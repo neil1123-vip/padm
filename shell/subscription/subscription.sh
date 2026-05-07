@@ -732,9 +732,11 @@ installSubscribe() {
 
         if [[ "${httpSubscribeStatus}" == "true" ]]; then
 
-            echoContent yellow "未发现tls证书，使用无加密订阅，可能被运营商拦截，请注意风险。"
+            echoContent red " ---> 未发现 TLS 证书，HTTP 订阅不会加密传输"
+            echoContent yellow " ---> 订阅链接、用户标识和控制路径可能被中间人或网络侧观察到"
+            echoContent yellow " ---> 仅建议在临时验收、内网或已确认风险的环境使用；长期使用请配置 TLS 订阅"
             echo
-            autoRead http_subscribe "是否使用http订阅[y/n]？" addNginxSubscribeStatus
+            autoRead http_subscribe "确认承担上述风险并启用 HTTP 订阅[y/n]？" addNginxSubscribeStatus
             echo
             if [[ "${addNginxSubscribeStatus}" != "y" ]]; then
                 echoContent yellow " ---> 退出安装"
