@@ -725,10 +725,15 @@ installWarpReg() {
 
         if [[ "${installWarpRegStatus}" == "y" ]]; then
 
-            if ! curl -fsSL -o /etc/padm/warp/warp-reg "https://github.com/badafans/warp-reg/releases/download/v1.0/${warpRegCoreCPUVendor}"; then
+            if ! downloadGitHubReleaseAsset -P /etc/padm/warp/ badafans/warp-reg v1.0 "${warpRegCoreCPUVendor}"; then
                 echoContent red " ---> warp-reg下载失败"
                 exit 1
             fi
+            if [[ ! -s "/etc/padm/warp/${warpRegCoreCPUVendor}" ]]; then
+                echoContent red " ---> warp-reg文件异常"
+                exit 1
+            fi
+            mv "/etc/padm/warp/${warpRegCoreCPUVendor}" /etc/padm/warp/warp-reg
             chmod 655 /etc/padm/warp/warp-reg
 
         else
