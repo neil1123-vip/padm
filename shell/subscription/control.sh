@@ -243,11 +243,12 @@ class Handler(BaseHTTPRequestHandler):
         return self.path[len(prefix):].split("?", 1)[0]
 
     def call_script(self, endpoint, payload=""):
-        cmd = ["/bin/bash", SCRIPT_PATH, "SubscriptionControl", endpoint, self.token()]
+        cmd = ["/bin/bash", SCRIPT_PATH, "SubscriptionControl", endpoint]
         if payload:
             cmd.append(payload)
         env = dict(os.environ)
         env["PADM_CONTROL_SERVER"] = "1"
+        env["PADM_CONTROL_TOKEN"] = self.token()
         result = subprocess.run(cmd, text=True, capture_output=True, timeout=180, env=env)
         try:
             body = json.loads(result.stdout or "{}")
@@ -286,6 +287,8 @@ installSubscriptionControlService() {
     if ! command -v python3 >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
         return 0
     fi
+    subscriptionControlEnsureToken
+    subscriptionGroupsSecureStateFiles
     writeSubscriptionControlServer
     serviceFile=$(subscriptionControlServiceFile)
     if ! cat >"${serviceFile}" <<EOF
@@ -320,11 +323,37 @@ subscriptionControlTokenFile() {
     echo "$(subscriptionGroupsDir)/control.token"
 }
 
+subscriptionControlEnsureToken() {
+    local tokenFile
+    tokenFile=$(subscriptionControlTokenFile)
+    mkdir -p "$(dirname "${tokenFile}")"
+    chmod 700 "$(dirname "${tokenFile}")" 2>/dev/null || true
+    if [[ ! -s "${tokenFile}" ]]; then
+        if command -v openssl >/dev/null 2>&1; then
+            openssl rand -hex 32 >"${tokenFile}"
+        else
+            tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64 >"${tokenFile}"
+            printf '\n' >>"${tokenFile}"
+        fi
+    fi
+    chmod 600 "${tokenFile}" 2>/dev/null || true
+}
+
+subscriptionGroupsSecureStateFiles() {
+    local groupsDir
+    local groupsFile
+    groupsDir=$(subscriptionGroupsDir)
+    groupsFile=$(subscriptionGroupsFile)
+    mkdir -p "${groupsDir}"
+    chmod 700 "${groupsDir}" 2>/dev/null || true
+    [[ -f "${groupsFile}" ]] && chmod 600 "${groupsFile}" 2>/dev/null || true
+}
+
 subscriptionControlToken() {
     local tokenFile
     tokenFile=$(subscriptionControlTokenFile)
     if [[ ! -f "${tokenFile}" ]]; then
-        return 1
+        subscriptionControlEnsureToken
     fi
     tr -d '[:space:]' <"${tokenFile}"
 }
@@ -394,7 +423,7 @@ subscriptionControlApplySync() {
 
 handleSubscriptionControl() {
     local endpoint=${1:-}
-    local token=${2:-}
+    local token=${2:-${PADM_CONTROL_TOKEN:-}}
     local payload=${3:-}
     ensureSubscriptionGroupsState
     if ! subscriptionControlAuthorized "${token}"; then

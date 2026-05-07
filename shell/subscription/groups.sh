@@ -180,6 +180,7 @@ ensureSubscriptionGroupsState() {
         writeDefaultSubscriptionGroupsState "${stateFile}"
     fi
     migrateSubscriptionGroupsState
+    subscriptionGroupsSecureStateFiles 2>/dev/null || true
 }
 
 subscriptionGroupsStateRead() {
@@ -195,6 +196,7 @@ subscriptionGroupsStateWrite() {
     ensureSubscriptionGroupsState
     jq "$@" "${stateFile}" >"${tmpFile}" && mv "${tmpFile}" "${stateFile}"
     migrateSubscriptionGroupsState
+    subscriptionGroupsSecureStateFiles 2>/dev/null || true
 }
 
 createSubscriptionGroupsBackup() {
