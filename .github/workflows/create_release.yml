@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read script version
+        id: version
+        shell: bash
+        run: |
+          PROJECT_ROOT="$GITHUB_WORKSPACE"
+          source shell/core/version.sh
+          file_version=$(getScriptVersion)
+          if [ -z "$file_version" ]; then
+            echo "Unable to read script version" >&2
+            exit 1
+          fi
+          echo "file_version=$file_version" >> "$GITHUB_OUTPUT"
+          echo "is_release_commit=false" >> "$GITHUB_OUTPUT"
+          if git log -1 --format=%s | grep -qE '^chore\(release\): v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "is_release_commit=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "$file_version"
+
+      - name: Resolve release version
+        id: release_version
+        shell: bash
+        run: |
+          PROJECT_ROOT="$GITHUB_WORKSPACE"
+          source shell/core/version.sh
+          current_version="${{ steps.version.outputs.file_version }}"
+          latest_tag=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)
+          if [ -z "$latest_tag" ]; then
+            latest_tag="$current_version"
+          fi
+
+          if [ "${{ steps.version.outputs.is_release_commit }}" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            release_version="$current_version"
+            needs_bump=false
+          else
+            if git rev-parse -q --verify "refs/tags/${latest_tag}" >/dev/null; then
+              commits=$(git log --format=%B "${latest_tag}..HEAD")
+            else
+              commits=$(git log --format=%B)
+            fi
+            next_version="v$(nextScriptVersionFromCommits "$latest_tag" "$commits")"
+            release_version="$next_version"
+            if [ "$release_version" != "$current_version" ]; then
+              needs_bump=true
+            else
+              needs_bump=false
+            fi
+          fi
+
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "needs_bump=$needs_bump" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$latest_tag release_version=$release_version needs_bump=$needs_bump"
+
+      - name: Bump script version
+        id: bump
+        if: ${{ steps.release_version.outputs.needs_bump == 'true' }}
+        shell: bash
+        run: |
+          PROJECT_ROOT="$GITHUB_WORKSPACE"
+          source shell/core/version.sh
+          setScriptVersion "${{ steps.release_version.outputs.release_version }}" shell/core/version.sh
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add shell/core/version.sh
+          git commit -m "chore(release): ${{ steps.release_version.outputs.release_version }}"
+          release_sha=$(git rev-parse HEAD)
+          git push origin HEAD:main
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release target
+        id: target
+        shell: bash
+        run: |
+          release_sha="${{ steps.bump.outputs.release_sha }}"
+          if [ -z "$release_sha" ]; then
+            release_sha=$(git rev-parse HEAD)
+          fi
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
+          echo "$release_sha"
+
+      - name: Get release
+        id: release
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const tag = '${{ steps.release_version.outputs.release_version }}';
+            const { owner, repo } = context.repo;
+            const release = await github.rest.repos.getReleaseByTag({ owner, repo, tag })
+              .then(({ data }) => data)
+              .catch(error => {
+                if (error.status === 404) return null;
+                throw error;
+              });
+            return release ? release.tag_name : '';
+          result-encoding: string
+
+      - name: Create release
+        if: ${{ steps.release.outputs.result != steps.release_version.outputs.release_version }}
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const tag = '${{ steps.release_version.outputs.release_version }}';
+            const targetCommitish = '${{ steps.target.outputs.release_sha }}';
+            const { owner, repo } = context.repo;
+            await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              target_commitish: targetCommitish,
+              name: tag,
+              body: `Automated release ${tag}`
+            });

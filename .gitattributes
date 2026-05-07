@@ -1,0 +1,19 @@
+.gitattributes text eol=lf
+* text=auto
+
+*.sh text eol=lf
+install.sh text eol=lf
+*.bash text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

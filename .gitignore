@@ -1,0 +1,14 @@
+# Editor / OS
+.vscode/
+.DS_Store
+
+# Local Claude/project status notes
+Status.md
+
+# Local test and runtime artifacts
+.tmp-*/
+*.tmp
+*.log
+
+# GitHub funding metadata
+.github/FUNDING.yml
