@@ -307,6 +307,84 @@ downloadFile() {
     fi
 }
 
+validateGitHubReleaseTag() {
+    [[ "$1" =~ ^v?[0-9]+(\.[0-9]+){1,3}([-.+][A-Za-z0-9._-]+)?$ ]]
+}
+
+downloadGitHubReleaseAsset() {
+    local outputDir=
+    local repo=
+    local version=
+    local assetName=
+    local metadata=
+    local downloadUrl=
+    local digest=
+    local outputPath=
+    local expectedSha256=
+    local actualSha256=
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+        -P)
+            outputDir=$2
+            shift 2
+            ;;
+        *)
+            if [[ -z "${repo}" ]]; then
+                repo=$1
+            elif [[ -z "${version}" ]]; then
+                version=$1
+            else
+                assetName=$1
+            fi
+            shift
+            ;;
+        esac
+    done
+
+    if [[ -z "${outputDir}" || -z "${repo}" || -z "${version}" || -z "${assetName}" ]]; then
+        echoContent red " ---> GitHub Release 下载参数不完整"
+        return 1
+    fi
+    if ! validateGitHubReleaseTag "${version}"; then
+        echoContent red " ---> Release 版本格式异常: ${version}"
+        return 1
+    fi
+    if [[ "${assetName}" == *"/"* || "${assetName}" == *".."* ]]; then
+        echoContent red " ---> Release 资产名称异常: ${assetName}"
+        return 1
+    fi
+
+    mkdir -p "${outputDir}"
+    metadata=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/${repo}/releases/tags/${version}" | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // "")}' | head -1) || return 1
+    downloadUrl=$(jq -r '.url // empty' <<<"${metadata}" 2>/dev/null)
+    digest=$(jq -r '.digest // empty' <<<"${metadata}" 2>/dev/null)
+    if [[ -z "${downloadUrl}" ]]; then
+        echoContent red " ---> 未找到 Release 资产: ${repo} ${version} ${assetName}"
+        return 1
+    fi
+    outputPath="${outputDir%/}/${assetName}"
+    if ! downloadFile -P "${outputDir}" "${downloadUrl}"; then
+        return 1
+    fi
+    if [[ "${digest}" == sha256:* ]]; then
+        if ! command -v sha256sum >/dev/null 2>&1; then
+            echoContent red " ---> 缺少 sha256sum，无法校验下载文件"
+            return 1
+        fi
+        expectedSha256=${digest#sha256:}
+        actualSha256=$(sha256sum "${outputPath}" | awk '{print $1}')
+        if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
+            echoContent red " ---> 下载文件 sha256 校验失败: ${assetName}"
+            rm -f "${outputPath}"
+            return 1
+        fi
+        echoContent green " ---> sha256 校验通过: ${assetName}"
+    else
+        echoContent yellow " ---> GitHub 未提供 sha256 digest，已完成精确资产匹配下载: ${assetName}"
+    fi
+}
+
 # 初始化安装目录
 mkdirTools() {
     mkdir -p /etc/padm/tls

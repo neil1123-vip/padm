@@ -18,7 +18,7 @@ installSingBox() {
 
         echoContent green " ---> 最新版本:${version}"
 
-        if ! downloadFile -P /etc/padm/sing-box/ "https://github.com/SagerNet/sing-box/releases/download/${version}/sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"; then
+        if ! downloadGitHubReleaseAsset -P /etc/padm/sing-box/ SagerNet/sing-box "${version}" "sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"; then
             echoContent red " ---> sing-box下载失败"
             exit 1
         fi
@@ -75,7 +75,7 @@ installXray() {
         version=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=100" | jq -r ".[]|select (.prerelease==${prereleaseStatus})|.tag_name" | head -1)
         checkVersionNotEmpty "${version}"
         echoContent green " ---> Xray-core版本:${version}"
-        if ! downloadFile -P /etc/padm/xray/ "https://github.com/XTLS/Xray-core/releases/download/${version}/${xrayCoreCPUVendor}.zip"; then
+        if ! downloadGitHubReleaseAsset -P /etc/padm/xray/ XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
             echoContent red " ---> Xray-core下载失败"
             exit 1
         fi
@@ -98,7 +98,7 @@ installXray() {
             echo "version:${version}"
             cleanXrayGeoFiles /etc/padm/xray
 
-            if ! downloadFile -P /etc/padm/xray/ "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geosite.dat" || ! downloadFile -P /etc/padm/xray/ "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geoip.dat"; then
+            if ! downloadGitHubReleaseAsset -P /etc/padm/xray/ Loyalsoldier/v2ray-rules-dat "${version}" geosite.dat || ! downloadGitHubReleaseAsset -P /etc/padm/xray/ Loyalsoldier/v2ray-rules-dat "${version}" geoip.dat; then
                 echoContent red " ---> geo文件下载失败"
                 exit 1
             fi
@@ -185,8 +185,8 @@ updateGeoSite() {
     echo "version:${version}"
     cleanXrayGeoFiles "${configPath}.."
 
-    downloadFile -P ${configPath}../ "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geosite.dat"
-    downloadFile -P ${configPath}../ "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/download/${version}/geoip.dat"
+    downloadGitHubReleaseAsset -P ${configPath}../ Loyalsoldier/v2ray-rules-dat "${version}" geosite.dat
+    downloadGitHubReleaseAsset -P ${configPath}../ Loyalsoldier/v2ray-rules-dat "${version}" geoip.dat
 
     reloadCore
     echoContent green " ---> 更新完毕"
@@ -207,7 +207,7 @@ updateXray() {
 
         echoContent green " ---> Xray-core版本:${version}"
 
-        if ! downloadFile -P /etc/padm/xray/ "https://github.com/XTLS/Xray-core/releases/download/${version}/${xrayCoreCPUVendor}.zip"; then
+        if ! downloadGitHubReleaseAsset -P /etc/padm/xray/ XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
             echoContent red " ---> Xray-core下载失败"
             exit 1
         fi
