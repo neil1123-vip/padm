@@ -187,7 +187,8 @@ moreSystemMenu() {
 advancedDangerMenu() {
     echoContent skyBlue "\n┌─ 高级/危险操作 ────────────────────────────────────"
     menuDangerItem 1 "卸载脚本" "移除脚本和相关配置，执行前请确认备份"
-    menuItem 2 "返回主菜单" "回到 padm 管理面板"
+    menuDangerItem 2 "VLESS Encryption 实验" "Xray-only，高级兼容性实验开关"
+    menuItem 3 "返回主菜单" "回到 padm 管理面板"
     echoContent skyBlue "└──────────────────────────────────────────────────"
     autoRead danger_menu "请选择:" selectDangerMenuType
     case ${selectDangerMenuType} in
@@ -195,6 +196,9 @@ advancedDangerMenu() {
         unInstall 1
         ;;
     2)
+        manageVlessEncryptionExperiment
+        ;;
+    3)
         menu
         ;;
     *)

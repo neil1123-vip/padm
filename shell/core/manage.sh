@@ -1,5 +1,165 @@
 #!/usr/bin/env bash
 
+vlessEncryptionStateFile() {
+    echo "/etc/padm/xray/vless_encryption.json"
+}
+
+xrayVersionAtLeast() {
+    local current=$1
+    local required=$2
+    current=${current#v}
+    required=${required#v}
+    [[ "$(printf '%s\n%s\n' "${required}" "${current}" | sort -V | head -n 1)" == "${required}" ]]
+}
+
+extractVlessEncField() {
+    local field=$1
+    sed -n 's/.*"'"${field}"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+currentVlessRealityEncryption() {
+    local stateFile
+    stateFile=$(vlessEncryptionStateFile)
+    if [[ -f "${stateFile}" ]]; then
+        jq -r '.encryption // "none"' "${stateFile}" 2>/dev/null
+    else
+        echo none
+    fi
+}
+
+validateXrayConfig() {
+    /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-xray-test.log 2>&1
+}
+
+setVlessRealityEncryption() {
+    local mode=$1
+    local configFile=/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json
+    local stateFile
+    local backupFile
+    local xrayVersion
+    local vlessEncOutput
+    local encryption
+    local decryption
+    local stateBackupFile
+    stateFile=$(vlessEncryptionStateFile)
+
+    if [[ "${coreInstallType}" != "1" ]]; then
+        echoContent red " ---> 此实验功能仅支持 Xray-core"
+        return 1
+    fi
+    if [[ ! -x /etc/padm/xray/xray || ! -f "${configFile}" ]]; then
+        echoContent red " ---> 未检测到 Xray Reality Vision 配置，请先安装 Xray Reality Vision"
+        return 1
+    fi
+
+    backupFile="${configFile}.vlessenc.bak"
+    stateBackupFile="${stateFile}.bak"
+    cp "${configFile}" "${backupFile}"
+    if [[ -f "${stateFile}" ]]; then
+        cp "${stateFile}" "${stateBackupFile}"
+    else
+        rm -f "${stateBackupFile}"
+    fi
+
+    if [[ "${mode}" == "enable" ]]; then
+        xrayVersion=$(/etc/padm/xray/xray --version | awk 'NR==1 {print $2}')
+        if ! xrayVersionAtLeast "${xrayVersion}" "25.9.5"; then
+            echoContent red " ---> 当前 Xray-core ${xrayVersion} 不支持 vlessenc，请先升级到 v25.9.5 或更高版本"
+            rm -f "${backupFile}"
+            return 1
+        fi
+        if ! /etc/padm/xray/xray vlessenc >/tmp/padm-vlessenc.out 2>/tmp/padm-vlessenc.err; then
+            echoContent red " ---> xray vlessenc 执行失败，请先确认当前 Xray-core 支持该命令"
+            rm -f "${backupFile}" /tmp/padm-vlessenc.out /tmp/padm-vlessenc.err
+            return 1
+        fi
+        vlessEncOutput=$(cat /tmp/padm-vlessenc.out)
+        encryption=$(printf '%s\n' "${vlessEncOutput}" | extractVlessEncField encryption)
+        decryption=$(printf '%s\n' "${vlessEncOutput}" | extractVlessEncField decryption)
+        rm -f /tmp/padm-vlessenc.out /tmp/padm-vlessenc.err
+        if [[ -z "${encryption}" || -z "${decryption}" ]]; then
+            echoContent red " ---> 无法解析 xray vlessenc 输出，已取消启用"
+            rm -f "${backupFile}"
+            return 1
+        fi
+        if ! jq --arg decryption "${decryption}" 'del(.inbounds[1].settings.fallbacks) | .inbounds[1].settings.decryption = $decryption' "${configFile}" >"${configFile}.tmp"; then
+            echoContent red " ---> 写入 Xray 配置失败，已取消启用"
+            mv "${backupFile}" "${configFile}"
+            rm -f "${configFile}.tmp" "${stateBackupFile}"
+            return 1
+        fi
+        mv "${configFile}.tmp" "${configFile}"
+        mkdir -p "$(dirname "${stateFile}")"
+        if ! jq -n --arg encryption "${encryption}" --arg decryption "${decryption}" '{enabled:true,encryption:$encryption,decryption:$decryption}' >"${stateFile}"; then
+            echoContent red " ---> 写入 VLESS Encryption 状态失败，已取消启用"
+            mv "${backupFile}" "${configFile}"
+            [[ -f "${stateBackupFile}" ]] && mv "${stateBackupFile}" "${stateFile}"
+            return 1
+        fi
+        chmod 600 "${stateFile}" 2>/dev/null || true
+    else
+        if ! jq '.inbounds[1].settings.decryption = "none" | del(.inbounds[1].settings.fallbacks)' "${configFile}" >"${configFile}.tmp"; then
+            echoContent red " ---> 写入 Xray 配置失败，已取消关闭"
+            mv "${backupFile}" "${configFile}"
+            rm -f "${configFile}.tmp" "${stateBackupFile}"
+            return 1
+        fi
+        mv "${configFile}.tmp" "${configFile}"
+        rm -f "${stateFile}"
+    fi
+
+    if ! validateXrayConfig; then
+        mv "${backupFile}" "${configFile}"
+        if [[ -f "${stateBackupFile}" ]]; then
+            mv "${stateBackupFile}" "${stateFile}"
+        elif [[ "${mode}" == "enable" ]]; then
+            rm -f "${stateFile}"
+        fi
+        echoContent red " ---> Xray 配置校验失败，已回滚本次修改"
+        echoContent yellow " ---> 可查看 /tmp/padm-xray-test.log 排查原因"
+        return 1
+    fi
+    rm -f "${backupFile}" "${stateBackupFile}"
+    reloadCore
+    return 0
+}
+
+manageVlessEncryptionExperiment() {
+    readInstallType
+    readInstallProtocolType
+    echoContent skyBlue "\n┌─ VLESS Encryption 实验功能 ─────────────────────────"
+    menuLine "仅支持 Xray-core + VLESS Reality Vision"
+    menuLine "启用后可能只有部分客户端可用；Clash/Mihomo/sing-box 订阅不保证兼容"
+    menuLine "默认推荐仍是 Reality Vision，不建议新手启用"
+    menuDangerItem 1 "启用实验开关" "生成 vlessenc 并修改 Xray Reality Vision 配置"
+    menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
+    menuItem 3 "返回主菜单" "回到 padm 管理面板"
+    echoContent skyBlue "└──────────────────────────────────────────────────"
+    autoRead vless_encryption_menu "请选择:" selectVlessEncryptionMenu
+    case ${selectVlessEncryptionMenu} in
+    1)
+        echoContent red " ---> VLESS Encryption 是实验功能，可能只有部分客户端可用"
+        echoContent yellow " ---> 启用后 default VLESS 链接会携带新的 encryption 参数；Clash/Mihomo/sing-box 订阅不保证兼容"
+        autoRead vless_encryption_confirm "确认承担兼容性风险并启用[y/n]?" confirmVlessEncryption
+        if [[ "${confirmVlessEncryption}" == "y" ]]; then
+            setVlessRealityEncryption enable && echoContent green " ---> VLESS Encryption 实验开关已启用"
+        else
+            echoContent yellow " ---> 已取消"
+        fi
+        ;;
+    2)
+        setVlessRealityEncryption disable && echoContent green " ---> VLESS Encryption 实验开关已关闭"
+        ;;
+    3)
+        menu
+        ;;
+    *)
+        echoContent red ' ---> 选择错误，重新选择'
+        manageVlessEncryptionExperiment
+        ;;
+    esac
+}
+
 # 检查是否安装宝塔
 checkBTPanel() {
     if [[ -n $(pgrep -f "BT-Panel") ]]; then

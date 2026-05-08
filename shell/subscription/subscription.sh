@@ -29,7 +29,8 @@ serializeVlessRealityVisionLink() {
     local publicKey=$5
     local pqv=$6
     local email=$7
-    printf 'vless://%s@%s:%s?encryption=none&security=reality&pqv=%s&type=tcp&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#%s' "${id}" "${entryHost}" "${port}" "${pqv}" "${sni}" "${publicKey}" "${email}"
+    local encryption=${8:-none}
+    printf 'vless://%s@%s:%s?encryption=%s&security=reality&pqv=%s&type=tcp&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#%s' "${id}" "${entryHost}" "${port}" "${encryption}" "${pqv}" "${sni}" "${publicKey}" "${email}"
 }
 
 serializeVlessRealityGrpcLink() {
@@ -363,13 +364,20 @@ EOF
         local realitySNI=${xrayVLESSRealitySNI}
         local publicKey=${currentRealityPublicKey}
         local realityMldsa65Verify=${currentRealityMldsa65Verify}
+        local vlessEncryption=none
+        if [[ "${coreInstallType}" == "1" && -f /etc/padm/xray/vless_encryption.json ]]; then
+            vlessEncryption=$(jq -r '.encryption // "none"' /etc/padm/xray/vless_encryption.json 2>/dev/null)
+        fi
+        if [[ -z "${vlessEncryption}" || "${vlessEncryption}" == "null" ]]; then
+            vlessEncryption=none
+        fi
 
         if [[ "${coreInstallType}" == "2" ]]; then
             realitySNI=${singBoxVLESSRealityVisionSNI}
             publicKey=${singBoxVLESSRealityPublicKey}
         fi
         local defaultLink
-        defaultLink=$(serializeVlessRealityVisionLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}")
+        defaultLink=$(serializeVlessRealityVisionLink "${id}" "${entryHost}" "${port}" "${realitySNI}" "${publicKey}" "${realityMldsa65Verify}" "${email}" "${vlessEncryption}")
         echoContent yellow " ---> 通用格式(VLESS+reality+uTLS+Vision)"
         echoContent green "    ${defaultLink}\n"
 
@@ -394,7 +402,7 @@ EOF
         appendSingBoxSubscribeLocalConfig "${user}" ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${entryHost}\",\"server_port\":${port},\"uuid\":\"${id}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"${realitySNI}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"${publicKey}\",\"short_id\":\"6ba85179e30d4fc2\"}},\"packet_encoding\":\"xudp\"}]"
 
         echoContent yellow " ---> 二维码 VLESS(VLESS+reality+uTLS+Vision)"
-        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${entryHost}%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26type%3Dtcp%26sni%3D${realitySNI}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26flow%3Dxtls-rprx-vision%23${email}\n"
+        echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${entryHost}%3A${port}%3Fencryption%3D${vlessEncryption}%26security%3Dreality%26type%3Dtcp%26sni%3D${realitySNI}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26flow%3Dxtls-rprx-vision%23${email}\n"
 
     elif [[ "${type}" == "vlessRealityGRPC" ]]; then
         local entryHost
