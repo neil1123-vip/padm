@@ -8,6 +8,7 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 export PADM_SUBSCRIPTION_GROUPS_DIR="${TMP_DIR}/subscribe_groups"
 export PADM_SUBSCRIBE_LOCAL_DIR="${TMP_DIR}/subscribe_local"
+export PADM_VLESS_ENCRYPTION_STATE_FILE="${TMP_DIR}/vless_encryption.json"
 
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/protocols.sh"

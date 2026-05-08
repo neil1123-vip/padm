@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 vlessEncryptionStateFile() {
-    echo "/etc/padm/xray/vless_encryption.json"
+    echo "${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
 }
 
 xrayVersionAtLeast() {
@@ -27,8 +27,17 @@ currentVlessRealityEncryption() {
     fi
 }
 
-validateXrayConfig() {
-    /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-xray-test.log 2>&1
+
+refreshSubscribeIfInstalled() {
+    readNginxSubscribe
+    if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
+        subscribe renew >/dev/null
+    else
+        cleanDirectoryContent /etc/padm/subscribe_local/default
+        cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
+        cleanDirectoryContent /etc/padm/subscribe_local/sing-box
+        showAccounts >/dev/null
+    fi
 }
 
 setVlessRealityEncryption() {
@@ -108,7 +117,7 @@ setVlessRealityEncryption() {
         rm -f "${stateFile}"
     fi
 
-    if ! validateXrayConfig; then
+    if ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-xray-test.log 2>&1; then
         mv "${backupFile}" "${configFile}"
         if [[ -f "${stateBackupFile}" ]]; then
             mv "${stateBackupFile}" "${stateFile}"
@@ -121,6 +130,7 @@ setVlessRealityEncryption() {
     fi
     rm -f "${backupFile}" "${stateBackupFile}"
     reloadCore
+    refreshSubscribeIfInstalled
     return 0
 }
 

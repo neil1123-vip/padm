@@ -365,8 +365,9 @@ EOF
         local publicKey=${currentRealityPublicKey}
         local realityMldsa65Verify=${currentRealityMldsa65Verify}
         local vlessEncryption=none
-        if [[ "${coreInstallType}" == "1" && -f /etc/padm/xray/vless_encryption.json ]]; then
-            vlessEncryption=$(jq -r '.encryption // "none"' /etc/padm/xray/vless_encryption.json 2>/dev/null)
+        local vlessEncryptionStateFile=${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}
+        if [[ "${coreInstallType}" == "1" && -f "${vlessEncryptionStateFile}" ]]; then
+            vlessEncryption=$(jq -r '.encryption // "none"' "${vlessEncryptionStateFile}" 2>/dev/null)
         fi
         if [[ -z "${vlessEncryption}" || "${vlessEncryption}" == "null" ]]; then
             vlessEncryption=none
