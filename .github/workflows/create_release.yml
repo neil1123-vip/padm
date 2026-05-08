@@ -35,7 +35,7 @@ jobs:
 
       - name: Get release
         id: release
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const tag = '${{ steps.version.outputs.file_version }}';
@@ -51,7 +51,7 @@ jobs:
 
       - name: Create release
         if: ${{ steps.release.outputs.result != steps.version.outputs.file_version }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const tag = '${{ steps.version.outputs.file_version }}';
