@@ -17,26 +17,34 @@ extractVlessEncField() {
     sed -n 's/.*"'"${field}"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
 }
 
-currentVlessRealityEncryption() {
+vlessEncryptionStateSummary() {
     local stateFile
+    local xrayVersion="未安装"
+    local encryptionPrefix="none"
     stateFile=$(vlessEncryptionStateFile)
+    if [[ -x /etc/padm/xray/xray ]]; then
+        xrayVersion=$(/etc/padm/xray/xray --version | awk 'NR==1 {print $2}')
+    fi
     if [[ -f "${stateFile}" ]]; then
-        jq -r '.encryption // "none"' "${stateFile}" 2>/dev/null
+        encryptionPrefix=$(jq -r '.encryption // "none" | split(".")[:3] | join(".")' "${stateFile}" 2>/dev/null)
+        [[ -z "${encryptionPrefix}" || "${encryptionPrefix}" == "null" ]] && encryptionPrefix=none
+        menuLine "当前状态：已启用；Xray=${xrayVersion}；encryption=${encryptionPrefix}..."
     else
-        echo none
+        menuLine "当前状态：未启用；Xray=${xrayVersion}；encryption=none"
     fi
 }
 
-
-refreshSubscribeIfInstalled() {
+refreshVlessEncryptionSubscriptions() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
         subscribe renew >/dev/null
+        echoContent green " ---> 已刷新 default 公网订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段"
     else
         cleanDirectoryContent /etc/padm/subscribe_local/default
         cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
         cleanDirectoryContent /etc/padm/subscribe_local/sing-box
         showAccounts >/dev/null
+        echoContent green " ---> 已刷新本地 default 订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段"
     fi
 }
 
@@ -130,7 +138,7 @@ setVlessRealityEncryption() {
     fi
     rm -f "${backupFile}" "${stateBackupFile}"
     reloadCore
-    refreshSubscribeIfInstalled
+    refreshVlessEncryptionSubscriptions
     return 0
 }
 
@@ -141,6 +149,7 @@ manageVlessEncryptionExperiment() {
     menuLine "仅支持 Xray-core + VLESS Reality Vision"
     menuLine "启用后可能只有部分客户端可用；Clash/Mihomo/sing-box 订阅不保证兼容"
     menuLine "默认推荐仍是 Reality Vision，不建议新手启用"
+    vlessEncryptionStateSummary
     menuDangerItem 1 "启用实验开关" "生成 vlessenc 并修改 Xray Reality Vision 配置"
     menuItem 2 "关闭实验开关" "恢复 decryption=none 并删除实验订阅参数"
     menuItem 3 "返回主菜单" "回到 padm 管理面板"
