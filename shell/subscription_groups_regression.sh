@@ -2357,6 +2357,19 @@ runMenuSmokeRegression() {
     local oldConfigPath="${configPath:-}"
     local oldCoreInstallType="${coreInstallType:-}"
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
+    local wgChoice
+    local wgAction
+    local wgActions=(
+        "1:initSubscriptionWireGuardMain"
+        "2:initSubscriptionWireGuardControlled"
+        "3:showSubscriptionWireGuardMainCredential"
+        "4:importSubscriptionWireGuardMainCredential"
+        "5:showSubscriptionWireGuardControlledCredential"
+        "6:showSubscriptionWireGuardPeers"
+        "7:testSubscriptionWireGuardControl"
+        "8:restartSubscriptionWireGuardControl"
+        "9:disableSubscriptionWireGuardControl"
+    )
     coreInstallType=${coreInstallType:-}
 
     recordMenuAction() {
@@ -2605,6 +2618,13 @@ y
 7"
     assertMenuAction showSubscriptionWireGuardMainCredential
     assertMenuAction menu
+    for wgAction in "${wgActions[@]}"; do
+        wgChoice=${wgAction%%:*}
+        resetMenuActions
+        manageSubscriptionWireGuardControlMenu <<<"${wgChoice}
+10"
+        assertMenuAction "${wgAction#*:}"
+    done
     resetMenuActions
     manageMultiServerSubscriptions <<<"4
 10
