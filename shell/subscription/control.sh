@@ -216,6 +216,15 @@ runSubscriptionRemoteSync() {
     echo "${failures}"
 }
 
+subscriptionGroupSyncInstallScript() {
+    if [[ -f /etc/padm/install.sh ]]; then
+        echo /etc/padm/install.sh
+    else
+        echo "${PROJECT_ROOT}/install.sh"
+    fi
+}
+
+
 subscriptionControlPort() {
     echo 10086
 }
@@ -271,12 +280,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def call_script(self, endpoint, payload=""):
         cmd = ["/bin/bash", SCRIPT_PATH, "SubscriptionControl", endpoint]
-        if payload:
-            cmd.append(payload)
         env = dict(os.environ)
         env["PADM_CONTROL_SERVER"] = "1"
         env["PADM_CONTROL_TOKEN"] = self.token()
-        result = subprocess.run(cmd, text=True, capture_output=True, timeout=180, env=env)
+        env["PADM_SKIP_REMOTE_REF_CHECK"] = "1"
+        result = subprocess.run(cmd, input=payload, text=True, capture_output=True, timeout=180, env=env)
         try:
             body = json.loads(result.stdout or "{}")
         except json.JSONDecodeError:
@@ -336,8 +344,11 @@ EOF
         return 0
     fi
     systemctl daemon-reload
-    systemctl enable --now padm-subscription-control.service >/dev/null 2>&1 || true
-    systemctl restart padm-subscription-control.service >/dev/null 2>&1 || true
+    if systemctl is-active --quiet padm-subscription-control.service; then
+        systemctl restart padm-subscription-control.service >/dev/null 2>&1 || true
+    else
+        systemctl enable --now padm-subscription-control.service >/dev/null 2>&1 || true
+    fi
     for ((i = 0; i < 10; i++)); do
         if curl -sS --connect-timeout 1 --max-time 1 http://127.0.0.1:$(subscriptionControlPort)/s/control/health >/dev/null 2>&1; then
             break

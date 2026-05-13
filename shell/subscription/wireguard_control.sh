@@ -81,15 +81,22 @@ subscriptionWireGuardReadState() {
 }
 
 subscriptionWireGuardWriteState() {
-    local filter=$1
     local stateFile
     local tmpFile
-    shift
+    local stateJson
+    local filter
+    local jqArgs=()
     stateFile=$(subscriptionWireGuardStateFile)
     tmpFile="${stateFile}.tmp"
     mkdir -p "$(dirname "${stateFile}")"
     chmod 700 "$(dirname "${stateFile}")" 2>/dev/null || true
-    if ! subscriptionWireGuardReadState | jq "$@" "${filter}" >"${tmpFile}" || ! jq empty "${tmpFile}" >/dev/null 2>&1; then
+    while (($# > 1)); do
+        jqArgs+=("$1")
+        shift
+    done
+    filter=$1
+    stateJson=$(subscriptionWireGuardReadState) || return 1
+    if ! jq "${jqArgs[@]}" "${filter}" <<<"${stateJson}" >"${tmpFile}" || ! jq empty "${tmpFile}" >/dev/null 2>&1; then
         rm -f "${tmpFile}"
         return 1
     fi
@@ -107,8 +114,14 @@ subscriptionWireGuardInstalled() {
 
 installSubscriptionWireGuardTools() {
     subscriptionWireGuardInstalled && return 0
-    if [[ "${packageManager:-}" == "apt" || "${packageManager:-}" == "yum" || "${packageManager:-}" == "apk" ]]; then
+    if [[ "${packageManager:-}" == "apt" ]]; then
         installOptionalPackageTracked "WireGuard" wireguard-tools || return 1
+    elif [[ "${packageManager:-}" == "yum" ]]; then
+        installOptionalPackageTracked "WireGuard" wireguard-tools || installOptionalPackageTracked "WireGuard" kmod-wireguard wireguard-tools || return 1
+    elif [[ "${packageManager:-}" == "apk" ]]; then
+        installOptionalPackageTracked "WireGuard" wireguard-tools || return 1
+    else
+        return 1
     fi
     subscriptionWireGuardInstalled
 }
@@ -116,15 +129,17 @@ installSubscriptionWireGuardTools() {
 subscriptionWireGuardEnsureKeys() {
     local privateKeyFile
     local publicKeyFile
+    local privateKey
     privateKeyFile=$(subscriptionWireGuardPrivateKeyFile)
     publicKeyFile=$(subscriptionWireGuardPublicKeyFile)
     mkdir -p "$(dirname "${privateKeyFile}")"
     chmod 700 "$(dirname "${privateKeyFile}")" 2>/dev/null || true
     if [[ ! -s "${privateKeyFile}" ]]; then
-        wg genkey >"${privateKeyFile}" || return 1
+        privateKey=$(umask 077 && wg genkey) || return 1
+        printf '%s\n' "${privateKey}" >"${privateKeyFile}"
         chmod 600 "${privateKeyFile}" 2>/dev/null || true
     fi
-    wg pubkey <"${privateKeyFile}" >"${publicKeyFile}" || return 1
+    wg pubkey <"${privateKeyFile}" | tr -d '[:space:]' >"${publicKeyFile}" || return 1
     chmod 600 "${publicKeyFile}" 2>/dev/null || true
 }
 
@@ -176,12 +191,18 @@ writeSubscriptionWireGuardConfig() {
 }
 
 applySubscriptionWireGuardService() {
+    local interface
+    interface=$(subscriptionWireGuardInterface)
     writeSubscriptionWireGuardConfig || return 1
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl enable --now "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || systemctl restart "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
+        if systemctl is-active --quiet "wg-quick@${interface}"; then
+            systemctl restart "wg-quick@${interface}" >/dev/null 2>&1 || return 1
+        else
+            systemctl enable --now "wg-quick@${interface}" >/dev/null 2>&1 || return 1
+        fi
     elif command -v wg-quick >/dev/null 2>&1; then
-        wg-quick down "$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
-        wg-quick up "$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
+        wg-quick down "${interface}" >/dev/null 2>&1 || true
+        wg-quick up "${interface}" >/dev/null 2>&1 || return 1
     fi
 }
 
@@ -288,8 +309,18 @@ initSubscriptionWireGuardMain() {
       --arg publicKey "$(subscriptionWireGuardPublicKey)" \
       --argjson listenPort "${listenPort}" \
       --argjson controlPort "${controlPort}" \
-      '.enabled = true | .role = "main" | .address = $address | .endpoint_host = $endpointHost | .public_key = $publicKey | .listen_port = $listenPort | .control_port = $controlPort'
-    applySubscriptionWireGuardService
+      '.enabled = true | .role = "main" | .address = $address | .endpoint_host = $endpointHost | .public_key = $publicKey | .listen_port = $listenPort | .control_port = $controlPort' || {
+        errorCard "WireGuard 主控状态写入失败"
+        return 1
+      }
+    applySubscriptionWireGuardService || {
+        errorCard "WireGuard 主控服务启动失败"
+        return 1
+    }
+    [[ -f "$(subscriptionWireGuardStateFile)" && -f "$(subscriptionWireGuardConfigFile)" ]] || {
+        errorCard "WireGuard 主控配置未落地"
+        return 1
+    }
     successCard "WireGuard 主控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "监听端口：${listenPort}/udp"
 }
 
@@ -313,10 +344,20 @@ initSubscriptionWireGuardControlled() {
       --arg address "${address}" \
       --arg publicKey "$(subscriptionWireGuardPublicKey)" \
       --argjson controlPort "${controlPort}" \
-      '.enabled = true | .role = "controlled" | .address = $address | .public_key = $publicKey | .control_port = $controlPort'
-    applySubscriptionWireGuardService
+      '.enabled = true | .role = "controlled" | .address = $address | .public_key = $publicKey | .control_port = $controlPort' || {
+        errorCard "WireGuard 被控状态写入失败"
+        return 1
+      }
+    applySubscriptionWireGuardService || {
+        errorCard "WireGuard 被控服务启动失败"
+        return 1
+    }
     installSubscriptionControlService
     ensureSubscriptionWireGuardNginxConfig && serviceQueueRestart nginx && serviceQueueApply
+    [[ -f "$(subscriptionWireGuardStateFile)" && -f "$(subscriptionWireGuardConfigFile)" ]] || {
+        errorCard "WireGuard 被控配置未落地"
+        return 1
+    }
     successCard "WireGuard 被控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "控制面：WireGuard 内网 ${controlPort} 端口"
 }
 

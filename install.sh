@@ -51,6 +51,12 @@ refreshScriptModules() {
 
 ensureScriptModules() {
     local remoteRef localRef
+    if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
+        if [[ ! -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]]; then
+            refreshScriptModules ""
+        fi
+        return 0
+    fi
     remoteRef=$(fetchRemoteRef || true)
     [[ -f "${SCRIPT_REF_FILE}" ]] && localRef=$(cat "${SCRIPT_REF_FILE}")
 
