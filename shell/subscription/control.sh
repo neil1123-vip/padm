@@ -405,7 +405,7 @@ subscriptionControlAuthorized() {
 
 subscriptionControlValidateSyncPayload() {
     local payload=$1
-    jq -e 'type == "object" and (.desired_users? | type == "array")' <<<"${payload}" >/dev/null 2>&1
+    jq -e 'type == "object" and (.desired_users? | type == "array") and ((has("dry_run") | not) or (.dry_run | type == "boolean"))' <<<"${payload}" >/dev/null 2>&1
 }
 
 subscriptionControlDesiredUsers() {
@@ -416,48 +416,44 @@ subscriptionControlDesiredUsers() {
 subscriptionControlSyncPlan() {
     local desiredUsers=$1
     local desiredAccounts
-    local currentAccounts
-    desiredAccounts=$(jq -r '.[] | "sub_" + (.id | gsub("-"; "_"))' <<<"${desiredUsers}" | sort -u)
-    currentAccounts=$(subscriptionSyncConfiguredManagedUsers)
-    jq -n \
-      --argjson desired "$(printf '%s\n' "${desiredAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
-      --argjson current "$(printf '%s\n' "${currentAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
-      '{create: ($desired - $current), remove: ($current - $desired)}'
+    desiredAccounts=$(while IFS= read -r id; do subscriptionSyncAccountName "${id}"; done < <(jq -r '.[].id' <<<"${desiredUsers}") | sort -u)
+    subscriptionSyncPlanFromAccounts "${desiredAccounts}"
+}
+
+subscriptionControlUpdateDesiredUserState() {
+    local desiredUsers=$1
+    local createAccounts=$2
+    local createUsers
+    local accountName
+    local id
+    local uuid
+    createUsers='[]'
+    while IFS= read -r accountName; do
+        id=$(subscriptionSyncAccountId "${accountName}")
+        uuid=$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .uuid // empty' <<<"${desiredUsers}")
+        [[ -n "${uuid}" ]] || continue
+        createUsers=$(jq --arg id "${id}" --arg uuid "${uuid}" '. + [{id:$id, uuid:$uuid}]' <<<"${createUsers}")
+    done < <(jq -r '.[]?' <<<"${createAccounts}")
+    if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1; then
+        subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --argjson users "${createUsers}" '
+          .groups |= map(if .id == $groupId then
+            reduce $users[] as $user (.;
+              if any(.user_groups[]?; .id == $user.id) then
+                .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
+              else
+                .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, token:"", uuid:$user.uuid}]
+              end)
+          else . end)'
+    fi
 }
 
 subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
-    local accountName
-    local id
-    local uuid
-    while IFS= read -r accountName; do
-        subscriptionSyncRemoveAccount "${accountName}"
-    done < <(jq -r '.remove[]?' <<<"${plan}")
-    while IFS= read -r accountName; do
-        id=$(subscriptionSyncAccountId "${accountName}")
-        uuid=$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .uuid // empty' <<<"${desiredUsers}")
-        if [[ -n "${uuid}" ]]; then
-            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${id}" --arg uuid "${uuid}" '
-              .groups |= map(if .id == $groupId then
-                if any(.user_groups[]?; .id == $id) then .user_groups |= map(if .id == $id then .uuid = $uuid else . end) else .user_groups += [{id:$id, name:$id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, token:"", uuid:$uuid}] end
-              else . end)'
-        fi
-        subscriptionSyncAppendLocalAccount "${accountName}"
-    done < <(jq -r '.create[]?' <<<"${plan}")
-}
-
-subscriptionControlReconcileLocalServices() {
-    reloadCore
-    readNginxSubscribe
-    installSubscriptionControlService
-    if ensureSubscriptionControlNginxLocation; then
-        serviceQueueRestart nginx
-        serviceQueueApply
-    fi
-    if [[ -n "${subscribePort}" ]]; then
-        subscribe false
-    fi
+    local createAccounts
+    createAccounts=$(jq -c '.create' <<<"${plan}")
+    subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"
+    subscriptionSyncApplyAccountPlan "${plan}"
 }
 
 subscriptionControlApplySync() {
@@ -482,7 +478,7 @@ subscriptionControlApplySync() {
     fi
     subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
-        subscriptionControlReconcileLocalServices
+        subscriptionSyncReconcileLocalServices
     fi
     jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
 }

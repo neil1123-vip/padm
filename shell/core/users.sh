@@ -402,12 +402,20 @@ subscriptionSyncConfiguredManagedUsers() {
     done < <(subscriptionSyncConfigFiles) | sort -u
 }
 
+subscriptionSyncPlanFromAccounts() {
+    local desiredAccounts=$1
+    local currentAccounts
+    currentAccounts=$(subscriptionSyncConfiguredManagedUsers)
+    jq -n \
+      --argjson desired "$(printf '%s\n' "${desiredAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
+      --argjson current "$(printf '%s\n' "${currentAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
+      '{create: ($desired - $current), remove: ($current - $desired)}'
+}
+
 subscriptionSyncPlan() {
     local desiredAccounts
-    local currentAccounts
     desiredAccounts=$(while IFS= read -r id; do subscriptionSyncAccountName "${id}"; done < <(subscriptionSyncDesiredLocalUsers) | sort -u)
-    currentAccounts=$(subscriptionSyncConfiguredManagedUsers)
-    jq -n --argjson desired "$(printf '%s\n' "${desiredAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" --argjson current "$(printf '%s\n' "${currentAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" '{create: ($desired - $current), remove: ($current - $desired)}'
+    subscriptionSyncPlanFromAccounts "${desiredAccounts}"
 }
 
 subscriptionSyncRemoveAccountFromFile() {
@@ -514,6 +522,32 @@ subscriptionSyncAppendLocalAccount() {
     subscriptionSyncAppendLocalUser "$(subscriptionSyncAccountId "${accountName}")"
 }
 
+subscriptionSyncApplyAccountPlan() {
+    local syncPlan=$1
+    local accountName
+    while IFS= read -r accountName; do
+        subscriptionSyncRemoveAccount "${accountName}"
+    done < <(echo "${syncPlan}" | jq -r '.remove[]?')
+
+    while IFS= read -r accountName; do
+        subscriptionSyncAppendLocalAccount "${accountName}"
+    done < <(echo "${syncPlan}" | jq -r '.create[]?')
+}
+
+subscriptionSyncReconcileLocalServices() {
+    local skipSubscribeRefresh=${1:-}
+    reloadCore
+    readNginxSubscribe
+    installSubscriptionControlService
+    if ensureSubscriptionControlNginxLocation; then
+        serviceQueueRestart nginx
+        serviceQueueApply
+    fi
+    if [[ -n "${subscribePort}" && -z "${skipSubscribeRefresh}" ]]; then
+        subscribe false
+    fi
+}
+
 subscriptionSyncMarkResult() {
     local status=$1
     local failures=$2
@@ -550,29 +584,14 @@ runSubscriptionGroupSync() {
     fi
 
     syncPlan=$(subscriptionSyncPlan)
-    while IFS= read -r accountName; do
-        subscriptionSyncRemoveAccount "${accountName}"
-    done < <(echo "${syncPlan}" | jq -r '.remove[]?')
-
-    while IFS= read -r accountName; do
-        subscriptionSyncAppendLocalAccount "${accountName}"
-    done < <(echo "${syncPlan}" | jq -r '.create[]?')
+    subscriptionSyncApplyAccountPlan "${syncPlan}"
 
     if subscriptionGroupRemoteSyncEnabled; then
         remoteFailures=$(runSubscriptionRemoteSync)
         failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
     fi
 
-    reloadCore
-    readNginxSubscribe
-    installSubscriptionControlService
-    if ensureSubscriptionControlNginxLocation; then
-        serviceQueueRestart nginx
-        serviceQueueApply
-    fi
-    if [[ -n "${subscribePort}" && -z "${skipSubscribeRefresh}" ]]; then
-        subscribe false
-    fi
+    subscriptionSyncReconcileLocalServices "${skipSubscribeRefresh}"
 
     collectSubscriptionTraffic
 
