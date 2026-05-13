@@ -403,35 +403,38 @@ subscriptionControlAuthorized() {
     [[ -n "${currentToken}" && "${token}" == "${currentToken}" ]]
 }
 
-subscriptionControlApplySync() {
+subscriptionControlValidateSyncPayload() {
     local payload=$1
-    local dryRun
-    local desiredUsers
+    jq -e 'type == "object" and (.desired_users? | type == "array")' <<<"${payload}" >/dev/null 2>&1
+}
+
+subscriptionControlDesiredUsers() {
+    local payload=$1
+    jq '[.desired_users[]? | select((.id // "") != "") | {id, uuid: (.uuid // "")}]' <<<"${payload}"
+}
+
+subscriptionControlSyncPlan() {
+    local desiredUsers=$1
     local desiredAccounts
     local currentAccounts
-    if ! jq -e 'type == "object" and (.desired_users? | type == "array")' <<<"${payload}" >/dev/null 2>&1; then
-        jq -n '{ok:false, error:"invalid_payload"}'
-        return 1
-    fi
-    dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
-    desiredUsers=$(jq '[.desired_users[]? | select((.id // "") != "") | {id, uuid: (.uuid // "")}]' <<<"${payload}")
     desiredAccounts=$(jq -r '.[] | "sub_" + (.id | gsub("-"; "_"))' <<<"${desiredUsers}" | sort -u)
     currentAccounts=$(subscriptionSyncConfiguredManagedUsers)
-    plan=$(jq -n --argjson desired "$(printf '%s\n' "${desiredAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" --argjson current "$(printf '%s\n' "${currentAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" '{create: ($desired - $current), remove: ($current - $desired)}')
-    if jq -e '(.create | length == 0) and (.remove | length == 0)' <<<"${plan}" >/dev/null 2>&1; then
-        jq -n --argjson plan "${plan}" --argjson dryRun "${dryRun}" '{ok:true, dry_run:$dryRun, changed:false, plan:$plan}'
-        return 0
-    fi
-    if [[ "${dryRun}" == "true" ]]; then
-        jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
-        return 0
-    fi
+    jq -n \
+      --argjson desired "$(printf '%s\n' "${desiredAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
+      --argjson current "$(printf '%s\n' "${currentAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
+      '{create: ($desired - $current), remove: ($current - $desired)}'
+}
+
+subscriptionControlApplyAccountPlan() {
+    local plan=$1
+    local desiredUsers=$2
+    local accountName
+    local id
+    local uuid
     while IFS= read -r accountName; do
         subscriptionSyncRemoveAccount "${accountName}"
     done < <(jq -r '.remove[]?' <<<"${plan}")
     while IFS= read -r accountName; do
-        local id
-        local uuid
         id=$(subscriptionSyncAccountId "${accountName}")
         uuid=$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .uuid // empty' <<<"${desiredUsers}")
         if [[ -n "${uuid}" ]]; then
@@ -442,10 +445,9 @@ subscriptionControlApplySync() {
         fi
         subscriptionSyncAppendLocalAccount "${accountName}"
     done < <(jq -r '.create[]?' <<<"${plan}")
-    if [[ "${PADM_CONTROL_SERVER:-}" == "1" ]]; then
-        jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
-        return 0
-    fi
+}
+
+subscriptionControlReconcileLocalServices() {
     reloadCore
     readNginxSubscribe
     installSubscriptionControlService
@@ -455,6 +457,32 @@ subscriptionControlApplySync() {
     fi
     if [[ -n "${subscribePort}" ]]; then
         subscribe false
+    fi
+}
+
+subscriptionControlApplySync() {
+    local payload=$1
+    local dryRun
+    local desiredUsers
+    local plan
+    if ! subscriptionControlValidateSyncPayload "${payload}"; then
+        jq -n '{ok:false, error:"invalid_payload"}'
+        return 1
+    fi
+    dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
+    desiredUsers=$(subscriptionControlDesiredUsers "${payload}")
+    plan=$(subscriptionControlSyncPlan "${desiredUsers}")
+    if jq -e '(.create | length == 0) and (.remove | length == 0)' <<<"${plan}" >/dev/null 2>&1; then
+        jq -n --argjson plan "${plan}" --argjson dryRun "${dryRun}" '{ok:true, dry_run:$dryRun, changed:false, plan:$plan}'
+        return 0
+    fi
+    if [[ "${dryRun}" == "true" ]]; then
+        jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
+        return 0
+    fi
+    subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"
+    if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
+        subscriptionControlReconcileLocalServices
     fi
     jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
 }
