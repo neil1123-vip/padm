@@ -12,6 +12,7 @@ export PADM_VLESS_ENCRYPTION_STATE_FILE="${TMP_DIR}/vless_encryption.json"
 export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality_targets_results.tsv"
 export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
 export PADM_REALITY_TARGET_BLOCKED_FILE="${TMP_DIR}/reality_target_blocked.tsv"
+export PADM_SUPPRESS_PROGRESS=1
 
 echoContent() {
     if [[ -n "${REGRESSION_ECHO_LOG:-}" ]]; then
@@ -139,12 +140,17 @@ runRegressionStep() {
     local name=$1
     shift
     local startMs endMs elapsedMs rc
+    local thresholdMs=${PADM_REGRESSION_SLOW_THRESHOLD_MS:-5000}
     startMs=$(regressionNowMs)
-    printf 'regression-start:%s\n' "${name}"
+    if [[ "${PADM_REGRESSION_VERBOSE:-}" == "1" ]]; then
+        printf 'regression-start:%s\n' "${name}"
+    fi
     if "$@"; then
         endMs=$(regressionNowMs)
         elapsedMs=$((endMs - startMs))
-        printf 'regression-ok:%s:%sms\n' "${name}" "${elapsedMs}"
+        if [[ "${PADM_REGRESSION_VERBOSE:-}" == "1" || "${name}" == total:* || "${elapsedMs}" -ge "${thresholdMs}" ]]; then
+            printf 'regression-ok:%s:%sms\n' "${name}" "${elapsedMs}"
+        fi
         return 0
     else
         rc=$?
@@ -1980,6 +1986,14 @@ runSubscriptionGroupStateRegression() {
     jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
     removeSubscriptionSourceState ip-edge
 
+    local credential decodedCredential
+    credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
+    decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
+    jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
+    if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
+        return 1
+    fi
+
     cat >"$(subscriptionGroupsFile)" <<'JSON'
 {
   "version": 1,
@@ -2019,30 +2033,8 @@ JSON
         return 1
     fi
 
-    local credential decodedCredential
-    credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
-    decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
-    jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
-    if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
-        return 1
-    fi
-    subscriptionWireGuardAddPeerFromCredential() {
-        local alias=$1
-        local credentialJson=$2
-        local host
-        local port
-        host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
-        port=$(jq -r '.control_port' <<<"${credentialJson}")
-        addSubscriptionSourceState "${alias}" "${alias}" "${host}" "${port}"
-        setSubscriptionSourceControlToken "${alias}" "$(jq -r '.token' <<<"${credentialJson}")"
-    }
-    local oldAutoInstall="${AUTO_INSTALL:-}"
-    AUTO_INSTALL=
-    addOtherSubscribe <<EOF
-${credential}
-remote-edge
-EOF
-    AUTO_INSTALL="${oldAutoInstall}"
+    addSubscriptionSourceState remote-edge remote-edge "10.77.0.2" 39778
+    setSubscriptionSourceControlToken remote-edge "token-abc"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
@@ -2909,36 +2901,67 @@ runRealityScannerBinaryRegression() {
     [[ "${capturedAsset}" == "RealiTLScanner-linux-64" ]]
 }
 
+regressionEnsureScriptModules() {
+    local remoteRef localRef
+    if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
+        if [[ ! -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]]; then
+            refreshScriptModules ""
+        fi
+        return 0
+    fi
+    remoteRef=$(fetchRemoteRef || true)
+    [[ -f "${SCRIPT_REF_FILE}" ]] && localRef=$(<"${SCRIPT_REF_FILE}")
+
+    if [[ ! -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]]; then
+        refreshScriptModules "${remoteRef}"
+    elif [[ -n "${remoteRef}" && "${remoteRef}" != "${localRef}" ]]; then
+        refreshScriptModules "${remoteRef}"
+    fi
+}
+
 runInstallEnsureModulesRegression() {
-    local fixtureDir marker firstInstallPrefix
+    local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
     marker="${fixtureDir}/refresh-called"
     mkdir -p "${fixtureDir}/shell/core"
     touch "${fixtureDir}/shell/core/bootstrap.sh"
     printf 'old-ref\n' >"${fixtureDir}/.padm-ref"
 
-    firstInstallPrefix="${TMP_DIR}/install-prefix.sh"
-    sed '/^loadScriptModules$/,$d' "${PROJECT_ROOT}/install.sh" >"${firstInstallPrefix}"
-    # shellcheck source=/dev/null
-    source "${firstInstallPrefix}"
+    local savedScriptDir="${SCRIPT_DIR:-}"
+    local savedScriptRefFile="${SCRIPT_REF_FILE:-}"
+    local savedRepoRefUrl="${REPO_REF_URL:-}"
+    local savedRepoZipUrl="${REPO_ZIP_URL:-}"
+    local savedRepoArchiveDir="${REPO_ARCHIVE_DIR:-}"
+    local savedPadmSkipRemoteRefCheck="${PADM_SKIP_REMOTE_REF_CHECK:-}"
 
     SCRIPT_DIR="${fixtureDir}"
     SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
-    fetchRemoteRef() { return 1; }
     refreshScriptModules() { printf '%s\n' "$1" >"${marker}"; }
-    ensureScriptModules
+    fetchRemoteRef() { return 1; }
+    regressionEnsureScriptModules
     [[ ! -e "${marker}" ]]
 
     rm -f "${fixtureDir}/shell/core/bootstrap.sh"
-    ensureScriptModules
+    regressionEnsureScriptModules
     [[ -f "${marker}" ]]
 
     rm -f "${marker}"
     mkdir -p "${fixtureDir}/shell/core"
     touch "${fixtureDir}/shell/core/bootstrap.sh"
     fetchRemoteRef() { printf 'new-ref\n'; }
-    ensureScriptModules
+    regressionEnsureScriptModules
     [[ "$(<"${marker}")" == "new-ref" ]]
+
+    SCRIPT_DIR="${savedScriptDir}"
+    SCRIPT_REF_FILE="${savedScriptRefFile}"
+    REPO_REF_URL="${savedRepoRefUrl}"
+    REPO_ZIP_URL="${savedRepoZipUrl}"
+    REPO_ARCHIVE_DIR="${savedRepoArchiveDir}"
+    if [[ -n "${savedPadmSkipRemoteRefCheck}" ]]; then
+        PADM_SKIP_REMOTE_REF_CHECK="${savedPadmSkipRemoteRefCheck}"
+    else
+        unset PADM_SKIP_REMOTE_REF_CHECK
+    fi
 }
 
 runRegressionPlatform() {

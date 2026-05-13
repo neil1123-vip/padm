@@ -19,22 +19,8 @@ addSingBoxRouteRule() {
     fi
     local rules=
     rules=$(initSingBoxRules "${domainList}" "${routingName}")
-    # domain 精确匹配规则
-    local domainRules=
-    domainRules=$(echo "${rules}" | jq .domainRules)
-
-    local suffixRules=
-    suffixRules=$(echo "${rules}" | jq .suffixRules)
-
-    # rule_set 规则集
-    local ruleSet=
-    ruleSet=$(echo "${rules}" | jq .ruleSet)
-
-    # rule_set tag
-    local ruleSetTag=[]
-    if [[ "$(echo "${ruleSet}" | jq '.|length')" != "0" ]]; then
-        ruleSetTag=$(echo "${ruleSet}" | jq '.|map(.tag)')
-    fi
+    local domainRules suffixRules ruleSet ruleSetTag
+    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag
     if [[ -n "${singBoxConfigPath}" ]]; then
         local routeAction='"outbound": "'"${outboundTag}"'"'
         if [[ "${outboundTag}" == *block* ]]; then

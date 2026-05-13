@@ -2,6 +2,9 @@
 
 realityTargetProgressLine() {
     local message=$1
+    if [[ "${PADM_SUPPRESS_PROGRESS:-}" == "1" ]]; then
+        return 0
+    fi
     if declare -F printInstallProgressLine >/dev/null 2>&1; then
         printInstallProgressLine "${message}"
     else

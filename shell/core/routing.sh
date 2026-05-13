@@ -855,15 +855,21 @@ EOF
         routingRule="{\"type\": \"field\",\"domain\": [],\"outboundTag\": \"${tag}\"}"
     fi
 
+    local newRules=()
     while read -r line; do
         if echo "${routingRule}" | grep -q "${line}"; then
             statusCard "规则已存在" "${line} 已存在，跳过"
         else
             local matchedRuleValue
             matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray")
-            routingRule=$(echo "${routingRule}" | jq -r --arg rule "${matchedRuleValue}" '.domain += [$rule]')
+            newRules+=("${matchedRuleValue}")
         fi
     done < <(echo "${domain}" | tr ',' '\n')
+    if [[ ${#newRules[@]} -gt 0 ]]; then
+        local rulesJson
+        rulesJson=$(printf '%s\n' "${newRules[@]}" | jq -R -s 'split("\n") | map(select(length > 0))')
+        routingRule=$(jq -r --argjson rules "${rulesJson}" '.domain += $rules' <<<"${routingRule}")
+    fi
 
     unInstallRouting "${tag}" "${type}" || return 1
     if ! grep -q "gstatic.com" ${configPath}09_routing.json && [[ "${tag}" == "blackhole_out" ]]; then
@@ -908,6 +914,7 @@ EOF
         routingRule="{\"type\": \"field\",\"ip\": [],\"outboundTag\": \"${tag}\"}"
     fi
 
+    local newRules=()
     while read -r line; do
         line=$(echo "${line}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         if [[ -z "${line}" ]]; then
@@ -922,9 +929,14 @@ EOF
         if echo "${routingRule}" | grep -q "${ipRuleValue}"; then
             statusCard "规则已存在" "${ipRuleValue} 已存在，跳过"
         else
-            routingRule=$(echo "${routingRule}" | jq -r '.ip += ["'"${ipRuleValue}"'"]')
+            newRules+=("${ipRuleValue}")
         fi
     done < <(echo "${ipList}" | tr ',' '\n')
+    if [[ ${#newRules[@]} -gt 0 ]]; then
+        local rulesJson
+        rulesJson=$(printf '%s\n' "${newRules[@]}" | jq -R -s 'split("\n") | map(select(length > 0))')
+        routingRule=$(jq -r --argjson rules "${rulesJson}" '.ip += $rules' <<<"${routingRule}")
+    fi
 
     unInstallRouting "${tag}" "${type}" || return 1
     updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [$routingRule]' --argjson routingRule "${routingRule}"
@@ -1740,12 +1752,12 @@ setSocks5Inbound() {
 
 # 初始化 sing-box rule_set 路由规则
 initSingBoxRules() {
-    local domainRules=[]
-    local ruleSet=[]
-    local suffixRules=[]
+    local domainRuleLines=
+    local ruleSetLines=
+    local suffixRuleLines=
     local singBoxRulePath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+    local line normalizedLine matchedRuleName tag url
     while read -r line; do
-        local normalizedLine=
         normalizedLine=$(echo "${line}" | tr '[:upper:]' '[:lower:]' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 
         if [[ -z "${normalizedLine}" ]]; then
@@ -1754,39 +1766,69 @@ initSingBoxRules() {
 
         if [[ "${normalizedLine}" == geosite:* ]]; then
             normalizedLine=${normalizedLine#geosite:}
-            ruleSet=$(echo "${ruleSet}" | jq -r --arg tag "geosite_${normalizedLine}_$2" --arg url "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-${normalizedLine}.srs" '. += [{"tag":$tag,"type":"remote","format":"binary","url":$url,"download_detour":"01_direct_outbound"}]')
+            tag="geosite_${normalizedLine}_$2"
+            url="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-${normalizedLine}.srs"
+            ruleSetLines+="${tag}"$'\t'"${url}"$'\n'
             continue
         fi
         if [[ "${normalizedLine}" == domain:* ]]; then
-            normalizedLine=${normalizedLine#domain:}
-            suffixRules=$(echo "${suffixRules}" | jq -r --arg domain "${normalizedLine}" '. += [$domain]')
+            suffixRuleLines+="${normalizedLine#domain:}"$'\n'
             continue
         fi
         if [[ "${normalizedLine}" == full:* ]]; then
-            normalizedLine=${normalizedLine#full:}
-            domainRules=$(echo "${domainRules}" | jq -r --arg domain "${normalizedLine}" '. += [$domain]')
+            domainRuleLines+="${normalizedLine#full:}"$'\n'
             continue
         fi
         if [[ "${normalizedLine}" == keyword:* ]]; then
-            normalizedLine=${normalizedLine#keyword:}
-            suffixRules=$(echo "${suffixRules}" | jq -r --arg domain "${normalizedLine}" '. += [$domain]')
+            suffixRuleLines+="${normalizedLine#keyword:}"$'\n'
             continue
         fi
 
         if isDomainFormat "${normalizedLine}"; then
-            suffixRules=$(echo "${suffixRules}" | jq -r --arg domain "${normalizedLine}" '. += [$domain]')
+            suffixRuleLines+="${normalizedLine}"$'\n'
         else
-            local matchedRuleName
             matchedRuleName=$(getDLCGeositeName "${normalizedLine}" "${singBoxRulePath}")
 
             if [[ -n "${matchedRuleName}" ]]; then
-                ruleSet=$(echo "${ruleSet}" | jq -r --arg tag "geosite_${matchedRuleName}_$2" --arg url "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-${matchedRuleName}.srs" '. += [{"tag":$tag,"type":"remote","format":"binary","url":$url,"download_detour":"01_direct_outbound"}]')
+                tag="geosite_${matchedRuleName}_$2"
+                url="https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-${matchedRuleName}.srs"
+                ruleSetLines+="${tag}"$'\t'"${url}"$'\n'
             else
-                suffixRules=$(echo "${suffixRules}" | jq -r --arg domain "${normalizedLine}" '. += [$domain]')
+                suffixRuleLines+="${normalizedLine}"$'\n'
             fi
         fi
     done < <(echo "$1" | tr ',' '\n' | grep -v '^$' | sort -u)
-    echo "{ \"domainRules\":${domainRules},\"suffixRules\":${suffixRules},\"ruleSet\":${ruleSet}}"
+
+    jq -n \
+        --arg domainRules "${domainRuleLines}" \
+        --arg suffixRules "${suffixRuleLines}" \
+        --arg ruleSet "${ruleSetLines}" '
+        def lines($value): $value | split("\n") | map(select(length > 0));
+        {
+          domainRules: lines($domainRules),
+          suffixRules: lines($suffixRules),
+          ruleSet: ($ruleSet | split("\n") | map(select(length > 0) | split("\t") | {
+            tag: .[0],
+            type: "remote",
+            format: "binary",
+            url: .[1],
+            download_detour: "01_direct_outbound"
+          }))
+        }'
+}
+
+splitSingBoxRules() {
+    local rules=$1
+    local -n domainRulesRef=$2
+    local -n suffixRulesRef=$3
+    local -n ruleSetRef=$4
+    local -n ruleSetTagRef=$5
+    local parsedRules
+    mapfile -t parsedRules < <(jq -c '.domainRules, .suffixRules, .ruleSet, (.ruleSet | map(.tag))' <<<"${rules}")
+    domainRulesRef=${parsedRules[0]:-[]}
+    suffixRulesRef=${parsedRules[1]:-[]}
+    ruleSetRef=${parsedRules[2]:-[]}
+    ruleSetTagRef=${parsedRules[3]:-[]}
 }
 
 # Socks5 inbound routing 规则
@@ -2121,7 +2163,7 @@ updateRoutingJsonConfig() {
     local filter=$2
     local tmpPath="${targetPath}.tmp"
     shift 2
-    if ! jq "$@" "${filter}" "${targetPath}" >"${tmpPath}" || ! jq empty "${tmpPath}" >/dev/null; then
+    if ! jq "$@" "${filter}" "${targetPath}" >"${tmpPath}"; then
         rm -f "${tmpPath}"
         return 1
     fi
@@ -2215,22 +2257,8 @@ addSingBoxDNSConfig() {
 
     local rules=
     rules=$(initSingBoxRules "${domainList}" "dns")
-    # domain 精确匹配规则
-    local domainRules=
-    domainRules=$(echo "${rules}" | jq .domainRules)
-
-    local suffixRules=
-    suffixRules=$(echo "${rules}" | jq .suffixRules)
-
-    # rule_set 规则集
-    local ruleSet=
-    ruleSet=$(echo "${rules}" | jq .ruleSet)
-
-    # rule_set 规则 tag
-    local ruleSetTag=[]
-    if [[ "$(echo "${ruleSet}" | jq '.|length')" != "0" ]]; then
-        ruleSetTag=$(echo "${ruleSet}" | jq '.|map(.tag)')
-    fi
+    local domainRules suffixRules ruleSet ruleSetTag
+    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ "${actionType}" == "predefined" ]]; then
             local predefined={}
