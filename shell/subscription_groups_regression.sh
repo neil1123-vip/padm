@@ -1538,6 +1538,10 @@ runRuntimeAndRealityRegression() {
     ensureXrayGeoFiles "${geoTmpDir}"
     [[ "$(<"${geoTmpDir}/geoip.dat")" == "geoip" ]]
     [[ "$(<"${geoTmpDir}/geosite.dat")" == "geosite" ]]
+    printf 'v20260513' >"${geoTmpDir}/geo.version"
+    [[ "$(xrayGeoDisplayVersion "${geoTmpDir}")" == "版本 v20260513" ]]
+    rm -f "${geoTmpDir}/geo.version"
+    [[ "$(xrayGeoDisplayVersion "${geoTmpDir}")" == 更新时间* || "$(xrayGeoDisplayVersion "${geoTmpDir}")" == "版本未知" ]]
 
     parseRealityTargetInput "example.com"
     [[ "${realityTargetHost}" == "example.com" ]]
@@ -2387,6 +2391,9 @@ runMenuSmokeRegression() {
         actions=
     }
     menu() { recordMenuAction menu; }
+    menuLine() { output+="$*"$'\n'; }
+    menuMutedLine() { output+="$*"$'\n'; }
+    menuClose() { return 0; }
     menuRecommendedItem() { return 0; }
     menuReturnItem() { return 0; }
     statusCard() { recordMenuAction "statusCard:$1"; }
@@ -2475,6 +2482,16 @@ runMenuSmokeRegression() {
         fi
         jq -n '{groups:[{id:"default", sources:[], user_groups:[], traffic:{global:{upload:0,download:0}, admin:{upload:0,download:0}, user_groups:{}, sources:{}}}], upload:0, download:0}'
     }
+    local geoOverviewDir="${TMP_DIR}/menu-smoke-xray-geo"
+    mkdir -p "${geoOverviewDir}/conf"
+    printf '#!/usr/bin/env bash\ncase "$1" in --version) printf "Xray 1.0.0 test\\n" ;; -test) exit 0 ;; *) exit 1 ;; esac\n' >"${geoOverviewDir}/xray"
+    chmod +x "${geoOverviewDir}/xray"
+    printf 'geoip' >"${geoOverviewDir}/geoip.dat"
+    printf 'geosite' >"${geoOverviewDir}/geosite.dat"
+    printf 'v20260513' >"${geoOverviewDir}/geo.version"
+    local output=
+    PADM_XRAY_DIR="${geoOverviewDir}" showCoreStatusOverview
+    [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
     customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
     installMenu <<<"7"
     assertMenuAction menu

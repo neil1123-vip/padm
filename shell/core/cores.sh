@@ -3,7 +3,7 @@
 # 清理 Xray geo 数据文件
 cleanXrayGeoFiles() {
     local targetDir=$1
-    rm -f "${targetDir}/geosite.dat" "${targetDir}/geoip.dat" >/dev/null 2>&1
+    rm -f "${targetDir}/geosite.dat" "${targetDir}/geoip.dat" "${targetDir}/geo.version" >/dev/null 2>&1
 }
 
 ensureXrayGeoFiles() {
@@ -26,6 +26,29 @@ ensureXrayGeoFiles() {
         errorCard "geo文件下载失败"
         return 1
     fi
+    printf '%s\n' "${geoVersion}" >"${targetDir}/geo.version"
+}
+
+xrayGeoDisplayVersion() {
+    local targetDir=${1:-/etc/padm/xray}
+    if [[ -s "${targetDir}/geo.version" ]]; then
+        printf '版本 %s' "$(tr -d '\r\n' <"${targetDir}/geo.version")"
+        return
+    fi
+    if [[ -s "${targetDir}/geosite.dat" || -s "${targetDir}/geoip.dat" ]]; then
+        local newest=0 file mtime
+        for file in "${targetDir}/geosite.dat" "${targetDir}/geoip.dat"; do
+            [[ -e "${file}" ]] || continue
+            mtime=$(stat -c %Y "${file}" 2>/dev/null || stat -f %m "${file}" 2>/dev/null || printf '0')
+            [[ ${mtime} =~ ^[0-9]+$ ]] || mtime=0
+            ((mtime > newest)) && newest=${mtime}
+        done
+        if ((newest > 0)); then
+            date -d "@${newest}" '+更新时间 %Y-%m-%d' 2>/dev/null || date -r "${newest}" '+更新时间 %Y-%m-%d' 2>/dev/null || printf '版本未知'
+            return
+        fi
+    fi
+    printf '版本未知'
 }
 
 commitGeneratedFile() {
@@ -248,6 +271,22 @@ appendSingBoxCompatibilityHints() {
     fi
 }
 
+coreValidationStateWithPaths() {
+    local core=$1
+    local binary=$2
+    local configDir=$3
+    local logFile=$4
+    if [[ "${core}" == "xray" ]]; then
+        if [[ -x "${binary}" && -d "${configDir}" ]] && "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1; then
+            echo "通过"
+        else
+            echo "失败，查看 ${logFile}"
+        fi
+    elif [[ "${core}" == "sing-box" ]]; then
+        coreValidationState sing-box
+    fi
+}
+
 coreValidationState() {
     local core=$1
     if [[ "${core}" == "xray" ]]; then
@@ -275,17 +314,24 @@ coreDisplayState() {
 }
 
 showCoreStatusOverview() {
+    local xrayDir=${PADM_XRAY_DIR:-/etc/padm/xray}
+    local xrayBinary="${xrayDir}/xray"
+    local xrayConfigDir="${xrayDir}/conf"
     local xrayVersion="未安装"
     local singBoxVersion="未安装"
     local geoStatus="未安装"
+    local geoVersion=""
     local geoCron="未设置"
 
-    xrayVersion=$(getXrayCurrentVersion)
+    if [[ -x "${xrayBinary}" ]]; then
+        xrayVersion=$("${xrayBinary}" --version 2>/dev/null | awk 'NR==1 {print "v"$2}')
+    fi
     singBoxVersion=$(getSingBoxCurrentVersion)
 
-    if [[ -s /etc/padm/xray/geosite.dat && -s /etc/padm/xray/geoip.dat ]]; then
+    if [[ -s "${xrayDir}/geosite.dat" && -s "${xrayDir}/geoip.dat" ]]; then
         geoStatus="已安装"
-    elif xrayInstalled; then
+        geoVersion=$(xrayGeoDisplayVersion "${xrayDir}")
+    elif [[ -x "${xrayBinary}" ]]; then
         geoStatus="缺失或为空"
     fi
     if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
@@ -295,9 +341,13 @@ showCoreStatusOverview() {
     echoContent title "\n┌─ 核心状态总览 ─────────────────────────────────────"
     menuLine "Xray-core: $(coreDisplayState "${xrayVersion}")"
     menuLine "Xray 服务: $(coreDisplayState "$(coreServiceState xray xrayRunning)")"
-    if xrayInstalled; then
-        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationState xray)")"
-        menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / 自动更新 $(coreDisplayState "${geoCron}")"
+    if [[ -x "${xrayBinary}" ]]; then
+        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" /tmp/padm-core-xray-test.log)")"
+        if [[ -n "${geoVersion}" ]]; then
+            menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / $(coreDisplayState "${geoVersion}") / 自动更新 $(coreDisplayState "${geoCron}")"
+        else
+            menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / 自动更新 $(coreDisplayState "${geoCron}")"
+        fi
     fi
     menuLine "sing-box: $(coreDisplayState "${singBoxVersion}")"
     menuLine "sing-box 服务: $(coreDisplayState "$(coreServiceState sing-box singBoxRunning)")"
