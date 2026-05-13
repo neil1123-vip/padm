@@ -62,7 +62,7 @@ readNginxSubscribe() {
             if (hasSingBox) {
               print port
               print domain
-              print hasSsl ? "https" : "http"
+              print hasSsl ? "https" : ""
             }
           }
         ' "${subscribeConfig}")
