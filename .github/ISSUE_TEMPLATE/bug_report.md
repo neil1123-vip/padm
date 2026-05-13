@@ -51,7 +51,7 @@ assignees: ''
 - 安装方式：
 
 ```text
-例如：推荐直连 Reality Vision / 推荐 CDN Reality XHTTP / 无域名 Reality / 自定义安装 / 传统 TLS 兼容安装
+例如：推荐直连 Reality Vision / 推荐 CDN Reality XHTTP / 无域名 Reality / TLS 指纹抗性 NaiveProxy / 自定义安装 / 传统 TLS 兼容安装
 ```
 
 - 协议：

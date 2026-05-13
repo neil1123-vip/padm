@@ -8,12 +8,13 @@ padm 是面向 Xray-core / sing-box 的一键安装与日常运维脚本，聚�
 
 如果你第一次使用，不需要先理解所有协议，按下面路径走即可：
 
-1. **不知道怎么选**：主菜单选择 `安装与重装`，菜单顶部会说明直连/CDN/无域名分别该选哪一项；不确定时直接选 `推荐直连 Reality Vision`。
+1. **不知道怎么选**：主菜单选择 `安装与重装`，菜单顶部会说明直连/CDN/无域名/NaiveProxy 分别该选哪一项；不确定时直接选 `推荐直连 Reality Vision`。
 2. **直连/有域名**：选择 `安装与重装` -> `推荐直连 Reality Vision`，有域名时把域名作为 entry。
 3. **需要 CDN**：选择 `安装与重装` -> `推荐 CDN Reality XHTTP`，脚本会使用 XHTTP XMUX；传统 TLS/WS/gRPC/HTTPUpgrade 仅在兼容旧客户端时使用。
 4. **没有域名**：选择 `安装与重装` -> `无域名 Reality`，脚本会生成 Reality 节点。
-5. **安装完成**：回到主菜单选择 `订阅与用户` -> `订阅服务` 安装/更新订阅发布服务，再到 `我的订阅` 查看自用链接。
-6. **验证服务**：在服务器上运行 `bash shell/validate_install.sh [domain]` 做只读验收。
+5. **需要 TLS 指纹抗性**：选择 `安装与重装` -> `TLS 指纹抗性 NaiveProxy`，需准备真实域名和可信证书。
+6. **安装完成**：回到主菜单选择 `订阅与用户` -> `订阅服务` 安装/更新订阅发布服务，再到 `我的订阅` 查看自用链接。
+7. **验证服务**：在服务器上运行 `bash shell/validate_install.sh [domain]` 做只读验收。
 
 不要一开始就使用“自定义安装”“CDN节点管理”“多服务器同步”这类高级入口，除非你明确知道客户端需要什么协议和网络形态。
 
@@ -23,7 +24,7 @@ padm 主菜单按任务对象分组，一个功能只放在一个入口里：
 
 | 菜单 | 适用场景 |
 | --- | --- |
-| 安装与重装 | 含新手选择指引；创建或重建节点：推荐直连、推荐 CDN、无域名 Reality、自定义安装、传统 TLS 兼容安装。 |
+| 安装与重装 | 含新手选择指引；创建或重建节点：推荐直连、推荐 CDN、无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装。 |
 | 订阅与用户 | 订阅服务、自用链接、给别人开订阅、多服务器同步、流量限额和自动同步。 |
 | 协议与入口 | 管理 REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口地址。 |
 | 站点与证书 | 维护传统 TLS fallback 站点、302、ALPN 诊断/修复和 TLS 证书。 |
@@ -80,6 +81,12 @@ VLESS Reality XHTTP + CDN 推荐安装（内置 XTLS Vision flow 与 XHTTP XMUX�
 
 ```bash
 bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+```
+
+NaiveProxy TLS 指纹抗性安装（需要真实域名和证书，不是无域名 Reality 替代）：
+
+```bash
+bash install.sh --install-type custom --core sing-box --protocols 10 --domain naive.example.com --port 443 --reuse-last no
 ```
 
 传统 TLS 组合安装（兼容旧客户端或迁移时使用；Cloudflare DNS-01 可全程非交互）：
@@ -152,10 +159,10 @@ bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
 | `7` | VLESS Reality Vision | 新手直连/有域名场景优先选择；启用高级 VLESS Encryption 实验后形成 `VLESS Encryption + XTLS Vision` 组合。 |
 | `8` | VLESS Reality gRPC | 需要 gRPC/HTTP2 多路复用且不走 CDN 时作为备选。 |
 | `9` | Tuic | UDP/移动网络场景可考虑。 |
-| `10` | Naive | 需要 NaiveProxy 时选择。 |
+| `10` | Naive | 需要 NaiveProxy 或 TLS 指纹抗性时优先选择。 |
 | `11` | VMess HTTPUpgrade TLS | 传统 TLS/CDN 兼容方案；新建 CDN 优先选 12。 |
 | `12` | VLESS Reality XHTTP | CDN 场景优先选择；使用 XTLS Vision flow、XHTTP XMUX，多路复用和 CDN 兼容更好；启用高级 VLESS Encryption 实验后形成 `VLESS Encryption + XTLS Vision + XHTTP XMUX` 组合。 |
-| `13` | AnyTLS | sing-box AnyTLS 场景使用。 |
+| `13` | AnyTLS | sing-box AnyTLS 场景使用；客户端支持面不如 Reality/Naive/Hysteria2，明确需要时再选。 |
 
 
 ## 推荐协议能力对照
@@ -166,6 +173,12 @@ bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
 | VLESS Reality Vision | ✅ | ✅ | ❌ | ❌ | 新手直连、有域名或无域名 Reality 首选；高级实验可叠加 VLESS Encryption。 |
 | VLESS Reality gRPC | ❌ | ✅ | ✅ HTTP/2 | ❌ | 需要 gRPC/HTTP2 多路复用但不走 CDN 时备选。 |
 | VLESS Reality XHTTP | ✅ | ✅ | ✅ XMUX | ✅ | CDN 场景首选；高级实验可叠加 VLESS Encryption。 |
+| NaiveProxy | ❌ | ✅ | 按客户端能力 | ❌ | 明确需要 TLS 指纹抗性时优先选择。 |
+| Hysteria2 | 不适用 | ❌ | QUIC | ❌ | 移动网络、UDP 或弱网场景按需选择。 |
+| Tuic | 不适用 | ❌ | QUIC | ❌ | UDP/移动网络场景按需选择。 |
+| AnyTLS | ❌ | 协议侧缓解 | 新多路复用 | ❌ | 明确需要 sing-box AnyTLS 且客户端支持时选择。 |
+
+sing-box 订阅输出中的 `utls.fingerprint=chrome` 是客户端兼容/模拟选项，不作为抗封锁保证；需要 TLS 指纹抗性时优先选择 NaiveProxy、Reality Vision 或 Reality XHTTP。sing-box 1.13+ 已移除旧 WireGuard outbound/legacy special outbounds，1.14 将移除旧 DNS server 格式与旧 `domain_strategy`；padm 生成的 sing-box WARP、DNS 与直连出站模板已使用 endpoints、新版 DNS server 和 `domain_resolver`。
 
 ## XHTTP 管理
 

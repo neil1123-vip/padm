@@ -36,6 +36,10 @@ addSingBoxRouteRule() {
         ruleSetTag=$(echo "${ruleSet}" | jq '.|map(.tag)')
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
+        local routeAction='"outbound": "'"${outboundTag}"'"'
+        if [[ "${outboundTag}" == *block* ]]; then
+            routeAction='"action": "reject"'
+        fi
         writeRoutingJsonConfig "${singBoxConfigPath}${routingName}.json" <<EOF || return 1
 {
   "route": {
@@ -44,7 +48,7 @@ addSingBoxRouteRule() {
         "rule_set":${ruleSetTag},
         "domain":${domainRules},
         "domain_suffix":${suffixRules},
-        "outbound": "${outboundTag}"
+        ${routeAction}
       }
     ],
     "rule_set":${ruleSet}
@@ -61,7 +65,7 @@ EOF
 removeSingBoxRouteRule() {
     local outboundTag=$1
     if [[ -f "${singBoxConfigPath}${outboundTag}_route.json" ]]; then
-        updateRoutingJsonConfig "${singBoxConfigPath}${outboundTag}_route.json" 'del(.route.rules[] | select(.outbound == $outboundTag))' --arg outboundTag "${outboundTag}"
+        updateRoutingJsonConfig "${singBoxConfigPath}${outboundTag}_route.json" 'del(.route.rules[] | select(.outbound == $outboundTag or .action == "reject"))' --arg outboundTag "${outboundTag}"
     fi
 }
 
@@ -82,7 +86,10 @@ addSingBoxOutbound() {
              "type": "direct",
              "tag": "${tag}",
              "detour": "${detour}",
-             "domain_strategy": "${type}_only"
+             "domain_resolver": {
+                 "server": "dns-local",
+                 "strategy": "${type}_only"
+             }
         }
     ]
 }
@@ -100,17 +107,7 @@ EOF
 }
 EOF
     elif [[ "${tag}" == *block* ]]; then
-
-        writeRoutingJsonConfig "${singBoxConfigPath}${tag}.json" <<EOF || return 1
-{
-     "outbounds": [
-        {
-             "type": "block",
-             "tag": "${tag}"
-        }
-    ]
-}
-EOF
+        return 0
     else
         writeRoutingJsonConfig "${singBoxConfigPath}${tag}.json" <<EOF || return 1
 {
@@ -118,7 +115,10 @@ EOF
         {
              "type": "direct",
              "tag": "${tag}",
-             "domain_strategy": "${type}_only"
+             "domain_resolver": {
+                 "server": "dns-local",
+                 "strategy": "${type}_only"
+             }
         }
     ]
 }

@@ -283,10 +283,13 @@ protocolMenuDescription() {
         desc="传统 TLS 前置/兼容；${desc}"
         ;;
     6 | 9)
-        desc="UDP 场景按需；${desc}"
+        desc="UDP/移动网络按需；${desc}"
         ;;
-    10 | 13)
-        desc="sing-box 按需；${desc}"
+    10)
+        desc="TLS 指纹抗性优先；${desc}"
+        ;;
+    13)
+        desc="sing-box AnyTLS 按需；${desc}"
         ;;
     1 | 2 | 3 | 4 | 5 | 11)
         desc="传统 TLS 兼容；${desc}"

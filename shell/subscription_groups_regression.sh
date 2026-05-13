@@ -238,10 +238,10 @@ YAML
     addSingBoxIPRouteRule "block_ip_outbound" "1.1.1.0/24,cn" "block_ip_route"
     jq -e '
       (.route.rules[0].ip_cidr | sort) == (["1.1.1.0/24", "geoip:cn"] | sort) and
-      .route.rules[0].outbound == "block_ip_outbound"
+      .route.rules[0].action == "reject"
     ' "${singBoxConfigPath}block_ip_route.json" >/dev/null
     cat >"${singBoxConfigPath}block_ip_outbound_route.json" <<'JSON'
-{"route":{"rules":[{"outbound":"block_ip_outbound","domain":["example.com"]},{"outbound":"keep_outbound","domain":["keep.example.com"]}]}}
+{"route":{"rules":[{"action":"reject","domain":["example.com"]},{"outbound":"keep_outbound","domain":["keep.example.com"]}]}}
 JSON
     removeSingBoxRouteRule "block_ip_outbound"
     jq -e '
@@ -257,12 +257,15 @@ JSON
     addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route"
     jq -e '
       .route.rules[0].rule_set == ["geoip_cn_cn_block_ip_route"] and
+      .route.rules[0].action == "reject" and
       .route.rule_set[0].format == "binary"
     ' "${singBoxConfigPath}cn_block_ip_route.json" >/dev/null
     addSingBoxOutbound "01_direct_outbound"
     jq -e '.outbounds[0].tag == "01_direct_outbound"' "${singBoxConfigPath}01_direct_outbound.json" >/dev/null
+    addSingBoxOutbound "IPv6_out"
+    jq -e '.outbounds[0].domain_resolver.server == "dns-local" and .outbounds[0].domain_resolver.strategy == "ipv6_only" and (.outbounds[0].domain_strategy | not)' "${singBoxConfigPath}IPv6_out.json" >/dev/null
     addSingBoxOutbound "block_domain_outbound"
-    jq -e '.outbounds[0].type == "block"' "${singBoxConfigPath}block_domain_outbound.json" >/dev/null
+    [[ ! -e "${singBoxConfigPath}block_domain_outbound.json" ]]
     addXrayOutbound "IPv4_outbound"
     jq -e '
       .outbounds[0].protocol == "freedom" and
@@ -2349,6 +2352,8 @@ runMenuSmokeLightRegression() {
     assertMenuAction menu
     grep -q "不知道怎么选时，建议直接选 1" <<<"${output}"
     grep -q "entry 是客户端连接地址" <<<"${output}"
+    [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
 }
 
@@ -2470,10 +2475,14 @@ runMenuSmokeRegression() {
         fi
         jq -n '{groups:[{id:"default", sources:[], user_groups:[], traffic:{global:{upload:0,download:0}, admin:{upload:0,download:0}, user_groups:{}, sources:{}}}], upload:0, download:0}'
     }
-    installMenu <<<"6"
+    customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
+    installMenu <<<"7"
     assertMenuAction menu
     resetMenuActions
     installMenu <<<"4"
+    assertMenuAction "customSingBoxInstall:10"
+    resetMenuActions
+    installMenu <<<"5"
     assertMenuAction selectCoreInstall
     resetMenuActions
     protocolEntryMenu <<<"7"

@@ -231,8 +231,21 @@ validateSingBoxConfigWithBinary() {
     local logFile=${2:-/tmp/padm-core-sing-box-test.log}
     [[ -x "${binary}" ]] || return 1
     singBoxConfigInstalled || return 2
-    "${binary}" merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1 || return 1
-    "${binary}" check -c /etc/padm/sing-box/conf/config.json >>"${logFile}" 2>&1
+    "${binary}" merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1 || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
+    "${binary}" check -c /etc/padm/sing-box/conf/config.json >>"${logFile}" 2>&1 || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
+}
+
+appendSingBoxCompatibilityHints() {
+    local logFile=$1
+    [[ -f "${logFile}" ]] || return 0
+    if grep -Eqi 'legacy DNS servers|legacy special outbounds|legacy domain strategy|domain_resolver|default_domain_resolver|wireguard.*outbound|domain_strategy' "${logFile}"; then
+        {
+            printf '\n[padm 兼容性提示]\n'
+            printf -- '- sing-box 1.13+ 已移除 legacy special outbounds；阻断规则应使用 route action: reject，不再使用 type=block 出站。\n'
+            printf -- '- sing-box 1.13+ 已移除旧 WireGuard outbound；请迁移到 endpoints[type=wireguard]。\n'
+            printf -- '- sing-box 1.14 将移除旧 DNS server 格式与旧 domain_strategy；请使用 typed DNS servers 与 domain_resolver/default_domain_resolver。\n'
+        } >>"${logFile}"
+    fi
 }
 
 coreValidationState() {
@@ -1885,14 +1898,20 @@ customXrayInstall() {
 
 # sing-box 个性化安装
 customSingBoxInstall() {
+    local preselectedProtocols=${1:-}
     echoContent title "\n┌─ sing-box 个性化安装 ───────────────────────────────"
     menuLine "可输入单个编号，也可用英文逗号多选，例如 0,6,7"
     menuLine "推荐新人：优先选 7；需要 CDN/反代时用 Xray 选择 12；协议说明来自 registry"
-    menuLine "传统 TLS 类协议仅在明确需要兼容；Hysteria2、Tuic、Naive 或 AnyTLS 按需选择"
+    menuLine "传统 TLS 类协议仅在明确需要兼容；Hysteria2/Tuic 用于 UDP/移动网络，Naive 用于 TLS 指纹抗性，AnyTLS 按需选择"
     protocolRegistryMenu ",0,1,3,4,6,7,8,9,10,11,13,"
 
     menuClose
-    autoRead protocols "请选择[多选]，[例如:0,6,7]:" selectCustomInstallType
+    if [[ -n "${preselectedProtocols}" ]]; then
+        selectCustomInstallType=${preselectedProtocols}
+        statusCard "推荐安装" "已选择协议编号: ${selectCustomInstallType}"
+    else
+        autoRead protocols "请选择[多选]，[例如:0,6,7]:" selectCustomInstallType
+    fi
     if echo "${selectCustomInstallType}" | grep -q "，"; then
         errorCard "请使用英文逗号分隔"
         exit 0
@@ -2098,7 +2117,7 @@ coreConfigMaintenanceMenu() {
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box /tmp/padm-core-sing-box-test.log; then
             statusCard "sing-box 配置校验" "通过"
         else
-            statusCard "sing-box 配置校验" "失败" "排查日志: /tmp/padm-core-sing-box-test.log"
+            statusCard "sing-box 配置校验" "失败" "排查日志: /tmp/padm-core-sing-box-test.log" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
     3) updateGeoSite ;;
@@ -2202,7 +2221,7 @@ singBoxVersionManageMenu() {
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box /tmp/padm-core-sing-box-test.log; then
             statusCard "sing-box 配置校验" "通过"
         else
-            statusCard "sing-box 配置校验" "失败" "排查日志: /tmp/padm-core-sing-box-test.log"
+            statusCard "sing-box 配置校验" "失败" "排查日志: /tmp/padm-core-sing-box-test.log" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
     5) coreServiceControlMenu sing-box ;;

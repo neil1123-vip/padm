@@ -83,6 +83,12 @@ Recommended VLESS Reality XHTTP + CDN install (with XTLS Vision flow and XHTTP X
 bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
 ```
 
+NaiveProxy install for TLS fingerprint resistance (requires a real domain and certificate; it is not a no-domain Reality replacement):
+
+```bash
+bash install.sh --install-type custom --core sing-box --protocols 10 --domain naive.example.com --port 443 --reuse-last no
+```
+
 Traditional TLS install with Cloudflare DNS-01 automation:
 
 ```bash
@@ -123,6 +129,12 @@ Subscription publishing options can also be appended to protocol installation wh
 | VLESS Reality Vision | yes | yes | no | no | Default direct-connection choice, with or without a domain; the advanced VLESS Encryption switch adds `VLESS Encryption + XTLS Vision`. |
 | VLESS Reality gRPC | no | yes | yes, HTTP/2 | no | Alternative when gRPC/HTTP2 multiplexing is needed without CDN. |
 | VLESS Reality XHTTP | yes | yes | yes, XMUX | yes | Preferred CDN choice; the advanced VLESS Encryption switch adds `VLESS Encryption + XTLS Vision + XHTTP XMUX`. |
+| NaiveProxy | no | yes | depends on client | no | Prefer when TLS fingerprint resistance is explicitly needed. |
+| Hysteria2 | n/a | no | QUIC | no | Mobile, UDP, or lossy-network scenarios. |
+| Tuic | n/a | no | QUIC | no | UDP/mobile-network scenarios. |
+| AnyTLS | no | protocol-side mitigation | new multiplexing | no | Use only when sing-box AnyTLS is explicitly needed and clients support it. |
+
+`utls.fingerprint=chrome` in sing-box subscription output is a compatibility/simulation option, not a censorship-resistance guarantee. Prefer NaiveProxy, Reality Vision, or Reality XHTTP when TLS fingerprint resistance is the goal. sing-box 1.13+ removed legacy WireGuard outbound and legacy special outbounds, and 1.14 will remove old DNS server formats and legacy `domain_strategy`; padm-generated sing-box WARP, DNS, and direct outbound templates use endpoints, typed DNS servers, and `domain_resolver`.
 
 ## XHTTP management
 

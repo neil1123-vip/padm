@@ -172,7 +172,7 @@ showInstallArgsHelp() {
 │ 2. 推荐 CDN: bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443
 │ 3. 安装后: 运行 padm -> 订阅与用户，先安装订阅服务，再查看我的订阅或给别人开订阅
 ├─ 交互菜单路径
-│ 安装与重装: 含新手选择指引，推荐直连/CDN/无域名 Reality、自定义安装、传统 TLS 兼容安装
+│ 安装与重装: 含新手选择指引，推荐直连/CDN/无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装
 │ 订阅与用户: 订阅服务、自用/用户订阅、主控/被控多服务器同步、流量和备份
 │ 协议与入口: REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口
 │ 站点与证书: 传统 TLS fallback 站点、302、ALPN 和证书

@@ -234,7 +234,6 @@ installBTBlock() {
 
     if [[ -n "${singBoxConfigPath}" ]]; then
         addSingBoxBTBlockRule
-        addSingBoxOutbound block
     fi
 }
 
@@ -277,7 +276,7 @@ addSingBoxBTBlockRule() {
         "protocol": [
           "bittorrent"
         ],
-        "outbound": "block"
+        "action": "reject"
       }
     ]
   }
@@ -405,7 +404,6 @@ addBlockedDomains() {
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
         addSingBoxRouteRule "block_domain_outbound" "${domainList}" "block_domain_route"
-        addSingBoxOutbound "block_domain_outbound"
         addSingBoxOutbound "01_direct_outbound"
     fi
     validateAccessControlConfig || exit 1
@@ -433,7 +431,6 @@ addBlockedIPs() {
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
         addSingBoxIPRouteRule "block_ip_outbound" "${normalizedIPs}" "block_ip_route"
-        addSingBoxOutbound "block_ip_outbound"
     fi
     validateAccessControlConfig || exit 1
     reloadCore
@@ -498,8 +495,8 @@ manageRegionalBlockPolicy() {
         addXrayOutbound allow_domain_direct_outbound
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
-        [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]] && { addSingBoxRouteRule "cn_block_outbound" "cn" "cn_block_route"; addSingBoxOutbound "cn_block_outbound"; }
-        [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]] && { addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route"; addSingBoxOutbound "block_ip_outbound"; }
+        [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]] && { addSingBoxRouteRule "cn_block_outbound" "cn" "cn_block_route"; }
+        [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]] && { addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route"; }
         addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route"
         addSingBoxOutbound "01_direct_outbound"
     fi
@@ -952,13 +949,17 @@ addSingBoxIPRouteRule() {
     local ipCIDR=[]
     ipCIDR=$(echo "${ipList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^cn$/geoip:cn/' | grep -v '^$' | sort -n | uniq | jq -R . | jq -s .)
 
+    local routeAction='"outbound": "'"${outboundTag}"'"'
+    if [[ "${outboundTag}" == *block* ]]; then
+        routeAction='"action": "reject"'
+    fi
     writeRoutingJsonConfig "${singBoxConfigPath}${routingName}.json" <<EOF || return 1
 {
   "route": {
     "rules": [
       {
         "ip_cidr": ${ipCIDR},
-        "outbound": "${outboundTag}"
+        ${routeAction}
       }
     ]
   }
@@ -973,6 +974,10 @@ addSingBoxGeoIPRouteRule() {
     local geoipCode=$2
     local routingName=$3
 
+    local routeAction='"outbound": "'"${outboundTag}"'"'
+    if [[ "${outboundTag}" == *block* ]]; then
+        routeAction='"action": "reject"'
+    fi
     writeRoutingJsonConfig "${singBoxConfigPath}${routingName}.json" <<EOF || return 1
 {
   "route": {
@@ -981,7 +986,7 @@ addSingBoxGeoIPRouteRule() {
         "rule_set": [
           "geoip_${geoipCode}_${routingName}"
         ],
-        "outbound": "${outboundTag}"
+        ${routeAction}
       }
     ],
     "rule_set": [
@@ -1822,7 +1827,6 @@ setSocks5InboundRouting() {
         addSingBoxRouteRule "01_direct_outbound" "" "socks5_02_inbound_route"
         updateRoutingJsonConfig "${singBoxConfigPath}socks5_02_inbound_route.json" '.route.rules[0].inbound = ["socks5_inbound"] | .route.rules[0].source_ip_cidr = $sourceIPs' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
 
-        addSingBoxOutbound block
         addSingBoxOutbound "01_direct_outbound"
     else
         echoContent yellow "录入示例:netflix,openai,example.com\n"
@@ -1834,7 +1838,6 @@ setSocks5InboundRouting() {
         addSingBoxRouteRule "01_direct_outbound" "${socks5InboundRoutingDomain}" "socks5_02_inbound_route"
         updateRoutingJsonConfig "${singBoxConfigPath}socks5_02_inbound_route.json" '.route.rules[0].inbound = ["socks5_inbound"] | .route.rules[0].source_ip_cidr = $sourceIPs' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
 
-        addSingBoxOutbound block
         addSingBoxOutbound "01_direct_outbound"
     fi
 

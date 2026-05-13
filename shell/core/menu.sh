@@ -7,15 +7,16 @@ installMenu() {
     else
         menuLine "首次安装或不知道怎么选时，建议直接选 1；安装后去 订阅与用户 查看链接"
     fi
-    menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3"
-    menuLine "高级：想手选核心和协议选 4；旧客户端、迁移或已有 TLS/fallback 架构选 5"
+    menuLine "怎么选：直连/有域名选 1；需要 CDN/反代选 2；没有域名选 3；需要 TLS 指纹抗性可选 4"
+    menuLine "高级：想手选核心和协议选 5；旧客户端、迁移或已有 TLS/fallback 架构选 6"
     menuLine "概念：entry 是客户端连接地址；target/SNI 是 Reality 伪装目标，不是同一个概念"
     menuRecommendedItem 1 "推荐直连 Reality Vision" "新手首选；稳定、配置少，有域名或直连入口都适合"
     menuRecommendedItem 2 "推荐 CDN Reality XHTTP" "需要 CDN/反代时选择；客户端兼容要求更高"
     menuItem 3 "无域名 Reality" "没有域名时选择；用服务器 IP 或自定义 entry-host"
-    menuItem 4 "自定义安装" "手动选择核心和协议组合，适合熟悉参数的人"
-    menuItem 5 "传统 TLS 兼容安装" "仅用于旧客户端、迁移或已有 TLS/fallback 架构"
-    menuReturnItem 6 "返回主菜单" "回到 padm 管理面板"
+    menuRecommendedItem 4 "TLS 指纹抗性 NaiveProxy" "需要真实域名和证书；不是无域名 Reality 替代"
+    menuItem 5 "自定义安装" "手动选择核心和协议组合，适合熟悉参数的人"
+    menuItem 6 "传统 TLS 兼容安装" "仅用于旧客户端、迁移或已有 TLS/fallback 架构"
+    menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
     menuClose
     autoRead install_type "请选择:" selectInstallType
     case ${selectInstallType} in
@@ -33,13 +34,17 @@ installMenu() {
         ;;
     4)
         selectInstallType=2
-        selectCoreInstall
+        customSingBoxInstall 10
         ;;
     5)
-        selectInstallType=1
+        selectInstallType=2
         selectCoreInstall
         ;;
     6)
+        selectInstallType=1
+        selectCoreInstall
+        ;;
+    7)
         menu
         ;;
     *)
@@ -209,7 +214,7 @@ menu() {
     showInstallStatus
     checkWgetShowProgress
     menuSection "├─ 任务入口 ───────────────────────────────────────"
-    menuItem 1 "安装与重装" "含新手选择指引；推荐直连/CDN/无域名 Reality、自定义和传统 TLS 兼容安装"
+    menuItem 1 "安装与重装" "含新手选择指引；推荐直连/CDN/无域名 Reality、NaiveProxy、自定义和传统 TLS"
     menuItem 2 "订阅与用户" "订阅服务、自用链接、给别人开订阅、多服务器同步、流量限额和自动同步"
     menuItem 3 "协议与入口" "REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口"
     menuItem 4 "站点与证书" "传统 TLS fallback 站点、302、ALPN 和 TLS 证书"
