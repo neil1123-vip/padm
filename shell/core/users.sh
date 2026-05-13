@@ -623,39 +623,22 @@ manageSubscription() {
 manageSubscriptionService() {
     while true; do
         echoContent title "\n┌─ 订阅服务 ─────────────────────────────────────────"
-        menuLine "订阅服务负责把订阅链接发布出去；未安装时，生成了链接也无法公网访问"
-        menuLine "建议首次进入先安装/更新订阅发布服务，再查看自用或用户订阅链接"
+        menuLine "订阅服务只负责客户端订阅发布；未安装时，生成了链接也无法公网访问"
+        menuLine "多服务器同步不走公网 HTTPS，而是走 多服务器订阅 -> WireGuard 控制面"
         menuItem 1 "安装/更新订阅发布服务" "安装或刷新 Nginx 订阅发布配置"
         menuItem 2 "查看/刷新我的订阅链接" "重新生成并输出当前自用订阅"
-        menuItem 3 "查看本机被控凭据" "本机被其他主控添加时复制给对方填写"
-        menuItem 4 "查看订阅服务状态" "显示当前订阅发布端口和域名"
-        menuReturnItem 5 "返回订阅与用户" "回到上级菜单"
+        menuItem 3 "查看订阅服务状态" "显示当前订阅发布端口和域名"
+        menuReturnItem 4 "返回订阅与用户" "回到上级菜单"
         menuClose
         autoRead subscription_service_menu "请选择:" subscriptionServiceStatus
         case "${subscriptionServiceStatus}" in
         1) installSubscribe ;;
         2) subscribe ;;
-        3) showSubscriptionControlToken ;;
-        4) showSubscriptionServiceStatus ;;
-        5) return ;;
+        3) showSubscriptionServiceStatus ;;
+        4) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
-}
-
-showSubscriptionControlToken() {
-    local token
-    local controlHost
-    local credential
-    token=$(subscriptionControlToken)
-    readNginxSubscribe
-    controlHost=${subscribeDomain:-${currentHost:-}}
-    if [[ -n "${controlHost}" && -n "${subscribePort}" ]]; then
-        credential=$(subscriptionControlCredentialEncode "${controlHost}" "${subscribePort}" "${token}")
-        statusCard "本机被控凭据" "被控凭据：${credential}" "被控地址：${controlHost}:${subscribePort}" "主控端添加被控服务器时粘贴这串凭据，再设置别名" "凭据包含地址、订阅端口和 Token，请只复制给可信主控端"
-    else
-        statusCard "本机被控凭据" "被控凭据：暂不可生成" "Token：${token}" "未检测到订阅服务地址或端口，请先进入 订阅服务 -> 安装/更新订阅发布服务" "请只复制给可信主控端"
-    fi
 }
 
 showSubscriptionServiceStatus() {
@@ -1261,7 +1244,7 @@ showSubscriptionSourceControlUrls() {
     groupId=$(activeSubscriptionGroupId)
     subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
       .groups[] | select(.id == $groupId) | .sources[]? | select(.role != "main") |
-      "ID:\(.id)\n名称:\(.name)\nHealth:\(.scheme)://\(.host):\(.port)/s/control/health\nSync:\(.scheme)://\(.host):\(.port)/s/control/sync\n---"'
+      "ID:\(.id)\n名称:\(.name)\n控制面:WireGuard\n内网地址:\(.host):\(.port)\nHealth:http://\(.host):\(.port)/s/control/health\nSync:http://\(.host):\(.port)/s/control/sync\n---"'
 }
 
 showSubscriptionSourceSyncResults() {
@@ -1276,33 +1259,69 @@ showSubscriptionSourceSyncResults() {
       "\n---"'
 }
 
+manageSubscriptionWireGuardControlMenu() {
+    while true; do
+        echoContent title "\n┌─ WireGuard 控制面 ─────────────────────────────────"
+        menuLine "用于主控和被控之间的加密同步；客户端订阅链接仍由 HTTPS 订阅服务发布"
+        menuLine "第一版只支持星型拓扑：一台主控管理多台被控"
+        showSubscriptionWireGuardStatus
+        menuItem 1 "初始化本机为主控" "生成主控 WireGuard 控制面"
+        menuItem 2 "初始化本机为被控" "生成被控 WireGuard 控制面"
+        menuItem 3 "查看本机主控接入凭据" "复制到被控服务器导入"
+        menuItem 4 "导入主控接入凭据" "仅被控使用，用于加入主控"
+        menuItem 5 "查看本机被控接入凭据" "复制回主控服务器添加被控"
+        menuItem 6 "查看 Peer / 连接状态" "查看 WireGuard peer 和被控列表"
+        menuItem 7 "测试 WireGuard 控制面" "测试被控健康检查"
+        menuItem 8 "修复/重启 WireGuard 控制面" "重写配置并重启服务"
+        menuDangerItem 9 "关闭 WireGuard 控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 10 "返回多服务器订阅" "回到上级菜单"
+        menuClose
+        autoRead subscription_wireguard_menu "请选择:" subscriptionWireGuardMenuStatus
+        case "${subscriptionWireGuardMenuStatus}" in
+        1) initSubscriptionWireGuardMain ;;
+        2) initSubscriptionWireGuardControlled ;;
+        3) showSubscriptionWireGuardMainCredential ;;
+        4) importSubscriptionWireGuardMainCredential ;;
+        5) showSubscriptionWireGuardControlledCredential ;;
+        6) showSubscriptionWireGuardPeers ;;
+        7) testSubscriptionWireGuardControl ;;
+        8) restartSubscriptionWireGuardControl ;;
+        9) disableSubscriptionWireGuardControl ;;
+        10) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
 manageMultiServerSubscriptions() {
     while true; do
         echoContent title "\n┌─ 多服务器订阅 ─────────────────────────────────────"
-        menuLine "本机是主控：负责生成同步计划，并主动调用远端被控服务器的 /s/control/ 接口"
-        menuLine "远端是被控：需先安装订阅服务，在远端复制“本机被控凭据”，再回到这里添加或更新"
-        menuLine "推荐流程：被控端安装订阅服务并复制凭据 -> 主控添加被控服务器 -> 测试连接 -> 同步"
-        menuItem 1 "查看服务器源" "列出本机主控和远端被控服务器"
-        menuItem 2 "添加/移除被控服务器" "主控端管理远端被控服务器"
-        menuItem 3 "更新被控服务器凭据" "粘贴从被控端复制来的整串凭据"
-        menuItem 4 "测试被控连接" "主控端请求被控端健康检查"
-        menuItem 5 "查看被控控制 URL" "显示被控端 health/sync 地址"
-        menuItem 6 "查看同步结果" "显示最近同步计划和错误"
-        menuItem 7 "启用/停用被控服务器" "切换被控服务器源状态"
-        menuItem 8 "清除同步错误" "清理最近同步错误"
-        menuReturnItem 9 "返回订阅与用户" "回到上级菜单"
+        menuLine "多服务器同步统一使用 WireGuard 控制面；不再使用公网 HTTPS 控制接口"
+        menuLine "客户端订阅继续走 HTTPS；服务器间同步只通过 WireGuard 内网访问 /s/control/"
+        menuLine "推荐流程：主控初始化 -> 被控初始化并导入主控凭据 -> 主控添加被控 -> 测试连接 -> 同步"
+        menuItem 1 "WireGuard 控制面" "初始化主控/被控、查看凭据和连接状态"
+        menuItem 2 "查看服务器源" "列出本机和已添加被控服务器"
+        menuItem 3 "添加/移除被控服务器" "主控端管理被控服务器"
+        menuItem 4 "更新被控服务器凭据" "粘贴被控端 WireGuard 接入凭据"
+        menuItem 5 "测试被控连接" "主控端请求被控端健康检查"
+        menuItem 6 "查看控制地址" "显示 WireGuard 内网 health/sync 地址"
+        menuItem 7 "查看同步结果" "显示最近同步计划和错误"
+        menuItem 8 "启用/停用被控服务器" "切换被控服务器源状态"
+        menuItem 9 "清除同步错误" "清理最近同步错误"
+        menuReturnItem 10 "返回订阅与用户" "回到上级菜单"
         menuClose
         autoRead multi_server_subscription_menu "请选择:" multiServerSubscriptionStatus
         case "${multiServerSubscriptionStatus}" in
-        1) showSubscriptionSources ;;
-        2) addSubscribeMenu 1 ;;
-        3) setSubscriptionSourceControlTokenMenu ;;
-        4) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
-        5) showSubscriptionSourceControlUrls ;;
-        6) showSubscriptionSourceSyncResults ;;
-        7) toggleSubscriptionSourceMenu ;;
-        8) clearSubscriptionSourceSyncErrorMenu ;;
-        9) return ;;
+        1) manageSubscriptionWireGuardControlMenu ;;
+        2) showSubscriptionSources ;;
+        3) addSubscribeMenu 1 ;;
+        4) setSubscriptionSourceControlTokenMenu ;;
+        5) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
+        6) showSubscriptionSourceControlUrls ;;
+        7) showSubscriptionSourceSyncResults ;;
+        8) toggleSubscriptionSourceMenu ;;
+        9) clearSubscriptionSourceSyncErrorMenu ;;
+        10) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
@@ -1321,20 +1340,24 @@ setSubscriptionSourceControlTokenMenu() {
     local token=
     local matches=
     echoContent title "\n┌─ 更新被控服务器凭据 ───────────────────────────────"
-    menuLine "在被控服务器进入 订阅服务 -> 查看本机被控凭据，复制整串被控凭据"
-    menuLine "粘贴后会自动读取 HTTPS 地址、订阅端口和 Token，并更新已有被控服务器"
+    menuLine "在被控服务器进入 多服务器订阅 -> WireGuard 控制面 -> 查看本机被控接入凭据"
+    menuLine "粘贴后会自动读取 WireGuard 内网地址、控制端口和 Token，并更新已有被控服务器"
     menuClose
-    autoRead subscription_control_credential "请粘贴被控凭据:" credential
+    autoRead subscription_control_credential "请粘贴被控接入凭据:" credential
     if [[ -z "${credential}" ]]; then
-        errorCard "被控凭据不可为空"
+        errorCard "被控接入凭据不可为空"
         return 1
     fi
-    credentialJson=$(subscriptionControlCredentialDecode "${credential}") || {
-        errorCard "被控凭据无效，请复制被控端完整输出"
+    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || {
+        errorCard "被控接入凭据无效，请复制被控端完整输出"
         return 1
     }
-    host=$(jq -r '.host' <<<"${credentialJson}")
-    port=$(jq -r '.port' <<<"${credentialJson}")
+    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "controlled" ]]; then
+        errorCard "请粘贴被控接入凭据"
+        return 1
+    fi
+    host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
+    port=$(jq -r '.control_port' <<<"${credentialJson}")
     token=$(jq -r '.token' <<<"${credentialJson}")
     matches=$(listSubscriptionSources | awk -F ':' -v host="${host}" -v port="${port}" '$3 != "main" && $5 == host && $6 == port {print $1}')
     if [[ -n "${matches}" ]] && [[ "$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')" == "1" ]]; then
@@ -1347,12 +1370,8 @@ setSubscriptionSourceControlTokenMenu() {
         errorCard "被控服务器别名无效"
         return 1
     fi
-    if subscriptionRemoteSourceSelfReference "$(jq -n --arg host "${host}" --argjson port "${port}" --arg scheme https '{host:$host, port:$port, scheme:$scheme}')"; then
-        errorCard "被控服务器指向当前主控订阅服务，已拒绝更新，避免递归同步"
-        return 1
-    fi
     setSubscriptionSourceCredential "${sourceId}" "${host}" "${port}" "${token}"
-    successCard "被控服务器凭据已更新" "被控地址：${host}:${port}" "别名：${sourceId}" "Token 已保存，可继续测试被控连接"
+    successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Token 已保存，可继续测试被控连接"
 }
 
 toggleSubscriptionSourceMenu() {
@@ -1389,99 +1408,6 @@ clearSubscriptionSourceSyncErrorMenu() {
     successCard "同步错误已清除"
 }
 
-showSubscriptionTrafficJson() {
-    local title=$1
-    local filter=$2
-    collectSubscriptionTraffic || return 1
-    showSubscriptionTrafficJsonNoRefresh "${title}" "${filter}"
-}
-
-showSubscriptionTrafficJsonNoRefresh() {
-    local title=$1
-    local filter=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    ensureSubscriptionGroupsState
-    userJsonCard "${title}" "$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" "${filter}")"
-}
-
-manageTrafficAndQuota() {
-    while true; do
-        echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
-        menuLine "刷新流量统计会读取 Xray stats API；查看动作只读 groups.json，不会隐式刷新"
-        menuLine "首次刷新会建立计数基线，后续按增量累计；采集失败会保留上次统计"
-        menuLine "限额状态只用于提示和策略执行，是否停用用户由限额计划决定"
-        menuItem 1 "刷新流量统计" "读取当前流量并更新累计值"
-        menuItem 2 "查看总流量" "查看全局累计流量"
-        menuItem 3 "查看我的流量" "查看自用账号流量"
-        menuItem 4 "查看用户订阅流量" "查看用户订阅流量"
-        menuItem 5 "查看服务器流量" "查看服务器来源流量"
-        menuItem 6 "查看限额计划" "预览超限用户处理"
-        menuDangerItem 7 "执行限额计划" "停用超限用户并等待同步移除账号"
-        menuReturnItem 8 "返回订阅与用户" "回到上级菜单"
-        menuClose
-        autoRead traffic_quota_menu "请选择:" trafficQuotaStatus
-        case "${trafficQuotaStatus}" in
-        1) collectSubscriptionTraffic ;;
-        2) showSubscriptionTrafficJsonNoRefresh "总流量" '.groups[] | select(.id == $groupId) | .traffic.global' ;;
-        3) showAdminSubscriptionTraffic ;;
-        4) showSubscriptionTrafficJsonNoRefresh "用户订阅流量" '.groups[] | select(.id == $groupId) | .traffic.user_groups' ;;
-        5) showSubscriptionTrafficJsonNoRefresh "服务器流量" '.groups[] | select(.id == $groupId) | .traffic.sources' ;;
-        6) userJsonCard "限额计划" "$(subscriptionQuotaDryRunPlan)" ;;
-        7) executeSubscriptionQuotaPlanMenu ;;
-        8) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
-        esac
-    done
-}
-
-manageSubscriptionTraffic() {
-    manageTrafficAndQuota
-}
-
-manageSubscriptionStateBackups() {
-    local backupFile
-    local confirm
-    while true; do
-        echoContent title "\n┌─ 状态备份 ─────────────────────────────────────────"
-        menuLine "备份对象是订阅组状态 groups.json，包含用户订阅、服务器源、同步状态和流量统计"
-        menuLine "恢复会覆盖当前订阅组状态；不会自动回滚核心配置文件或证书"
-        menuItem 1 "创建备份" "保存当前 groups.json"
-        menuItem 2 "查看备份" "列出已有备份"
-        menuDangerItem 3 "恢复备份" "用指定备份覆盖当前状态"
-        menuReturnItem 4 "返回自动同步与备份" "回到上级菜单"
-        menuClose
-        autoRead subscription_backup_menu "请选择:" backupStatus
-        case "${backupStatus}" in
-        1)
-            backupFile=$(createSubscriptionGroupsBackup)
-            successCard "已创建备份: ${backupFile}"
-            ;;
-        2) listSubscriptionGroupsBackups ;;
-        3)
-            listSubscriptionGroupsBackups
-            autoRead subscription_restore_backup "请输入要恢复的备份完整路径:" backupFile
-            if [[ -z "${backupFile}" ]]; then
-                errorCard "备份路径不可为空"
-                continue
-            fi
-            autoRead subscription_restore_confirm "恢复会覆盖当前订阅组状态，确认请输入 yes：" confirm
-            if [[ "${confirm}" != "yes" ]]; then
-                statusCard "已取消" "操作未执行"
-                continue
-            fi
-            if restoreSubscriptionGroupsBackup "${backupFile}"; then
-                successCard "状态已恢复"
-            else
-                errorCard "状态恢复失败"
-            fi
-            ;;
-        4) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
-        esac
-    done
-}
-
 manageSubscriptionAutomation() {
     while true; do
         echoContent title "\n┌─ 自动同步与备份 ───────────────────────────────────"
@@ -1509,185 +1435,6 @@ manageSubscriptionAutomation() {
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
-}
-
-manageSubscriptionSettings() {
-    manageSubscriptionAutomation
-}
-
-managePublishingAndSync() {
-    manageSubscriptionAutomation
-}
-
-subscriptionQuotaDryRunPlan() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    ensureSubscriptionGroupsState
-    subscriptionGroupsStateRead --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) |
-      [
-        .user_groups[]? as $userGroup |
-        select($userGroup.enabled == true) |
-        select(($userGroup.traffic_limit_gb // 0) > 0) |
-        (.traffic.user_groups[$userGroup.id] // {upload:0, download:0}) as $traffic |
-        (($traffic.upload // 0) + ($traffic.download // 0)) as $usedBytes |
-        (($userGroup.traffic_limit_gb * 1024 * 1024 * 1024) | floor) as $limitBytes |
-        select($usedBytes >= $limitBytes) |
-        {
-          action: "disable_user_group",
-          id: $userGroup.id,
-          name: $userGroup.name,
-          used_bytes: $usedBytes,
-          limit_bytes: $limitBytes,
-          percent: (($usedBytes * 100 / $limitBytes) | floor),
-          dry_run: true
-        }
-      ]'
-}
-
-applySubscriptionQuotaPlan() {
-    local plan=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson plan "${plan}" '
-      ($plan | map(select(.action == "disable_user_group") | .id)) as $disableIds |
-      .groups |= map(if .id == $groupId then
-        .user_groups |= map(if (.id as $id | $disableIds | index($id)) then .enabled = false else . end)
-      else . end)'
-}
-
-executeSubscriptionQuotaPlanMenu() {
-    local plan
-    local confirm
-    plan=$(subscriptionQuotaDryRunPlan)
-    if [[ "$(jq 'length' <<<"${plan}")" == "0" ]]; then
-        successCard "当前没有需要执行的限额计划"
-        return
-    fi
-    echoContent title "\n┌─ 限额执行计划 ─────────────────────────────────────"
-    menuLine "仅停用用户订阅状态，账号删除由同步流程处理"
-    printf '%s\n' "${plan}" | jq .
-    menuClose
-    autoRead subscription_quota_execute_confirm "确认执行请输入 yes：" confirm
-    if [[ "${confirm}" != "yes" ]]; then
-        statusCard "已取消" "操作未执行"
-        return
-    fi
-    if ! collectSubscriptionTraffic; then
-        errorCard "流量统计刷新失败，已取消执行限额计划"
-        return
-    fi
-    plan=$(subscriptionQuotaDryRunPlan)
-    if [[ "$(jq 'length' <<<"${plan}")" == "0" ]]; then
-        successCard "刷新后没有需要执行的限额计划"
-        return
-    fi
-    applySubscriptionQuotaPlan "${plan}"
-    successCard "限额计划已执行，请运行同步计划或立即同步以移除对应账号"
-}
-
-subscriptionGroupRemoteSyncEnabled() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.remote_enabled // true) == true' >/dev/null 2>&1
-}
-
-subscriptionGroupQuotaAutoApplyEnabled() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
-}
-
-subscriptionQuotaPlanAccountNames() {
-    local plan=$1
-    jq -r '.[]? | select(.action == "disable_user_group") | .id' <<<"${plan}" | while IFS= read -r id; do subscriptionSyncAccountName "${id}"; done
-}
-
-applySubscriptionQuotaPlanAccounts() {
-    local plan=$1
-    local accountName
-    while IFS= read -r accountName; do
-        [[ -n "${accountName}" ]] && subscriptionSyncRemoveAccount "${accountName}"
-    done < <(subscriptionQuotaPlanAccountNames "${plan}")
-}
-
-subscriptionGroupSyncEnabled() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .sync.enabled == true' >/dev/null 2>&1
-}
-
-subscriptionGroupSyncInterval() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .sync.interval_minutes // 10'
-}
-
-runSubscriptionGroupSyncCron() {
-    local lockDir=/tmp/padm-subscription-sync.lock
-    if ! mkdir "${lockDir}" 2>/dev/null; then
-        userResultCard "订阅组自动同步"
-        menuLine "订阅组同步正在执行，跳过本轮"
-        menuClose
-        return 0
-    fi
-    trap 'rmdir "${lockDir}" >/dev/null 2>&1' RETURN
-
-    ensureSubscriptionGroupsState
-    if ! subscriptionGroupSyncEnabled; then
-        userResultCard "订阅组自动同步"
-        menuLine "订阅组自动同步未开启，跳过本轮"
-        menuClose
-        return 0
-    fi
-    readInstallType
-    readInstallProtocolType
-    if [[ -z "${configPath}" ]]; then
-        userResultCard "订阅组自动同步"
-        menuLine "未检测到安装配置，跳过订阅组同步"
-        menuClose
-        return 0
-    fi
-    userResultCard "订阅组自动同步"
-    menuLine "开始执行：$(date '+%Y-%m-%d %H:%M:%S')"
-    menuClose
-    runSubscriptionGroupSync
-}
-
-subscriptionGroupSyncInstallScript() {
-    if [[ -f /etc/padm/install.sh ]]; then
-        echo /etc/padm/install.sh
-    else
-        echo "${PROJECT_ROOT}/install.sh"
-    fi
-}
-
-subscriptionGroupSyncCronFile() {
-    echo /etc/padm/backup_crontab.cron
-}
-
-subscriptionGroupSyncIntervalValid() {
-    [[ -n "$1" && "$1" =~ ^[0-9]+$ && "$1" -ge 1 && "$1" -le 59 ]]
-}
-
-installSubscriptionGroupSyncCron() {
-    local interval
-    local currentCron
-    local syncCron
-    local cronFile
-    local scriptPath
-    ensureSubscriptionGroupsState
-    interval=$(subscriptionGroupSyncInterval)
-    cronFile=$(subscriptionGroupSyncCronFile)
-    scriptPath=$(subscriptionGroupSyncInstallScript)
-    if ! subscriptionGroupSyncIntervalValid "${interval}"; then
-        interval=10
-    fi
-    mkdir -p "$(dirname "${cronFile}")"
-    currentCron=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
-    syncCron="*/${interval} * * * * /bin/bash ${scriptPath} SyncSubscriptionGroups >> /etc/padm/crontab_subscription_sync.log 2>&1"
-    installUserCrontabContent "${currentCron}
-${syncCron}"
 }
 
 removeSubscriptionGroupSyncCron() {

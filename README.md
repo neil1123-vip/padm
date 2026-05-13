@@ -105,13 +105,13 @@ bash install.sh --install-type custom --core xray --protocols 7 --entry-host nod
 安装订阅发布服务可使用正式子命令：
 
 ```bash
-bash install.sh InstallSubscription --subscribe-port 39778 --http-subscribe yes --install-nginx yes
+bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
 ```
 
 也可以在协议安装时追加订阅发布选项：
 
 ```bash
---subscribe-port 39778 --http-subscribe no --install-nginx yes
+--subscribe-port 39778 --install-nginx yes
 ```
 
 ## 参数说明
@@ -138,7 +138,6 @@ bash install.sh InstallSubscription --subscribe-port 39778 --http-subscribe yes 
 | `--clean-acme` | `yes`、`no`、`y`、`n` | `no` | 清空上次安装配置时，是否同时清理 acme 证书目录。 |
 | `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 仅选择 Reality 协议时入口是否使用自有域名；新安装推荐直接使用 `--entry-host` 表达入口地址。 |
 | `--subscribe-port` | 端口号 | 无固定默认；未传时由端口选择逻辑交互输入或生成可用端口 | 订阅发布服务端口。 |
-| `--http-subscribe` | `yes`、`no`、`y`、`n` | `no` | 无 TLS 场景下是否允许 HTTP 订阅。 |
 | `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅发布或反代需要 Nginx 时，是否自动安装 Nginx。 |
 
 ## 协议编号
@@ -262,10 +261,10 @@ net.ipv4.tcp_congestion_control = bbr
 
 主菜单 `订阅与用户` 使用订阅组模型，并按任务流组织：
 
-1. **订阅服务**：安装/更新订阅发布服务，查看本机被控凭据和订阅服务状态。
+1. **订阅服务**：安装/更新订阅发布服务，查看订阅服务状态；这里只负责客户端订阅 HTTPS 发布，不再承载服务器间控制面。
 2. **我的订阅**：查看/刷新自用订阅链接、可用服务器和自用流量。
 3. **给别人开订阅**：一键创建用户订阅并同步，生成托管账号 `sub_<ID>`，再查看用户订阅链接。
-4. **多服务器订阅**：本机作为主控，管理远端被控服务器、被控凭据、健康检查和同步结果。
+4. **多服务器订阅**：通过 WireGuard 控制面管理远端被控服务器、接入凭据、健康检查和同步结果；第一版只支持一台主控管理多台被控的星型拓扑。
 5. **流量与限额**：明确分开刷新流量和查看流量，查看/执行限额计划。
 6. **自动同步与备份**：管理自动同步、手动同步、同步计划和状态备份恢复。
 
@@ -278,12 +277,13 @@ net.ipv4.tcp_congestion_control = bbr
 
 多服务器同步推荐流程：
 
-1. 在被控服务器进入 `订阅服务`，安装/更新订阅发布服务，并复制“本机被控凭据”。
-2. 回到主控服务器进入 `多服务器订阅` -> `添加/移除被控服务器`，粘贴被控凭据并设置本地别名。
-3. `测试被控连接`，成功后查看同步计划或立即执行同步。
-4. 被控地址、订阅端口和 Token 都包含在被控凭据中，控制通道强制 HTTPS。
+1. 在主控服务器进入 `多服务器订阅` -> `WireGuard 控制面`，初始化本机为主控，并复制“本机主控接入凭据”。
+2. 在被控服务器进入 `多服务器订阅` -> `WireGuard 控制面`，初始化本机为被控，导入主控接入凭据，再复制“本机被控接入凭据”。
+3. 回到主控服务器进入 `多服务器订阅` -> `添加/移除被控服务器`，粘贴被控接入凭据并设置本地别名。
+4. `测试被控连接`，成功后查看同步计划或立即执行同步。
+5. 客户端订阅继续通过公网 HTTPS 发布；服务器间控制接口只通过 WireGuard 内网访问 `http://<wg-ip>:<control-port>/s/control/...`。
 
-主菜单和订阅管理输出使用卡片式展示：订阅链接会显示账号、订阅地址和在线二维码；用户订阅、服务器源、健康检查、同步计划、限额计划和流量统计会以结果卡或计划卡展示。HTTP 订阅、Reality 目标站、XHTTP 高级参数、DNS/端口/Nginx 排障等高风险或需要用户处理的内容会以风险卡/排障卡显示，便于区分普通状态和需要行动的提示。
+主菜单和订阅管理输出使用卡片式展示：订阅链接会显示账号、订阅地址和在线二维码；用户订阅、服务器源、健康检查、同步计划、限额计划和流量统计会以结果卡或计划卡展示。HTTPS 订阅发布、Reality 目标站、XHTTP 高级参数、DNS/端口/Nginx 排障等需要用户处理的内容会以风险卡/排障卡显示，便于区分普通状态和需要行动的提示。
 
 ## 验收
 

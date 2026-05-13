@@ -630,48 +630,9 @@ EOF
 }
 
 
-subscriptionControlCredentialEncode() {
-    local host=$1
-    local port=$2
-    local token=$3
-    local payload
-    payload=$(jq -nc --arg host "${host}" --argjson port "${port}" --arg token "${token}" '{version:1, scheme:"https", host:$host, port:$port, token:$token}')
-    printf '%s' "padmctl1:"
-    printf '%s' "${payload}" | base64 -w 0 | tr '+/' '-_' | tr -d '='
-}
-
-subscriptionControlCredentialDecode() {
-    local credential=$1
-    local payload
-    local padding
-    credential=$(printf '%s' "${credential}" | tr -d '[:space:]')
-    [[ "${credential}" == padmctl1:* ]] || return 1
-    payload=${credential#padmctl1:}
-    payload=$(printf '%s' "${payload}" | tr '_-' '/+')
-    padding=$(( (4 - ${#payload} % 4) % 4 ))
-    payload="${payload}$(printf '%*s' "${padding}" '' | tr ' ' '=')"
-    payload=$(printf '%s' "${payload}" | base64 -d 2>/dev/null) || return 1
-    jq -e -c 'select(.version == 1 and .scheme == "https" and ((.host // "") | length > 0) and ((.port // 0) >= 1 and (.port <= 65535)) and ((.token // "") | length > 0)) | {host, port, token}' <<<"${payload}"
-}
 # 服务器源管理
 normalizeSubscriptionSourceInput() {
-    local line=$1
-    local host port alias extra
-
-    line=$(echo "${line}" | xargs)
-    if [[ -z "${line}" ]]; then
-        return 1
-    fi
-
-    IFS=':' read -r host port alias extra <<<"${line}"
-    if [[ -z "${host}" || -z "${port}" || -z "${alias}" || -n "${extra}" ]]; then
-        return 1
-    fi
-    if ! echo "${port}" | grep -qE '^[0-9]+$' || ((port < 1 || port > 65535)); then
-        return 1
-    fi
-
-    printf '%s:%s:%s:https\n' "${host}" "${port}" "${alias}"
+    return 1
 }
 
 remoteSubscribeFile() {
@@ -724,40 +685,46 @@ addOtherSubscribe() {
     local host=
     local port=
     local alias=
-    local token=
     echoContent title "\n┌─ 添加被控服务器 ───────────────────────────────────"
-    menuLine "在被控服务器进入 订阅服务 -> 查看本机被控凭据，复制整串被控凭据"
-    menuLine "主控端只需要粘贴被控凭据，再设置一个本地别名"
-    menuLine "被控凭据已包含 HTTPS 地址、订阅端口和 Token；不再手动输入地址或端口"
+    menuLine "在被控服务器进入 多服务器订阅 -> WireGuard 控制面 -> 查看本机被控接入凭据"
+    menuLine "主控端只需要粘贴被控接入凭据，再设置一个本地别名"
+    menuLine "被控接入凭据已包含 WireGuard 内网地址、控制端口、Token 和公钥"
     menuClose
-    autoRead subscription_control_credential "请粘贴被控凭据:" credential
+    autoRead subscription_control_credential "请粘贴被控接入凭据:" credential
     if [[ -z "${credential}" ]]; then
-        errorCard "被控凭据不可为空"
+        errorCard "被控接入凭据不可为空"
         addOtherSubscribe
         return
     fi
-    credentialJson=$(subscriptionControlCredentialDecode "${credential}") || {
-        errorCard "被控凭据无效，请复制被控端完整输出"
+    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || {
+        errorCard "被控接入凭据无效，请复制被控端完整输出"
         addOtherSubscribe
         return
     }
-    host=$(jq -r '.host' <<<"${credentialJson}")
-    port=$(jq -r '.port' <<<"${credentialJson}")
-    token=$(jq -r '.token' <<<"${credentialJson}")
+    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "controlled" ]]; then
+        errorCard "请粘贴被控接入凭据"
+        addOtherSubscribe
+        return
+    fi
+    host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
+    port=$(jq -r '.control_port' <<<"${credentialJson}")
     autoRead subscription_source_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1]:" alias
     if [[ -z "${alias}" ]] || ! echo "${alias}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
         errorCard "别名只能使用英文、数字、短横线或下划线"
         addOtherSubscribe
         return
     fi
-    if subscriptionRemoteSourceSelfReference "$(jq -n --arg host "${host}" --argjson port "${port}" --arg scheme https '{host:$host, port:$port, scheme:$scheme}')"; then
-        errorCard "被控服务器指向当前主控订阅服务，已拒绝添加，避免递归同步"
+    if subscriptionRemoteSourceSelfReference "$(jq -n --arg host "${host}" '{host:$host}')"; then
+        errorCard "被控服务器指向当前主控 WireGuard 地址，已拒绝添加，避免递归同步"
         addOtherSubscribe
         return
     fi
-    addSubscriptionSourceState "${alias}" "${alias}" https "${host}" "${port}"
-    setSubscriptionSourceControlToken "${alias}" "${token}"
-    successCard "被控服务器已添加" "被控地址：${host}:${port}" "别名：${alias}" "Token 已保存，可继续测试被控连接"
+    if ! subscriptionWireGuardAddPeerFromCredential "${alias}" "${credentialJson}"; then
+        errorCard "被控服务器添加失败"
+        addOtherSubscribe
+        return
+    fi
+    successCard "被控服务器已添加" "WireGuard 内网地址：${host}:${port}" "别名：${alias}" "已保存 Token 和 Peer，可继续测试被控连接"
     subscribe
 }
 
@@ -765,24 +732,7 @@ addOtherSubscribe() {
 
 
 ensureSubscriptionControlNginxLocation() {
-    local subscribeConfig="${nginxConfigPath}subscribe.conf"
-    local tmpConfig="${subscribeConfig}.tmp"
-    [[ -f "${subscribeConfig}" ]] || return 1
-    grep -q 'location /s/control/' "${subscribeConfig}" && return 1
-    awk -v port="$(subscriptionControlPort)" '
-      BEGIN { inserted = 0 }
-      !inserted && $0 == "    location / {" {
-        print "    location /s/control/ {"
-        print "        client_max_body_size 256k;"
-        print "        proxy_pass http://127.0.0.1:" port ";"
-        print "        proxy_set_header Authorization $http_authorization;"
-        print "        proxy_set_header Content-Type $content_type;"
-        print "    }"
-        inserted = 1
-      }
-      { print }
-      END { if (!inserted) exit 1 }
-    ' "${subscribeConfig}" >"${tmpConfig}" && mv "${tmpConfig}" "${subscribeConfig}"
+    return 1
 }
 
 
@@ -865,36 +815,15 @@ installSubscribe() {
         mapfile -t result < <(initSingBoxPort "${AUTO_SUBSCRIBE_PORT:-${subscribePort}}" false)
         PADM_NGINX_BLOG_REINSTALL_PROMPT=false nginxBlog
         echo
-        local httpSubscribeStatus=
-
         subscribeServerName=$(resolveSubscribeServerName || true)
-        if ! protocolSelectionNeedsTLS "${selectCustomInstallType}" && ! protocolSelectionNeedsTLS "${currentInstallProtocolType}" && [[ -z "${subscribeServerName}" ]]; then
-            httpSubscribeStatus=true
+        if [[ -z "${subscribeServerName}" ]]; then
+            errorCard "订阅服务需要 HTTPS 域名" "未发现可用于订阅服务的 TLS 域名或证书" "请先在 站点与证书 中配置域名证书，或安装时提供 --domain"
+            return 1
         fi
 
-        if [[ "${httpSubscribeStatus}" == "true" ]]; then
-
-            warnCard \
-                "未发现 TLS 证书，HTTP 订阅不会加密传输" \
-                "订阅链接、用户标识和控制路径可能被中间人或网络侧观察到" \
-                "仅建议在临时验收、内网或已确认风险的环境使用" \
-                "长期使用请配置 TLS 订阅"
-            echo
-            autoConfirm http_subscribe "确认承担上述风险并启用 HTTP 订阅？" n addNginxSubscribeStatus
-            echo
-            if [[ "${addNginxSubscribeStatus}" != "y" ]]; then
-                echoContent title "\n┌─ 订阅安装已取消 ───────────────────────────────────"
-                menuLine "未确认 HTTP 订阅风险，已退出订阅安装"
-                menuClose
-                exit
-            fi
-        else
-            [[ -n "${subscribeServerName}" ]] || subscribeServerName="${currentHost:-${domain:-}}"
-
-            SSLType="ssl"
-            serverName="server_name ${subscribeServerName};"
-            nginxSubscribeSSL="ssl_certificate ${PADM_TLS_DIR:-/etc/padm/tls}/${subscribeServerName}.crt;ssl_certificate_key ${PADM_TLS_DIR:-/etc/padm/tls}/${subscribeServerName}.key;"
-        fi
+        SSLType="ssl"
+        serverName="server_name ${subscribeServerName};"
+        nginxSubscribeSSL="ssl_certificate ${PADM_TLS_DIR:-/etc/padm/tls}/${subscribeServerName}.crt;ssl_certificate_key ${PADM_TLS_DIR:-/etc/padm/tls}/${subscribeServerName}.key;"
         if hasIPv6Connectivity; then
             listenIPv6="listen [::]:${result[-1]} ${SSLType};"
         fi
@@ -920,12 +849,6 @@ server {
     location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/(.*) {
         default_type 'text/plain; charset=utf-8';
         alias /etc/padm/subscribe/\$1/\$2;
-    }
-    location /s/control/ {
-        client_max_body_size 256k;
-        proxy_pass http://127.0.0.1:$(subscriptionControlPort);
-        proxy_set_header Authorization \$http_authorization;
-        proxy_set_header Content-Type \$content_type;
     }
     location / {
     }

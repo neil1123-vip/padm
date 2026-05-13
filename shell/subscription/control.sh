@@ -23,7 +23,7 @@ subscriptionRemoteDesiredUsers() {
 subscriptionRemoteControlUrl() {
     local source=$1
     local endpoint=$2
-    jq -r --arg endpoint "${endpoint}" '(.scheme + "://" + .host + ":" + (.port | tostring) + "/s/control/" + $endpoint)' <<<"${source}"
+    subscriptionWireGuardControlUrl "${source}" "${endpoint}"
 }
 
 subscriptionRemoteControlToken() {
@@ -34,19 +34,12 @@ subscriptionRemoteControlToken() {
 subscriptionRemoteSourceSelfReference() {
     local source=$1
     local sourceHost
-    local sourcePort
     local selfHost
     sourceHost=$(jq -r '(.host // "") | ascii_downcase' <<<"${source}")
-    sourcePort=$(jq -r '.port // 0 | tostring' <<<"${source}")
-    if [[ -z "${subscribePort:-}" ]]; then
-        readNginxSubscribe
-    fi
-    [[ -n "${subscribePort:-}" && "${sourcePort}" == "${subscribePort}" ]] || return 1
-    for selfHost in "${currentHost:-}" "${subscribeDomain:-}"; do
-        selfHost=$(tr 'A-Z' 'a-z' <<<"${selfHost}")
-        [[ -n "${selfHost}" && "${sourceHost}" == "${selfHost}" ]] && return 0
-    done
-    [[ "${sourceHost}" == "127.0.0.1" || "${sourceHost}" == "localhost" ]]
+    selfHost=$(subscriptionWireGuardReadState | jq -r '.address // empty' | head -n 1)
+    selfHost=$(subscriptionWireGuardAddressHost "${selfHost}")
+    selfHost=$(tr 'A-Z' 'a-z' <<<"${selfHost}")
+    [[ -n "${selfHost}" && "${sourceHost}" == "${selfHost}" ]]
 }
 
 subscriptionRemoteControlRequest() {

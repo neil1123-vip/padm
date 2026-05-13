@@ -31,7 +31,6 @@ parseInstallArgs() {
     AUTO_REALITY_SERVER_NAME=
     AUTO_ENTRY_HOST=
     AUTO_SUBSCRIBE_PORT=
-    AUTO_HTTP_SUBSCRIBE=
     AUTO_INSTALL_NGINX=
     AUTO_UUID=
     AUTO_USER=
@@ -138,11 +137,6 @@ parseInstallArgs() {
             AUTO_SUBSCRIBE_PORT=$2
             shift 2
             ;;
-        --http-subscribe)
-            AUTO_INSTALL=true
-            AUTO_HTTP_SUBSCRIBE=$2
-            shift 2
-            ;;
         --install-nginx)
             AUTO_INSTALL=true
             AUTO_INSTALL_NGINX=$2
@@ -186,8 +180,8 @@ showInstallArgsHelp() {
 │ 核心与服务: Xray/sing-box 生命周期、配置校验、服务控制和日志
 │ 系统与脚本: 更新 padm、网络优化和宿主机辅助项
 ├─ 正式子命令
-│ bash install.sh InstallSubscription --subscribe-port 39778 --http-subscribe yes --install-nginx yes
-│ 仅安装或更新订阅发布服务，适合自动化验收；需要已有核心协议配置
+│ bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
+│ 仅安装或更新 HTTPS 订阅发布服务，适合自动化验收；需要已有核心协议配置
 ├─ 关键概念
 │ TLS 域名/端口: 普通 TLS 协议入口；当前不作为新人首选，传统 TLS 类协议存在更高识别风险
 │ Reality entry: 客户端实际连接地址，通常是自有域名、CDN 入口或服务器 IP
@@ -218,7 +212,6 @@ showInstallArgsHelp() {
 │ --reality-server-name <sni>             REALITY SNI，默认等于 target host
 │ --entry-host <host>                     客户端实际连接地址，默认使用 --domain 或公网 IP
 │ --subscribe-port <port>                 订阅服务端口
-│ --http-subscribe <yes|no|y|n>           无 TLS 时是否允许 HTTP 订阅
 │ --install-nginx <yes|no|y|n>            订阅需要 nginx 时是否自动安装
 │ --uuid <uuid>                           初始用户 UUID，默认随机生成
 │ --user <name>                           初始用户名，默认随机生成
@@ -367,9 +360,6 @@ autoValueForKey() {
         ;;
     subscribe_port)
         printf '%s' "${AUTO_SUBSCRIBE_PORT}"
-        ;;
-    http_subscribe)
-        normalizeYesNo "${AUTO_HTTP_SUBSCRIBE}"
         ;;
     reality_stream_enable)
         normalizeYesNo "${AUTO_REALITY_STREAM_ENABLE}"

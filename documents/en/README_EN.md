@@ -106,13 +106,13 @@ bash install.sh --install-type custom --core xray --protocols 7 --entry-host nod
 Install or update the subscription publishing service with the dedicated subcommand:
 
 ```bash
-bash install.sh InstallSubscription --subscribe-port 39778 --http-subscribe yes --install-nginx yes
+bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
 ```
 
 Subscription publishing options can also be appended to protocol installation when needed:
 
 ```bash
---subscribe-port 39778 --http-subscribe no --install-nginx yes
+--subscribe-port 39778 --install-nginx yes
 ```
 
 ## Protocol capability matrix
@@ -220,10 +220,10 @@ Before writing, it checks whether `bbr` is available; if it is missing, it tries
 
 Open `Subscriptions & users` in the main menu. It is organized by user task flow:
 
-1. **Subscription service**: install/update subscription publishing, view the local controlled-server credential, and check publishing status.
+1. **Subscription service**: install/update subscription publishing and check publishing status. This menu now handles client-facing HTTPS publishing only; it no longer exposes the server-to-server control plane.
 2. **My Subscription**: view/refresh personal subscription links, available servers, and personal traffic.
 3. **Create subscriptions for others**: create and sync user subscriptions; managed accounts use the `sub_<ID>` prefix.
-4. **Multi-server subscriptions**: use this server as the controller and manage remote controlled servers, credentials, health checks, and sync results.
+4. **Multi-server subscriptions**: use a WireGuard control plane to manage remote controlled servers, join credentials, health checks, and sync results. The first release supports a star topology only: one controller manages multiple controlled servers.
 5. **Traffic & quotas**: refresh traffic explicitly, view traffic without implicit refresh, and preview/execute quota plans.
 6. **Automatic sync & backups**: automatic sync, manual sync, sync plans, and state backup/restore.
 
@@ -236,12 +236,13 @@ Recommended user subscription flow:
 
 Recommended multi-server flow:
 
-1. On the controlled server, open `Subscription service`, install/update publishing, and copy the local controlled-server credential.
-2. On the controller server, open `Multi-server subscriptions` -> `Add/remove controlled server`, paste the credential, and set a local alias.
-3. Test the controlled connection, then view the sync plan or run sync.
-4. The credential contains the controlled address, subscription port, and token; the control channel is forced to HTTPS.
+1. On the controller server, open `Multi-server subscriptions` -> `WireGuard control plane`, initialize this server as the controller, and copy the local controller join credential.
+2. On the controlled server, open `Multi-server subscriptions` -> `WireGuard control plane`, initialize this server as controlled, import the controller join credential, then copy the local controlled join credential.
+3. Back on the controller server, open `Multi-server subscriptions` -> `Add/remove controlled server`, paste the controlled join credential, and set a local alias.
+4. Test the controlled connection, then view the sync plan or run sync.
+5. Client subscriptions continue to be published over public HTTPS. The server-to-server control API is only reachable inside the WireGuard network as `http://<wg-ip>:<control-port>/s/control/...`.
 
-Subscription and management output now uses card-style presentation: subscription links show the account, URL, and online QR code; user subscriptions, server sources, health checks, sync plans, quota plans, and traffic statistics are shown as result or plan cards. HTTP subscription warnings, Reality target warnings, XHTTP advanced parameters, DNS/port/Nginx troubleshooting, and other action-required messages are shown as risk or troubleshooting cards so normal status messages are easier to distinguish from items that need attention.
+Subscription and management output now uses card-style presentation: subscription links show the account, URL, and online QR code; user subscriptions, server sources, health checks, sync plans, quota plans, and traffic statistics are shown as result or plan cards. HTTPS subscription publishing, Reality target warnings, XHTTP advanced parameters, DNS/port/Nginx troubleshooting, and other action-required messages are shown as risk or troubleshooting cards so normal status messages are easier to distinguish from items that need attention.
 
 ## Validation
 

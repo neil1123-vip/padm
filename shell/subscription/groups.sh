@@ -89,6 +89,7 @@ normalizeSubscriptionGroupsState() {
           name: "本机",
           role: "main",
           scheme: "local",
+          transport: "local",
           host: "127.0.0.1",
           port: 0,
           enabled: true,
@@ -100,7 +101,8 @@ normalizeSubscriptionGroupsState() {
         .id = (($source.id // "") | tostring) |
         .name = (($source.name // $source.id // "") | tostring) |
         .role = (if ($source.role // "") == "main" then "main" else "secondary" end) |
-        .scheme = (if .role == "main" then "local" else "https" end) |
+        .transport = (if .role == "main" then "local" else "wireguard" end) |
+        .scheme = (if .role == "main" then "local" else "wireguard" end) |
         .host = (($source.host // "") | tostring) |
         .port = (($source.port // 0) | tonumber? // 0) |
         .enabled = (if $source.enabled == false then false else true end) |
@@ -320,15 +322,14 @@ setSubscriptionSources() {
 addSubscriptionSourceState() {
     local id=$1
     local name=$2
-    local scheme=$3
-    local host=$4
-    local port=$5
+    local host=$3
+    local port=$4
     local groupId
     groupId=$(activeSubscriptionGroupId)
     subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg name "${name}" --arg host "${host}" --argjson port "${port}" '
       .groups |= map(if .id == $groupId then
         if any(.sources[]?; .id == $id) then . else
-          .sources += [{"id": $id, "name": $name, "role": "secondary", "scheme": "https", "host": $host, "port": $port, "enabled": true, "sync_status": "pending"}]
+          .sources += [{"id": $id, "name": $name, "role": "secondary", "scheme": "wireguard", "transport": "wireguard", "host": $host, "port": $port, "enabled": true, "sync_status": "pending"}]
         end
       else . end)'
 }
@@ -368,7 +369,7 @@ setSubscriptionSourceCredential() {
     groupId=$(activeSubscriptionGroupId)
     subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg host "${host}" --argjson port "${port}" --arg token "${token}" '
       .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .scheme = "https" | .host = $host | .port = $port | .control_token = $token else . end)
+        .sources |= map(if .id == $id and .role != "main" then .transport = "wireguard" | .scheme = "wireguard" | .host = $host | .port = $port | .control_token = $token else . end)
       else . end)'
 }
 

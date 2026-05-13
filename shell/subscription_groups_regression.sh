@@ -91,6 +91,8 @@ source "${PROJECT_ROOT}/shell/subscription/subscription.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/control.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/adapters.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/manage.sh"
@@ -1103,15 +1105,12 @@ runSubscribeUserOutputTransactionRegression() {
 
     subscribeDomain=
     currentHost=
-    subscribeType=http
-    getPublicIP() { printf '203.0.113.20\n'; }
-    [[ "$(resolveSubscribePublicDomain)" == "203.0.113.20" ]]
-    unset -f getPublicIP
-
-    subscribeType=https
     if [[ -n "$(resolveSubscribePublicDomain)" ]]; then
         return 1
     fi
+
+    currentHost=current.example.com
+    [[ "$(resolveSubscribePublicDomain)" == "current.example.com" ]]
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
@@ -1970,8 +1969,8 @@ runSubscriptionGroupStateRegression() {
     ensureSubscriptionGroupsState
     jq -e '.version == 2 and .active_group == "default" and (.groups | length == 1)' "$(subscriptionGroupsFile)" >/dev/null
 
-    addSubscriptionSourceState ip-edge "IP Edge" http 203.0.113.10 39778
-    jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "https" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
+    addSubscriptionSourceState ip-edge "IP Edge" 203.0.113.10 39778
+    jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
     removeSubscriptionSourceState ip-edge
 
     cat >"$(subscriptionGroupsFile)" <<'JSON'
@@ -2006,40 +2005,40 @@ JSON
       (.groups[0].user_groups[0].traffic_limit_gb == 1)
     ' "$(subscriptionGroupsFile)" >/dev/null
 
-    [[ "$(normalizeSubscriptionSourceInput 'remote.example.com:443:edge')" == "remote.example.com:443:edge:https" ]]
-    [[ "$(normalizeSubscriptionSourceInput '203.0.113.10:39778:vps1')" == "203.0.113.10:39778:vps1:https" ]]
-    if normalizeSubscriptionSourceInput 'remote.example.com:443:edge:http' >/dev/null 2>&1; then
+    if normalizeSubscriptionSourceInput 'remote.example.com:443:edge' >/dev/null 2>&1; then
         return 1
     fi
-    if normalizeSubscriptionSourceInput 'remote.example.com:443:edge:https' >/dev/null 2>&1; then
+    if normalizeSubscriptionSourceInput '203.0.113.10:39778:vps1' >/dev/null 2>&1; then
         return 1
     fi
 
     local credential decodedCredential
-    credential=$(subscriptionControlCredentialEncode "remote.example.com" 39778 "token-abc")
-    decodedCredential=$(subscriptionControlCredentialDecode "${credential}")
-    jq -e '.host == "remote.example.com" and .port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
-    if subscriptionControlCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
+    credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
+    decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
+    jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
+    if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
         return 1
     fi
+    subscriptionWireGuardAddPeerFromCredential() {
+        local alias=$1
+        local credentialJson=$2
+        local host
+        local port
+        host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
+        port=$(jq -r '.control_port' <<<"${credentialJson}")
+        addSubscriptionSourceState "${alias}" "${alias}" "${host}" "${port}"
+        setSubscriptionSourceControlToken "${alias}" "$(jq -r '.token' <<<"${credentialJson}")"
+    }
     local oldAutoInstall="${AUTO_INSTALL:-}"
-    local oldSubscribeFunc
-    oldSubscribeFunc=$(declare -f subscribe || true)
     AUTO_INSTALL=
-    subscribe() { return 0; }
     addOtherSubscribe <<EOF
 ${credential}
 remote-edge
 EOF
-    if [[ -n "${oldSubscribeFunc}" ]]; then
-        eval "${oldSubscribeFunc}"
-    else
-        unset -f subscribe
-    fi
     AUTO_INSTALL="${oldAutoInstall}"
-    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "https" and .host == "remote.example.com" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
-    setSubscriptionSourceCredential remote-edge "remote2.example.com" 48779 "token-def"
-    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "https" and .host == "remote2.example.com" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
+    setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
+    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
 
     setSubscriptionSourceEnabled edge false
     jq -e '.groups[0].sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
@@ -2054,9 +2053,13 @@ EOF
     subscribeDomain="self.example.com"
     subscribePort=39778
     subscriptionGroupsStateWrite '
-      .groups[0].sources += [{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"https","host":"self.example.com","port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}] |
+      .groups[0].sources |= map(if .id == "remote-edge" then .enabled = false else . end) |
+      .groups[0].sources += [{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.1","port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}] |
       .groups[0].user_groups = (.groups[0].user_groups | map(if .id == "team-a" then .allowed_sources = ["self-ref"] else . end))
     '
+    subscriptionRemoteControlRequest() {
+        printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n'
+    }
     subscriptionRemoteSyncPlan | jq -e '.[] | select(.source_id == "self-ref" and .status == "self_reference" and .error_detail.type == "self_reference")' >/dev/null
     runSubscriptionRemoteSync | jq -e '.[] | contains("self-ref")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "self-ref" and .sync_status == "failed" and .last_sync_error.type == "self_reference")' >/dev/null
@@ -2412,10 +2415,16 @@ runMenuSmokeRegression() {
     changeInstalledRealityTarget() { recordMenuAction "changeReality:$*"; }
     subscribe() { recordMenuAction subscribe; }
     showSubscriptionSources() { recordMenuAction showSubscriptionSources; }
-    showSubscriptionSourceControlUrls() { recordMenuAction showSubscriptionSourceControlUrls; }
-    showSubscriptionSourceSyncResults() { recordMenuAction showSubscriptionSourceSyncResults; }
-    showSubscriptionControlToken() { recordMenuAction showSubscriptionControlToken; }
-    showSubscriptionServiceStatus() { recordMenuAction showSubscriptionServiceStatus; }
+    showSubscriptionWireGuardMainCredential() { recordMenuAction showSubscriptionWireGuardMainCredential; }
+    showSubscriptionWireGuardControlledCredential() { recordMenuAction showSubscriptionWireGuardControlledCredential; }
+    importSubscriptionWireGuardMainCredential() { recordMenuAction importSubscriptionWireGuardMainCredential; }
+    initSubscriptionWireGuardMain() { recordMenuAction initSubscriptionWireGuardMain; }
+    initSubscriptionWireGuardControlled() { recordMenuAction initSubscriptionWireGuardControlled; }
+    showSubscriptionWireGuardPeers() { recordMenuAction showSubscriptionWireGuardPeers; }
+    testSubscriptionWireGuardControl() { recordMenuAction testSubscriptionWireGuardControl; }
+    restartSubscriptionWireGuardControl() { recordMenuAction restartSubscriptionWireGuardControl; }
+    disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; }
+    showSubscriptionWireGuardStatus() { recordMenuAction showSubscriptionWireGuardStatus; }
     showAccounts() { recordMenuAction showAccounts; }
     showUserSubscriptions() { recordMenuAction showUserSubscriptions; }
     createAndSyncUserSubscriptionWizard() { recordMenuAction createAndSyncUserSubscriptionWizard; }
@@ -2501,25 +2510,19 @@ r"
     assertMenuAction menu
     resetMenuActions
     manageSubscriptionService <<<"1
-5
+4
 7"
     assertMenuAction installSubscribe
     assertMenuAction menu
     resetMenuActions
     manageSubscriptionService <<<"2
-5
+4
 7"
     assertMenuAction subscribe
     assertMenuAction menu
     resetMenuActions
     manageSubscriptionService <<<"3
-5
-7"
-    assertMenuAction showSubscriptionControlToken
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscriptionService <<<"4
-5
+4
 7"
     assertMenuAction showSubscriptionServiceStatus
     assertMenuAction menu
@@ -2596,20 +2599,27 @@ y
     assertMenuAction subscriptionSyncPlan
     assertMenuAction menu
     resetMenuActions
-    manageMultiServerSubscriptions <<<"3
-9
+    manageMultiServerSubscriptions <<<"1
+3
+10
+7"
+    assertMenuAction showSubscriptionWireGuardMainCredential
+    assertMenuAction menu
+    resetMenuActions
+    manageMultiServerSubscriptions <<<"4
+10
 7"
     assertMenuAction setSubscriptionSourceControlTokenMenu
     assertMenuAction menu
     resetMenuActions
-    manageMultiServerSubscriptions <<<"5
-9
+    manageMultiServerSubscriptions <<<"6
+10
 7"
     assertMenuAction showSubscriptionSourceControlUrls
     assertMenuAction menu
     resetMenuActions
-    manageMultiServerSubscriptions <<<"6
-9
+    manageMultiServerSubscriptions <<<"7
+10
 7"
     assertMenuAction showSubscriptionSourceSyncResults
     assertMenuAction menu

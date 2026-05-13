@@ -49,6 +49,8 @@ source "${SUB_DIR}/subscription.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/control.sh"
 # shellcheck source=/dev/null
+source "${SUB_DIR}/wireguard_control.sh"
+# shellcheck source=/dev/null
 source "${CORE_DIR}/manage.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/menu.sh"
