@@ -868,7 +868,7 @@ removePadmNginxConfigFragments() {
     local failed=false
     local dir name candidate
     local -a dirs=()
-    local -a names=(alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf)
+    local -a names=(alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf)
 
     [[ -n "${nginxConfigPath:-}" ]] && dirs+=("${nginxConfigPath}")
     dirs+=("${PADM_NGINX_CONF_FALLBACK_DIR:-/etc/nginx/conf.d/}")

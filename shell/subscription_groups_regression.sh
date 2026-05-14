@@ -821,18 +821,18 @@ runUninstallNginxCleanupRegression() {
     mkdir -p "${primaryDir}" "${actualDir}"
     nginxConfigPath="${primaryDir}"
     PADM_NGINX_CONF_FALLBACK_DIR="${actualDir}"
-    for name in alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf; do
+    for name in alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf; do
         printf 'padm config\n' >"${primaryDir}${name}"
     done
-    for name in sing_box_VMess_HTTPUpgrade.conf subscribe.conf; do
+    for name in sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf; do
         printf 'padm config\n' >"${actualDir}${name}"
     done
 
     removePadmNginxConfigFragments
-    for name in alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf; do
+    for name in alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf; do
         [[ ! -e "${primaryDir}${name}" ]]
     done
-    for name in sing_box_VMess_HTTPUpgrade.conf subscribe.conf; do
+    for name in sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf; do
         [[ ! -e "${actualDir}${name}" ]]
     done
     nginxConfigPath="${oldNginxConfigPath}"
