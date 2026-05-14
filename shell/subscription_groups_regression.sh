@@ -1606,6 +1606,41 @@ runRuntimeAndRealityRegression() {
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "FAIL" ]]
 }
 
+resolveReleaseWorkflowVersionForRegression() {
+    local isReleaseCommit=$1
+    local currentVersion=$2
+    local latestTag=$3
+    local commits=$4
+    local releaseVersion needsBump
+
+    if [[ "${isReleaseCommit}" == "true" ]]; then
+        releaseVersion="${currentVersion}"
+        needsBump=false
+    else
+        releaseVersion="v$(nextScriptVersionFromCommits "${latestTag}" "${commits}")"
+        if [[ "${releaseVersion}" != "${currentVersion}" ]]; then
+            needsBump=true
+        else
+            needsBump=false
+        fi
+    fi
+    printf '%s %s\n' "${releaseVersion}" "${needsBump}"
+}
+
+runReleaseWorkflowVersionRegression() {
+    local result
+    result=$(resolveReleaseWorkflowVersionForRegression false v1.2.0 v1.2.0 $'fix(update): harden script refresh rollback')
+    [[ "${result}" == "v1.2.1 true" ]]
+    result=$(resolveReleaseWorkflowVersionForRegression false v1.2.0 v1.2.0 $'feat(subscription): add new flow')
+    [[ "${result}" == "v1.3.0 true" ]]
+    result=$(resolveReleaseWorkflowVersionForRegression false v1.2.0 v1.2.0 $'style: whitespace only')
+    [[ "${result}" == "v1.2.0 false" ]]
+    result=$(resolveReleaseWorkflowVersionForRegression false v0.0.0 v0.0.0 $'feat(core): initial release')
+    [[ "${result}" == "v0.1.0 true" ]]
+    result=$(resolveReleaseWorkflowVersionForRegression true v1.3.0 v1.2.0 $'chore(release): v1.3.0')
+    [[ "${result}" == "v1.3.0 false" ]]
+}
+
 runRealityConfigVlessEncryptionRegression() {
     local fakeXrayBinary="${TMP_DIR}/fake-xray-vlessenc"
     local vlessConfigDir="${TMP_DIR}/vlessenc-xray-conf"
@@ -3257,6 +3292,7 @@ runInstallEnsureModulesRegression() {
 }
 
 runRegressionPlatform() {
+    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression
     runRegressionStep cleanup-trap runCleanupTrapRegression
     runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
     runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression

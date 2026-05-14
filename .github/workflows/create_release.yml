@@ -50,7 +50,7 @@ jobs:
             latest_tag="$current_version"
           fi
 
-          if [ "${{ steps.version.outputs.is_release_commit }}" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ steps.version.outputs.is_release_commit }}" = "true" ]; then
             release_version="$current_version"
             needs_bump=false
           else
