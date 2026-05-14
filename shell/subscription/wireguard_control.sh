@@ -80,6 +80,10 @@ subscriptionWireGuardReadState() {
       "${stateFile}"
 }
 
+subscriptionWireGuardControlEnabled() {
+    [[ "$(subscriptionWireGuardReadState | jq -r '.enabled')" == "true" ]]
+}
+
 subscriptionWireGuardWriteState() {
     local stateFile
     local tmpFile
@@ -208,6 +212,25 @@ applySubscriptionWireGuardService() {
 
 subscriptionWireGuardNginxConfigFile() {
     echo "${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf"
+}
+
+ensureSubscriptionWireGuardNginx() {
+    if command -v nginx >/dev/null 2>&1; then
+        return 0
+    fi
+    installNginxTools || return 1
+}
+
+refreshSubscriptionWireGuardNginxControl() {
+    ensureSubscriptionWireGuardNginx && ensureSubscriptionWireGuardNginxConfig && serviceQueueRestart nginx
+}
+
+stopSubscriptionWireGuardControlService() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl disable --now "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
+    elif command -v wg-quick >/dev/null 2>&1; then
+        wg-quick down "$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
+    fi
 }
 
 ensureSubscriptionWireGuardNginxConfig() {
@@ -353,7 +376,7 @@ initSubscriptionWireGuardControlled() {
         return 1
     }
     installSubscriptionControlService
-    ensureSubscriptionWireGuardNginxConfig && serviceQueueRestart nginx && serviceQueueApply
+    refreshSubscriptionWireGuardNginxControl && serviceQueueApply
     [[ -f "$(subscriptionWireGuardStateFile)" && -f "$(subscriptionWireGuardConfigFile)" ]] || {
         errorCard "WireGuard 被控配置未落地"
         return 1
@@ -473,16 +496,12 @@ testSubscriptionWireGuardControl() {
 restartSubscriptionWireGuardControl() {
     installSubscriptionControlService
     applySubscriptionWireGuardService
-    ensureSubscriptionWireGuardNginxConfig && serviceQueueRestart nginx && serviceQueueApply
+    refreshSubscriptionWireGuardNginxControl && serviceQueueApply
     successCard "WireGuard 控制面已修复/重启"
 }
 
 disableSubscriptionWireGuardControl() {
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl disable --now "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
-    elif command -v wg-quick >/dev/null 2>&1; then
-        wg-quick down "$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
-    fi
+    stopSubscriptionWireGuardControlService
     subscriptionWireGuardWriteState '.enabled = false'
     successCard "WireGuard 控制面已关闭"
 }

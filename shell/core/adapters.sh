@@ -361,7 +361,8 @@ installBasePackages() {
         if [[ "${packageManager}" == "apt" ]]; then
             packages+=(iptables)
         elif [[ "${packageManager}" == "yum" ]]; then
-            packages+=(iptables iptables-legacy)
+            packages+=(iptables)
+            [[ "${centosVersion:-}" != "10" ]] && packages+=(iptables-legacy)
         elif [[ "${packageManager}" == "apk" ]]; then
             packages+=(iptables)
         fi

@@ -784,6 +784,33 @@ SH
     )
 }
 
+
+runUninstallWireGuardCleanupRegression() (
+    local actions=
+    local targetDir="${TMP_DIR}/uninstall-wireguard"
+    local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
+    PADM_WIREGUARD_CONTROL_DIR="${targetDir}/state"
+    mkdir -p "${PADM_WIREGUARD_CONTROL_DIR}" "${targetDir}/etc-wireguard" "${targetDir}/systemd"
+    subscriptionWireGuardWriteState '.enabled = true'
+    removeInstallPath() { actions+="remove:$1:$2"$'\n'; rm -rf "$1"; }
+    systemctl() { actions+="systemctl:$*"$'\n'; return 0; }
+    command() {
+        if [[ "$1" == "-v" && "$2" == "systemctl" ]]; then
+            return 0
+        fi
+        builtin command "$@"
+    }
+    subscriptionWireGuardConfigFile() { printf '%s\n' "${targetDir}/etc-wireguard/wg-padm.conf"; }
+    subscriptionControlServiceFile() { printf '%s\n' "${targetDir}/systemd/padm-subscription-control.service"; }
+    printf 'wg\n' >"$(subscriptionWireGuardConfigFile)"
+    printf 'svc\n' >"$(subscriptionControlServiceFile)"
+    cleanupSubscriptionWireGuardControlOnUninstall
+    grep -qxF 'systemctl:disable --now wg-quick@wg-padm' <<<"${actions}"
+    grep -qxF 'systemctl:disable --now padm-subscription-control.service' <<<"${actions}"
+    [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+    [[ ! -e "$(subscriptionControlServiceFile)" ]]
+    if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
+)
 runUninstallNginxCleanupRegression() {
     local primaryDir="${TMP_DIR}/uninstall-nginx-primary/"
     local actualDir="${TMP_DIR}/uninstall-nginx-actual/"
@@ -1568,6 +1595,7 @@ runRuntimeAndRealityRegression() {
     [[ "${AUTO_REALITY_SERVER_NAME}" == "www.microsoft.com" ]]
     [[ "${AUTO_ENTRY_HOST}" == "node.example.com" ]]
     [[ "$(autoValueForKey reality_target)" == "www.microsoft.com:443" ]]
+    [[ "$(autoValueForKey install_type)" == "5" ]]
     validateGitHubReleaseTag "v26.3.27"
     validateGitHubReleaseTag "202605082251"
     validateGitHubReleaseTag "release-2026.05.08"
@@ -2456,7 +2484,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         printf 'Address = %s\n' "$(subscriptionWireGuardReadState | jq -r '.address')" >"$(subscriptionWireGuardConfigFile)"
     }
     installSubscriptionControlService() { recordMenuAction installSubscriptionControlService; }
-    ensureSubscriptionWireGuardNginxConfig() { recordMenuAction ensureSubscriptionWireGuardNginxConfig; return 0; }
+    refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; return 0; }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
     serviceQueueApply() { recordMenuAction serviceQueueApply; }
     subscriptionRemoteControlHealthAll() { printf '[{"id":"edge-a","ok":true}]\n'; }
@@ -2516,7 +2544,7 @@ edge-a
 9
 10"
     assertMenuAction installSubscriptionControlService
-    assertMenuAction ensureSubscriptionWireGuardNginxConfig
+    assertMenuAction refreshSubscriptionWireGuardNginxControl
     subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
 
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
@@ -2564,6 +2592,26 @@ runMenuSmokeLightRegression() {
     assertMenuAction menu
     grep -q "不知道怎么选时，建议直接选 1" <<<"${output}"
     grep -q "entry 是客户端连接地址" <<<"${output}"
+
+    resetMenuActions
+    installXray() { recordMenuAction installXray; }
+    installXrayService() { recordMenuAction installXrayService; }
+    initXrayConfig() { recordMenuAction initXrayConfig; }
+    cleanUp() { recordMenuAction cleanUp; }
+    checkGFWStatue() { recordMenuAction checkGFWStatue; }
+    showAccounts() { recordMenuAction showAccounts; }
+    installTools() { recordMenuAction installTools; }
+    readLastInstallationConfig() { recordMenuAction readLastInstallationConfig; }
+    unInstallSubscribe() { recordMenuAction unInstallSubscribe; }
+    handleNginx() { recordMenuAction "handleNginx:$*"; }
+    serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
+    serviceQueueApply() { recordMenuAction serviceQueueApply; }
+    subscriptionWireGuardControlEnabled() { return 0; }
+    refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; }
+    installXrayReality
+    assertMenuAction 'handleNginx:stop'
+    assertMenuAction refreshSubscriptionWireGuardNginxControl
+    assertMenuAction serviceQueueApply
     [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
     [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
@@ -3013,15 +3061,15 @@ runBasePackageBatchRegression() {
         fi
         builtin command "$@"
     }
-    packageManager=apt
     release=debian
     initVar
     checkSystem
     [[ "${installType}" == *"--no-install-recommends"* ]]
-    packageManager=apt
-    release=debian
+    packageManager=yum
+    release=centos
+    centosVersion=10
     selectCustomInstallType=",1,"
-    rhelLike=false
+    rhelLike=true
     protocolSelectionSkipsNginx() { return 1; }
     local capturedDisplay=
     local capturedPackages=
@@ -3041,9 +3089,10 @@ runBasePackageBatchRegression() {
     installBasePackages
     [[ "${capturedDisplay}" == "基础工具" ]]
     [[ "${capturedPackages}" == *"sudo"* ]]
-    [[ "${capturedPackages}" == *"dnsutils"* ]]
+    [[ "${capturedPackages}" == *"bind-utils"* ]]
     [[ "${capturedPackages}" == *"iptables"* ]]
-    [[ "${capturedPackages}" == *"inetutils-ping"* ]]
+    [[ "${capturedPackages}" != *"iptables-legacy"* ]]
+    [[ "${capturedPackages}" == *"iputils"* ]]
     installPackageTracked "测试" padm-missing-package
     [[ "${capturedTimeout}" == "900" ]]
     PADM_INSTALL_STEP_TOTAL=1
@@ -3595,6 +3644,7 @@ runRegressionTransactionSubscription() {
 runRegressionTransactionSystem() {
     runRegressionStep nginx-service-failure runNginxServiceFailureRegression
     runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression
+    runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression
     runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
 }
 

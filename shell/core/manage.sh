@@ -883,6 +883,15 @@ removePadmNginxConfigFragments() {
     [[ "${failed}" != "true" ]]
 }
 
+cleanupSubscriptionWireGuardControlOnUninstall() {
+    stopSubscriptionWireGuardControlService
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl disable --now padm-subscription-control.service >/dev/null 2>&1 || true
+    fi
+    removeInstallPath "$(subscriptionWireGuardConfigFile)" "WireGuard控制面配置" || return 1
+    removeInstallPath "$(subscriptionControlServiceFile)" "订阅控制面systemd服务" || return 1
+}
+
 unInstall() {
     autoRead uninstall_confirm "是否确认卸载安装内容？[y/n]:" unInstallStatus
     if [[ "${unInstallStatus}" != "y" ]]; then
@@ -938,6 +947,8 @@ unInstall() {
             successCard "删除sing-box开机自启完成"
         fi
     fi
+
+    cleanupSubscriptionWireGuardControlOnUninstall || uninstallFailed=true
 
     if ! removePadmNginxConfigFragments; then
         uninstallFailed=true

@@ -1795,6 +1795,9 @@ installXrayReality() {
     installTools 1
 
     handleNginx stop
+    if subscriptionWireGuardControlEnabled; then
+        refreshSubscriptionWireGuardNginxControl
+    fi
 
     # 安装 Xray
     installXray 2 false
