@@ -558,6 +558,67 @@ subscriptionSyncMarkResult() {
     subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg now "${now}" --arg status "${status}" --argjson failures "${failures}" '.groups |= map(if .id == $groupId then .sync.last_run = $now | .sync.last_status = $status | .sync.failures = $failures else . end)'
 }
 
+subscriptionQuotaDryRunPlan() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    ensureSubscriptionGroupsState
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
+      .groups[] | select(.id == $groupId) |
+      . as $group |
+      [($group.user_groups[]? |
+        (.traffic_limit_gb // 0 | tonumber? // 0) as $limitGb |
+        ($group.traffic.user_groups[.id] // {upload:0, download:0}) as $traffic |
+        (($traffic.upload // 0) + ($traffic.download // 0)) as $usedBytes |
+        (($limitGb * 1024 * 1024 * 1024) | floor) as $limitBytes |
+        select((.enabled // true) == true and $limitGb > 0 and $usedBytes >= $limitBytes) |
+        {
+          id: .id,
+          name: .name,
+          used_bytes: $usedBytes,
+          limit_gb: $limitGb,
+          percent: (($usedBytes * 100 / $limitBytes) | floor),
+          action: "disable-and-remove-local-account"
+        })]'
+}
+
+applySubscriptionQuotaPlan() {
+    local quotaPlan=$1
+    local id
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        setUserSubscriptionEnabled "${id}" false
+    done < <(jq -r '.[].id' <<<"${quotaPlan}")
+}
+
+applySubscriptionQuotaPlanAccounts() {
+    local quotaPlan=$1
+    local accountPlan
+    accountPlan=$(jq '[.[].id | "sub_" + gsub("-"; "_")] | {create: [], remove: .}' <<<"${quotaPlan}")
+    if [[ "$(jq '.remove | length' <<<"${accountPlan}")" != "0" ]]; then
+        subscriptionSyncApplyAccountPlan "${accountPlan}"
+        reloadCore
+    fi
+}
+
+executeSubscriptionQuotaPlanMenu() {
+    local quotaPlan
+    local confirm=
+    quotaPlan=$(subscriptionQuotaDryRunPlan)
+    userJsonCard "超限处理计划" "${quotaPlan}"
+    if [[ "$(jq 'length' <<<"${quotaPlan}")" == "0" ]]; then
+        statusCard "无需处理" "当前没有已超额且仍启用的分享订阅"
+        return 0
+    fi
+    autoRead subscription_quota_apply_confirm "执行后会停用超额订阅并移除本机托管账号。确认请输入 yes:" confirm
+    if [[ "${confirm}" != "yes" ]]; then
+        statusCard "已取消" "超限处理未执行"
+        return 1
+    fi
+    applySubscriptionQuotaPlan "${quotaPlan}"
+    applySubscriptionQuotaPlanAccounts "${quotaPlan}"
+    successCard "超限处理已执行" "已停用超额分享订阅，并移除本机 sub_<ID> 托管账号" "如需同步被控服务器，请再执行同步"
+}
+
 runSubscriptionGroupSync() {
     local skipSubscribeRefresh=${1:-}
     local id
@@ -619,9 +680,9 @@ manageSubscription() {
         menuLine "常用路径：订阅服务 -> 我的订阅；共享给别人时走 给别人开订阅 -> 立即同步"
         menuItem 1 "订阅服务" "安装/更新订阅发布服务，确认链接入口可用"
         menuItem 2 "我的订阅" "自用链接、可用服务器和我的流量"
-        menuItem 3 "给别人开订阅" "创建用户订阅、同步托管账号并查看链接"
+        menuItem 3 "给别人开订阅" "创建分享订阅、设置节点和额度、同步托管账号并查看链接"
         menuItem 4 "多服务器订阅" "本机作为主控，管理远端被控服务器、Token 和同步结果"
-        menuItem 5 "流量与限额" "刷新/查看流量、查看和执行限额计划"
+        menuItem 5 "流量与限额" "刷新/查看用量，预览并执行超限处理"
         menuItem 6 "自动同步与备份" "自动同步、手动同步、同步计划和状态备份"
         menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
         menuClose
@@ -701,14 +762,14 @@ manageSharedSubscriptions() {
     ensureSubscriptionGroupsState
     while true; do
         echoContent title "\n┌─ 给别人开订阅 ─────────────────────────────────────"
-        menuLine "给别人发独立订阅链接：先创建一个订阅对象，再同步生成托管账号 sub_<ID>"
-        menuLine "服务器范围只决定这个订阅里包含哪些节点；main 是本机，* 是全部已添加服务器"
+        menuLine "这里管理分享订阅对象：给谁开、包含哪些节点、订阅额度是多少"
+        menuLine "同步后会生成托管账号 sub_<ID>；超限停用和批量处理在 流量与限额 中执行"
         menuLine "首次使用请先确认 订阅服务 已安装；一键流程会同步后只刷新一次链接"
-        menuItem 1 "一键创建并生成链接" "填写 ID/名称、节点范围、流量上限，然后同步并输出链接"
+        menuItem 1 "一键创建并生成链接" "填写 ID/名称、节点范围、订阅额度，然后同步并输出链接"
         menuItem 2 "查看已开的订阅" "列出已创建的分享订阅"
-        menuItem 3 "管理已开的订阅" "改节点范围、流量、启停或删除"
-        menuItem 4 "只执行同步" "只把已有订阅变更应用到本机和被控服务器"
-        menuItem 5 "预览本机变更" "查看将创建/删除哪些 sub_ 托管账号"
+        menuItem 3 "管理单个订阅" "改节点范围、额度、启停或删除"
+        menuItem 4 "手动同步订阅变更" "把已有订阅变更应用到本机和被控服务器"
+        menuItem 5 "预览同步变更" "查看将创建/删除哪些 sub_ 托管账号"
         menuReturnItem 6 "返回订阅与用户" "回到上级菜单"
         menuClose
         autoRead shared_subscription_menu "请选择:" sharedSubscriptionStatus
@@ -778,7 +839,7 @@ showUserSubscriptions() {
             menuLine "状态：$(uiStyle warn "${enabled}")"
         fi
         menuLine "可用服务器：$(uiStyle value "${sources}")"
-        menuLine "流量上限GB：$(uiStyle value "${limit}")"
+        menuLine "订阅额度GB：$(uiStyle value "${limit}")"
         case "${quota}" in
         已超限*) menuLine "限额状态：$(uiStyle danger "${quota}")" ;;
         接近上限*) menuLine "限额状态：$(uiStyle warn "${quota}")" ;;
@@ -831,17 +892,17 @@ createAndSyncUserSubscriptionWizard() {
         return 1
     fi
 
-    autoRead user_subscription_traffic_limit "请输入流量上限GB[回车/0为不限，只用于统计和限额策略]:" limit
+    autoRead user_subscription_traffic_limit "请输入订阅额度GB[回车/0为不限；这里只设置额度，超限处理在 流量与限额 中执行]:" limit
     limit=${limit:-0}
     if ! echo "${limit}" | grep -qE '^[0-9]+$'; then
-        errorCard "流量上限必须是数字"
+        errorCard "订阅额度必须是数字"
         return 1
     fi
 
     addUserSubscriptionState "${id}" "${name}"
     setUserSubscriptionSources "${id}" "${sourceJson}"
     setUserSubscriptionTrafficLimit "${id}" "${limit}"
-    statusCard "分享订阅已创建" "订阅ID：${id}" "显示名称：${name}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "流量上限GB：${limit}"
+    statusCard "分享订阅已创建" "订阅ID：${id}" "显示名称：${name}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 流量与限额 执行"
 
     if ! subscriptionGroupSyncEnabled; then
         autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync
@@ -861,7 +922,7 @@ createAndSyncUserSubscriptionWizard() {
         runSubscriptionGroupSync skip-subscribe-refresh || return 1
         showUserSubscriptionLinks "${id}"
     else
-        statusCard "稍后同步" "该订阅已保存；之后可在 给别人开订阅 -> 只执行同步 中生成托管账号和链接"
+        statusCard "稍后同步" "该订阅已保存；之后可在 给别人开订阅 -> 手动同步订阅变更 中生成托管账号和链接"
     fi
 }
 
@@ -902,15 +963,15 @@ manageUserSubscriptionItem() {
     local userSubscriptionId
     userSubscriptionId=$(selectUserSubscriptionId) || return
     while true; do
-        echoContent title "\n┌─ 管理已开的订阅 ───────────────────────────────────"
+        echoContent title "\n┌─ 管理单个订阅 ─────────────────────────────────────"
         menuLine "当前订阅: ${userSubscriptionId}"
-        menuLine "改节点范围、启停或删除后，需要执行同步才会写入核心配置"
+        menuLine "这里只管理订阅对象；超限停用和批量处理在 流量与限额 中执行"
         menuItem 1 "刷新并查看链接" "重新生成订阅输出，显示该订阅的链接"
         menuItem 2 "设置节点范围" "选择 main、被控服务器 ID 或 *"
-        menuItem 3 "查看流量与限额" "查看累计流量和限额状态"
-        menuItem 4 "设置流量上限" "0 表示不限，只影响统计和限额策略"
+        menuItem 3 "查看该订阅用量" "只读查看累计用量和额度状态"
+        menuItem 4 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
         menuItem 5 "启用/停用" "停用后同步会移除对应托管账号"
-        menuItem 6 "预览本机变更" "查看将创建/删除哪些 sub_ 托管账号"
+        menuItem 6 "预览同步变更" "查看将创建/删除哪些 sub_ 托管账号"
         menuDangerItem 7 "删除订阅" "删除记录；同步后移除对应托管账号"
         menuReturnItem 8 "返回给别人开订阅" "回到上级菜单"
         menuClose
@@ -961,13 +1022,13 @@ setUserSubscriptionSourcesMenu() {
 setUserSubscriptionTrafficLimitMenu() {
     local userSubscriptionId=$1
     local limit=
-    autoRead user_subscription_traffic_limit "请输入流量上限GB[0为不限，仅统计和策略使用]:" limit
+    autoRead user_subscription_traffic_limit "请输入订阅额度GB[0为不限；这里只设置额度，不执行超限处理]:" limit
     if [[ -z "${limit}" ]] || ! echo "${limit}" | grep -qE '^[0-9]+$'; then
-        errorCard "流量上限必须是数字"
+        errorCard "订阅额度必须是数字"
         return 1
     fi
     setUserSubscriptionTrafficLimit "${userSubscriptionId}" "${limit}"
-    successCard "流量上限已更新"
+    successCard "订阅额度已更新" "超限停用和批量处理请到 流量与限额 执行"
 }
 
 ensureXrayTrafficStatsConfig() {
@@ -1250,24 +1311,27 @@ showUserSubscriptionTraffic() {
 manageTrafficAndQuota() {
     while true; do
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
-        menuLine "先手动刷新流量，再查看本机、用户订阅和服务器源流量；限额计划可先预览再执行"
+        menuLine "这里是用量治理台：先刷新统计，再查看用量、预览并执行超限处理"
+        menuLine "订阅额度在 给别人开订阅 中设置；这里不编辑订阅对象，只处理运行状态"
         menuItem 1 "刷新流量统计" "采集本机账号流量并写入 groups.json"
         menuItem 2 "查看我的流量" "显示自用账号流量"
-        menuItem 3 "查看用户订阅流量" "选择用户订阅后显示限额状态和来源流量"
-        menuItem 4 "查看服务器流量" "显示各服务器源累计流量"
-        menuItem 5 "预览限额计划" "查看将因超限而禁用/处理的用户订阅"
-        menuItem 6 "执行限额计划" "应用当前限额计划"
-        menuReturnItem 7 "返回订阅与用户" "回到上级菜单"
+        menuItem 3 "查看单个分享订阅用量" "选择订阅后显示用量和额度状态"
+        menuItem 4 "查看全部分享订阅概览" "列出全部分享订阅、额度和状态"
+        menuItem 5 "查看服务器流量" "显示各服务器源累计流量"
+        menuItem 6 "预览超限处理" "查看将因超额而停用的分享订阅"
+        menuDangerItem 7 "执行超限处理" "停用超额订阅并移除本机托管账号"
+        menuReturnItem 8 "返回订阅与用户" "回到上级菜单"
         menuClose
         autoRead traffic_quota_menu "请选择:" trafficQuotaStatus
         case "${trafficQuotaStatus}" in
         1) collectSubscriptionTraffic ;;
         2) showAdminSubscriptionTraffic ;;
         3) selectUserSubscriptionTrafficMenu ;;
-        4) showSubscriptionSourcesTraffic ;;
-        5) userJsonCard "限额计划" "$(subscriptionQuotaDryRunPlan)" ;;
-        6) executeSubscriptionQuotaPlanMenu ;;
-        7) return ;;
+        4) showUserSubscriptions ;;
+        5) showSubscriptionSourcesTraffic ;;
+        6) userJsonCard "超限处理计划" "$(subscriptionQuotaDryRunPlan)" ;;
+        7) executeSubscriptionQuotaPlanMenu ;;
+        8) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
@@ -1539,8 +1603,8 @@ manageSubscriptionSyncSettings() {
         menuItem 3 "立即执行同步" "立即应用同步计划"
         menuItem 4 "查看本机同步计划" "预览本机 create/remove"
         menuItem 5 "查看远程同步计划" "预览远端同步计划"
-        menuItem 6 "查看限额计划" "预览超限用户处理"
-        menuDangerItem 7 "执行限额计划" "停用超限用户并等待同步移除账号"
+        menuItem 6 "查看超限处理计划" "预览超额用户处理"
+        menuDangerItem 7 "执行超限处理" "停用超额用户并等待同步移除账号"
         menuItem 8 "开启/关闭远程同步" "切换远端同步状态"
         menuItem 9 "开启/关闭限额自动执行" "切换自动执行超限策略"
         menuItem 10 "查看定时任务" "显示当前 cron 配置"
@@ -1571,7 +1635,7 @@ manageSubscriptionSyncSettings() {
             userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
             ;;
         5) userJsonCard "远程同步计划" "$(subscriptionRemoteSyncPlan)" ;;
-        6) userJsonCard "限额计划" "$(subscriptionQuotaDryRunPlan)" ;;
+        6) userJsonCard "超限处理计划" "$(subscriptionQuotaDryRunPlan)" ;;
         7) executeSubscriptionQuotaPlanMenu ;;
         8)
             subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.remote_enabled = ((.sync.remote_enabled // true) | not) else . end)'

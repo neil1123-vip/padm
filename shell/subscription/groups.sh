@@ -312,6 +312,39 @@ setUserSubscriptionTrafficLimit() {
     subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --argjson limit "${limit}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .traffic_limit_gb = $limit else . end) else . end)'
 }
 
+setUserSubscriptionEnabled() {
+    local id=$1
+    local enabled=$2
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --argjson enabled "${enabled}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .enabled = $enabled else . end) else . end)'
+}
+
+userSubscriptionExists() {
+    local id=$1
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -e --arg groupId "${groupId}" --arg id "${id}" '.groups[] | select(.id == $groupId) | any(.user_groups[]?; .id == $id)' >/dev/null 2>&1
+}
+
+subscriptionGroupSyncEnabled() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .sync.enabled == true' >/dev/null 2>&1
+}
+
+subscriptionGroupRemoteSyncEnabled() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.remote_enabled // true) == true' >/dev/null 2>&1
+}
+
+subscriptionGroupQuotaAutoApplyEnabled() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
+}
+
 setSubscriptionSources() {
     local sources=$1
     local groupId

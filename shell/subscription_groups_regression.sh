@@ -2088,6 +2088,19 @@ JSON
     removeSubscriptionSourceState edge
     jq -e '(.groups[0].sources | map(.id) | index("edge") | not) and (.groups[0].traffic.sources | has("edge") | not) and (.groups[0].traffic.user_groups["team-a"].sources | has("edge") | not)' "$(subscriptionGroupsFile)" >/dev/null
 
+    subscriptionGroupsStateWrite '
+      .groups[0].user_groups[0].enabled = true |
+      .groups[0].user_groups[0].traffic_limit_gb = 1 |
+      .groups[0].traffic.user_groups["team-a"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
+    '
+    subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
+    applySubscriptionQuotaPlan "$(subscriptionQuotaDryRunPlan)"
+    jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
+    subscriptionSyncPlanFromAccounts() {
+        jq -n '{create:[], remove:["sub_team_a"]}'
+    }
+    subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
+
     currentHost="self.example.com"
     subscribeDomain="self.example.com"
     subscribePort=39778
@@ -2693,7 +2706,7 @@ r"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"5
-7
+8
 7"
     assertMenuAction menu
     resetMenuActions
@@ -2821,15 +2834,15 @@ y
     assertMenuAction menu
     resetMenuActions
     manageTrafficAndQuota <<<"1
-7"
+8"
     assertMenuAction collectSubscriptionTraffic
     resetMenuActions
-    manageTrafficAndQuota <<<"5
-7"
+    manageTrafficAndQuota <<<"6
+8"
     assertMenuAction subscriptionQuotaDryRunPlan
     resetMenuActions
-    manageTrafficAndQuota <<<"6
-7"
+    manageTrafficAndQuota <<<"7
+8"
     assertMenuAction executeSubscriptionQuotaPlanMenu
     resetMenuActions
     manageSubscriptionAutomation <<<"1
@@ -2861,7 +2874,7 @@ y
     manageSubscriptionServers <<<"10"
     assertMenuAction menu
     resetMenuActions
-    manageTrafficAndQuota <<<"7"
+    manageTrafficAndQuota <<<"8"
     assertMenuAction menu
     resetMenuActions
     coreVersionManageMenu <<<"6"
