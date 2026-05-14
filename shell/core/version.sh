@@ -96,5 +96,7 @@ setScriptVersion() {
         return 1
     }
     mv "${tmpFile}" "${versionFile}"
-    declare -F padmForgetCleanupPath >/dev/null 2>&1 && padmForgetCleanupPath "${tmpFile}"
+    if declare -F padmForgetCleanupPath >/dev/null 2>&1; then
+        padmForgetCleanupPath "${tmpFile}"
+    fi
 }
