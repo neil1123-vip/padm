@@ -379,23 +379,75 @@ addNginx302() {
 
 # 更新脚本
 updatePadm() {
+    local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
+    local installPath="${installDir}/install.sh"
+    local backupPath="${installDir}/install.sh.bak"
+    local tmpDir newInstall
+    if ! mkdir -p "${installDir}"; then
+        errorCard "更新入口目录创建失败"
+        return 1
+    fi
     progressCard "$1" "更新管理脚本"
-    rm -rf /etc/padm/install.sh
-    if [[ "${release}" == "alpine" ]]; then
-        wget -c -q -P /etc/padm/ -N "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"
+
+    if declare -F padmCreateTempPath >/dev/null 2>&1; then
+        padmCreateTempPath tmpDir -d /tmp/padm-update.XXXXXX || { errorCard "更新入口临时目录创建失败"; return 1; }
     else
-        downloadFile -P /etc/padm/ "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"
+        tmpDir=$(mktemp -d /tmp/padm-update.XXXXXX) || { errorCard "更新入口临时目录创建失败"; return 1; }
+    fi
+    newInstall="${tmpDir}/install.sh"
+
+    if [[ "${release}" == "alpine" ]]; then
+        if ! wget -c -q -P "${tmpDir}/" -N "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"; then
+            padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+            errorCard "更新入口下载失败"
+            return 1
+        fi
+    elif ! downloadFile -P "${tmpDir}/" "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"; then
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "更新入口下载失败"
+        return 1
     fi
 
-    sudo chmod 700 /etc/padm/install.sh
+    if [[ ! -s "${newInstall}" ]] || ! bash -n "${newInstall}" || ! grep -q "ensureScriptModules" "${newInstall}"; then
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "新版入口校验失败，已保留旧入口"
+        return 1
+    fi
 
-    successCard "更新完毕"
-    statusCard "下一步" "请手动执行 [padm] 打开脚本"
-    successCard "当前版本：$(getScriptVersion)\n"
-    menuLine "$(uiStyle warn "如更新不成功，请手动执行下面命令")"
+    rm -f "${backupPath}"
+    if [[ -f "${installPath}" ]] && ! cp "${installPath}" "${backupPath}"; then
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "旧入口备份失败，已取消更新"
+        return 1
+    fi
+    if ! mv "${newInstall}" "${installPath}" || ! sudo chmod 700 "${installPath}"; then
+        [[ -f "${backupPath}" ]] && mv "${backupPath}" "${installPath}"
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "更新入口替换失败，已尝试恢复旧入口"
+        return 1
+    fi
+    padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+
+    successCard "更新入口已下载，正在重新打开新版脚本"
+    if "${installPath}"; then
+        rm -f "${backupPath}"
+        exit 0
+    fi
+
+    if [[ -f "${backupPath}" ]]; then
+        if mv "${backupPath}" "${installPath}"; then
+            sudo chmod 700 "${installPath}" >/dev/null 2>&1 || true
+            errorCard "新版入口执行失败，已恢复旧入口"
+        else
+            errorCard "新版入口执行失败，旧入口恢复失败，请手动恢复 ${backupPath}"
+        fi
+    else
+        errorCard "新版入口执行失败，旧入口备份不存在"
+    fi
+    menuLine "$(uiStyle warn "请手动执行下面命令重新更新")"
     menuLine "$(uiStyle value "wget -P /root -N https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh && chmod 700 /root/install.sh && /root/install.sh")"
     echo
-    exit 0
+    return 1
 }
 
 disableRunningService() {

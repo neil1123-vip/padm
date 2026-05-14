@@ -5,6 +5,17 @@ REPO_ZIP_URL="https://github.com/neil1123-vip/padm/archive/refs/heads/main.tar.g
 REPO_ARCHIVE_DIR="padm-main"
 SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
 
+restoreScriptModuleBackup() {
+    local backupDir=$1
+    local scriptDir=$2
+    [[ -d "${backupDir}" ]] || return 0
+    rm -rf "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md"
+    [[ -e "${backupDir}/shell" ]] && mv "${backupDir}/shell" "${scriptDir}/shell"
+    [[ -e "${backupDir}/documents" ]] && mv "${backupDir}/documents" "${scriptDir}/documents"
+    [[ -e "${backupDir}/assets" ]] && mv "${backupDir}/assets" "${scriptDir}/assets"
+    [[ -e "${backupDir}/README.md" ]] && mv "${backupDir}/README.md" "${scriptDir}/README.md"
+}
+
 fetchRemoteRef() {
     local metadata
     if command -v curl >/dev/null 2>&1; then
@@ -19,9 +30,10 @@ fetchRemoteRef() {
 
 refreshScriptModules() {
     local remoteRef=$1
-    local tmpDir archiveDir
+    local tmpDir archiveDir backupDir copyStatus
     tmpDir=$(mktemp -d /tmp/padm.XXXXXX) || exit 1
-    trap 'rm -rf "${tmpDir}"' EXIT INT TERM
+    backupDir="${SCRIPT_DIR}/.padm-update-backup"
+    trap 'restoreScriptModuleBackup "${backupDir}" "${SCRIPT_DIR}"; rm -rf "${backupDir}" "${tmpDir}"' EXIT INT TERM
     archiveDir="${tmpDir}/${REPO_ARCHIVE_DIR}"
 
     printf '正在下载最新完整安装包\n'
@@ -41,13 +53,38 @@ refreshScriptModules() {
         exit 1
     fi
 
-    rm -rf "${SCRIPT_DIR}/shell" "${SCRIPT_DIR}/documents" "${SCRIPT_DIR}/assets"
+    rm -rf "${backupDir}"
+    mkdir -p "${backupDir}"
+    [[ -e "${SCRIPT_DIR}/shell" ]] && mv "${SCRIPT_DIR}/shell" "${backupDir}/shell"
+    [[ -e "${SCRIPT_DIR}/documents" ]] && mv "${SCRIPT_DIR}/documents" "${backupDir}/documents"
+    [[ -e "${SCRIPT_DIR}/assets" ]] && mv "${SCRIPT_DIR}/assets" "${backupDir}/assets"
+    [[ -e "${SCRIPT_DIR}/README.md" ]] && mv "${SCRIPT_DIR}/README.md" "${backupDir}/README.md"
+
     cp -R "${archiveDir}/shell" "${SCRIPT_DIR}/"
-    [[ -d "${archiveDir}/documents" ]] && cp -R "${archiveDir}/documents" "${SCRIPT_DIR}/"
-    [[ -d "${archiveDir}/assets" ]] && cp -R "${archiveDir}/assets" "${SCRIPT_DIR}/"
-    [[ -f "${archiveDir}/README.md" ]] && cp "${archiveDir}/README.md" "${SCRIPT_DIR}/README.md"
+    copyStatus=$?
+    if [[ ${copyStatus} -eq 0 && -d "${archiveDir}/documents" ]]; then
+        cp -R "${archiveDir}/documents" "${SCRIPT_DIR}/"
+        copyStatus=$?
+    fi
+    if [[ ${copyStatus} -eq 0 && -d "${archiveDir}/assets" ]]; then
+        cp -R "${archiveDir}/assets" "${SCRIPT_DIR}/"
+        copyStatus=$?
+    fi
+    if [[ ${copyStatus} -eq 0 && -f "${archiveDir}/README.md" ]]; then
+        cp "${archiveDir}/README.md" "${SCRIPT_DIR}/README.md"
+        copyStatus=$?
+    fi
+
+    if [[ ${copyStatus} -ne 0 ]]; then
+        restoreScriptModuleBackup "${backupDir}" "${SCRIPT_DIR}"
+        printf '完整安装包替换失败，已恢复旧模块\n'
+        rm -rf "${backupDir}" "${tmpDir}"
+        trap - EXIT INT TERM
+        exit 1
+    fi
+
     [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_REF_FILE}"
-    rm -rf "${tmpDir}"
+    rm -rf "${backupDir}" "${tmpDir}"
     trap - EXIT INT TERM
 }
 

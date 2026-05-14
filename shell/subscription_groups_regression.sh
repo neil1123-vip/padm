@@ -41,6 +41,11 @@ menuDangerItem() {
     return 0
 }
 
+uiStyle() {
+    shift
+    printf '%s' "$*"
+}
+
 statusCard() {
     printf '%s\n' "$*" >>"${REGRESSION_STATUS_CARD_LOG:-/dev/null}"
 }
@@ -50,6 +55,9 @@ progressCard() {
 }
 
 successCard() {
+    if [[ -n "${REGRESSION_SUCCESS_CARD_LOG:-}" ]]; then
+        printf '%s\n' "$*" >>"${REGRESSION_SUCCESS_CARD_LOG}"
+    fi
     return 0
 }
 
@@ -61,6 +69,8 @@ menuClose() {
     return 0
 }
 
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/version.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/platform.sh"
 # shellcheck source=/dev/null
@@ -3078,6 +3088,129 @@ regressionEnsureScriptModules() {
     fi
 }
 
+runUpdatePadmVersionPromptRegression() {
+    local successLog errorLog installDir
+    successLog="${TMP_DIR}/update-padm-success.log"
+    errorLog="${TMP_DIR}/update-padm-error.log"
+    installDir="${TMP_DIR}/update-padm-install"
+    mkdir -p "${installDir}"
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
+    chmod 700 "${installDir}/install.sh"
+
+    (
+        REGRESSION_SUCCESS_CARD_LOG="${successLog}"
+        REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${installDir}"
+
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+printf 'new-entry-ok\n'
+exit 0
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+        sudo() { "$@"; }
+
+        updatePadm 1
+    ) >"${TMP_DIR}/update-padm-run-ok.log" 2>&1
+    grep -q '更新入口已下载，正在重新打开新版脚本' "${successLog}"
+    grep -q 'new-entry-ok' "${successLog}" && return 1
+    [[ ! -e "${installDir}/install.sh.bak" ]]
+    "${installDir}/install.sh" | grep -q 'new-entry-ok'
+
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
+    chmod 700 "${installDir}/install.sh"
+    : >"${errorLog}"
+    (
+        REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${installDir}"
+
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+exit 23
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+        sudo() { "$@"; }
+
+        updatePadm 1
+    ) >"${TMP_DIR}/update-padm-run-fail.log" 2>&1 && return 1
+    grep -q '新版入口执行失败，已恢复旧入口' "${errorLog}"
+    "${installDir}/install.sh" | grep -q 'old-entry'
+}
+
+runInstallRefreshRestoresBackupRegression() {
+    local fixtureDir archiveRoot outputLog archiveDirName
+    fixtureDir="${TMP_DIR}/install-refresh-restore"
+    archiveDirName="padm-main"
+    archiveRoot="${fixtureDir}/archive/${archiveDirName}"
+    outputLog="${fixtureDir}/refresh.log"
+    mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${archiveRoot}/shell" "${archiveRoot}/documents"
+    printf 'old-shell\n' >"${fixtureDir}/shell/marker"
+    printf 'old-doc\n' >"${fixtureDir}/documents/marker"
+    printf 'old-readme\n' >"${fixtureDir}/README.md"
+    printf 'new-shell\n' >"${archiveRoot}/shell/marker"
+    printf 'new-doc\n' >"${archiveRoot}/documents/marker"
+    printf 'new-readme\n' >"${archiveRoot}/README.md"
+
+    (
+        set +e
+        eval "$(awk '
+            /^restoreScriptModuleBackup\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="${fixtureDir}"
+        REPO_ARCHIVE_DIR="${archiveDirName}"
+        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        REPO_ZIP_URL="fixture.tar.gz"
+        command() {
+            if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        curl() { tar -cz -C "${fixtureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
+        cp() {
+            if [[ "$1" == "-R" && "$2" == *"/documents" ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        refreshScriptModules new-ref
+    ) >"${outputLog}" 2>&1
+    grep -q '完整安装包替换失败，已恢复旧模块' "${outputLog}"
+    [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+    [[ "$(<"${fixtureDir}/documents/marker")" == "old-doc" ]]
+    [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
+    [[ ! -e "${fixtureDir}/.padm-ref" ]]
+    [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -3125,6 +3258,8 @@ runInstallEnsureModulesRegression() {
 
 runRegressionPlatform() {
     runRegressionStep cleanup-trap runCleanupTrapRegression
+    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
+    runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression
     runRegressionStep install-entry-refresh runInstallEnsureModulesRegression
     runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression
     runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression
