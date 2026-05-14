@@ -524,6 +524,25 @@ realityTargetRecentlyFailed() {
     [[ $((now - checkedAt)) -lt 86400 ]]
 }
 
+formatRealityTargetResultLine() {
+    local target=$1
+    local sni=$2
+    local name=$3
+    local category=$4
+    local cdnRisk=$5
+    local ip=$6
+    local asn=$7
+    local asOrg=$8
+    local networkMatch=$9
+    local score=${10}
+    local pqc=${11}
+    local certLength=${12}
+    local tls13=${13}
+    local checkedAt=${14}
+    local note=${15}
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
+}
+
 writeRealityTargetResultLine() {
     local target=$1
     local sni=$2
@@ -549,8 +568,69 @@ writeRealityTargetResultLine() {
     else
         : >"${tmpFile}"
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${tmpFile}"
+    formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${tmpFile}"
     mv "${tmpFile}" "${resultsFile}"
+}
+
+writeRealityTargetResultLines() {
+    local linesFile=$1
+    local resultsFile tmpFile
+    [[ -s "${linesFile}" ]] || return 0
+    resultsFile=$(realityTargetResultsFile)
+    mkdir -p "$(dirname "${resultsFile}")"
+    tmpFile="${resultsFile}.tmp"
+    if [[ -f "${resultsFile}" ]]; then
+        awk -F'\t' '
+          NR == FNR {
+            if (!($1 in seen)) order[++count] = $1
+            seen[$1] = 1
+            line[$1] = $0
+            next
+          }
+          !($1 in seen) { print }
+          END {
+            for (i = 1; i <= count; i++) print line[order[i]]
+          }
+        ' "${linesFile}" "${resultsFile}" >"${tmpFile}"
+    else
+        awk -F'\t' '
+          {
+            if (!($1 in seen)) order[++count] = $1
+            seen[$1] = 1
+            line[$1] = $0
+          }
+          END {
+            for (i = 1; i <= count; i++) print line[order[i]]
+          }
+        ' "${linesFile}" >"${tmpFile}"
+    fi
+    mv "${tmpFile}" "${resultsFile}"
+}
+
+removeRealityTargetsFromUnifiedLibrary() {
+    local targetsFile=$1
+    local resultsFile candidatesFile tmpFile hostsFile target parsed host
+    [[ -s "${targetsFile}" ]] || return 0
+    resultsFile=$(realityTargetResultsFile)
+    if [[ -f "${resultsFile}" ]]; then
+        tmpFile="${resultsFile}.tmp"
+        awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets)' "${targetsFile}" "${resultsFile}" >"${tmpFile}"
+        mv "${tmpFile}" "${resultsFile}"
+    fi
+    candidatesFile=${PADM_REALITY_TARGET_CANDIDATES_FILE:-}
+    [[ -n "${candidatesFile}" && -f "${candidatesFile}" ]] || return 0
+    hostsFile="${targetsFile}.hosts"
+    : >"${hostsFile}"
+    while IFS= read -r target; do
+        [[ -n "${target}" ]] || continue
+        parsed=$(parseHostPort "${target}" 443)
+        host=${parsed%:*}
+        printf '%s\n' "${host}" >>"${hostsFile}"
+    done <"${targetsFile}"
+    tmpFile="${candidatesFile}.tmp"
+    awk -F'|' 'NR == FNR {hosts[$1] = 1; next} !($1 in hosts)' "${hostsFile}" "${candidatesFile}" >"${tmpFile}"
+    mv "${tmpFile}" "${candidatesFile}"
+    rm -f "${hostsFile}"
 }
 
 sortedRealityTargetResults() {
@@ -1439,6 +1519,7 @@ importRealityScannerResults() {
     local currentOrg=${3:-}
     local summaryVar=${4:-}
     local detector ip origin domain issuer geo target tlsPingResult result score pqc certLength tls13 note checkedAt imported=0 skipped=0 processed=0 totalRecords importStart lastProgressAt=0 now profile candidateAsn candidateOrg networkMatch countA=0 countB=0 countC=0 countFail=0
+    local resultLinesFile failedTargetsFile
     [[ -f "${sourceFile}" ]] || {
         realityTargetStatusBlock red "RealiTLScanner 导入" "CSV 不存在: ${sourceFile}"
         return 1
@@ -1456,6 +1537,8 @@ importRealityScannerResults() {
         fi
     fi
     totalRecords=$(awk -F, 'NR > 1 && $1 != "" {count++} END{print count + 0}' "${sourceFile}")
+    resultLinesFile=$(mktemp)
+    failedTargetsFile=$(mktemp)
     importStart=$(date +%s)
     while IFS=, read -r ip origin domain issuer geo; do
         [[ "${ip}" == "IP" ]] && continue
@@ -1478,7 +1561,7 @@ importRealityScannerResults() {
         profile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}")
         IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${profile}"
         if ! tlsPingResult=$("${detector}" tls ping -ip "${ip}" "${target}" 2>&1); then
-            removeRealityTargetFromUnifiedLibrary "${target}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}"
             countFail=$((countFail + 1))
             skipped=$((skipped + 1))
             continue
@@ -1487,12 +1570,12 @@ importRealityScannerResults() {
         IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
         checkedAt=$(date +%s)
         if [[ "${score}" == "FAIL" ]]; then
-            removeRealityTargetFromUnifiedLibrary "${target}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}"
             countFail=$((countFail + 1))
             skipped=$((skipped + 1))
             continue
         fi
-        writeRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "unknown" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}"
+        formatRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "unknown" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}" >>"${resultLinesFile}"
         case "${score}" in
         A) countA=$((countA + 1)) ;;
         B) countB=$((countB + 1)) ;;
@@ -1500,6 +1583,9 @@ importRealityScannerResults() {
         esac
         imported=$((imported + 1))
     done < "${sourceFile}"
+    writeRealityTargetResultLines "${resultLinesFile}"
+    removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
+    rm -f "${resultLinesFile}" "${failedTargetsFile}"
     if [[ -n "${summaryVar}" ]]; then
         printf -v "${summaryVar}" '%s\t%s\t%s\t%s\t%s\t%s' "${imported}" "${skipped}" "${countA}" "${countB}" "${countC}" "${countFail}"
     fi
@@ -2144,6 +2230,7 @@ selectRealityTargetFromScanResults() {
 
 scanLocalAsnRealityTargets() {
     local detector networkProfile currentIp currentAsn currentOrg line host sni target name category cdnRisk ip candidateProfile candidateAsn candidateOrg source tlsPingResult result score pqc certLength tls13 note checkedAt scanned=0 resolved=0 failed=0 sameAsn=0 sameProvider=0 differentNetwork=0 scanStart scanSeconds totalCandidates lastProgressAt=0 now
+    local resultLinesFile failedTargetsFile
     if ! detector=$(realityTargetDetector); then
         realityTargetStatusBlock yellow "REALITY 目标站扫描" "未找到 xray，无法扫描目标质量" "安装核心后再执行扫描"
         return 1
@@ -2154,6 +2241,8 @@ scanLocalAsnRealityTargets() {
     fi
     scanStart=$(date +%s)
     totalCandidates=$(realityTargetCandidateCount)
+    resultLinesFile=$(mktemp)
+    failedTargetsFile=$(mktemp)
     currentIp=${networkProfile%%$'\t'*}
     local rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
@@ -2195,19 +2284,22 @@ scanLocalAsnRealityTargets() {
             result=$(scoreRealityTargetFromTlsPing "")
             IFS=$'\t' read -r score pqc certLength tls13 _note <<<"${result}"
             note="tls ping 失败，已从统一目标库剔除"
-            removeRealityTargetFromUnifiedLibrary "${target}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}"
             continue
         fi
         result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
         IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
         checkedAt=$(date +%s)
         if [[ "${score}" == "FAIL" ]]; then
-            removeRealityTargetFromUnifiedLibrary "${target}"
+            printf '%s\n' "${target}" >>"${failedTargetsFile}"
             continue
         fi
-        writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${source}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
+        formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${source}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${resultLinesFile}"
     done < <(realityTargetCandidates)
 
+    writeRealityTargetResultLines "${resultLinesFile}"
+    removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
+    rm -f "${resultLinesFile}" "${failedTargetsFile}"
     scanSeconds=$(( $(date +%s) - scanStart ))
     realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "候选: ${scanned}" "ASN 已识别: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "解析/ASN 失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then

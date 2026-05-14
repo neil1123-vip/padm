@@ -1637,7 +1637,7 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine
+    local scannerLine batchLinesFile failedTargetsFile
     cat >"${scannerCandidatesFile}" <<'EOF'
 fail-auto.example.com|fail-auto.example.com|Fail Auto|global|large_site|unknown|1|yes|fixture failing candidate
 www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|2|yes|fixture fallback candidate
@@ -1662,9 +1662,23 @@ CSV
     [[ "$(realityTargetResultField "${scannerLine}" 7)" == "AS64501" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 8)" == "RemoteNet" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 9)" == "different_network" ]]
-    writeRealityTargetResultLine "fail.example.com:443" "fail.example.com" "Fail Example" "scanner" "unknown" "192.0.2.14" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "stale target"
-    importRealityScannerResults "${TMP_DIR}/realitlscanner-fail.csv" "AS64500" "ExampleNet"
-    ! grep -qF $'fail.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    batchLinesFile="${TMP_DIR}/reality-batch-lines.tsv"
+    failedTargetsFile="${TMP_DIR}/reality-failed-targets.txt"
+    writeRealityTargetResultLine "batch-old.example.com:443" "old.example.com" "Old Batch" "test" "unknown" "192.0.2.20" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567800" "old batch line"
+    {
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-old.example.com:443" "new.example.com" "New Batch" "test" "unknown" "192.0.2.21" "AS64500" "ExampleNet" "same_asn" "A" "yes" "8192" "yes" "1234567899" "new batch line"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "batch-new.example.com:443" "batch-new.example.com" "Batch New" "test" "unknown" "192.0.2.22" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567898" "second batch line"
+    } >"${batchLinesFile}"
+    writeRealityTargetResultLines "${batchLinesFile}"
+    batchLine=$(grep -F $'batch-old.example.com:443\tnew.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}")
+    [[ "$(realityTargetResultField "${batchLine}" 10)" == "A" ]]
+    grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    printf '%s\n' "batch-old.example.com:443" >"${failedTargetsFile}"
+    writeRealityTargetCandidateLine "batch-old.example.com" "batch-old.example.com" "Batch Old" "global" "large_site" "unknown" "9" "yes" "batch candidate" >>"${scannerCandidatesFile}"
+    removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
+    ! grep -qF $'batch-old.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
+    ! grep -qF 'batch-old.example.com|' "${scannerCandidatesFile}"
+
     rm -f "${PADM_REALITY_TARGET_SCAN_FILE}" "${REALITY_TLS_PING_ARGS_FILE}"
     realityTargetCandidateBlocked "images.apple.com"
     unset AUTO_REALITY_SERVER_NAME
