@@ -738,15 +738,15 @@ corePortWriteAddFiles() {
 corePortApplyFileTransaction() {
     local action=$1
     local backupDir
-    backupDir=$(mktemp -d /tmp/padm-core-port.XXXXXX) || return 1
+    padmCreateTempPath backupDir -d /tmp/padm-core-port.XXXXXX || return 1
     corePortBackupFiles "${backupDir}"
     shift
     if ! "${action}" "$@" || ! corePortValidateFiles; then
         corePortRollbackFiles "${backupDir}"
-        rm -rf "${backupDir}"
+        padmRemoveCleanupPath "${backupDir}"
         return 1
     fi
-    rm -rf "${backupDir}"
+    padmRemoveCleanupPath "${backupDir}"
 }
 
 writeCoreDokodemoInbound() {
@@ -1591,7 +1591,7 @@ renderSubscribeUserOutputs() {
 
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
-    stageDir=$(mktemp -d /tmp/padm-subscribe-user.XXXXXX) || return 1
+    padmCreateTempPath stageDir -d /tmp/padm-subscribe-user.XXXXXX || return 1
     mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/clashMetaProfiles" "${stageDir}/sing-box" "${stageDir}/sing-box_profiles"
 
     defaultPath="${stageDir}/default/${emailMd5}"
@@ -1601,14 +1601,14 @@ renderSubscribeUserOutputs() {
     singBoxPath="${stageDir}/sing-box/${emailMd5}"
 
     if ! cp "${localBase}/default/${email}" "${defaultPath}"; then
-        rm -rf "${stageDir}"
+        padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
     if [[ "${updateRemoteStatus}" == "y" ]]; then
         PADM_SUBSCRIBE_DIR="${stageDir}" updateRemoteSubscribe "${emailMd5}" "${email}"
     fi
     if ! base64Result=$(base64 -w 0 "${defaultPath}"); then
-        rm -rf "${stageDir}"
+        padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
     printf '%s\n' "${base64Result}" >"${defaultPath}"
@@ -1617,17 +1617,17 @@ renderSubscribeUserOutputs() {
         {
             printf 'proxies:\n'
             cat "${localBase}/clashMeta/${email}"
-        } >"${clashPath}" || { rm -rf "${stageDir}"; return 1; }
+        } >"${clashPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         clashProxyUrl="${subscribeType}://${currentDomain}/s/clashMeta/${emailMd5}"
         if ! clashMetaConfig "${clashProxyUrl}" "${emailMd5}" "${clashProfilePath}"; then
-            rm -rf "${stageDir}"
+            padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
     fi
 
     if [[ -f "${localBase}/sing-box/${email}" ]]; then
         if ! cp "${localBase}/sing-box/${email}" "${singBoxProfilePath}"; then
-            rm -rf "${stageDir}"
+            padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
         [[ -z "${showStatus}" ]] && statusCard "sing-box 通用配置" "正在下载 sing-box 通用配置文件"
@@ -1638,16 +1638,16 @@ renderSubscribeUserOutputs() {
             downloadFile -O "${singBoxPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/documents/sing-box.json"
         fi
         if ! singBoxOutboundTags=$(jq -c '. | map(.tag)' "${localBase}/sing-box/${email}"); then
-            rm -rf "${stageDir}"
+            padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
         if ! jq --argjson tags "${singBoxOutboundTags}" '.outbounds |= map(if has("outbounds") then .outbounds += $tags else . end)' "${singBoxPath}" >"${singBoxPath}.tmp"; then
-            rm -rf "${stageDir}"
+            padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
         mv "${singBoxPath}.tmp" "${singBoxPath}"
         if ! jq --slurpfile localOutbounds "${localBase}/sing-box/${email}" '.outbounds += $localOutbounds[0]' "${singBoxPath}" >"${singBoxPath}.tmp"; then
-            rm -rf "${stageDir}"
+            padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
         mv "${singBoxPath}.tmp" "${singBoxPath}"
@@ -1658,7 +1658,7 @@ renderSubscribeUserOutputs() {
     commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}"
     commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}"
     commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}"
-    rm -rf "${stageDir}"
+    padmRemoveCleanupPath "${stageDir}"
 }
 
 # 订阅

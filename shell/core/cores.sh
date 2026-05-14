@@ -59,7 +59,7 @@ commitGeneratedFile() {
     if [[ -n "${mode}" ]]; then
         chmod "${mode}" "${tmpFile}" || return 1
     fi
-    mv "${tmpFile}" "${targetFile}"
+    mv "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
 }
 
 commitGeneratedJsonFile() {
@@ -74,9 +74,10 @@ writeGeneratedJsonFile() {
     local tmpPrefix=$2
     local tmpFile
 
-    tmpFile=$(mktemp "/tmp/${tmpPrefix}.XXXXXX") || return 1
-    cat >"${tmpFile}" || { rm -f "${tmpFile}"; return 1; }
-    commitGeneratedJsonFile "${tmpFile}" "${targetFile}" || { rm -f "${tmpFile}"; return 1; }
+    padmCreateTempPath tmpFile "/tmp/${tmpPrefix}.XXXXXX" || return 1
+    cat >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    commitGeneratedJsonFile "${tmpFile}" "${targetFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    padmForgetCleanupPath "${tmpFile}"
 }
 
 # 安装 sing-box
@@ -363,24 +364,24 @@ showCoreStatusOverview() {
 installDownloadedXrayBinary() {
     local version=$1
     local tmpDir oldBinary backupBinary newBinary
-    tmpDir=$(mktemp -d /etc/padm/tmp.xray.XXXXXX)
+    padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.XXXXXX || return 1
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         return 1
     fi
     if ! unzip -o "${tmpDir}/${xrayCoreCPUVendor}.zip" -d "${tmpDir}" >/dev/null; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         errorCard "Xray-core 解压失败"
         return 1
     fi
     newBinary="${tmpDir}/xray"
     if [[ ! -x "${newBinary}" ]]; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         errorCard "Xray-core 资产中未找到 xray 二进制"
         return 1
     fi
     if [[ -d /etc/padm/xray/conf ]] && ! validateXrayConfigWithBinary "${newBinary}" /tmp/padm-core-xray-upgrade-test.log; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         statusCard "Xray 配置校验失败" "已取消升级" "排查日志: /tmp/padm-core-xray-upgrade-test.log"
         return 1
     fi
@@ -397,7 +398,7 @@ installDownloadedXrayBinary() {
     handleXray start
     SERVICE_QUEUE_ALLOW_FAILURE=
     if xrayInstalled && xrayRunning; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}"
         return 0
     fi
@@ -406,7 +407,7 @@ installDownloadedXrayBinary() {
     SERVICE_QUEUE_ALLOW_FAILURE=true
     handleXray start
     SERVICE_QUEUE_ALLOW_FAILURE=
-    rm -rf "${tmpDir}"
+    padmRemoveCleanupPath "${tmpDir}"
     statusCard "Xray-core 更新失败" "已尝试恢复旧二进制" "排查日志: /tmp/padm-core-xray-upgrade-test.log"
     return 1
 }
@@ -414,26 +415,26 @@ installDownloadedXrayBinary() {
 installDownloadedSingBoxBinary() {
     local version=$1
     local tmpDir asset oldBinary backupBinary extractedDir newBinary
-    tmpDir=$(mktemp -d /etc/padm/tmp.sing-box.XXXXXX)
+    padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
     asset="sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         return 1
     fi
     if ! tar zxf "${tmpDir}/${asset}" -C "${tmpDir}" >/dev/null 2>&1; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         errorCard "sing-box 解压失败"
         return 1
     fi
     extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
     newBinary="${extractedDir}/sing-box"
     if [[ ! -x "${newBinary}" ]]; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         errorCard "sing-box 资产中未找到 sing-box 二进制"
         return 1
     fi
     if [[ -d /etc/padm/sing-box/conf ]] && ! validateSingBoxConfigWithBinary "${newBinary}" /tmp/padm-core-sing-box-upgrade-test.log; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         statusCard "sing-box 配置校验失败" "已取消升级" "排查日志: /tmp/padm-core-sing-box-upgrade-test.log"
         return 1
     fi
@@ -450,7 +451,7 @@ installDownloadedSingBoxBinary() {
     handleSingBox start
     SERVICE_QUEUE_ALLOW_FAILURE=
     if singBoxInstalled && singBoxRunning; then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}"
         return 0
     fi
@@ -459,7 +460,7 @@ installDownloadedSingBoxBinary() {
     SERVICE_QUEUE_ALLOW_FAILURE=true
     handleSingBox start
     SERVICE_QUEUE_ALLOW_FAILURE=
-    rm -rf "${tmpDir}"
+    padmRemoveCleanupPath "${tmpDir}"
     statusCard "sing-box 更新失败" "已尝试恢复旧二进制" "排查日志: /tmp/padm-core-sing-box-upgrade-test.log"
     return 1
 }
@@ -585,10 +586,10 @@ checkGFWStatue() {
 installAlpineStartup() {
     local serviceName=$1
     local tmpFile
-    tmpFile=$(mktemp "/tmp/padm-${serviceName}.init.XXXXXX") || return 1
+    padmCreateTempPath tmpFile "/tmp/padm-${serviceName}.init.XXXXXX" || return 1
 
     if [[ "${serviceName}" == "sing-box" ]]; then
-        cat <<EOF >"${tmpFile}" || { rm -f "${tmpFile}"; return 1; }
+        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/sbin/openrc-run
 
 description="sing-box service"
@@ -598,7 +599,7 @@ command_background=true
 pidfile="/var/run/sing-box.pid"
 EOF
     elif [[ "${serviceName}" == "xray" ]]; then
-        cat <<EOF >"${tmpFile}" || { rm -f "${tmpFile}"; return 1; }
+        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/sbin/openrc-run
 
 description="xray service"
@@ -608,12 +609,12 @@ command_background=true
 pidfile="/var/run/xray.pid"
 EOF
     else
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
 
     if ! grep -q '^#!/sbin/openrc-run$' "${tmpFile}" || ! grep -q '^command=' "${tmpFile}"; then
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
 
@@ -629,8 +630,8 @@ installSingBoxService() {
     if [[ -n $(find /bin /usr/bin -name "systemctl") && "${release}" != "alpine" ]]; then
         local serviceFile=/etc/systemd/system/sing-box.service
         local tmpFile
-        tmpFile=$(mktemp /tmp/padm-sing-box.service.XXXXXX) || exit 1
-        cat <<EOF >"${tmpFile}" || { rm -f "${tmpFile}"; exit 1; }
+        padmCreateTempPath tmpFile /tmp/padm-sing-box.service.XXXXXX || exit 1
+        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
 [Unit]
 Description=Sing-Box Service
 Documentation=https://sing-box.sagernet.org
@@ -652,12 +653,12 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
         if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -q "^ExecStart=${execStart}$" "${tmpFile}"; then
-            rm -f "${tmpFile}"
+            padmRemoveCleanupPath "${tmpFile}"
             errorCard "sing-box systemd 模板生成失败"
             exit 1
         fi
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
-            rm -f "${tmpFile}"
+            padmRemoveCleanupPath "${tmpFile}"
             errorCard "sing-box systemd 模板提交失败"
             exit 1
         fi
@@ -681,8 +682,8 @@ installXrayService() {
     if [[ -n $(find /bin /usr/bin -name "systemctl") ]]; then
         local serviceFile=/etc/systemd/system/xray.service
         local tmpFile
-        tmpFile=$(mktemp /tmp/padm-xray.service.XXXXXX) || exit 1
-        cat <<EOF >"${tmpFile}" || { rm -f "${tmpFile}"; exit 1; }
+        padmCreateTempPath tmpFile /tmp/padm-xray.service.XXXXXX || exit 1
+        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/xtls
@@ -698,12 +699,12 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 EOF
         if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -q "^ExecStart=${execStart}$" "${tmpFile}"; then
-            rm -f "${tmpFile}"
+            padmRemoveCleanupPath "${tmpFile}"
             errorCard "Xray systemd 模板生成失败"
             exit 1
         fi
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
-            rm -f "${tmpFile}"
+            padmRemoveCleanupPath "${tmpFile}"
             errorCard "Xray systemd 模板提交失败"
             exit 1
         fi

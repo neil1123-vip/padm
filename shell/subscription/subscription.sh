@@ -918,8 +918,8 @@ updateRemoteSubscribe() {
     local line=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget
 
-    tmpDir=$(mktemp -d /tmp/padm-remote-subscribe-fetch.XXXXXX) || return 1
-    stageDir=$(mktemp -d /tmp/padm-remote-subscribe-stage.XXXXXX) || { rm -rf "${tmpDir}"; return 1; }
+    padmCreateTempPath tmpDir -d /tmp/padm-remote-subscribe-fetch.XXXXXX || return 1
+    padmCreateTempPath stageDir -d /tmp/padm-remote-subscribe-stage.XXXXXX || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     publicBase=$(subscribePublicBaseDir)
     localBase=$(subscribeLocalBaseDir)
     mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/sing-box"
@@ -979,11 +979,13 @@ updateRemoteSubscribe() {
         singBoxSubscribe=$(<"${singBoxFile}")
         if [[ -n "${singBoxSubscribe}" && "${singBoxSubscribe}" != *nginx* ]] && echo "${singBoxSubscribe}" | jq empty >/dev/null 2>&1; then
             if ! singBoxSubscribe=$(jq --arg email "${email}" --arg alias "${serverAlias}" 'map(if ((.tag // "") | startswith($email)) then .tag = ($email + "_" + $alias + (.tag[($email | length):])) else . end)' <<<"${singBoxSubscribe}"); then
-                rm -rf "${tmpDir}" "${stageDir}"
+                padmRemoveCleanupPath "${tmpDir}"
+                padmRemoveCleanupPath "${stageDir}"
                 return 1
             fi
             if ! mergeSingBoxSubscribeOutbounds "${singBoxTarget}" "${singBoxSubscribe}"; then
-                rm -rf "${tmpDir}" "${stageDir}"
+                padmRemoveCleanupPath "${tmpDir}"
+                padmRemoveCleanupPath "${stageDir}"
                 return 1
             fi
             successCard "sing-box订阅 ${remoteUrl}:${email} 更新成功"
@@ -997,7 +999,8 @@ updateRemoteSubscribe() {
     mv "${defaultTarget}" "${publicBase}/default/${emailMD5}"
     mv "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}"
     mv "${singBoxTarget}" "${localBase}/sing-box/${email}"
-    rm -rf "${tmpDir}" "${stageDir}"
+    padmRemoveCleanupPath "${tmpDir}"
+    padmRemoveCleanupPath "${stageDir}"
 }
 
 subscribeSectionTitle() {

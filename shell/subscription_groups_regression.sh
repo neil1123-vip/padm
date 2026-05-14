@@ -67,6 +67,8 @@ source "${PROJECT_ROOT}/shell/core/platform.sh"
 source "${PROJECT_ROOT}/shell/core/protocols.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/runtime.sh"
+padmRegisterCleanupPath "${TMP_DIR}"
+padmInstallCleanupTrap
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/reality_targets.sh"
 # shellcheck source=/dev/null
@@ -161,7 +163,30 @@ runRegressionStep() {
     fi
 }
 
-REALITY_TLS_PING_ARGS_FILE="${TMP_DIR}/tls_ping_args.txt"
+runCleanupTrapRegression() {
+    local tmpDir exitProbe intProbe intOutput termProbe termOutput
+
+    tmpDir=$(mktemp -d)
+    exitProbe="${tmpDir}/exit.XXXXXX"
+    intProbe="${tmpDir}/int.XXXXXX"
+    termProbe="${tmpDir}/term.XXXXXX"
+    intOutput="${tmpDir}/int.out"
+    termOutput="${tmpDir}/term.out"
+    bash -c 'source "$1"; padmCreateTempPath p "$2"; exit 0' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${exitProbe}"
+    [[ ! -e "${exitProbe}" ]]
+    set +e
+    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -INT $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${intProbe}" >"${intOutput}" 2>&1
+    local intStatus=$?
+    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -TERM $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${termProbe}" >"${termOutput}" 2>&1
+    local termStatus=$?
+    set -e
+    [[ ${intStatus} -eq 130 ]]
+    [[ ${termStatus} -eq 143 ]]
+    [[ ! -e "${intProbe}" ]]
+    [[ ! -e "${termProbe}" ]]
+    rm -rf "${tmpDir}"
+}
+
 realityTargetDetector() {
     printf '%s\n' fake-xray
 }
@@ -185,6 +210,7 @@ lookupRealityTargetAsn() {
     esac
 }
 
+REALITY_TLS_PING_ARGS_FILE="${TMP_DIR}/tls_ping_args.txt"
 fake-xray() {
     [[ "$1" == "tls" && "$2" == "ping" ]]
     printf '%s\n' "$*" >>"${REALITY_TLS_PING_ARGS_FILE}"
@@ -2979,6 +3005,7 @@ runInstallEnsureModulesRegression() {
 }
 
 runRegressionPlatform() {
+    runRegressionStep cleanup-trap runCleanupTrapRegression
     runRegressionStep install-entry-refresh runInstallEnsureModulesRegression
     runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression
     runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression

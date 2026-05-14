@@ -1,12 +1,80 @@
 #!/usr/bin/env bash
 
+PADM_CLEANUP_PATHS=()
+PADM_CLEANUP_TRAP_INSTALLED=
+
+padmInstallCleanupTrap() {
+    if [[ -n "${PADM_CLEANUP_TRAP_INSTALLED}" ]]; then
+        return 0
+    fi
+    PADM_CLEANUP_TRAP_INSTALLED=1
+    trap 'padmCleanupTempPaths' EXIT
+    trap 'padmCleanupTempPaths INT' INT
+    trap 'padmCleanupTempPaths TERM' TERM
+}
+
+padmRegisterCleanupPath() {
+    local path=$1
+    [[ -n "${path}" ]] || return 0
+    PADM_CLEANUP_PATHS+=("${path}")
+}
+
+padmUnregisterCleanupPath() {
+    local path=$1
+    local kept=()
+    local item
+    for item in "${PADM_CLEANUP_PATHS[@]}"; do
+        [[ "${item}" == "${path}" ]] || kept+=("${item}")
+    done
+    PADM_CLEANUP_PATHS=("${kept[@]}")
+}
+
+padmCreateTempPath() {
+    local resultVar=$1
+    shift
+    local path
+    path=$(mktemp "$@") || return 1
+    padmInstallCleanupTrap
+    padmRegisterCleanupPath "${path}"
+    printf -v "${resultVar}" '%s' "${path}"
+}
+
+padmForgetCleanupPath() {
+    local path=$1
+    padmUnregisterCleanupPath "${path}"
+}
+
+padmRemoveCleanupPath() {
+    local path=$1
+    rm -rf -- "${path}" >/dev/null 2>&1 || true
+    padmUnregisterCleanupPath "${path}"
+}
+
+padmCleanupTempPaths() {
+    local status=$?
+    local signal=${1:-}
+    local index
+    trap - EXIT INT TERM
+    for ((index=${#PADM_CLEANUP_PATHS[@]} - 1; index >= 0; index--)); do
+        [[ -n "${PADM_CLEANUP_PATHS[index]}" ]] || continue
+        rm -rf -- "${PADM_CLEANUP_PATHS[index]}" >/dev/null 2>&1 || true
+    done
+    if [[ -n "${signal}" ]]; then
+        case "${signal}" in
+        INT) exit 130 ;;
+        TERM) exit 143 ;;
+        esac
+    fi
+    exit "${status}"
+}
+
 installUserCrontabContent() {
     local tmpFile
 
-    tmpFile=$(mktemp /tmp/padm-crontab.XXXXXX) || return 1
-    printf '%s\n' "$1" | sed '/^$/d' >"${tmpFile}" || { rm -f "${tmpFile}"; return 1; }
-    crontab "${tmpFile}" || { rm -f "${tmpFile}"; return 1; }
-    rm -f "${tmpFile}"
+    padmCreateTempPath tmpFile /tmp/padm-crontab.XXXXXX || return 1
+    printf '%s\n' "$1" | sed '/^$/d' >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    crontab "${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    padmRemoveCleanupPath "${tmpFile}"
 }
 
 parseInstallArgs() {
@@ -485,11 +553,12 @@ downloadFile() {
     elif [[ -n "${outputFile}" ]]; then
         outputParent=$(dirname -- "${outputFile}")
         outputName=$(basename -- "${outputFile}")
-        tmpFile=$(mktemp "${outputParent}/.${outputName}.download.XXXXXX") || return 1
+        padmCreateTempPath tmpFile "${outputParent}/.${outputName}.download.XXXXXX" || return 1
         if wget "${args[@]}" -O "${tmpFile}" "${url}" && [[ -s "${tmpFile}" ]]; then
             mv "${tmpFile}" "${outputFile}"
+            padmForgetCleanupPath "${tmpFile}"
         else
-            rm -f "${tmpFile}"
+            padmRemoveCleanupPath "${tmpFile}"
             return 1
         fi
     else

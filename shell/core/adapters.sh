@@ -14,11 +14,11 @@ commitRepoFile() {
     local mode=${3:-644}
 
     if [[ ! -s "${tmpFile}" ]]; then
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
 
-    chmod "${mode}" "${tmpFile}" && mv "${tmpFile}" "${targetFile}"
+    chmod "${mode}" "${tmpFile}" && mv "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
 }
 
 packageInstalled() {
@@ -63,7 +63,7 @@ trackInstalledPackagesFromFile() {
             PADM_INSTALLED_PACKAGES="${PADM_INSTALLED_PACKAGES:-} ${packageName}"
         fi
     done <"${tmpFile}"
-    rm -f "${tmpFile}"
+    padmRemoveCleanupPath "${tmpFile}"
 }
 
 beginPackageInstallTransaction() {
@@ -277,7 +277,7 @@ installPackageTracked() {
 
     local packageTimeout=300
 
-    missingPackagesFile=$(mktemp /tmp/padm-packages.XXXXXX) || failPackageInstallTransaction "${displayName}安装状态记录失败"
+    padmCreateTempPath missingPackagesFile /tmp/padm-packages.XXXXXX || failPackageInstallTransaction "${displayName}安装状态记录失败"
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
@@ -285,7 +285,7 @@ installPackageTracked() {
         if recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}"; then
             :
         else
-            rm -f "${missingPackagesFile}"
+            padmRemoveCleanupPath "${missingPackagesFile}"
             diagnosePackageInstallFailure
             failPackageInstallTransaction "${displayName}安装失败"
         fi
@@ -301,13 +301,13 @@ installOptionalPackageTracked() {
 
     local packageTimeout=300
 
-    missingPackagesFile=$(mktemp /tmp/padm-packages.XXXXXX) || return 1
+    padmCreateTempPath missingPackagesFile /tmp/padm-packages.XXXXXX || return 1
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
     if ! runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" /etc/padm/install.log; then
         recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}" || {
-            rm -f "${missingPackagesFile}"
+            padmRemoveCleanupPath "${missingPackagesFile}"
             diagnosePackageInstallFailure
             return 1
         }
@@ -449,11 +449,12 @@ installTools() {
             successCard "安装acme.sh"
             local acmeInstallScript="/tmp/padm-tls/acme.sh"
             local acmeDownloadScript
-            acmeDownloadScript=$(mktemp /tmp/padm-tls/acme.sh.download.XXXXXX) || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
+            padmCreateTempPath acmeDownloadScript /tmp/padm-tls/acme.sh.download.XXXXXX || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
             if curl -fsSL -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
                 mv "${acmeDownloadScript}" "${acmeInstallScript}"
+                padmForgetCleanupPath "${acmeDownloadScript}"
             else
-                rm -f "${acmeDownloadScript}"
+                padmRemoveCleanupPath "${acmeDownloadScript}"
                 failPackageInstallTransaction "acme安装脚本下载失败"
             fi
             runWithTimeout 600 "sh \"${acmeInstallScript}\" >/etc/padm/tls/acme.log 2>&1" || failPackageInstallTransaction "acme.sh安装失败"
@@ -501,11 +502,11 @@ installNginxTools() {
         if curl -fsSL "https://nginx.org/packages/mainline/debian/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
             curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor | sudo tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
             local repoFile
-            repoFile=$(mktemp /tmp/padm-nginx-repo.XXXXXX) || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
+            padmCreateTempPath repoFile /tmp/padm-nginx-repo.XXXXXX || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/debian %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
             commitRepoFile "${repoFile}" /etc/apt/sources.list.d/nginx.list || failPackageInstallTransaction "Nginx apt 源提交失败"
             local pinFile
-            pinFile=$(mktemp /tmp/padm-nginx-pin.XXXXXX) || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
+            padmCreateTempPath pinFile /tmp/padm-nginx-pin.XXXXXX || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
             printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n\n' >"${pinFile}"
             commitRepoFile "${pinFile}" /etc/apt/preferences.d/99nginx || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
             refreshAptAfterRepoChange
@@ -518,11 +519,11 @@ installNginxTools() {
         if curl -fsSL "https://nginx.org/packages/mainline/ubuntu/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
             curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor | sudo tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
             local repoFile
-            repoFile=$(mktemp /tmp/padm-nginx-repo.XXXXXX) || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
+            padmCreateTempPath repoFile /tmp/padm-nginx-repo.XXXXXX || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/ubuntu %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
             commitRepoFile "${repoFile}" /etc/apt/sources.list.d/nginx.list || failPackageInstallTransaction "Nginx apt 源提交失败"
             local pinFile
-            pinFile=$(mktemp /tmp/padm-nginx-pin.XXXXXX) || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
+            padmCreateTempPath pinFile /tmp/padm-nginx-pin.XXXXXX || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
             printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n\n' >"${pinFile}"
             commitRepoFile "${pinFile}" /etc/apt/preferences.d/99nginx || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
             refreshAptAfterRepoChange
@@ -531,7 +532,7 @@ installNginxTools() {
     elif [[ "${release}" == "centos" ]]; then
         installPackageTracked "yum-utils" yum-utils
         local repoFile
-        repoFile=$(mktemp /tmp/padm-nginx-yum-repo.XXXXXX) || failPackageInstallTransaction "Nginx yum 源临时文件创建失败"
+        padmCreateTempPath repoFile /tmp/padm-nginx-yum-repo.XXXXXX || failPackageInstallTransaction "Nginx yum 源临时文件创建失败"
         cat <<EOF >"${repoFile}"
 [nginx-stable]
 name=nginx stable repo
@@ -656,7 +657,7 @@ installWarp() {
         if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
             curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg >/dev/null
             local repoFile
-            repoFile=$(mktemp /tmp/padm-warp-repo.XXXXXX) || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
+            padmCreateTempPath repoFile /tmp/padm-warp-repo.XXXXXX || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
             commitRepoFile "${repoFile}" /etc/apt/sources.list.d/cloudflare-client.list || failPackageInstallTransaction "WARP apt 源提交失败"
             refreshAptAfterRepoChange
@@ -671,7 +672,7 @@ installWarp() {
         if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
             curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg >/dev/null
             local repoFile
-            repoFile=$(mktemp /tmp/padm-warp-repo.XXXXXX) || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
+            padmCreateTempPath repoFile /tmp/padm-warp-repo.XXXXXX || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
             commitRepoFile "${repoFile}" /etc/apt/sources.list.d/cloudflare-client.list || failPackageInstallTransaction "WARP apt 源提交失败"
             refreshAptAfterRepoChange
@@ -684,7 +685,7 @@ installWarp() {
     elif [[ "${release}" == "centos" || "${release}" == "fedora" ]]; then
         installPackageTracked "yum-utils" yum-utils
         local repoFile
-        repoFile=$(mktemp /tmp/padm-warp-yum-repo.XXXXXX) || failPackageInstallTransaction "WARP yum 源临时文件创建失败"
+        padmCreateTempPath repoFile /tmp/padm-warp-yum-repo.XXXXXX || failPackageInstallTransaction "WARP yum 源临时文件创建失败"
         cat <<EOF >"${repoFile}"
 [cloudflare-warp]
 name=Cloudflare WARP

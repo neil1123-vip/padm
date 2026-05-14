@@ -21,6 +21,7 @@ refreshScriptModules() {
     local remoteRef=$1
     local tmpDir archiveDir
     tmpDir=$(mktemp -d /tmp/padm.XXXXXX) || exit 1
+    trap 'rm -rf "${tmpDir}"' EXIT INT TERM
     archiveDir="${tmpDir}/${REPO_ARCHIVE_DIR}"
 
     printf '正在下载最新完整安装包\n'
@@ -47,6 +48,7 @@ refreshScriptModules() {
     [[ -f "${archiveDir}/README.md" ]] && cp "${archiveDir}/README.md" "${SCRIPT_DIR}/README.md"
     [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_REF_FILE}"
     rm -rf "${tmpDir}"
+    trap - EXIT INT TERM
 }
 
 ensureScriptModules() {

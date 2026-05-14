@@ -484,7 +484,7 @@ commitPadmBbrFile() {
     local targetFile=$2
 
     chmod 644 "${tmpFile}" || return 1
-    mv "${tmpFile}" "${targetFile}"
+    mv "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
 }
 
 restorePadmBbrRuntime() {
@@ -513,25 +513,26 @@ enableOfficialBbrFq() {
     previousQdisc=${previousQdisc:-fq_codel}
 
     mkdir -p "$(dirname "${PADM_BBR_STATE_FILE}")"
-    stateTmp=$(mktemp /tmp/padm-bbr-state.XXXXXX) || { statusCard "BBR 启用失败" "无法创建状态临时文件"; bbrInstall; return; }
+    padmCreateTempPath stateTmp /tmp/padm-bbr-state.XXXXXX || { statusCard "BBR 启用失败" "无法创建状态临时文件"; bbrInstall; return; }
     cat >"${stateTmp}" <<EOF
 previous_congestion=${previousCongestion}
 previous_qdisc=${previousQdisc}
 EOF
     if ! commitPadmBbrFile "${stateTmp}" "${PADM_BBR_STATE_FILE}"; then
-        rm -f "${stateTmp}"
+        padmRemoveCleanupPath "${stateTmp}"
         statusCard "BBR 启用失败" "状态文件提交失败，未改动 sysctl 配置"
         bbrInstall
         return
     fi
 
-    sysctlTmp=$(mktemp /tmp/padm-bbr-sysctl.XXXXXX) || { rm -f "${PADM_BBR_STATE_FILE}"; statusCard "BBR 启用失败" "无法创建 sysctl 临时文件"; bbrInstall; return; }
+    padmCreateTempPath sysctlTmp /tmp/padm-bbr-sysctl.XXXXXX || { rm -f "${PADM_BBR_STATE_FILE}"; statusCard "BBR 启用失败" "无法创建 sysctl 临时文件"; bbrInstall; return; }
     cat >"${sysctlTmp}" <<EOF
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
     if ! commitPadmBbrFile "${sysctlTmp}" "${PADM_BBR_SYSCTL_CONF}"; then
-        rm -f "${sysctlTmp}" "${PADM_BBR_STATE_FILE}"
+        padmRemoveCleanupPath "${sysctlTmp}"
+        rm -f "${PADM_BBR_STATE_FILE}"
         statusCard "BBR 启用失败" "sysctl 配置提交失败，已删除本次状态记录"
         bbrInstall
         return

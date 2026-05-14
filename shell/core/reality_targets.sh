@@ -922,7 +922,7 @@ generateRealityAsnSampleIps() {
     declare -a rangeLasts=()
     declare -a rangeCounts=()
     declare -a rangeNexts=()
-    rangesFile=$(mktemp)
+    padmCreateTempPath rangesFile || return 1
     while IFS= read -r prefix; do
         range=$(realityAsnPrefixUsableRange "${prefix}" || true)
         [[ -n "${range}" ]] && printf '%s\n' "${range}" >>"${rangesFile}"
@@ -933,7 +933,7 @@ generateRealityAsnSampleIps() {
         rangeCounts+=("${count}")
         rangeNexts+=("${first}")
     done <"${rangesFile}"
-    rm -f "${rangesFile}"
+    padmRemoveCleanupPath "${rangesFile}"
     : >"${outputFile}"
     [[ "${#rangeFirsts[@]}" -gt 0 && "${targetCount}" -gt 0 ]] || return 1
     while (( generated < targetCount )); do
@@ -1058,16 +1058,16 @@ selectRealityAsnScanPlan() {
             selectedRealityAsnAddressTotal=${totalUsable}
             autoConfirm reality_asn_prefix_confirm "确认全量扫描 ${selectedRealityAsnPrefixTotal} 个 prefix、约 ${selectedRealityAsnAddressTotal} 个可用 IP？" n confirm
             if [[ "${confirm}" == "y" ]]; then
-                selectedRealityScannerPrefixFile=$(mktemp)
+                padmCreateTempPath selectedRealityScannerPrefixFile || return 1
                 cp "${allPrefixFile}" "${selectedRealityScannerPrefixFile}"
                 selectedRealityScannerRange="全量公告前缀 ${selectedRealityAsnPrefixTotal} prefixes"
                 return 0
             fi
             continue
         fi
-        sampleFile=$(mktemp)
+        padmCreateTempPath sampleFile || return 1
         generateRealityAsnSampleIps "${allPrefixFile}" "${selectedRealityAsnSampleSize}" "${sampleFile}" || {
-            rm -f "${sampleFile}"
+            padmRemoveCleanupPath "${sampleFile}"
             errorCard "随机抽样失败，请返回或重试"
             continue
         }
@@ -1082,7 +1082,7 @@ selectRealityAsnScanPlan() {
             selectedRealityScannerRange="本次抽样 ${selectedRealityAsnSampleSize} IP（ASN 总可用 ${totalUsable}）"
             return 0
         fi
-        rm -f "${sampleFile}"
+        padmRemoveCleanupPath "${sampleFile}"
     done
 }
 
@@ -1537,8 +1537,8 @@ importRealityScannerResults() {
         fi
     fi
     totalRecords=$(awk -F, 'NR > 1 && $1 != "" {count++} END{print count + 0}' "${sourceFile}")
-    resultLinesFile=$(mktemp)
-    failedTargetsFile=$(mktemp)
+    padmCreateTempPath resultLinesFile || return 1
+    padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
     importStart=$(date +%s)
     while IFS=, read -r ip origin domain issuer geo; do
         [[ "${ip}" == "IP" ]] && continue
@@ -1585,7 +1585,8 @@ importRealityScannerResults() {
     done < "${sourceFile}"
     writeRealityTargetResultLines "${resultLinesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
-    rm -f "${resultLinesFile}" "${failedTargetsFile}"
+    padmRemoveCleanupPath "${resultLinesFile}"
+    padmRemoveCleanupPath "${failedTargetsFile}"
     if [[ -n "${summaryVar}" ]]; then
         printf -v "${summaryVar}" '%s\t%s\t%s\t%s\t%s\t%s' "${imported}" "${skipped}" "${countA}" "${countB}" "${countC}" "${countFail}"
     fi
@@ -1766,11 +1767,11 @@ runRealityScannerTargetFile() {
     totalStartAt=$(date +%s)
     while (( processed < total )); do
         batchIndex=$((batchIndex + 1))
-        batchFile=$(mktemp)
+        padmCreateTempPath batchFile || return 1
         sed -n "$((processed + 1)),$((processed + batchSize))p" "${targetFile}" >"${batchFile}"
         batchCount=$(wc -l <"${batchFile}" | tr -d ' ')
         [[ "${batchCount}" -gt 0 ]] || {
-            rm -f "${batchFile}"
+            padmRemoveCleanupPath "${batchFile}"
             break
         }
         outputFile="/tmp/padm-realitlscanner-$(date +%s)-sample-${batchIndex}.csv"
@@ -1784,7 +1785,7 @@ runRealityScannerTargetFile() {
         done
         scannerStatus=0
         wait "${scannerPid}" || scannerStatus=$?
-        rm -f "${batchFile}"
+        padmRemoveCleanupPath "${batchFile}"
         if [[ ${scannerStatus} -ne 0 && ! -s "${outputFile}" ]]; then
             realityTargetStatusBlock yellow "RealiTLScanner 扫描" "抽样批次失败且无结果" "进度: $((processed + batchCount))/${total}" "继续扫描剩余目标"
             processed=$((processed + batchCount))
@@ -1869,29 +1870,29 @@ runRealityScannerSameAsnPrefixes() {
     currentAsn=${rest%%$'\t'*}
     currentOrg=${rest#*$'\t'}
     realityTargetStatusBlock yellow "同 ASN 前缀扫描" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "正在从 RIPEstat 拉取 announced prefixes"
-    allPrefixFile=$(mktemp)
+    padmCreateTempPath allPrefixFile || return 1
     if ! fetchRealityAsnPrefixes "${currentAsn}" >"${allPrefixFile}" || [[ ! -s "${allPrefixFile}" ]]; then
-        rm -f "${allPrefixFile}"
+        padmRemoveCleanupPath "${allPrefixFile}"
         realityTargetStatusBlock red "同 ASN 前缀扫描" "未获取到 ${currentAsn} 的 IPv4 前缀"
         return 1
     fi
     if ! selectRealityAsnPrefixSet "${currentAsn}" "${allPrefixFile}"; then
-        rm -f "${allPrefixFile}"
+        padmRemoveCleanupPath "${allPrefixFile}"
         return 1
     fi
-    rm -f "${allPrefixFile}"
+    padmRemoveCleanupPath "${allPrefixFile}"
     realityTargetStatusBlock yellow "RealiTLScanner 风险提示" "扫描计划: ${selectedRealityScannerRange}" "公告 prefix 数: ${selectedRealityAsnPrefixTotal}" "本次将扫描 IP: ${selectedRealityAsnAddressTotal}" "会扫描目标网段 TLS 证书；云端扫描可能导致 VPS 被标记"
     autoRead reality_asn_scanner_confirm "确认开始扫描？[y/n]:" confirm
     if [[ "${confirm}" != "y" ]]; then
-        rm -f "${selectedRealityScannerPrefixFile}"
+        padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
         return 1
     fi
     if [[ "${selectedRealityAsnFullScan}" == "true" ]]; then
         runRealityScannerPrefixFile "${selectedRealityScannerPrefixFile}"
-        rm -f "${selectedRealityScannerPrefixFile}"
+        padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
     else
         runRealityScannerTargetFile "${selectedRealityScannerPrefixFile}" "${currentAsn}" "${currentOrg}"
-        rm -f "${selectedRealityScannerPrefixFile}"
+        padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
     fi
 }
 
@@ -1905,9 +1906,9 @@ showRealityTargetCertificateChain() {
         realityTargetStatusBlock yellow "REALITY 证书链" "未找到 openssl，无法查看证书链"
         return 1
     fi
-    tmpDir=$(mktemp -d)
+    padmCreateTempPath tmpDir -d || return 1
     if ! sClientOutput=$(timeout 15 openssl s_client -connect "${host}:${port}" -servername "${host}" -showcerts </dev/null 2>/dev/null); then
-        rm -rf "${tmpDir}"
+        padmRemoveCleanupPath "${tmpDir}"
         realityTargetStatusBlock red "REALITY 证书链" "证书链获取失败: ${target}"
         return 1
     fi
@@ -1944,7 +1945,7 @@ showRealityTargetCertificateChain() {
         esac
         realityTargetStatusBlock skyBlue "REALITY 证书链 #${certCount}" "Subject: ${subject}" "Issuer: ${issuer}" "有效期: ${notBefore} → ${notAfter}" "SAN: ${san:-无 SAN}" "SHA256: ${fingerprint}"
     done
-    rm -rf "${tmpDir}"
+    padmRemoveCleanupPath "${tmpDir}"
     if [[ ${certCount} -eq 0 ]]; then
         realityTargetStatusBlock red "REALITY 证书链" "未解析到证书: ${target}"
         return 1
@@ -2241,8 +2242,8 @@ scanLocalAsnRealityTargets() {
     fi
     scanStart=$(date +%s)
     totalCandidates=$(realityTargetCandidateCount)
-    resultLinesFile=$(mktemp)
-    failedTargetsFile=$(mktemp)
+    padmCreateTempPath resultLinesFile || return 1
+    padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
     currentIp=${networkProfile%%$'\t'*}
     local rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
@@ -2299,7 +2300,8 @@ scanLocalAsnRealityTargets() {
 
     writeRealityTargetResultLines "${resultLinesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
-    rm -f "${resultLinesFile}" "${failedTargetsFile}"
+    padmRemoveCleanupPath "${resultLinesFile}"
+    padmRemoveCleanupPath "${failedTargetsFile}"
     scanSeconds=$(( $(date +%s) - scanStart ))
     realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "候选: ${scanned}" "ASN 已识别: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "解析/ASN 失败: ${failed}" "耗时: ${scanSeconds}s"
     if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
@@ -2439,20 +2441,20 @@ changeInstalledRealityTarget() {
     local target=$1
     local sni=$2
     local backupDir
-    backupDir=$(mktemp -d /tmp/padm-reality-target.XXXXXX) || return 1
+    padmCreateTempPath backupDir -d /tmp/padm-reality-target.XXXXXX || return 1
     backupRealityTargetConfigs "${backupDir}"
     if ! applyRealityTargetToInstalledConfigs "${target}" "${sni}"; then
         restoreRealityTargetConfigs "${backupDir}"
-        rm -rf "${backupDir}"
+        padmRemoveCleanupPath "${backupDir}"
         return 1
     fi
     if ! validateRealityTargetConfigAfterChange; then
         restoreRealityTargetConfigs "${backupDir}"
-        rm -rf "${backupDir}"
+        padmRemoveCleanupPath "${backupDir}"
         realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: /tmp/padm-reality-target-xray-test.log" "sing-box 日志: /tmp/padm-reality-target-sing-box-test.log"
         return 1
     fi
-    rm -rf "${backupDir}"
+    padmRemoveCleanupPath "${backupDir}"
     reloadCore
     refreshSubscriptionsAfterRealityTargetChange
     realityTargetStatusBlock green "REALITY 目标站" "已更新为 ${realityTargetHost}:${realityTargetPort}" "SNI=${realitySNI}"

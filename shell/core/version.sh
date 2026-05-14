@@ -70,7 +70,11 @@ setScriptVersion() {
         echo "Invalid version: ${version}" >&2
         return 1
     fi
-    tmpFile=$(mktemp)
+    if declare -F padmCreateTempPath >/dev/null 2>&1; then
+        padmCreateTempPath tmpFile || return 1
+    else
+        tmpFile=$(mktemp) || return 1
+    fi
     awk -v version="${version}" '
         BEGIN { replaced = 0 }
         /^SCRIPT_VERSION=/ {
@@ -83,9 +87,14 @@ setScriptVersion() {
             if (!replaced) exit 1
         }
     ' "${versionFile}" >"${tmpFile}" || {
-        rm -f "${tmpFile}"
+        if declare -F padmRemoveCleanupPath >/dev/null 2>&1; then
+            padmRemoveCleanupPath "${tmpFile}"
+        else
+            rm -f "${tmpFile}"
+        fi
         echo "SCRIPT_VERSION not found" >&2
         return 1
     }
     mv "${tmpFile}" "${versionFile}"
+    declare -F padmForgetCleanupPath >/dev/null 2>&1 && padmForgetCleanupPath "${tmpFile}"
 }

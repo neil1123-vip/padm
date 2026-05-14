@@ -113,7 +113,7 @@ subscriptionRemoteControlHealthAll() {
     local index=0
     local pids=()
     sources=$(subscriptionRemoteControlSources)
-    tmpDir=$(mktemp -d /tmp/padm-remote-health.XXXXXX) || return 1
+    padmCreateTempPath tmpDir -d /tmp/padm-remote-health.XXXXXX || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         subscriptionRemoteControlHealth "${source}" >"${outputFile}" &
@@ -124,7 +124,7 @@ subscriptionRemoteControlHealthAll() {
         wait "${pid}" 2>/dev/null || true
     done
     jq -s '.' "${tmpDir}"/*.json 2>/dev/null || jq -n '[]'
-    rm -rf "${tmpDir}"
+    padmRemoveCleanupPath "${tmpDir}"
 }
 
 subscriptionRemoteSyncPlanForSource() {
@@ -162,7 +162,7 @@ subscriptionRemoteSyncPlan() {
     local index=0
     local pids=()
     sources=$(subscriptionRemoteControlSources)
-    tmpDir=$(mktemp -d /tmp/padm-remote-plan.XXXXXX) || return 1
+    padmCreateTempPath tmpDir -d /tmp/padm-remote-plan.XXXXXX || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         subscriptionRemoteSyncPlanForSource "${source}" >"${outputFile}" &
@@ -173,7 +173,7 @@ subscriptionRemoteSyncPlan() {
         wait "${pid}" 2>/dev/null || true
     done
     jq -s '.' "${tmpDir}"/*.json 2>/dev/null || jq -n '[]'
-    rm -rf "${tmpDir}"
+    padmRemoveCleanupPath "${tmpDir}"
 }
 
 runSubscriptionRemoteSync() {

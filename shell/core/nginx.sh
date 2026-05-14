@@ -156,7 +156,7 @@ realityStreamRollback() {
 
 removeRealityStreamBackup() {
     local tmpDir=$1
-    [[ -n "${tmpDir}" && -d "${tmpDir}" ]] && rm -rf "${tmpDir}"
+    [[ -n "${tmpDir}" && -d "${tmpDir}" ]] && padmRemoveCleanupPath "${tmpDir}"
 }
 
 ensureRealityStreamNginxInclude() {
@@ -179,12 +179,12 @@ removeRealityStreamNginxInclude() {
     local nginxMainConf tmpFile
     nginxMainConf=$(realityStreamSplitNginxConf)
     [[ -n "${nginxMainConf}" && -f "${nginxMainConf}" ]] || return 0
-    tmpFile=$(mktemp /tmp/padm-nginx.XXXXXX) || return 1
+    padmCreateTempPath tmpFile /tmp/padm-nginx.XXXXXX || return 1
     awk '
         /# padm stream include start/ {skip=1; next}
         /# padm stream include end/ {skip=0; next}
         skip != 1 {print}
-    ' "${nginxMainConf}" >"${tmpFile}" && mv "${tmpFile}" "${nginxMainConf}"
+    ' "${nginxMainConf}" >"${tmpFile}" && mv "${tmpFile}" "${nginxMainConf}" && padmForgetCleanupPath "${tmpFile}"
 }
 
 normalizeRealityStreamDomains() {
@@ -407,7 +407,7 @@ configureRealityStreamSplit() {
     publicPort=443
     currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
     currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
-    backupDir=$(mktemp -d /tmp/padm-reality-stream.XXXXXX) || return 1
+    padmCreateTempPath backupDir -d /tmp/padm-reality-stream.XXXXXX || return 1
     backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json"
     backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json"
     backupRealityStreamFile "$(realityStreamSplitConfFile)" "${backupDir}/stream.conf"
@@ -554,7 +554,7 @@ disableRealityStreamSplit() {
         return
     fi
 
-    backupDir=$(mktemp -d /tmp/padm-reality-stream-disable.XXXXXX) || return 1
+    padmCreateTempPath backupDir -d /tmp/padm-reality-stream-disable.XXXXXX || return 1
     backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json"
     backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json"
     backupRealityStreamFile "${confFile}" "${backupDir}/stream.conf"
