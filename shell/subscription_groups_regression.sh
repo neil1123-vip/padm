@@ -2134,6 +2134,7 @@ runRemoteSubscribeFetchRegression() {
     local emailMd5="hash-user"
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
     local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
+    local oldFakeRemoteSubscribeMode="${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-}"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     export PADM_SUBSCRIBE_DIR="${publicDir}"
     rm -rf "${publicDir}" "${localDir}"
@@ -2146,7 +2147,7 @@ runRemoteSubscribeFetchRegression() {
     }
 
     listRemoteSubscribeSources() {
-        printf '%s\n' 'remote1.example:443:r1:https' 'remote2.example:443:r2:https'
+        printf '%s\n' 'remote1.example:443:r1:https' 'remote2.example:443:r2:https' 'remote3.example:443:r3:https'
     }
 
     fetchRemoteSubscribeContent() {
@@ -2171,6 +2172,15 @@ runRemoteSubscribeFetchRegression() {
                 printf '%s\n' '{bad json'
             fi
             ;;
+        *remote3.example*/s/clashMeta/*)
+            printf '%s\n' 'proxies:' '- name: "user@example.com"'
+            ;;
+        *remote3.example*/s/default/*)
+            printf '%s' 'trojan://pass@remote3.example:443#user@example.com-extra' | base64
+            ;;
+        *remote3.example*/s/sing-box_profiles/*)
+            printf '%s\n' '[{"tag":"user@example.com-extra"}]'
+            ;;
         *)
             return 1
             ;;
@@ -2192,13 +2202,21 @@ runRemoteSubscribeFetchRegression() {
     updateRemoteSubscribe "${emailMd5}" "${email}"
     grep -qxF -- '- name: "user@example.com_r1"' "${publicDir}/clashMeta/${emailMd5}"
     grep -qxF 'vless://uuid@remote1.example:443#user@example.com_r1' "${publicDir}/default/${emailMd5}"
-    jq -e '.[0].tag == "old-local" and .[1].tag == "user@example.com_r1"' "${localDir}/sing-box/${email}" >/dev/null
+    grep -qxF 'trojan://pass@remote3.example:443#user@example.com_r3-extra' "${publicDir}/default/${emailMd5}"
+    jq -e '.[0].tag == "old-local" and .[1].tag == "user@example.com_r1" and .[2].tag == "user@example.com_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
     [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
     [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
     [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
 
+    updateRemoteSubscribe "${emailMd5}" "${email}"
+    [[ "$(grep -cFx -- '- name: "user@example.com_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
+    [[ "$(grep -cFx 'vless://uuid@remote1.example:443#user@example.com_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
+    [[ "$(grep -cFx 'trojan://pass@remote3.example:443#user@example.com_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
+    jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "user@example.com_r1" and .[2].tag == "user@example.com_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+    if [[ -n "${oldFakeRemoteSubscribeMode}" ]]; then export PADM_FAKE_REMOTE_SUBSCRIBE_MODE="${oldFakeRemoteSubscribeMode}"; else unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE; fi
 }
 
 runRemoteControlConcurrencyRegression() {
@@ -2348,6 +2366,106 @@ EOF
     PADM_YUM_REPOS_DIR=
 }
 
+runSubscriptionWireGuardMenuFlowRegression() (
+    local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
+    local oldCurrentHost="${currentHost:-}"
+    local oldNginxConfigPath="${nginxConfigPath:-}"
+    local controlledCredential updatedCredential
+    PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/menu-smoke-wireguard"
+    currentHost="main.example.com"
+    nginxConfigPath="${TMP_DIR}/menu-smoke-nginx/"
+    rm -rf "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+    mkdir -p "${nginxConfigPath}"
+    ensureSubscriptionGroupsState
+
+    initSubscriptionWireGuardMain() {
+        recordMenuAction initSubscriptionWireGuardMain
+        local endpointHost=
+        autoRead wg_main_endpoint_host "请输入主控公网地址或域名[用于被控连接 WireGuard]:" endpointHost
+        subscriptionWireGuardWriteState --arg endpointHost "${endpointHost}" '.enabled = true | .role = "main" | .address = "10.77.0.1/24" | .endpoint_host = $endpointHost | .public_key = "public-key" | .listen_port = 51820 | .control_port = 39778'
+        applySubscriptionWireGuardService
+    }
+    disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; subscriptionWireGuardWriteState '.enabled = false'; }
+    installSubscriptionWireGuardTools() { return 0; }
+    subscriptionWireGuardEnsureKeys() {
+        mkdir -p "$(subscriptionWireGuardDir)"
+        printf 'private-key\n' >"$(subscriptionWireGuardPrivateKeyFile)"
+        printf 'public-key\n' >"$(subscriptionWireGuardPublicKeyFile)"
+    }
+    subscriptionWireGuardPublicKey() { printf 'public-key\n'; }
+    applySubscriptionWireGuardService() {
+        mkdir -p "$(dirname "$(subscriptionWireGuardConfigFile)")"
+        printf 'Address = %s\n' "$(subscriptionWireGuardReadState | jq -r '.address')" >"$(subscriptionWireGuardConfigFile)"
+    }
+    installSubscriptionControlService() { recordMenuAction installSubscriptionControlService; }
+    ensureSubscriptionWireGuardNginxConfig() { recordMenuAction ensureSubscriptionWireGuardNginxConfig; return 0; }
+    serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
+    serviceQueueApply() { recordMenuAction serviceQueueApply; }
+    subscriptionRemoteControlHealthAll() { printf '[{"id":"edge-a","ok":true}]\n'; }
+    subscribe() { recordMenuAction subscribe; }
+
+    resetMenuActions
+    manageSubscriptionWireGuardControlMenu <<<"1
+main.example.com
+10"
+    assertMenuAction initSubscriptionWireGuardMain
+    subscriptionWireGuardReadState | jq -e '.role == "main" and .enabled == true and .endpoint_host == "main.example.com" and .address == "10.77.0.1/24"' >/dev/null
+    grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+
+    controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
+    resetMenuActions
+    manageMultiServerSubscriptions <<<"3
+1
+${controlledCredential}
+edge-a
+10"
+    assertMenuAction subscribe
+    subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
+    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
+
+    updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
+    resetMenuActions
+    manageMultiServerSubscriptions <<<"4
+${updatedCredential}
+edge-a
+10"
+    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
+
+    resetMenuActions
+    manageMultiServerSubscriptions <<<"8
+edge-a
+disable
+10"
+    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
+    resetMenuActions
+    manageMultiServerSubscriptions <<<"8
+edge-a
+enable
+10"
+    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+    setSubscriptionSourceSyncFailure edge-a remote_error old-error
+    resetMenuActions
+    manageMultiServerSubscriptions <<<"9
+edge-a
+10"
+    subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
+    resetMenuActions
+    manageMultiServerSubscriptions <<<"5
+10"
+    assertMenuAction 'statusCard:被控服务器健康检查'
+    resetMenuActions
+    manageSubscriptionWireGuardControlMenu <<<"8
+9
+10"
+    assertMenuAction installSubscriptionControlService
+    assertMenuAction ensureSubscriptionWireGuardNginxConfig
+    subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
+
+    if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
+    currentHost="${oldCurrentHost}"
+    nginxConfigPath="${oldNginxConfigPath}"
+)
+
 runMenuSmokeLightRegression() {
     local actions=
     local output=
@@ -2423,6 +2541,7 @@ runMenuSmokeRegression() {
         actions=
     }
     menu() { recordMenuAction menu; }
+    uiStyle() { printf '%s' "$2"; }
     menuLine() { output+="$*"$'\n'; }
     menuMutedLine() { output+="$*"$'\n'; }
     menuClose() { return 0; }
@@ -2482,11 +2601,13 @@ runMenuSmokeRegression() {
     restartSubscriptionWireGuardControl() { recordMenuAction restartSubscriptionWireGuardControl; }
     disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; }
     showSubscriptionWireGuardStatus() { recordMenuAction showSubscriptionWireGuardStatus; }
+    subscriptionWireGuardConfigFile() { echo "${TMP_DIR}/menu-smoke-wireguard/wg-padm.conf"; }
     showAccounts() { recordMenuAction showAccounts; }
     showUserSubscriptions() { recordMenuAction showUserSubscriptions; }
     createAndSyncUserSubscriptionWizard() { recordMenuAction createAndSyncUserSubscriptionWizard; }
     manageUserSubscriptionItem() { recordMenuAction manageUserSubscriptionItem; }
     installSubscribe() { recordMenuAction installSubscribe; }
+    manageSubscriptionAutomation() { recordMenuAction manageSubscriptionAutomation; }
     manageSubscriptionSyncSettings() { recordMenuAction manageSubscriptionSyncSettings; }
     manageSubscriptionStateBackups() { recordMenuAction manageSubscriptionStateBackups; }
     runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
@@ -2540,6 +2661,7 @@ runMenuSmokeRegression() {
     protocolEntryMenu <<<"1
 2
 7
+9
 r"
     assertMenuAction 'statusCard:已取消'
 
@@ -2551,7 +2673,7 @@ r"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"1
-5
+4
 7"
     assertMenuAction menu
     resetMenuActions
@@ -2566,17 +2688,17 @@ r"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"4
-9
+10
 7"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"5
-8
+7
 7"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"6
-6
+7
 7"
     assertMenuAction menu
     resetMenuActions
@@ -2599,26 +2721,22 @@ r"
     assertMenuAction menu
     resetMenuActions
     manageMySubscription <<<"1
-5
-7"
+5"
     assertMenuAction subscribe
     assertMenuAction menu
     resetMenuActions
     manageMySubscription <<<"2
-5
-7"
+5"
     assertMenuAction subscribe
     assertMenuAction menu
     resetMenuActions
     manageMySubscription <<<"3
-5
-7"
+5"
     assertMenuAction showSubscriptionSources
     assertMenuAction menu
     resetMenuActions
     manageMySubscription <<<"4
-5
-7"
+5"
     assertMenuAction showAdminSubscriptionTraffic
     assertMenuAction menu
     resetMenuActions
@@ -2673,7 +2791,7 @@ y
     manageMultiServerSubscriptions <<<"1
 3
 10
-7"
+10"
     assertMenuAction showSubscriptionWireGuardMainCredential
     assertMenuAction menu
     for wgAction in "${wgActions[@]}"; do
@@ -2703,22 +2821,16 @@ y
     assertMenuAction menu
     resetMenuActions
     manageTrafficAndQuota <<<"1
-8
 7"
     assertMenuAction collectSubscriptionTraffic
-    assertMenuAction menu
     resetMenuActions
-    manageTrafficAndQuota <<<"6
-8
+    manageTrafficAndQuota <<<"5
 7"
     assertMenuAction subscriptionQuotaDryRunPlan
-    assertMenuAction menu
     resetMenuActions
-    manageTrafficAndQuota <<<"7
-8
+    manageTrafficAndQuota <<<"6
 7"
     assertMenuAction executeSubscriptionQuotaPlanMenu
-    assertMenuAction menu
     resetMenuActions
     manageSubscriptionAutomation <<<"1
 6
@@ -2746,16 +2858,10 @@ y
 7"
     assertMenuAction menu
     resetMenuActions
-    manageSubscriptionServers <<<"9
-7"
+    manageSubscriptionServers <<<"10"
     assertMenuAction menu
     resetMenuActions
-    manageSubscriptionTraffic <<<"8
-7"
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscriptionSettings <<<"6
-7"
+    manageTrafficAndQuota <<<"7"
     assertMenuAction menu
     resetMenuActions
     coreVersionManageMenu <<<"6"
@@ -3132,6 +3238,7 @@ runRegressionFastReality() {
 
 runRegressionUi() {
     runRegressionStep ui-smoke runMenuSmokeRegression
+    runRegressionStep wireguard-menu-flow runSubscriptionWireGuardMenuFlowRegression
 }
 
 runRegressionMenuSmoke() {

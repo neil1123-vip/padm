@@ -1246,6 +1246,50 @@ showUserSubscriptionTraffic() {
     menuClose
 }
 
+
+manageTrafficAndQuota() {
+    while true; do
+        echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
+        menuLine "先手动刷新流量，再查看本机、用户订阅和服务器源流量；限额计划可先预览再执行"
+        menuItem 1 "刷新流量统计" "采集本机账号流量并写入 groups.json"
+        menuItem 2 "查看我的流量" "显示自用账号流量"
+        menuItem 3 "查看用户订阅流量" "选择用户订阅后显示限额状态和来源流量"
+        menuItem 4 "查看服务器流量" "显示各服务器源累计流量"
+        menuItem 5 "预览限额计划" "查看将因超限而禁用/处理的用户订阅"
+        menuItem 6 "执行限额计划" "应用当前限额计划"
+        menuReturnItem 7 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead traffic_quota_menu "请选择:" trafficQuotaStatus
+        case "${trafficQuotaStatus}" in
+        1) collectSubscriptionTraffic ;;
+        2) showAdminSubscriptionTraffic ;;
+        3) selectUserSubscriptionTrafficMenu ;;
+        4) showSubscriptionSourcesTraffic ;;
+        5) userJsonCard "限额计划" "$(subscriptionQuotaDryRunPlan)" ;;
+        6) executeSubscriptionQuotaPlanMenu ;;
+        7) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+selectUserSubscriptionTrafficMenu() {
+    local userSubscriptionId=
+    showUserSubscriptions
+    autoRead user_subscription_traffic_id "请输入用户订阅 ID:" userSubscriptionId
+    if [[ -z "${userSubscriptionId}" ]] || ! userSubscriptionExists "${userSubscriptionId}"; then
+        errorCard "用户订阅 ID 无效"
+        return 1
+    fi
+    showUserSubscriptionTraffic "${userSubscriptionId}"
+}
+
+showSubscriptionSourcesTraffic() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    userJsonCard "服务器流量" "$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .traffic.sources')"
+}
+
 showSubscriptionSources() {
     local groupId
     groupId=$(activeSubscriptionGroupId)
