@@ -3105,22 +3105,41 @@ runRealityScannerBinaryRegression() {
     [[ "${capturedAsset}" == "RealiTLScanner-linux-64" ]]
 }
 
+regressionModuleManifestReady() {
+    [[ "${PADM_FAKE_MODULE_MANIFEST_READY:-1}" == "1" ]]
+}
+
+regressionScriptModulesReady() {
+    [[ -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]] || return 1
+    regressionModuleManifestReady || return 1
+    [[ -f "${SCRIPT_EXPECTED_REF_FILE}" ]] || return 0
+    [[ -f "${SCRIPT_REF_FILE}" ]] || return 1
+    [[ "$(<"${SCRIPT_EXPECTED_REF_FILE}")" == "$(<"${SCRIPT_REF_FILE}")" ]]
+}
+
 regressionEnsureScriptModules() {
-    local remoteRef localRef
-    if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
-        if [[ ! -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]]; then
-            refreshScriptModules ""
-        fi
+    local remoteRef= expectedRef=
+    if [[ "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" == "1" ]]; then
+        remoteRef=$(fetchRemoteRef || true)
+        refreshScriptModules "${remoteRef}"
+        [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_EXPECTED_REF_FILE}"
         return 0
     fi
-    remoteRef=$(fetchRemoteRef || true)
-    [[ -f "${SCRIPT_REF_FILE}" ]] && localRef=$(<"${SCRIPT_REF_FILE}")
-
-    if [[ ! -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]]; then
-        refreshScriptModules "${remoteRef}"
-    elif [[ -n "${remoteRef}" && "${remoteRef}" != "${localRef}" ]]; then
-        refreshScriptModules "${remoteRef}"
+    if regressionScriptModulesReady; then
+        return 0
     fi
+    if [[ -f "${SCRIPT_EXPECTED_REF_FILE}" ]]; then
+        expectedRef=$(<"${SCRIPT_EXPECTED_REF_FILE}")
+    fi
+    if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
+        refreshScriptModules "${expectedRef}"
+        return 0
+    fi
+
+    remoteRef="${expectedRef}"
+    [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef || true)
+    refreshScriptModules "${remoteRef}"
+    [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_EXPECTED_REF_FILE}"
 }
 
 runUpdatePadmVersionPromptRegression() {
@@ -3222,6 +3241,7 @@ runInstallRefreshRestoresBackupRegression() {
         SCRIPT_DIR="${fixtureDir}"
         REPO_ARCHIVE_DIR="${archiveDirName}"
         SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
         REPO_ZIP_URL="fixture.tar.gz"
         command() {
             if [[ "$1" == "-v" && "$2" == "curl" ]]; then
@@ -3256,6 +3276,7 @@ runInstallEnsureModulesRegression() {
 
     local savedScriptDir="${SCRIPT_DIR:-}"
     local savedScriptRefFile="${SCRIPT_REF_FILE:-}"
+    local savedScriptExpectedRefFile="${SCRIPT_EXPECTED_REF_FILE:-}"
     local savedRepoRefUrl="${REPO_REF_URL:-}"
     local savedRepoZipUrl="${REPO_ZIP_URL:-}"
     local savedRepoArchiveDir="${REPO_ARCHIVE_DIR:-}"
@@ -3263,6 +3284,7 @@ runInstallEnsureModulesRegression() {
 
     SCRIPT_DIR="${fixtureDir}"
     SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+    SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
     refreshScriptModules() { printf '%s\n' "$1" >"${marker}"; }
     fetchRemoteRef() { return 1; }
     regressionEnsureScriptModules
@@ -3277,10 +3299,30 @@ runInstallEnsureModulesRegression() {
     touch "${fixtureDir}/shell/core/bootstrap.sh"
     fetchRemoteRef() { printf 'new-ref\n'; }
     regressionEnsureScriptModules
+    [[ ! -e "${marker}" ]]
+
+    printf 'expected-ref\n' >"${fixtureDir}/.padm-entry-ref"
+    printf 'old-ref\n' >"${fixtureDir}/.padm-ref"
+    rm -f "${marker}"
+    regressionEnsureScriptModules
+    [[ "$(<"${marker}")" == "expected-ref" ]]
+
+    printf 'expected-ref\n' >"${fixtureDir}/.padm-entry-ref"
+    printf 'expected-ref\n' >"${fixtureDir}/.padm-ref"
+    rm -f "${marker}"
+    PADM_FAKE_MODULE_MANIFEST_READY=0 regressionEnsureScriptModules
+    [[ "$(<"${marker}")" == "expected-ref" ]]
+
+    unset PADM_FAKE_MODULE_MANIFEST_READY
+
+    rm -f "${marker}" "${fixtureDir}/.padm-entry-ref"
+    rm -f "${fixtureDir}/shell/core/bootstrap.sh"
+    regressionEnsureScriptModules
     [[ "$(<"${marker}")" == "new-ref" ]]
 
     SCRIPT_DIR="${savedScriptDir}"
     SCRIPT_REF_FILE="${savedScriptRefFile}"
+    SCRIPT_EXPECTED_REF_FILE="${savedScriptExpectedRefFile}"
     REPO_REF_URL="${savedRepoRefUrl}"
     REPO_ZIP_URL="${savedRepoZipUrl}"
     REPO_ARCHIVE_DIR="${savedRepoArchiveDir}"
@@ -3291,17 +3333,77 @@ runInstallEnsureModulesRegression() {
     fi
 }
 
+runAliasInstallSameTargetRegression() {
+    local fixtureDir outputLog cpLog oldScriptDir oldPadmInstallDir oldHome
+    fixtureDir="${TMP_DIR}/alias-install-same-target"
+    outputLog="${fixtureDir}/output.log"
+    cpLog="${fixtureDir}/cp.log"
+    mkdir -p "${fixtureDir}"
+    cat >"${fixtureDir}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+EOF
+
+    oldScriptDir="${SCRIPT_DIR:-}"
+    oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
+    oldHome="${HOME}"
+    SCRIPT_DIR="${fixtureDir}"
+    PADM_INSTALL_DIR="${fixtureDir}"
+    HOME="${fixtureDir}/home"
+    mkdir -p "${HOME}"
+
+    (
+        cp() { printf 'cp %s\n' "$*" >>"${cpLog}"; command cp "$@"; }
+        chmod() { :; }
+        ln() { :; }
+        aliasInstall
+    ) >"${outputLog}" 2>&1
+
+    [[ ! -s "${outputLog}" ]]
+    [[ ! -e "${cpLog}" ]]
+
+    SCRIPT_DIR="${oldScriptDir}"
+    HOME="${oldHome}"
+    if [[ -n "${oldPadmInstallDir}" ]]; then
+        PADM_INSTALL_DIR="${oldPadmInstallDir}"
+    else
+        unset PADM_INSTALL_DIR
+    fi
+}
+
+runInstallModulePathsRegression() {
+    local outputList
+    outputList="${TMP_DIR}/install-module-paths.txt"
+    (
+        eval "$(awk '
+            /^modulePaths\(\)/ { capture = 1 }
+            /^scriptModulesReady\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="${PROJECT_ROOT}"
+        modulePaths
+    ) | sort >"${outputList}"
+    grep -q '^shell/core/bootstrap\.sh$' "${outputList}"
+    grep -q '^shell/core/menu\.sh$' "${outputList}"
+    grep -q '^shell/subscription/wireguard_control\.sh$' "${outputList}"
+    ! grep -q '^REQUIRED_MODULE_PATHS' "${PROJECT_ROOT}/install.sh"
+}
+
 runRegressionPlatform() {
-    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression
-    runRegressionStep cleanup-trap runCleanupTrapRegression
-    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
-    runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression
-    runRegressionStep install-entry-refresh runInstallEnsureModulesRegression
-    runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression
-    runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression
-    runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression
-    runRegressionStep rhel-like-detection runRhelLikeDetectionRegression
-    runRegressionStep fedora-detection runFedoraDetectionRegression
+    local rc=0
+    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression || rc=1
+    runRegressionStep cleanup-trap runCleanupTrapRegression || rc=1
+    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression || rc=1
+    runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression || rc=1
+    runRegressionStep install-entry-refresh runInstallEnsureModulesRegression || rc=1
+    runRegressionStep install-module-paths runInstallModulePathsRegression || rc=1
+    runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression || rc=1
+    runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression || rc=1
+    runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression || rc=1
+    runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression || rc=1
+    runRegressionStep rhel-like-detection runRhelLikeDetectionRegression || rc=1
+    runRegressionStep fedora-detection runFedoraDetectionRegression || rc=1
+    return "${rc}"
 }
 
 runRegressionPlatformIo() {

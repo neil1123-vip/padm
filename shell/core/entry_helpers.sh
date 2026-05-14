@@ -377,6 +377,11 @@ addNginx302() {
     fi
 }
 
+padmEntryScriptReady() {
+    local entryPath=$1
+    [[ -s "${entryPath}" ]] && bash -n "${entryPath}" && grep -q "ensureScriptModules" "${entryPath}"
+}
+
 # 更新脚本
 updatePadm() {
     local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
@@ -408,7 +413,7 @@ updatePadm() {
         return 1
     fi
 
-    if [[ ! -s "${newInstall}" ]] || ! bash -n "${newInstall}" || ! grep -q "ensureScriptModules" "${newInstall}"; then
+    if ! padmEntryScriptReady "${newInstall}"; then
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
         errorCard "新版入口校验失败，已保留旧入口"
         return 1
@@ -429,7 +434,7 @@ updatePadm() {
     padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
 
     successCard "更新入口已下载，正在重新打开新版脚本"
-    if "${installPath}"; then
+    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 "${installPath}"; then
         rm -f "${backupPath}"
         exit 0
     fi
@@ -804,39 +809,53 @@ checkLog() {
     esac
 }
 
+sameInstallPath() {
+    local left=$1
+    local right=$2
+    local leftDir rightDir leftBase rightBase
+    leftDir=$(cd -- "$(dirname -- "${left}")" 2>/dev/null && pwd -P) || return 1
+    rightDir=$(cd -- "$(dirname -- "${right}")" 2>/dev/null && pwd -P) || return 1
+    leftBase=$(basename -- "${left}")
+    rightBase=$(basename -- "${right}")
+    [[ "${leftDir}/${leftBase}" == "${rightDir}/${rightBase}" ]]
+}
+
 # 脚本快捷方式
 aliasInstall() {
     local sourceInstall="${SCRIPT_DIR}/install.sh"
+    local targetDir="${PADM_INSTALL_DIR:-/etc/padm}"
     if [[ ! -f "${sourceInstall}" && -f "$HOME/install.sh" ]]; then
         sourceInstall="$HOME/install.sh"
     fi
 
-    if [[ -f "${sourceInstall}" && -d "/etc/padm" ]] && grep <"${sourceInstall}" -q "ensureScriptModules"; then
-        cp "${sourceInstall}" /etc/padm/install.sh
-        chmod 700 /etc/padm/install.sh
-        if [[ -d "${SCRIPT_DIR}/shell" ]]; then
-            rm -rf /etc/padm/shell
-            cp -R "${SCRIPT_DIR}/shell" /etc/padm/
+    if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
+        if ! sameInstallPath "${sourceInstall}" "${targetDir}/install.sh"; then
+            cp "${sourceInstall}" "${targetDir}/install.sh"
+            chmod 700 "${targetDir}/install.sh"
         fi
-        if [[ -d "${SCRIPT_DIR}/documents" ]]; then
-            rm -rf /etc/padm/documents
-            cp -R "${SCRIPT_DIR}/documents" /etc/padm/
+        if [[ -d "${SCRIPT_DIR}/shell" ]] && ! sameInstallPath "${SCRIPT_DIR}/shell" "${targetDir}/shell"; then
+            rm -rf "${targetDir}/shell"
+            cp -R "${SCRIPT_DIR}/shell" "${targetDir}/"
         fi
-        if [[ -d "${SCRIPT_DIR}/assets" ]]; then
-            rm -rf /etc/padm/assets
-            cp -R "${SCRIPT_DIR}/assets" /etc/padm/
+        if [[ -d "${SCRIPT_DIR}/documents" ]] && ! sameInstallPath "${SCRIPT_DIR}/documents" "${targetDir}/documents"; then
+            rm -rf "${targetDir}/documents"
+            cp -R "${SCRIPT_DIR}/documents" "${targetDir}/"
         fi
-        rm -f /etc/padm/xray/README.md
+        if [[ -d "${SCRIPT_DIR}/assets" ]] && ! sameInstallPath "${SCRIPT_DIR}/assets" "${targetDir}/assets"; then
+            rm -rf "${targetDir}/assets"
+            cp -R "${SCRIPT_DIR}/assets" "${targetDir}/"
+        fi
+        rm -f "${targetDir}/xray/README.md"
         local shortcutCreated=
         if [[ -d "/usr/bin/" ]]; then
             if [[ ! -f "/usr/bin/padm" ]]; then
-                ln -s /etc/padm/install.sh /usr/bin/padm
+                ln -s "${targetDir}/install.sh" /usr/bin/padm
                 chmod 700 /usr/bin/padm
                 shortcutCreated=true
             fi
         elif [[ -d "/usr/sbin" ]]; then
             if [[ ! -f "/usr/sbin/padm" ]]; then
-                ln -s /etc/padm/install.sh /usr/sbin/padm
+                ln -s "${targetDir}/install.sh" /usr/sbin/padm
                 chmod 700 /usr/sbin/padm
                 shortcutCreated=true
             fi
