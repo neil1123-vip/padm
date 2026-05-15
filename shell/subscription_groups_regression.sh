@@ -510,6 +510,14 @@ JSON
     ' "${configPath}09_routing.json" >/dev/null
     addXrayBTBlockRule
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_out" and (.protocol | index("bittorrent")))' "${configPath}09_routing.json" >/dev/null
+    coreInstallType=2
+    mkdir -p "${singBoxConfigPath}"
+    addSingBoxBTBlockRule
+    hasSingBoxBTBlockRule
+    accessControlBackupCreate
+    [[ -d "$(accessControlBackupDir)/xray" ]]
+    [[ -d "$(accessControlBackupDir)/sing-box" ]]
+    coreInstallType=1
     cat >"${configPath}09_routing.json" <<'JSON'
 {"routing":{"rules":[]}}
 JSON

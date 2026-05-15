@@ -221,7 +221,7 @@ hasXrayBTBlockRule() {
 }
 
 hasSingBoxBTBlockRule() {
-    [[ -f "${singBoxConfigPath}bt_block_route.json" ]] && jq -e '.route.rules[]? | select(.outbound == "block" and (.protocol // [] | index("bittorrent")))' "${singBoxConfigPath}bt_block_route.json" >/dev/null 2>&1
+    [[ -f "${singBoxConfigPath}bt_block_route.json" ]] && jq -e '.route.rules[]? | select((.action == "reject" or .outbound == "block") and (.protocol // [] | index("bittorrent")))' "${singBoxConfigPath}bt_block_route.json" >/dev/null 2>&1
 }
 
 installBTBlock() {
@@ -626,17 +626,22 @@ accessControlBackupCreate() {
     local backupDir
     backupDir=$(accessControlBackupDir)
     rm -rf "${backupDir}" >/dev/null 2>&1
-    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1
+    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
     if [[ -n "${configPath}" ]]; then
         for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
-            [[ -f "${configPath}${file}" ]] && cp "${configPath}${file}" "${backupDir}/xray/${file}"
+            if [[ -f "${configPath}${file}" ]]; then
+                cp "${configPath}${file}" "${backupDir}/xray/${file}" || return 1
+            fi
         done
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
         for file in block_domain_route.json block_domain_outbound.json block_ip_route.json block_ip_outbound.json cn_block_route.json cn_block_outbound.json cn_block_ip_route.json 00_allow_domain_route.json 01_direct_outbound.json; do
-            [[ -f "${singBoxConfigPath}${file}" ]] && cp "${singBoxConfigPath}${file}" "${backupDir}/sing-box/${file}"
+            if [[ -f "${singBoxConfigPath}${file}" ]]; then
+                cp "${singBoxConfigPath}${file}" "${backupDir}/sing-box/${file}" || return 1
+            fi
         done
     fi
+    return 0
 }
 
 accessControlBackupRestore() {
