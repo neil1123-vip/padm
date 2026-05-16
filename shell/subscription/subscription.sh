@@ -648,7 +648,7 @@ listRemoteSubscribeSources() {
 addSubscribeMenu() {
     echoContent title "\n┌─ 服务器源管理 ─────────────────────────────────────"
     menuLine "主控端管理被控服务器：粘贴被控接入凭据添加，或删除已有被控"
-    menuLine "被控接入凭据来自被控服务器的 多服务器：被控 菜单"
+    menuLine "被控不需要安装公网订阅服务；只需在 多服务器：被控 生成接入凭据"
     menuItem 1 "添加被控服务器" "粘贴被控凭据，新增 WireGuard Peer 和服务器源"
     menuItem 2 "移除被控服务器" "删除已有被控来源"
     menuReturnItem 3 "返回主控菜单" "回到上级菜单"
@@ -687,7 +687,8 @@ addOtherSubscribe() {
     local port=
     local alias=
     echoContent title "\n┌─ 添加被控服务器 ───────────────────────────────────"
-    menuLine "在被控服务器进入 多服务器订阅 -> WireGuard 控制面 -> 查看本机被控接入凭据"
+    menuLine "在被控服务器进入 多服务器：被控 -> 查看本机被控接入凭据"
+    menuLine "被控无需安装公网订阅服务；初始化被控会启用 WireGuard 内网控制面"
     menuLine "主控端只需要粘贴被控接入凭据，再设置一个本地别名"
     menuLine "被控接入凭据已包含 WireGuard 内网地址、控制端口、Token 和公钥"
     menuClose

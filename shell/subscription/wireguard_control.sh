@@ -381,7 +381,7 @@ initSubscriptionWireGuardControlled() {
         errorCard "WireGuard 被控配置未落地"
         return 1
     }
-    successCard "WireGuard 被控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "控制面：WireGuard 内网 ${controlPort} 端口"
+    successCard "WireGuard 被控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "控制面：WireGuard 内网 ${controlPort} 端口" "无需安装公网订阅服务；把被控接入凭据交回主控即可"
 }
 
 showSubscriptionWireGuardMainCredential() {
@@ -442,7 +442,7 @@ showSubscriptionWireGuardControlledCredential() {
       --argjson controlPort "$(jq -r '.control_port' <<<"${state}")" \
       --arg token "$(subscriptionControlToken)" \
       '{address:$address, public_key:$publicKey, control_port:$controlPort, token:$token}')
-    statusCard "本机被控接入凭据" "被控接入凭据：$(subscriptionWireGuardCredentialEncode controlled "${payload}")" "用途：复制到主控服务器添加被控" "控制接口只通过 WireGuard 内网访问"
+    statusCard "本机被控接入凭据" "被控接入凭据：$(subscriptionWireGuardCredentialEncode controlled "${payload}")" "用途：复制到主控服务器添加被控" "控制接口只通过 WireGuard 内网访问" "无需安装公网订阅服务"
 }
 
 subscriptionWireGuardAddPeerFromCredential() {

@@ -665,6 +665,30 @@ runSubscriptionGroupSync() {
     fi
 }
 
+showSubscriptionServerRoleSummary() {
+    local state
+    local role
+    local roleText
+    local enabledText
+    local address
+    local peerCount
+    state=$(subscriptionWireGuardReadState)
+    role=$(jq -r '.role' <<<"${state}")
+    case "${role}" in
+    main) roleText="主控" ;;
+    controlled) roleText="被控" ;;
+    *) roleText="未配置主控/被控" ;;
+    esac
+    if [[ "$(jq -r '.enabled' <<<"${state}")" == "true" ]]; then
+        enabledText="已启用"
+    else
+        enabledText="未启用"
+    fi
+    address=$(jq -r 'if (.address // "") == "" then "未配置" else .address end' <<<"${state}")
+    peerCount=$(jq -r '.peers | length' <<<"${state}")
+    menuLine "当前服务器角色：$(uiStyle value "${roleText}")；WireGuard 控制面：$(uiStyle value "${enabledText}")；内网地址：$(uiStyle value "${address}")；Peer：$(uiStyle value "${peerCount}")"
+}
+
 # 订阅与用户入口
 manageSubscription() {
     progressCard "1" "订阅与用户"
@@ -675,7 +699,9 @@ manageSubscription() {
 
     while true; do
         echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
-        menuLine "先安装/更新订阅服务，再查看链接、给别人开订阅或配置主控/被控同步"
+        showSubscriptionServerRoleSummary
+        menuLine "先安装/更新本机订阅服务，再查看链接、给别人开订阅或配置主控/被控同步"
+        menuLine "被控不需要安装公网订阅服务；只需启用 WireGuard 内网控制面并把凭据交给主控"
         menuLine "groups.json 是用户订阅、服务器源、同步计划和流量统计的状态真源"
         menuLine "常用路径：本机订阅 -> 安装服务/查看链接；分享给别人 -> 开订阅；多服务器 -> 按主控/被控配置"
         menuItem 1 "本机订阅" "安装/更新订阅发布服务，查看自用链接和本机状态"
@@ -703,8 +729,8 @@ manageSubscription() {
 manageLocalSubscription() {
     while true; do
         echoContent title "\n┌─ 本机订阅 ─────────────────────────────────────────"
-        menuLine "本机订阅面向当前服务器：先安装发布服务，再查看自用链接、服务器源和本机流量"
-        menuLine "给别人开的分享订阅在上级菜单单独管理；多服务器同步按主控/被控视角配置"
+        menuLine "本机订阅面向当前服务器：安装公网发布服务、查看自用链接、服务器源和本机流量"
+        menuLine "这不是被控加入主控的必选步骤；被控加入请走 多服务器：被控"
         menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
         menuItem 2 "查看/刷新我的订阅链接" "重新生成并输出当前自用订阅"
         menuItem 3 "查看订阅服务状态" "显示当前订阅发布端口和域名"
@@ -714,7 +740,7 @@ manageLocalSubscription() {
         menuClose
         autoRead local_subscription_menu "请选择:" localSubscriptionStatus
         case "${localSubscriptionStatus}" in
-        1) installSubscribe ;;
+        1) installSubscribe && showSubscriptionServiceStatus ;;
         2) subscribe ;;
         3) showSubscriptionServiceStatus ;;
         4) showSubscriptionSources ;;
@@ -730,7 +756,7 @@ showSubscriptionServiceStatus() {
     if [[ -n "${subscribePort}" ]]; then
         statusCard "订阅服务" "状态：已配置" "协议：${subscribeType:-https}" "域名：${subscribeDomain:-${currentHost:-未读取}}" "端口：${subscribePort}"
     else
-        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "请先进入 订阅服务 -> 安装/更新订阅发布服务"
+        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入 本机订阅 -> 安装/更新订阅服务" "仅作为被控加入主控时，不需要安装公网订阅服务"
     fi
 }
 
@@ -744,7 +770,7 @@ manageSharedSubscriptions() {
         echoContent title "\n┌─ 给别人开订阅 ─────────────────────────────────────"
         menuLine "这里管理分享订阅对象：给谁开、包含哪些节点、订阅额度是多少"
         menuLine "同步后会生成托管账号 sub_<ID>；超限停用和批量处理在 流量与限额 中执行"
-        menuLine "首次使用请先确认 订阅服务 已安装；一键流程会同步后只刷新一次链接"
+        menuLine "首次给客户端发分享链接前，请先确认 本机订阅 已安装公网发布服务；只做被控服务器不需要这一步"
         menuItem 1 "一键创建并生成链接" "填写 ID/名称、节点范围、订阅额度，然后同步并输出链接"
         menuItem 2 "查看已开的订阅" "列出已创建的分享订阅"
         menuItem 3 "管理单个订阅" "改节点范围、额度、启停或删除"
@@ -1370,7 +1396,7 @@ manageMainControllerSubscriptions() {
     while true; do
         echoContent title "\n┌─ 多服务器：主控 ───────────────────────────────────"
         menuLine "这个视角只放主控动作：初始化主控、添加/管理被控、测试连接和查看同步结果"
-        menuLine "被控服务器需先在自己的 被控 菜单生成接入凭据，再复制到这里添加"
+        menuLine "被控服务器只需在自己的 被控 菜单生成接入凭据；不需要安装公网订阅服务"
         menuItem 1 "初始化/查看主控控制面" "初始化主控、查看主控凭据、Peer 和 WireGuard 状态"
         menuItem 2 "添加/移除被控服务器" "粘贴被控接入凭据添加，或删除已有被控"
         menuItem 3 "更新被控服务器凭据" "被控重建后粘贴新凭据更新 Token/内网地址"
@@ -1402,9 +1428,9 @@ manageMainControllerSubscriptions() {
 manageControlledSubscription() {
     while true; do
         echoContent title "\n┌─ 多服务器：被控 ───────────────────────────────────"
-        menuLine "这个视角只放被控动作：初始化本机为被控、导入主控凭据、把被控凭据交回主控"
-        menuLine "被控只提供 WireGuard 内网控制面；给用户看的订阅链接仍由主控/本机订阅服务发布"
-        menuItem 1 "初始化本机为被控" "生成被控 WireGuard 控制面"
+        menuLine "这个视角只放被控动作：初始化被控、导入主控凭据、把被控凭据交回主控"
+        menuLine "被控无需安装公网订阅服务；这里只启动 WireGuard 内网控制面供主控同步"
+        menuItem 1 "初始化本机为被控" "安装 WireGuard 内网控制面，不安装公网订阅服务"
         menuItem 2 "导入主控接入凭据" "加入主控 WireGuard 网络"
         menuItem 3 "查看本机被控接入凭据" "复制回主控添加被控"
         menuItem 4 "查看被控控制面状态" "显示角色、接口、内网地址和端口"
@@ -1496,7 +1522,8 @@ setSubscriptionSourceControlTokenMenu() {
     local token=
     local matches=
     echoContent title "\n┌─ 更新被控服务器凭据 ───────────────────────────────"
-    menuLine "在被控服务器进入 多服务器订阅 -> WireGuard 控制面 -> 查看本机被控接入凭据"
+    menuLine "在被控服务器进入 多服务器：被控 -> 查看本机被控接入凭据"
+    menuLine "被控不需要安装公网订阅服务；凭据来自 WireGuard 内网控制面"
     menuLine "粘贴后会自动读取 WireGuard 内网地址、控制端口和 Token，并更新已有被控服务器"
     menuClose
     autoRead subscription_control_credential "请粘贴被控接入凭据:" credential

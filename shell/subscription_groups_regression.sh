@@ -2747,6 +2747,9 @@ runMenuSmokeRegression() {
     restartSubscriptionWireGuardControl() { recordMenuAction restartSubscriptionWireGuardControl; }
     disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; }
     showSubscriptionWireGuardStatus() { recordMenuAction showSubscriptionWireGuardStatus; }
+    subscriptionWireGuardReadState() {
+        jq -n '{enabled:false, role:"uninitialized", address:"", peers:[]}'
+    }
     subscriptionWireGuardConfigFile() { echo "${TMP_DIR}/menu-smoke-wireguard/wg-padm.conf"; }
     showAccounts() { recordMenuAction showAccounts; }
     showUserSubscriptions() { recordMenuAction showUserSubscriptions; }
@@ -2817,8 +2820,10 @@ r"
     resetMenuActions
     manageSubscription <<<"7"
     assertMenuAction menu
+    grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
     grep -q "多服务器：主控" <<<"${output}"
     grep -q "多服务器：被控" <<<"${output}"
+    grep -q "被控不需要安装公网订阅服务" <<<"${output}"
     resetMenuActions
     manageSubscription <<<"1
 6
@@ -2853,26 +2858,7 @@ r"
     manageLocalSubscription <<<"1
 6"
     assertMenuAction installSubscribe
-    resetMenuActions
-    manageLocalSubscription <<<"2
-6"
-    assertMenuAction subscribe
-    resetMenuActions
-    manageLocalSubscription <<<"3
-6"
     assertMenuAction showSubscriptionServiceStatus
-    resetMenuActions
-    manageLocalSubscription <<<"4
-6"
-    assertMenuAction showSubscriptionSources
-    resetMenuActions
-    manageLocalSubscription <<<"5
-6"
-    assertMenuAction showAdminSubscriptionTraffic
-    resetMenuActions
-    manageLocalSubscription <<<"1
-6"
-    assertMenuAction installSubscribe
     resetMenuActions
     manageLocalSubscription <<<"2
 6"
