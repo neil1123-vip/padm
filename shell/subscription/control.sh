@@ -456,6 +456,10 @@ subscriptionControlApplyAccountPlan() {
     subscriptionSyncApplyAccountPlan "${plan}"
 }
 
+subscriptionControlRefreshPublishedSubscriptions() {
+    subscribe false false >/dev/null 2>&1 || true
+}
+
 subscriptionControlApplySync() {
     local payload=$1
     local dryRun
@@ -479,6 +483,8 @@ subscriptionControlApplySync() {
     subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
         subscriptionSyncReconcileLocalServices
+    else
+        subscriptionControlRefreshPublishedSubscriptions
     fi
     jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
 }

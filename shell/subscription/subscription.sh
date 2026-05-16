@@ -647,11 +647,11 @@ listRemoteSubscribeSources() {
 # 添加服务器源
 addSubscribeMenu() {
     echoContent title "\n┌─ 服务器源管理 ─────────────────────────────────────"
-    menuLine "服务器源用于多服务器订阅聚合和主控/被控同步，不是普通客户端节点导入入口"
-    menuLine "当前机器是主控；添加前请先在被控服务器安装订阅服务，并复制被控端 Token"
-    menuItem 1 "添加被控服务器" "新增远端被控订阅服务来源"
-    menuItem 2 "移除被控服务器" "删除已有远端被控来源"
-    menuReturnItem 3 "返回订阅与用户" "回到上级菜单"
+    menuLine "主控端管理被控服务器：粘贴被控接入凭据添加，或删除已有被控"
+    menuLine "被控接入凭据来自被控服务器的 多服务器：被控 菜单"
+    menuItem 1 "添加被控服务器" "粘贴被控凭据，新增 WireGuard Peer 和服务器源"
+    menuItem 2 "移除被控服务器" "删除已有被控来源"
+    menuReturnItem 3 "返回主控菜单" "回到上级菜单"
     menuClose
     autoRead server_source_menu "请选择:" addSubscribeStatus
     if [[ "${addSubscribeStatus}" == "1" ]]; then

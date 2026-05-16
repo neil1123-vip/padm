@@ -2365,6 +2365,38 @@ JSON
     subscriptionRemoteSyncPlan | jq -e 'length == 12 and .[0].source_id == "src0" and .[2].source_id == "src2" and .[10].source_id == "src10" and all(.[]; .status == "success")' >/dev/null
 }
 
+runRemoteControlServerRefreshRegression() (
+    local subscribeCalls=0
+    local subscribeArgs=
+    local reconcileCalls=0
+    local responseFile="${TMP_DIR}/remote-control-server-refresh.json"
+
+    subscriptionSyncPlanFromAccounts() {
+        printf '{"create":["sub_team_a"],"remove":[]}'
+    }
+    subscriptionControlApplyAccountPlan() {
+        return 0
+    }
+    subscribe() {
+        subscribeCalls=$((subscribeCalls + 1))
+        subscribeArgs="$*"
+    }
+    subscriptionSyncReconcileLocalServices() {
+        reconcileCalls=$((reconcileCalls + 1))
+    }
+
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
+    jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
+    [[ "${subscribeCalls}" == "1" ]]
+    [[ "${subscribeArgs}" == "false false" ]]
+    [[ "${reconcileCalls}" == "0" ]]
+
+    PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
+    jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
+    [[ "${subscribeCalls}" == "1" ]]
+    [[ "${reconcileCalls}" == "1" ]]
+)
+
 runNginxBlogAutoInstallRegression() {
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local staticDir="${TMP_DIR}/nginx-blog-auto/"
@@ -2508,7 +2540,7 @@ main.example.com
 
     controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
     resetMenuActions
-    manageMultiServerSubscriptions <<<"3
+    manageMainControllerSubscriptions <<<"2
 1
 ${controlledCredential}
 edge-a
@@ -2519,32 +2551,32 @@ edge-a
 
     updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
     resetMenuActions
-    manageMultiServerSubscriptions <<<"4
+    manageMainControllerSubscriptions <<<"3
 ${updatedCredential}
 edge-a
 10"
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
 
     resetMenuActions
-    manageMultiServerSubscriptions <<<"8
+    manageMainControllerSubscriptions <<<"8
 edge-a
 disable
 10"
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
     resetMenuActions
-    manageMultiServerSubscriptions <<<"8
+    manageMainControllerSubscriptions <<<"8
 edge-a
 enable
 10"
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
     setSubscriptionSourceSyncFailure edge-a remote_error old-error
     resetMenuActions
-    manageMultiServerSubscriptions <<<"9
+    manageMainControllerSubscriptions <<<"9
 edge-a
 10"
     subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
     resetMenuActions
-    manageMultiServerSubscriptions <<<"5
+    manageMainControllerSubscriptions <<<"4
 10"
     assertMenuAction 'statusCard:被控服务器健康检查'
     resetMenuActions
@@ -2785,9 +2817,11 @@ r"
     resetMenuActions
     manageSubscription <<<"7"
     assertMenuAction menu
+    grep -q "多服务器：主控" <<<"${output}"
+    grep -q "多服务器：被控" <<<"${output}"
     resetMenuActions
     manageSubscription <<<"1
-4
+6
 7"
     assertMenuAction menu
     resetMenuActions
@@ -2797,12 +2831,12 @@ r"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"3
-6
+10
 7"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"4
-10
+7
 7"
     assertMenuAction menu
     resetMenuActions
@@ -2812,47 +2846,49 @@ r"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"6
-7
+6
 7"
     assertMenuAction menu
     resetMenuActions
-    manageSubscriptionService <<<"1
-4
-7"
+    manageLocalSubscription <<<"1
+6"
     assertMenuAction installSubscribe
-    assertMenuAction menu
     resetMenuActions
-    manageSubscriptionService <<<"2
-4
-7"
+    manageLocalSubscription <<<"2
+6"
     assertMenuAction subscribe
-    assertMenuAction menu
     resetMenuActions
-    manageSubscriptionService <<<"3
-4
-7"
+    manageLocalSubscription <<<"3
+6"
     assertMenuAction showSubscriptionServiceStatus
-    assertMenuAction menu
     resetMenuActions
-    manageMySubscription <<<"1
-5"
-    assertMenuAction subscribe
-    assertMenuAction menu
-    resetMenuActions
-    manageMySubscription <<<"2
-5"
-    assertMenuAction subscribe
-    assertMenuAction menu
-    resetMenuActions
-    manageMySubscription <<<"3
-5"
+    manageLocalSubscription <<<"4
+6"
     assertMenuAction showSubscriptionSources
-    assertMenuAction menu
     resetMenuActions
-    manageMySubscription <<<"4
-5"
+    manageLocalSubscription <<<"5
+6"
     assertMenuAction showAdminSubscriptionTraffic
-    assertMenuAction menu
+    resetMenuActions
+    manageLocalSubscription <<<"1
+6"
+    assertMenuAction installSubscribe
+    resetMenuActions
+    manageLocalSubscription <<<"2
+6"
+    assertMenuAction subscribe
+    resetMenuActions
+    manageLocalSubscription <<<"3
+6"
+    assertMenuAction showSubscriptionServiceStatus
+    resetMenuActions
+    manageLocalSubscription <<<"4
+6"
+    assertMenuAction showSubscriptionSources
+    resetMenuActions
+    manageLocalSubscription <<<"5
+6"
+    assertMenuAction showAdminSubscriptionTraffic
     resetMenuActions
     manageSharedSubscriptions <<<"2
 6
@@ -2902,12 +2938,28 @@ y
     assertMenuAction subscriptionSyncPlan
     assertMenuAction menu
     resetMenuActions
-    manageMultiServerSubscriptions <<<"1
-3
-10
+    manageMainControllerSubscriptions <<<"1
+7
 10"
-    assertMenuAction showSubscriptionWireGuardMainCredential
     assertMenuAction menu
+    resetMenuActions
+    manageSubscriptionMainControlMenu <<<"2
+7"
+    assertMenuAction showSubscriptionWireGuardMainCredential
+    for wgAction in "1:initSubscriptionWireGuardMain" "2:showSubscriptionWireGuardMainCredential" "3:showSubscriptionWireGuardPeers" "4:testSubscriptionWireGuardControl" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
+        wgChoice=${wgAction%%:*}
+        resetMenuActions
+        manageSubscriptionMainControlMenu <<<"${wgChoice}
+7"
+        assertMenuAction "${wgAction#*:}"
+    done
+    for wgAction in "1:initSubscriptionWireGuardControlled" "2:importSubscriptionWireGuardMainCredential" "3:showSubscriptionWireGuardControlledCredential" "4:showSubscriptionWireGuardStatus" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
+        wgChoice=${wgAction%%:*}
+        resetMenuActions
+        manageControlledSubscription <<<"${wgChoice}
+7"
+        assertMenuAction "${wgAction#*:}"
+    done
     for wgAction in "${wgActions[@]}"; do
         wgChoice=${wgAction%%:*}
         resetMenuActions
@@ -2916,21 +2968,16 @@ y
         assertMenuAction "${wgAction#*:}"
     done
     resetMenuActions
-    manageMultiServerSubscriptions <<<"4
-10
-7"
+    manageMainControllerSubscriptions <<<"3
+10"
     assertMenuAction setSubscriptionSourceControlTokenMenu
-    assertMenuAction menu
     resetMenuActions
-    manageMultiServerSubscriptions <<<"6
-10
-7"
+    manageMainControllerSubscriptions <<<"6
+10"
     assertMenuAction showSubscriptionSourceControlUrls
-    assertMenuAction menu
     resetMenuActions
-    manageMultiServerSubscriptions <<<"7
-10
-7"
+    manageMainControllerSubscriptions <<<"7
+10"
     assertMenuAction showSubscriptionSourceSyncResults
     assertMenuAction menu
     resetMenuActions
@@ -2964,15 +3011,12 @@ y
     assertMenuAction manageSubscriptionStateBackups
     assertMenuAction menu
     resetMenuActions
-    manageAdminSubscription <<<"5
+    manageAdminSubscription <<<"6
 7"
     assertMenuAction menu
     resetMenuActions
     manageUserSubscription <<<"6
 7"
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscriptionServers <<<"10"
     assertMenuAction menu
     resetMenuActions
     manageTrafficAndQuota <<<"8"
@@ -3664,6 +3708,7 @@ runRegressionTransaction() {
 
 runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
+    runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression
 }
 
 runRegressionAll() {

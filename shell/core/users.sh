@@ -677,21 +677,21 @@ manageSubscription() {
         echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
         menuLine "先安装/更新订阅服务，再查看链接、给别人开订阅或配置主控/被控同步"
         menuLine "groups.json 是用户订阅、服务器源、同步计划和流量统计的状态真源"
-        menuLine "常用路径：订阅服务 -> 我的订阅；共享给别人时走 给别人开订阅 -> 立即同步"
-        menuItem 1 "订阅服务" "安装/更新订阅发布服务，确认链接入口可用"
-        menuItem 2 "我的订阅" "自用链接、可用服务器和我的流量"
-        menuItem 3 "给别人开订阅" "创建分享订阅、设置节点和额度、同步托管账号并查看链接"
-        menuItem 4 "多服务器订阅" "本机作为主控，管理远端被控服务器、Token 和同步结果"
+        menuLine "常用路径：本机订阅 -> 安装服务/查看链接；分享给别人 -> 开订阅；多服务器 -> 按主控/被控配置"
+        menuItem 1 "本机订阅" "安装/更新订阅发布服务，查看自用链接和本机状态"
+        menuItem 2 "给别人开订阅" "创建分享订阅、设置节点和额度、同步托管账号并查看链接"
+        menuItem 3 "多服务器：主控" "本机作为主控，添加被控、测试连接、查看同步结果"
+        menuItem 4 "多服务器：被控" "本机作为被控，加入主控并提供被控接入凭据"
         menuItem 5 "流量与限额" "刷新/查看用量，预览并执行超限处理"
         menuItem 6 "自动同步与备份" "自动同步、手动同步、同步计划和状态备份"
         menuReturnItem 7 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_menu "请选择:" manageSubscriptionStatus
         case "${manageSubscriptionStatus}" in
-        1) manageSubscriptionService ;;
-        2) manageMySubscription ;;
-        3) manageSharedSubscriptions ;;
-        4) manageMultiServerSubscriptions ;;
+        1) manageLocalSubscription ;;
+        2) manageSharedSubscriptions ;;
+        3) manageMainControllerSubscriptions ;;
+        4) manageControlledSubscription ;;
         5) manageTrafficAndQuota ;;
         6) manageSubscriptionAutomation ;;
         7) menu; return ;;
@@ -700,22 +700,26 @@ manageSubscription() {
     done
 }
 
-manageSubscriptionService() {
+manageLocalSubscription() {
     while true; do
-        echoContent title "\n┌─ 订阅服务 ─────────────────────────────────────────"
-        menuLine "订阅服务只负责客户端订阅发布；未安装时，生成了链接也无法公网访问"
-        menuLine "多服务器同步不走公网 HTTPS，而是走 多服务器订阅 -> WireGuard 控制面"
-        menuItem 1 "安装/更新订阅发布服务" "安装或刷新 Nginx 订阅发布配置"
+        echoContent title "\n┌─ 本机订阅 ─────────────────────────────────────────"
+        menuLine "本机订阅面向当前服务器：先安装发布服务，再查看自用链接、服务器源和本机流量"
+        menuLine "给别人开的分享订阅在上级菜单单独管理；多服务器同步按主控/被控视角配置"
+        menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
         menuItem 2 "查看/刷新我的订阅链接" "重新生成并输出当前自用订阅"
         menuItem 3 "查看订阅服务状态" "显示当前订阅发布端口和域名"
-        menuReturnItem 4 "返回订阅与用户" "回到上级菜单"
+        menuItem 4 "查看我的可用服务器" "查看本机和已添加被控服务器源"
+        menuItem 5 "查看我的流量" "查看自用账号流量统计"
+        menuReturnItem 6 "返回订阅与用户" "回到上级菜单"
         menuClose
-        autoRead subscription_service_menu "请选择:" subscriptionServiceStatus
-        case "${subscriptionServiceStatus}" in
+        autoRead local_subscription_menu "请选择:" localSubscriptionStatus
+        case "${localSubscriptionStatus}" in
         1) installSubscribe ;;
         2) subscribe ;;
         3) showSubscriptionServiceStatus ;;
-        4) return ;;
+        4) showSubscriptionSources ;;
+        5) showAdminSubscriptionTraffic ;;
+        6) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
@@ -730,32 +734,8 @@ showSubscriptionServiceStatus() {
     fi
 }
 
-manageMySubscription() {
-    while true; do
-        echoContent title "\n┌─ 我的订阅 ────────────────────────────────────────"
-        menuLine "这里是脚本安装账号/自用账号的订阅入口；查看链接会沿用当前 Salt"
-        menuLine "如果要更换订阅链接路径，请使用刷新入口并重新设置 Salt"
-        menuLine "如果订阅服务未安装，请先返回 订阅服务 安装发布入口"
-        menuItem 1 "查看我的订阅链接" "沿用当前 Salt，输出当前自用订阅"
-        menuItem 2 "重新生成我的订阅链接" "重新生成本地账号订阅，可选择沿用或更换 Salt"
-        menuItem 3 "查看我的可用服务器" "查看可用服务器源"
-        menuItem 4 "查看我的流量" "查看自用账号流量统计"
-        menuReturnItem 5 "返回订阅与用户" "回到上级菜单"
-        menuClose
-        autoRead my_subscription_menu "请选择:" mySubscriptionStatus
-        case "${mySubscriptionStatus}" in
-        1) subscribe false ;;
-        2) subscribe ;;
-        3) showSubscriptionSources ;;
-        4) showAdminSubscriptionTraffic ;;
-        5) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
-        esac
-    done
-}
-
 manageAdminSubscription() {
-    manageMySubscription
+    manageLocalSubscription
 }
 
 manageSharedSubscriptions() {
@@ -1386,11 +1366,98 @@ showSubscriptionSourceSyncResults() {
       "\n---"'
 }
 
+manageMainControllerSubscriptions() {
+    while true; do
+        echoContent title "\n┌─ 多服务器：主控 ───────────────────────────────────"
+        menuLine "这个视角只放主控动作：初始化主控、添加/管理被控、测试连接和查看同步结果"
+        menuLine "被控服务器需先在自己的 被控 菜单生成接入凭据，再复制到这里添加"
+        menuItem 1 "初始化/查看主控控制面" "初始化主控、查看主控凭据、Peer 和 WireGuard 状态"
+        menuItem 2 "添加/移除被控服务器" "粘贴被控接入凭据添加，或删除已有被控"
+        menuItem 3 "更新被控服务器凭据" "被控重建后粘贴新凭据更新 Token/内网地址"
+        menuItem 4 "测试被控连接" "请求所有被控健康检查"
+        menuItem 5 "查看服务器源" "列出本机和已添加被控服务器"
+        menuItem 6 "查看控制地址" "显示 WireGuard 内网 health/sync 地址"
+        menuItem 7 "查看同步结果" "显示最近同步计划和错误"
+        menuItem 8 "启用/停用被控服务器" "切换被控服务器源状态"
+        menuItem 9 "清除同步错误" "清理最近同步错误"
+        menuReturnItem 10 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead main_controller_subscription_menu "请选择:" mainControllerSubscriptionStatus
+        case "${mainControllerSubscriptionStatus}" in
+        1) manageSubscriptionMainControlMenu ;;
+        2) addSubscribeMenu 1 ;;
+        3) setSubscriptionSourceControlTokenMenu ;;
+        4) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
+        5) showSubscriptionSources ;;
+        6) showSubscriptionSourceControlUrls ;;
+        7) showSubscriptionSourceSyncResults ;;
+        8) toggleSubscriptionSourceMenu ;;
+        9) clearSubscriptionSourceSyncErrorMenu ;;
+        10) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageControlledSubscription() {
+    while true; do
+        echoContent title "\n┌─ 多服务器：被控 ───────────────────────────────────"
+        menuLine "这个视角只放被控动作：初始化本机为被控、导入主控凭据、把被控凭据交回主控"
+        menuLine "被控只提供 WireGuard 内网控制面；给用户看的订阅链接仍由主控/本机订阅服务发布"
+        menuItem 1 "初始化本机为被控" "生成被控 WireGuard 控制面"
+        menuItem 2 "导入主控接入凭据" "加入主控 WireGuard 网络"
+        menuItem 3 "查看本机被控接入凭据" "复制回主控添加被控"
+        menuItem 4 "查看被控控制面状态" "显示角色、接口、内网地址和端口"
+        menuItem 5 "修复/重启被控控制面" "重写配置并重启 WireGuard/控制服务"
+        menuDangerItem 6 "关闭被控控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 7 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead controlled_subscription_menu "请选择:" controlledSubscriptionStatus
+        case "${controlledSubscriptionStatus}" in
+        1) initSubscriptionWireGuardControlled ;;
+        2) importSubscriptionWireGuardMainCredential ;;
+        3) showSubscriptionWireGuardControlledCredential ;;
+        4) showSubscriptionWireGuardStatus ;;
+        5) restartSubscriptionWireGuardControl ;;
+        6) disableSubscriptionWireGuardControl ;;
+        7) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageSubscriptionMainControlMenu() {
+    while true; do
+        echoContent title "\n┌─ 主控控制面 ───────────────────────────────────────"
+        menuLine "主控负责维护被控 Peer、保存被控 Token，并把订阅变更同步到被控"
+        showSubscriptionWireGuardStatus
+        menuItem 1 "初始化本机为主控" "生成主控 WireGuard 控制面"
+        menuItem 2 "查看本机主控接入凭据" "复制到被控服务器导入"
+        menuItem 3 "查看 Peer / 连接状态" "查看 WireGuard peer 和被控列表"
+        menuItem 4 "测试被控连接" "测试被控健康检查"
+        menuItem 5 "修复/重启主控控制面" "重写配置并重启服务"
+        menuDangerItem 6 "关闭主控控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 7 "返回多服务器：主控" "回到上级菜单"
+        menuClose
+        autoRead main_control_menu "请选择:" mainControlMenuStatus
+        case "${mainControlMenuStatus}" in
+        1) initSubscriptionWireGuardMain ;;
+        2) showSubscriptionWireGuardMainCredential ;;
+        3) showSubscriptionWireGuardPeers ;;
+        4) testSubscriptionWireGuardControl ;;
+        5) restartSubscriptionWireGuardControl ;;
+        6) disableSubscriptionWireGuardControl ;;
+        7) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
 manageSubscriptionWireGuardControlMenu() {
     while true; do
         echoContent title "\n┌─ WireGuard 控制面 ─────────────────────────────────"
-        menuLine "用于主控和被控之间的加密同步；客户端订阅链接仍由 HTTPS 订阅服务发布"
-        menuLine "第一版只支持星型拓扑：一台主控管理多台被控"
+        menuLine "用于主控和被控之间的加密同步；新菜单已按主控/被控拆分，这里保留兼容入口"
+        menuLine "建议从上级菜单进入 多服务器：主控 或 多服务器：被控，避免混用角色动作"
         showSubscriptionWireGuardStatus
         menuItem 1 "初始化本机为主控" "生成主控 WireGuard 控制面"
         menuItem 2 "初始化本机为被控" "生成被控 WireGuard 控制面"
@@ -1418,44 +1485,6 @@ manageSubscriptionWireGuardControlMenu() {
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
-}
-
-manageMultiServerSubscriptions() {
-    while true; do
-        echoContent title "\n┌─ 多服务器订阅 ─────────────────────────────────────"
-        menuLine "多服务器同步统一使用 WireGuard 控制面；不再使用公网 HTTPS 控制接口"
-        menuLine "客户端订阅继续走 HTTPS；服务器间同步只通过 WireGuard 内网访问 /s/control/"
-        menuLine "推荐流程：主控初始化 -> 被控初始化并导入主控凭据 -> 主控添加被控 -> 测试连接 -> 同步"
-        menuItem 1 "WireGuard 控制面" "初始化主控/被控、查看凭据和连接状态"
-        menuItem 2 "查看服务器源" "列出本机和已添加被控服务器"
-        menuItem 3 "添加/移除被控服务器" "主控端管理被控服务器"
-        menuItem 4 "更新被控服务器凭据" "粘贴被控端 WireGuard 接入凭据"
-        menuItem 5 "测试被控连接" "主控端请求被控端健康检查"
-        menuItem 6 "查看控制地址" "显示 WireGuard 内网 health/sync 地址"
-        menuItem 7 "查看同步结果" "显示最近同步计划和错误"
-        menuItem 8 "启用/停用被控服务器" "切换被控服务器源状态"
-        menuItem 9 "清除同步错误" "清理最近同步错误"
-        menuReturnItem 10 "返回订阅与用户" "回到上级菜单"
-        menuClose
-        autoRead multi_server_subscription_menu "请选择:" multiServerSubscriptionStatus
-        case "${multiServerSubscriptionStatus}" in
-        1) manageSubscriptionWireGuardControlMenu ;;
-        2) showSubscriptionSources ;;
-        3) addSubscribeMenu 1 ;;
-        4) setSubscriptionSourceControlTokenMenu ;;
-        5) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
-        6) showSubscriptionSourceControlUrls ;;
-        7) showSubscriptionSourceSyncResults ;;
-        8) toggleSubscriptionSourceMenu ;;
-        9) clearSubscriptionSourceSyncErrorMenu ;;
-        10) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
-        esac
-    done
-}
-
-manageSubscriptionServers() {
-    manageMultiServerSubscriptions
 }
 
 setSubscriptionSourceControlTokenMenu() {
