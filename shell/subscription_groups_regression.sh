@@ -2382,6 +2382,45 @@ JSON
     subscriptionRemoteSyncPlan | jq -e 'length == 12 and .[0].source_id == "src0" and .[2].source_id == "src2" and .[10].source_id == "src10" and all(.[]; .status == "success")' >/dev/null
 )
 
+runRemoteControlAggregationFailureRegression() (
+    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"a.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"https","host":"b.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
+JSON
+
+    subscriptionRemoteControlHealth() {
+        local source=$1
+        case "$(jq -r '.id' <<<"${source}")" in
+        edge-a)
+            printf '{"id":"edge-a","name":"Edge A","ok":true}\n'
+            ;;
+        edge-b)
+            printf 'broken-health-json\n'
+            ;;
+        *)
+            printf '{"id":"main","name":"Main","ok":true}\n'
+            ;;
+        esac
+    }
+    subscriptionRemoteSyncPlanForSource() {
+        local source=$1
+        case "$(jq -r '.id' <<<"${source}")" in
+        edge-a)
+            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            ;;
+        edge-b)
+            printf 'broken-plan-json\n'
+            ;;
+        *)
+            printf '{"source_id":"main","status":"success","dry_run":true,"request":{"source_id":"main"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            ;;
+        esac
+    }
+
+    subscriptionRemoteControlHealthAll | jq -e 'length == 2 and .[0].ok == true and .[0].id == "edge-a" and .[1].status == "internal_error" and .[1].error_detail.type == "internal_error"' >/dev/null
+    subscriptionRemoteSyncPlan | jq -e 'length == 2 and .[0].status == "success" and .[0].source_id == "edge-a" and .[1].status == "internal_error" and .[1].error_detail.type == "internal_error"' >/dev/null
+)
+
 runRemoteControlHealthRegression() (
     local responseFile="${TMP_DIR}/remote-control-health.json"
     local sourceMissing='{"id":"edge-missing","name":"Edge Missing","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
@@ -4348,6 +4387,7 @@ runRegressionTransaction() {
 
 runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
+    runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
     runRegressionStep remote-control-health runRemoteControlHealthRegression
     runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression
     runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression

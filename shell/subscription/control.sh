@@ -143,6 +143,65 @@ subscriptionRemoteControlHealth() {
     jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" --arg statusCode "${statusCode}" '{id:$id, name:$name, ok:false, status:"remote_error", status_code:$statusCode}'
 }
 
+subscriptionRemoteInternalErrorResult() {
+    local source=$1
+    local mode=$2
+    local id
+    local name
+    id=$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)
+    name=$(jq -r '.name // .id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)
+    if [[ "${mode}" == "health" ]]; then
+        jq -n --arg id "${id}" --arg name "${name}" '{id:$id, name:$name, ok:false, status:"internal_error", error_detail:{type:"internal_error", message:"健康检查结果生成失败"}}'
+    else
+        jq -n --arg sourceId "${id}" '{source_id:$sourceId, status:"internal_error", dry_run:true, error_detail:{type:"internal_error", message:"远程同步计划生成失败"}}'
+    fi
+}
+
+subscriptionRemoteWriteCheckedResult() {
+    local source=$1
+    local mode=$2
+    local outputFile=$3
+    local result
+    if [[ "${mode}" == "health" ]]; then
+        result=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null) || result=
+    else
+        result=$(subscriptionRemoteSyncPlanForSource "${source}" 2>/dev/null) || result=
+    fi
+    if [[ -n "${result}" ]] && jq -e . <<<"${result}" >/dev/null 2>&1; then
+        printf '%s\n' "${result}" >"${outputFile}"
+    else
+        subscriptionRemoteInternalErrorResult "${source}" "${mode}" >"${outputFile}"
+    fi
+}
+
+subscriptionRemoteCollectCheckedResults() {
+    local tmpDir=$1
+    local mode=$2
+    local sources=$3
+    local sourceCount
+    local index
+    local source
+    local outputFile
+    local result
+    local results='[]'
+    sourceCount=$(jq 'length' <<<"${sources}")
+    if [[ "${sourceCount}" == "0" ]]; then
+        jq -n '[]'
+        return 0
+    fi
+    for ((index = 0; index < sourceCount; index++)); do
+        source=$(jq -c ".[$index]" <<<"${sources}") || source='{}'
+        printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
+        if [[ -f "${outputFile}" ]] && result=$(jq -c . "${outputFile}" 2>/dev/null); then
+            results=$(jq -c --argjson item "${result}" '. + [$item]' <<<"${results}") || return 1
+        else
+            result=$(subscriptionRemoteInternalErrorResult "${source}" "${mode}") || return 1
+            results=$(jq -c --argjson item "${result}" '. + [$item]' <<<"${results}") || return 1
+        fi
+    done
+    printf '%s\n' "${results}"
+}
+
 subscriptionRemoteControlHealthAll() {
     local source
     local sources
@@ -154,14 +213,14 @@ subscriptionRemoteControlHealthAll() {
     padmCreateTempPath tmpDir -d /tmp/padm-remote-health.XXXXXX || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
-        subscriptionRemoteControlHealth "${source}" >"${outputFile}" &
+        subscriptionRemoteWriteCheckedResult "${source}" health "${outputFile}" &
         pids+=("$!")
         index=$((index + 1))
     done < <(jq -c '.[]' <<<"${sources}")
     for pid in "${pids[@]}"; do
         wait "${pid}" 2>/dev/null || true
     done
-    jq -s '.' "${tmpDir}"/*.json 2>/dev/null || jq -n '[]'
+    subscriptionRemoteCollectCheckedResults "${tmpDir}" health "${sources}"
     padmRemoveCleanupPath "${tmpDir}"
 }
 
@@ -203,14 +262,14 @@ subscriptionRemoteSyncPlan() {
     padmCreateTempPath tmpDir -d /tmp/padm-remote-plan.XXXXXX || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
-        subscriptionRemoteSyncPlanForSource "${source}" >"${outputFile}" &
+        subscriptionRemoteWriteCheckedResult "${source}" plan "${outputFile}" &
         pids+=("$!")
         index=$((index + 1))
     done < <(jq -c '.[]' <<<"${sources}")
     for pid in "${pids[@]}"; do
         wait "${pid}" 2>/dev/null || true
     done
-    jq -s '.' "${tmpDir}"/*.json 2>/dev/null || jq -n '[]'
+    subscriptionRemoteCollectCheckedResults "${tmpDir}" plan "${sources}"
     padmRemoveCleanupPath "${tmpDir}"
 }
 
