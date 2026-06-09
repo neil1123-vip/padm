@@ -453,7 +453,7 @@ installTools() {
                     fi
                     statusCard "Nginx 状态" "nginx 卸载完成"
                     successCard "安装nginx"
-                    installNginxTools >/dev/null 2>&1
+                    installNginxTools || failPackageInstallTransaction "Nginx重装失败"
                 else
                     exit 0
                 fi

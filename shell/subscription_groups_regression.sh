@@ -3898,6 +3898,77 @@ runInstallToolsUpdateFailureRegression() {
     )
 }
 
+runInstallToolsNginxReinstallFailureRegression() {
+    (
+        local oldHome="${HOME}"
+        local oldSelect="${selectCustomInstallType:-}"
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local oldInstallLog="${PADM_INSTALL_LOG:-}"
+        local errorLog="${TMP_DIR}/install-tools-nginx-reinstall-error.log"
+        local fakeHome="${TMP_DIR}/install-tools-nginx-reinstall-home"
+
+        mkdir -p "${fakeHome}/.acme.sh"
+        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
+        HOME="${fakeHome}"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        PADM_INSTALL_LOG="${TMP_DIR}/install-tools-nginx-reinstall-install.log"
+        : >"${errorLog}"
+        release=debian
+        rhelLike=false
+        upgrade=true
+        updateReleaseInfoChange=true
+        packageManager=apt
+        installType=true
+        removeType=true
+        selectCustomInstallType=",1,"
+        unInstallNginxStatus=y
+        protocolSelectionSkipsNginx() { return 1; }
+        protocolSelectionNeedsLocalCertificate() { return 0; }
+        runWithTimeout() { return 0; }
+        runPackageCommandWithProgress() { return 0; }
+        waitAptProcess() { return 0; }
+        installBasePackages() { return 0; }
+        command() {
+            if [[ "$1" == "-v" && "$2" == "qrencode" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        nginx() {
+            [[ "${1:-}" == "-v" ]] && { printf 'nginx version: nginx/1.12.0\n' >&2; return 0; }
+            return 0
+        }
+        autoRead() {
+            printf -v "$3" 'y'
+        }
+        installNginxTools() {
+            return 42
+        }
+
+        set +e
+        (
+            installTools 1
+        ) >/dev/null 2>&1
+        local installStatus=$?
+        set -e
+        [[ "${installStatus}" -ne 0 ]]
+        grep -q "Nginx重装失败" "${errorLog}"
+
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        if [[ -n "${oldInstallLog}" ]]; then
+            PADM_INSTALL_LOG="${oldInstallLog}"
+        else
+            unset PADM_INSTALL_LOG
+        fi
+        HOME="${oldHome}"
+        selectCustomInstallType="${oldSelect}"
+    )
+}
+
 runBasePackageBatchRegression() {
     local commands=(sudo wget curl unzip socat tar crontab jq ld openssl ping6 ping lsb_release lsof dig iptables-save nginx)
     local cmd
@@ -4348,6 +4419,7 @@ runRegressionPlatform() {
 runRegressionPlatformIo() {
     runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression
     runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression
+    runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression
     runRegressionStep base-package-batch runBasePackageBatchRegression
     runRegressionStep package-rollback-failure runPackageRollbackFailureRegression
     runRegressionStep package-command-stdin runPackageCommandStdinRegression
