@@ -178,28 +178,28 @@ subscriptionRemoteCollectCheckedResults() {
     local tmpDir=$1
     local mode=$2
     local sources=$3
-    local sourceCount
+    local -a sourceList=()
+    local -a resultList=()
     local index
     local source
     local outputFile
     local result
-    local results='[]'
-    sourceCount=$(jq 'length' <<<"${sources}")
-    if [[ "${sourceCount}" == "0" ]]; then
+    mapfile -t sourceList < <(jq -c '.[]' <<<"${sources}")
+    if [[ "${#sourceList[@]}" == "0" ]]; then
         jq -n '[]'
         return 0
     fi
-    for ((index = 0; index < sourceCount; index++)); do
-        source=$(jq -c ".[$index]" <<<"${sources}") || source='{}'
+    for index in "${!sourceList[@]}"; do
+        source=${sourceList[$index]}
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         if [[ -f "${outputFile}" ]] && result=$(jq -c . "${outputFile}" 2>/dev/null); then
-            results=$(jq -c --argjson item "${result}" '. + [$item]' <<<"${results}") || return 1
+            resultList+=("${result}")
         else
             result=$(subscriptionRemoteInternalErrorResult "${source}" "${mode}") || return 1
-            results=$(jq -c --argjson item "${result}" '. + [$item]' <<<"${results}") || return 1
+            resultList+=("${result}")
         fi
     done
-    printf '%s\n' "${results}"
+    printf '%s\n' "${resultList[@]}" | jq -s '.'
 }
 
 subscriptionRemoteControlHealthAll() {
