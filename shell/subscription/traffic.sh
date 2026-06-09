@@ -99,10 +99,16 @@ EOF
 
 collectLocalTrafficAccounts() {
     local file
+    local files=()
     while IFS= read -r file; do
-        [[ -f "${file}" ]] || continue
-        jq -r '[.inbounds[]?.settings.clients[]?, .inbounds[]?.users[]?][]? | .email // .name // .username // empty' "${file}" 2>/dev/null
-    done < <(subscriptionSyncConfigFiles) | awk -F '-' 'NF {print $1}' | sort -u
+        [[ -f "${file}" ]] && files+=("${file}")
+    done < <(subscriptionSyncConfigFiles)
+    [[ "${#files[@]}" -gt 0 ]] || return 0
+    jq -r -s '
+      [.[] | [.inbounds[]?.settings.clients[]?, .inbounds[]?.users[]?][]?
+       | (.email // .name // .username // empty | split("-")[0])
+       | select(length > 0)]
+      | unique[]' "${files[@]}" 2>/dev/null
 }
 
 collectXrayTrafficStatsSnapshot() {
@@ -120,10 +126,17 @@ collectXrayTrafficStatsSnapshot() {
     fi
     if jq empty <<<"${stats}" >/dev/null 2>&1; then
         jq --argjson accounts "${accounts}" '
-          def accountName($name): ($name | split(">>>")[1] | split("-")[0]);
+          def accountName($name): (($name | split(">>>"))[1] // "" | split("-")[0]);
           def direction($name): if ($name | contains("downlink")) then "download" else "upload" end;
-          [.stat[]? | {account: accountName(.name), direction: direction(.name), value: (.value // 0)} | . as $item | select($accounts | index($item.account))] as $stats |
-          $accounts | map(. as $account | {account: $account, upload: ([$stats[] | select(.account == $account and .direction == "upload") | .value] | add // 0), download: ([$stats[] | select(.account == $account and .direction == "download") | .value] | add // 0)})
+          def emptyTotals: reduce $accounts[] as $account ({}; .[$account] = {account:$account, upload:0, download:0});
+          (reduce .stat[]? as $stat (emptyTotals;
+            (accountName($stat.name // "")) as $account |
+            if has($account) then
+              .[$account][direction($stat.name // "")] += (($stat.value // 0) | tonumber? // 0)
+            else
+              .
+            end)) as $totals |
+          $accounts | map(. as $account | $totals[$account])
         ' <<<"${stats}"
     else
         awk -v accounts="$(jq -r 'join(" ")' <<<"${accounts}")" '
@@ -158,8 +171,16 @@ collectXrayTrafficStatsSnapshot() {
 
 collectLocalTrafficSnapshot() {
     local accounts
+    local accountLines
     local items
-    accounts=$(collectLocalTrafficAccounts | jq -R -s 'split("\n") | map(select(length > 0))')
+    if ! accountLines=$(collectLocalTrafficAccounts); then
+        jq -n '{ok:false, items: []}'
+        return
+    fi
+    accounts=$(jq -R -s 'split("\n") | map(select(length > 0))' <<<"${accountLines}") || {
+        jq -n '{ok:false, items: []}'
+        return
+    }
     if [[ "$(jq 'length' <<<"${accounts}")" == "0" ]]; then
         jq -n '{ok:true, items: []}'
         return

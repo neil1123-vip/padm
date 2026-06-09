@@ -2758,21 +2758,44 @@ runNginxBlogAutoInstallRegression() {
     AUTO_INSTALL="${oldAutoInstall}"
 }
 
-runXrayTrafficStatsJqCompatibilityRegression() {
+runXrayTrafficStatsJqCompatibilityRegression() (
     local fakeBin="${TMP_DIR}/fake-xray-stats-bin"
-    local oldXrayStatsBinary="${XRAY_STATS_BINARY:-}"
     mkdir -p "${fakeBin}"
     cat >"${fakeBin}/xray" <<'SH'
 #!/usr/bin/env bash
 cat <<'JSON'
-{"stat":[{"name":"user>>>team-uplink","value":3},{"name":"user>>>team-downlink","value":5},{"name":"user>>>ignored-uplink","value":7}]}
+{"stat":[{"name":"user>>>team-uplink","value":3},{"name":"user>>>team-uplink","value":4},{"name":"user>>>team-downlink","value":5},{"name":"user>>>team-downlink","value":"6"},{"name":"user>>>ignored-uplink","value":7},{"name":"inbound>>>api>>>traffic>>>uplink","value":99}]}
 JSON
 SH
     chmod +x "${fakeBin}/xray"
     XRAY_STATS_BINARY="${fakeBin}/xray"
-    collectXrayTrafficStatsSnapshot '["team"]' | jq -e '. == [{"account":"team","upload":3,"download":5}]' >/dev/null
-    XRAY_STATS_BINARY="${oldXrayStatsBinary}"
-}
+    collectXrayTrafficStatsSnapshot '["team","missing"]' | jq -e '. == [{"account":"team","upload":7,"download":11},{"account":"missing","upload":0,"download":0}]' >/dev/null
+)
+
+runLocalTrafficAccountsBatchRegression() (
+    local xrayConfig="${TMP_DIR}/traffic-xray-conf/"
+    local singBoxConfig="${TMP_DIR}/traffic-sing-box-conf/"
+    local accounts
+    local snapshot
+    mkdir -p "${xrayConfig}" "${singBoxConfig}"
+    configPath="${xrayConfig}"
+    singBoxConfigPath="${singBoxConfig}"
+    cat >"${xrayConfig}01_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-vless"},{"email":"admin-root"}]}},{"users":[{"name":"sub_team_b-hysteria2"}]}]}
+JSON
+    cat >"${singBoxConfig}02_inbounds.json" <<'JSON'
+{"inbounds":[{"users":[{"username":"sub_team_a-tuic"},{"username":"ops"}]}]}
+JSON
+    accounts=$(collectLocalTrafficAccounts)
+    jq -R -s 'split("\n") | map(select(length > 0))' <<<"${accounts}" | jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' >/dev/null
+
+    printf '{bad-json\n' >"${singBoxConfig}03_inbounds.json"
+    if collectLocalTrafficAccounts >/dev/null 2>&1; then
+        return 1
+    fi
+    snapshot=$(collectLocalTrafficSnapshot)
+    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
+)
 
 runDpkgInstalledPatternRegression() {
     printf 'ii  ufw                             0.36.2-6                                all          program for managing a Netfilter firewall\n' | grep -Eq '^[[:space:]]*ii[[:space:]]+ufw[[:space:]]'
@@ -4049,6 +4072,7 @@ runRegressionPlatform() {
     runRegressionStep install-module-paths runInstallModulePathsRegression || rc=1
     runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression || rc=1
     runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression || rc=1
+    runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression || rc=1
     runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression || rc=1
     runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression || rc=1
     runRegressionStep rhel-like-detection runRhelLikeDetectionRegression || rc=1
