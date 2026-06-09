@@ -1034,6 +1034,23 @@ runSubscribeUserOutputTransactionRegression() {
     writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
     (
+        currentHost=example.com
+        subscribePort=
+        currentDefaultPort=443
+        listRemoteSubscribeSources() {
+            return 0
+        }
+        renderSubscribeUserOutputs() {
+            return 1
+        }
+        if renderAllSubscribeUserOutputs "${localDir}" renew true 2>/dev/null; then
+            return 1
+        fi
+    )
+
+    writeOldSubscribeOutputs
+    writeLocalSubscribeOutputs
+    (
         updateRemoteSubscribe() {
             return 1
         }

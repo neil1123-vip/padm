@@ -1546,7 +1546,7 @@ renderAllSubscribeUserOutputs() {
     local renewSalt=$2
     local showStatus=$3
     local subscribePortLocal="${subscribePort}"
-    local email emailMd5 currentDomain
+    local email emailMd5 currentDomain defaultFile
 
     if [[ ! -d "${localBase}/default" || -z $(ls "${localBase}/default"/) ]]; then
         return 0
@@ -1560,9 +1560,9 @@ renderAllSubscribeUserOutputs() {
         fi
     fi
 
-    find "${localBase}/default"/* | while read -r email; do
-        email=${email##*/}
-        emailMd5=$(echo -n "${email}${subscribeSalt}"$'\n' | md5sum | awk '{print $1}')
+    while IFS= read -r defaultFile; do
+        email=${defaultFile##*/}
+        emailMd5=$(printf '%s\n' "${email}${subscribeSalt}" | md5sum | awk '{print $1}')
         echoContent title "\n┌─ 订阅输出 ─────────────────────────────────────────"
         currentDomain=$(resolveSubscribePublicDomain)
         if [[ -z "${currentDomain}" ]]; then
@@ -1596,7 +1596,7 @@ renderAllSubscribeUserOutputs() {
         else
             successCard "email:${email}，订阅已更新，请使用客户端重新拉取"
         fi
-    done
+    done < <(find "${localBase}/default" -mindepth 1 -maxdepth 1 -type f | sort)
 }
 
 renderSubscribeUserOutputs() {
@@ -1605,7 +1605,7 @@ renderSubscribeUserOutputs() {
     local currentDomain=$3
     local updateRemoteStatus=$4
     local showStatus=$5
-    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate singBoxOutboundTags base64Result
+    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath
     local rc=0
 
     localBase=$(subscribeLocalBaseDir)
@@ -1659,20 +1659,16 @@ renderSubscribeUserOutputs() {
         else
             downloadFile -O "${singBoxPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/documents/sing-box.json"
         fi
-        if ! singBoxOutboundTags=$(jq -c '. | map(.tag)' "${localBase}/sing-box/${email}"); then
+        padmCreateTempFileForTarget singBoxTmpPath "${singBoxPath}" singbox || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+        if ! jq --slurpfile localOutbounds "${localBase}/sing-box/${email}" '
+          ($localOutbounds[0] | map(.tag)) as $tags |
+          .outbounds |= (map(if has("outbounds") then .outbounds += $tags else . end) + $localOutbounds[0])
+        ' "${singBoxPath}" >"${singBoxTmpPath}"; then
+            padmRemoveCleanupPath "${singBoxTmpPath}"
             padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
-        if ! jq --argjson tags "${singBoxOutboundTags}" '.outbounds |= map(if has("outbounds") then .outbounds += $tags else . end)' "${singBoxPath}" >"${singBoxPath}.tmp"; then
-            padmRemoveCleanupPath "${stageDir}"
-            return 1
-        fi
-        mv "${singBoxPath}.tmp" "${singBoxPath}"
-        if ! jq --slurpfile localOutbounds "${localBase}/sing-box/${email}" '.outbounds += $localOutbounds[0]' "${singBoxPath}" >"${singBoxPath}.tmp"; then
-            padmRemoveCleanupPath "${stageDir}"
-            return 1
-        fi
-        mv "${singBoxPath}.tmp" "${singBoxPath}"
+        commitGeneratedJsonFile "${singBoxTmpPath}" "${singBoxPath}" || { padmRemoveCleanupPath "${singBoxTmpPath}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     fi
 
     commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}" || rc=1
