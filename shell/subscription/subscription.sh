@@ -135,7 +135,10 @@ EOF
             errorCard "订阅 Nginx 配置校验失败，已回滚"
             return 1
         fi
-        installSubscriptionControlService
+        if ! installSubscriptionControlService; then
+            errorCard "订阅控制服务安装失败"
+            return 1
+        fi
         bootStartup nginx
         handleNginx stop
         handleNginx start

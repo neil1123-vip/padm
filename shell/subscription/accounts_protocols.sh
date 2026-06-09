@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
 
+subscriptionAccountProfile() {
+    local user=$1
+    jq -r '[
+      ((.email // .name // .username // "") | tostring),
+      ((.id // .uuid // "") | tostring),
+      ((.password // "") | tostring),
+      ((.username // .name // .email // "") | tostring),
+      ((.name // .email // .username // "") | tostring),
+      ((.uuid // .id // "") | tostring)
+    ] | join("\u001f")' <<<"${user}"
+}
+
 showVlessTcpAccounts() {
     # VLESS TCP
     if currentProtocolHas 0; then
 
         subscribeSectionTitle "VLESS TCP TLS Vision" "传统 TLS 兼容方案"
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}02_VLESS_TCP_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             subscribeAccountTitle "${email}"
             echo
-            defaultBase64Code vlesstcp "${currentDefaultPort}${singBoxVLESSVisionPort}" "${email}" "$(echo "${user}" | jq -r .id//.uuid)"
+            defaultBase64Code vlesstcp "${currentDefaultPort}${singBoxVLESSVisionPort}" "${email}" "${accountId}"
         done
     fi
 
@@ -23,8 +35,8 @@ showVlessWsAccounts() {
         subscribeSectionTitle "VLESS WS TLS" "兼容旧客户端，不作为新手推荐"
 
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}03_VLESS_WS_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             local vlessWSPort=${currentDefaultPort}
             if [[ "${coreInstallType}" == "2" ]]; then
@@ -43,7 +55,7 @@ showVlessWsAccounts() {
             while read -r line; do
                 subscribeAccountTitle "${email}${count}"
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vlessws "${vlessWSPort}" "${email}${count}" "$(echo "${user}" | jq -r .id//.uuid)" "${line}" "${path}"
+                    defaultBase64Code vlessws "${vlessWSPort}" "${email}${count}" "${accountId}" "${line}" "${path}"
                     count=$((count + 1))
                     echo
                 fi
@@ -57,14 +69,14 @@ showTrojanGrpcAccounts() {
     if currentProtocolHas 2; then
         subscribeSectionTitle "Trojan gRPC TLS" "兼容旧客户端，不作为新手推荐"
         jq .inbounds[0].settings.clients ${configPath}04_trojan_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email)
+            local email password
+            IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             local count=
             while read -r line; do
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code trojangrpc "${currentDefaultPort}" "${email}${count}" "$(echo "${user}" | jq -r .password)" "${line}"
+                    defaultBase64Code trojangrpc "${currentDefaultPort}" "${email}${count}" "${password}" "${line}"
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -84,8 +96,8 @@ showVmessWsAccounts() {
             path="${singBoxVMessWSPath}"
         fi
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}05_VMess_WS_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             local vmessPort=${currentDefaultPort}
             if [[ "${coreInstallType}" == "2" ]]; then
@@ -97,7 +109,7 @@ showVmessWsAccounts() {
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vmessws "${vmessPort}" "${email}${count}" "$(echo "${user}" | jq -r .id//.uuid)" "${line}" "${path}"
+                    defaultBase64Code vmessws "${vmessPort}" "${email}${count}" "${accountId}" "${line}" "${path}"
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -111,11 +123,11 @@ showTrojanAccounts() {
     if currentProtocolHas 4; then
         subscribeSectionTitle "Trojan TLS" "不推荐"
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}04_trojan_TCP_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email password
+            IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${email}"
 
-            defaultBase64Code trojan "${currentDefaultPort}${singBoxTrojanPort}" "${email}" "$(echo "${user}" | jq -r .password)"
+            defaultBase64Code trojan "${currentDefaultPort}${singBoxTrojanPort}" "${email}" "${password}"
         done
     fi
 }
@@ -125,16 +137,15 @@ showVlessGrpcAccounts() {
     if currentProtocolHas 5; then
         subscribeSectionTitle "VLESS gRPC TLS" "兼容旧客户端，不作为新手推荐"
         jq .inbounds[0].settings.clients ${configPath}06_VLESS_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
-
-            local email=
-            email=$(echo "${user}" | jq -r .email)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             local count=
             while read -r line; do
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vlessgrpc "${currentDefaultPort}" "${email}${count}" "$(echo "${user}" | jq -r .id)" "${line}"
+                    defaultBase64Code vlessgrpc "${currentDefaultPort}" "${email}${count}" "${accountId}" "${line}"
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -160,9 +171,11 @@ showHysteriaAccounts() {
         fi
 
         jq -r -c '.inbounds[]|.users[]' "${path}06_hysteria2_inbounds.json" | while read -r user; do
-            subscribeAccountTitle "$(echo "${user}" | jq -r .name)"
+            local name password
+            IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
+            subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code hysteria "${hysteria2DefaultPort}" "$(echo "${user}" | jq -r .name)" "$(echo "${user}" | jq -r .password)"
+            defaultBase64Code hysteria "${hysteria2DefaultPort}" "${name}" "${password}"
         done
 
     fi
@@ -174,8 +187,8 @@ showVlessRealityAccounts() {
     if currentProtocolHas 7; then
         subscribeSectionTitle "VLESS reality_vision" "推荐"
         jq .inbounds[1].settings.clients//.inbounds[0].users ${configPath}07_VLESS_vision_reality_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             subscribeAccountTitle "${email}"
             echo
@@ -185,7 +198,7 @@ showVlessRealityAccounts() {
             if [[ "${coreInstallType}" == "1" && -n "${streamPublicPort}" ]]; then
                 realityVisionPort=${streamPublicPort}
             fi
-            defaultBase64Code vlessReality "${realityVisionPort}" "${email}" "$(echo "${user}" | jq -r .id//.uuid)"
+            defaultBase64Code vlessReality "${realityVisionPort}" "${email}" "${accountId}"
         done
     fi
 }
@@ -195,13 +208,13 @@ showVlessRealityGrpcAccounts() {
     if currentProtocolHas 8; then
         subscribeSectionTitle "VLESS reality_gRPC" "推荐"
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}08_VLESS_vision_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             subscribeAccountTitle "${email}"
             echo
             local realityGRPCPort="${singBoxVLESSRealityGRPCPort:-${xrayVLESSRealityPort}}"
-            defaultBase64Code vlessRealityGRPC "${realityGRPCPort}" "${email}" "$(echo "${user}" | jq -r .id//.uuid)"
+            defaultBase64Code vlessRealityGRPC "${realityGRPCPort}" "${email}" "${accountId}"
         done
     fi
 }
@@ -215,9 +228,11 @@ showTuicAccounts() {
             path="${singBoxConfigPath}"
         fi
         jq -r -c '.inbounds[].users[]' "${path}09_tuic_inbounds.json" | while read -r user; do
-            subscribeAccountTitle "$(echo "${user}" | jq -r .name)"
+            local name uuid password
+            IFS=$'\037' read -r _ _ password _ name uuid <<<"$(subscriptionAccountProfile "${user}")"
+            subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code tuic "${singBoxTuicPort}" "$(echo "${user}" | jq -r .name)" "$(echo "${user}" | jq -r .uuid)_$(echo "${user}" | jq -r .password)"
+            defaultBase64Code tuic "${singBoxTuicPort}" "${name}" "${uuid}_${password}"
         done
 
     fi
@@ -229,9 +244,11 @@ showNaiveAccounts() {
         subscribeSectionTitle "naive TLS" "推荐，不支持ClashMeta"
 
         jq -r -c '.inbounds[]|.users[]' "${configPath}10_naive_inbounds.json" | while read -r user; do
-            subscribeAccountTitle "$(echo "${user}" | jq -r .username)"
+            local username password
+            IFS=$'\037' read -r _ _ password username _ _ <<<"$(subscriptionAccountProfile "${user}")"
+            subscribeAccountTitle "${username}"
             echo
-            defaultBase64Code naive "${singBoxNaivePort}" "$(echo "${user}" | jq -r .username)" "$(echo "${user}" | jq -r .password)"
+            defaultBase64Code naive "${singBoxNaivePort}" "${username}" "${password}"
         done
 
     fi
@@ -248,8 +265,8 @@ showVmessHTTPUpgradeAccounts() {
             path="${singBoxVMessHTTPUpgradePath}"
         fi
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}11_VMess_HTTPUpgrade_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             local vmessHTTPUpgradePort=${currentDefaultPort}
             if [[ "${coreInstallType}" == "2" ]]; then
@@ -261,7 +278,7 @@ showVmessHTTPUpgradeAccounts() {
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vmessHTTPUpgrade "${vmessHTTPUpgradePort}" "${email}${count}" "$(echo "${user}" | jq -r .id//.uuid)" "${line}" "${path}"
+                    defaultBase64Code vmessHTTPUpgrade "${vmessHTTPUpgradePort}" "${email}${count}" "${accountId}" "${line}" "${path}"
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -275,8 +292,8 @@ showVlessRealityXHTTPAccounts() {
         subscribeSectionTitle "VLESS Reality XHTTP" "CDN推荐"
 
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}12_VLESS_XHTTP_inbounds.json | jq -c '.[]' | while read -r user; do
-            local email=
-            email=$(echo "${user}" | jq -r .email//.name)
+            local email accountId
+            IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             echo
             local path
             path=$(xrayRealityXHTTPSetting path "/${currentPath}xHTTP")
@@ -294,7 +311,7 @@ showVlessRealityXHTTPAccounts() {
                     if [[ -n "${streamPublicPort}" ]]; then
                         xhttpPort=${streamPublicPort}
                     fi
-                    defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}${count}" "$(echo "${user}" | jq -r .id//.uuid)" "${line}" "${path}"
+                    defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}${count}" "${accountId}" "${line}" "${path}"
                     count=$((count + 1))
                     echo
                 fi
@@ -309,9 +326,11 @@ showAnyTlsAccounts() {
         subscribeSectionTitle "AnyTLS" "TLS 兼容协议"
 
         jq -r -c '.inbounds[]|.users[]' "${configPath}13_anytls_inbounds.json" | while read -r user; do
-            subscribeAccountTitle "$(echo "${user}" | jq -r .name)"
+            local name password
+            IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
+            subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code anytls "${singBoxAnyTLSPort}" "$(echo "${user}" | jq -r .name)" "$(echo "${user}" | jq -r .password)"
+            defaultBase64Code anytls "${singBoxAnyTLSPort}" "${name}" "${password}"
         done
 
     fi

@@ -45,12 +45,17 @@ subscriptionSyncDesiredLocalUsers() {
 }
 
 subscriptionSyncCurrentManagedUsers() {
-    local file=$1
-    [[ -f "${file}" ]] || return
-    jq -r '
-      [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
-      | ((.email // .name // .username // "") | split("-")[0])
-      | select(startswith("sub_"))' "${file}" 2>/dev/null | sort -u
+    local file
+    local validFiles=()
+    for file in "$@"; do
+        [[ -f "${file}" ]] && validFiles+=("${file}")
+    done
+    [[ "${#validFiles[@]}" -gt 0 ]] || return 0
+    jq -r -s '
+      [.[] | [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
+       | ((.email // .name // .username // "") | split("-")[0])
+       | select(startswith("sub_"))]
+      | unique[]' "${validFiles[@]}"
 }
 
 subscriptionSyncConfigFiles() {
@@ -67,15 +72,17 @@ subscriptionSyncConfigFiles() {
 
 subscriptionSyncConfiguredManagedUsers() {
     local file
+    local files=()
     while IFS= read -r file; do
-        subscriptionSyncCurrentManagedUsers "${file}"
-    done < <(subscriptionSyncConfigFiles) | sort -u
+        files+=("${file}")
+    done < <(subscriptionSyncConfigFiles)
+    subscriptionSyncCurrentManagedUsers "${files[@]}"
 }
 
 subscriptionSyncPlanFromAccounts() {
     local desiredAccounts=$1
     local currentAccounts
-    currentAccounts=$(subscriptionSyncConfiguredManagedUsers)
+    currentAccounts=$(subscriptionSyncConfiguredManagedUsers) || return 1
     jq -n \
       --argjson desired "$(printf '%s\n' "${desiredAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
       --argjson current "$(printf '%s\n' "${currentAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \

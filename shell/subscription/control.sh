@@ -49,6 +49,9 @@ subscriptionRemoteControlRequest() {
     local token
     local url
     local maxTime
+    local response
+    local statusCode
+    local body
     token=$(subscriptionRemoteControlToken "${source}")
     if [[ -z "${token}" ]]; then
         return 2
@@ -59,10 +62,26 @@ subscriptionRemoteControlRequest() {
     else
         maxTime=15
     fi
-    curl -fsSL --connect-timeout 5 --max-time "${maxTime}" \
+    response=$(curl -sS --connect-timeout 5 --max-time "${maxTime}" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${token}" \
-        -X POST --data "${payload}" "${url}"
+        -X POST --data "${payload}" -w '\n%{http_code}' "${url}") || return 1
+    statusCode=${response##*$'\n'}
+    body=${response%$'\n'*}
+    if ! body=$(jq -c . <<<"${body}" 2>/dev/null); then
+        jq -n --arg statusCode "${statusCode}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端响应不是合法 JSON"}, http_status: ($statusCode | tonumber? // 0)}'
+        return 0
+    fi
+    if [[ ! "${statusCode}" =~ ^2 ]]; then
+        body=$(jq -c --arg statusCode "${statusCode}" '
+          if .ok == true then
+            .ok = false | .error = (.error // "http_error")
+          else
+            .
+          end | . + {http_status: ($statusCode | tonumber? // 0)}
+        ' <<<"${body}") || return 1
+    fi
+    printf '%s\n' "${body}"
 }
 
 subscriptionRemoteControlPayload() {
@@ -75,6 +94,18 @@ subscriptionRemoteControlPayload() {
     jq -n --arg sourceId "${sourceId}" --arg groupId "$(activeSubscriptionGroupId)" --argjson dryRun "${dryRun}" --argjson users "${users}" '{version:1, group_id:$groupId, source_id:$sourceId, dry_run:$dryRun, desired_users:$users}'
 }
 
+subscriptionRemoteResponseErrorMessage() {
+    local response=$1
+    local errorMessage
+    local httpStatus
+    errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${response}" 2>/dev/null || echo unknown_error)
+    httpStatus=$(jq -r '.http_status // empty' <<<"${response}" 2>/dev/null || true)
+    if [[ -n "${httpStatus}" && "${httpStatus}" != "null" ]]; then
+        errorMessage="${errorMessage} (HTTP ${httpStatus})"
+    fi
+    printf '%s\n' "${errorMessage}"
+}
+
 subscriptionRemoteControlHealth() {
     local source=$1
     local token
@@ -82,14 +113,15 @@ subscriptionRemoteControlHealth() {
     local response
     local statusCode
     local body
+    local errorMessage
     token=$(subscriptionRemoteControlToken "${source}")
     if [[ -z "${token}" ]]; then
-        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"missing_token"}'
+        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
         return 0
     fi
     url=$(subscriptionRemoteControlUrl "${source}" health)
     response=$(curl -sS --connect-timeout 5 --max-time 15 -H "Authorization: Bearer ${token}" -w '\n%{http_code}' "${url}" 2>/dev/null) || {
-        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable"}'
+        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
         return 0
     }
     statusCode=${response##*$'\n'}
@@ -99,7 +131,13 @@ subscriptionRemoteControlHealth() {
         return 0
     fi
     if [[ "${statusCode}" == "401" ]]; then
-        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unauthorized"}'
+        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" --arg statusCode "${statusCode}" '{id:$id, name:$name, ok:false, status:"unauthorized", status_code:$statusCode, error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
+        return 0
+    fi
+    if jq -c . <<<"${body}" >/dev/null 2>&1; then
+        errorMessage=$(subscriptionRemoteResponseErrorMessage "${body}")
+        [[ -n "${statusCode}" && "${statusCode}" != "null" ]] && errorMessage="${errorMessage} (HTTP ${statusCode})"
+        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" --arg statusCode "${statusCode}" --arg errorMessage "${errorMessage}" '{id:$id, name:$name, ok:false, status:"remote_error", status_code:$statusCode, error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}}'
         return 0
     fi
     jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" --arg statusCode "${statusCode}" '{id:$id, name:$name, ok:false, status:"remote_error", status_code:$statusCode}'
@@ -146,7 +184,7 @@ subscriptionRemoteSyncPlanForSource() {
         if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
             jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" '{source_id:$sourceId, status:"success", dry_run:true, request:$payload, response:$response}'
         else
-            errorMessage=$(jq -r '.error // "unknown_error"' <<<"${response}" 2>/dev/null || echo unknown_error)
+            errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
             jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}, dry_run:true, request:$payload, response:$response}'
         fi
     else
@@ -204,7 +242,7 @@ runSubscriptionRemoteSync() {
             if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
                 setSubscriptionSourceSyncStatus "${sourceId}" success "$(jq -r 'if has("changed") then .changed else true end' <<<"${response}")" "$(jq -c '.plan // {create: [], remove: []}' <<<"${response}")"
             else
-                errorMessage=$(jq -r '.error // "unknown_error"' <<<"${response}" 2>/dev/null || echo unknown_error)
+                errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
                 setSubscriptionSourceSyncFailure "${sourceId}" remote_error "${errorMessage}"
                 failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 拒绝同步: " + $errorMessage]' <<<"${failures}")
             fi
@@ -240,19 +278,25 @@ subscriptionControlServiceFile() {
 writeSubscriptionControlServer() {
     local serverScript
     local scriptPath
+    local tmpFile
     serverScript=$(subscriptionControlServerScript)
     scriptPath=$(subscriptionGroupSyncInstallScript)
-    mkdir -p "$(dirname "${serverScript}")"
-    cat >"${serverScript}" <<EOF
+    padmCreateTempFileForTarget tmpFile "${serverScript}" control-server || return 1
+    cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/usr/bin/env python3
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 SCRIPT_PATH = "${scriptPath}"
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
+try:
+    SCRIPT_TIMEOUT = max(1, int(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "180") or "180"))
+except ValueError:
+    SCRIPT_TIMEOUT = 180
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
@@ -278,18 +322,72 @@ class Handler(BaseHTTPRequestHandler):
             return ""
         return self.path[len(prefix):].split("?", 1)[0]
 
+    def parse_script_response(self, stdout, returncode):
+        output = (stdout or "").strip()
+        parsed = []
+        decoder = json.JSONDecoder()
+        if output:
+            for index, char in enumerate(output):
+                if char != "{":
+                    continue
+                try:
+                    value, _ = decoder.raw_decode(output[index:])
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    parsed.append(value)
+        body = None
+        for candidate in reversed(parsed):
+            if "ok" in candidate:
+                body = candidate
+                break
+        if body is None and parsed:
+            body = parsed[-1]
+        if isinstance(body, dict):
+            if returncode != 0:
+                body = dict(body)
+                body.setdefault("exit_code", returncode)
+                if body.get("ok") is not False:
+                    body["ok"] = False
+                    body.setdefault("error", "script_failed")
+                body.setdefault("error_detail", {"type": "script_failed", "message": f"脚本退出码 {returncode}"})
+            return body
+        if returncode != 0:
+            return {"ok": False, "error": "script_failed", "exit_code": returncode, "error_detail": {"type": "script_failed", "message": f"脚本退出码 {returncode}"}}
+        return {"ok": False, "error": "invalid_response", "error_detail": {"type": "invalid_response", "message": "脚本输出不是合法 JSON"}}
+
+    def response_status(self, endpoint, body):
+        if not isinstance(body, dict):
+            return 500
+        if body.get("ok") is True:
+            return 200
+        error = body.get("error", "")
+        if error == "unauthorized":
+            return 401
+        if endpoint == "sync" and error in ("invalid_payload", "empty_payload"):
+            return 400
+        if endpoint == "health":
+            return 503
+        if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):
+            return 503
+        if endpoint == "sync":
+            return 503
+        return 500
+
     def call_script(self, endpoint, payload=""):
-        cmd = ["/bin/bash", SCRIPT_PATH, "SubscriptionControl", endpoint]
+        bash_bin = shutil.which("bash.exe") or shutil.which("bash") or "/bin/bash"
+        cmd = [bash_bin, SCRIPT_PATH, "SubscriptionControl", endpoint]
         env = dict(os.environ)
         env["PADM_CONTROL_SERVER"] = "1"
         env["PADM_CONTROL_TOKEN"] = self.token()
         env["PADM_SKIP_REMOTE_REF_CHECK"] = "1"
-        result = subprocess.run(cmd, input=payload, text=True, capture_output=True, timeout=180, env=env)
         try:
-            body = json.loads(result.stdout or "{}")
-        except json.JSONDecodeError:
-            body = {"ok": False, "error": "invalid_response"}
-        return body
+            result = subprocess.run(cmd, input=payload, text=True, capture_output=True, timeout=SCRIPT_TIMEOUT, env=env)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "script_timeout", "error_detail": {"type": "script_timeout", "message": "脚本执行超时"}}
+        except OSError:
+            return {"ok": False, "error": "script_exec_failed", "error_detail": {"type": "script_exec_failed", "message": "脚本无法执行"}}
+        return self.parse_script_response(result.stdout, result.returncode)
 
     def do_GET(self):
         endpoint = self.endpoint()
@@ -297,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(404, {"ok": False, "error": "not_found"})
             return
         body = self.call_script(endpoint)
-        self.respond(200 if body.get("ok") else 401, body)
+        self.respond(self.response_status(endpoint, body), body)
 
     def do_POST(self):
         endpoint = self.endpoint()
@@ -310,23 +408,57 @@ class Handler(BaseHTTPRequestHandler):
             return
         payload = self.rfile.read(length).decode() if length > 0 else ""
         body = self.call_script(endpoint, payload)
-        self.respond(200 if body.get("ok") else 400, body)
+        self.respond(self.response_status(endpoint, body), body)
 
 HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 EOF
-    chmod +x "${serverScript}"
+    commitGeneratedFile "${tmpFile}" "${serverScript}" 755 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+}
+
+subscriptionControlHealthCheck() {
+    local token=$1
+    local port
+    port=$(subscriptionControlPort)
+    [[ -n "${token}" && -n "${port}" ]] || return 1
+    PADM_CONTROL_HEALTH_TOKEN="${token}" PADM_CONTROL_HEALTH_PORT="${port}" python3 <<'PY'
+import json
+import os
+import sys
+import urllib.request
+
+token = os.environ.get("PADM_CONTROL_HEALTH_TOKEN", "")
+port = os.environ.get("PADM_CONTROL_HEALTH_PORT", "")
+if not token or not port:
+    sys.exit(1)
+request = urllib.request.Request(
+    f"http://127.0.0.1:{port}/s/control/health",
+    headers={"Authorization": f"Bearer {token}"},
+)
+try:
+    with urllib.request.urlopen(request, timeout=1) as response:
+        payload = json.loads(response.read().decode() or "{}")
+except Exception:
+    sys.exit(1)
+sys.exit(0 if payload.get("ok") is True else 1)
+PY
 }
 
 installSubscriptionControlService() {
     local serviceFile
+    local tmpFile
+    local token
+    local i
     if ! command -v python3 >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
         return 0
     fi
-    subscriptionControlEnsureToken
-    subscriptionGroupsSecureStateFiles
-    writeSubscriptionControlServer
+    subscriptionControlEnsureToken || return 1
+    token=$(subscriptionControlToken) || return 1
+    [[ -n "${token}" ]] || return 1
+    subscriptionGroupsSecureStateFiles || return 1
+    writeSubscriptionControlServer || return 1
     serviceFile=$(subscriptionControlServiceFile)
-    if ! cat >"${serviceFile}" <<EOF
+    padmCreateTempFileForTarget tmpFile "${serviceFile}" service || return 1
+    cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 [Unit]
 Description=padm subscription control
 After=network.target
@@ -340,21 +472,20 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 EOF
-    then
-        return 0
-    fi
-    systemctl daemon-reload
+    commitGeneratedFile "${tmpFile}" "${serviceFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    systemctl daemon-reload || return 1
     if systemctl is-active --quiet padm-subscription-control.service; then
-        systemctl restart padm-subscription-control.service >/dev/null 2>&1 || true
+        systemctl restart padm-subscription-control.service >/dev/null 2>&1 || return 1
     else
-        systemctl enable --now padm-subscription-control.service >/dev/null 2>&1 || true
+        systemctl enable --now padm-subscription-control.service >/dev/null 2>&1 || return 1
     fi
-    for ((i = 0; i < 10; i++)); do
-        if curl -sS --connect-timeout 1 --max-time 1 http://127.0.0.1:$(subscriptionControlPort)/s/control/health >/dev/null 2>&1; then
-            break
+    for ((i = 0; i < 20; i++)); do
+        if subscriptionControlHealthCheck "${token}" >/dev/null 2>&1; then
+            return 0
         fi
-        sleep 0.2
+        sleep 0.25
     done
+    return 1
 }
 
 subscriptionControlTokenFile() {
@@ -363,17 +494,20 @@ subscriptionControlTokenFile() {
 
 subscriptionControlEnsureToken() {
     local tokenFile
+    local tokenValue
     tokenFile=$(subscriptionControlTokenFile)
-    mkdir -p "$(dirname "${tokenFile}")"
+    mkdir -p "$(dirname "${tokenFile}")" || return 1
     chmod 700 "$(dirname "${tokenFile}")" 2>/dev/null || true
     if [[ ! -s "${tokenFile}" ]]; then
         if command -v openssl >/dev/null 2>&1; then
-            openssl rand -hex 32 >"${tokenFile}"
+            openssl rand -hex 32 >"${tokenFile}" || return 1
         else
-            tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64 >"${tokenFile}"
-            printf '\n' >>"${tokenFile}"
+            tokenValue=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64 || true)
+            [[ "${#tokenValue}" -ge 64 ]] || return 1
+            printf '%s\n' "${tokenValue}" >"${tokenFile}" || return 1
         fi
     fi
+    [[ -s "${tokenFile}" ]] || return 1
     chmod 600 "${tokenFile}" 2>/dev/null || true
 }
 
@@ -382,7 +516,7 @@ subscriptionGroupsSecureStateFiles() {
     local groupsFile
     groupsDir=$(subscriptionGroupsDir)
     groupsFile=$(subscriptionGroupsFile)
-    mkdir -p "${groupsDir}"
+    mkdir -p "${groupsDir}" || return 1
     chmod 700 "${groupsDir}" 2>/dev/null || true
     [[ -f "${groupsFile}" ]] && chmod 600 "${groupsFile}" 2>/dev/null || true
 }
@@ -463,7 +597,7 @@ subscriptionControlApplyAccountPlan() {
 }
 
 subscriptionControlRefreshPublishedSubscriptions() {
-    subscribe false false >/dev/null 2>&1 || true
+    subscribe false false >/dev/null 2>&1
 }
 
 subscriptionControlApplySync() {
@@ -472,7 +606,7 @@ subscriptionControlApplySync() {
     local desiredUsers
     local plan
     if ! subscriptionControlValidateSyncPayload "${payload}"; then
-        jq -n '{ok:false, error:"invalid_payload"}'
+        jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     fi
     dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
@@ -487,17 +621,17 @@ subscriptionControlApplySync() {
         return 0
     fi
     if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
-        jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", plan:$plan}'
+        jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", error_detail:{type:"apply_plan_failed", message:"同步计划应用失败"}, plan:$plan}'
         return 1
     fi
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
         if ! subscriptionSyncReconcileLocalServices; then
-            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", plan:$plan}'
+            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:"本机服务重建失败"}, plan:$plan}'
             return 1
         fi
     else
         if ! subscriptionControlRefreshPublishedSubscriptions; then
-            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", plan:$plan}'
+            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:"订阅发布刷新失败"}, plan:$plan}'
             return 1
         fi
     fi
@@ -510,7 +644,7 @@ handleSubscriptionControl() {
     local payload=${3:-}
     ensureSubscriptionGroupsState
     if ! subscriptionControlAuthorized "${token}"; then
-        jq -n '{ok:false, error:"unauthorized"}'
+        jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
         return 1
     fi
     if [[ "${endpoint}" == "health" ]]; then
@@ -520,12 +654,12 @@ handleSubscriptionControl() {
             payload=$(cat)
         fi
         if [[ -z "${payload}" ]]; then
-            jq -n '{ok:false, error:"empty_payload"}'
+            jq -n '{ok:false, error:"empty_payload", error_detail:{type:"empty_payload", message:"同步请求体为空"}}'
             return 1
         fi
         subscriptionControlApplySync "${payload}"
     else
-        jq -n '{ok:false, error:"unknown_endpoint"}'
+        jq -n '{ok:false, error:"unknown_endpoint", error_detail:{type:"unknown_endpoint", message:"未知控制端点"}}'
         return 1
     fi
 }

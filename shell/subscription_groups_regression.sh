@@ -1833,6 +1833,11 @@ runRealityConfigRegression() {
 runSubscriptionOutputRegression() {
     rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
     export REGRESSION_ECHO_LOG="${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+local profileEmail profileId profilePassword profileName profileUuid
+IFS=$'\037' read -r profileEmail profileId profilePassword _ profileName profileUuid <<<"$(subscriptionAccountProfile '{"email":"user-main","id":"uuid-main","password":"pass-main"}')"
+[[ "${profileEmail}" == "user-main" && "${profileId}" == "uuid-main" && "${profilePassword}" == "pass-main" && "${profileName}" == "user-main" && "${profileUuid}" == "uuid-main" ]]
+IFS=$'\037' read -r _ _ profilePassword _ profileName profileUuid <<<"$(subscriptionAccountProfile '{"name":"udp-user","password":"udp-pass"}')"
+[[ "${profilePassword}" == "udp-pass" && "${profileName}" == "udp-user" && -z "${profileUuid}" ]]
 coreInstallType=1
 currentHost="tls.example.com"
 realityEntryHost="node.example.com"
@@ -2059,10 +2064,35 @@ JSON
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
     applySubscriptionQuotaPlan "$(subscriptionQuotaDryRunPlan)"
     jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    subscriptionSyncPlanFromAccounts() {
-        jq -n '{create:[], remove:["sub_team_a"]}'
-    }
-    subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
+    (
+        subscriptionSyncPlanFromAccounts() {
+            jq -n '{create:[], remove:["sub_team_a"]}'
+        }
+        subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
+    )
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local syncConfigRoot="${TMP_DIR}/subscription-sync-config"
+    configPath="${syncConfigRoot}/xray/"
+    singBoxConfigPath="${syncConfigRoot}/sing-box/"
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"sub_team_b-main"}]}}]}
+JSON
+    cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
+{"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
+JSON
+    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a", "sub_team_b"]' >/dev/null
+    subscriptionSyncPlanFromAccounts $'sub_team_a' | jq -e '.create == [] and .remove == ["sub_team_b"]' >/dev/null
+    printf '{bad-json' >"${configPath}99_broken_inbounds.json"
+    set +e
+    subscriptionSyncPlanFromAccounts $'sub_team_a' >/dev/null 2>&1
+    local brokenPlanStatus=$?
+    set -e
+    [[ "${brokenPlanStatus}" -ne 0 ]]
+    rm -f "${configPath}99_broken_inbounds.json"
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
     (
         runSubscriptionGroupSync() {
             return 23
@@ -2222,7 +2252,7 @@ runRemoteSubscribeFetchRegression() {
     if [[ -n "${oldFakeRemoteSubscribeMode}" ]]; then export PADM_FAKE_REMOTE_SUBSCRIBE_MODE="${oldFakeRemoteSubscribeMode}"; else unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE; fi
 }
 
-runRemoteControlConcurrencyRegression() {
+runRemoteControlConcurrencyRegression() (
     mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
@@ -2272,7 +2302,43 @@ JSON
 
     subscriptionRemoteControlHealthAll | jq -e 'length == 12 and .[0].id == "src0" and .[2].id == "src2" and .[10].id == "src10"' >/dev/null
     subscriptionRemoteSyncPlan | jq -e 'length == 12 and .[0].source_id == "src0" and .[2].source_id == "src2" and .[10].source_id == "src10" and all(.[]; .status == "success")' >/dev/null
-}
+)
+
+runRemoteControlHealthRegression() (
+    local responseFile="${TMP_DIR}/remote-control-health.json"
+    local sourceMissing='{"id":"edge-missing","name":"Edge Missing","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
+    local sourceRemote='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
+    local sourceUnauthorized='{"id":"edge-auth","name":"Edge Auth","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
+
+    curl() {
+        case "${PADM_FAKE_REMOTE_HEALTH_MODE:-}" in
+        unauthorized)
+            printf '{"ok":false,"error":"unauthorized"}\n401'
+            ;;
+        remote_error)
+            printf '{"ok":false,"error":"service_unavailable","error_detail":{"type":"service_unavailable","message":"服务暂时不可用"}}\n503'
+            ;;
+        success)
+            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
+            ;;
+        *)
+            printf '{"ok":false,"error":"unexpected"}\n500'
+            ;;
+        esac
+    }
+
+    subscriptionRemoteControlHealth "${sourceMissing}" >"${responseFile}"
+    jq -e '.status == "missing_token" and .error_detail.type == "missing_token" and .error_detail.message == "未配置控制 token"' "${responseFile}" >/dev/null
+
+    PADM_FAKE_REMOTE_HEALTH_MODE=unauthorized subscriptionRemoteControlHealth "${sourceUnauthorized}" >"${responseFile}"
+    jq -e '.status == "unauthorized" and .status_code == "401" and .error_detail.type == "unauthorized" and .error_detail.message == "控制 token 验证失败"' "${responseFile}" >/dev/null
+
+    PADM_FAKE_REMOTE_HEALTH_MODE=remote_error subscriptionRemoteControlHealth "${sourceRemote}" >"${responseFile}"
+    jq -e '.status == "remote_error" and .status_code == "503" and .error_detail.type == "remote_error" and (.error | contains("服务暂时不可用"))' "${responseFile}" >/dev/null
+
+    PADM_FAKE_REMOTE_HEALTH_MODE=success subscriptionRemoteControlHealth "${sourceRemote}" >"${responseFile}"
+    jq -e '.ok == true and .version == "test" and .capabilities == ["health","sync"] and .id == "edge-remote" and .name == "Edge Remote"' "${responseFile}" >/dev/null
+)
 
 runRemoteControlServerRefreshRegression() (
     local subscribeCalls=0
@@ -2305,6 +2371,18 @@ runRemoteControlServerRefreshRegression() (
     [[ "${subscribeCalls}" == "1" ]]
     [[ "${reconcileCalls}" == "1" ]]
 
+    subscribe() {
+        subscribeCalls=$((subscribeCalls + 1))
+        subscribeArgs="$*"
+        return 1
+    }
+    set +e
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
+    local refreshStatus=$?
+    set -e
+    [[ "${refreshStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed"' "${responseFile}" >/dev/null
+
     subscriptionControlApplyAccountPlan() {
         return 1
     }
@@ -2313,7 +2391,7 @@ runRemoteControlServerRefreshRegression() (
     local applyStatus=$?
     set -e
     [[ "${applyStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "apply_plan_failed"' "${responseFile}" >/dev/null
+    jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}" >/dev/null
 
     subscriptionControlApplyAccountPlan() {
         return 0
@@ -2327,7 +2405,289 @@ runRemoteControlServerRefreshRegression() (
     local reconcileStatus=$?
     set -e
     [[ "${reconcileStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "reconcile_failed"' "${responseFile}" >/dev/null
+    jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed"' "${responseFile}" >/dev/null
+)
+
+runSubscriptionControlServiceInstallRegression() (
+    local fakeBin="${TMP_DIR}/remote-control-service-bin"
+    local controlRoot="${TMP_DIR}/remote-control-service-install"
+    local actionsFile="${TMP_DIR}/remote-control-systemctl-actions.txt"
+    local healthTokensFile="${TMP_DIR}/remote-control-health-tokens.txt"
+    local knownToken="known-control-token"
+    local installStatus
+    local oldPath="${PATH}"
+
+    mkdir -p "${fakeBin}" "${controlRoot}"
+    cat >"${fakeBin}/python3" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "${PADM_CONTROL_HEALTH_TOKEN:-}" >>"${PADM_FAKE_HEALTH_TOKENS}"
+[[ "${PADM_FAKE_HEALTH_FAIL:-}" == "true" ]] && exit 1
+exit 0
+SH
+    cat >"${fakeBin}/sleep" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+    cat >"${fakeBin}/systemctl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS}"
+case "$1" in
+daemon-reload)
+    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "daemon-reload" ]] && exit 1
+    exit 0
+    ;;
+is-active)
+    [[ "${PADM_FAKE_SYSTEMCTL_ACTIVE:-}" == "true" ]] && exit 0
+    exit 3
+    ;;
+restart)
+    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "restart" ]] && exit 1
+    exit 0
+    ;;
+enable)
+    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && exit 1
+    exit 0
+    ;;
+*)
+    exit 0
+    ;;
+esac
+SH
+    chmod +x "${fakeBin}/python3" "${fakeBin}/sleep" "${fakeBin}/systemctl"
+
+    subscriptionControlServiceFile() {
+        printf '%s\n' "${controlRoot}/systemd/padm-subscription-control.service"
+    }
+    export PADM_FAKE_SYSTEMCTL_ACTIONS="${actionsFile}"
+    export PADM_FAKE_HEALTH_TOKENS="${healthTokensFile}"
+    PATH="${fakeBin}:${oldPath}"
+    sleep() { return 0; }
+
+    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/success"
+    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
+    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
+    : >"${actionsFile}"
+    : >"${healthTokensFile}"
+    installSubscriptionControlService
+    [[ -x "$(subscriptionControlServerScript)" ]]
+    grep -q 'ExecStart=/usr/bin/env python3' "$(subscriptionControlServiceFile)"
+    grep -qxF 'enable --now padm-subscription-control.service' "${actionsFile}"
+    grep -qxF "${knownToken}" "${healthTokensFile}"
+
+    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/systemctl-fail"
+    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
+    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
+    export PADM_FAKE_SYSTEMCTL_FAIL=enable
+    set +e
+    installSubscriptionControlService
+    installStatus=$?
+    set -e
+    PADM_FAKE_SYSTEMCTL_FAIL=
+    [[ "${installStatus}" -ne 0 ]]
+
+    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/health-fail"
+    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
+    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
+    export PADM_FAKE_HEALTH_FAIL=true
+    set +e
+    installSubscriptionControlService
+    installStatus=$?
+    set -e
+    PADM_FAKE_HEALTH_FAIL=
+    [[ "${installStatus}" -ne 0 ]]
+)
+
+runSubscriptionControlServerResponseRegression() (
+    command -v python3 >/dev/null 2>&1 || return 0
+
+    local controlRoot="${TMP_DIR}/remote-control-server-response"
+    local fakeInstall="${controlRoot}/install.sh"
+    local modeFile="${controlRoot}/mode"
+    local responseFile="${controlRoot}/response.txt"
+    local serverLog="${controlRoot}/server.log"
+    local serverScript
+    local serverPid=
+    local testPort
+    local serverToken="test-token"
+    local status
+    local body
+    local ready=
+
+    mkdir -p "${controlRoot}"
+    testPort=$(python3 <<'PY'
+import socket
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)
+    cat >"${fakeInstall}" <<'SH'
+#!/usr/bin/env bash
+endpoint=${2:-}
+mode=$(cat "${PADM_FAKE_CONTROL_MODE_FILE}" 2>/dev/null || true)
+payload=
+if [[ "${PADM_CONTROL_TOKEN:-}" != "${PADM_FAKE_SERVER_TOKEN:-}" ]]; then
+    printf '{"ok":false,"error":"unauthorized","error_detail":{"type":"unauthorized","message":"控制 token 验证失败"}}\n'
+    exit 1
+fi
+if [[ "${endpoint}" == "sync" ]]; then
+    payload=$(cat)
+    if [[ -z "${payload}" ]]; then
+        printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
+        exit 1
+    fi
+    if ! jq -e . >/dev/null 2>&1 <<<"${payload}"; then
+        printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
+        exit 1
+    fi
+fi
+case "${endpoint}:${mode}" in
+health:*)
+    printf 'ui noise before health\n'
+    printf '{"ok":true,"version":"test"}\n'
+    ;;
+sync:noise)
+    printf 'ui noise before sync\n'
+    printf '{"ok":false,"error":"first_json"}\n'
+    printf 'ui noise between json\n'
+    printf '{"ok":true,"changed":true,"plan":{"create":[],"remove":[]}}\n'
+    ;;
+sync:failed)
+    printf 'ui noise before failed sync\n'
+    printf '{"ok":true,"changed":true}\n'
+    exit 7
+    ;;
+sync:timeout)
+    /bin/sleep 2
+    printf '{"ok":true}\n'
+    ;;
+sync:invalid)
+    printf 'ui noise only\n'
+    exit 0
+    ;;
+*)
+    printf '{"ok":false,"error":"unexpected"}\n'
+    exit 1
+    ;;
+esac
+SH
+    chmod +x "${fakeInstall}"
+
+    subscriptionControlPort() {
+        printf '%s\n' "${testPort}"
+    }
+    subscriptionGroupSyncInstallScript() {
+        printf '%s\n' "${fakeInstall}"
+    }
+    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/state"
+    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
+    printf '%s\n' "${serverToken}" >"$(subscriptionControlTokenFile)"
+    export PADM_FAKE_SERVER_TOKEN="${serverToken}"
+    writeSubscriptionControlServer
+    serverScript=$(subscriptionControlServerScript)
+    printf 'noise\n' >"${modeFile}"
+    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
+    serverPid=$!
+    trap '[[ -n "${serverPid}" ]] && kill "${serverPid}" >/dev/null 2>&1 || true; [[ -n "${serverPid}" ]] && wait "${serverPid}" 2>/dev/null || true' EXIT
+
+    controlServerRequest() {
+        local method=$1
+        local endpoint=$2
+        local payload=${3:-}
+        local token=${4:-${serverToken}}
+        PADM_TEST_CONTROL_METHOD="${method}" \
+        PADM_TEST_CONTROL_ENDPOINT="${endpoint}" \
+        PADM_TEST_CONTROL_PORT="${testPort}" \
+        PADM_TEST_CONTROL_PAYLOAD="${payload}" \
+        PADM_TEST_CONTROL_TOKEN="${token}" \
+        python3 <<'PY'
+import os
+import sys
+import urllib.error
+import urllib.request
+
+method = os.environ["PADM_TEST_CONTROL_METHOD"]
+endpoint = os.environ["PADM_TEST_CONTROL_ENDPOINT"]
+port = os.environ["PADM_TEST_CONTROL_PORT"]
+payload = os.environ.get("PADM_TEST_CONTROL_PAYLOAD", "")
+token = os.environ["PADM_TEST_CONTROL_TOKEN"]
+data = payload.encode() if method == "POST" else None
+request = urllib.request.Request(
+    f"http://127.0.0.1:{port}/s/control/{endpoint}",
+    data=data,
+    method=method,
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+)
+try:
+    with urllib.request.urlopen(request, timeout=3) as response:
+        print(response.status)
+        print(response.read().decode())
+except urllib.error.HTTPError as error:
+    print(error.code)
+    print(error.read().decode())
+except Exception:
+    sys.exit(1)
+PY
+    }
+
+    for _ in {1..50}; do
+        if controlServerRequest GET health >"${responseFile}" 2>/dev/null; then
+            ready=true
+            break
+        fi
+        sleep 0.1
+    done
+    [[ "${ready}" == "true" ]]
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "200" ]]
+    jq -e '.ok == true and .version == "test"' <<<"${body}" >/dev/null
+
+    printf 'noise\n' >"${modeFile}"
+    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "200" ]]
+    jq -e '.ok == true and .changed == true and (.plan.create | length) == 0' <<<"${body}" >/dev/null
+
+    controlServerRequest GET health '' wrong-token >"${responseFile}" || true
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "401" ]]
+    jq -e '.ok == false and .error == "unauthorized" and .error_detail.type == "unauthorized"' <<<"${body}" >/dev/null
+
+    controlServerRequest POST sync '' >"${responseFile}" || true
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "400" ]]
+    jq -e '.ok == false and .error == "empty_payload" and .error_detail.type == "empty_payload"' <<<"${body}" >/dev/null
+
+    controlServerRequest POST sync 'not-json' >"${responseFile}" || true
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "400" ]]
+    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' <<<"${body}" >/dev/null
+
+    printf 'failed\n' >"${modeFile}"
+    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "503" ]]
+    jq -e '.ok == false and .error == "script_failed" and .error_detail.type == "script_failed" and .exit_code == 7' <<<"${body}" >/dev/null
+
+    printf 'timeout\n' >"${modeFile}"
+    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "503" ]]
+    jq -e '.ok == false and .error == "script_timeout" and .error_detail.type == "script_timeout"' <<<"${body}" >/dev/null
+
+    printf 'invalid\n' >"${modeFile}"
+    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "503" ]]
+    jq -e '.ok == false and .error == "invalid_response" and .error_detail.type == "invalid_response"' <<<"${body}" >/dev/null
 )
 
 runNginxBlogAutoInstallRegression() {
@@ -3848,7 +4208,10 @@ runRegressionTransaction() {
 
 runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
+    runRegressionStep remote-control-health runRemoteControlHealthRegression
     runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression
+    runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression
+    runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
 
 runRegressionAll() {
