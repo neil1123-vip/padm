@@ -106,6 +106,14 @@ source "${PROJECT_ROOT}/shell/subscription/control.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/sync.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/traffic.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/state_maintenance.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/menu.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/adapters.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/manage.sh"
@@ -2196,7 +2204,7 @@ JSON
     subscriptionRemoteSyncPlan | jq -e '.[] | select(.source_id == "self-ref" and .status == "self_reference" and .error_detail.type == "self_reference")' >/dev/null
     runSubscriptionRemoteSync | jq -e '.[] | contains("self-ref")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "self-ref" and .sync_status == "failed" and .last_sync_error.type == "self_reference")' >/dev/null
-    local stateSnapshot badBackup legacyBackup
+    local stateSnapshot badBackup legacyBackup menuBackup
     stateSnapshot=$(<"$(subscriptionGroupsFile)")
     if subscriptionGroupsStateWrite '.groups = "broken" | .dangling = ' 2>/dev/null; then
         return 1
@@ -2219,6 +2227,23 @@ JSON
 JSON
     restoreSubscriptionGroupsBackup "${legacyBackup}"
     jq -e '.version == 2 and .active_group == "legacy" and any(.groups[0].sources[]; .role == "main") and (.groups[0].sync.remote_enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
+
+    menuBackup=$(createSubscriptionGroupsBackup)
+    subscriptionGroupsStateWrite '.active_group = "changed" | .groups[0].id = "changed" | .groups[0].name = "Changed"'
+    (
+        local menuOutput
+        autoRead() {
+            local targetVar=$3
+            local input=
+            IFS= read -r input || input=
+            printf -v "${targetVar}" '%s' "${input}"
+        }
+        menuLine() { printf 'menu:%s\n' "$*"; }
+        menuClose() { printf 'menu:close\n'; }
+        menuOutput=$(printf '%s\nyes\n' "${menuBackup}" | restoreSubscriptionGroupsBackupMenu)
+        [[ "${menuOutput}" == *"menu:"* ]]
+    )
+    jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runRemoteSubscribeFetchRegression() {
@@ -2736,7 +2761,10 @@ runMenuSmokeRegression() {
     disableRealityStreamSplit() { recordMenuAction disableRealityStreamSplit; }
     changeInstalledRealityTarget() { recordMenuAction "changeReality:$*"; }
     subscribe() { recordMenuAction subscribe; }
+    showSubscriptionServiceStatus() { recordMenuAction showSubscriptionServiceStatus; }
     showSubscriptionSources() { recordMenuAction showSubscriptionSources; }
+    showSubscriptionSourceControlUrls() { recordMenuAction showSubscriptionSourceControlUrls; }
+    showSubscriptionSourceSyncResults() { recordMenuAction showSubscriptionSourceSyncResults; }
     showSubscriptionWireGuardMainCredential() { recordMenuAction showSubscriptionWireGuardMainCredential; }
     showSubscriptionWireGuardControlledCredential() { recordMenuAction showSubscriptionWireGuardControlledCredential; }
     importSubscriptionWireGuardMainCredential() { recordMenuAction importSubscriptionWireGuardMainCredential; }
@@ -2756,18 +2784,25 @@ runMenuSmokeRegression() {
     createAndSyncUserSubscriptionWizard() { recordMenuAction createAndSyncUserSubscriptionWizard; }
     manageUserSubscriptionItem() { recordMenuAction manageUserSubscriptionItem; }
     installSubscribe() { recordMenuAction installSubscribe; }
-    manageSubscriptionAutomation() { recordMenuAction manageSubscriptionAutomation; }
     manageSubscriptionSyncSettings() { recordMenuAction manageSubscriptionSyncSettings; }
-    manageSubscriptionStateBackups() { recordMenuAction manageSubscriptionStateBackups; }
     runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
     subscriptionSyncPlan() { recordMenuAction subscriptionSyncPlan; printf '[]\n'; }
     subscriptionRemoteSyncPlan() { recordMenuAction subscriptionRemoteSyncPlan; printf '[]\n'; }
     subscriptionQuotaDryRunPlan() { recordMenuAction subscriptionQuotaDryRunPlan; printf '[]\n'; }
     executeSubscriptionQuotaPlanMenu() { recordMenuAction executeSubscriptionQuotaPlanMenu; }
     setSubscriptionSourceControlTokenMenu() { recordMenuAction setSubscriptionSourceControlTokenMenu; }
+    toggleSubscriptionSourceMenu() { recordMenuAction toggleSubscriptionSourceMenu; }
+    clearSubscriptionSourceSyncErrorMenu() { recordMenuAction clearSubscriptionSourceSyncErrorMenu; }
     showAdminSubscriptionTraffic() { recordMenuAction showAdminSubscriptionTraffic; }
     collectSubscriptionTraffic() { recordMenuAction collectSubscriptionTraffic; return 0; }
+    showSubscriptionTrafficOverview() { recordMenuAction showSubscriptionTrafficOverview; }
+    showSubscriptionGroupsStateSummary() { recordMenuAction showSubscriptionGroupsStateSummary; }
+    createSubscriptionGroupsBackupMenu() { recordMenuAction createSubscriptionGroupsBackupMenu; }
+    showSubscriptionGroupsBackups() { recordMenuAction showSubscriptionGroupsBackups; }
+    restoreSubscriptionGroupsBackupMenu() { recordMenuAction restoreSubscriptionGroupsBackupMenu; }
+    resetSubscriptionGroupsStateMenu() { recordMenuAction resetSubscriptionGroupsStateMenu; }
     refreshSubscriptionGroupSyncCron() { recordMenuAction refreshSubscriptionGroupSyncCron; }
+    subscriptionGroupSyncCronStatus() { recordMenuAction subscriptionGroupSyncCronStatus; }
     xrayInstalled() { return 0; }
     singBoxInstalled() { return 0; }
     getXrayCurrentVersion() { printf 'v1.0.0\n'; }
@@ -2818,42 +2853,71 @@ r"
     coreInstallType=1
     ensureSubscriptionGroupsState
     resetMenuActions
-    manageSubscription <<<"7"
+    manageSubscription <<<"9"
     assertMenuAction menu
     grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
+    grep -q "快速开始" <<<"${output}"
     grep -q "多服务器：主控" <<<"${output}"
     grep -q "多服务器：被控" <<<"${output}"
     grep -q "被控不需要安装公网订阅服务" <<<"${output}"
     resetMenuActions
     manageSubscription <<<"1
-6
-7"
+5
+9"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"2
-5
-7"
+6
+9"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"3
-10
-7"
+6
+9"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"4
-7
-7"
+8
+9"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"5
 8
-7"
+9"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"6
-6
-7"
+11
+9"
     assertMenuAction menu
+    resetMenuActions
+    manageSubscription <<<"7
+8
+9"
+    assertMenuAction menu
+    resetMenuActions
+    manageSubscription <<<"8
+9
+9"
+    assertMenuAction menu
+    resetMenuActions
+    manageSubscriptionQuickStart <<<"1
+5"
+    assertMenuAction installSubscribe
+    assertMenuAction subscribe
+    resetMenuActions
+    manageSubscriptionQuickStart <<<"3
+5"
+    assertMenuAction collectSubscriptionTraffic
+    assertMenuAction showSubscriptionTrafficOverview
+    assertMenuAction subscriptionQuotaDryRunPlan
+    resetMenuActions
+    manageSubscriptionMultiServerQuickStart <<<"3
+5"
+    if assertMenuAction initSubscriptionWireGuardMain; then
+        printf 'menu-smoke failed: multi-server quick-start return initialized main\n' >&2
+        return 1
+    fi
     resetMenuActions
     manageLocalSubscription <<<"1
 6"
@@ -2924,10 +2988,10 @@ y
     assertMenuAction subscriptionSyncPlan
     assertMenuAction menu
     resetMenuActions
-    manageMainControllerSubscriptions <<<"1
+    manageMainControllerSubscriptions <<<"2
 7
-10"
-    assertMenuAction menu
+11"
+    assertMenuAction showSubscriptionWireGuardStatus
     resetMenuActions
     manageSubscriptionMainControlMenu <<<"2
 7"
@@ -2939,11 +3003,11 @@ y
 7"
         assertMenuAction "${wgAction#*:}"
     done
-    for wgAction in "1:initSubscriptionWireGuardControlled" "2:importSubscriptionWireGuardMainCredential" "3:showSubscriptionWireGuardControlledCredential" "4:showSubscriptionWireGuardStatus" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
+    for wgAction in "2:initSubscriptionWireGuardControlled" "3:importSubscriptionWireGuardMainCredential" "4:showSubscriptionWireGuardControlledCredential" "5:showSubscriptionWireGuardStatus" "6:restartSubscriptionWireGuardControl" "7:disableSubscriptionWireGuardControl"; do
         wgChoice=${wgAction%%:*}
         resetMenuActions
         manageControlledSubscription <<<"${wgChoice}
-7"
+8"
         assertMenuAction "${wgAction#*:}"
     done
     for wgAction in "${wgActions[@]}"; do
@@ -2954,22 +3018,22 @@ y
         assertMenuAction "${wgAction#*:}"
     done
     resetMenuActions
-    manageMainControllerSubscriptions <<<"3
-10"
+    manageMainControllerSubscriptions <<<"4
+11"
     assertMenuAction setSubscriptionSourceControlTokenMenu
     resetMenuActions
-    manageMainControllerSubscriptions <<<"6
-10"
+    manageMainControllerSubscriptions <<<"7
+11"
     assertMenuAction showSubscriptionSourceControlUrls
     resetMenuActions
-    manageMainControllerSubscriptions <<<"7
-10"
+    manageMainControllerSubscriptions <<<"8
+11"
     assertMenuAction showSubscriptionSourceSyncResults
-    assertMenuAction menu
     resetMenuActions
     manageTrafficAndQuota <<<"1
 8"
     assertMenuAction collectSubscriptionTraffic
+    assertMenuAction showSubscriptionTrafficOverview
     resetMenuActions
     manageTrafficAndQuota <<<"6
 8"
@@ -2979,23 +3043,46 @@ y
 8"
     assertMenuAction executeSubscriptionQuotaPlanMenu
     resetMenuActions
-    manageSubscriptionAutomation <<<"1
-6
-7"
+    manageSubscriptionAutomation <<<"4
+8"
     assertMenuAction manageSubscriptionSyncSettings
-    assertMenuAction menu
     resetMenuActions
-    manageSubscriptionAutomation <<<"2
-6
-7"
+    manageSubscriptionAutomation <<<"1
+8"
     assertMenuAction runSubscriptionGroupSync
-    assertMenuAction menu
     resetMenuActions
     manageSubscriptionAutomation <<<"5
+1
 6
-7"
-    assertMenuAction manageSubscriptionStateBackups
-    assertMenuAction menu
+8"
+    assertMenuAction showSubscriptionGroupsStateSummary
+    resetMenuActions
+    manageSubscriptionStateBackups <<<"1
+6"
+    assertMenuAction showSubscriptionGroupsStateSummary
+    resetMenuActions
+    manageSubscriptionStateBackups <<<"2
+6"
+    assertMenuAction createSubscriptionGroupsBackupMenu
+    resetMenuActions
+    manageSubscriptionStateBackups <<<"3
+6"
+    assertMenuAction showSubscriptionGroupsBackups
+    resetMenuActions
+    manageSubscriptionStateBackups <<<"4
+6"
+    assertMenuAction restoreSubscriptionGroupsBackupMenu
+    resetMenuActions
+    manageSubscriptionStateBackups <<<"5
+6"
+    assertMenuAction resetSubscriptionGroupsStateMenu
+    resetMenuActions
+    manageSubscriptionDiagnostics <<<"1
+9"
+    assertMenuAction showSubscriptionServiceStatus
+    assertMenuAction showSubscriptionWireGuardStatus
+    assertMenuAction showSubscriptionGroupsStateSummary
+    assertMenuAction showSubscriptionSourceSyncResults
     resetMenuActions
     manageAdminSubscription <<<"6
 7"

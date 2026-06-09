@@ -1559,7 +1559,7 @@ renderAllSubscribeUserOutputs() {
         echoContent title "\n┌─ 订阅输出 ─────────────────────────────────────────"
         currentDomain=$(resolveSubscribePublicDomain)
         if [[ -z "${currentDomain}" ]]; then
-            errorCard "订阅地址生成失败" "未读取到订阅服务域名，请进入 订阅服务 检查 HTTPS 发布入口配置"
+            errorCard "订阅地址生成失败" "未读取到订阅服务域名，请进入 我的订阅 检查 HTTPS 发布入口配置"
             return 1
         fi
 
@@ -2636,4 +2636,3 @@ handleHysteria() {
         fi
     fi
 }
-

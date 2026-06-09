@@ -1,0 +1,927 @@
+#!/usr/bin/env bash
+
+showSubscriptionServerRoleSummary() {
+    local state
+    local role
+    local roleText
+    local enabledText
+    local address
+    local peerCount
+    state=$(subscriptionWireGuardReadState)
+    role=$(jq -r '.role' <<<"${state}")
+    case "${role}" in
+    main) roleText="主控" ;;
+    controlled) roleText="被控" ;;
+    *) roleText="未配置主控/被控" ;;
+    esac
+    if [[ "$(jq -r '.enabled' <<<"${state}")" == "true" ]]; then
+        enabledText="已启用"
+    else
+        enabledText="未启用"
+    fi
+    address=$(jq -r 'if (.address // "") == "" then "未配置" else .address end' <<<"${state}")
+    peerCount=$(jq -r '.peers | length' <<<"${state}")
+    menuLine "当前服务器角色：$(uiStyle value "${roleText}")；WireGuard 控制面：$(uiStyle value "${enabledText}")；内网地址：$(uiStyle value "${address}")；Peer：$(uiStyle value "${peerCount}")"
+}
+
+manageSubscriptionQuickStart() {
+    while true; do
+        echoContent title "\n┌─ 快速开始 ─────────────────────────────────────────"
+        menuLine "按任务走完整闭环；需要细调时再回到对应顶层入口"
+        menuItem 1 "我自己用" "安装/更新订阅服务，然后刷新我的订阅链接"
+        menuItem 2 "给别人开订阅" "创建分享订阅、立即同步并输出链接"
+        menuItem 3 "治理用量" "刷新流量、查看概览并预览超限处理"
+        menuItem 4 "接入多服务器" "按主控或被控角色走 WireGuard 控制面向导"
+        menuReturnItem 5 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead subscription_quick_start_menu "请选择:" quickStartStatus
+        case "${quickStartStatus}" in
+        1) installSubscribe && showSubscriptionServiceStatus && subscribe ;;
+        2) showSubscriptionServiceStatus; createAndSyncUserSubscriptionWizard ;;
+        3) collectSubscriptionTraffic && showSubscriptionTrafficOverview; userJsonCard "超限处理计划" "$(subscriptionQuotaDryRunPlan)" ;;
+        4) manageSubscriptionMultiServerQuickStart ;;
+        5) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageSubscriptionMultiServerQuickStart() {
+    while true; do
+        echoContent title "\n┌─ 多服务器快速开始 ─────────────────────────────────"
+        showSubscriptionServerRoleSummary
+        menuItem 1 "这台作为主控" "初始化主控、复制主控凭据、添加被控并检查健康"
+        menuItem 2 "这台作为被控" "初始化被控、导入主控凭据、输出被控凭据"
+        menuReturnItem 3 "返回快速开始" "回到上级菜单"
+        menuClose
+        autoRead subscription_multi_quick_start "请选择:" multiQuickStartStatus
+        case "${multiQuickStartStatus}" in
+        1) runSubscriptionMainControllerWizard ;;
+        2) runSubscriptionControlledWizard ;;
+        3) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+runSubscriptionMainControllerWizard() {
+    initSubscriptionWireGuardMain || return 1
+    showSubscriptionWireGuardMainCredential
+    addSubscribeMenu
+    userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)"
+    userJsonCard "远程同步计划" "$(subscriptionRemoteSyncPlan)"
+}
+
+runSubscriptionControlledWizard() {
+    initSubscriptionWireGuardControlled || return 1
+    importSubscriptionWireGuardMainCredential || return 1
+    showSubscriptionWireGuardControlledCredential
+    showSubscriptionWireGuardStatus
+}
+
+# 订阅与用户入口
+manageSubscription() {
+    progressCard "1" "订阅与用户"
+    if [[ -z "${configPath}" ]]; then
+        errorCard "未安装"
+        exit 0
+    fi
+
+    while true; do
+        echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
+        showSubscriptionServerRoleSummary
+        menuLine "先选任务入口；高级功能仍保留在顶层，方便熟手直接进入"
+        menuLine "groups.json 是用户订阅、服务器源、同步计划和流量统计的状态真源"
+        menuLine "被控不需要安装公网订阅服务；只需启用 WireGuard 内网控制面并把凭据交给主控"
+        menuItem 1 "快速开始" "按自己用、给别人、用量治理、多服务器接入完成常见闭环"
+        menuItem 2 "我的订阅" "安装/更新订阅发布服务，查看自用链接和本机状态"
+        menuItem 3 "给别人开订阅" "创建分享订阅、设置节点和额度、同步托管账号并查看链接"
+        menuItem 4 "用量与限额" "刷新/查看用量，预览并执行超限处理"
+        menuItem 5 "同步与备份" "手动/自动同步、同步计划、状态备份恢复和显式重建"
+        menuItem 6 "多服务器：主控" "本机作为主控，添加被控、测试连接、查看同步结果"
+        menuItem 7 "多服务器：被控" "本机作为被控，加入主控并提供被控接入凭据"
+        menuItem 8 "高级诊断" "查看服务、控制面、远端健康、同步错误和兼容入口"
+        menuReturnItem 9 "返回主菜单" "回到 padm 管理面板"
+        menuClose
+        autoRead subscription_menu "请选择:" manageSubscriptionStatus
+        case "${manageSubscriptionStatus}" in
+        1) manageSubscriptionQuickStart ;;
+        2) manageLocalSubscription ;;
+        3) manageSharedSubscriptions ;;
+        4) manageTrafficAndQuota ;;
+        5) manageSubscriptionAutomation ;;
+        6) manageMainControllerSubscriptions ;;
+        7) manageControlledSubscription ;;
+        8) manageSubscriptionDiagnostics ;;
+        9) menu; return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageLocalSubscription() {
+    while true; do
+        echoContent title "\n┌─ 我的订阅 ─────────────────────────────────────────"
+        menuLine "我的订阅面向当前服务器：安装公网发布服务、查看自用链接、服务器源和本机流量"
+        menuLine "这不是被控加入主控的必选步骤；被控加入请走 多服务器：被控"
+        menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
+        menuItem 2 "查看/刷新我的订阅链接" "重新生成并输出当前自用订阅"
+        menuItem 3 "查看订阅服务状态" "显示当前订阅发布端口和域名"
+        menuItem 4 "查看我的可用服务器" "查看本机和已添加被控服务器源"
+        menuItem 5 "查看我的流量" "查看自用账号流量统计"
+        menuReturnItem 6 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead local_subscription_menu "请选择:" localSubscriptionStatus
+        case "${localSubscriptionStatus}" in
+        1) installSubscribe && showSubscriptionServiceStatus ;;
+        2) subscribe ;;
+        3) showSubscriptionServiceStatus ;;
+        4) showSubscriptionSources ;;
+        5) showAdminSubscriptionTraffic ;;
+        6) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+showSubscriptionServiceStatus() {
+    readNginxSubscribe
+    if [[ -n "${subscribePort}" ]]; then
+        statusCard "订阅服务" "状态：已配置" "协议：${subscribeType:-https}" "域名：${subscribeDomain:-${currentHost:-未读取}}" "端口：${subscribePort}"
+    else
+        statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入 我的订阅 -> 安装/更新订阅服务" "仅作为被控加入主控时，不需要安装公网订阅服务"
+    fi
+}
+
+manageAdminSubscription() {
+    manageLocalSubscription
+}
+
+manageSharedSubscriptions() {
+    ensureSubscriptionGroupsState
+    while true; do
+        echoContent title "\n┌─ 给别人开订阅 ─────────────────────────────────────"
+        menuLine "这里管理分享订阅对象：给谁开、包含哪些节点、订阅额度是多少"
+        menuLine "同步后会生成托管账号 sub_<ID>；超限停用和批量处理在 流量与限额 中执行"
+        menuLine "首次给客户端发分享链接前，请先确认 我的订阅 已安装公网发布服务；只做被控服务器不需要这一步"
+        menuItem 1 "一键创建并生成链接" "填写 ID/名称、节点范围、订阅额度，然后同步并输出链接"
+        menuItem 2 "查看已开的订阅" "列出已创建的分享订阅"
+        menuItem 3 "管理单个订阅" "改节点范围、额度、启停或删除"
+        menuItem 4 "手动同步订阅变更" "把已有订阅变更应用到本机和被控服务器"
+        menuItem 5 "预览同步变更" "查看将创建/删除哪些 sub_ 托管账号"
+        menuReturnItem 6 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead shared_subscription_menu "请选择:" sharedSubscriptionStatus
+        case "${sharedSubscriptionStatus}" in
+        1) createAndSyncUserSubscriptionWizard ;;
+        2) showUserSubscriptions ;;
+        3) manageUserSubscriptionItem ;;
+        4) runSubscriptionGroupSync ;;
+        5)
+            readInstallType
+            readInstallProtocolType
+            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
+            ;;
+        6) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageUserSubscription() {
+    manageSharedSubscriptions
+}
+
+userResultCard() {
+    local title=$1
+    echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
+}
+
+userJsonCard() {
+    local title=$1
+    local json=$2
+    userResultCard "${title}"
+    printf '%s\n' "${json}" | jq .
+    menuClose
+}
+showUserSubscriptions() {
+    local groupId
+    local output
+    groupId=$(activeSubscriptionGroupId)
+    ensureSubscriptionGroupsState
+    output=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
+      def quotaStatus($userGroup; $traffic):
+        if ($userGroup.traffic_limit_gb // 0) <= 0 then
+          "不限额"
+        else
+          ((($userGroup.traffic_limit_gb * 1024 * 1024 * 1024) | floor) as $limitBytes |
+           (((($traffic.upload // 0) + ($traffic.download // 0)) * 100 / $limitBytes) | floor) as $percent |
+           if $percent >= 100 then "已超限(" + ($percent | tostring) + "%)"
+           elif $percent >= 80 then "接近上限(" + ($percent | tostring) + "%)"
+           else "正常(" + ($percent | tostring) + "%)" end)
+        end;
+      .groups[] | select(.id == $groupId) |
+      . as $group |
+      .user_groups[]? |
+      "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb):\(quotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}))"')
+    if [[ -z "${output}" ]]; then
+        statusCard "用户订阅" "暂无用户订阅"
+        return
+    fi
+    userResultCard "用户订阅列表"
+    while IFS=: read -r id name enabled sources limit quota; do
+        menuLine "ID：$(uiStyle value "${id}")"
+        menuLine "名称：$(uiStyle value "${name}")"
+        if [[ "${enabled}" == "true" ]]; then
+            menuLine "状态：$(uiStyle ok "${enabled}")"
+        else
+            menuLine "状态：$(uiStyle warn "${enabled}")"
+        fi
+        menuLine "可用服务器：$(uiStyle value "${sources}")"
+        menuLine "订阅额度GB：$(uiStyle value "${limit}")"
+        case "${quota}" in
+        已超限*) menuLine "限额状态：$(uiStyle danger "${quota}")" ;;
+        接近上限*) menuLine "限额状态：$(uiStyle warn "${quota}")" ;;
+        正常*) menuLine "限额状态：$(uiStyle ok "${quota}")" ;;
+        *) menuLine "限额状态：$(uiStyle muted "${quota}")" ;;
+        esac
+    done <<<"${output}"
+    menuClose
+}
+
+createUserSubscription() {
+    local id=
+    local name=
+    autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
+    autoRead user_subscription_name "请输入显示名称[例 家人A/团队A]:" name
+    if [[ -z "${id}" || -z "${name}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+        errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线，名称不能为空"
+        return 1
+    fi
+    addUserSubscriptionState "${id}" "${name}"
+    successCard "用户订阅已创建"
+}
+
+createAndSyncUserSubscriptionWizard() {
+    local id=
+    local name=
+    local sourceIds=main
+    local sourceJson=
+    local limit=0
+    local confirm=
+    local enableSync=
+    autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
+    autoRead user_subscription_name "请输入显示名称[例 家人A/团队A]:" name
+    if [[ -z "${id}" || -z "${name}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+        errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线，名称不能为空"
+        return 1
+    fi
+
+    userResultCard "这个订阅可使用的服务器"
+    menuLine "这里不是填写用户 ID，而是选择订阅里包含哪些节点"
+    menuLine "main 表示本机；被控服务器需先在 多服务器：主控 中添加；* 表示全部已添加服务器"
+    menuLine "多个服务器用英文逗号分隔，例如 main,remote-a"
+    listSubscriptionSources
+    menuClose
+    autoRead user_subscription_sources "请输入服务器范围[回车默认 main]:" sourceIds
+    sourceIds=${sourceIds:-main}
+    sourceJson=$(printf '%s' "${sourceIds}" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))')
+    if [[ "$(jq 'length' <<<"${sourceJson}")" == "0" ]]; then
+        errorCard "服务器范围不能为空；直接回车使用本机 main"
+        return 1
+    fi
+
+    autoRead user_subscription_traffic_limit "请输入订阅额度GB[回车/0为不限；这里只设置额度，超限处理在 流量与限额 中执行]:" limit
+    limit=${limit:-0}
+    if ! echo "${limit}" | grep -qE '^[0-9]+$'; then
+        errorCard "订阅额度必须是数字"
+        return 1
+    fi
+
+    addUserSubscriptionState "${id}" "${name}"
+    setUserSubscriptionSources "${id}" "${sourceJson}"
+    setUserSubscriptionTrafficLimit "${id}" "${limit}"
+    statusCard "分享订阅已创建" "订阅ID：${id}" "显示名称：${name}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 流量与限额 执行"
+
+    if ! subscriptionGroupSyncEnabled; then
+        autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync
+        enableSync=${enableSync:-yes}
+        if [[ "${enableSync}" == "yes" || "${enableSync}" == "y" ]]; then
+            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" '.groups |= map(if .id == $groupId then .sync.enabled = true else . end)'
+            refreshSubscriptionGroupSyncCron
+            successCard "自动同步已开启" "后续会按当前间隔自动同步；可在 同步与备份 -> 自动同步设置 中调整间隔"
+        else
+            statusCard "自动同步未开启" "本次仍可立即同步一次；后续变更需手动同步，或到 同步与备份 中开启"
+        fi
+    fi
+
+    autoRead user_subscription_sync_now "现在同步并生成订阅链接？[yes/no，默认 yes]:" confirm
+    confirm=${confirm:-yes}
+    if [[ "${confirm}" == "yes" || "${confirm}" == "y" ]]; then
+        runSubscriptionGroupSync skip-subscribe-refresh || return 1
+        showUserSubscriptionLinks "${id}"
+    else
+        statusCard "稍后同步" "该订阅已保存；之后可在 给别人开订阅 -> 手动同步订阅变更 中生成托管账号和链接"
+    fi
+}
+
+selectUserSubscriptionId() {
+    local id=
+    showUserSubscriptions
+    autoRead select_user_subscription_id "请输入用户订阅ID:" id
+    if [[ -z "${id}" ]]; then
+        errorCard "用户订阅 ID 不可以为空"
+        return 1
+    fi
+    echo "${id}"
+}
+
+showUserSubscriptionLinks() {
+    local userSubscriptionId=$1
+    local accountName
+    accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
+    subscribe false
+    statusCard "用户订阅链接" "已刷新 ${accountName} 的订阅输出，请把上方该账号的链接发给对方" "如果上方没有该账号，先执行同步生成托管账号"
+}
+
+removeUserSubscriptionMenu() {
+    local userSubscriptionId=$1
+    local confirm=
+    autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应 sub_ 托管账号。确认请输入 yes：" confirm
+    if [[ "${confirm}" != "yes" ]]; then
+        statusCard "已取消" "操作未执行"
+        return 1
+    fi
+    removeUserSubscriptionState "${userSubscriptionId}"
+    subscriptionSyncRemoveAccount "$(subscriptionSyncAccountName "${userSubscriptionId}")"
+    reloadCore
+    successCard "用户订阅已删除"
+}
+
+manageUserSubscriptionItem() {
+    local userSubscriptionId
+    userSubscriptionId=$(selectUserSubscriptionId) || return
+    while true; do
+        echoContent title "\n┌─ 管理单个订阅 ─────────────────────────────────────"
+        menuLine "当前订阅: ${userSubscriptionId}"
+        menuLine "这里只管理订阅对象；超限停用和批量处理在 流量与限额 中执行"
+        menuItem 1 "刷新并查看链接" "重新生成订阅输出，显示该订阅的链接"
+        menuItem 2 "设置节点范围" "选择 main、被控服务器 ID 或 *"
+        menuItem 3 "查看该订阅用量" "只读查看累计用量和额度状态"
+        menuItem 4 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
+        menuItem 5 "启用/停用" "停用后同步会移除对应托管账号"
+        menuItem 6 "预览同步变更" "查看将创建/删除哪些 sub_ 托管账号"
+        menuDangerItem 7 "删除订阅" "删除记录；同步后移除对应托管账号"
+        menuReturnItem 8 "返回给别人开订阅" "回到上级菜单"
+        menuClose
+        autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus
+        case "${userSubscriptionItemStatus}" in
+        1) showUserSubscriptionLinks "${userSubscriptionId}" ;;
+        2) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
+        3) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
+        4) setUserSubscriptionTrafficLimitMenu "${userSubscriptionId}" ;;
+        5) toggleUserSubscriptionState "${userSubscriptionId}"; successCard "用户订阅状态已切换" ;;
+        6)
+            readInstallType
+            readInstallProtocolType
+            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
+            ;;
+        7) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
+        8) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+setUserSubscriptionSourcesMenu() {
+    local userSubscriptionId=$1
+    local sourceIds=
+    local sourceJson=
+    local line=
+
+    userResultCard "这个订阅可使用的服务器"
+    menuLine "这里选择订阅里包含哪些节点，不是填写订阅 ID"
+    menuLine "main 表示本机；被控服务器需先在 多服务器：主控 中添加凭据"
+    menuLine "可输入 main、远程服务器 ID，或 * 表示全部已添加服务器"
+    menuLine "多个服务器用英文逗号分隔，例如 main,remote-a"
+    while IFS= read -r line; do
+        menuLine "${line}"
+    done < <(listSubscriptionSources)
+    menuClose
+    autoRead user_subscription_sources "请输入服务器范围，多个用逗号分隔:" sourceIds
+    if [[ -z "${sourceIds}" ]]; then
+        errorCard "服务器范围不能为空；直接回车使用本机 main"
+        return 1
+    fi
+    sourceJson=$(printf '%s' "${sourceIds}" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))')
+    setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"
+    successCard "节点范围已更新"
+}
+
+setUserSubscriptionTrafficLimitMenu() {
+    local userSubscriptionId=$1
+    local limit=
+    autoRead user_subscription_traffic_limit "请输入订阅额度GB[0为不限；这里只设置额度，不执行超限处理]:" limit
+    if [[ -z "${limit}" ]] || ! echo "${limit}" | grep -qE '^[0-9]+$'; then
+        errorCard "订阅额度必须是数字"
+        return 1
+    fi
+    setUserSubscriptionTrafficLimit "${userSubscriptionId}" "${limit}"
+    successCard "订阅额度已更新" "超限停用和批量处理请到 流量与限额 执行"
+}
+
+
+
+# 服务器源管理
+normalizeSubscriptionSourceInput() {
+    return 1
+}
+
+remoteSubscribeFile() {
+    subscriptionGroupsFile
+}
+
+listRemoteSubscribeSources() {
+    listSubscriptionSources | awk -F ':' '$3 != "main" {print $5":"$6":"$2":"$4}'
+}
+
+# 添加服务器源
+addSubscribeMenu() {
+    local addSubscribeStatus=
+    local sourceId=
+    while true; do
+        echoContent title "\n┌─ 服务器源管理 ─────────────────────────────────────"
+        menuLine "主控端管理被控服务器：粘贴被控接入凭据添加，或删除已有被控"
+        menuLine "被控不需要安装公网订阅服务；只需在 多服务器：被控 生成接入凭据"
+        menuItem 1 "添加被控服务器" "粘贴被控凭据，新增 WireGuard Peer 和服务器源"
+        menuItem 2 "移除被控服务器" "删除已有被控来源"
+        menuReturnItem 3 "返回主控菜单" "回到上级菜单"
+        menuClose
+        autoRead server_source_menu "请选择:" addSubscribeStatus
+        case "${addSubscribeStatus}" in
+        1) addOtherSubscribe ;;
+        2)
+            sourceId=
+            echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
+            menuLine "当前可移除被控服务器："
+            listSubscriptionSources | awk -F ':' '$3 != "main" {print "│ " NR ". " $0}'
+            menuClose
+            autoRead delete_subscription_source "请输入要删除的被控服务器源ID:" sourceId
+            if [[ -z "${sourceId}" ]]; then
+                errorCard "被控服务器源 ID 不可以为空"
+                continue
+            fi
+            if ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
+                errorCard "被控服务器源 ID 无效"
+                continue
+            fi
+            removeSubscriptionSourceState "${sourceId}"
+            successCard "被控服务器删除成功" "如需应用订阅变更，请到 同步与备份 -> 立即执行同步"
+            ;;
+        3) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+# 添加被控服务器
+addOtherSubscribe() {
+    local credential=
+    local credentialJson=
+    local host=
+    local port=
+    local alias=
+    echoContent title "\n┌─ 添加被控服务器 ───────────────────────────────────"
+    menuLine "在被控服务器进入 多服务器：被控 -> 查看本机被控接入凭据"
+    menuLine "被控无需安装公网订阅服务；初始化被控会启用 WireGuard 内网控制面"
+    menuLine "主控端只需要粘贴被控接入凭据，再设置一个本地别名"
+    menuLine "被控接入凭据已包含 WireGuard 内网地址、控制端口、Token 和公钥"
+    menuClose
+    autoRead subscription_control_credential "请粘贴被控接入凭据:" credential
+    if [[ -z "${credential}" ]]; then
+        errorCard "被控接入凭据不可为空"
+        return 1
+    fi
+    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || {
+        errorCard "被控接入凭据无效，请复制被控端完整输出"
+        return 1
+    }
+    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "controlled" ]]; then
+        errorCard "请粘贴被控接入凭据"
+        return 1
+    fi
+    host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
+    port=$(jq -r '.control_port' <<<"${credentialJson}")
+    autoRead subscription_source_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1]:" alias
+    if [[ -z "${alias}" ]] || ! echo "${alias}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+        errorCard "别名只能使用英文、数字、短横线或下划线"
+        return 1
+    fi
+    if subscriptionRemoteSourceSelfReference "$(jq -n --arg host "${host}" '{host:$host}')"; then
+        errorCard "被控服务器指向当前主控 WireGuard 地址，已拒绝添加，避免递归同步"
+        return 1
+    fi
+    if ! subscriptionWireGuardAddPeerFromCredential "${alias}" "${credentialJson}"; then
+        errorCard "被控服务器添加失败"
+        return 1
+    fi
+    successCard "被控服务器已添加" "WireGuard 内网地址：${host}:${port}" "别名：${alias}" "已保存 Token 和 Peer，可继续测试被控连接或执行同步"
+}
+
+
+
+
+
+
+showSubscriptionSources() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
+      .groups[] | select(.id == $groupId) | .sources[]? |
+      "ID:\(.id)\n名称:\(.name)\n角色:\(.role)\n地址:\(.scheme)://\(.host):\(.port)\n启用:\(.enabled)\n同步状态:\(.sync_status)" +
+      (if has("last_sync_changed") then "\n上次同步变更:" + (if .last_sync_changed then "是" else "否" end) else "" end) +
+      (if .last_sync_plan? then "\n上次同步计划: 创建\((.last_sync_plan.create // []) | length)，删除\((.last_sync_plan.remove // []) | length)" else "" end) +
+      (if .last_sync_error? then "\n上次同步错误:\(.last_sync_error.type) \(.last_sync_error.message)" else "" end) +
+      "\n---"'
+}
+
+showSubscriptionSourceControlUrls() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
+      .groups[] | select(.id == $groupId) | .sources[]? | select(.role != "main") |
+      "ID:\(.id)\n名称:\(.name)\n控制面:WireGuard\n内网地址:\(.host):\(.port)\nHealth:http://\(.host):\(.port)/s/control/health\nSync:http://\(.host):\(.port)/s/control/sync\n---"'
+}
+
+showSubscriptionSourceSyncResults() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
+      .groups[] | select(.id == $groupId) | .sources[]? |
+      "ID:\(.id)\n名称:\(.name)\n同步状态:\(.sync_status)" +
+      (if has("last_sync_changed") then "\n上次同步变更:" + (if .last_sync_changed then "是" else "否" end) else "" end) +
+      (if .last_sync_plan? then "\n上次同步计划: 创建\((.last_sync_plan.create // []) | length)，删除\((.last_sync_plan.remove // []) | length)" else "" end) +
+      (if .last_sync_error? then "\n上次同步错误:\(.last_sync_error.type) \(.last_sync_error.message)" else "" end) +
+      "\n---"'
+}
+
+manageMainControllerSubscriptions() {
+    while true; do
+        echoContent title "\n┌─ 多服务器：主控 ───────────────────────────────────"
+        menuLine "这个视角只放主控动作：初始化主控、添加/管理被控、测试连接和查看同步结果"
+        menuLine "被控服务器只需在自己的 被控 菜单生成接入凭据；不需要安装公网订阅服务"
+        menuItem 1 "主控建链向导" "初始化主控、输出凭据、添加被控、检查健康并预览同步"
+        menuItem 2 "初始化/查看主控控制面" "初始化主控、查看主控凭据、Peer 和 WireGuard 状态"
+        menuItem 3 "添加/移除被控服务器" "粘贴被控接入凭据添加，或删除已有被控"
+        menuItem 4 "更新被控服务器凭据" "被控重建后粘贴新凭据更新 Token/内网地址"
+        menuItem 5 "测试被控连接" "请求所有被控健康检查"
+        menuItem 6 "查看服务器源" "列出本机和已添加被控服务器"
+        menuItem 7 "查看控制地址" "显示 WireGuard 内网 health/sync 地址"
+        menuItem 8 "查看同步结果" "显示最近同步计划和错误"
+        menuItem 9 "启用/停用被控服务器" "切换被控服务器源状态"
+        menuItem 10 "清除同步错误" "清理最近同步错误"
+        menuReturnItem 11 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead main_controller_subscription_menu "请选择:" mainControllerSubscriptionStatus
+        case "${mainControllerSubscriptionStatus}" in
+        1) runSubscriptionMainControllerWizard ;;
+        2) manageSubscriptionMainControlMenu ;;
+        3) addSubscribeMenu ;;
+        4) setSubscriptionSourceControlTokenMenu ;;
+        5) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
+        6) showSubscriptionSources ;;
+        7) showSubscriptionSourceControlUrls ;;
+        8) showSubscriptionSourceSyncResults ;;
+        9) toggleSubscriptionSourceMenu ;;
+        10) clearSubscriptionSourceSyncErrorMenu ;;
+        11) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageControlledSubscription() {
+    while true; do
+        echoContent title "\n┌─ 多服务器：被控 ───────────────────────────────────"
+        menuLine "这个视角只放被控动作：初始化被控、导入主控凭据、把被控凭据交回主控"
+        menuLine "被控无需安装公网订阅服务；这里只启动 WireGuard 内网控制面供主控同步"
+        menuItem 1 "被控加入向导" "初始化被控、导入主控凭据并输出被控接入凭据"
+        menuItem 2 "初始化本机为被控" "安装 WireGuard 内网控制面，不安装公网订阅服务"
+        menuItem 3 "导入主控接入凭据" "加入主控 WireGuard 网络"
+        menuItem 4 "查看本机被控接入凭据" "复制回主控添加被控"
+        menuItem 5 "查看被控控制面状态" "显示角色、接口、内网地址和端口"
+        menuItem 6 "修复/重启被控控制面" "重写配置并重启 WireGuard/控制服务"
+        menuDangerItem 7 "关闭被控控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 8 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead controlled_subscription_menu "请选择:" controlledSubscriptionStatus
+        case "${controlledSubscriptionStatus}" in
+        1) runSubscriptionControlledWizard ;;
+        2) initSubscriptionWireGuardControlled ;;
+        3) importSubscriptionWireGuardMainCredential ;;
+        4) showSubscriptionWireGuardControlledCredential ;;
+        5) showSubscriptionWireGuardStatus ;;
+        6) restartSubscriptionWireGuardControl ;;
+        7) disableSubscriptionWireGuardControl ;;
+        8) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageSubscriptionMainControlMenu() {
+    while true; do
+        echoContent title "\n┌─ 主控控制面 ───────────────────────────────────────"
+        menuLine "主控负责维护被控 Peer、保存被控 Token，并把订阅变更同步到被控"
+        showSubscriptionWireGuardStatus
+        menuItem 1 "初始化本机为主控" "生成主控 WireGuard 控制面"
+        menuItem 2 "查看本机主控接入凭据" "复制到被控服务器导入"
+        menuItem 3 "查看 Peer / 连接状态" "查看 WireGuard peer 和被控列表"
+        menuItem 4 "测试被控连接" "测试被控健康检查"
+        menuItem 5 "修复/重启主控控制面" "重写配置并重启服务"
+        menuDangerItem 6 "关闭主控控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 7 "返回多服务器：主控" "回到上级菜单"
+        menuClose
+        autoRead main_control_menu "请选择:" mainControlMenuStatus
+        case "${mainControlMenuStatus}" in
+        1) initSubscriptionWireGuardMain ;;
+        2) showSubscriptionWireGuardMainCredential ;;
+        3) showSubscriptionWireGuardPeers ;;
+        4) testSubscriptionWireGuardControl ;;
+        5) restartSubscriptionWireGuardControl ;;
+        6) disableSubscriptionWireGuardControl ;;
+        7) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageSubscriptionWireGuardControlMenu() {
+    while true; do
+        echoContent title "\n┌─ WireGuard 控制面 ─────────────────────────────────"
+        menuLine "用于主控和被控之间的加密同步；新菜单已按主控/被控拆分，这里保留兼容入口"
+        menuLine "建议从上级菜单进入 多服务器：主控 或 多服务器：被控，避免混用角色动作"
+        showSubscriptionWireGuardStatus
+        menuItem 1 "初始化本机为主控" "生成主控 WireGuard 控制面"
+        menuItem 2 "初始化本机为被控" "生成被控 WireGuard 控制面"
+        menuItem 3 "查看本机主控接入凭据" "复制到被控服务器导入"
+        menuItem 4 "导入主控接入凭据" "仅被控使用，用于加入主控"
+        menuItem 5 "查看本机被控接入凭据" "复制回主控服务器添加被控"
+        menuItem 6 "查看 Peer / 连接状态" "查看 WireGuard peer 和被控列表"
+        menuItem 7 "测试 WireGuard 控制面" "测试被控健康检查"
+        menuItem 8 "修复/重启 WireGuard 控制面" "重写配置并重启服务"
+        menuDangerItem 9 "关闭 WireGuard 控制面" "停止本机 WireGuard 控制面"
+        menuReturnItem 10 "返回多服务器入口" "回到上级菜单"
+        menuClose
+        autoRead subscription_wireguard_menu "请选择:" subscriptionWireGuardMenuStatus
+        case "${subscriptionWireGuardMenuStatus}" in
+        1) initSubscriptionWireGuardMain ;;
+        2) initSubscriptionWireGuardControlled ;;
+        3) showSubscriptionWireGuardMainCredential ;;
+        4) importSubscriptionWireGuardMainCredential ;;
+        5) showSubscriptionWireGuardControlledCredential ;;
+        6) showSubscriptionWireGuardPeers ;;
+        7) testSubscriptionWireGuardControl ;;
+        8) restartSubscriptionWireGuardControl ;;
+        9) disableSubscriptionWireGuardControl ;;
+        10) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+setSubscriptionSourceControlTokenMenu() {
+    local credential=
+    local credentialJson=
+    local host=
+    local port=
+    local sourceId=
+    local token=
+    local matches=
+    echoContent title "\n┌─ 更新被控服务器凭据 ───────────────────────────────"
+    menuLine "在被控服务器进入 多服务器：被控 -> 查看本机被控接入凭据"
+    menuLine "被控不需要安装公网订阅服务；凭据来自 WireGuard 内网控制面"
+    menuLine "粘贴后会自动读取 WireGuard 内网地址、控制端口和 Token，并更新已有被控服务器"
+    menuClose
+    autoRead subscription_control_credential "请粘贴被控接入凭据:" credential
+    if [[ -z "${credential}" ]]; then
+        errorCard "被控接入凭据不可为空"
+        return 1
+    fi
+    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || {
+        errorCard "被控接入凭据无效，请复制被控端完整输出"
+        return 1
+    }
+    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "controlled" ]]; then
+        errorCard "请粘贴被控接入凭据"
+        return 1
+    fi
+    host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
+    port=$(jq -r '.control_port' <<<"${credentialJson}")
+    token=$(jq -r '.token' <<<"${credentialJson}")
+    matches=$(listSubscriptionSources | awk -F ':' -v host="${host}" -v port="${port}" '$3 != "main" && $5 == host && $6 == port {print $1}')
+    if [[ -n "${matches}" ]] && [[ "$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')" == "1" ]]; then
+        sourceId=${matches}
+    else
+        listSubscriptionSources | awk -F ':' '$3 != "main" {print $1":"$2":"$4":"$5":"$6":"$8}'
+        autoRead subscription_source_id "请输入要更新的被控服务器别名:" sourceId
+    fi
+    if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
+        errorCard "被控服务器别名无效"
+        return 1
+    fi
+    setSubscriptionSourceCredential "${sourceId}" "${host}" "${port}" "${token}"
+    successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Token 已保存，可继续测试被控连接"
+}
+
+toggleSubscriptionSourceMenu() {
+    local sourceId=
+    local sourceAction=
+    listSubscriptionSources | awk -F ':' '$3 != "main" {print $1":"$2":启用="$7}'
+    autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
+    if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
+        errorCard "服务器源 ID 无效"
+        return 1
+    fi
+    autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
+    if [[ "${sourceAction}" == "enable" ]]; then
+        setSubscriptionSourceEnabled "${sourceId}" true
+        successCard "被控服务器已启用"
+    elif [[ "${sourceAction}" == "disable" ]]; then
+        setSubscriptionSourceEnabled "${sourceId}" false
+        successCard "被控服务器已停用"
+    else
+        errorCard "操作无效"
+        return 1
+    fi
+}
+
+clearSubscriptionSourceSyncErrorMenu() {
+    local sourceId=
+    showSubscriptionSourceSyncResults
+    autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
+    if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}"; then
+        errorCard "服务器源 ID 无效"
+        return 1
+    fi
+    clearSubscriptionSourceSyncError "${sourceId}"
+    successCard "同步错误已清除"
+}
+
+showSubscriptionDiagnosticsOverview() {
+    showSubscriptionServiceStatus
+    showSubscriptionWireGuardStatus
+    showSubscriptionGroupsStateSummary
+    showSubscriptionSourceSyncResults
+}
+
+manageSubscriptionDiagnostics() {
+    while true; do
+        echoContent title "\n┌─ 高级诊断 ─────────────────────────────────────────"
+        menuLine "这里集中放状态、控制面、远端健康、同步错误和兼容入口"
+        menuItem 1 "查看综合状态" "显示订阅服务、WireGuard、groups.json 摘要和同步结果"
+        menuItem 2 "查看订阅服务状态" "显示当前订阅发布端口和域名"
+        menuItem 3 "查看服务器源" "列出本机和已添加被控服务器"
+        menuItem 4 "测试被控连接" "请求所有被控健康检查"
+        menuItem 5 "查看同步结果" "显示最近同步计划和错误"
+        menuItem 6 "查看定时任务" "显示当前 cron 配置"
+        menuItem 7 "兼容 WireGuard 控制面" "进入旧版主控/被控混合控制面入口"
+        menuItem 8 "清除同步错误" "清理指定服务器源最近同步错误"
+        menuReturnItem 9 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead subscription_diagnostics_menu "请选择:" diagnosticsStatus
+        case "${diagnosticsStatus}" in
+        1) showSubscriptionDiagnosticsOverview ;;
+        2) showSubscriptionServiceStatus ;;
+        3) showSubscriptionSources ;;
+        4) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
+        5) showSubscriptionSourceSyncResults ;;
+        6) subscriptionGroupSyncCronStatus ;;
+        7) manageSubscriptionWireGuardControlMenu ;;
+        8) clearSubscriptionSourceSyncErrorMenu ;;
+        9) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+manageSubscriptionAutomation() {
+    while true; do
+        echoContent title "\n┌─ 同步与备份 ───────────────────────────────────────"
+        menuLine "自动同步会按用户订阅生成 sub_<ID> 托管账号，并同步本机和被控服务器"
+        menuLine "恢复或重建状态前会先自动备份；普通进入菜单不会重置任何状态"
+        menuItem 1 "立即执行同步" "立即应用本机和远端同步计划"
+        menuItem 2 "查看本机同步计划" "预览本机 create/remove"
+        menuItem 3 "查看远程同步计划" "预览远端同步计划"
+        menuItem 4 "自动同步设置" "配置定时同步、远程同步和限额自动执行"
+        menuItem 5 "状态备份与恢复" "创建、查看、恢复或显式重建 groups.json"
+        menuItem 6 "查看状态摘要" "显示订阅用户、服务器源、同步状态和流量更新时间"
+        menuItem 7 "查看定时任务" "显示当前 cron 配置"
+        menuReturnItem 8 "返回订阅与用户" "回到上级菜单"
+        menuClose
+        autoRead subscription_automation_menu "请选择:" subscriptionAutomationStatus
+        case "${subscriptionAutomationStatus}" in
+        1) runSubscriptionGroupSync ;;
+        2)
+            readInstallType
+            readInstallProtocolType
+            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
+            ;;
+        3) userJsonCard "远程同步计划" "$(subscriptionRemoteSyncPlan)" ;;
+        4) manageSubscriptionSyncSettings ;;
+        5) manageSubscriptionStateBackups ;;
+        6) showSubscriptionGroupsStateSummary ;;
+        7) subscriptionGroupSyncCronStatus ;;
+        8) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
+removeSubscriptionGroupSyncCron() {
+    local cronFile
+    local currentCron
+    cronFile=$(subscriptionGroupSyncCronFile)
+    mkdir -p "$(dirname "${cronFile}")"
+    currentCron=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
+    installUserCrontabContent "${currentCron}"
+}
+
+refreshSubscriptionGroupSyncCron() {
+    ensureSubscriptionGroupsState
+    if subscriptionGroupSyncEnabled; then
+        installSubscriptionGroupSyncCron
+    else
+        removeSubscriptionGroupSyncCron
+    fi
+}
+
+subscriptionGroupSyncCronStatus() {
+    crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
+}
+
+manageSubscriptionSyncSettings() {
+    local groupId
+    local syncStatus
+    while true; do
+        groupId=$(activeSubscriptionGroupId)
+        syncStatus=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .sync')
+        echoContent title "\n┌─ 自动同步 ─────────────────────────────────────────"
+        menuLine "自动同步会按用户订阅生成 sub_<ID> 托管账号，并删除不再期望的托管账号"
+        menuLine "建议先看本机/远程同步计划，确认 create/remove 后再立即执行同步"
+        menuLine "限额自动执行默认关闭；开启后超限用户会被停用并在同步中移除托管账号"
+        userJsonCard "自动同步当前状态" "${syncStatus}"
+        echoContent title "\n┌─ 自动同步操作 ─────────────────────────────────────"
+        menuItem 1 "开启/关闭自动同步" "切换定时同步状态"
+        menuItem 2 "设置自动同步间隔" "设置 1-59 分钟间隔"
+        menuItem 3 "立即执行同步" "立即应用同步计划"
+        menuItem 4 "查看本机同步计划" "预览本机 create/remove"
+        menuItem 5 "查看远程同步计划" "预览远端同步计划"
+        menuItem 6 "查看超限处理计划" "预览超额用户处理"
+        menuDangerItem 7 "执行超限处理" "停用超额用户并等待同步移除账号"
+        menuItem 8 "开启/关闭远程同步" "切换远端同步状态"
+        menuItem 9 "开启/关闭限额自动执行" "切换自动执行超限策略"
+        menuItem 10 "查看定时任务" "显示当前 cron 配置"
+        menuReturnItem 11 "返回同步与备份" "回到上级菜单"
+        menuClose
+        autoRead sync_settings_menu "请选择:" syncSettingsStatus
+        case "${syncSettingsStatus}" in
+        1)
+            subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.enabled = (.sync.enabled | not) else . end)'
+            refreshSubscriptionGroupSyncCron
+            successCard "自动同步状态已切换"
+            ;;
+        2)
+            local interval=
+            autoRead sync_interval_minutes "请输入同步间隔分钟:" interval
+            if ! subscriptionGroupSyncIntervalValid "${interval}"; then
+                errorCard "输入有误，同步间隔需为 1-59 分钟"
+                continue
+            fi
+            subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson interval "${interval}" '.groups |= map(if .id == $groupId then .sync.interval_minutes = $interval else . end)'
+            refreshSubscriptionGroupSyncCron
+            successCard "自动同步间隔已更新"
+            ;;
+        3) runSubscriptionGroupSync ;;
+        4)
+            readInstallType
+            readInstallProtocolType
+            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
+            ;;
+        5) userJsonCard "远程同步计划" "$(subscriptionRemoteSyncPlan)" ;;
+        6) userJsonCard "超限处理计划" "$(subscriptionQuotaDryRunPlan)" ;;
+        7) executeSubscriptionQuotaPlanMenu ;;
+        8)
+            subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.remote_enabled = ((.sync.remote_enabled // true) | not) else . end)'
+            successCard "远程同步状态已切换"
+            ;;
+        9)
+            subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.quota_auto_apply = ((.sync.quota_auto_apply // false) | not) else . end)'
+            successCard "限额自动执行状态已切换"
+            ;;
+        10) subscriptionGroupSyncCronStatus ;;
+        11) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}

@@ -51,6 +51,14 @@ source "${SUB_DIR}/control.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/wireguard_control.sh"
 # shellcheck source=/dev/null
+source "${SUB_DIR}/sync.sh"
+# shellcheck source=/dev/null
+source "${SUB_DIR}/traffic.sh"
+# shellcheck source=/dev/null
+source "${SUB_DIR}/state_maintenance.sh"
+# shellcheck source=/dev/null
+source "${SUB_DIR}/menu.sh"
+# shellcheck source=/dev/null
 source "${CORE_DIR}/manage.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/menu.sh"
