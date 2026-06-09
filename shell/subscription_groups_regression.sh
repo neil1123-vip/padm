@@ -2498,6 +2498,18 @@ runRemoteControlServerRefreshRegression() (
     local subscribeArgs=
     local reconcileCalls=0
     local responseFile="${TMP_DIR}/remote-control-server-refresh.json"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local rollbackRoot="${TMP_DIR}/remote-control-rollback"
+    local rollbackStateBefore
+    local rollbackFirstBefore
+    local rollbackSecondBefore
+    local oldCoreInstallType="${coreInstallType:-}"
+    local setUsersCalls=0
+    local rollbackExpectedFile="${TMP_DIR}/remote-control-rollback-expected.json"
+
+    eval "$(declare -f subscriptionControlApplyAccountPlan | sed '1s/^subscriptionControlApplyAccountPlan/originalSubscriptionControlApplyAccountPlan/')"
+    eval "$(declare -f subscriptionSyncSetUsersInFile | sed '1s/^subscriptionSyncSetUsersInFile/originalSubscriptionSyncSetUsersInFile/')"
 
     subscriptionSyncPlanFromAccounts() {
         printf '{"create":["sub_team_a"],"remove":[]}'
@@ -2563,6 +2575,55 @@ runRemoteControlServerRefreshRegression() (
     set -e
     [[ "${applyStatus}" -ne 0 ]]
     jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}" >/dev/null
+
+    mkdir -p "${rollbackRoot}/xray"
+    configPath="${rollbackRoot}/xray/"
+    singBoxConfigPath="${rollbackRoot}/xray/"
+    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+    cat >"${configPath}03_VLESS_WS_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    coreInstallType=1
+    subscriptionSyncPlanFromAccounts() {
+        printf '{"create":["sub_rollback"],"remove":[]}'
+    }
+    rollbackStateBefore=$(<"$(subscriptionGroupsFile)")
+    rollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+    rollbackSecondBefore=$(<"${configPath}03_VLESS_WS_inbounds.json")
+    subscriptionControlApplyAccountPlan() {
+        originalSubscriptionControlApplyAccountPlan "$@"
+    }
+    subscriptionSyncSetUsersInFile() {
+        setUsersCalls=$((setUsersCalls + 1))
+        if [[ "${setUsersCalls}" -eq 2 ]]; then
+            return 1
+        fi
+        originalSubscriptionSyncSetUsersInFile "$@"
+    }
+    set +e
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"rollback","uuid":"66666666-6666-6666-6666-666666666666"}],"dry_run":false}' >"${responseFile}.rollback"
+    local rollbackStatus=$?
+    set -e
+    [[ "${rollbackStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}.rollback" >/dev/null
+    printf '%s\n' "${rollbackStateBefore}" >"${rollbackExpectedFile}"
+    jq -e --slurpfile expected "${rollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
+    [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${rollbackFirstBefore}" ]]
+    [[ "$(<"${configPath}03_VLESS_WS_inbounds.json")" == "${rollbackSecondBefore}" ]]
+    if find "${rollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' \) | grep -q .; then
+        return 1
+    fi
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    coreInstallType="${oldCoreInstallType}"
+    subscriptionSyncSetUsersInFile() {
+        originalSubscriptionSyncSetUsersInFile "$@"
+    }
 
     subscriptionControlApplyAccountPlan() {
         return 0

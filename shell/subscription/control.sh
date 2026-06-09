@@ -663,16 +663,18 @@ subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
     local createAccounts
-    local rc=0
+    local previousGroupsState
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
+    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
     createAccounts=$(jq -c '.create' <<<"${plan}") || return 1
     if ! subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"; then
-        rc=1
+        subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || true
+        return 1
     fi
-    if ! subscriptionSyncApplyAccountPlan "${plan}"; then
-        rc=1
+    if ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
+        subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || true
+        return 1
     fi
-    return "${rc}"
 }
 
 subscriptionControlRefreshPublishedSubscriptions() {

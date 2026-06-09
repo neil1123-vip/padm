@@ -251,6 +251,50 @@ subscriptionSyncApplyAccountPlan() {
     return "${rc}"
 }
 
+subscriptionSyncRestoreConfigBackups() {
+    local backupDir=$1
+    local manifest="${backupDir}/manifest"
+    local backupFile
+    local targetFile
+    [[ -f "${manifest}" ]] || return 1
+    while IFS=$'\t' read -r backupFile targetFile; do
+        [[ -n "${backupFile}" && -n "${targetFile}" ]] || continue
+        mkdir -p "$(dirname "${targetFile}")" || return 1
+        cp -p "${backupFile}" "${targetFile}" || return 1
+    done <"${manifest}"
+}
+
+subscriptionSyncApplyAccountPlanTransaction() {
+    local syncPlan=$1
+    local backupDir
+    local file
+    local manifest
+    local backupFile
+    local applyStatus=0
+    local backupIndex=0
+    subscriptionSyncValidateAccountPlan "${syncPlan}" || return 1
+    padmCreateTempPath backupDir -d /tmp/padm-subscription-sync-backup.XXXXXX || return 1
+    manifest="${backupDir}/manifest"
+    : >"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+    while IFS= read -r file; do
+        [[ -f "${file}" ]] || continue
+        printf -v backupFile '%s/%06d.json' "${backupDir}" "${backupIndex}"
+        backupIndex=$((backupIndex + 1))
+        cp -p "${file}" "${backupFile}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+        printf '%s\t%s\n' "${backupFile}" "${file}" >>"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+    done < <(subscriptionSyncConfigFiles)
+
+    if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
+        applyStatus=1
+    fi
+    if [[ "${applyStatus}" -ne 0 ]]; then
+        subscriptionSyncRestoreConfigBackups "${backupDir}" >/dev/null 2>&1 || true
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${backupDir}"
+}
+
 subscriptionSyncReconcileLocalServices() {
     local skipSubscribeRefresh=${1:-}
     local rc=0
@@ -341,7 +385,7 @@ applySubscriptionQuotaPlanAccounts() {
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
     accountPlan=$(jq '[.[].id | "sub_" + gsub("-"; "_")] | {create: [], remove: .}' <<<"${quotaPlan}") || return 1
     if [[ "$(jq '.remove | length' <<<"${accountPlan}")" != "0" ]]; then
-        if ! subscriptionSyncApplyAccountPlan "${accountPlan}"; then
+        if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}"; then
             rc=1
         fi
         if ! reloadCore; then
@@ -426,7 +470,7 @@ runSubscriptionGroupSync() {
         subscriptionSyncMarkResult partial "${failures}" || true
         return 1
     }
-    if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
+    if ! subscriptionSyncApplyAccountPlanTransaction "${syncPlan}"; then
         failures=$(jq '. + ["本机同步计划应用失败"]' <<<"${failures}")
         rc=1
     fi
