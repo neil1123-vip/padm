@@ -4038,6 +4038,46 @@ runInstallToolsNginxReinstallFailureRegression() {
     )
 }
 
+runAptKeyInstallFailureRegression() {
+    (
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local errorLog="${TMP_DIR}/apt-key-error.log"
+        local curlCalls="${TMP_DIR}/apt-key-curl-calls.log"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        : >"${errorLog}"
+        : >"${curlCalls}"
+        removeType=true
+        PADM_INSTALLED_PACKAGES="new-dependency"
+        curl() {
+            printf '%s\n' "$*" >>"${curlCalls}"
+            return 22
+        }
+        gpg() {
+            cat >/dev/null
+        }
+        sudo() {
+            "$@"
+        }
+
+        set +e
+        (
+            installAptKeyringFromUrl https://example.invalid/key.gpg "${TMP_DIR}/missing-keyring.gpg" "测试源"
+        ) >/dev/null 2>&1
+        local keyStatus=$?
+        set -e
+        [[ "${keyStatus}" -ne 0 ]]
+        grep -q "测试源 apt key 安装失败" "${errorLog}"
+        grep -q "https://example.invalid/key.gpg" "${curlCalls}"
+
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        unset -f curl gpg sudo
+    )
+}
+
 runBasePackageBatchRegression() {
     local commands=(sudo wget curl unzip socat tar crontab jq ld openssl ping6 ping lsb_release lsof dig iptables-save nginx)
     local cmd
@@ -4490,6 +4530,7 @@ runRegressionPlatformIo() {
     runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression
     runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression
     runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression
+    runRegressionStep apt-key-install-failure runAptKeyInstallFailureRegression
     runRegressionStep base-package-batch runBasePackageBatchRegression
     runRegressionStep package-rollback-failure runPackageRollbackFailureRegression
     runRegressionStep package-command-stdin runPackageCommandStdinRegression

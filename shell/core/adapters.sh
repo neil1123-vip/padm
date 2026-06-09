@@ -8,6 +8,16 @@ refreshAptAfterRepoChange() {
     runWithTimeout 300 "${upgrade} >/dev/null 2>&1"
 }
 
+installAptKeyringFromUrl() {
+    local url=$1
+    local targetFile=$2
+    local displayName=$3
+
+    if ! curl -fsSL "${url}" | gpg --dearmor | sudo tee "${targetFile}" >/dev/null; then
+        failPackageInstallTransaction "${displayName} apt key 安装失败"
+    fi
+}
+
 commitRepoFile() {
     local tmpFile=$1
     local targetFile=$2
@@ -522,7 +532,7 @@ installNginxTools() {
         local nginxRepoCodename
         nginxRepoCodename=$(lsb_release -cs)
         if curl -fsSL "https://nginx.org/packages/mainline/debian/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
-            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor | sudo tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key /usr/share/keyrings/nginx-archive-keyring.gpg Nginx
             local repoFile
             padmCreateTempPath repoFile /tmp/padm-nginx-repo.XXXXXX || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/debian %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
@@ -539,7 +549,7 @@ installNginxTools() {
         local nginxRepoCodename
         nginxRepoCodename=$(lsb_release -cs)
         if curl -fsSL "https://nginx.org/packages/mainline/ubuntu/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
-            curl -fsSL https://nginx.org/keys/nginx_signing.key | gpg --dearmor | sudo tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key /usr/share/keyrings/nginx-archive-keyring.gpg Nginx
             local repoFile
             padmCreateTempPath repoFile /tmp/padm-nginx-repo.XXXXXX || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/ubuntu %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
@@ -677,7 +687,7 @@ installWarp() {
         local warpRepoCodename
         warpRepoCodename=$(lsb_release -cs)
         if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
-            curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg >/dev/null
+            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg WARP
             local repoFile
             padmCreateTempPath repoFile /tmp/padm-warp-repo.XXXXXX || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
@@ -692,7 +702,7 @@ installWarp() {
     elif [[ "${release}" == "ubuntu" ]]; then
         local warpRepoCodename="focal"
         if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
-            curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg >/dev/null
+            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg WARP
             local repoFile
             padmCreateTempPath repoFile /tmp/padm-warp-repo.XXXXXX || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
