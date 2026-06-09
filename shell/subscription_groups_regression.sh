@@ -124,6 +124,8 @@ source "${PROJECT_ROOT}/shell/subscription/output_protocols.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/accounts_protocols.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/control.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"

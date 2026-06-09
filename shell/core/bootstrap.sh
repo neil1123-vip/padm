@@ -69,6 +69,8 @@ source "${SUB_DIR}/output_protocols.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/accounts.sh"
 # shellcheck source=/dev/null
+source "${SUB_DIR}/accounts_protocols.sh"
+# shellcheck source=/dev/null
 source "${SUB_DIR}/control.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/wireguard_control.sh"
