@@ -27,6 +27,7 @@ serviceQueueRestart() {
 
 serviceQueueApply() {
     local entry serviceName action
+    local status=0
     while read -r entry; do
         [[ -n "${entry}" ]] || continue
         serviceName=${entry%%:*}
@@ -34,37 +35,38 @@ serviceQueueApply() {
         case "${serviceName}" in
         nginx)
             if [[ "${action}" == "restart" ]]; then
-                handleNginx stop
-                handleNginx start
+                handleNginx stop || status=1
+                handleNginx start || status=1
             else
-                handleNginx "${action}"
+                handleNginx "${action}" || status=1
             fi
             ;;
         xray)
             if [[ "${action}" == "restart" ]]; then
-                handleXray stop
-                handleXray start
+                handleXray stop || status=1
+                handleXray start || status=1
             elif [[ "${action}" == "start" && xrayRunning ]]; then
-                handleXray stop
-                handleXray start
+                handleXray stop || status=1
+                handleXray start || status=1
             else
-                handleXray "${action}"
+                handleXray "${action}" || status=1
             fi
             ;;
         sing-box)
             if [[ "${action}" == "restart" ]]; then
-                handleSingBox stop
-                handleSingBox start
+                handleSingBox stop || status=1
+                handleSingBox start || status=1
             elif [[ "${action}" == "start" && singBoxRunning ]]; then
-                handleSingBox stop
-                handleSingBox start
+                handleSingBox stop || status=1
+                handleSingBox start || status=1
             else
-                handleSingBox "${action}"
+                handleSingBox "${action}" || status=1
             fi
             ;;
         esac
     done <<<"${SERVICE_ACTIONS}"
     SERVICE_ACTIONS=
+    return "${status}"
 }
 
 nginxRunning() {
@@ -278,4 +280,3 @@ reloadCore() {
     fi
     serviceQueueApply
 }
-

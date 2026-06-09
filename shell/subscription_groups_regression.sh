@@ -285,6 +285,7 @@ YAML
     fi
     [[ "$(<"${singBoxConfigPath}test_route.json")" == "${originalContent}" ]]
     [[ ! -e "${singBoxConfigPath}test_route.json.tmp" ]]
+    ! compgen -G "${singBoxConfigPath}.test_route.json.*" >/dev/null
     addSingBoxIPRouteRule "block_ip_outbound" "1.1.1.0/24,cn" "block_ip_route"
     jq -e '
       (.route.rules[0].ip_cidr | sort) == (["1.1.1.0/24", "geoip:cn"] | sort) and
@@ -436,6 +437,7 @@ JSON
     fi
     jq -e '.outbounds[0].tag == "old"' "${singBoxConfigPath}socks5_outbound.json" >/dev/null
     [[ ! -e "${singBoxConfigPath}socks5_outbound.json.tmp" ]]
+    ! compgen -G "${singBoxConfigPath}.socks5_outbound.json.*" >/dev/null
     addSingBoxDNSConfig "1.1.1.1" "openai,example.com"
     jq -e '
       .dns.rules[0].rule_set == ["geosite_openai_dns"] and
@@ -458,6 +460,7 @@ JSON
     fi
     jq -e '.dns.servers == ["old-xray"]' "${configPath}11_dns.json" >/dev/null
     [[ ! -e "${configPath}11_dns.json.tmp" ]]
+    ! compgen -G "${configPath}.11_dns.json.*" >/dev/null
     printf '{"dns":{"servers":["old-sing"]}}\n' >"${singBoxConfigPath}dns.json"
     if writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<'JSON' 2>/dev/null
 {"dns":{"servers":[}
@@ -537,6 +540,32 @@ JSON
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_ip_out") | .ip == ["geoip:cn", "1.1.1.0/24"]' "${configPath}09_routing.json" >/dev/null
     [[ "$(validateAccessIPList '1.1.1.1, 1.1.1.1,2001:db8::/32,cn')" == "1.1.1.1,2001:db8::/32,cn" ]]
     ! validateAccessIPList 'bad-ip' >/dev/null
+}
+
+runAccessControlFailureReturnRegression() {
+    local marker="${TMP_DIR}/access-control-return.marker"
+
+    rm -f "${marker}"
+    (
+        configPath="${TMP_DIR}/access-control-return/xray/"
+        singBoxConfigPath=
+        coreInstallType=1
+        mkdir -p "${configPath}"
+        autoRead() { printf -v "$3" 'example.com'; }
+        accessControlBackupCreate() { return 0; }
+        addXrayRouting() { return 0; }
+        addXrayOutbound() { return 0; }
+        validateAccessControlConfig() { return 1; }
+        reloadCore() { return 0; }
+
+        set +e
+        addBlockedDomains >/dev/null 2>&1
+        local rc=$?
+        set -e
+        [[ "${rc}" == "1" ]] || exit 1
+        : >"${marker}"
+    ) || return 1
+    [[ -f "${marker}" ]]
 }
 
 runUserConfigWriteRegression() {
@@ -796,6 +825,14 @@ SH
         PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
         printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
         PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=false handleNginx stop >/dev/null 2>&1
+        printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+        SERVICE_ACTIONS=
+        serviceQueueStart nginx
+        serviceQueueStop nginx
+        if PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false serviceQueueApply >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ -z "${SERVICE_ACTIONS}" ]]
         rm -rf "${serviceTmp}"
     )
 }
@@ -3707,6 +3744,7 @@ runRegressionMenuSmoke() {
 
 runRegressionRouting() {
     runRegressionStep routing-core runRoutingRegression
+    runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }
 

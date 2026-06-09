@@ -51,35 +51,6 @@ xrayGeoDisplayVersion() {
     printf '版本未知'
 }
 
-commitGeneratedFile() {
-    local tmpFile=$1
-    local targetFile=$2
-    local mode=$3
-
-    if [[ -n "${mode}" ]]; then
-        chmod "${mode}" "${tmpFile}" || return 1
-    fi
-    mv "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
-}
-
-commitGeneratedJsonFile() {
-    local tmpFile=$1
-    local targetFile=$2
-
-    jq empty "${tmpFile}" >/dev/null 2>&1 && commitGeneratedFile "${tmpFile}" "${targetFile}" 644
-}
-
-writeGeneratedJsonFile() {
-    local targetFile=$1
-    local tmpPrefix=$2
-    local tmpFile
-
-    padmCreateTempPath tmpFile "/tmp/${tmpPrefix}.XXXXXX" || return 1
-    cat >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-    commitGeneratedJsonFile "${tmpFile}" "${targetFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-    padmForgetCleanupPath "${tmpFile}"
-}
-
 # 安装 sing-box
 installSingBox() {
     readInstallType
@@ -2310,4 +2281,3 @@ EOF
     serviceQueueRestart sing-box
     serviceQueueApply
 }
-

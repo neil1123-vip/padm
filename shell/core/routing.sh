@@ -406,8 +406,7 @@ addBlockedDomains() {
         addSingBoxRouteRule "block_domain_outbound" "${domainList}" "block_domain_route"
         addSingBoxOutbound "01_direct_outbound"
     fi
-    validateAccessControlConfig || exit 1
-    reloadCore
+    applyAccessControlConfigChange || return 1
     successCard "域名阻断规则已添加"
 }
 
@@ -432,8 +431,7 @@ addBlockedIPs() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         addSingBoxIPRouteRule "block_ip_outbound" "${normalizedIPs}" "block_ip_route"
     fi
-    validateAccessControlConfig || exit 1
-    reloadCore
+    applyAccessControlConfigChange || return 1
     successCard "IP/CIDR 阻断规则已添加"
 }
 
@@ -459,8 +457,7 @@ addDirectAllowDomains() {
         addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route"
         addSingBoxOutbound "01_direct_outbound"
     fi
-    validateAccessControlConfig || exit 1
-    reloadCore
+    applyAccessControlConfigChange || return 1
     successCard "直连例外已添加"
 }
 
@@ -500,8 +497,7 @@ manageRegionalBlockPolicy() {
         addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route"
         addSingBoxOutbound "01_direct_outbound"
     fi
-    validateAccessControlConfig || exit 1
-    reloadCore
+    applyAccessControlConfigChange || return 1
     successCard "区域阻断策略已应用"
 }
 
@@ -525,8 +521,7 @@ removeAccessControlMenu() {
     6) accessControlMenu; return ;;
     *) errorCard "选择错误，请重新选择"; removeAccessControlMenu; return ;;
     esac
-    validateAccessControlConfig || exit 1
-    reloadCore
+    applyAccessControlConfigChange || return 1
     successCard "访问控制规则已移除"
 }
 
@@ -683,6 +678,11 @@ validateAccessControlConfig() {
         fi
     fi
     rm -rf "$(accessControlBackupDir)" >/dev/null 2>&1
+}
+
+applyAccessControlConfigChange() {
+    validateAccessControlConfig || return 1
+    reloadCore || return 1
 }
 
 # 下载 dlc.dat_plain.yml 到核心目录
@@ -2153,26 +2153,32 @@ sniRouting() {
 # 设置 DNS/hosts 覆盖
 writeRoutingJsonConfig() {
     local targetPath=$1
-    local tmpPath="${targetPath}.tmp"
-    mkdir -p "$(dirname "${targetPath}")"
-    cat >"${tmpPath}"
-    if ! jq empty "${tmpPath}" >/dev/null; then
-        rm -f "${tmpPath}"
+    local targetDir targetName tmpPath
+    targetDir=$(dirname -- "${targetPath}")
+    targetName=$(basename -- "${targetPath}")
+    mkdir -p "${targetDir}" || return 1
+    padmCreateTempPath tmpPath "${targetDir}/.${targetName}.XXXXXX" || return 1
+    if ! cat >"${tmpPath}"; then
+        padmRemoveCleanupPath "${tmpPath}"
         return 1
     fi
-    mv "${tmpPath}" "${targetPath}"
+    commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 updateRoutingJsonConfig() {
     local targetPath=$1
     local filter=$2
-    local tmpPath="${targetPath}.tmp"
+    local targetDir targetName tmpPath
     shift 2
+    targetDir=$(dirname -- "${targetPath}")
+    targetName=$(basename -- "${targetPath}")
+    mkdir -p "${targetDir}" || return 1
+    padmCreateTempPath tmpPath "${targetDir}/.${targetName}.XXXXXX" || return 1
     if ! jq "$@" "${filter}" "${targetPath}" >"${tmpPath}"; then
-        rm -f "${tmpPath}"
+        padmRemoveCleanupPath "${tmpPath}"
         return 1
     fi
-    mv "${tmpPath}" "${targetPath}"
+    commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 setUnlockSNI() {
