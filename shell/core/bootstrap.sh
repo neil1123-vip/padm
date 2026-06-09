@@ -65,6 +65,8 @@ source "${SUB_DIR}/subscription.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/output.sh"
 # shellcheck source=/dev/null
+source "${SUB_DIR}/output_protocols.sh"
+# shellcheck source=/dev/null
 source "${SUB_DIR}/accounts.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/control.sh"

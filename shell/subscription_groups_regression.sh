@@ -120,6 +120,8 @@ source "${PROJECT_ROOT}/shell/subscription/subscription.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/output.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/output_protocols.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/control.sh"
