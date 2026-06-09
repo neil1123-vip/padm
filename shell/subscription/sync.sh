@@ -215,21 +215,39 @@ subscriptionSyncAppendLocalAccount() {
     subscriptionSyncAppendLocalUser "$(subscriptionSyncAccountId "${accountName}")"
 }
 
+subscriptionSyncValidateAccountPlan() {
+    local syncPlan=$1
+    jq -e '
+      type == "object" and
+      (.create | type == "array") and
+      (.remove | type == "array") and
+      all(.create[]?; type == "string" and length > 0) and
+      all(.remove[]?; type == "string" and length > 0)
+    ' <<<"${syncPlan}" >/dev/null 2>&1
+}
+
 subscriptionSyncApplyAccountPlan() {
     local syncPlan=$1
     local accountName
+    local createAccounts
+    local removeAccounts
     local rc=0
+    subscriptionSyncValidateAccountPlan "${syncPlan}" || return 1
+    removeAccounts=$(jq -r '.remove[]' <<<"${syncPlan}") || return 1
+    createAccounts=$(jq -r '.create[]' <<<"${syncPlan}") || return 1
     while IFS= read -r accountName; do
+        [[ -n "${accountName}" ]] || continue
         if ! subscriptionSyncRemoveAccount "${accountName}"; then
             rc=1
         fi
-    done < <(echo "${syncPlan}" | jq -r '.remove[]?')
+    done <<<"${removeAccounts}"
 
     while IFS= read -r accountName; do
+        [[ -n "${accountName}" ]] || continue
         if ! subscriptionSyncAppendLocalAccount "${accountName}"; then
             rc=1
         fi
-    done < <(echo "${syncPlan}" | jq -r '.create[]?')
+    done <<<"${createAccounts}"
     return "${rc}"
 }
 
@@ -288,16 +306,31 @@ subscriptionQuotaDryRunPlan() {
         })]'
 }
 
+subscriptionQuotaValidatePlan() {
+    local quotaPlan=$1
+    jq -e '
+      type == "array" and
+      all(.[]?; type == "object" and (.id | type == "string" and length > 0) and .action == "disable-and-remove-local-account")
+    ' <<<"${quotaPlan}" >/dev/null 2>&1
+}
+
 applySubscriptionQuotaPlan() {
     local quotaPlan=$1
     local id
+    local planIds
     local rc=0
+    subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
+    planIds=$(jq -r '.[].id' <<<"${quotaPlan}") || return 1
     while IFS= read -r id; do
         [[ -n "${id}" ]] || continue
+        if ! userSubscriptionExists "${id}"; then
+            rc=1
+            continue
+        fi
         if ! setUserSubscriptionEnabled "${id}" false; then
             rc=1
         fi
-    done < <(jq -r '.[].id' <<<"${quotaPlan}")
+    done <<<"${planIds}"
     return "${rc}"
 }
 
@@ -305,7 +338,8 @@ applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
     local rc=0
-    accountPlan=$(jq '[.[].id | "sub_" + gsub("-"; "_")] | {create: [], remove: .}' <<<"${quotaPlan}")
+    subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
+    accountPlan=$(jq '[.[].id | "sub_" + gsub("-"; "_")] | {create: [], remove: .}' <<<"${quotaPlan}") || return 1
     if [[ "$(jq '.remove | length' <<<"${accountPlan}")" != "0" ]]; then
         if ! subscriptionSyncApplyAccountPlan "${accountPlan}"; then
             rc=1
@@ -321,8 +355,15 @@ executeSubscriptionQuotaPlanMenu() {
     local quotaPlan
     local confirm=
     local rc=0
-    quotaPlan=$(subscriptionQuotaDryRunPlan)
+    quotaPlan=$(subscriptionQuotaDryRunPlan) || {
+        errorCard "超限处理计划生成失败"
+        return 1
+    }
     userJsonCard "超限处理计划" "${quotaPlan}"
+    if ! subscriptionQuotaValidatePlan "${quotaPlan}"; then
+        errorCard "超限处理计划格式无效"
+        return 1
+    fi
     if [[ "$(jq 'length' <<<"${quotaPlan}")" == "0" ]]; then
         statusCard "无需处理" "当前没有已超额且仍启用的分享订阅"
         return 0
@@ -343,7 +384,7 @@ executeSubscriptionQuotaPlanMenu() {
     else
         errorCard "超限处理执行失败" "已尽力执行可完成的部分，请检查本机配置后重试"
     fi
-    return 0
+    return "${rc}"
 }
 
 runSubscriptionGroupSync() {
@@ -362,8 +403,13 @@ runSubscriptionGroupSync() {
 
     if subscriptionGroupQuotaAutoApplyEnabled; then
         if collectSubscriptionTraffic; then
-            quotaPlan=$(subscriptionQuotaDryRunPlan)
-            if [[ "$(jq 'length' <<<"${quotaPlan}")" != "0" ]]; then
+            if ! quotaPlan=$(subscriptionQuotaDryRunPlan); then
+                failures=$(jq '. + ["限额自动执行计划生成失败"]' <<<"${failures}")
+                rc=1
+            elif ! subscriptionQuotaValidatePlan "${quotaPlan}"; then
+                failures=$(jq '. + ["限额自动执行计划格式无效"]' <<<"${failures}")
+                rc=1
+            elif [[ "$(jq 'length' <<<"${quotaPlan}")" != "0" ]]; then
                 if ! applySubscriptionQuotaPlan "${quotaPlan}"; then
                     failures=$(jq '. + ["限额自动执行时，停用超额分享订阅失败"]' <<<"${failures}")
                     rc=1

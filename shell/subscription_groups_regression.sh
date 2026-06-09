@@ -2107,7 +2107,35 @@ JSON
       .groups[0].traffic.user_groups["team-a"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
     '
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
+    if applySubscriptionQuotaPlan '{bad-json' 2>/dev/null; then
+        return 1
+    fi
+    if applySubscriptionQuotaPlan '[{"id":"","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
+        return 1
+    fi
+    if applySubscriptionQuotaPlan '[{"id":"missing","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
+        return 1
+    fi
+    if subscriptionSyncApplyAccountPlan '{bad-json' 2>/dev/null; then
+        return 1
+    fi
+    if subscriptionSyncApplyAccountPlan '{"create":["sub_team_a"],"remove":[null]}' 2>/dev/null; then
+        return 1
+    fi
     applySubscriptionQuotaPlan "$(subscriptionQuotaDryRunPlan)"
+    jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
+    subscriptionGroupsStateWrite '.groups[0].user_groups[0].enabled = true'
+    (
+        subscriptionSyncApplyAccountPlan() {
+            return 42
+        }
+        reloadCore() {
+            return 0
+        }
+        if executeSubscriptionQuotaPlanMenu <<<"yes" >/dev/null 2>&1; then
+            return 1
+        fi
+    )
     jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
     (
         subscriptionSyncPlanFromAccounts() {
