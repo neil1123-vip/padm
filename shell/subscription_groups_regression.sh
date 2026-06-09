@@ -3898,6 +3898,75 @@ runInstallToolsUpdateFailureRegression() {
     )
 }
 
+runInstallToolsReleaseInfoFailureRegression() {
+    (
+        local oldHome="${HOME}"
+        local oldSelect="${selectCustomInstallType:-}"
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local oldInstallLog="${PADM_INSTALL_LOG:-}"
+        local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
+        local errorLog="${TMP_DIR}/install-tools-release-info-error.log"
+        local fakeHome="${TMP_DIR}/install-tools-release-info-home"
+        PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-release-info-base-called"
+
+        mkdir -p "${fakeHome}/.acme.sh"
+        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
+        HOME="${fakeHome}"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        PADM_INSTALL_LOG="${TMP_DIR}/install-tools-release-info-install.log"
+        : >"${errorLog}"
+        printf 'Repository changed its value\n' >"${PADM_INSTALL_LOG}"
+        release=debian
+        rhelLike=false
+        upgrade=true
+        updateReleaseInfoChange=false
+        packageManager=apt
+        installType=true
+        removeType=true
+        selectCustomInstallType=",7,"
+        protocolSelectionSkipsNginx() { return 0; }
+        protocolSelectionNeedsLocalCertificate() { return 0; }
+        waitAptProcess() { return 0; }
+        installBasePackages() { : >"${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}"; }
+        runPackageCommandWithProgress() {
+            printf 'changed\n' >"$4"
+            return 0
+        }
+        runWithTimeout() {
+            [[ "$1" == "300" ]] && return 1
+            return 0
+        }
+
+        set +e
+        (
+            installTools 1
+        ) >/dev/null 2>&1
+        local installStatus=$?
+        set -e
+        [[ "${installStatus}" -ne 0 ]]
+        [[ ! -e "${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}" ]]
+        grep -q "系统软件源 release 信息刷新失败" "${errorLog}"
+
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        if [[ -n "${oldInstallLog}" ]]; then
+            PADM_INSTALL_LOG="${oldInstallLog}"
+        else
+            unset PADM_INSTALL_LOG
+        fi
+        HOME="${oldHome}"
+        selectCustomInstallType="${oldSelect}"
+        if [[ -n "${oldBasePackageCalledFile}" ]]; then
+            PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
+        else
+            unset PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE
+        fi
+    )
+}
+
 runInstallToolsNginxReinstallFailureRegression() {
     (
         local oldHome="${HOME}"
@@ -4419,6 +4488,7 @@ runRegressionPlatform() {
 runRegressionPlatformIo() {
     runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression
     runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression
+    runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression
     runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression
     runRegressionStep base-package-batch runBasePackageBatchRegression
     runRegressionStep package-rollback-failure runPackageRollbackFailureRegression

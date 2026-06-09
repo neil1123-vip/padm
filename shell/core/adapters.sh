@@ -415,7 +415,10 @@ installTools() {
     fi
 
     if grep <"${installLog}" -q "changed"; then
-        runWithTimeout 300 "${updateReleaseInfoChange} >/dev/null 2>&1"
+        runWithTimeout 300 "${updateReleaseInfoChange} >/dev/null 2>&1" || {
+            diagnosePackageInstallFailure
+            failPackageInstallTransaction "系统软件源 release 信息刷新失败"
+        }
     fi
 
     if [[ "${rhelLike:-}" == "true" ]]; then
