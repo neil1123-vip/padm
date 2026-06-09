@@ -264,15 +264,13 @@ subscriptionSyncRestoreConfigBackups() {
     done <"${manifest}"
 }
 
-subscriptionSyncApplyAccountPlanTransaction() {
-    local syncPlan=$1
+subscriptionSyncCreateConfigBackups() {
     local backupDir
     local file
     local manifest
     local backupFile
-    local applyStatus=0
     local backupIndex=0
-    subscriptionSyncValidateAccountPlan "${syncPlan}" || return 1
+
     padmCreateTempPath backupDir -d /tmp/padm-subscription-sync-backup.XXXXXX || return 1
     manifest="${backupDir}/manifest"
     : >"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
@@ -283,7 +281,90 @@ subscriptionSyncApplyAccountPlanTransaction() {
         cp -p "${file}" "${backupFile}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
         printf '%s\t%s\n' "${backupFile}" "${file}" >>"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
     done < <(subscriptionSyncConfigFiles)
+    printf '%s\n' "${backupDir}"
+}
 
+subscriptionSyncBackupPath() {
+    local sourcePath=$1
+    local backupDir=$2
+    local label=$3
+    local targetBackup="${backupDir}/${label}"
+    local marker="${backupDir}/${label}.exists"
+
+    [[ -n "${sourcePath}" && "${sourcePath}" != "." && "${sourcePath}" != "/" ]] || return 1
+    if [[ -d "${sourcePath}" ]]; then
+        printf 'dir\n' >"${marker}" || return 1
+        mkdir -p "${targetBackup}" || return 1
+        cp -a "${sourcePath}/." "${targetBackup}/" || return 1
+    elif [[ -f "${sourcePath}" ]]; then
+        printf 'file\n' >"${marker}" || return 1
+        cp -p "${sourcePath}" "${targetBackup}" || return 1
+    else
+        printf 'missing\n' >"${marker}" || return 1
+    fi
+}
+
+subscriptionSyncRestoreBackupPath() {
+    local targetPath=$1
+    local backupDir=$2
+    local label=$3
+    local targetBackup="${backupDir}/${label}"
+    local marker="${backupDir}/${label}.exists"
+    local state
+
+    [[ -n "${targetPath}" && "${targetPath}" != "." && "${targetPath}" != "/" ]] || return 1
+    [[ -f "${marker}" ]] || return 1
+    state=$(<"${marker}")
+    rm -rf -- "${targetPath}" || return 1
+    case "${state}" in
+    dir)
+        mkdir -p "$(dirname "${targetPath}")" || return 1
+        mkdir -p "${targetPath}" || return 1
+        cp -a "${targetBackup}/." "${targetPath}/" || return 1
+        ;;
+    file)
+        mkdir -p "$(dirname "${targetPath}")" || return 1
+        cp -p "${targetBackup}" "${targetPath}" || return 1
+        ;;
+    missing)
+        return 0
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
+subscriptionSyncCreateSubscribeOutputBackups() {
+    local backupDir
+    local localBase
+    local publicBase
+
+    padmCreateTempPath backupDir -d /tmp/padm-subscription-output-backup.XXXXXX || return 1
+    localBase=$(subscribeLocalBaseDir)
+    publicBase=$(subscribePublicBaseDir)
+    subscriptionSyncBackupPath "${localBase}" "${backupDir}" local || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+    subscriptionSyncBackupPath "${publicBase}" "${backupDir}" public || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+    printf '%s\n' "${backupDir}"
+}
+
+subscriptionSyncRestoreSubscribeOutputBackups() {
+    local backupDir=$1
+    local localBase
+    local publicBase
+
+    localBase=$(subscribeLocalBaseDir)
+    publicBase=$(subscribePublicBaseDir)
+    subscriptionSyncRestoreBackupPath "${localBase}" "${backupDir}" local || return 1
+    subscriptionSyncRestoreBackupPath "${publicBase}" "${backupDir}" public || return 1
+}
+
+subscriptionSyncApplyAccountPlanTransaction() {
+    local syncPlan=$1
+    local backupDir
+    local applyStatus=0
+    subscriptionSyncValidateAccountPlan "${syncPlan}" || return 1
+    backupDir=$(subscriptionSyncCreateConfigBackups) || return 1
     if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
         applyStatus=1
     fi

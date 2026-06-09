@@ -2510,6 +2510,7 @@ runRemoteControlServerRefreshRegression() (
 
     eval "$(declare -f subscriptionControlApplyAccountPlan | sed '1s/^subscriptionControlApplyAccountPlan/originalSubscriptionControlApplyAccountPlan/')"
     eval "$(declare -f subscriptionSyncSetUsersInFile | sed '1s/^subscriptionSyncSetUsersInFile/originalSubscriptionSyncSetUsersInFile/')"
+    eval "$(declare -f renderSubscribeUserOutputs | sed '1s/^renderSubscribeUserOutputs/originalRenderSubscribeUserOutputs/')"
 
     subscriptionSyncPlanFromAccounts() {
         printf '{"create":["sub_team_a"],"remove":[]}'
@@ -2623,6 +2624,79 @@ JSON
     coreInstallType="${oldCoreInstallType}"
     subscriptionSyncSetUsersInFile() {
         originalSubscriptionSyncSetUsersInFile "$@"
+    }
+
+    local refreshRollbackRoot="${TMP_DIR}/remote-control-refresh-rollback"
+    local refreshRollbackLocalDir="${refreshRollbackRoot}/subscribe_local"
+    local refreshRollbackPublicDir="${refreshRollbackRoot}/subscribe"
+    local refreshRollbackStateBefore
+    local refreshRollbackFirstBefore
+    local refreshRollbackOldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local refreshRollbackOldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
+    local refreshRollbackOldScriptDir="${SCRIPT_DIR}"
+    local refreshRollbackPublicBefore
+    local refreshRollbackLocalBefore
+    local refreshRollbackExpectedFile="${TMP_DIR}/remote-control-refresh-rollback-expected.json"
+    local refreshRollbackPublicExpected="${TMP_DIR}/remote-control-refresh-public-expected.txt"
+    local refreshRollbackLocalExpected="${TMP_DIR}/remote-control-refresh-local-expected.txt"
+    mkdir -p "${refreshRollbackRoot}/xray"
+    configPath="${refreshRollbackRoot}/xray/"
+    singBoxConfigPath="${refreshRollbackRoot}/xray/"
+    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+    mkdir -p "${refreshRollbackLocalDir}/default" "${refreshRollbackLocalDir}/clashMeta" "${refreshRollbackLocalDir}/sing-box" "${refreshRollbackPublicDir}/default" "${refreshRollbackPublicDir}/clashMeta"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${refreshRollbackLocalDir}"
+    export PADM_SUBSCRIBE_DIR="${refreshRollbackPublicDir}"
+    SCRIPT_DIR="${PROJECT_ROOT}"
+    subscribeType=https
+    subscribePort=39778
+    currentHost=refresh.example.com
+    printf 'old salt\n' >"${refreshRollbackLocalDir}/subscribeSalt"
+    printf 'old local default\n' >"${refreshRollbackLocalDir}/default/existing"
+    printf 'old public default\n' >"${refreshRollbackPublicDir}/default/existing-md5"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    coreInstallType=1
+    subscriptionSyncPlanFromAccounts() {
+        printf '{"create":["sub_publish"],"remove":[]}'
+    }
+    subscriptionControlApplyAccountPlan() {
+        originalSubscriptionControlApplyAccountPlan "$@"
+    }
+    refreshRollbackStateBefore=$(<"$(subscriptionGroupsFile)")
+    refreshRollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
+    refreshRollbackLocalBefore=$(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
+    refreshRollbackPublicBefore=$(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
+    printf '%s\n' "${refreshRollbackLocalBefore}" >"${refreshRollbackLocalExpected}"
+    printf '%s\n' "${refreshRollbackPublicBefore}" >"${refreshRollbackPublicExpected}"
+    renderSubscribeUserOutputs() {
+        originalRenderSubscribeUserOutputs "$@"
+        return 1
+    }
+    set +e
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"publish","uuid":"77777777-7777-7777-7777-777777777777"}],"dry_run":false}' >"${responseFile}.refresh-rollback"
+    local refreshRollbackStatus=$?
+    set -e
+    [[ "${refreshRollbackStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed"' "${responseFile}.refresh-rollback" >/dev/null
+    printf '%s\n' "${refreshRollbackStateBefore}" >"${refreshRollbackExpectedFile}"
+    jq -e --slurpfile expected "${refreshRollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
+    [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${refreshRollbackFirstBefore}" ]]
+    diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
+    diff -u "${refreshRollbackPublicExpected}" <(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
+    if find "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \) | grep -q .; then
+        return 1
+    fi
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    coreInstallType="${oldCoreInstallType}"
+    SCRIPT_DIR="${refreshRollbackOldScriptDir}"
+    if [[ -n "${refreshRollbackOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${refreshRollbackOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${refreshRollbackOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${refreshRollbackOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+    renderSubscribeUserOutputs() {
+        originalRenderSubscribeUserOutputs "$@"
     }
 
     subscriptionControlApplyAccountPlan() {

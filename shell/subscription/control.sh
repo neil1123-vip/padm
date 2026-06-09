@@ -677,6 +677,19 @@ subscriptionControlApplyAccountPlan() {
     fi
 }
 
+subscriptionControlRestoreAppliedPlan() {
+    local previousGroupsState=$1
+    local configBackupDir=$2
+    local outputBackupDir=${3:-}
+    subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || true
+    if [[ -n "${configBackupDir}" ]]; then
+        subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "${outputBackupDir}" ]]; then
+        subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1 || true
+    fi
+}
+
 subscriptionControlRefreshPublishedSubscriptions() {
     subscribe false false >/dev/null 2>&1
 }
@@ -686,6 +699,9 @@ subscriptionControlApplySync() {
     local dryRun
     local desiredUsers
     local plan
+    local previousGroupsState
+    local configBackupDir=
+    local outputBackupDir=
     if ! subscriptionControlValidateSyncPayload "${payload}"; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
@@ -715,21 +731,34 @@ subscriptionControlApplySync() {
         jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
         return 0
     fi
+    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
+    configBackupDir=$(subscriptionSyncCreateConfigBackups) || return 1
+    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || { padmRemoveCleanupPath "${configBackupDir}"; return 1; }
     if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
+        padmRemoveCleanupPath "${configBackupDir}"
+        padmRemoveCleanupPath "${outputBackupDir}"
         jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", error_detail:{type:"apply_plan_failed", message:"同步计划应用失败"}, plan:$plan}'
         return 1
     fi
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
         if ! subscriptionSyncReconcileLocalServices; then
+            subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"
+            padmRemoveCleanupPath "${configBackupDir}"
+            padmRemoveCleanupPath "${outputBackupDir}"
             jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:"本机服务重建失败"}, plan:$plan}'
             return 1
         fi
     else
         if ! subscriptionControlRefreshPublishedSubscriptions; then
+            subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"
+            padmRemoveCleanupPath "${configBackupDir}"
+            padmRemoveCleanupPath "${outputBackupDir}"
             jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:"订阅发布刷新失败"}, plan:$plan}'
             return 1
         fi
     fi
+    padmRemoveCleanupPath "${configBackupDir}"
+    padmRemoveCleanupPath "${outputBackupDir}"
     jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
 }
 
