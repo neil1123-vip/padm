@@ -62,13 +62,14 @@ customUserEmail() {
 writeUserConfigJq() {
     local targetPath=$1
     local jqFilter=$2
-    local tmpPath="${targetPath}.tmp"
+    local tmpPath
     shift 2
+    padmCreateTempFileForTarget tmpPath "${targetPath}" user || return 1
     if ! jq -r "$@" "${jqFilter}" "${targetPath}" | jq . >"${tmpPath}"; then
-        rm -f "${tmpPath}"
+        padmRemoveCleanupPath "${tmpPath}"
         return 1
     fi
-    mv "${tmpPath}" "${targetPath}"
+    commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 removeUserAccountName() {

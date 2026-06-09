@@ -154,7 +154,6 @@ migrateSubscriptionGroupsState() {
     local currentVersion
     local schemaVersion
     stateFile=$(subscriptionGroupsFile)
-    tmpFile="${stateFile}.migrate.tmp"
     schemaVersion=$(subscriptionGroupsSchemaVersion)
     currentVersion=$(jq -r '.version // 0' "${stateFile}" 2>/dev/null || echo 0)
     if [[ "${currentVersion}" == "${schemaVersion}" ]] && jq -e '
@@ -164,10 +163,11 @@ migrateSubscriptionGroupsState() {
         return 0
     fi
     backupSubscriptionGroupsStateForMigration
+    padmCreateTempFileForTarget tmpFile "${stateFile}" migrate || return 1
     if normalizeSubscriptionGroupsState <"${stateFile}" >"${tmpFile}"; then
-        mv "${tmpFile}" "${stateFile}"
+        commitGeneratedJsonFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     else
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
 }
@@ -193,28 +193,29 @@ subscriptionGroupsStateRead() {
 subscriptionGroupsStateReplace() {
     local sourceFile=$1
     local targetFile=$2
-    local tmpFile=$3
+    local tmpFile
     [[ -f "${sourceFile}" ]] || return 1
     jq empty "${sourceFile}" >/dev/null 2>&1 || return 1
-    mkdir -p "$(dirname "${targetFile}")"
-    cp "${sourceFile}" "${tmpFile}" || return 1
+    padmCreateTempFileForTarget tmpFile "${targetFile}" state || return 1
+    cp "${sourceFile}" "${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     if ! jq empty "${tmpFile}" >/dev/null 2>&1; then
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
-    mv "${tmpFile}" "${targetFile}"
+    commitGeneratedJsonFile "${tmpFile}" "${targetFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 subscriptionGroupsStateWrite() {
     local stateFile
     local tmpFile
     stateFile=$(subscriptionGroupsFile)
-    tmpFile="${stateFile}.tmp"
     ensureSubscriptionGroupsState
-    if ! jq "$@" "${stateFile}" >"${tmpFile}" || ! subscriptionGroupsStateReplace "${tmpFile}" "${stateFile}" "${tmpFile}.commit"; then
-        rm -f "${tmpFile}" "${tmpFile}.commit"
+    padmCreateTempFileForTarget tmpFile "${stateFile}" update || return 1
+    if ! jq "$@" "${stateFile}" >"${tmpFile}" || ! subscriptionGroupsStateReplace "${tmpFile}" "${stateFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
+    padmRemoveCleanupPath "${tmpFile}"
     migrateSubscriptionGroupsState
     subscriptionGroupsSecureStateFiles 2>/dev/null || true
 }
@@ -243,7 +244,7 @@ restoreSubscriptionGroupsBackup() {
     local backupFile=$1
     local stateFile
     stateFile=$(subscriptionGroupsFile)
-    if ! subscriptionGroupsStateReplace "${backupFile}" "${stateFile}" "${stateFile}.restore.tmp"; then
+    if ! subscriptionGroupsStateReplace "${backupFile}" "${stateFile}"; then
         return 1
     fi
     migrateSubscriptionGroupsState

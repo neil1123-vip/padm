@@ -175,16 +175,23 @@ appendUniqueLines() {
 mergeSingBoxSubscribeOutbounds() {
     local targetPath=$1
     local remoteContent=$2
-    local tmpPath="${targetPath}.tmp"
-    local remoteTmpPath="${targetPath}.remote.tmp"
+    local tmpPath
+    local remoteTmpPath
 
-    echo "${remoteContent}" >"${remoteTmpPath}"
+    padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
+    padmCreateTempFileForTarget remoteTmpPath "${targetPath}" remote || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    echo "${remoteContent}" >"${remoteTmpPath}" || {
+        padmRemoveCleanupPath "${remoteTmpPath}"
+        padmRemoveCleanupPath "${tmpPath}"
+        return 1
+    }
     if ! jq -s '.[0] as $local | .[1] as $remote | $local + ($remote | map(select(.tag as $tag | ($local | map(.tag) | index($tag) | not))))' "${targetPath}" "${remoteTmpPath}" >"${tmpPath}"; then
-        rm -f "${remoteTmpPath}" "${tmpPath}" >/dev/null 2>&1
+        padmRemoveCleanupPath "${remoteTmpPath}"
+        padmRemoveCleanupPath "${tmpPath}"
         return 1
     fi
-    mv "${tmpPath}" "${targetPath}"
-    rm -f "${remoteTmpPath}" >/dev/null 2>&1
+    commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${remoteTmpPath}"; padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    padmRemoveCleanupPath "${remoteTmpPath}"
 }
 
 # 更新远程订阅源

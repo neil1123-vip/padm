@@ -551,7 +551,7 @@ diagnoseTraditionalTlsAlpn() {
 
 applyTraditionalTlsAlpn() {
     local alpnJson=$1
-    local configFile backupFile
+    local configFile backupFile tmpFile
     configFile=$(traditionalTlsFallbackConfigFile)
     backupFile="${configFile}.alpn.bak"
     if [[ ! -f "${configFile}" ]]; then
@@ -559,12 +559,19 @@ applyTraditionalTlsAlpn() {
         return 1
     fi
     cp "${configFile}" "${backupFile}"
-    if ! jq --argjson alpn "${alpnJson}" '.inbounds[0].streamSettings.tlsSettings.alpn = $alpn' "${configFile}" >"${configFile}.tmp"; then
-        rm -f "${configFile}.tmp" "${backupFile}"
+    padmCreateTempFileForTarget tmpFile "${configFile}" alpn || { rm -f "${backupFile}"; return 1; }
+    if ! jq --argjson alpn "${alpnJson}" '.inbounds[0].streamSettings.tlsSettings.alpn = $alpn' "${configFile}" >"${tmpFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        rm -f "${backupFile}"
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
-    mv "${configFile}.tmp" "${configFile}"
+    if ! commitGeneratedJsonFile "${tmpFile}" "${configFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        rm -f "${backupFile}"
+        errorCard "写入 ALPN 配置失败"
+        return 1
+    fi
     if [[ -x /etc/padm/xray/xray ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-alpn-xray-test.log 2>&1; then
         mv "${backupFile}" "${configFile}"
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"

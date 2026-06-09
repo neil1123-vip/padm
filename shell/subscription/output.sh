@@ -75,13 +75,14 @@ appendSingBoxSubscribeLocalConfig() {
     local user=$1
     local jqFilter=$2
     local targetPath="$(subscribeLocalBaseDir)/sing-box/${user}"
-    local tmpPath="${targetPath}.tmp"
+    local tmpPath
 
+    padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
     if ! jq -r "${jqFilter}" "${targetPath}" | jq . >"${tmpPath}"; then
-        rm -f "${tmpPath}"
+        padmRemoveCleanupPath "${tmpPath}"
         return 1
     fi
-    mv "${tmpPath}" "${targetPath}"
+    commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 appendStandardTLSSubscribeOutputs() {

@@ -39,6 +39,17 @@ padmCreateTempPath() {
     printf -v "${resultVar}" '%s' "${path}"
 }
 
+padmCreateTempFileForTarget() {
+    local resultVar=$1
+    local targetFile=$2
+    local label=${3:-tmp}
+    local targetDir targetName
+    targetDir=$(dirname -- "${targetFile}")
+    targetName=$(basename -- "${targetFile}")
+    mkdir -p "${targetDir}" || return 1
+    padmCreateTempPath "${resultVar}" "${targetDir}/.${targetName}.${label}.XXXXXX"
+}
+
 padmForgetCleanupPath() {
     local path=$1
     padmUnregisterCleanupPath "${path}"
@@ -64,8 +75,9 @@ commitGeneratedFile() {
 commitGeneratedJsonFile() {
     local tmpFile=$1
     local targetFile=$2
+    local mode=${3:-644}
 
-    jq empty "${tmpFile}" >/dev/null 2>&1 && commitGeneratedFile "${tmpFile}" "${targetFile}" 644
+    jq empty "${tmpFile}" >/dev/null 2>&1 && commitGeneratedFile "${tmpFile}" "${targetFile}" "${mode}"
 }
 
 writeGeneratedJsonFile() {

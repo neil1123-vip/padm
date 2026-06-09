@@ -179,12 +179,16 @@ removeRealityStreamNginxInclude() {
     local nginxMainConf tmpFile
     nginxMainConf=$(realityStreamSplitNginxConf)
     [[ -n "${nginxMainConf}" && -f "${nginxMainConf}" ]] || return 0
-    padmCreateTempPath tmpFile /tmp/padm-nginx.XXXXXX || return 1
-    awk '
+    padmCreateTempFileForTarget tmpFile "${nginxMainConf}" nginx || return 1
+    if ! awk '
         /# padm stream include start/ {skip=1; next}
         /# padm stream include end/ {skip=0; next}
         skip != 1 {print}
-    ' "${nginxMainConf}" >"${tmpFile}" && mv "${tmpFile}" "${nginxMainConf}" && padmForgetCleanupPath "${tmpFile}"
+    ' "${nginxMainConf}" >"${tmpFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    commitGeneratedFile "${tmpFile}" "${nginxMainConf}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 normalizeRealityStreamDomains() {
@@ -227,8 +231,9 @@ realityStreamPatchXrayConfig() {
     local protocol=$1
     local internalPort=$2
     local configFile=$3
-    local tmpFile="${configFile}.tmp"
+    local tmpFile
     [[ -f "${configFile}" ]] || return 0
+    padmCreateTempFileForTarget tmpFile "${configFile}" reality || return 1
 
     local filter
     if [[ "${protocol}" == "vision" ]]; then
@@ -237,18 +242,19 @@ realityStreamPatchXrayConfig() {
         filter='.inbounds[0].listen = "127.0.0.1" | .inbounds[0].port = ($port | tonumber)'
     fi
     if ! jq --arg port "${internalPort}" "${filter}" "${configFile}" >"${tmpFile}"; then
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
-    mv "${tmpFile}" "${configFile}"
+    commitGeneratedJsonFile "${tmpFile}" "${configFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 realityStreamRestoreXrayConfig() {
     local protocol=$1
     local publicPort=$2
     local configFile=$3
-    local tmpFile="${configFile}.tmp"
+    local tmpFile
     [[ -f "${configFile}" ]] || return 0
+    padmCreateTempFileForTarget tmpFile "${configFile}" reality || return 1
 
     local filter
     if [[ "${protocol}" == "vision" ]]; then
@@ -257,10 +263,10 @@ realityStreamRestoreXrayConfig() {
         filter='.inbounds[0].listen = "0.0.0.0" | .inbounds[0].port = ($port | tonumber)'
     fi
     if ! jq --arg port "${publicPort}" "${filter}" "${configFile}" >"${tmpFile}"; then
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
-    mv "${tmpFile}" "${configFile}"
+    commitGeneratedJsonFile "${tmpFile}" "${configFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 realityStreamRefreshSubscribeIfInstalled() {
@@ -276,8 +282,7 @@ renderRealityStreamSplitNginxConf() {
     local realityPort=$3
     local confFile tmpFile
     confFile=$(realityStreamSplitConfFile)
-    tmpFile="${confFile}.tmp"
-    mkdir -p "$(dirname "${confFile}")"
+    padmCreateTempFileForTarget tmpFile "${confFile}" nginx || return 1
 
     {
         echo "stream {"
@@ -304,7 +309,8 @@ renderRealityStreamSplitNginxConf() {
         echo "        proxy_pass \$padm_reality_backend;"
         echo "    }"
         echo "}"
-    } >"${tmpFile}" && mv "${tmpFile}" "${confFile}"
+    } >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    commitGeneratedFile "${tmpFile}" "${confFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 showRealityStreamSplitStatus() {

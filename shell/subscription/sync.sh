@@ -91,16 +91,21 @@ subscriptionSyncPlan() {
 subscriptionSyncRemoveAccountFromFile() {
     local file=$1
     local accountName=$2
-    local tmpFile="${file}.tmp"
+    local tmpFile
     [[ -f "${file}" ]] || return
     if ! jq -e --arg accountName "${accountName}" '
       [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
       | select(((.email // .name // .username // "") | split("-")[0]) == $accountName)' "${file}" >/dev/null 2>&1; then
         return
     fi
-    jq --arg accountName "${accountName}" '
+    padmCreateTempFileForTarget tmpFile "${file}" sync || return 1
+    if ! jq --arg accountName "${accountName}" '
       (.inbounds[]?.settings.clients? // empty) |= map(select(((.email // .name // .username // "") | split("-")[0]) != $accountName)) |
-      (.inbounds[]?.users? // empty) |= map(select(((.email // .name // .username // "") | split("-")[0]) != $accountName))' "${file}" >"${tmpFile}" && mv "${tmpFile}" "${file}"
+      (.inbounds[]?.users? // empty) |= map(select(((.email // .name // .username // "") | split("-")[0]) != $accountName))' "${file}" >"${tmpFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    commitGeneratedJsonFile "${tmpFile}" "${file}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 subscriptionSyncRemoveAccount() {
@@ -115,9 +120,14 @@ subscriptionSyncSetUsersInFile() {
     local file=$1
     local userPath=$2
     local users=$3
-    local tmpFile="${file}.tmp"
+    local tmpFile
     [[ -f "${file}" ]] || return
-    jq --argjson users "${users}" "${userPath} = \$users" "${file}" >"${tmpFile}" && mv "${tmpFile}" "${file}"
+    padmCreateTempFileForTarget tmpFile "${file}" sync || return 1
+    if ! jq --argjson users "${users}" "${userPath} = \$users" "${file}" >"${tmpFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    commitGeneratedJsonFile "${tmpFile}" "${file}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 subscriptionSyncUserPath() {
@@ -334,4 +344,3 @@ runSubscriptionGroupSync() {
         statusCard "订阅同步" "本机自动同步完成，被控服务器待后续通道同步"
     fi
 }
-

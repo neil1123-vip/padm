@@ -86,26 +86,27 @@ subscriptionWireGuardControlEnabled() {
 
 subscriptionWireGuardWriteState() {
     local stateFile
+    local stateDir
     local tmpFile
     local stateJson
     local filter
     local jqArgs=()
     stateFile=$(subscriptionWireGuardStateFile)
-    tmpFile="${stateFile}.tmp"
-    mkdir -p "$(dirname "${stateFile}")"
-    chmod 700 "$(dirname "${stateFile}")" 2>/dev/null || true
+    stateDir=$(dirname "${stateFile}")
+    mkdir -p "${stateDir}" || return 1
+    chmod 700 "${stateDir}" 2>/dev/null || true
+    padmCreateTempFileForTarget tmpFile "${stateFile}" state || return 1
     while (($# > 1)); do
         jqArgs+=("$1")
         shift
     done
     filter=$1
-    stateJson=$(subscriptionWireGuardReadState) || return 1
+    stateJson=$(subscriptionWireGuardReadState) || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     if ! jq "${jqArgs[@]}" "${filter}" <<<"${stateJson}" >"${tmpFile}" || ! jq empty "${tmpFile}" >/dev/null 2>&1; then
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
-    chmod 600 "${tmpFile}" 2>/dev/null || true
-    mv "${tmpFile}" "${stateFile}"
+    commitGeneratedJsonFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 subscriptionWireGuardRole() {
@@ -167,11 +168,10 @@ writeSubscriptionWireGuardConfig() {
     state=$(subscriptionWireGuardReadState)
     privateKeyFile=$(subscriptionWireGuardPrivateKeyFile)
     configFile=$(subscriptionWireGuardConfigFile)
-    tmpFile="${configFile}.tmp"
-    mkdir -p "$(dirname "${configFile}")"
+    padmCreateTempFileForTarget tmpFile "${configFile}" wireguard || return 1
     listenPort=$(jq -r '.listen_port' <<<"${state}")
     address=$(jq -r '.address' <<<"${state}")
-    [[ -n "${address}" && -s "${privateKeyFile}" ]] || return 1
+    [[ -n "${address}" && -s "${privateKeyFile}" ]] || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     {
         printf '[Interface]\n'
         printf 'Address = %s\n' "${address}"
@@ -189,9 +189,8 @@ writeSubscriptionWireGuardConfig() {
             fi
             printf '\n'
         done < <(jq -c '.peers[]? | select(.enabled == true)' <<<"${state}")
-    } >"${tmpFile}"
-    chmod 600 "${tmpFile}" 2>/dev/null || true
-    mv "${tmpFile}" "${configFile}"
+    } >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    commitGeneratedFile "${tmpFile}" "${configFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 applySubscriptionWireGuardService() {

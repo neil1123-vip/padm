@@ -122,18 +122,21 @@ resetSubscriptionGroupsStateMenu() {
         return 1
     fi
     stateFile=$(subscriptionGroupsFile)
-    stageFile="${stateFile}.reset.tmp"
+    padmCreateTempFileForTarget stageFile "${stateFile}" reset || {
+        errorCard "默认状态临时文件创建失败"
+        return 1
+    }
     writeDefaultSubscriptionGroupsState "${stageFile}" || {
-        rm -f "${stageFile}"
+        padmRemoveCleanupPath "${stageFile}"
         errorCard "默认状态生成失败"
         return 1
     }
-    if ! subscriptionGroupsStateReplace "${stageFile}" "${stateFile}" "${stateFile}.reset.commit"; then
-        rm -f "${stageFile}" "${stateFile}.reset.commit"
+    if ! subscriptionGroupsStateReplace "${stageFile}" "${stateFile}"; then
+        padmRemoveCleanupPath "${stageFile}"
         errorCard "订阅状态重建失败" "当前状态备份：${currentBackup}"
         return 1
     fi
-    rm -f "${stageFile}"
+    padmRemoveCleanupPath "${stageFile}"
     migrateSubscriptionGroupsState
     subscriptionGroupsSecureStateFiles 2>/dev/null || true
     successCard "订阅状态已重建" "重建前备份：${currentBackup}"

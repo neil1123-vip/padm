@@ -498,11 +498,8 @@ EOF
 # 设置 DNS/hosts 覆盖
 writeRoutingJsonConfig() {
     local targetPath=$1
-    local targetDir targetName tmpPath
-    targetDir=$(dirname -- "${targetPath}")
-    targetName=$(basename -- "${targetPath}")
-    mkdir -p "${targetDir}" || return 1
-    padmCreateTempPath tmpPath "${targetDir}/.${targetName}.XXXXXX" || return 1
+    local tmpPath
+    padmCreateTempFileForTarget tmpPath "${targetPath}" routing || return 1
     if ! cat >"${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"
         return 1
@@ -513,12 +510,9 @@ writeRoutingJsonConfig() {
 updateRoutingJsonConfig() {
     local targetPath=$1
     local filter=$2
-    local targetDir targetName tmpPath
+    local tmpPath
     shift 2
-    targetDir=$(dirname -- "${targetPath}")
-    targetName=$(basename -- "${targetPath}")
-    mkdir -p "${targetDir}" || return 1
-    padmCreateTempPath tmpPath "${targetDir}/.${targetName}.XXXXXX" || return 1
+    padmCreateTempFileForTarget tmpPath "${targetPath}" routing || return 1
     if ! jq "$@" "${filter}" "${targetPath}" >"${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"
         return 1

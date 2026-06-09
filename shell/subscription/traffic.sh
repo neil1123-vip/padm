@@ -4,11 +4,12 @@ ensureXrayTrafficStatsConfig() {
     local xrayConfigPath=${configPath:-/etc/padm/xray/conf/}
     local statsConfig=${xrayConfigPath}13_stats_api.json
     local policyConfig=${xrayConfigPath}12_policy.json
-    local tmpFile=${statsConfig}.tmp
-    local policyTmp=${policyConfig}.tmp
+    local tmpFile
+    local policyTmp
     local changed=
     [[ "${coreInstallType}" == "1" && -d "${xrayConfigPath}" ]] || return 0
-    cat <<EOF >"${tmpFile}"
+    padmCreateTempFileForTarget tmpFile "${statsConfig}" stats || return 1
+    if ! cat <<EOF >"${tmpFile}"
 {
   "stats": {},
   "api": {
@@ -41,15 +42,20 @@ ensureXrayTrafficStatsConfig() {
   }
 }
 EOF
+    then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
     if [[ -f "${statsConfig}" ]] && cmp -s "${tmpFile}" "${statsConfig}"; then
-        rm -f "${tmpFile}"
+        padmRemoveCleanupPath "${tmpFile}"
     else
-        mv "${tmpFile}" "${statsConfig}"
+        commitGeneratedJsonFile "${tmpFile}" "${statsConfig}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
         changed=true
     fi
 
     if [[ ! -f "${policyConfig}" ]]; then
-        cat <<EOF >"${policyConfig}"
+        padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || return 1
+        if ! cat <<EOF >"${policyTmp}"
 {
   "policy": {
     "levels": {
@@ -59,8 +65,14 @@ EOF
   }
 }
 EOF
+        then
+            padmRemoveCleanupPath "${policyTmp}"
+            return 1
+        fi
+        commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || { padmRemoveCleanupPath "${policyTmp}"; return 1; }
         changed=true
     fi
+    padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || return 1
     if ! jq '
       .policy.levels["0"].statsUserUplink = true |
       .policy.levels["0"].statsUserDownlink = true |
@@ -69,14 +81,14 @@ EOF
       .policy.system.statsOutboundUplink = true |
       .policy.system.statsOutboundDownlink = true
     ' "${policyConfig}" >"${policyTmp}"; then
-        rm -f "${policyTmp}"
+        padmRemoveCleanupPath "${policyTmp}"
         errorCard "Xray 流量统计策略配置生成失败"
         return 1
     fi
     if cmp -s "${policyTmp}" "${policyConfig}"; then
-        rm -f "${policyTmp}"
+        padmRemoveCleanupPath "${policyTmp}"
     else
-        mv "${policyTmp}" "${policyConfig}"
+        commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || { padmRemoveCleanupPath "${policyTmp}"; return 1; }
         changed=true
     fi
 
