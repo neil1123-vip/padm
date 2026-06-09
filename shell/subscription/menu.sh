@@ -38,7 +38,7 @@ manageSubscriptionQuickStart() {
         case "${quickStartStatus}" in
         1) installSubscribe && showSubscriptionServiceStatus && subscribe ;;
         2) showSubscriptionServiceStatus; createAndSyncUserSubscriptionWizard ;;
-        3) collectSubscriptionTraffic && showSubscriptionTrafficOverview; userJsonCard "超限处理计划" "$(subscriptionQuotaDryRunPlan)" ;;
+        3) collectSubscriptionTraffic && showSubscriptionTrafficOverview; showSubscriptionQuotaPlan ;;
         4) manageSubscriptionMultiServerQuickStart ;;
         5) return ;;
         *) errorCard "选择错误，请重新选择" ;;
@@ -68,8 +68,8 @@ runSubscriptionMainControllerWizard() {
     initSubscriptionWireGuardMain || return 1
     showSubscriptionWireGuardMainCredential
     addSubscribeMenu
-    userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)"
-    userJsonCard "远程同步计划" "$(subscriptionRemoteSyncPlan)"
+    showSubscriptionRemoteHealthPlan
+    showSubscriptionRemoteSyncPlan
 }
 
 runSubscriptionControlledWizard() {
@@ -177,11 +177,7 @@ manageSharedSubscriptions() {
         2) showUserSubscriptions ;;
         3) manageUserSubscriptionItem ;;
         4) runSubscriptionGroupSync || true ;;
-        5)
-            readInstallType
-            readInstallProtocolType
-            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
-            ;;
+        5) showSubscriptionLocalSyncPlan ;;
         6) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
@@ -204,6 +200,78 @@ userJsonCard() {
     printf '%s\n' "${json}" | jq .
     menuClose
 }
+
+showSubscriptionJsonWithSummary() {
+    local title=$1
+    local json=$2
+    local summary=$3
+    userResultCard "${title}"
+    while IFS= read -r line; do
+        [[ -n "${line}" ]] && menuLine "${line}"
+    done <<<"${summary}"
+    printf '%s\n' "${json}" | jq .
+    menuClose
+}
+
+showSubscriptionLocalSyncPlan() {
+    local plan
+    local summary
+    readInstallType
+    readInstallProtocolType
+    plan=$(subscriptionSyncPlan) || {
+        errorCard "本机同步计划生成失败"
+        return 1
+    }
+    summary=$(jq -r '"创建账号：" + ((.create // []) | length | tostring) + "\n移除账号：" + ((.remove // []) | length | tostring)' <<<"${plan}") || return 1
+    showSubscriptionJsonWithSummary "本机同步计划" "${plan}" "${summary}"
+}
+
+showSubscriptionRemoteHealthPlan() {
+    local health
+    local summary
+    health=$(subscriptionRemoteControlHealthAll) || {
+        errorCard "被控服务器健康检查失败"
+        return 1
+    }
+    summary=$(jq -r '
+      "服务器数：" + (length | tostring) + "\n" +
+      "健康：" + ([.[]? | select(.ok == true)] | length | tostring) + "\n" +
+      "异常：" + ([.[]? | select(.ok != true)] | length | tostring)
+    ' <<<"${health}") || return 1
+    showSubscriptionJsonWithSummary "被控服务器健康检查" "${health}" "${summary}"
+}
+
+showSubscriptionRemoteSyncPlan() {
+    local plan
+    local summary
+    plan=$(subscriptionRemoteSyncPlan) || {
+        errorCard "远程同步计划生成失败"
+        return 1
+    }
+    summary=$(jq -r '
+      "服务器数：" + (length | tostring) + "\n" +
+      "可同步：" + ([.[]? | select(.status == "success")] | length | tostring) + "\n" +
+      "异常：" + ([.[]? | select(.status != "success")] | length | tostring) + "\n" +
+      "预计创建：" + ([.[]?.response.plan.create[]?] | length | tostring) + "\n" +
+      "预计移除：" + ([.[]?.response.plan.remove[]?] | length | tostring)
+    ' <<<"${plan}") || return 1
+    showSubscriptionJsonWithSummary "远程同步计划" "${plan}" "${summary}"
+}
+
+showSubscriptionQuotaPlan() {
+    local plan
+    local summary
+    plan=$(subscriptionQuotaDryRunPlan) || {
+        errorCard "超限处理计划生成失败"
+        return 1
+    }
+    summary=$(jq -r '
+      "待处理订阅：" + (length | tostring) + "\n" +
+      "动作：停用超额订阅并移除本机托管账号"
+    ' <<<"${plan}") || return 1
+    showSubscriptionJsonWithSummary "超限处理计划" "${plan}" "${summary}"
+}
+
 showUserSubscriptions() {
     local groupId
     local output
@@ -381,11 +449,7 @@ manageUserSubscriptionItem() {
         3) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
         4) setUserSubscriptionTrafficLimitMenu "${userSubscriptionId}" ;;
         5) toggleUserSubscriptionState "${userSubscriptionId}"; successCard "用户订阅状态已切换" ;;
-        6)
-            readInstallType
-            readInstallProtocolType
-            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
-            ;;
+        6) showSubscriptionLocalSyncPlan ;;
         7) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
         8) return ;;
         *) errorCard "选择错误，请重新选择" ;;
@@ -592,7 +656,7 @@ manageMainControllerSubscriptions() {
         2) manageSubscriptionMainControlMenu ;;
         3) addSubscribeMenu ;;
         4) setSubscriptionSourceControlTokenMenu ;;
-        5) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
+        5) showSubscriptionRemoteHealthPlan ;;
         6) showSubscriptionSources ;;
         7) showSubscriptionSourceControlUrls ;;
         8) showSubscriptionSourceSyncResults ;;
@@ -805,7 +869,7 @@ manageSubscriptionDiagnostics() {
         1) showSubscriptionDiagnosticsOverview ;;
         2) showSubscriptionServiceStatus ;;
         3) showSubscriptionSources ;;
-        4) userJsonCard "被控服务器健康检查" "$(subscriptionRemoteControlHealthAll)" ;;
+        4) showSubscriptionRemoteHealthPlan ;;
         5) showSubscriptionSourceSyncResults ;;
         6) subscriptionGroupSyncCronStatus ;;
         7) manageSubscriptionWireGuardControlMenu ;;
@@ -833,12 +897,8 @@ manageSubscriptionAutomation() {
         autoRead subscription_automation_menu "请选择:" subscriptionAutomationStatus
         case "${subscriptionAutomationStatus}" in
         1) runSubscriptionGroupSync || true ;;
-        2)
-            readInstallType
-            readInstallProtocolType
-            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
-            ;;
-        3) userJsonCard "远程同步计划" "$(subscriptionRemoteSyncPlan)" ;;
+        2) showSubscriptionLocalSyncPlan ;;
+        3) showSubscriptionRemoteSyncPlan ;;
         4) manageSubscriptionSyncSettings ;;
         5) manageSubscriptionStateBackups ;;
         6) showSubscriptionGroupsStateSummary ;;
@@ -914,13 +974,9 @@ manageSubscriptionSyncSettings() {
             successCard "自动同步间隔已更新"
             ;;
         3) runSubscriptionGroupSync || true ;;
-        4)
-            readInstallType
-            readInstallProtocolType
-            userJsonCard "本机同步计划" "$(subscriptionSyncPlan)"
-            ;;
-        5) userJsonCard "远程同步计划" "$(subscriptionRemoteSyncPlan)" ;;
-        6) userJsonCard "超限处理计划" "$(subscriptionQuotaDryRunPlan)" ;;
+        4) showSubscriptionLocalSyncPlan ;;
+        5) showSubscriptionRemoteSyncPlan ;;
+        6) showSubscriptionQuotaPlan ;;
         7) executeSubscriptionQuotaPlanMenu ;;
         8)
             subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.remote_enabled = ((.sync.remote_enabled // true) | not) else . end)'

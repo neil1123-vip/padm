@@ -3390,9 +3390,14 @@ runMenuSmokeRegression() {
     installSubscribe() { recordMenuAction installSubscribe; }
     manageSubscriptionSyncSettings() { recordMenuAction manageSubscriptionSyncSettings; }
     runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
-    subscriptionSyncPlan() { recordMenuAction subscriptionSyncPlan; printf '[]\n'; }
-    subscriptionRemoteSyncPlan() { recordMenuAction subscriptionRemoteSyncPlan; printf '[]\n'; }
+    subscriptionSyncPlan() { recordMenuAction subscriptionSyncPlan; jq -n '{create:[], remove:[]}'; }
+    subscriptionRemoteControlHealthAll() { recordMenuAction subscriptionRemoteControlHealthAll; jq -n '[{id:"edge-a", ok:true}]'; }
+    subscriptionRemoteSyncPlan() { recordMenuAction subscriptionRemoteSyncPlan; jq -n '[{source_id:"edge-a", status:"success", response:{plan:{create:[], remove:[]}}}]'; }
     subscriptionQuotaDryRunPlan() { recordMenuAction subscriptionQuotaDryRunPlan; printf '[]\n'; }
+    showSubscriptionLocalSyncPlan() { recordMenuAction showSubscriptionLocalSyncPlan; subscriptionSyncPlan >/dev/null; }
+    showSubscriptionRemoteHealthPlan() { recordMenuAction showSubscriptionRemoteHealthPlan; subscriptionRemoteControlHealthAll >/dev/null; }
+    showSubscriptionRemoteSyncPlan() { recordMenuAction showSubscriptionRemoteSyncPlan; subscriptionRemoteSyncPlan >/dev/null; }
+    showSubscriptionQuotaPlan() { recordMenuAction showSubscriptionQuotaPlan; subscriptionQuotaDryRunPlan >/dev/null; }
     executeSubscriptionQuotaPlanMenu() { recordMenuAction executeSubscriptionQuotaPlanMenu; }
     setSubscriptionSourceControlTokenMenu() { recordMenuAction setSubscriptionSourceControlTokenMenu; }
     toggleSubscriptionSourceMenu() { recordMenuAction toggleSubscriptionSourceMenu; }
@@ -3514,6 +3519,7 @@ r"
 5"
     assertMenuAction collectSubscriptionTraffic
     assertMenuAction showSubscriptionTrafficOverview
+    assertMenuAction showSubscriptionQuotaPlan
     assertMenuAction subscriptionQuotaDryRunPlan
     resetMenuActions
     manageSubscriptionMultiServerQuickStart <<<"3
@@ -3589,6 +3595,7 @@ y
     manageSharedSubscriptions <<<"5
 6
 7"
+    assertMenuAction showSubscriptionLocalSyncPlan
     assertMenuAction subscriptionSyncPlan
     assertMenuAction menu
     resetMenuActions
@@ -3626,6 +3633,11 @@ y
 11"
     assertMenuAction setSubscriptionSourceControlTokenMenu
     resetMenuActions
+    manageMainControllerSubscriptions <<<"5
+11"
+    assertMenuAction showSubscriptionRemoteHealthPlan
+    assertMenuAction subscriptionRemoteControlHealthAll
+    resetMenuActions
     manageMainControllerSubscriptions <<<"7
 11"
     assertMenuAction showSubscriptionSourceControlUrls
@@ -3641,6 +3653,7 @@ y
     resetMenuActions
     manageTrafficAndQuota <<<"6
 8"
+    assertMenuAction showSubscriptionQuotaPlan
     assertMenuAction subscriptionQuotaDryRunPlan
     resetMenuActions
     manageTrafficAndQuota <<<"7

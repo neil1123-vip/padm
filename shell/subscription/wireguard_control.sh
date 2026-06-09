@@ -715,7 +715,7 @@ showSubscriptionWireGuardPeers() {
 }
 
 testSubscriptionWireGuardControl() {
-    userJsonCard "WireGuard 控制面健康检查" "$(subscriptionRemoteControlHealthAll)"
+    showSubscriptionRemoteHealthPlan
 }
 
 restartSubscriptionWireGuardControl() {
