@@ -86,6 +86,18 @@ source "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/singbox.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_rules.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_ipv6.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_bt.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_socks.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_vmess.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing_access_control.sh"

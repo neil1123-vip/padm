@@ -33,6 +33,18 @@ source "${CORE_DIR}/tls.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/singbox.sh"
 # shellcheck source=/dev/null
+source "${CORE_DIR}/routing_rules.sh"
+# shellcheck source=/dev/null
+source "${CORE_DIR}/routing_ipv6.sh"
+# shellcheck source=/dev/null
+source "${CORE_DIR}/routing_bt.sh"
+# shellcheck source=/dev/null
+source "${CORE_DIR}/routing_warp.sh"
+# shellcheck source=/dev/null
+source "${CORE_DIR}/routing_socks.sh"
+# shellcheck source=/dev/null
+source "${CORE_DIR}/routing_vmess.sh"
+# shellcheck source=/dev/null
 source "${CORE_DIR}/routing.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/routing_access_control.sh"

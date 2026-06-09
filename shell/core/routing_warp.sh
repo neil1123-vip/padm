@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+
+# 读取第三方 WARP 配置
+readConfigWarpReg() {
+    if [[ ! -f "/etc/padm/warp/config" ]]; then
+        /etc/padm/warp/warp-reg >/etc/padm/warp/config
+    fi
+
+    secretKeyWarpReg=$(grep <"/etc/padm/warp/config" private_key | awk '{print $2}')
+
+    addressWarpReg=$(grep <"/etc/padm/warp/config" v6 | awk '{print $2}')
+
+    publicKeyWarpReg=$(grep <"/etc/padm/warp/config" public_key | awk '{print $2}')
+
+    reservedWarpReg=$(grep <"/etc/padm/warp/config" reserved | awk -F "[:]" '{print $2}')
+
+}
+# 安装 warp-reg 工具
+installWarpReg() {
+    if [[ ! -f "/etc/padm/warp/warp-reg" ]]; then
+        echo
+        echoContent title "\n┌─ warp-reg 第三方工具 ──────────────────────────────"
+        menuLine "依赖第三方程序，请熟知其中风险"
+        menuLine "项目地址：https://github.com/badafans/warp-reg"
+        menuClose
+
+        autoRead warp_reg_install "warp-reg未安装，是否安装？[y/n]:" installWarpRegStatus
+
+        if [[ "${installWarpRegStatus}" == "y" ]]; then
+
+            if ! downloadGitHubReleaseAsset -P /etc/padm/warp/ badafans/warp-reg v1.0 "${warpRegCoreCPUVendor}"; then
+                errorCard "warp-reg下载失败"
+                exit 1
+            fi
+            if [[ ! -s "/etc/padm/warp/${warpRegCoreCPUVendor}" ]]; then
+                errorCard "warp-reg文件异常"
+                exit 1
+            fi
+            mv "/etc/padm/warp/${warpRegCoreCPUVendor}" /etc/padm/warp/warp-reg
+            chmod 655 /etc/padm/warp/warp-reg
+
+        else
+            statusCard "已取消" "放弃安装"
+            exit 0
+        fi
+    fi
+}
+
+# 展示 WARP 分流域名
+showWireGuardDomain() {
+    local type=$1
+    if [[ "${coreInstallType}" == "1" ]]; then
+        if [[ -f "${configPath}09_routing.json" ]]; then
+            echoContent yellow "Xray-core"
+            jq -r -c '.routing.rules[]|select (.outboundTag=="wireguard_out_'"${type}"'")|.domain' ${configPath}09_routing.json | jq -r
+        elif [[ ! -f "${configPath}09_routing.json" && -f "${configPath}wireguard_out_${type}.json" ]]; then
+            echoContent yellow "Xray-core"
+            successCard "已设置warp ${type}全局分流"
+        else
+            statusCard "WARP 分流" "未安装 WARP ${type} 分流"
+        fi
+    fi
+
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        if [[ -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" ]]; then
+            echoContent yellow "sing-box"
+            jq -r -c '.route.rules[]' "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" | jq -r
+        elif [[ ! -f "${singBoxConfigPath}wireguard_endpoints_${type}_route.json" && -f "${singBoxConfigPath}wireguard_endpoints_${type}.json" ]]; then
+            echoContent yellow "sing-box"
+            successCard "已设置warp ${type}全局分流"
+        else
+            statusCard "WARP 分流" "未安装 WARP ${type} 分流"
+        fi
+    fi
+
+}
+
+# 添加 WARP 分流规则
+addWireGuardRoute() {
+    local type=$1
+    local tag=$2
+    local domainList=$3
+    if [[ "${coreInstallType}" == "1" ]]; then
+
+        addXrayRouting "wireguard_out_${type}" "${tag}" "${domainList}"
+        addXrayOutbound "wireguard_out_${type}"
+    fi
+    if [[ -n "${singBoxConfigPath}" ]]; then
+
+        addSingBoxRouteRule "wireguard_endpoints_${type}" "${domainList}" "wireguard_endpoints_${type}_route"
+        if [[ -n "${domainList}" ]]; then
+            addSingBoxOutbound "01_direct_outbound"
+        fi
+
+        addSingBoxWireGuardEndpoints "${type}"
+    fi
+}
+
+# 卸载 WireGuard
+unInstallWireGuard() {
+    local type=$1
+    if [[ "${coreInstallType}" == "1" ]]; then
+
+        if [[ "${type}" == "IPv4" ]]; then
+            if [[ ! -f "${configPath}wireguard_out_IPv6.json" ]]; then
+                rm -rf /etc/padm/warp/config >/dev/null 2>&1
+            fi
+        elif [[ "${type}" == "IPv6" ]]; then
+            if [[ ! -f "${configPath}wireguard_out_IPv4.json" ]]; then
+                rm -rf /etc/padm/warp/config >/dev/null 2>&1
+            fi
+        fi
+    fi
+
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        if [[ ! -f "${singBoxConfigPath}wireguard_endpoints_IPv6_route.json" && ! -f "${singBoxConfigPath}wireguard_endpoints_IPv4_route.json" ]]; then
+            rm "${singBoxConfigPath}wireguard_outbound.json" >/dev/null 2>&1
+            rm -rf /etc/padm/warp/config >/dev/null 2>&1
+        fi
+    fi
+}
+# 移除 WARP 分流规则
+removeWireGuardRoute() {
+    local type=$1
+    if [[ "${coreInstallType}" == "1" ]]; then
+
+        unInstallRouting wireguard_out_"${type}" outboundTag
+
+        removeXrayOutbound "wireguard_out_${type}"
+        if [[ ! -f "${configPath}IPv4_out.json" ]]; then
+            addXrayOutbound IPv4_out
+        fi
+    fi
+
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        removeSingBoxRouteRule "wireguard_endpoints_${type}"
+    fi
+
+    unInstallWireGuard "${type}"
+}
+# WARP 第三方分流管理
+warpRoutingReg() {
+    local type=$2
+    local title="WARP 分流 ${type}"
+    progressCard "$1" "${title}"
+    echoContent title "\n┌─ ${title} ────────────────────────────────────────"
+    menuLine "依赖 Cloudflare WARP WireGuard 出站与第三方 warp-reg 账号注册工具"
+    menuLine "适合少量域名或明确场景分流；全局模式会移除其他出站规则"
+    menuItem 1 "查看已分流域名" "显示当前 WARP ${type} 分流规则"
+    menuItem 2 "添加域名" "添加 WARP ${type} 出站分流规则"
+    menuDangerItem 3 "设置 WARP 全局" "删除其他出站并全局走 WARP ${type}"
+    menuDangerItem 4 "卸载 WARP 分流" "移除 WARP ${type} 分流配置"
+    menuReturnItem 5 "返回 WARP 出站" "回到 WARP 出站菜单"
+    menuClose
+    autoRead warp_ipv4_menu "请选择:" warpStatus
+    installWarpReg
+    readConfigWarpReg
+    local address=
+    if [[ ${type} == "IPv4" ]]; then
+        address="172.16.0.2/32"
+    elif [[ ${type} == "IPv6" ]]; then
+        address="${addressWarpReg}/128"
+    else
+        errorCard "IP获取失败，退出安装"
+    fi
+
+    if [[ "${warpStatus}" == "1" ]]; then
+        showWireGuardDomain "${type}"
+        exit 0
+    elif [[ "${warpStatus}" == "2" ]]; then
+        echoContent title "\n┌─ WARP 分流规则说明 ────────────────────────────────"
+        menuLine "支持 sing-box、Xray-core"
+        menuLine "请按 README 中的分流说明配置域名或规则"
+        menuClose
+
+        autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
+        addWireGuardRoute "${type}" outboundTag "${domainList}"
+        successCard "添加完毕"
+
+    elif [[ "${warpStatus}" == "3" ]]; then
+
+        warnCard \
+            "会删除所有设置的分流规则" \
+            "会删除除 WARP[第三方] 之外的所有出站规则"
+        autoConfirm warp_global_confirm "确认设置 WARP 全局出站？" n warpOutStatus
+
+        if [[ "${warpOutStatus}" == "y" ]]; then
+            readConfigWarpReg
+            if [[ "${coreInstallType}" == "1" ]]; then
+                addXrayOutbound "wireguard_out_${type}"
+                if [[ "${type}" == "IPv4" ]]; then
+                    removeXrayOutbound "wireguard_out_IPv6"
+                elif [[ "${type}" == "IPv6" ]]; then
+                    removeXrayOutbound "wireguard_out_IPv4"
+                fi
+
+                removeXrayOutbound IPv4_out
+                removeXrayOutbound IPv6_out
+                removeXrayOutbound z_direct_outbound
+                removeXrayOutbound blackhole_out
+                removeXrayOutbound socks5_outbound
+
+                rm ${configPath}09_routing.json >/dev/null 2>&1
+            fi
+
+            if [[ -n "${singBoxConfigPath}" ]]; then
+
+                removeSingBoxConfig IPv4_out
+                removeSingBoxConfig IPv6_out
+                removeSingBoxConfig 01_direct_outbound
+
+                # 删除所有分流规则
+                removeSingBoxConfig wireguard_endpoints_IPv4_route
+                removeSingBoxConfig wireguard_endpoints_IPv6_route
+
+                removeSingBoxConfig IPv6_route
+                removeSingBoxConfig socks5_02_inbound_route
+
+                addSingBoxWireGuardEndpoints "${type}"
+                addWireGuardRoute "${type}" outboundTag ""
+                if [[ "${type}" == "IPv4" ]]; then
+                    removeSingBoxConfig wireguard_endpoints_IPv6
+                else
+                    removeSingBoxConfig wireguard_endpoints_IPv4
+                fi
+
+            fi
+
+            successCard "WARP全局出站设置完毕"
+        else
+            statusCard "已取消" "未设置 WARP 全局出站"
+            warpRoutingReg "$1" "${type}"
+            return 0
+        fi
+
+    elif [[ "${warpStatus}" == "4" ]]; then
+        if [[ "${coreInstallType}" == "1" ]]; then
+            unInstallRouting "wireguard_out_${type}" outboundTag
+
+            removeXrayOutbound "wireguard_out_${type}"
+            addXrayOutbound "z_direct_outbound"
+        fi
+
+        if [[ -n "${singBoxConfigPath}" ]]; then
+            removeSingBoxConfig "wireguard_endpoints_${type}_route"
+
+            removeSingBoxConfig "wireguard_endpoints_${type}"
+            addSingBoxOutbound "01_direct_outbound"
+        fi
+
+        successCard "卸载WARP ${type}分流完毕"
+    elif [[ "${warpStatus}" == "5" ]]; then
+        warpRoutingMenu
+        return 0
+    else
+
+        errorCard "选择错误"
+        warpRoutingReg "$1" "${type}"
+        return 0
+    fi
+    reloadCore
+}
+
+
+warpRoutingMenu() {
+    echoContent title "\n┌─ WARP 出站 ────────────────────────────────────────"
+    menuLine "通过 Cloudflare WARP WireGuard 出站，常用于 IPv4/IPv6 出口切换"
+    menuLine "依赖第三方 warp-reg 获取账号参数；Cloudflare 服务状态或策略变化会影响可用性"
+    menuItem 1 "WARP IPv4" "使用 IPv4 WARP 地址作为出站"
+    menuItem 2 "WARP IPv6" "使用 IPv6 WARP 地址作为出站"
+    menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
+    menuClose
+    autoRead warp_routing_type_menu "请选择:" warpRoutingType
+
+    case ${warpRoutingType} in
+    1)
+        warpRoutingReg 1 IPv4
+        ;;
+    2)
+        warpRoutingReg 1 IPv6
+        ;;
+    3)
+        routingToolsMenu
+        ;;
+    *)
+        errorCard "选择错误"
+        warpRoutingMenu
+        ;;
+    esac
+}
