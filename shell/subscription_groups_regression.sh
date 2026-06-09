@@ -4078,6 +4078,46 @@ runAptKeyInstallFailureRegression() {
     )
 }
 
+runNginxYumMainlineEnableFailureRegression() {
+    (
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local errorLog="${TMP_DIR}/nginx-yum-mainline-error.log"
+        local repoDir="${TMP_DIR}/nginx-yum-repos"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        : >"${errorLog}"
+        mkdir -p "${repoDir}"
+        release=centos
+        packageManager=yum
+        removeType=true
+        PADM_YUM_REPOS_DIR="${repoDir}"
+        installPackageTracked() { return 0; }
+        packageInstalled() { return 0; }
+        nginxServiceInstalled() { return 0; }
+        bootStartup() { return 0; }
+        sudo() {
+            [[ "$1" == "yum-config-manager" && "$2" == "--enable" && "$3" == "nginx-mainline" ]] && return 1
+            "$@"
+        }
+
+        set +e
+        (
+            installNginxTools
+        ) >/dev/null 2>&1
+        local nginxStatus=$?
+        set -e
+        [[ "${nginxStatus}" -ne 0 ]]
+        grep -q "Nginx yum mainline 源启用失败" "${errorLog}"
+
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        unset -f installPackageTracked packageInstalled nginxServiceInstalled bootStartup sudo
+        unset PADM_YUM_REPOS_DIR
+    )
+}
+
 runBasePackageBatchRegression() {
     local commands=(sudo wget curl unzip socat tar crontab jq ld openssl ping6 ping lsb_release lsof dig iptables-save nginx)
     local cmd
@@ -4531,6 +4571,7 @@ runRegressionPlatformIo() {
     runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression
     runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression
     runRegressionStep apt-key-install-failure runAptKeyInstallFailureRegression
+    runRegressionStep nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureRegression
     runRegressionStep base-package-batch runBasePackageBatchRegression
     runRegressionStep package-rollback-failure runPackageRollbackFailureRegression
     runRegressionStep package-command-stdin runPackageCommandStdinRegression

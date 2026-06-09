@@ -563,6 +563,7 @@ installNginxTools() {
 
     elif [[ "${release}" == "centos" ]]; then
         installPackageTracked "yum-utils" yum-utils
+        local yumReposDir=${PADM_YUM_REPOS_DIR:-/etc/yum.repos.d}
         local repoFile
         padmCreateTempPath repoFile /tmp/padm-nginx-yum-repo.XXXXXX || failPackageInstallTransaction "Nginx yum 源临时文件创建失败"
         cat <<EOF >"${repoFile}"
@@ -582,8 +583,9 @@ enabled=0
 gpgkey=https://nginx.org/keys/nginx_signing.key
 module_hotfixes=true
 EOF
-        commitRepoFile "${repoFile}" /etc/yum.repos.d/nginx.repo || failPackageInstallTransaction "Nginx yum 源提交失败"
-        sudo yum-config-manager --enable nginx-mainline >/dev/null 2>&1
+        mkdir -p "${yumReposDir}" || failPackageInstallTransaction "Nginx yum 源目录创建失败"
+        commitRepoFile "${repoFile}" "${yumReposDir}/nginx.repo" || failPackageInstallTransaction "Nginx yum 源提交失败"
+        sudo yum-config-manager --enable nginx-mainline >/dev/null 2>&1 || failPackageInstallTransaction "Nginx yum mainline 源启用失败"
     elif [[ "${release}" == "fedora" ]]; then
         statusCard "Nginx 源" "nginx.org 未提供 Fedora ${centosVersion} 仓库，使用系统默认仓库安装 Nginx"
     elif [[ "${release}" == "alpine" ]]; then
@@ -716,6 +718,7 @@ installWarp() {
 
     elif [[ "${release}" == "centos" || "${release}" == "fedora" ]]; then
         installPackageTracked "yum-utils" yum-utils
+        local yumReposDir=${PADM_YUM_REPOS_DIR:-/etc/yum.repos.d}
         local repoFile
         padmCreateTempPath repoFile /tmp/padm-warp-yum-repo.XXXXXX || failPackageInstallTransaction "WARP yum 源临时文件创建失败"
         cat <<EOF >"${repoFile}"
@@ -726,7 +729,8 @@ enabled=1
 gpgcheck=1
 gpgkey=https://pkg.cloudflareclient.com/pubkey.gpg
 EOF
-        commitRepoFile "${repoFile}" /etc/yum.repos.d/cloudflare-client.repo || failPackageInstallTransaction "WARP yum 源提交失败"
+        mkdir -p "${yumReposDir}" || failPackageInstallTransaction "WARP yum 源目录创建失败"
+        commitRepoFile "${repoFile}" "${yumReposDir}/cloudflare-client.repo" || failPackageInstallTransaction "WARP yum 源提交失败"
     fi
 
     installPackageTracked "cloudflare-warp" cloudflare-warp
