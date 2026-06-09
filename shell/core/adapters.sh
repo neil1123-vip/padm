@@ -4,7 +4,7 @@ refreshAptAfterRepoChange() {
     if [[ "${release}" != "ubuntu" && "${release}" != "debian" ]]; then
         return
     fi
-    waitAptProcess
+    waitAptProcess || return 1
     runWithTimeout 300 "${upgrade} >/dev/null 2>&1"
 }
 
@@ -75,31 +75,46 @@ beginPackageInstallTransaction() {
     PADM_PACKAGE_TRANSACTION_ACTIVE=true
     PADM_PACKAGE_TRANSACTION_STARTED=true
     PADM_INSTALLED_PACKAGES=
+    PADM_PACKAGE_ROLLBACK_FAILURES=
 }
 
 endPackageInstallTransaction() {
     if [[ "$1" == "true" ]]; then
         PADM_INSTALLED_PACKAGES=
+        PADM_PACKAGE_ROLLBACK_FAILURES=
         PADM_PACKAGE_TRANSACTION_ACTIVE=
     fi
 }
 
 rollbackPackageInstallTransaction() {
     local packageName
+    local failedPackages=()
+    local rc=0
+    PADM_PACKAGE_ROLLBACK_FAILURES=
 
     if [[ -z "${PADM_INSTALLED_PACKAGES:-}" ]]; then
         return 0
     fi
 
     for packageName in ${PADM_INSTALLED_PACKAGES}; do
-        ${removeType} "${packageName}" >/dev/null 2>&1 || true
+        if ! ${removeType} "${packageName}" >/dev/null 2>&1; then
+            failedPackages+=("${packageName}")
+            rc=1
+        fi
     done
     PADM_INSTALLED_PACKAGES=
+    PADM_PACKAGE_ROLLBACK_FAILURES="${failedPackages[*]}"
+    return "${rc}"
 }
 
 failPackageInstallTransaction() {
-    rollbackPackageInstallTransaction
-    errorCard "$1，已尝试回滚本次新增软件包"
+    local rollbackStatus=0
+    rollbackPackageInstallTransaction || rollbackStatus=$?
+    if [[ "${rollbackStatus}" -eq 0 ]]; then
+        errorCard "$1，已尝试回滚本次新增软件包"
+    else
+        errorCard "$1，回滚部分软件包失败" "请手动检查：${PADM_PACKAGE_ROLLBACK_FAILURES}"
+    fi
     exit 1
 }
 
@@ -382,7 +397,7 @@ installTools() {
         runWithTimeout 120 "dpkg --configure -a"
     fi
 
-    waitAptProcess
+    waitAptProcess || failPackageInstallTransaction "等待 apt/dpkg 锁释放失败"
 
     initInstallProgress
     successCard "检查、安装工具依赖【新机器会很慢，请根据工具依赖进度判断是否仍在执行】"
@@ -393,7 +408,10 @@ installTools() {
     if [[ "${rhelLike:-}" == "true" ]]; then
         statusCard "系统更新" "RHEL-like/Fedora 基础安装跳过全量系统更新，仅安装所需依赖"
     else
-        runPackageCommandWithProgress "检查、安装更新" 600 "${upgrade}" "${installLog}"
+        runPackageCommandWithProgress "检查、安装更新" 600 "${upgrade}" "${installLog}" || {
+            diagnosePackageInstallFailure
+            failPackageInstallTransaction "系统软件源刷新失败"
+        }
     fi
 
     if grep <"${installLog}" -q "changed"; then
@@ -510,7 +528,7 @@ installNginxTools() {
             padmCreateTempPath pinFile /tmp/padm-nginx-pin.XXXXXX || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
             printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n\n' >"${pinFile}"
             commitRepoFile "${pinFile}" /etc/apt/preferences.d/99nginx || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
-            refreshAptAfterRepoChange
+            refreshAptAfterRepoChange || failPackageInstallTransaction "Nginx apt 源刷新失败"
         fi
 
     elif [[ "${release}" == "ubuntu" ]]; then
@@ -527,7 +545,7 @@ installNginxTools() {
             padmCreateTempPath pinFile /tmp/padm-nginx-pin.XXXXXX || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
             printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n\n' >"${pinFile}"
             commitRepoFile "${pinFile}" /etc/apt/preferences.d/99nginx || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
-            refreshAptAfterRepoChange
+            refreshAptAfterRepoChange || failPackageInstallTransaction "Nginx apt 源刷新失败"
         fi
 
     elif [[ "${release}" == "centos" ]]; then
@@ -661,7 +679,7 @@ installWarp() {
             padmCreateTempPath repoFile /tmp/padm-warp-repo.XXXXXX || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
             commitRepoFile "${repoFile}" /etc/apt/sources.list.d/cloudflare-client.list || failPackageInstallTransaction "WARP apt 源提交失败"
-            refreshAptAfterRepoChange
+            refreshAptAfterRepoChange || failPackageInstallTransaction "WARP apt 源刷新失败"
         else
             errorCard "当前Debian版本暂不支持官方WARP客户端"
             endPackageInstallTransaction "${packageTransactionOwner}"
@@ -676,7 +694,7 @@ installWarp() {
             padmCreateTempPath repoFile /tmp/padm-warp-repo.XXXXXX || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
             commitRepoFile "${repoFile}" /etc/apt/sources.list.d/cloudflare-client.list || failPackageInstallTransaction "WARP apt 源提交失败"
-            refreshAptAfterRepoChange
+            refreshAptAfterRepoChange || failPackageInstallTransaction "WARP apt 源刷新失败"
         else
             errorCard "当前Ubuntu版本暂不支持官方WARP客户端"
             endPackageInstallTransaction "${packageTransactionOwner}"
@@ -714,5 +732,3 @@ EOF
         failPackageInstallTransaction "WARP 连通性检测失败"
     fi
 }
-
-

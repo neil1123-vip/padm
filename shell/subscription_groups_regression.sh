@@ -3824,6 +3824,80 @@ runInstallToolsCertificateDependencyRegression() {
     realityOnlyWithDomain="${oldRealityDomain}"
 }
 
+runInstallToolsUpdateFailureRegression() {
+    (
+        local oldHome="${HOME}"
+        local oldSelect="${selectCustomInstallType:-}"
+        local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local oldInstallLog="${PADM_INSTALL_LOG:-}"
+        local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
+        local statusLog="${TMP_DIR}/install-tools-update-status.log"
+        local errorLog="${TMP_DIR}/install-tools-update-error.log"
+        local fakeHome="${TMP_DIR}/install-tools-update-home"
+        PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-update-base-called"
+
+        mkdir -p "${fakeHome}/.acme.sh"
+        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
+        HOME="${fakeHome}"
+        export REGRESSION_STATUS_CARD_LOG="${statusLog}"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        PADM_INSTALL_LOG="${TMP_DIR}/install-tools-update-install.log"
+        : >"${statusLog}"
+        : >"${errorLog}"
+        release=debian
+        rhelLike=false
+        upgrade=false
+        updateReleaseInfoChange=true
+        packageManager=apt
+        installType=true
+        removeType=true
+        selectCustomInstallType=",7,"
+        protocolSelectionSkipsNginx() { return 0; }
+        protocolSelectionNeedsLocalCertificate() { return 0; }
+        runWithTimeout() { return 0; }
+        waitAptProcess() { return 0; }
+        installBasePackages() { : >"${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}"; }
+        runPackageCommandWithProgress() {
+            [[ "$1" == "检查、安装更新" ]] && return 1
+            return 0
+        }
+
+        set +e
+        (
+            installTools 1
+        ) >/dev/null 2>&1
+        local installStatus=$?
+        set -e
+        [[ "${installStatus}" -ne 0 ]]
+        [[ ! -e "${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}" ]]
+        grep -q "系统软件源刷新失败" "${errorLog}"
+
+        if [[ -n "${oldStatusLog}" ]]; then
+            REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
+        else
+            unset REGRESSION_STATUS_CARD_LOG
+        fi
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        if [[ -n "${oldInstallLog}" ]]; then
+            PADM_INSTALL_LOG="${oldInstallLog}"
+        else
+            unset PADM_INSTALL_LOG
+        fi
+        HOME="${oldHome}"
+        selectCustomInstallType="${oldSelect}"
+        if [[ -n "${oldBasePackageCalledFile}" ]]; then
+            PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
+        else
+            unset PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE
+        fi
+    )
+}
+
 runBasePackageBatchRegression() {
     local commands=(sudo wget curl unzip socat tar crontab jq ld openssl ping6 ping lsb_release lsof dig iptables-save nginx)
     local cmd
@@ -3880,6 +3954,43 @@ runBasePackageBatchRegression() {
     PADM_INSTALL_STEP_TOTAL="${oldTotal}"
     PADM_INSTALL_STEP_INDEX="${oldIndex}"
     PADM_INSTALL_PROGRESS_TITLE="${oldTitle}"
+}
+
+runPackageRollbackFailureRegression() {
+    (
+        local removedFile="${TMP_DIR}/package-rollback-removed.log"
+        local oldInstalled="${PADM_INSTALLED_PACKAGES:-}"
+        local oldFailures="${PADM_PACKAGE_ROLLBACK_FAILURES:-}"
+        local oldRemoveType="${removeType:-}"
+
+        removePackageForRegression() {
+            printf '%s\n' "$1" >>"${removedFile}"
+            [[ "$1" != "bad-package" ]]
+        }
+
+        removeType=removePackageForRegression
+        PADM_INSTALLED_PACKAGES="ok-package bad-package"
+        if rollbackPackageInstallTransaction; then
+            return 1
+        fi
+        grep -qxF "ok-package" "${removedFile}"
+        grep -qxF "bad-package" "${removedFile}"
+        [[ "${PADM_INSTALLED_PACKAGES}" == "" ]]
+        [[ "${PADM_PACKAGE_ROLLBACK_FAILURES}" == "bad-package" ]]
+
+        if [[ -n "${oldInstalled}" ]]; then
+            PADM_INSTALLED_PACKAGES="${oldInstalled}"
+        else
+            unset PADM_INSTALLED_PACKAGES
+        fi
+        if [[ -n "${oldFailures}" ]]; then
+            PADM_PACKAGE_ROLLBACK_FAILURES="${oldFailures}"
+        else
+            unset PADM_PACKAGE_ROLLBACK_FAILURES
+        fi
+        removeType="${oldRemoveType}"
+        unset -f removePackageForRegression
+    )
 }
 
 runPackageCommandStdinRegression() {
@@ -4236,7 +4347,9 @@ runRegressionPlatform() {
 
 runRegressionPlatformIo() {
     runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression
+    runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression
     runRegressionStep base-package-batch runBasePackageBatchRegression
+    runRegressionStep package-rollback-failure runPackageRollbackFailureRegression
     runRegressionStep package-command-stdin runPackageCommandStdinRegression
     runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression
 }
