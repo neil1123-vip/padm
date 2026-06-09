@@ -438,7 +438,7 @@ initSingBoxPort() {
             return
         else
             errorCard "端口输入错误"
-            exit 0
+            return 1
         fi
     fi
     if [[ -n "${port}" && -z "${lastInstallationConfig}" ]]; then
@@ -462,8 +462,19 @@ initSingBoxPort() {
             echo "${port}"
         else
             errorCard "端口输入错误"
-            exit 0
+            return 1
         fi
     fi
 }
 
+readSingBoxPortResult() {
+    local -n resultRef=$1
+    local port=${2:-}
+    local promptHistory=${3:-true}
+    local output
+
+    resultRef=()
+    output=$(initSingBoxPort "${port}" "${promptHistory}") || return 1
+    mapfile -t resultRef <<<"${output}"
+    [[ -n "${resultRef[-1]:-}" ]] || return 1
+}

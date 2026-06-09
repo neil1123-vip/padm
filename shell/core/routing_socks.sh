@@ -300,7 +300,7 @@ setSocks5Inbound() {
     menuClose
     echoContent title "\n┌─ Socks5 入站端口 ─────────────────────────────────"
     echo
-    mapfile -t result < <(initSingBoxPort "${singBoxSocks5Port}")
+    readSingBoxPortResult result "${singBoxSocks5Port}" || return 1
     statusCard "入站 Socks5" "端口：${result[-1]}" "此端口需要配置到其他机器出站，请不要进行代理行为"
 
     echoContent yellow "\n请输入自定义UUID[需合法]，[回车]随机UUID"

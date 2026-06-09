@@ -89,7 +89,7 @@ installSubscribe() {
         fi
         echoContent title "开始配置订阅，请输入订阅的端口"
 
-        mapfile -t result < <(initSingBoxPort "${AUTO_SUBSCRIBE_PORT:-${subscribePort}}" false)
+        readSingBoxPortResult result "${AUTO_SUBSCRIBE_PORT:-${subscribePort}}" false || return 1
         PADM_NGINX_BLOG_REINSTALL_PROMPT=false nginxBlog
         echo
         subscribeServerName=$(resolveSubscribeServerName || true)

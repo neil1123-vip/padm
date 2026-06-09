@@ -464,7 +464,7 @@ initSingBoxConfig() {
         menuLine "开始配置 VLESS Vision 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVLESSVisionPort}")
+        readSingBoxPortResult result "${singBoxVLESSVisionPort}" || return 1
         statusCard "VLESS Vision端口" "${result[-1]}"
 
         checkDNSIP "${domain}"
@@ -500,7 +500,7 @@ EOF
         menuLine "开始配置 VLESS WS 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVLESSWSPort}")
+        readSingBoxPortResult result "${singBoxVLESSWSPort}" || return 1
         statusCard "VLESS WS端口" "${result[-1]}"
 
         checkDNSIP "${domain}"
@@ -542,7 +542,7 @@ EOF
         menuLine "开始配置 VMess WS 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVMessWSPort}")
+        readSingBoxPortResult result "${singBoxVMessWSPort}" || return 1
         statusCard "VMess ws端口" "${result[-1]}"
 
         checkDNSIP "${domain}"
@@ -587,7 +587,7 @@ EOF
         initRealityProfile
         initRealityKey
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVLESSRealityVisionPort}")
+        readSingBoxPortResult result "${singBoxVLESSRealityVisionPort}" || return 1
         statusCard "VLESS Reality Vision端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json padm-sing-box-reality <<EOF || { errorCard "sing-box Reality Vision 入站模板提交失败"; exit 1; }
 {
@@ -629,7 +629,7 @@ EOF
         initRealityProfile
         initRealityKey
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVLESSRealityGRPCPort}")
+        readSingBoxPortResult result "${singBoxVLESSRealityGRPCPort}" || return 1
         statusCard "VLESS Reality gPRC端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json padm-sing-box-reality-grpc <<EOF || { errorCard "sing-box Reality gRPC 入站模板提交失败"; exit 1; }
 {
@@ -673,7 +673,7 @@ EOF
         menuLine "开始配置 Hysteria2 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxHysteria2Port}")
+        readSingBoxPortResult result "${singBoxHysteria2Port}" || return 1
         statusCard "Hysteria2端口" "${result[-1]}"
         initHysteria2Network
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json padm-sing-box-hysteria2 <<EOF || { errorCard "sing-box Hysteria2 入站模板提交失败"; exit 1; }
@@ -708,7 +708,7 @@ EOF
         menuLine "开始配置 Trojan 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxTrojanPort}")
+        readSingBoxPortResult result "${singBoxTrojanPort}" || return 1
         statusCard "Trojan端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/04_trojan_TCP_inbounds.json padm-sing-box-trojan <<EOF || { errorCard "sing-box Trojan TCP 入站模板提交失败"; exit 1; }
 {
@@ -737,7 +737,7 @@ EOF
         menuLine "开始配置 Tuic 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxTuicPort}")
+        readSingBoxPortResult result "${singBoxTuicPort}" || return 1
         statusCard "Tuic端口" "${result[-1]}"
         initTuicProtocol
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/09_tuic_inbounds.json padm-sing-box-tuic <<EOF || { errorCard "sing-box TUIC 入站模板提交失败"; exit 1; }
@@ -775,7 +775,7 @@ EOF
         menuLine "开始配置 Naive 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxNaivePort}")
+        readSingBoxPortResult result "${singBoxNaivePort}" || return 1
         statusCard "Naive端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/10_naive_inbounds.json padm-sing-box-naive <<EOF || { errorCard "sing-box Naive 入站模板提交失败"; exit 1; }
 {
@@ -804,7 +804,7 @@ EOF
         menuLine "开始配置 VMess HTTPUpgrade 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxVMessHTTPUpgradePort}")
+        readSingBoxPortResult result "${singBoxVMessHTTPUpgradePort}" || return 1
         statusCard "VMess HTTPUpgrade端口" "${result[-1]}"
 
         checkDNSIP "${domain}"
@@ -841,7 +841,7 @@ EOF
         menuLine "开始配置 AnyTLS 协议端口"
         menuClose
         echo
-        mapfile -t result < <(initSingBoxPort "${singBoxAnyTLSPort}")
+        readSingBoxPortResult result "${singBoxAnyTLSPort}" || return 1
         statusCard "AnyTLS端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/13_anytls_inbounds.json padm-sing-box-anytls <<EOF || { errorCard "sing-box AnyTLS 入站模板提交失败"; exit 1; }
 {

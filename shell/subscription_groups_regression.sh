@@ -890,6 +890,70 @@ EOF
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
+runSingBoxPortFailureRegression() (
+    local result=()
+    local subscribeRoot="${TMP_DIR}/subscribe-port-failure"
+    local oldPath="${PATH}"
+    local oldNginxConfigPath="${nginxConfigPath:-}"
+    local oldStaticPath="${nginxStaticPath:-}"
+    local oldSubscribePort="${subscribePort:-}"
+    local oldAutoSubscribePort="${AUTO_SUBSCRIBE_PORT:-}"
+    local oldCurrentHost="${currentHost:-}"
+    local oldTlsDir="${PADM_TLS_DIR:-}"
+    local writeCalls=0
+
+    allowPort() { return 0; }
+
+    if readSingBoxPortResult result 70000 false 2>/dev/null; then
+        return 1
+    fi
+    [[ "${#result[@]}" == "0" ]]
+
+    mkdir -p "${subscribeRoot}/fake-bin" "${subscribeRoot}/nginx" "${subscribeRoot}/tls" "${subscribeRoot}/static"
+    cat >"${subscribeRoot}/fake-bin/nginx" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == "-v" ]]; then
+    printf 'nginx version: nginx/1.26.0\n' >&2
+    exit 0
+fi
+exit 0
+SH
+    chmod +x "${subscribeRoot}/fake-bin/nginx"
+    PATH="${subscribeRoot}/fake-bin:${PATH}"
+    nginxConfigPath="${subscribeRoot}/nginx/"
+    nginxStaticPath="${subscribeRoot}/static"
+    export PADM_TLS_DIR="${subscribeRoot}/tls"
+    currentHost=port.example.com
+    printf 'cert\n' >"${PADM_TLS_DIR}/port.example.com.crt"
+    printf 'key\n' >"${PADM_TLS_DIR}/port.example.com.key"
+    subscribePort=
+    AUTO_SUBSCRIBE_PORT=70000
+    writeSubscribeNginxConfig() {
+        writeCalls=$((writeCalls + 1))
+        return 0
+    }
+    nginxBlog() { return 0; }
+    hasIPv6Connectivity() { return 1; }
+    installSubscriptionControlService() { return 0; }
+    bootStartup() { return 0; }
+    handleNginx() { return 0; }
+    pgrep() { return 0; }
+
+    if installSubscribe 2>/dev/null; then
+        return 1
+    fi
+    [[ "${writeCalls}" == "0" ]]
+    [[ ! -e "${nginxConfigPath}subscribe.conf" ]]
+
+    PATH="${oldPath}"
+    nginxConfigPath="${oldNginxConfigPath}"
+    nginxStaticPath="${oldStaticPath}"
+    subscribePort="${oldSubscribePort}"
+    AUTO_SUBSCRIBE_PORT="${oldAutoSubscribePort}"
+    currentHost="${oldCurrentHost}"
+    if [[ -n "${oldTlsDir}" ]]; then export PADM_TLS_DIR="${oldTlsDir}"; else unset PADM_TLS_DIR; fi
+)
+
 runAloneNginxConfigTransactionRegression() {
     local targetPath="${TMP_DIR}/nginx-alone/alone.conf"
     local oldPath="${PATH}"
@@ -4914,6 +4978,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep sing-box-subscribe-write runSingBoxSubscribeWriteRegression
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression
     runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
+    runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
 }
