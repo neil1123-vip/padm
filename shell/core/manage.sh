@@ -1483,11 +1483,11 @@ EOF
 commitSubscribeUserOutputFile() {
     local stagedPath=$1
     local targetPath=$2
-    mkdir -p "$(dirname "${targetPath}")"
+    mkdir -p "$(dirname "${targetPath}")" || return 1
     if [[ -f "${stagedPath}" ]]; then
-        mv "${stagedPath}" "${targetPath}"
+        mv "${stagedPath}" "${targetPath}" || return 1
     else
-        rm -f "${targetPath}"
+        rm -f "${targetPath}" || return 1
     fi
 }
 
@@ -1606,6 +1606,7 @@ renderSubscribeUserOutputs() {
     local updateRemoteStatus=$4
     local showStatus=$5
     local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate singBoxOutboundTags base64Result
+    local rc=0
 
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
@@ -1623,7 +1624,10 @@ renderSubscribeUserOutputs() {
         return 1
     fi
     if [[ "${updateRemoteStatus}" == "y" ]]; then
-        PADM_SUBSCRIBE_DIR="${stageDir}" updateRemoteSubscribe "${emailMd5}" "${email}"
+        if ! PADM_SUBSCRIBE_DIR="${stageDir}" updateRemoteSubscribe "${emailMd5}" "${email}"; then
+            padmRemoveCleanupPath "${stageDir}"
+            return 1
+        fi
     fi
     if ! base64Result=$(base64 -w 0 "${defaultPath}"); then
         padmRemoveCleanupPath "${stageDir}"
@@ -1671,12 +1675,13 @@ renderSubscribeUserOutputs() {
         mv "${singBoxPath}.tmp" "${singBoxPath}"
     fi
 
-    commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}"
-    commitSubscribeUserOutputFile "${clashPath}" "${publicBase}/clashMeta/${emailMd5}"
-    commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}"
-    commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}"
-    commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}"
+    commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}" || rc=1
+    commitSubscribeUserOutputFile "${clashPath}" "${publicBase}/clashMeta/${emailMd5}" || rc=1
+    commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}" || rc=1
+    commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}" || rc=1
+    commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}" || rc=1
     padmRemoveCleanupPath "${stageDir}"
+    return "${rc}"
 }
 
 # 订阅

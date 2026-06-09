@@ -1031,6 +1031,34 @@ runSubscribeUserOutputTransactionRegression() {
     [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
     [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
 
+    writeOldSubscribeOutputs
+    writeLocalSubscribeOutputs
+    (
+        updateRemoteSubscribe() {
+            return 1
+        }
+        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" y true 2>/dev/null; then
+            return 1
+        fi
+    )
+    [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+    [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+    [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
+
+    writeOldSubscribeOutputs
+    writeLocalSubscribeOutputs
+    (
+        commitSubscribeUserOutputFile() {
+            return 1
+        }
+        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
+            return 1
+        fi
+    )
+    [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+    [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+    [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
+
     writeLocalSubscribeOutputs
     renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true
     [[ "$(base64 -d <"${publicDir}/default/${emailMd5}")" == "vless://new-node#atomic-user" ]]
@@ -2165,6 +2193,7 @@ runRemoteSubscribeFetchRegression() {
     local localDir="${TMP_DIR}/remote-subscribe-local"
     local email="user@example.com"
     local emailMd5="hash-user"
+    local uniqueFile="${TMP_DIR}/remote-subscribe-unique.txt"
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
     local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
     local oldFakeRemoteSubscribeMode="${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-}"
@@ -2182,6 +2211,10 @@ runRemoteSubscribeFetchRegression() {
     listRemoteSubscribeSources() {
         printf '%s\n' 'remote1.example:443:r1:https' 'remote2.example:443:r2:https' 'remote3.example:443:r3:https'
     }
+
+    printf '%s\n' old same >"${uniqueFile}"
+    appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"
+    cmp -s "${uniqueFile}" <(printf '%s\n' old same new)
 
     fetchRemoteSubscribeContent() {
         local url=$1

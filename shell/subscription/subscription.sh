@@ -165,14 +165,14 @@ fetchRemoteSubscribeContent() {
 appendUniqueLines() {
     local content=$1
     local targetPath=$2
-    local line
+    local tmpPath
 
-    touch "${targetPath}"
-    while IFS= read -r line; do
-        if [[ -n "${line}" ]] && ! grep -Fxq -- "${line}" "${targetPath}"; then
-            echo "${line}" >>"${targetPath}"
-        fi
-    done <<<"${content}"
+    padmCreateTempFileForTarget tmpPath "${targetPath}" unique || return 1
+    {
+        [[ -f "${targetPath}" ]] && cat "${targetPath}"
+        printf '%s\n' "${content}"
+    } | LC_ALL=C awk 'length($0) > 0 && !seen[$0]++' >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 mergeSingBoxSubscribeOutbounds() {
@@ -188,7 +188,12 @@ mergeSingBoxSubscribeOutbounds() {
         padmRemoveCleanupPath "${tmpPath}"
         return 1
     }
-    if ! jq -s '.[0] as $local | .[1] as $remote | $local + ($remote | map(select(.tag as $tag | ($local | map(.tag) | index($tag) | not))))' "${targetPath}" "${remoteTmpPath}" >"${tmpPath}"; then
+    if ! jq -s '
+      .[0] as $local |
+      .[1] as $remote |
+      ($local | map(.tag // empty) | reduce .[] as $tag ({}; .[$tag] = true)) as $seenTags |
+      $local + ($remote | map(select((.tag // "") as $tag | ($tag | length) == 0 or ($seenTags[$tag] | not))))
+    ' "${targetPath}" "${remoteTmpPath}" >"${tmpPath}"; then
         padmRemoveCleanupPath "${remoteTmpPath}"
         padmRemoveCleanupPath "${tmpPath}"
         return 1
@@ -281,10 +286,10 @@ updateRemoteSubscribe() {
         rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
     done < <(listRemoteSubscribeSources)
 
-    mkdir -p "${publicBase}/default" "${publicBase}/clashMeta" "${localBase}/sing-box"
-    mv "${defaultTarget}" "${publicBase}/default/${emailMD5}"
-    mv "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}"
-    mv "${singBoxTarget}" "${localBase}/sing-box/${email}"
+    mkdir -p "${publicBase}/default" "${publicBase}/clashMeta" "${localBase}/sing-box" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitGeneratedFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" 644 || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitGeneratedFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" 644 || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     padmRemoveCleanupPath "${tmpDir}"
     padmRemoveCleanupPath "${stageDir}"
 }
