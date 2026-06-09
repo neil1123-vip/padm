@@ -88,6 +88,10 @@ source "${PROJECT_ROOT}/shell/core/singbox.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_access_control.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/routing_dns.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/cores.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/nginx.sh"
@@ -101,6 +105,10 @@ source "${PROJECT_ROOT}/shell/core/users.sh"
 source "${PROJECT_ROOT}/shell/subscription/groups.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/subscription.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/output.sh"
+# shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/control.sh"
 # shellcheck source=/dev/null

@@ -35,6 +35,10 @@ source "${CORE_DIR}/singbox.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/routing.sh"
 # shellcheck source=/dev/null
+source "${CORE_DIR}/routing_access_control.sh"
+# shellcheck source=/dev/null
+source "${CORE_DIR}/routing_dns.sh"
+# shellcheck source=/dev/null
 source "${CORE_DIR}/entry_helpers.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/cores.sh"
@@ -46,6 +50,10 @@ source "${CORE_DIR}/users.sh"
 source "${SUB_DIR}/groups.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/subscription.sh"
+# shellcheck source=/dev/null
+source "${SUB_DIR}/output.sh"
+# shellcheck source=/dev/null
+source "${SUB_DIR}/accounts.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/control.sh"
 # shellcheck source=/dev/null
