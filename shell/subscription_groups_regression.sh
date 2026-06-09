@@ -106,6 +106,8 @@ source "${PROJECT_ROOT}/shell/core/routing_dns.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/cores.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/core_templates.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/nginx.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/network.sh"
