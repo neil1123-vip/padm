@@ -1977,11 +1977,23 @@ runSubscriptionGroupStateRegression() {
     jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
     removeSubscriptionSourceState ip-edge
 
-    local credential decodedCredential
+    local credential decodedCredential invalidCredential
     credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
     decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
     jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
     if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778}')
+    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.999.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
+    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":70000,"token":"token-abc"}')
+    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
         return 1
     fi
 
@@ -2051,6 +2063,16 @@ JSON
         jq -n '{create:[], remove:["sub_team_a"]}'
     }
     subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
+    (
+        runSubscriptionGroupSync() {
+            return 23
+        }
+        set +e
+        runSubscriptionGroupSyncCron
+        local cronStatus=$?
+        set -e
+        [[ "${cronStatus}" -eq 23 ]]
+    )
 
     currentHost="self.example.com"
     subscribeDomain="self.example.com"
@@ -2282,6 +2304,30 @@ runRemoteControlServerRefreshRegression() (
     jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
     [[ "${subscribeCalls}" == "1" ]]
     [[ "${reconcileCalls}" == "1" ]]
+
+    subscriptionControlApplyAccountPlan() {
+        return 1
+    }
+    set +e
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false}' >"${responseFile}"
+    local applyStatus=$?
+    set -e
+    [[ "${applyStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "apply_plan_failed"' "${responseFile}" >/dev/null
+
+    subscriptionControlApplyAccountPlan() {
+        return 0
+    }
+    subscriptionSyncReconcileLocalServices() {
+        reconcileCalls=$((reconcileCalls + 1))
+        return 1
+    }
+    set +e
+    PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}"
+    local reconcileStatus=$?
+    set -e
+    [[ "${reconcileStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "reconcile_failed"' "${responseFile}" >/dev/null
 )
 
 runNginxBlogAutoInstallRegression() {
@@ -2383,7 +2429,48 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     local oldCurrentHost="${currentHost:-}"
     local oldNginxConfigPath="${nginxConfigPath:-}"
-    local controlledCredential updatedCredential
+    local oldPath="${PATH}"
+    local controlledCredential updatedCredential failingCredential failingCredentialJson
+    local nginxFakeBin nginxTarget
+    local mainStateSnapshot
+    local wireGuardApplyShouldFail= installControlShouldFail= refreshControlShouldFail= serviceQueueShouldFail=
+    local addSourceShouldFail= setCredentialShouldFail=
+    local actions=
+
+    # Restore the real subscription functions because earlier UI smoke tests
+    # define menu stubs with global Bash function scope.
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/menu.sh"
+
+    recordMenuAction() {
+        actions+="$1"$'\n'
+    }
+    assertMenuAction() {
+        grep -qxF "$1" <<<"${actions}"
+    }
+    resetMenuActions() {
+        actions=
+    }
+    autoRead() {
+        local targetVar=$3
+        local input=
+        IFS= read -r input || input=
+        printf -v "${targetVar}" '%s' "${input}"
+    }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuItem() { return 0; }
+    menuReturnItem() { return 0; }
+    menuDangerItem() { return 0; }
+    menuClose() { return 0; }
+    statusCard() { recordMenuAction "statusCard:$1"; }
+    errorCard() { recordMenuAction "errorCard:$1"; }
+    successCard() { recordMenuAction "successCard:$1"; }
+
     PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/menu-smoke-wireguard"
     currentHost="main.example.com"
     nginxConfigPath="${TMP_DIR}/menu-smoke-nginx/"
@@ -2407,14 +2494,38 @@ runSubscriptionWireGuardMenuFlowRegression() (
     }
     subscriptionWireGuardPublicKey() { printf 'public-key\n'; }
     applySubscriptionWireGuardService() {
+        [[ "${wireGuardApplyShouldFail}" == "true" ]] && return 1
         mkdir -p "$(dirname "$(subscriptionWireGuardConfigFile)")"
         printf 'Address = %s\n' "$(subscriptionWireGuardReadState | jq -r '.address')" >"$(subscriptionWireGuardConfigFile)"
     }
-    installSubscriptionControlService() { recordMenuAction installSubscriptionControlService; }
-    refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; return 0; }
+    installSubscriptionControlService() {
+        recordMenuAction installSubscriptionControlService
+        [[ "${installControlShouldFail}" == "true" ]] && return 1
+        return 0
+    }
+    refreshSubscriptionWireGuardNginxControl() {
+        recordMenuAction refreshSubscriptionWireGuardNginxControl
+        [[ "${refreshControlShouldFail}" == "true" ]] && return 1
+        return 0
+    }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
-    serviceQueueApply() { recordMenuAction serviceQueueApply; }
+    serviceQueueApply() {
+        recordMenuAction serviceQueueApply
+        [[ "${serviceQueueShouldFail}" == "true" ]] && return 1
+        return 0
+    }
+    eval "$(declare -f addSubscriptionSourceState | sed '1s/^addSubscriptionSourceState/originalAddSubscriptionSourceState/')"
+    eval "$(declare -f setSubscriptionSourceCredential | sed '1s/^setSubscriptionSourceCredential/originalSetSubscriptionSourceCredential/')"
+    addSubscriptionSourceState() {
+        [[ "${addSourceShouldFail}" == "true" ]] && return 1
+        originalAddSubscriptionSourceState "$@"
+    }
+    setSubscriptionSourceCredential() {
+        [[ "${setCredentialShouldFail}" == "true" ]] && return 1
+        originalSetSubscriptionSourceCredential "$@"
+    }
     subscriptionRemoteControlHealthAll() { printf '[{"id":"edge-a","ok":true}]\n'; }
+    userJsonCard() { recordMenuAction "userJsonCard:$1"; }
     subscribe() { recordMenuAction subscribe; }
 
     resetMenuActions
@@ -2425,47 +2536,140 @@ main.example.com
     subscriptionWireGuardReadState | jq -e '.role == "main" and .enabled == true and .endpoint_host == "main.example.com" and .address == "10.77.0.1/24"' >/dev/null
     grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
 
+    mainStateSnapshot=$(subscriptionWireGuardReadState)
+    subscriptionWireGuardWriteState '.endpoint_host = ""'
+    if showSubscriptionWireGuardMainCredential >/dev/null 2>&1; then
+        return 1
+    fi
+    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+
+    nginxFakeBin="${TMP_DIR}/wg-nginx-fail-bin"
+    mkdir -p "${nginxFakeBin}"
+    cat >"${nginxFakeBin}/nginx" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+    chmod +x "${nginxFakeBin}/nginx"
+    nginxStaticPath="${TMP_DIR}/static"
+    nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+    printf 'old config\n' >"${nginxTarget}"
+    PATH="${nginxFakeBin}:${PATH}"
+    if ensureSubscriptionWireGuardNginxConfig >/dev/null 2>&1; then
+        PATH="${oldPath}"
+        return 1
+    fi
+    PATH="${oldPath}"
+    grep -qxF 'old config' "${nginxTarget}"
+    ! find "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \) | grep -q .
+
     controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
     resetMenuActions
-    manageMainControllerSubscriptions <<<"2
+    manageMainControllerSubscriptions <<<"3
 1
 ${controlledCredential}
 edge-a
-10"
-    assertMenuAction subscribe
+3
+11"
     subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
 
+    failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+    failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+    if subscriptionWireGuardAddPeerFromCredential "bad alias" "${failingCredentialJson}" >/dev/null 2>&1; then
+        return 1
+    fi
+    wireGuardApplyShouldFail=true
+    if subscriptionWireGuardAddPeerFromCredential "edge-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        wireGuardApplyShouldFail=
+        return 1
+    fi
+    wireGuardApplyShouldFail=
+    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-fail")' >/dev/null 2>&1; then
+        return 1
+    fi
+    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-fail")' >/dev/null 2>&1; then
+        return 1
+    fi
+
+    addSourceShouldFail=true
+    if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        addSourceShouldFail=
+        return 1
+    fi
+    addSourceShouldFail=
+    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-addfail")' >/dev/null 2>&1; then
+        return 1
+    fi
+
+    setCredentialShouldFail=true
+    if subscriptionWireGuardAddPeerFromCredential "edge-setfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        setCredentialShouldFail=
+        return 1
+    fi
+    setCredentialShouldFail=
+    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+        return 1
+    fi
+    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+        return 1
+    fi
+
     updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
     resetMenuActions
-    manageMainControllerSubscriptions <<<"3
+    manageMainControllerSubscriptions <<<"4
 ${updatedCredential}
 edge-a
-10"
+11"
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
 
     resetMenuActions
-    manageMainControllerSubscriptions <<<"8
+    manageMainControllerSubscriptions <<<"9
 edge-a
 disable
-10"
+11"
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
-    resetMenuActions
-    manageMainControllerSubscriptions <<<"8
-edge-a
-enable
-10"
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
-    setSubscriptionSourceSyncFailure edge-a remote_error old-error
     resetMenuActions
     manageMainControllerSubscriptions <<<"9
 edge-a
-10"
+enable
+11"
+    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+    setSubscriptionSourceSyncFailure edge-a remote_error old-error
+    resetMenuActions
+    manageMainControllerSubscriptions <<<"10
+edge-a
+11"
     subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
     resetMenuActions
-    manageMainControllerSubscriptions <<<"4
-10"
-    assertMenuAction 'statusCard:被控服务器健康检查'
+    manageMainControllerSubscriptions <<<"5
+11"
+    assertMenuAction 'userJsonCard:被控服务器健康检查'
+
+    installControlShouldFail=true
+    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+        installControlShouldFail=
+        return 1
+    fi
+    installControlShouldFail=
+    wireGuardApplyShouldFail=true
+    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+        wireGuardApplyShouldFail=
+        return 1
+    fi
+    wireGuardApplyShouldFail=
+    refreshControlShouldFail=true
+    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+        refreshControlShouldFail=
+        return 1
+    fi
+    refreshControlShouldFail=
+    serviceQueueShouldFail=true
+    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+        serviceQueueShouldFail=
+        return 1
+    fi
+    serviceQueueShouldFail=
+
     resetMenuActions
     manageSubscriptionWireGuardControlMenu <<<"8
 9

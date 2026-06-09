@@ -45,6 +45,87 @@ subscriptionWireGuardAddressHost() {
     echo "${address%%/*}"
 }
 
+subscriptionWireGuardValidIPv4Host() {
+    local address=$1
+    local host octet
+    local -a octets
+    [[ "${address}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+    IFS=. read -r -a octets <<<"${address}"
+    for octet in "${octets[@]}"; do
+        [[ "${octet}" =~ ^[0-9]+$ ]] && ((10#${octet} >= 0 && 10#${octet} <= 255)) || return 1
+    done
+}
+
+subscriptionWireGuardValidHostname() {
+    local host=$1
+    [[ "${host}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]
+}
+
+subscriptionWireGuardValidPort() {
+    local port=$1
+    [[ "${port}" =~ ^[0-9]+$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535))
+}
+
+subscriptionWireGuardValidIPv4Cidr() {
+    local address=$1
+    local host cidr octet
+    local -a octets
+    [[ "${address}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$ ]] || return 1
+    host=${address%/*}
+    cidr=${address#*/}
+    ((10#${cidr} >= 0 && 10#${cidr} <= 32)) || return 1
+    IFS=. read -r -a octets <<<"${host}"
+    for octet in "${octets[@]}"; do
+        [[ "${octet}" =~ ^[0-9]+$ ]] && ((10#${octet} >= 0 && 10#${octet} <= 255)) || return 1
+    done
+}
+
+subscriptionWireGuardValidEndpointHost() {
+    local host=$1
+    [[ -n "${host}" && "${host}" != "null" && "${host}" != */* && "${host}" != *:* && ! "${host}" =~ [[:space:]] ]] &&
+        (subscriptionWireGuardValidIPv4Host "${host}" || subscriptionWireGuardValidHostname "${host}")
+}
+
+subscriptionWireGuardValidTokenValue() {
+    local value=$1
+    [[ -n "${value}" && "${value}" != "null" && ! "${value}" =~ [[:space:]] ]]
+}
+
+subscriptionWireGuardValidPublicKeyValue() {
+    local value=$1
+    [[ -n "${value}" && "${value}" != "null" && ! "${value}" =~ [[:space:]] ]]
+}
+
+subscriptionWireGuardValidateMainCredentialJson() {
+    local credentialJson=$1
+    local endpointHost listenPort network address publicKey
+    [[ "$(jq -r '.kind // empty' <<<"${credentialJson}")" == "main" ]] || return 1
+    endpointHost=$(jq -r '.endpoint_host // empty' <<<"${credentialJson}")
+    listenPort=$(jq -r '.listen_port // empty' <<<"${credentialJson}")
+    network=$(jq -r '.network // empty' <<<"${credentialJson}")
+    address=$(jq -r '.address // empty' <<<"${credentialJson}")
+    publicKey=$(jq -r '.public_key // empty' <<<"${credentialJson}")
+    subscriptionWireGuardValidEndpointHost "${endpointHost}" &&
+        subscriptionWireGuardValidPort "${listenPort}" &&
+        subscriptionWireGuardValidIPv4Cidr "${network}" &&
+        subscriptionWireGuardValidIPv4Cidr "${address}" &&
+        subscriptionWireGuardValidPublicKeyValue "${publicKey}"
+}
+
+subscriptionWireGuardValidateControlledCredentialJson() {
+    local credentialJson=$1
+    local address publicKey controlPort token
+    [[ "$(jq -r '.kind // empty' <<<"${credentialJson}")" == "controlled" ]] || return 1
+    address=$(jq -r '.address // empty' <<<"${credentialJson}")
+    publicKey=$(jq -r '.public_key // empty' <<<"${credentialJson}")
+    controlPort=$(jq -r '.control_port // empty' <<<"${credentialJson}")
+    token=$(jq -r '.token // empty' <<<"${credentialJson}")
+    subscriptionWireGuardValidIPv4Cidr "${address}" &&
+        subscriptionWireGuardValidPublicKeyValue "${publicKey}" &&
+        subscriptionWireGuardValidPort "${controlPort}" &&
+        subscriptionWireGuardValidTokenValue "${token}"
+}
+
 subscriptionWireGuardBase64UrlEncode() {
     base64 -w 0 | tr '+/' '-_' | tr -d '='
 }
@@ -107,6 +188,24 @@ subscriptionWireGuardWriteState() {
         return 1
     fi
     commitGeneratedJsonFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+}
+
+subscriptionWireGuardRestoreStateAndConfig() {
+    local previousState=$1
+    local previousAddress
+    previousAddress=$(jq -r '.address // empty' <<<"${previousState}") || return 1
+    subscriptionWireGuardWriteState --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1 || return 1
+    if [[ -n "${previousAddress}" ]]; then
+        applySubscriptionWireGuardService >/dev/null 2>&1 || return 1
+    else
+        stopSubscriptionWireGuardControlService >/dev/null 2>&1 || true
+        rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || return 1
+    fi
+}
+
+subscriptionWireGuardRestoreGroupsState() {
+    local previousGroupsState=$1
+    subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || return 1
 }
 
 subscriptionWireGuardRole() {
@@ -206,6 +305,8 @@ applySubscriptionWireGuardService() {
     elif command -v wg-quick >/dev/null 2>&1; then
         wg-quick down "${interface}" >/dev/null 2>&1 || true
         wg-quick up "${interface}" >/dev/null 2>&1 || return 1
+    else
+        return 1
     fi
 }
 
@@ -238,14 +339,14 @@ ensureSubscriptionWireGuardNginxConfig() {
     local controlPort
     local targetPath
     local tmpPath
+    local backupPath=
     state=$(subscriptionWireGuardReadState)
     listenHost=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${state}")")
     controlPort=$(jq -r '.control_port' <<<"${state}")
     [[ -n "${listenHost}" && "${listenHost}" != "null" ]] || return 1
     targetPath=$(subscriptionWireGuardNginxConfigFile)
-    tmpPath="${targetPath}.tmp"
-    mkdir -p "$(dirname "${targetPath}")"
-    cat >"${tmpPath}" <<EOF
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || return 1
+    cat >"${tmpPath}" <<EOF || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 server {
     listen ${listenHost}:${controlPort};
     server_name _;
@@ -265,20 +366,22 @@ server {
 }
 EOF
     if command -v nginx >/dev/null 2>&1; then
-        local backupPath="${targetPath}.bak"
-        [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
-        mv "${tmpPath}" "${targetPath}"
+        if [[ -f "${targetPath}" ]]; then
+            padmCreateTempFileForTarget backupPath "${targetPath}" backup || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+            cp "${targetPath}" "${backupPath}" || { padmRemoveCleanupPath "${tmpPath}"; padmRemoveCleanupPath "${backupPath}"; return 1; }
+        fi
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"; return 1; }
         if ! nginx -t >/tmp/padm-wg-control-nginx-test.log 2>&1; then
-            if [[ -f "${backupPath}" ]]; then
-                mv "${backupPath}" "${targetPath}"
+            if [[ -n "${backupPath}" && -f "${backupPath}" ]]; then
+                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || padmRemoveCleanupPath "${backupPath}"
             else
                 rm -f "${targetPath}"
             fi
             return 1
         fi
-        rm -f "${backupPath}"
+        [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
     else
-        mv "${tmpPath}" "${targetPath}"
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     fi
 }
 
@@ -298,11 +401,25 @@ subscriptionWireGuardCredentialEncode() {
 subscriptionWireGuardCredentialDecode() {
     local credential=$1
     local payload
+    local kind
     credential=$(printf '%s' "${credential}" | tr -d '[:space:]')
     [[ "${credential}" == padmwg1:* ]] || return 1
     payload=${credential#padmwg1:}
     payload=$(subscriptionWireGuardBase64UrlDecode "${payload}") || return 1
-    jq -e -c 'select(.version == 1 and (.kind == "main" or .kind == "controlled"))' <<<"${payload}"
+    payload=$(jq -e -c 'select(.version == 1 and (.kind == "main" or .kind == "controlled"))' <<<"${payload}") || return 1
+    kind=$(jq -r '.kind' <<<"${payload}")
+    case "${kind}" in
+    main)
+        subscriptionWireGuardValidateMainCredentialJson "${payload}" || return 1
+        ;;
+    controlled)
+        subscriptionWireGuardValidateControlledCredentialJson "${payload}" || return 1
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+    printf '%s\n' "${payload}"
 }
 
 initSubscriptionWireGuardMain() {
@@ -310,10 +427,16 @@ initSubscriptionWireGuardMain() {
     local listenPort
     local controlPort
     local address
+    local publicKey
+    local previousState
     if [[ "$(subscriptionWireGuardRole)" == "controlled" ]]; then
         errorCard "当前机器已初始化为被控" "第一版只支持星型拓扑，被控不能再作为主控"
         return 1
     fi
+    previousState=$(subscriptionWireGuardReadState) || {
+        errorCard "WireGuard 状态读取失败"
+        return 1
+    }
     installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     listenPort=$(subscriptionWireGuardDefaultListenPort)
@@ -321,14 +444,22 @@ initSubscriptionWireGuardMain() {
     address=$(subscriptionWireGuardDefaultMainAddress)
     autoRead wg_main_endpoint_host "请输入主控公网地址或域名[用于被控连接 WireGuard]:" endpointHost
     [[ -n "${endpointHost}" ]] || endpointHost=${currentHost:-}
-    if [[ -z "${endpointHost}" ]]; then
-        errorCard "主控接入地址不可为空" "请填写被控能访问到的主控公网 IP 或域名"
+    if ! subscriptionWireGuardValidEndpointHost "${endpointHost}"; then
+        errorCard "主控接入地址无效" "请填写被控能访问到的主控公网 IP 或域名，不要包含协议、路径或空格"
         return 1
     fi
+    publicKey=$(subscriptionWireGuardPublicKey) || {
+        errorCard "WireGuard 公钥读取失败"
+        return 1
+    }
+    subscriptionWireGuardValidPublicKeyValue "${publicKey}" || {
+        errorCard "WireGuard 公钥无效"
+        return 1
+    }
     subscriptionWireGuardWriteState \
       --arg endpointHost "${endpointHost}" \
       --arg address "${address}" \
-      --arg publicKey "$(subscriptionWireGuardPublicKey)" \
+      --arg publicKey "${publicKey}" \
       --argjson listenPort "${listenPort}" \
       --argjson controlPort "${controlPort}" \
       '.enabled = true | .role = "main" | .address = $address | .endpoint_host = $endpointHost | .public_key = $publicKey | .listen_port = $listenPort | .control_port = $controlPort' || {
@@ -336,6 +467,7 @@ initSubscriptionWireGuardMain() {
         return 1
       }
     applySubscriptionWireGuardService || {
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
         errorCard "WireGuard 主控服务启动失败"
         return 1
     }
@@ -349,33 +481,61 @@ initSubscriptionWireGuardMain() {
 initSubscriptionWireGuardControlled() {
     local address=
     local controlPort
+    local publicKey
+    local previousState
     if [[ "$(subscriptionWireGuardRole)" == "main" ]]; then
         errorCard "当前机器已初始化为主控" "第一版只支持星型拓扑，主控不能再作为被控"
         return 1
     fi
+    previousState=$(subscriptionWireGuardReadState) || {
+        errorCard "WireGuard 状态读取失败"
+        return 1
+    }
     installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     controlPort=$(subscriptionWireGuardDefaultControlPort)
     autoRead wg_controlled_address "请输入本机 WireGuard 内网地址[默认 10.77.0.2/24]：" address
     [[ -n "${address}" ]] || address="10.77.0.2/24"
-    if ! grep -qE '^[0-9.]+/[0-9]+$' <<<"${address}"; then
+    if ! subscriptionWireGuardValidIPv4Cidr "${address}"; then
         errorCard "WireGuard 内网地址格式无效" "示例：10.77.0.2/24"
         return 1
     fi
+    publicKey=$(subscriptionWireGuardPublicKey) || {
+        errorCard "WireGuard 公钥读取失败"
+        return 1
+    }
+    subscriptionWireGuardValidPublicKeyValue "${publicKey}" || {
+        errorCard "WireGuard 公钥无效"
+        return 1
+    }
     subscriptionWireGuardWriteState \
       --arg address "${address}" \
-      --arg publicKey "$(subscriptionWireGuardPublicKey)" \
+      --arg publicKey "${publicKey}" \
       --argjson controlPort "${controlPort}" \
       '.enabled = true | .role = "controlled" | .address = $address | .public_key = $publicKey | .control_port = $controlPort' || {
         errorCard "WireGuard 被控状态写入失败"
         return 1
       }
     applySubscriptionWireGuardService || {
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
         errorCard "WireGuard 被控服务启动失败"
         return 1
     }
-    installSubscriptionControlService
-    refreshSubscriptionWireGuardNginxControl && serviceQueueApply
+    installSubscriptionControlService || {
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        errorCard "被控控制服务安装失败"
+        return 1
+    }
+    refreshSubscriptionWireGuardNginxControl || {
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        errorCard "WireGuard Nginx 控制面配置失败"
+        return 1
+    }
+    serviceQueueApply || {
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        errorCard "WireGuard Nginx 控制面重载失败"
+        return 1
+    }
     [[ -f "$(subscriptionWireGuardStateFile)" && -f "$(subscriptionWireGuardConfigFile)" ]] || {
         errorCard "WireGuard 被控配置未落地"
         return 1
@@ -386,6 +546,7 @@ initSubscriptionWireGuardControlled() {
 showSubscriptionWireGuardMainCredential() {
     local state
     local payload
+    local credentialJson
     state=$(subscriptionWireGuardReadState)
     if [[ "$(jq -r '.role' <<<"${state}")" != "main" ]]; then
         errorCard "本机还不是主控" "请先初始化本机为主控"
@@ -397,7 +558,18 @@ showSubscriptionWireGuardMainCredential() {
       --arg network "$(jq -r '.network' <<<"${state}")" \
       --arg address "$(jq -r '.address' <<<"${state}")" \
       --arg publicKey "$(jq -r '.public_key' <<<"${state}")" \
-      '{endpoint_host:$endpointHost, listen_port:$listenPort, network:$network, address:$address, public_key:$publicKey}')
+      '{endpoint_host:$endpointHost, listen_port:$listenPort, network:$network, address:$address, public_key:$publicKey}') || {
+        errorCard "主控状态读取失败"
+        return 1
+      }
+    credentialJson=$(jq -c '. + {version:1, kind:"main"}' <<<"${payload}") || {
+        errorCard "主控状态读取失败"
+        return 1
+    }
+    subscriptionWireGuardValidateMainCredentialJson "${credentialJson}" || {
+        errorCard "主控状态不完整，无法导出接入凭据" "请先修复/重启 WireGuard 控制面"
+        return 1
+    }
     statusCard "本机主控接入凭据" "主控接入凭据：$(subscriptionWireGuardCredentialEncode main "${payload}")" "用途：复制到被控服务器导入" "凭据只包含 WireGuard 入网信息，不包含公网订阅地址"
 }
 
@@ -405,42 +577,75 @@ importSubscriptionWireGuardMainCredential() {
     local credential=
     local credentialJson
     local endpoint
+    local previousState
     autoRead wg_main_credential "请粘贴主控接入凭据:" credential
     credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || { errorCard "主控接入凭据无效"; return 1; }
     if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "main" ]]; then
         errorCard "请粘贴主控接入凭据"
         return 1
     fi
+    subscriptionWireGuardValidateMainCredentialJson "${credentialJson}" || {
+        errorCard "主控接入凭据字段不完整或格式无效"
+        return 1
+    }
     if [[ "$(subscriptionWireGuardRole)" != "controlled" ]]; then
         errorCard "请先初始化本机为被控" "第一版星型拓扑要求被控导入主控凭据"
         return 1
     fi
+    previousState=$(subscriptionWireGuardReadState) || {
+        errorCard "当前 WireGuard 状态读取失败"
+        return 1
+    }
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
     subscriptionWireGuardWriteState \
       --arg network "$(jq -r '.network' <<<"${credentialJson}")" \
       --arg mainAddress "$(jq -r '.address' <<<"${credentialJson}")" \
       --arg mainPublicKey "$(jq -r '.public_key' <<<"${credentialJson}")" \
       --arg endpoint "${endpoint}" \
-      '.network = $network | .peers = [{id:"main", name:"主控", address:$mainAddress, public_key:$mainPublicKey, endpoint:$endpoint, enabled:true}]'
-    applySubscriptionWireGuardService
+      '.network = $network | .peers = [{id:"main", name:"主控", address:$mainAddress, public_key:$mainPublicKey, endpoint:$endpoint, enabled:true}]' || {
+        errorCard "主控接入状态写入失败"
+        return 1
+      }
+    applySubscriptionWireGuardService || {
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        errorCard "WireGuard 主控接入服务启动失败"
+        return 1
+    }
     successCard "主控接入凭据已导入" "主控端点：${endpoint}" "下一步：查看本机被控接入凭据，并复制回主控添加"
 }
 
 showSubscriptionWireGuardControlledCredential() {
     local state
     local payload
+    local credentialJson
+    local token
     state=$(subscriptionWireGuardReadState)
     if [[ "$(jq -r '.role' <<<"${state}")" != "controlled" ]]; then
         errorCard "本机还不是被控" "请先初始化本机为被控，并导入主控接入凭据"
         return 1
     fi
-    subscriptionControlEnsureToken
+    subscriptionControlEnsureToken || {
+        errorCard "控制 Token 生成失败"
+        return 1
+    }
+    token=$(subscriptionControlToken)
     payload=$(jq -n \
       --arg address "$(jq -r '.address' <<<"${state}")" \
       --arg publicKey "$(jq -r '.public_key' <<<"${state}")" \
       --argjson controlPort "$(jq -r '.control_port' <<<"${state}")" \
-      --arg token "$(subscriptionControlToken)" \
-      '{address:$address, public_key:$publicKey, control_port:$controlPort, token:$token}')
+      --arg token "${token}" \
+      '{address:$address, public_key:$publicKey, control_port:$controlPort, token:$token}') || {
+        errorCard "被控状态读取失败"
+        return 1
+      }
+    credentialJson=$(jq -c '. + {version:1, kind:"controlled"}' <<<"${payload}") || {
+        errorCard "被控状态读取失败"
+        return 1
+    }
+    subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || {
+        errorCard "被控状态不完整，无法导出接入凭据" "请先修复/重启 WireGuard 控制面"
+        return 1
+    }
     statusCard "本机被控接入凭据" "被控接入凭据：$(subscriptionWireGuardCredentialEncode controlled "${payload}")" "用途：复制到主控服务器添加被控" "控制接口只通过 WireGuard 内网访问" "无需安装公网订阅服务"
 }
 
@@ -452,24 +657,45 @@ subscriptionWireGuardAddPeerFromCredential() {
     local publicKey
     local controlPort
     local token
+    local previousState
+    local previousGroupsState
     if [[ "$(subscriptionWireGuardRole)" != "main" ]]; then
         errorCard "只有主控可以添加被控服务器" "第一版只支持一台主控管理多台被控"
         return 1
     fi
+    [[ -n "${alias}" && "${alias}" =~ ^[a-zA-Z0-9_-]+$ ]] || return 1
     [[ "$(jq -r '.kind' <<<"${credentialJson}")" == "controlled" ]] || return 1
+    subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || return 1
     address=$(jq -r '.address' <<<"${credentialJson}")
     host=$(subscriptionWireGuardAddressHost "${address}")
     publicKey=$(jq -r '.public_key' <<<"${credentialJson}")
     controlPort=$(jq -r '.control_port' <<<"${credentialJson}")
     token=$(jq -r '.token' <<<"${credentialJson}")
+    previousState=$(subscriptionWireGuardReadState) || return 1
+    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        return 1
+    }
     subscriptionWireGuardWriteState \
       --arg id "${alias}" \
       --arg address "${address}" \
       --arg publicKey "${publicKey}" \
-      'if any(.peers[]?; .id == $id) then .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end) else .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, enabled:true}] end'
-    applySubscriptionWireGuardService
-    addSubscriptionSourceState "${alias}" "${alias}" "${host}" "${controlPort}"
-    setSubscriptionSourceCredential "${alias}" "${host}" "${controlPort}" "${token}"
+      'if any(.peers[]?; .id == $id) then .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end) else .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, enabled:true}] end' || return 1
+    if ! applySubscriptionWireGuardService; then
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || true
+        return 1
+    fi
+    if ! addSubscriptionSourceState "${alias}" "${alias}" "${host}" "${controlPort}"; then
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || true
+        return 1
+    fi
+    if ! setSubscriptionSourceCredential "${alias}" "${host}" "${controlPort}" "${token}"; then
+        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || true
+        return 1
+    fi
 }
 
 showSubscriptionWireGuardStatus() {
@@ -493,14 +719,30 @@ testSubscriptionWireGuardControl() {
 }
 
 restartSubscriptionWireGuardControl() {
-    installSubscriptionControlService
-    applySubscriptionWireGuardService
-    refreshSubscriptionWireGuardNginxControl && serviceQueueApply
+    installSubscriptionControlService || {
+        errorCard "订阅控制服务安装失败"
+        return 1
+    }
+    applySubscriptionWireGuardService || {
+        errorCard "WireGuard 服务重启失败"
+        return 1
+    }
+    refreshSubscriptionWireGuardNginxControl || {
+        errorCard "WireGuard Nginx 控制面配置失败"
+        return 1
+    }
+    serviceQueueApply || {
+        errorCard "WireGuard Nginx 控制面重载失败"
+        return 1
+    }
     successCard "WireGuard 控制面已修复/重启"
 }
 
 disableSubscriptionWireGuardControl() {
     stopSubscriptionWireGuardControlService
-    subscriptionWireGuardWriteState '.enabled = false'
+    subscriptionWireGuardWriteState '.enabled = false' || {
+        errorCard "WireGuard 控制面状态写入失败"
+        return 1
+    }
     successCard "WireGuard 控制面已关闭"
 }

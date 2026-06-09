@@ -237,19 +237,23 @@ handleScriptCommand() {
         exit 0
     elif [[ "${cronName}" == "SyncSubscriptionGroups" ]]; then
         runSubscriptionGroupSyncCron
-        exit 0
+        exit $?
     elif [[ "${cronName}" == "SubscriptionControl" ]]; then
         shift
         handleSubscriptionControl "$@"
-        exit 0
+        exit $?
     elif [[ "${cronName}" == "InstallSubscription" ]]; then
+        local installStatus
         mkdirTools
         installSubscribe
-        readNginxSubscribe
-        if [[ -n "${subscribePort}" ]]; then
-            successCard "订阅服务安装完成: ${subscribeType} 端口 ${subscribePort}"
+        installStatus=$?
+        if [[ "${installStatus}" -eq 0 ]]; then
+            readNginxSubscribe
+            if [[ -n "${subscribePort}" ]]; then
+                successCard "订阅服务安装完成: ${subscribeType} 端口 ${subscribePort}"
+            fi
         fi
-        exit 0
+        exit "${installStatus}"
     fi
 }
 

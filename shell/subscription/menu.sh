@@ -176,7 +176,7 @@ manageSharedSubscriptions() {
         1) createAndSyncUserSubscriptionWizard ;;
         2) showUserSubscriptions ;;
         3) manageUserSubscriptionItem ;;
-        4) runSubscriptionGroupSync ;;
+        4) runSubscriptionGroupSync || true ;;
         5)
             readInstallType
             readInstallProtocolType
@@ -510,6 +510,10 @@ addOtherSubscribe() {
         errorCard "请粘贴被控接入凭据"
         return 1
     fi
+    subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || {
+        errorCard "被控接入凭据字段不完整或格式无效"
+        return 1
+    }
     host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
     port=$(jq -r '.control_port' <<<"${credentialJson}")
     autoRead subscription_source_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1]:" alias
@@ -716,6 +720,10 @@ setSubscriptionSourceControlTokenMenu() {
         errorCard "请粘贴被控接入凭据"
         return 1
     fi
+    subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || {
+        errorCard "被控接入凭据字段不完整或格式无效"
+        return 1
+    }
     host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
     port=$(jq -r '.control_port' <<<"${credentialJson}")
     token=$(jq -r '.token' <<<"${credentialJson}")
@@ -730,7 +738,10 @@ setSubscriptionSourceControlTokenMenu() {
         errorCard "被控服务器别名无效"
         return 1
     fi
-    setSubscriptionSourceCredential "${sourceId}" "${host}" "${port}" "${token}"
+    setSubscriptionSourceCredential "${sourceId}" "${host}" "${port}" "${token}" || {
+        errorCard "被控服务器凭据更新失败"
+        return 1
+    }
     successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Token 已保存，可继续测试被控连接"
 }
 
@@ -821,7 +832,7 @@ manageSubscriptionAutomation() {
         menuClose
         autoRead subscription_automation_menu "请选择:" subscriptionAutomationStatus
         case "${subscriptionAutomationStatus}" in
-        1) runSubscriptionGroupSync ;;
+        1) runSubscriptionGroupSync || true ;;
         2)
             readInstallType
             readInstallProtocolType
@@ -902,7 +913,7 @@ manageSubscriptionSyncSettings() {
             refreshSubscriptionGroupSyncCron
             successCard "自动同步间隔已更新"
             ;;
-        3) runSubscriptionGroupSync ;;
+        3) runSubscriptionGroupSync || true ;;
         4)
             readInstallType
             readInstallProtocolType

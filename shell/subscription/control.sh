@@ -451,9 +451,15 @@ subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
     local createAccounts
+    local rc=0
     createAccounts=$(jq -c '.create' <<<"${plan}")
-    subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"
-    subscriptionSyncApplyAccountPlan "${plan}"
+    if ! subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"; then
+        rc=1
+    fi
+    if ! subscriptionSyncApplyAccountPlan "${plan}"; then
+        rc=1
+    fi
+    return "${rc}"
 }
 
 subscriptionControlRefreshPublishedSubscriptions() {
@@ -480,11 +486,20 @@ subscriptionControlApplySync() {
         jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
         return 0
     fi
-    subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"
+    if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
+        jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", plan:$plan}'
+        return 1
+    fi
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
-        subscriptionSyncReconcileLocalServices
+        if ! subscriptionSyncReconcileLocalServices; then
+            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", plan:$plan}'
+            return 1
+        fi
     else
-        subscriptionControlRefreshPublishedSubscriptions
+        if ! subscriptionControlRefreshPublishedSubscriptions; then
+            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", plan:$plan}'
+            return 1
+        fi
     fi
     jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
 }
