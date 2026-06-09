@@ -5,7 +5,6 @@ REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 
-
 runCleanupTrapRegression() {
     local tmpDir exitProbe intProbe intOutput termProbe termOutput
 
@@ -1111,6 +1110,68 @@ runSubscribeUserOutputTransactionRegression() {
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
     SCRIPT_DIR="${oldScriptDir}"
 }
+
+runSubscribeReturnFailureRegression() (
+    local localDir="${TMP_DIR}/subscribe-return-local"
+    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local installCalls=0
+    local renderCalls=0
+    local showAccountsCalls=0
+
+    # Re-source manage.sh because the regression bootstrap replaces subscribe with a menu-safe no-op.
+    source "${PROJECT_ROOT}/shell/core/manage.sh"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+    printf 'existing-salt\n' >"${localDir}/subscribeSalt"
+
+    readInstallProtocolType() { return 0; }
+    readNginxSubscribe() { return 0; }
+    installSubscribe() {
+        installCalls=$((installCalls + 1))
+        return 1
+    }
+    showAccounts() {
+        showAccountsCalls=$((showAccountsCalls + 1))
+        return 0
+    }
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        return 0
+    }
+
+    coreInstallType=1
+    if subscribe false true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${installCalls}" == "1" ]]
+    [[ "${showAccountsCalls}" == "0" ]]
+    [[ "${renderCalls}" == "0" ]]
+
+    installSubscribe() {
+        installCalls=$((installCalls + 1))
+        return 0
+    }
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        return 1
+    }
+    if subscribe false true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${renderCalls}" == "1" ]]
+
+    coreInstallType=
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        return 0
+    }
+    if subscribe false true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${renderCalls}" == "1" ]]
+
+    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+)
 
 runRealityStreamDisableRegression() {
     local oldPath="${PATH}"
@@ -4854,6 +4915,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression
     runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
+    runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
 }
 
 runRegressionSubscription() {

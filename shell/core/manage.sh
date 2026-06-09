@@ -1683,7 +1683,9 @@ renderSubscribeUserOutputs() {
 # 订阅
 subscribe() {
     readInstallProtocolType
-    installSubscribe
+    if ! installSubscribe; then
+        return 1
+    fi
 
     readNginxSubscribe
     local renewSalt=$1
@@ -1709,9 +1711,10 @@ subscribe() {
         cleanDirectoryContent "${localBase}/clashMeta"
         cleanDirectoryContent "${localBase}/sing-box"
         showAccounts >/dev/null
-        renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}"
+        renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" || return 1
     else
         errorCard "未安装传统 TLS fallback 静态站点，无法使用订阅服务"
+        return 1
     fi
 }
 
