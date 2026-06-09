@@ -2438,6 +2438,24 @@ runRemoteControlServerRefreshRegression() (
         reconcileCalls=$((reconcileCalls + 1))
     }
 
+    set +e
+    subscriptionControlApplySync '{"desired_users":[{"id":"","uuid":""}]}' >"${responseFile}"
+    local invalidEmptyIdStatus=$?
+    subscriptionControlApplySync '{"desired_users":[{"id":"team-a"},{"id":"team-a"}]}' >"${responseFile}.duplicate"
+    local invalidDuplicateStatus=$?
+    subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":123}]}' >"${responseFile}.uuid"
+    local invalidUuidStatus=$?
+    set -e
+    [[ "${invalidEmptyIdStatus}" -ne 0 ]]
+    [[ "${invalidDuplicateStatus}" -ne 0 ]]
+    [[ "${invalidUuidStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}" >/dev/null
+    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.duplicate" >/dev/null
+    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.uuid" >/dev/null
+
+    subscriptionSyncPlanFromAccounts() {
+        printf '{"create":["sub_team_a"],"remove":[]}'
+    }
     PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
     jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
     [[ "${subscribeCalls}" == "1" ]]
@@ -2484,6 +2502,26 @@ runRemoteControlServerRefreshRegression() (
     set -e
     [[ "${reconcileStatus}" -ne 0 ]]
     jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed"' "${responseFile}" >/dev/null
+
+    subscriptionSyncPlanFromAccounts() {
+        printf '{"create":[null],"remove":[]}'
+    }
+    set +e
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-d","uuid":"44444444-4444-4444-4444-444444444444"}],"dry_run":true}' >"${responseFile}"
+    local invalidPlanStatus=$?
+    set -e
+    [[ "${invalidPlanStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "plan_failed" and .error_detail.type == "plan_failed" and (.plan.create[0] == null)' "${responseFile}" >/dev/null
+
+    subscriptionSyncPlanFromAccounts() {
+        printf 'not-json\n'
+    }
+    set +e
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-e","uuid":"55555555-5555-5555-5555-555555555555"}],"dry_run":true}' >"${responseFile}"
+    local badPlanStatus=$?
+    set -e
+    [[ "${badPlanStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "plan_failed" and .error_detail.type == "plan_failed" and has("plan") == false' "${responseFile}" >/dev/null
 )
 
 runSubscriptionControlServiceInstallRegression() (

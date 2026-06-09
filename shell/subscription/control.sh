@@ -539,18 +539,34 @@ subscriptionControlAuthorized() {
 
 subscriptionControlValidateSyncPayload() {
     local payload=$1
-    jq -e 'type == "object" and (.desired_users? | type == "array") and ((has("dry_run") | not) or (.dry_run | type == "boolean"))' <<<"${payload}" >/dev/null 2>&1
+    jq -e '
+      def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
+      type == "object" and
+      (.desired_users? | type == "array") and
+      ((has("dry_run") | not) or (.dry_run | type == "boolean")) and
+      all(.desired_users[]?; type == "object" and
+        (.id | valid_id) and
+        ((has("uuid") | not) or (.uuid | type == "string")) and
+        ((has("name") | not) or (.name | type == "string")) and
+        ((has("account") | not) or (.account | type == "string")) and
+        ((has("traffic_limit_gb") | not) or ((.traffic_limit_gb | type) as $type | $type == "number" or $type == "string"))) and
+      ([.desired_users[]?.id] | length) == ([.desired_users[]?.id] | unique | length)
+    ' <<<"${payload}" >/dev/null 2>&1
 }
 
 subscriptionControlDesiredUsers() {
     local payload=$1
-    jq '[.desired_users[]? | select((.id // "") != "") | {id, uuid: (.uuid // "")}]' <<<"${payload}"
+    jq '[.desired_users[]? | {id, uuid: (.uuid // "")}]' <<<"${payload}"
 }
 
 subscriptionControlSyncPlan() {
     local desiredUsers=$1
+    local ids
     local desiredAccounts
-    desiredAccounts=$(while IFS= read -r id; do subscriptionSyncAccountName "${id}"; done < <(jq -r '.[].id' <<<"${desiredUsers}") | sort -u)
+    ids=$(jq -r '.[].id' <<<"${desiredUsers}") || return 1
+    desiredAccounts=$(while IFS= read -r id; do
+        [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"
+    done <<<"${ids}" | sort -u) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccounts}"
 }
 
@@ -558,16 +574,19 @@ subscriptionControlUpdateDesiredUserState() {
     local desiredUsers=$1
     local createAccounts=$2
     local createUsers
+    local accountNames
     local accountName
     local id
     local uuid
     createUsers='[]'
+    accountNames=$(jq -r '.[]' <<<"${createAccounts}") || return 1
     while IFS= read -r accountName; do
+        [[ -n "${accountName}" ]] || continue
         id=$(subscriptionSyncAccountId "${accountName}")
-        uuid=$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .uuid // empty' <<<"${desiredUsers}")
+        uuid=$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .uuid // empty' <<<"${desiredUsers}") || return 1
         [[ -n "${uuid}" ]] || continue
-        createUsers=$(jq --arg id "${id}" --arg uuid "${uuid}" '. + [{id:$id, uuid:$uuid}]' <<<"${createUsers}")
-    done < <(jq -r '.[]?' <<<"${createAccounts}")
+        createUsers=$(jq --arg id "${id}" --arg uuid "${uuid}" '. + [{id:$id, uuid:$uuid}]' <<<"${createUsers}") || return 1
+    done <<<"${accountNames}"
     if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1; then
         subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --argjson users "${createUsers}" '
           .groups |= map(if .id == $groupId then
@@ -586,7 +605,8 @@ subscriptionControlApplyAccountPlan() {
     local desiredUsers=$2
     local createAccounts
     local rc=0
-    createAccounts=$(jq -c '.create' <<<"${plan}")
+    subscriptionSyncValidateAccountPlan "${plan}" || return 1
+    createAccounts=$(jq -c '.create' <<<"${plan}") || return 1
     if ! subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"; then
         rc=1
     fi
@@ -610,8 +630,22 @@ subscriptionControlApplySync() {
         return 1
     fi
     dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
-    desiredUsers=$(subscriptionControlDesiredUsers "${payload}")
-    plan=$(subscriptionControlSyncPlan "${desiredUsers}")
+    desiredUsers=$(subscriptionControlDesiredUsers "${payload}") || {
+        jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
+        return 1
+    }
+    if ! plan=$(subscriptionControlSyncPlan "${desiredUsers}"); then
+        jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划生成失败"}}'
+        return 1
+    fi
+    if ! subscriptionSyncValidateAccountPlan "${plan}"; then
+        if jq -e . <<<"${plan}" >/dev/null 2>&1; then
+            jq -n --argjson plan "${plan}" '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划格式无效"}, plan:$plan}'
+        else
+            jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划格式无效"}}'
+        fi
+        return 1
+    fi
     if jq -e '(.create | length == 0) and (.remove | length == 0)' <<<"${plan}" >/dev/null 2>&1; then
         jq -n --argjson plan "${plan}" --argjson dryRun "${dryRun}" '{ok:true, dry_run:$dryRun, changed:false, plan:$plan}'
         return 0
