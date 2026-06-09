@@ -2079,6 +2079,16 @@ JSON
       (.groups[0].user_groups[0].traffic_limit_gb == 1)
     ' "$(subscriptionGroupsFile)" >/dev/null
 
+    (
+        local summaryOutput
+        menuLine() { printf 'menu:%s\n' "$*"; }
+        menuClose() { return 0; }
+        summaryOutput=$(showSubscriptionGroupsStateSummary)
+        [[ "${summaryOutput}" == *"当前组：Edge Group(edge-group)"* ]]
+        [[ "${summaryOutput}" == *"分享订阅：1 个，启用 1 个"* ]]
+        [[ "${summaryOutput}" == *"服务器源：2 个，启用远端 1 个"* ]]
+    )
+
     if normalizeSubscriptionSourceInput 'remote.example.com:443:edge' >/dev/null 2>&1; then
         return 1
     fi
@@ -2104,8 +2114,24 @@ JSON
     subscriptionGroupsStateWrite '
       .groups[0].user_groups[0].enabled = true |
       .groups[0].user_groups[0].traffic_limit_gb = 1 |
+      .groups[0].traffic.admin = {upload:2097152, download:1048576, sources:{main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}}} |
+      .groups[0].traffic.sources = {main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}, "remote-edge":{upload:1048576, download:0, updated_at:"2026-06-10 10:01:00"}} |
       .groups[0].traffic.user_groups["team-a"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
     '
+    (
+        local trafficOutput
+        menuLine() { printf 'menu:%s\n' "$*"; }
+        menuClose() { return 0; }
+        trafficOutput=$(showAdminSubscriptionTraffic)
+        [[ "${trafficOutput}" == *"总上传：2 MB"* ]]
+        [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
+        [[ "${trafficOutput}" == *"来源数：1"* ]]
+        trafficOutput=$(showSubscriptionSourcesTraffic)
+        [[ "${trafficOutput}" == *"服务器数：2"* ]]
+        [[ "${trafficOutput}" == *"总上传：3 MB"* ]]
+        [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
+        [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
+    )
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
     if applySubscriptionQuotaPlan '{bad-json' 2>/dev/null; then
         return 1
@@ -2126,15 +2152,25 @@ JSON
     jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
     subscriptionGroupsStateWrite '.groups[0].user_groups[0].enabled = true'
     (
+        local quotaMenuOutput
+        local quotaMenuStatus
+        menuLine() { printf 'menu:%s\n' "$*"; }
+        menuClose() { return 0; }
         subscriptionSyncApplyAccountPlan() {
             return 42
         }
         reloadCore() {
             return 0
         }
-        if executeSubscriptionQuotaPlanMenu <<<"yes" >/dev/null 2>&1; then
+        set +e
+        quotaMenuOutput=$(executeSubscriptionQuotaPlanMenu <<<"yes" 2>/dev/null)
+        quotaMenuStatus=$?
+        set -e
+        if [[ "${quotaMenuStatus}" -eq 0 ]]; then
             return 1
         fi
+        [[ "${quotaMenuOutput}" == *"待处理订阅：1"* ]]
+        [[ "${quotaMenuOutput}" == *"动作：停用超额订阅并移除本机托管账号"* ]]
     )
     jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
     (

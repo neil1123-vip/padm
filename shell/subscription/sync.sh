@@ -359,11 +359,7 @@ executeSubscriptionQuotaPlanMenu() {
         errorCard "超限处理计划生成失败"
         return 1
     }
-    userJsonCard "超限处理计划" "${quotaPlan}"
-    if ! subscriptionQuotaValidatePlan "${quotaPlan}"; then
-        errorCard "超限处理计划格式无效"
-        return 1
-    fi
+    showSubscriptionQuotaPlanJson "${quotaPlan}" || return 1
     if [[ "$(jq 'length' <<<"${quotaPlan}")" == "0" ]]; then
         statusCard "无需处理" "当前没有已超额且仍启用的分享订阅"
         return 0

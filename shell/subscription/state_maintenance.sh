@@ -19,7 +19,20 @@ subscriptionGroupsStateSummaryJson() {
 }
 
 showSubscriptionGroupsStateSummary() {
-    userJsonCard "订阅状态摘要" "$(subscriptionGroupsStateSummaryJson)"
+    local summaryJson
+    local summary
+    summaryJson=$(subscriptionGroupsStateSummaryJson) || {
+        errorCard "订阅状态摘要读取失败"
+        return 1
+    }
+    summary=$(jq -r '
+      "当前组：" + ((.group_name // .group_id // "未知") | tostring) + "(" + ((.group_id // "unknown") | tostring) + ")\n" +
+      "分享订阅：" + ((.subscription_users // 0) | tostring) + " 个，启用 " + ((.enabled_users // 0) | tostring) + " 个\n" +
+      "服务器源：" + ((.sources // 0) | tostring) + " 个，启用远端 " + ((.enabled_remote_sources // 0) | tostring) + " 个\n" +
+      "同步状态：" + ((.sync.last_status // "pending") | tostring) + "，最近运行 " + ((.sync.last_run // "未运行") | tostring) + "\n" +
+      "流量更新时间：" + ((.traffic_updated_at // "unknown") | tostring)
+    ' <<<"${summaryJson}") || return 1
+    showSubscriptionJsonWithSummary "订阅状态摘要" "${summaryJson}" "${summary}"
 }
 
 createSubscriptionGroupsBackupMenu() {

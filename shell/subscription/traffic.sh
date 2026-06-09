@@ -291,8 +291,18 @@ showUserSubscriptionQuota() {
 
 showAdminSubscriptionTraffic() {
     local groupId
+    local traffic
+    local summary
     groupId=$(activeSubscriptionGroupId)
-    userJsonCard "我的流量" "$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .traffic.admin')"
+    traffic=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .traffic.admin')
+    summary=$(jq -r '
+      def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
+      "总上传：" + mb(.upload) + "\n" +
+      "总下载：" + mb(.download) + "\n" +
+      "来源数：" + (((.sources // {}) | length) | tostring) + "\n" +
+      "最近更新：" + (((.sources // {}) | to_entries | map(.value.updated_at // empty) | max) // (.updated_at // "未知") | tostring)
+    ' <<<"${traffic}") || return 1
+    showSubscriptionJsonWithSummary "我的流量" "${traffic}" "${summary}"
 }
 
 showUserSubscriptionTraffic() {
@@ -389,6 +399,19 @@ selectUserSubscriptionTrafficMenu() {
 
 showSubscriptionSourcesTraffic() {
     local groupId
+    local traffic
+    local summary
     groupId=$(activeSubscriptionGroupId)
-    userJsonCard "服务器流量" "$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .traffic.sources')"
+    traffic=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .traffic.sources')
+    summary=$(jq -r '
+      def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
+      def total($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
+      (. // {}) as $sources |
+      (total($sources | to_entries | map(.value))) as $total |
+      "服务器数：" + (($sources | length) | tostring) + "\n" +
+      "总上传：" + mb($total.upload) + "\n" +
+      "总下载：" + mb($total.download) + "\n" +
+      "最近更新：" + (($sources | to_entries | map(.value.updated_at // empty) | max) // "未知" | tostring)
+    ' <<<"${traffic}") || return 1
+    showSubscriptionJsonWithSummary "服务器流量" "${traffic}" "${summary}"
 }

@@ -258,11 +258,11 @@ showSubscriptionRemoteSyncPlan() {
     showSubscriptionJsonWithSummary "远程同步计划" "${plan}" "${summary}"
 }
 
-showSubscriptionQuotaPlan() {
-    local plan
+showSubscriptionQuotaPlanJson() {
+    local plan=$1
     local summary
-    plan=$(subscriptionQuotaDryRunPlan) || {
-        errorCard "超限处理计划生成失败"
+    subscriptionQuotaValidatePlan "${plan}" || {
+        errorCard "超限处理计划格式无效"
         return 1
     }
     summary=$(jq -r '
@@ -270,6 +270,15 @@ showSubscriptionQuotaPlan() {
       "动作：停用超额订阅并移除本机托管账号"
     ' <<<"${plan}") || return 1
     showSubscriptionJsonWithSummary "超限处理计划" "${plan}" "${summary}"
+}
+
+showSubscriptionQuotaPlan() {
+    local plan
+    plan=$(subscriptionQuotaDryRunPlan) || {
+        errorCard "超限处理计划生成失败"
+        return 1
+    }
+    showSubscriptionQuotaPlanJson "${plan}"
 }
 
 showUserSubscriptions() {
