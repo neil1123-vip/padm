@@ -365,13 +365,18 @@ subscriptionSyncApplyAccountPlanTransaction() {
     local syncPlan=$1
     local backupDir
     local applyStatus=0
+    SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     subscriptionSyncValidateAccountPlan "${syncPlan}" || return 1
     backupDir=$(subscriptionSyncCreateConfigBackups) || return 1
     if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
         applyStatus=1
     fi
     if [[ "${applyStatus}" -ne 0 ]]; then
-        subscriptionSyncRestoreConfigBackups "${backupDir}" >/dev/null 2>&1 || true
+        if ! subscriptionSyncRestoreConfigBackups "${backupDir}" >/dev/null 2>&1; then
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败，且配置恢复失败，请手动检查备份目录: ${backupDir}"
+            padmForgetCleanupPath "${backupDir}"
+            return 1
+        fi
         padmRemoveCleanupPath "${backupDir}"
         return 1
     fi
@@ -538,7 +543,7 @@ runSubscriptionGroupSync() {
                     rc=1
                 fi
                 if ! applySubscriptionQuotaPlanAccounts "${quotaPlan}"; then
-                    failures=$(jq '. + ["限额自动执行时，移除本机托管账号失败"]' <<<"${failures}")
+                    failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行时，移除本机托管账号失败}" '. + [$message]' <<<"${failures}")
                     rc=1
                 fi
             fi
@@ -554,7 +559,7 @@ runSubscriptionGroupSync() {
         return 1
     }
     if ! subscriptionSyncApplyAccountPlanTransaction "${syncPlan}"; then
-        failures=$(jq '. + ["本机同步计划应用失败"]' <<<"${failures}")
+        failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-本机同步计划应用失败}" '. + [$message]' <<<"${failures}")
         rc=1
     fi
 

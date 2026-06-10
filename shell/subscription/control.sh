@@ -666,6 +666,7 @@ subscriptionControlApplyAccountPlan() {
     local desiredUsers=$2
     local createAccounts
     local previousGroupsState
+    SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
     createAccounts=$(jq -c '.create' <<<"${plan}") || return 1
@@ -739,7 +740,7 @@ subscriptionControlApplySync() {
     if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
         padmRemoveCleanupPath "${configBackupDir}"
         padmRemoveCleanupPath "${outputBackupDir}"
-        jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", error_detail:{type:"apply_plan_failed", message:"同步计划应用失败"}, plan:$plan}'
+        jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-同步计划应用失败}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", error_detail:{type:"apply_plan_failed", message:$message}, plan:$plan}'
         return 1
     fi
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then

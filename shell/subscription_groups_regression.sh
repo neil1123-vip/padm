@@ -6358,6 +6358,65 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionSyncRollbackFailureRegression() (
+    local root="${TMP_DIR}/subscription-sync-rollback-failure"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local targetFile="${root}/xray/02_VLESS_TCP_inbounds.json"
+    local rc backupDirs=()
+
+    mkdir -p "${root}/xray" "${root}/tmp"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/xray/"
+    TMPDIR="${root}/tmp"
+    coreInstallType=1
+    ctlPath=
+    cat >"${targetFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
+JSON
+    eval "$(declare -f subscriptionSyncApplyAccountPlan | sed '1s/^subscriptionSyncApplyAccountPlan/originalSubscriptionSyncApplyAccountPlan/')"
+
+    initXrayClients() {
+        jq -n --arg email "$3-main" '[{email:$email}]'
+    }
+    subscriptionSyncGenerateUUID() {
+        printf '99999999-9999-9999-9999-999999999999\n'
+    }
+    subscriptionSyncApplyAccountPlan() {
+        originalSubscriptionSyncApplyAccountPlan "$@"
+        return 1
+    }
+    cp() {
+        if [[ "$1" == "-p" && "$2" == "${root}/tmp"/padm-subscription-sync-backup.*/*.json && "$3" == "${targetFile}" ]]; then
+            return 1
+        fi
+        command cp "$@"
+    }
+
+    set +e
+    subscriptionSyncApplyAccountPlanTransaction '{"create":["sub_new"],"remove":[]}'
+    rc=$?
+    set -e
+    unset -f cp subscriptionSyncApplyAccountPlan initXrayClients subscriptionSyncGenerateUUID
+
+    [[ "${rc}" == "1" ]]
+    jq -e '.inbounds[0].settings.clients[0].email == "sub_new-main"' "${targetFile}" >/dev/null
+    [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"配置恢复失败"* ]]
+    [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"备份目录:"* ]]
+    mapfile -t backupDirs < <(find "${root}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' -print)
+    [[ "${#backupDirs[@]}" == "1" ]]
+    [[ -f "${backupDirs[0]}/manifest" ]]
+    grep -q "${targetFile}" "${backupDirs[0]}/manifest"
+    if find "${root}/xray" -name '*.sync.*' | grep -q .; then
+        return 1
+    fi
+
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runRemoteSubscribeFetchRegression() {
     local publicDir="${TMP_DIR}/remote-subscribe-public"
     local localDir="${TMP_DIR}/remote-subscribe-local"
@@ -9340,6 +9399,7 @@ runRegressionSubscriptionOutput() {
 runRegressionSubscriptionState() {
     runRegressionStep subscription-state runSubscriptionGroupStateRegression
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
+    runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
 }
 
 runRegressionSubscriptionRemoteFetch() {
