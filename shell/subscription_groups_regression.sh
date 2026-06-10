@@ -5717,9 +5717,10 @@ runRealityConfigChangeReloadFailureRegression() (
     local singBoxGrpc="${root}/singbox-grpc.json"
     local statusLog="${root}/status.log"
     local refreshLog="${root}/refresh.log"
-    local rc reloadCalls=0
+    local rc reloadCalls=0 preservedBackupDir
 
-    mkdir -p "${root}"
+    mkdir -p "${root}" "${root}/tmp"
+    TMPDIR="${root}/tmp"
     cat >"${xrayVision}" <<'JSON'
 {"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
 JSON
@@ -5792,6 +5793,47 @@ JSON
     singBoxVLESSRealityGRPCSNI=old-sni.example.com
     cat >"${xrayVision}" <<'JSON'
 {"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
+JSON
+    cat >"${xrayXhttp}" <<'JSON'
+{bad-json
+JSON
+    cp() {
+        if [[ "$1" == */xray/07_VLESS_vision_reality_inbounds.json && "$2" == "${xrayVision}" ]]; then
+            return 1
+        fi
+        command cp "$@"
+    }
+    set +e
+    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
+    rc=$?
+    set -e
+    unset -f cp
+    [[ "${rc}" == "1" ]]
+    [[ "${reloadCalls}" == "0" ]]
+    [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "new.example.com:8443" ]]
+    [[ "${realityTargetHost}" == "old.example.com" ]]
+    [[ "${realityTargetPort}" == "443" ]]
+    [[ ! -s "${refreshLog}" ]]
+    grep -q '配置应用失败，且回滚配置失败' "${statusLog}"
+    preservedBackupDir=$(sed -n 's/.*备份目录: //p' "${statusLog}" | tail -n 1)
+    [[ -n "${preservedBackupDir}" && -d "${preservedBackupDir}" ]]
+    [[ -f "${preservedBackupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]
+
+    : >"${statusLog}"
+    : >"${refreshLog}"
+    reloadCalls=0
+    realityTargetHost=old.example.com
+    realityTargetPort=443
+    realitySNI=old-sni.example.com
+    xrayVLESSRealitySNI=old-sni.example.com
+    xrayVLESSRealityXHTTPSNI=old-sni.example.com
+    singBoxVLESSRealityVisionSNI=old-sni.example.com
+    singBoxVLESSRealityGRPCSNI=old-sni.example.com
+    cat >"${xrayVision}" <<'JSON'
+{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
+JSON
+    cat >"${xrayXhttp}" <<'JSON'
+{"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]},"xhttpSettings":{"host":"old-sni.example.com"}}}]}
 JSON
     cp() {
         if [[ "$1" == */xray/07_VLESS_vision_reality_inbounds.json && "$2" == "${xrayVision}" ]]; then

@@ -2548,7 +2548,11 @@ changeInstalledRealityTarget() {
         return 1
     fi
     if ! applyRealityTargetToInstalledConfigs "${target}" "${sni}"; then
-        restoreRealityTargetConfigs "${backupDir}" || true
+        if ! restoreRealityTargetConfigs "${backupDir}"; then
+            realityTargetStatusBlock red "REALITY 目标站" "配置应用失败，且回滚配置失败" "备份目录: ${backupDir}"
+            padmForgetCleanupPath "${backupDir}"
+            return 1
+        fi
         padmRemoveCleanupPath "${backupDir}"
         return 1
     fi
