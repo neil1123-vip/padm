@@ -411,6 +411,14 @@ padmEntryScriptReady() {
     [[ -s "${entryPath}" ]] && bash -n "${entryPath}" && grep -q "ensureScriptModules" "${entryPath}"
 }
 
+restorePadmEntryBackup() {
+    local backupPath=$1
+    local installPath=$2
+    [[ -f "${backupPath}" ]] || return 2
+    mv "${backupPath}" "${installPath}" || return 1
+    sudo chmod 700 "${installPath}" || return 1
+}
+
 # 更新脚本
 updatePadm() {
     local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
@@ -456,9 +464,16 @@ updatePadm() {
         return 1
     fi
     if ! mv "${newInstall}" "${installPath}" || ! sudo chmod 700 "${installPath}"; then
-        [[ -f "${backupPath}" ]] && mv "${backupPath}" "${installPath}"
+        local restoreStatus=0
+        restorePadmEntryBackup "${backupPath}" "${installPath}" || restoreStatus=$?
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
-        errorCard "更新入口替换失败，已尝试恢复旧入口"
+        if [[ "${restoreStatus}" -eq 0 ]]; then
+            errorCard "更新入口替换失败，已恢复旧入口"
+        elif [[ "${restoreStatus}" -eq 2 ]]; then
+            errorCard "更新入口替换失败，旧入口备份不存在"
+        else
+            errorCard "更新入口替换失败，旧入口恢复失败，请手动检查 ${installPath} 和 ${backupPath}"
+        fi
         return 1
     fi
     padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
@@ -470,11 +485,10 @@ updatePadm() {
     fi
 
     if [[ -f "${backupPath}" ]]; then
-        if mv "${backupPath}" "${installPath}"; then
-            sudo chmod 700 "${installPath}" >/dev/null 2>&1 || true
+        if restorePadmEntryBackup "${backupPath}" "${installPath}" >/dev/null 2>&1; then
             errorCard "新版入口执行失败，已恢复旧入口"
         else
-            errorCard "新版入口执行失败，旧入口恢复失败，请手动恢复 ${backupPath}"
+            errorCard "新版入口执行失败，旧入口恢复失败，请手动检查 ${installPath} 和 ${backupPath}"
         fi
     else
         errorCard "新版入口执行失败，旧入口备份不存在"

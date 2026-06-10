@@ -8898,16 +8898,28 @@ regressionEnsureScriptModules() {
 
 runUpdatePadmVersionPromptRegression() {
     local successLog errorLog installDir updateTmpRoot downloadDirLog oldTmpDir
+    local replaceFailureDir replaceFailureErrorLog replaceFailureDownloadLog
+    local chmodFailureDir chmodFailureErrorLog chmodFailureDownloadLog
     successLog="${TMP_DIR}/update-padm-success.log"
     errorLog="${TMP_DIR}/update-padm-error.log"
     installDir="${TMP_DIR}/update-padm-install"
     updateTmpRoot="${TMP_DIR}/update-padm-tmp"
     downloadDirLog="${TMP_DIR}/update-padm-download-dirs.log"
+    replaceFailureDir="${TMP_DIR}/update-padm-replace-restore-failure"
+    replaceFailureErrorLog="${TMP_DIR}/update-padm-replace-restore-failure-error.log"
+    replaceFailureDownloadLog="${TMP_DIR}/update-padm-replace-restore-failure-download.log"
+    chmodFailureDir="${TMP_DIR}/update-padm-chmod-restore-failure"
+    chmodFailureErrorLog="${TMP_DIR}/update-padm-chmod-restore-failure-error.log"
+    chmodFailureDownloadLog="${TMP_DIR}/update-padm-chmod-restore-failure-download.log"
     oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${installDir}" "${updateTmpRoot}"
+    mkdir -p "${installDir}" "${updateTmpRoot}" "${replaceFailureDir}" "${chmodFailureDir}"
     : >"${downloadDirLog}"
     : >"${successLog}"
     : >"${errorLog}"
+    : >"${replaceFailureErrorLog}"
+    : >"${replaceFailureDownloadLog}"
+    : >"${chmodFailureErrorLog}"
+    : >"${chmodFailureDownloadLog}"
     TMPDIR="${updateTmpRoot}"
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
     chmod 700 "${installDir}/install.sh"
@@ -8987,6 +8999,91 @@ EOF
         return 1
     fi
     "${installDir}/install.sh" | grep -q 'old-entry'
+
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${replaceFailureDir}/install.sh"
+    chmod 700 "${replaceFailureDir}/install.sh"
+    (
+        REGRESSION_ERROR_CARD_LOG="${replaceFailureErrorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${replaceFailureDir}"
+
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    printf '%s\n' "$2" >>"${replaceFailureDownloadLog}"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+printf 'new-entry\n'
+exit 0
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+        sudo() {
+            if [[ "$1" == "chmod" && "$2" == "700" && "$3" == "${replaceFailureDir}/install.sh" ]]; then
+                return 1
+            fi
+            "$@"
+        }
+        mv() {
+            if [[ "$1" == "${replaceFailureDir}/install.sh.bak" && "$2" == "${replaceFailureDir}/install.sh" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+
+        updatePadm 1
+    ) >"${TMP_DIR}/update-padm-replace-restore-failure-run.log" 2>&1 && return 1
+    grep -q '更新入口替换失败，旧入口恢复失败' "${replaceFailureErrorLog}"
+    grep -q "${replaceFailureDir}/install.sh.bak" "${replaceFailureErrorLog}"
+    [[ -f "${replaceFailureDir}/install.sh.bak" ]]
+    "${replaceFailureDir}/install.sh" | grep -q 'new-entry'
+
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${chmodFailureDir}/install.sh"
+    chmod 700 "${chmodFailureDir}/install.sh"
+    (
+        REGRESSION_ERROR_CARD_LOG="${chmodFailureErrorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${chmodFailureDir}"
+
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    printf '%s\n' "$2" >>"${chmodFailureDownloadLog}"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+exit 23
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+        sudo() {
+            if [[ "$1" == "chmod" && "$2" == "700" && "$3" == "${chmodFailureDir}/install.sh" && -f "${chmodFailureDir}/install.sh.bak" ]]; then
+                return 1
+            fi
+            "$@"
+        }
+
+        updatePadm 1
+    ) >"${TMP_DIR}/update-padm-chmod-restore-failure-run.log" 2>&1 && return 1
+    grep -q '新版入口执行失败，旧入口恢复失败' "${chmodFailureErrorLog}"
+    grep -q "${chmodFailureDir}/install.sh.bak" "${chmodFailureErrorLog}"
+    [[ ! -e "${chmodFailureDir}/install.sh.bak" ]]
+    "${chmodFailureDir}/install.sh" | grep -q 'old-entry'
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
