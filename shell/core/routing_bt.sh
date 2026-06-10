@@ -226,7 +226,7 @@ EOF
 
     unInstallRouting blackhole_out outboundTag bittorrent || return 1
 
-    updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type":"field","outboundTag":"blackhole_out","protocol":["bittorrent"]}]'
+    updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type":"field","outboundTag":"blackhole_out","protocol":["bittorrent"]}]' || return 1
 
 }
 

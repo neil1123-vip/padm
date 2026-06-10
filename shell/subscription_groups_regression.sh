@@ -546,6 +546,20 @@ runBTRoutingFailureReturnRegression() (
         return 0
     }
 
+    (
+        configPath="${root}/xray/"
+        cat >"${configPath}09_routing.json" <<'JSON'
+{"routing":{"rules":[]}}
+JSON
+        unInstallRouting() { return 0; }
+        updateRoutingJsonConfig() { return 1; }
+        set +e
+        addXrayBTBlockRule >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+    )
+
     addXrayBTBlockRule() { return 1; }
     installSniffing() {
         printf 'sniff\n' >"${sniffMarker}"
