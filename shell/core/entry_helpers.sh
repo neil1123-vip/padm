@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 
 # 初始化 Nginx 证书验证配置
+entryHelperTmpPath() {
+    local template=$1
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath "${template}"
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/${template}"
+    fi
+}
+
+singBoxVMessHTTPUpgradeNginxTestLog() {
+    entryHelperTmpPath padm-sing-box-vmess-httpupgrade-nginx-test.log
+}
+
+thirdPartyTcpScriptPath() {
+    entryHelperTmpPath padm-tcpx.sh
+}
+
 initTLSNginxConfig() {
     handleNginx stop
     progressCard "$1" "初始化 Nginx 证书验证配置"
@@ -40,6 +58,7 @@ initTLSNginxConfig() {
 writeSingBoxVMessHTTPUpgradeNginxConfig() {
     local targetPath="${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf"
     local tmpPath="${targetPath}.tmp"
+    local logFile
     mkdir -p "$(dirname "${targetPath}")"
     cat >"${tmpPath}"
     if command -v nginx >/dev/null 2>&1; then
@@ -47,7 +66,8 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
         [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
         cat "${tmpPath}" >>"${targetPath}"
         rm -f "${tmpPath}"
-        if ! nginx -t >/tmp/padm-sing-box-vmess-httpupgrade-nginx-test.log 2>&1; then
+        logFile=$(singBoxVMessHTTPUpgradeNginxTestLog)
+        if ! nginx -t >"${logFile}" 2>&1; then
             if [[ -f "${backupPath}" ]]; then
                 mv "${backupPath}" "${targetPath}"
             else
@@ -678,7 +698,8 @@ runThirdPartyTcpAccelerationScript() {
         return
     fi
 
-    local scriptPath="/tmp/padm-tcpx.sh"
+    local scriptPath
+    scriptPath=$(thirdPartyTcpScriptPath)
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh" -o "${scriptPath}"
     else

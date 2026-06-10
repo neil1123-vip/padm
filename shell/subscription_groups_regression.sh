@@ -1626,6 +1626,8 @@ runRuntimeTempDirRegression() (
     [[ "$(bbrSysctlLog)" == "${tmpRoot}/padm-bbr-sysctl.log" ]]
     [[ "$(bbrStateTempTemplate)" == "${tmpRoot}/padm-bbr-state.XXXXXX" ]]
     [[ "$(bbrSysctlTempTemplate)" == "${tmpRoot}/padm-bbr-sysctl.XXXXXX" ]]
+    [[ "$(singBoxVMessHTTPUpgradeNginxTestLog)" == "${tmpRoot}/padm-sing-box-vmess-httpupgrade-nginx-test.log" ]]
+    [[ "$(thirdPartyTcpScriptPath)" == "${tmpRoot}/padm-tcpx.sh" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
@@ -2562,12 +2564,14 @@ runUninstallNginxCleanupRegression() {
 runEntryHelperConfigRegression() {
     local entryConfigPath="${TMP_DIR}/entry-helper-conf/"
     local entryLogBase="${TMP_DIR}/entry-helper-logs/"
+    local entryTmpRoot="${TMP_DIR}/entry-helper-tmp"
+    local oldTmpDir="${TMPDIR:-}"
     local realityVisionFile="${entryConfigPath}07_VLESS_vision_reality_inbounds.json"
     local realityXhttpFile="${entryConfigPath}12_VLESS_XHTTP_inbounds.json"
     local oldPath="${PATH}"
     local nginxTarget="${TMP_DIR}/entry-helper-nginx/sing_box_VMess_HTTPUpgrade.conf"
     local originalContent
-    mkdir -p "${entryConfigPath}" "${entryLogBase}" "${TMP_DIR}/fake-bin" "${TMP_DIR}/entry-helper-nginx"
+    mkdir -p "${entryConfigPath}" "${entryLogBase}" "${TMP_DIR}/fake-bin" "${TMP_DIR}/entry-helper-nginx" "${entryTmpRoot}"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash
 if [[ "$1" == "-v" ]]; then
@@ -2579,6 +2583,7 @@ fi
 SH
     chmod +x "${TMP_DIR}/fake-bin/nginx"
     PATH="${TMP_DIR}/fake-bin:${PATH}"
+    TMPDIR="${entryTmpRoot}"
     writeXrayLogConfig "${entryConfigPath}00_log.json" "${entryLogBase}" true
     [[ "$(jq -r '.log.access' "${entryConfigPath}00_log.json")" == "${entryLogBase}access.log" ]]
     [[ "$(jq -r '.log.error' "${entryConfigPath}00_log.json")" == "${entryLogBase}error.log" ]]
@@ -2600,6 +2605,7 @@ SH
     fi
     [[ "$(<"${nginxTarget}")" == "old config" ]]
     [[ ! -e "${nginxTarget}.tmp" ]]
+    [[ -s "${entryTmpRoot}/padm-sing-box-vmess-httpupgrade-nginx-test.log" ]]
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     singBoxNginxConfig 11 443
     grep -q 'server_name example.com;' "${nginxTarget}"
@@ -2625,6 +2631,7 @@ JSON
     updateRealityShowConfig "${realityXhttpFile}" false
     jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityXhttpFile}" >/dev/null
     PATH="${oldPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
