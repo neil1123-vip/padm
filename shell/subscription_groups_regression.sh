@@ -4096,6 +4096,47 @@ EOF
     )
     [[ "$(<"${targetPath}")" == "old config" ]]
     ! compgen -G "${TMP_DIR}/nginx-subscribe/.subscribe.conf.*" >/dev/null
+    printf 'old config\n' >"${targetPath}"
+    (
+        local backupGlob="${TMP_DIR}/nginx-subscribe/.subscribe.conf.backup.*"
+        local backups=()
+        mv() {
+            if [[ "$1" == "${TMP_DIR}/nginx-subscribe/.subscribe.conf.backup."* && "$2" == "${targetPath}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        if writeSubscribeNginxConfig <<'EOF' 2>/dev/null
+rollback fail config
+EOF
+        then
+            return 1
+        fi
+        [[ "$(<"${targetPath}")" == "rollback fail config" ]]
+        mapfile -t backups < <(compgen -G "${backupGlob}" || true)
+        [[ "${#backups[@]}" == "1" ]]
+        [[ "$(<"${backups[0]}")" == "old config" ]]
+        [[ "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR}" == *"旧配置恢复失败"* ]]
+        rm -f "${backups[0]}"
+    ) || return 1
+    rm -f "${targetPath}"
+    (
+        rm() {
+            if [[ "$1" == "-f" && "$2" == "${targetPath}" ]]; then
+                return 1
+            fi
+            command rm "$@"
+        }
+        if writeSubscribeNginxConfig <<'EOF' 2>/dev/null
+cleanup fail config
+EOF
+        then
+            return 1
+        fi
+        [[ "$(<"${targetPath}")" == "cleanup fail config" ]]
+        [[ "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR}" == *"新配置清理失败"* ]]
+    ) || return 1
+    rm -f "${targetPath}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     writeSubscribeNginxConfig <<'EOF'
 new config
@@ -4140,7 +4181,7 @@ SH
     : >"${errorLog}"
 
     readNginxSubscribe() {
-        if [[ "${mode}" == "reload" ]]; then
+        if [[ "${mode}" == "reload" || "${mode}" == "config-fail" ]]; then
             subscribePort=
         else
             subscribePort=39778
@@ -4156,6 +4197,10 @@ SH
     writeSubscribeNginxConfig() {
         writeCalls=$((writeCalls + 1))
         cat >/dev/null
+        if [[ "${mode}" == "config-fail" ]]; then
+            SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR="订阅 Nginx 配置校验失败，且旧配置恢复失败"
+            return 1
+        fi
         return 0
     }
     installSubscriptionControlService() {
@@ -4209,6 +4254,25 @@ SH
     [[ "${bootCalls}" == "0" ]]
     grep -qx 'existing-port:start:true' "${serviceLog}"
     grep -q '订阅 Nginx 服务启动失败' "${errorLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    mode=config-fail
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    writeCalls=0
+    controlCalls=0
+    bootCalls=0
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${writeCalls}" == "1" ]]
+    [[ "${controlCalls}" == "0" ]]
+    [[ "${bootCalls}" == "0" ]]
+    grep -q '订阅 Nginx 配置校验失败，且旧配置恢复失败' "${errorLog}"
+    ! grep -q '订阅 Nginx 配置校验失败，已回滚' "${errorLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     PATH="${oldPath}"

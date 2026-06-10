@@ -12,6 +12,10 @@ ensureSubscriptionControlNginxLocation() {
     return 1
 }
 
+subscribeNginxConfigWriteError() {
+    SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR=$1
+    return 1
+}
 
 writeSubscribeNginxConfig() {
     local targetPath="${nginxConfigPath}subscribe.conf"
@@ -19,6 +23,7 @@ writeSubscribeNginxConfig() {
     local backupPath=
     local tmpBase="${TMPDIR:-/tmp}"
     local nginxTestLog="${tmpBase%/}/padm-subscribe-nginx-test.log"
+    SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR=
     padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
     if ! cat >"${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"
@@ -36,13 +41,18 @@ writeSubscribeNginxConfig() {
         fi
         if ! nginx -t >"${nginxTestLog}" 2>&1; then
             if [[ -n "${backupPath}" && -f "${backupPath}" ]]; then
-                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || return 1
+                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || {
+                    padmForgetCleanupPath "${backupPath}"
+                    subscribeNginxConfigWriteError "订阅 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+                    return 1
+                }
             else
-                rm -f "${targetPath}" || return 1
+                rm -f "${targetPath}" || subscribeNginxConfigWriteError "订阅 Nginx 配置校验失败，且新配置清理失败，请手动检查 ${targetPath}" || return 1
             fi
             return 1
         fi
         [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
+        return 0
     else
         commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     fi
@@ -154,7 +164,7 @@ server {
 }
 EOF
         then
-            errorCard "订阅 Nginx 配置校验失败，已回滚"
+            errorCard "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR:-订阅 Nginx 配置校验失败，已回滚}"
             return 1
         fi
         if ! installSubscriptionControlService; then
