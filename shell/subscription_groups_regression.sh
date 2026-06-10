@@ -3311,6 +3311,36 @@ JSON
     [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
     refreshMode=success
 
+    local refreshFailureLog="${TMP_DIR}/transaction-refresh-failure.log"
+    readNginxSubscribe() {
+        subscribePort=443
+        nginxConfigPath="${TMP_DIR}/nginx-refresh/"
+    }
+    subscribe() {
+        printf 'subscribe:%s\n' "$*" >>"${refreshFailureLog}"
+        return 1
+    }
+    showAccounts() {
+        printf 'showAccounts\n' >>"${refreshFailureLog}"
+        return 1
+    }
+    errorCard() { return 0; }
+    rm -f "${refreshFailureLog}"
+    if refreshXHTTPSubscriptions >/dev/null 2>&1; then
+        return 1
+    fi
+    grep -qx 'subscribe:renew' "${refreshFailureLog}"
+
+    readNginxSubscribe() {
+        subscribePort=
+        nginxConfigPath="${TMP_DIR}/nginx-refresh/"
+    }
+    rm -f "${refreshFailureLog}"
+    if refreshTuicSubscriptions >/dev/null 2>&1; then
+        return 1
+    fi
+    grep -qx 'showAccounts' "${refreshFailureLog}"
+
     mkdir -p "${TMP_DIR}/fake-bin" "${checkPortNginxDir}"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash

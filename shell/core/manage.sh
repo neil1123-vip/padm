@@ -2007,13 +2007,19 @@ xhttpSettingsSummary() {
 refreshXHTTPSubscriptions() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        subscribe renew >/dev/null
+        if ! subscribe renew >/dev/null; then
+            errorCard "刷新 XHTTP 公网订阅失败"
+            return 1
+        fi
         successCard "已刷新公网订阅"
     else
         cleanDirectoryContent /etc/padm/subscribe_local/default
         cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
         cleanDirectoryContent /etc/padm/subscribe_local/sing-box
-        showAccounts >/dev/null
+        if ! showAccounts >/dev/null; then
+            errorCard "刷新 XHTTP 本地订阅失败"
+            return 1
+        fi
         successCard "已刷新本地订阅"
     fi
 }
@@ -2541,13 +2547,19 @@ tuicSettingsSummary() {
 refreshTuicSubscriptions() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        subscribe renew >/dev/null
+        if ! subscribe renew >/dev/null; then
+            errorCard "刷新 Tuic 公网订阅失败"
+            return 1
+        fi
         successCard "已刷新公网订阅"
     else
         cleanDirectoryContent /etc/padm/subscribe_local/default
         cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
         cleanDirectoryContent /etc/padm/subscribe_local/sing-box
-        showAccounts >/dev/null
+        if ! showAccounts >/dev/null; then
+            errorCard "刷新 Tuic 本地订阅失败"
+            return 1
+        fi
         successCard "已刷新本地订阅"
     fi
 }
