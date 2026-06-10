@@ -347,6 +347,24 @@ accessControlBackupDir() {
     echo "${PADM_ACCESS_CONTROL_BACKUP_DIR:-/tmp/padm-access-control-backup}"
 }
 
+accessControlXrayTestLog() {
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath padm-access-xray-test.log
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/padm-access-xray-test.log"
+    fi
+}
+
+accessControlSingBoxTestLog() {
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath padm-access-sing-box-test.log
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/padm-access-sing-box-test.log"
+    fi
+}
+
 accessControlBackupCreate() {
     local backupDir
     backupDir=$(accessControlBackupDir)
@@ -387,22 +405,25 @@ accessControlBackupRestore() {
 }
 
 validateAccessControlConfig() {
+    local logFile
     if [[ "${coreInstallType}" == "1" && -x /etc/padm/xray/xray ]]; then
-        if ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-access-xray-test.log 2>&1; then
+        logFile=$(accessControlXrayTestLog)
+        if ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
             accessControlBackupRestore
             echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
             menuLine "访问控制配置未通过校验，已回滚本次修改"
-            menuLine "排查日志：/tmp/padm-access-xray-test.log"
+            menuLine "排查日志：${logFile}"
             menuClose
             return 1
         fi
     fi
     if [[ -n "${singBoxConfigPath}" && -x /etc/padm/sing-box/sing-box ]]; then
-        if ! /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >/tmp/padm-access-sing-box-test.log 2>&1; then
+        logFile=$(accessControlSingBoxTestLog)
+        if ! /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1; then
             accessControlBackupRestore
             echoContent title "\n┌─ sing-box 配置校验失败 ─────────────────────────────"
             menuLine "访问控制配置未通过校验，已回滚本次修改"
-            menuLine "排查日志：/tmp/padm-access-sing-box-test.log"
+            menuLine "排查日志：${logFile}"
             menuClose
             return 1
         fi

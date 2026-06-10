@@ -1618,6 +1618,8 @@ runRuntimeTempDirRegression() (
     [[ "$(coreXrayUpgradeTestLog)" == "${tmpRoot}/padm-core-xray-upgrade-test.log" ]]
     [[ "$(coreSingBoxConfigTestLog)" == "${tmpRoot}/padm-core-sing-box-test.log" ]]
     [[ "$(coreSingBoxUpgradeTestLog)" == "${tmpRoot}/padm-core-sing-box-upgrade-test.log" ]]
+    [[ "$(accessControlXrayTestLog)" == "${tmpRoot}/padm-access-xray-test.log" ]]
+    [[ "$(accessControlSingBoxTestLog)" == "${tmpRoot}/padm-access-sing-box-test.log" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
