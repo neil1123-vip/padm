@@ -44,13 +44,17 @@ btTools() {
 
     if [[ "${btStatus}" == "1" ]]; then
 
-        installBTBlock
+        installBTBlock || return 1
+
+        reloadCore || return 1
 
         successCard "已启用 BT 阻断"
 
     elif [[ "${btStatus}" == "2" ]]; then
 
-        uninstallBTBlock
+        uninstallBTBlock || return 1
+
+        reloadCore || return 1
 
         successCard "已关闭 BT 阻断"
 
@@ -77,8 +81,6 @@ btTools() {
     fi
 
 
-
-    reloadCore
 
 }
 
@@ -156,13 +158,13 @@ installBTBlock() {
 
     if [[ "${coreInstallType}" == "1" ]]; then
 
-        addXrayBTBlockRule
+        addXrayBTBlockRule || return 1
 
-        installSniffing
+        installSniffing || return 1
 
-        removeXrayOutbound blackhole_out
+        removeXrayOutbound blackhole_out || return 1
 
-        addXrayOutbound blackhole_out
+        addXrayOutbound blackhole_out || return 1
 
     fi
 
@@ -170,7 +172,7 @@ installBTBlock() {
 
     if [[ -n "${singBoxConfigPath}" ]]; then
 
-        addSingBoxBTBlockRule
+        addSingBoxBTBlockRule || return 1
 
     fi
 
@@ -182,7 +184,7 @@ uninstallBTBlock() {
 
     if [[ "${coreInstallType}" == "1" ]]; then
 
-        unInstallRouting blackhole_out outboundTag bittorrent
+        unInstallRouting blackhole_out outboundTag bittorrent || return 1
 
     fi
 
@@ -190,7 +192,7 @@ uninstallBTBlock() {
 
     if [[ -n "${singBoxConfigPath}" ]]; then
 
-        removeSingBoxConfig bt_block_route
+        removeSingBoxConfig bt_block_route || return 1
 
     fi
 

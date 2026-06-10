@@ -392,6 +392,87 @@ runAccessControlFailureReturnRegression() {
     [[ -f "${marker}" ]]
 }
 
+runBTRoutingFailureReturnRegression() (
+    local root="${TMP_DIR}/bt-routing-failure"
+    local installMarker="${root}/install"
+    local sniffMarker="${root}/sniff"
+    local uninstallMarker="${root}/uninstall"
+    local reloadMarker="${root}/reload"
+    local successMarker="${root}/success"
+    local rc
+
+    mkdir -p "${root}/xray" "${root}/sing-box"
+    configPath="${root}/xray/"
+    singBoxConfigPath=
+    coreInstallType=1
+    statusCard() { return 0; }
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuItem() { return 0; }
+    menuReturnItem() { return 0; }
+    menuClose() { return 0; }
+    showBTBlockStatus() { return 0; }
+    readInstallType() { coreInstallType=1; }
+    successCard() {
+        printf 'success\n' >"${successMarker}"
+        return 0
+    }
+
+    addXrayBTBlockRule() { return 1; }
+    installSniffing() {
+        printf 'sniff\n' >"${sniffMarker}"
+        return 0
+    }
+    set +e
+    installBTBlock >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${sniffMarker}" ]]
+
+    unInstallRouting() { return 1; }
+    set +e
+    uninstallBTBlock >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+
+    autoRead() { printf -v "$3" '1'; }
+    installBTBlock() {
+        printf 'install\n' >"${installMarker}"
+        return 0
+    }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        return 1
+    }
+    rm -f "${installMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    btTools >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${installMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    autoRead() { printf -v "$3" '2'; }
+    uninstallBTBlock() {
+        printf 'uninstall\n' >"${uninstallMarker}"
+        return 0
+    }
+    rm -f "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    btTools >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+)
+
 runUserConfigWriteRegression() {
     local targetPath="${TMP_DIR}/user-config.json"
     cat >"${targetPath}" <<'JSON'
@@ -5718,6 +5799,7 @@ runRegressionMenuSmoke() {
 runRegressionRouting() {
     runRegressionStep routing-core runRoutingRegression
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
+    runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }
 

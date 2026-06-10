@@ -330,7 +330,7 @@ validateAccessIPList() {
 }
 
 accessControlBackupDir() {
-    echo "/tmp/padm-access-control-backup"
+    echo "${PADM_ACCESS_CONTROL_BACKUP_DIR:-/tmp/padm-access-control-backup}"
 }
 
 accessControlBackupCreate() {

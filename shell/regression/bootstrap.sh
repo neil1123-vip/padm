@@ -10,6 +10,7 @@ export PADM_VLESS_ENCRYPTION_STATE_FILE="${TMP_DIR}/vless_encryption.json"
 export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality_targets_results.tsv"
 export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"
 export PADM_REALITY_TARGET_BLOCKED_FILE="${TMP_DIR}/reality_target_blocked.tsv"
+export PADM_ACCESS_CONTROL_BACKUP_DIR="${TMP_DIR}/access_control_backup"
 export PADM_SUPPRESS_PROGRESS=1
 
 echoContent() {
