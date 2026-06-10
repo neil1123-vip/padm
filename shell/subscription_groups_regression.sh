@@ -6192,6 +6192,99 @@ runInstallToolsAcmeResultFailureRegression() {
     )
 }
 
+runInstallToolsAcmeCommitFailureRegression() {
+    (
+        local oldHome="${HOME}"
+        local oldSelect="${selectCustomInstallType:-}"
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
+        local oldTmpDir="${TMPDIR:-}"
+        local fakeHome="${TMP_DIR}/install-tools-acme-commit-home"
+        local tmpRoot="${TMP_DIR}/install-tools-acme-commit-tmp"
+        local errorLog="${TMP_DIR}/install-tools-acme-commit-error.log"
+        local statusLog="${TMP_DIR}/install-tools-acme-commit-status.log"
+        local runMarker="${TMP_DIR}/install-tools-acme-commit-run"
+        local installStatus
+
+        rm -rf "${fakeHome}" "${tmpRoot}"
+        rm -f "${runMarker}"
+        mkdir -p "${fakeHome}" "${tmpRoot}"
+        HOME="${fakeHome}"
+        TMPDIR="${tmpRoot}"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        export REGRESSION_STATUS_CARD_LOG="${statusLog}"
+        : >"${errorLog}"
+        : >"${statusLog}"
+        release=debian
+        rhelLike=false
+        upgrade=true
+        updateReleaseInfoChange=true
+        packageManager=apt
+        installType=true
+        removeType=true
+        selectCustomInstallType=",7,"
+        command() {
+            if [[ "$1" == "-v" && "$2" == "qrencode" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        runWithTimeout() { : >"${runMarker}"; return 0; }
+        runPackageCommandWithProgress() { return 0; }
+        waitAptProcess() { return 0; }
+        installBasePackages() { return 0; }
+        installNginxTools() { return 0; }
+        nginx() { return 0; }
+        protocolSelectionSkipsNginx() { return 0; }
+        protocolSelectionNeedsLocalCertificate() { return 0; }
+        curl() {
+            local outputFile=
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -o)
+                    outputFile=$2
+                    shift 2
+                    ;;
+                *)
+                    shift
+                    ;;
+                esac
+            done
+            [[ -n "${outputFile}" ]] || return 1
+            printf '#!/usr/bin/env sh\nexit 0\n' >"${outputFile}"
+        }
+        mv() { return 1; }
+
+        set +e
+        (
+            installTools 1
+        ) >/dev/null 2>&1
+        installStatus=$?
+        set -e
+        [[ "${installStatus}" -ne 0 ]]
+        grep -q "acme安装脚本提交失败" "${errorLog}"
+        [[ ! -e "${runMarker}" ]]
+        if find "${tmpRoot}" -type f -name 'acme.sh.download.*' | grep -q .; then
+            return 1
+        fi
+
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        if [[ -n "${oldStatusLog}" ]]; then
+            REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
+        else
+            unset REGRESSION_STATUS_CARD_LOG
+        fi
+        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+        HOME="${oldHome}"
+        selectCustomInstallType="${oldSelect}"
+        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl mv
+    )
+}
+
 runInstallToolsUpdateFailureRegression() {
     (
         local oldHome="${HOME}"
@@ -6972,6 +7065,7 @@ runRegressionPlatform() {
 runRegressionPlatformIo() {
     runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression &&
         runRegressionStep install-tools-acme-result-failure runInstallToolsAcmeResultFailureRegression &&
+        runRegressionStep install-tools-acme-commit-failure runInstallToolsAcmeCommitFailureRegression &&
         runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression &&
         runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression &&
         runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression &&

@@ -531,7 +531,10 @@ installTools() {
             mkdir -p "$(adapterAcmeTmpDir)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
             padmCreateTempPath acmeDownloadScript "$(adapterAcmeDownloadTemplate)" || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
             if curl -fsSL -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
-                mv "${acmeDownloadScript}" "${acmeInstallScript}"
+                if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then
+                    padmRemoveCleanupPath "${acmeDownloadScript}"
+                    failPackageInstallTransaction "acme安装脚本提交失败"
+                fi
                 padmForgetCleanupPath "${acmeDownloadScript}"
             else
                 padmRemoveCleanupPath "${acmeDownloadScript}"
