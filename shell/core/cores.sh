@@ -391,6 +391,15 @@ runCoreServiceActionAllowFailure() {
     return "${rc}"
 }
 
+coreInstallServiceAction() {
+    local failureMessage=$1
+    shift
+    if ! runCoreServiceActionAllowFailure "$@"; then
+        errorCard "${failureMessage}"
+        return 1
+    fi
+}
+
 restoreCoreBinaryBackup() {
     local backupBinary=$1
     local targetBinary=$2
@@ -989,7 +998,7 @@ installXrayReality() {
     totalProgress=6
     installTools 1
 
-    handleNginx stop
+    coreInstallServiceAction "Nginx 服务停止失败，已取消 Xray Reality 安装" handleNginx stop || return 1
     if subscriptionWireGuardControlEnabled; then
         refreshSubscriptionWireGuardNginxControl
     fi
@@ -1094,7 +1103,7 @@ customXrayInstall() {
         installTools 1
         if [[ -n "${btDomain}" ]]; then
             statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
-            handleXray stop
+            coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
             if [[ "${selectCustomInstallType}" != ",7," || -n "${realityOnlyWithDomain}" ]]; then
                 customPortFunction || return 1
             fi
@@ -1121,7 +1130,7 @@ customXrayInstall() {
         fi
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             updateRedirectNginxConf
-            handleNginx start
+            coreInstallServiceAction "Nginx 服务启动失败，已取消 Xray 安装" handleNginx start || return 1
         fi
 
         # 安装 Xray
@@ -1185,7 +1194,7 @@ customSingBoxInstall() {
         if protocolSelectionNeedsTLS "${selectCustomInstallType}"; then
             initTLSNginxConfig 2 || return 1
             installTLS 3 || return 1
-            handleNginx stop
+            coreInstallServiceAction "Nginx 服务停止失败，已取消 sing-box 安装" handleNginx stop || return 1
         fi
 
         installSingBox 4
@@ -1252,7 +1261,7 @@ xrayCoreInstall() {
     installTools 2
     if [[ -n "${btDomain}" ]]; then
         statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
-        handleXray stop
+        coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
         customPortFunction || return 1
     else
         # 申请tls
@@ -1274,11 +1283,11 @@ xrayCoreInstall() {
         nginxBlog 10
     fi
     updateRedirectNginxConf
-    handleXray stop
+    coreInstallServiceAction "Xray 服务停止失败，已取消安装收尾" handleXray stop || return 1
     sleep 2
-    handleXray start
+    coreInstallServiceAction "Xray 服务启动失败，已取消安装收尾" handleXray start || return 1
 
-    handleNginx start
+    coreInstallServiceAction "Nginx 服务启动失败，已取消安装收尾" handleNginx start || return 1
     # 生成账号
     checkGFWStatue 11
     showAccounts 12
@@ -1297,7 +1306,7 @@ singBoxInstall() {
 
     if [[ -n "${btDomain}" ]]; then
         statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
-        handleXray stop
+        coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
         customPortFunction || return 1
     else
         # 申请tls
@@ -1305,7 +1314,7 @@ singBoxInstall() {
         installTLS 4 || return 1
     fi
 
-    handleNginx stop
+    coreInstallServiceAction "Nginx 服务停止失败，已取消 sing-box 安装" handleNginx stop || return 1
 
     installSingBox 5
     installSingBoxService 6

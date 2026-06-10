@@ -2466,6 +2466,121 @@ runServiceQueueApplyPropagationRegression() (
     [[ ! -e "${reachedFile}" ]]
 )
 
+runCoreInstallServiceActionFailureRegression() (
+    local root="${TMP_DIR}/core-install-service-action"
+    local serviceLog="${root}/service.log"
+    local callLog="${root}/calls.log"
+    local errorLog="${root}/errors.log"
+    local reachedFile="${root}/reached"
+    local mode rc
+
+    mkdir -p "${root}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    progressCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    protocolRegistryMenu() { return 0; }
+    readLastInstallationConfig() { return 0; }
+    unInstallSubscribe() { return 0; }
+    installTools() { printf 'installTools:%s\n' "$*" >>"${callLog}"; return 0; }
+    initTLSNginxConfig() { printf 'initTLS:%s\n' "$*" >>"${callLog}"; return 0; }
+    installTLS() { printf 'installTLS:%s\n' "$*" >>"${callLog}"; return 0; }
+    randomPathFunction() { printf 'path:%s\n' "$*" >>"${callLog}"; return 0; }
+    nginxBlog() { printf 'nginxBlog:%s\n' "$*" >>"${callLog}"; return 0; }
+    updateRedirectNginxConf() { printf 'redirect\n' >>"${callLog}"; return 0; }
+    installXray() { printf 'installXray:%s\n' "$*" >>"${callLog}"; return 0; }
+    installXrayService() { printf 'installXrayService:%s\n' "$*" >>"${callLog}"; return 0; }
+    initXrayConfig() { printf 'initXrayConfig:%s\n' "$*" >>"${callLog}"; return 0; }
+    installSingBox() { printf 'installSingBox:%s\n' "$*" >>"${callLog}"; return 0; }
+    installSingBoxService() { printf 'installSingBoxService:%s\n' "$*" >>"${callLog}"; return 0; }
+    initSingBoxConfig() { printf 'initSingBoxConfig:%s\n' "$*" >>"${callLog}"; return 0; }
+    cleanUp() { printf 'cleanup:%s\n' "$*" >>"${callLog}"; return 0; }
+    installCronTLS() { printf 'cron:%s\n' "$*" >>"${callLog}"; return 0; }
+    customPortFunction() { printf 'customPort\n' >>"${callLog}"; return 0; }
+    subscriptionWireGuardControlEnabled() { return 0; }
+    refreshSubscriptionWireGuardNginxControl() { printf 'wg-refresh\n' >>"${callLog}"; return 0; }
+    serviceQueueRestart() { printf 'queueRestart:%s\n' "$*" >>"${callLog}"; return 0; }
+    serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; return 0; }
+    serviceQueueApply() { printf 'queueApply\n' >>"${callLog}"; return 0; }
+    checkGFWStatue() { printf 'reached\n' >"${reachedFile}"; return 0; }
+    showAccounts() { printf 'reached\n' >"${reachedFile}"; return 0; }
+    handleNginx() {
+        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
+        [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
+        return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
+        [[ "${mode}" == "xray-start-fail" && "$1" == "start" ]] && return 1
+        return 0
+    }
+
+    resetInstallServiceFixture() {
+        mode=$1
+        : >"${serviceLog}"
+        : >"${callLog}"
+        : >"${errorLog}"
+        rm -f "${reachedFile}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        btDomain=
+        realityOnlyWithDomain=
+        currentHost=install.example.com
+        domain=install.example.com
+    }
+
+    resetInstallServiceFixture nginx-stop-fail
+    set +e
+    installXrayReality >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    ! grep -q '^installXray:' "${callLog}"
+    ! grep -q '^wg-refresh$' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture nginx-start-fail
+    set +e
+    customXrayInstall 0 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    ! grep -q '^installXray:' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture xray-start-fail
+    set +e
+    xrayCoreInstall >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
+    grep -q '^installXray:' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture nginx-stop-fail
+    set +e
+    singBoxInstall >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    ! grep -q '^installSingBox:' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+)
+
 runSingBoxMergeStartFailureRegression() (
     local root="${TMP_DIR}/sing-box-merge-start-failure"
     local serviceFile="${root}/sing-box.service"
@@ -8470,6 +8585,7 @@ runRegressionTransactionCore() {
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression &&
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
+        runRegressionStep core-install-service-action-failure runCoreInstallServiceActionFailureRegression &&
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
         runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
