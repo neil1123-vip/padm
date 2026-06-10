@@ -584,7 +584,10 @@ initXrayRealityPort() {
             return 1
         fi
         if [[ -n "${realityPort}" && "${xrayVLESSRealityPort}" == "${realityPort}" ]]; then
-            handleXray stop
+            if ! runCoreServiceActionAllowFailure handleXray stop; then
+                errorCard "Xray 服务停止失败，无法复用当前 Reality 端口"
+                return 1
+            fi
         else
             checkPort "${realityPort}" || return 1
         fi
@@ -625,7 +628,10 @@ initXrayXHTTPort() {
             return 1
         fi
         if [[ -n "${xHTTPort}" && "${xrayVLESSRealityXHTTPort}" == "${xHTTPort}" ]]; then
-            handleXray stop
+            if ! runCoreServiceActionAllowFailure handleXray stop; then
+                errorCard "Xray 服务停止失败，无法复用当前 Reality XHTTP 端口"
+                return 1
+            fi
         else
             checkPort "${xHTTPort}" || return 1
         fi

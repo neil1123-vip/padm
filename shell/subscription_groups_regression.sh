@@ -1758,6 +1758,10 @@ runXrayRealityPortFailureRegression() (
     local oldXrayXHTTPort="${xrayVLESSRealityXHTTPort:-}"
     local oldLastInstallationConfig="${lastInstallationConfig:-}"
     local allowCalls=0
+    local serviceLog="${xrayRoot}/service.log"
+    local errorLog="${xrayRoot}/error.log"
+    local allowMarker="${xrayRoot}/allow.log"
+    local configRc
 
     configPath="${xrayRoot}/"
     mkdir -p "${configPath}"
@@ -1793,7 +1797,15 @@ runXrayRealityPortFailureRegression() (
     }
     allowPort() {
         allowCalls=$((allowCalls + 1))
+        printf 'allow:%s\n' "$*" >>"${allowMarker}"
         return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 1
+    }
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
     }
 
     ! validPortNumber 999999999999999999999
@@ -1809,21 +1821,72 @@ runXrayRealityPortFailureRegression() (
     fi
     [[ "${allowCalls}" == "0" ]]
 
-    selectCustomInstallType=",7,"
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    realityPort=
     xHTTPort=
-    if initXrayConfig custom 1 true 2>/dev/null; then
+    xrayVLESSRealityPort=1443
+    lastInstallationConfig=
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    autoRead() {
+        printf -v "$3" '1443'
+    }
+    if initXrayRealityPort 2>/dev/null; then
         return 1
     fi
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -q '无法复用当前 Reality 端口' "${errorLog}"
     [[ "${allowCalls}" == "0" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    realityPort=
+    xHTTPort=
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=2443
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    autoRead() {
+        printf -v "$3" '2443'
+    }
+    if initXrayXHTTPort 2>/dev/null; then
+        return 1
+    fi
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -q '无法复用当前 Reality XHTTP 端口' "${errorLog}"
+    [[ "${allowCalls}" == "0" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    selectCustomInstallType=",7,"
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=
+    xHTTPort=
+    realityPort=70000
+    rm -f "${allowMarker}"
+    set +e
+    (
+        set +e
+        initXrayConfig custom 1 true >/dev/null 2>&1
+    )
+    configRc=$?
+    set -e
+    [[ "${configRc}" == "1" ]]
+    [[ ! -e "${allowMarker}" ]]
     [[ ! -e "${configPath}07_VLESS_vision_reality_inbounds.json" ]]
 
     selectCustomInstallType=",12,"
     realityPort=10888
     xHTTPort=bad-port
-    if initXrayConfig custom 1 true 2>/dev/null; then
-        return 1
-    fi
-    [[ "${allowCalls}" == "0" ]]
+    rm -f "${allowMarker}"
+    set +e
+    (
+        set +e
+        initXrayConfig custom 1 true >/dev/null 2>&1
+    )
+    configRc=$?
+    set -e
+    [[ "${configRc}" == "1" ]]
+    [[ ! -e "${allowMarker}" ]]
     [[ ! -e "${configPath}12_VLESS_XHTTP_inbounds.json" ]]
 
     configPath="${oldConfigPath}"
