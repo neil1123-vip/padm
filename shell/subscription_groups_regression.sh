@@ -3332,6 +3332,114 @@ runUninstallNginxCleanupRegression() {
     PADM_NGINX_CONF_FALLBACK_DIR="${oldFallbackDir}"
 }
 
+runCleanLastInstallationConfigFailureRegression() (
+    local root="${TMP_DIR}/clean-last-installation"
+    local serviceLog="${root}/service.log"
+    local cleanupLog="${root}/cleanup.log"
+    local errorLog="${root}/error.log"
+    local mode rc
+
+    mkdir -p "${root}/nginx" "${root}/static"
+    : >"${serviceLog}"
+    : >"${cleanupLog}"
+    : >"${errorLog}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    currentDefaultPort=443
+    currentPort=
+    customPort=
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=
+    singBoxVLESSVisionPort=
+    singBoxVLESSRealityVisionPort=
+    singBoxVLESSRealityGRPCPort=
+    singBoxHysteria2Port=
+    singBoxTuicPort=
+    singBoxSocks5Port=
+    hysteriaPort=
+    tuicPort=
+    nginxConfigPath="${root}/nginx/"
+    nginxStaticPath="${root}/static"
+    configPath="${root}/xray-conf/"
+
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "xray-stop-fail" ]] && return 1
+        return 0
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "sing-box-stop-fail" ]] && return 1
+        return 0
+    }
+    handleNginx() {
+        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "nginx-stop-fail" ]] && return 1
+        return 0
+    }
+    cleanAgentNginxConf() { printf 'clean-agent\n' >>"${cleanupLog}"; }
+    cleanDirectoryContent() { printf 'clean-dir:%s\n' "$1" >>"${cleanupLog}"; }
+    readInstallType() { printf 'read-install-type\n' >>"${cleanupLog}"; }
+    mkdirTools() { printf 'mkdir-tools\n' >>"${cleanupLog}"; }
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    showLastInstallationConfig() { return 0; }
+    autoRead() { printf -v "$3" 'n'; }
+    lsof() { return 1; }
+    systemctl() {
+        printf 'systemctl:%s\n' "$*" >>"${cleanupLog}"
+        return 0
+    }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${cleanupLog}"
+        return 0
+    }
+
+    runCleanFailureCase() {
+        local failureMode=$1
+        mode="${failureMode}"
+        : >"${serviceLog}"
+        : >"${cleanupLog}"
+        : >"${errorLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        cleanLastInstallationConfig >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+        [[ ! -s "${cleanupLog}" ]]
+        grep -q '已取消清空上次安装配置' "${errorLog}"
+    }
+
+    runCleanFailureCase xray-stop-fail
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    ! grep -q '^sing-box:' "${serviceLog}"
+
+    runCleanFailureCase sing-box-stop-fail
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    ! grep -q '^nginx:' "${serviceLog}"
+
+    runCleanFailureCase nginx-stop-fail
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+
+    mode=xray-stop-fail
+    : >"${serviceLog}"
+    : >"${cleanupLog}"
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    readLastInstallationConfig >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+)
+
 runEntryHelperConfigRegression() {
     local entryConfigPath="${TMP_DIR}/entry-helper-conf/"
     local entryLogBase="${TMP_DIR}/entry-helper-logs/"
@@ -8727,6 +8835,7 @@ runRegressionTransactionSystem() {
     runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
         runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
+        runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
         runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
 }
 

@@ -393,9 +393,18 @@ cleanLastInstallationConfig() {
     oldPorts=$(printf '%s\n' "${currentDefaultPort}" "${currentPort}" "${customPort}" "${xrayVLESSRealityPort}" "${xrayVLESSRealityXHTTPort}" "${singBoxVLESSVisionPort}" "${singBoxVLESSRealityVisionPort}" "${singBoxVLESSRealityGRPCPort}" "${singBoxHysteria2Port}" "${singBoxTuicPort}" "${singBoxSocks5Port}" "${hysteriaPort}" "${tuicPort}" | grep -E '^[0-9]+$' | sort -n | uniq)
 
     statusCard "安装配置" "清空上次安装配置"
-    handleXray stop >/dev/null 2>&1
-    handleSingBox stop >/dev/null 2>&1
-    handleNginx stop >/dev/null 2>&1
+    if ! runCoreServiceActionAllowFailure handleXray stop >/dev/null 2>&1; then
+        errorCard "Xray 服务停止失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! runCoreServiceActionAllowFailure handleSingBox stop >/dev/null 2>&1; then
+        errorCard "sing-box 服务停止失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! runCoreServiceActionAllowFailure handleNginx stop >/dev/null 2>&1; then
+        errorCard "Nginx 服务停止失败，已取消清空上次安装配置"
+        return 1
+    fi
 
     cleanAgentNginxConf
     cleanDirectoryContent /etc/padm/xray/conf
@@ -480,7 +489,7 @@ readLastInstallationConfig() {
         if [[ "${lastInstallationConfigStatus}" == "y" ]]; then
             lastInstallationConfig=true
         else
-            cleanLastInstallationConfig
+            cleanLastInstallationConfig || return 1
         fi
     fi
 }
