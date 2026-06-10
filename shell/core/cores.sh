@@ -994,7 +994,7 @@ customXrayInstall() {
                     statusCard "域名 Reality 证书" "将为自有入口域名申请本机 TLS 证书" "该证书用于客户端连接入口和前置 TLS，不是 Reality target/SNI 伪装目标证书"
                 fi
                 initTLSNginxConfig 2 || return 1
-                installTLS 3
+                installTLS 3 || return 1
             else
                 statusCard "跳过 TLS 证书" "仅安装无域名 Reality"
             fi
@@ -1073,7 +1073,7 @@ customSingBoxInstall() {
         # 申请tls
         if protocolSelectionNeedsTLS "${selectCustomInstallType}"; then
             initTLSNginxConfig 2 || return 1
-            installTLS 3
+            installTLS 3 || return 1
             handleNginx stop
         fi
 
@@ -1146,7 +1146,7 @@ xrayCoreInstall() {
     else
         # 申请tls
         initTLSNginxConfig 3 || return 1
-        installTLS 4
+        installTLS 4 || return 1
     fi
 
     randomPathFunction 5
@@ -1191,7 +1191,7 @@ singBoxInstall() {
     else
         # 申请tls
         initTLSNginxConfig 3 || return 1
-        installTLS 4
+        installTLS 4 || return 1
     fi
 
     handleNginx stop

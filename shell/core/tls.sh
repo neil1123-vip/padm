@@ -2,12 +2,12 @@
 
 # 自定义 Email
 customSSLEmail() {
-    if echo "$1" | grep -q "validate email"; then
+    if echo "${1:-}" | grep -q "validate email"; then
         autoRead tls_email_retry "是否重新输入邮箱地址[y/n]:" sslEmailStatus
         if [[ "${sslEmailStatus}" == "y" ]]; then
-            sed '/ACCOUNT_EMAIL/d' /root/.acme.sh/account.conf >/root/.acme.sh/account.conf_tmp && mv /root/.acme.sh/account.conf_tmp /root/.acme.sh/account.conf
+            sed '/ACCOUNT_EMAIL/d' /root/.acme.sh/account.conf >/root/.acme.sh/account.conf_tmp && mv /root/.acme.sh/account.conf_tmp /root/.acme.sh/account.conf || return 1
         else
-            exit 0
+            return 1
         fi
     fi
 
@@ -15,11 +15,11 @@ customSSLEmail() {
         if ! grep -q "ACCOUNT_EMAIL" <"/root/.acme.sh/account.conf" && ! echo "${sslType}" | grep -q "letsencrypt"; then
             autoRead tls_account_email "请输入邮箱地址:" sslEmail
             if echo "${sslEmail}" | grep -q "@"; then
-                echo "ACCOUNT_EMAIL='${sslEmail}'" >>/root/.acme.sh/account.conf
+                echo "ACCOUNT_EMAIL='${sslEmail}'" >>/root/.acme.sh/account.conf || return 1
                 successCard "添加完毕"
             else
                 echoContent yellow "请重新输入正确的邮箱格式[例: username@example.com]"
-                customSSLEmail
+                customSSLEmail || return 1
             fi
         fi
     fi
@@ -46,7 +46,7 @@ switchDNSAPI() {
             dnsAPIType="cloudflare"
             ;;
         esac
-        initDNSAPIConfig "${dnsAPIType}"
+        initDNSAPIConfig "${dnsAPIType}" || return 1
     fi
 }
 
@@ -60,13 +60,13 @@ initDNSAPIConfig() {
         autoRead cloudflare_api_token "请输入API Token:" cfAPIToken
         if [[ -z "${cfAPIToken}" ]]; then
             errorCard "输入为空，请重新输入"
-            initDNSAPIConfig "$1"
+            initDNSAPIConfig "$1" || return 1
         else
             autoRead cloudflare_zone_id "请输入Zone ID[可选，回车自动识别]:" cfZoneID
             echo
             if ! echo "${dnsTLSDomain}" | grep -q "\." || [[ -z $(echo "${dnsTLSDomain}" | awk -F "[.]" '{print $1}') ]]; then
                 successCard "不支持此域名申请通配符证书，建议使用此格式[xx.xx.xx]"
-                exit 0
+                return 1
             fi
             autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" dnsAPIStatus
         fi
@@ -75,12 +75,12 @@ initDNSAPIConfig() {
         autoRead aliyun_api_secret "请输入Ali Secret:" aliSecret
         if [[ -z "${aliKey}" || -z "${aliSecret}" ]]; then
             errorCard "输入为空，请重新输入"
-            initDNSAPIConfig "$1"
+            initDNSAPIConfig "$1" || return 1
         else
             echo
             if ! echo "${dnsTLSDomain}" | grep -q "\." || [[ -z $(echo "${dnsTLSDomain}" | awk -F "[.]" '{print $1}') ]]; then
                 successCard "不支持此域名申请通配符证书，建议使用此格式[xx.xx.xx]"
-                exit 0
+                return 1
             fi
             autoRead dns_api_wildcard "是否使用*.${dnsTLSDomain}进行API申请通配符证书？[y/n]:" dnsAPIStatus
         fi
@@ -89,7 +89,7 @@ initDNSAPIConfig() {
 
 # 选择ssl安装类型
 switchSSLType() {
-    if [[ -z "${sslType}" ]]; then
+    if [[ -z "${sslType:-}" ]]; then
         echoContent title "\n┌─ 证书 CA ──────────────────────────────────────────"
         menuRecommendedItem 1 "letsencrypt" "默认 CA"
         menuItem 2 "zerossl" "ZeroSSL CA"
@@ -110,18 +110,18 @@ switchSSLType() {
             sslType="letsencrypt"
             ;;
         esac
-        if [[ -n "${dnsAPIType}" && "${sslType}" == "buypass" ]]; then
+        if [[ -n "${dnsAPIType:-}" && "${sslType}" == "buypass" ]]; then
             errorCard "buypass不支持API申请证书"
-            exit 0
+            return 1
         fi
-        echo "${sslType}" >/etc/padm/tls/ssl_type
+        echo "${sslType}" >/etc/padm/tls/ssl_type || return 1
     fi
 }
 
 
 # 选择 acme.sh 证书签发方式
 selectAcmeInstallSSL() {
-    if [[ "${ipType}" == "6" ]]; then
+    if [[ "${ipType:-}" == "6" ]]; then
         sslIPv6="--listen-v6"
     fi
 
@@ -134,23 +134,23 @@ selectAcmeInstallSSL() {
 # 安装 TLS 证书
 acmeInstallSSL() {
     local dnsAPIDomain="${tlsDomain}"
-    if [[ "${dnsAPIStatus}" == "y" ]]; then
+    if [[ "${dnsAPIStatus:-}" == "y" ]]; then
         dnsAPIDomain="*.${dnsTLSDomain}"
     fi
 
-    if [[ "${dnsAPIType}" == "cloudflare" ]]; then
+    if [[ "${dnsAPIType:-}" == "cloudflare" ]]; then
         successCard "DNS API 生成证书中"
-        if [[ -n "${cfZoneID}" ]]; then
-            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+        if [[ -n "${cfZoneID:-}" ]]; then
+            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
         else
-            CF_Token="${cfAPIToken}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+            CF_Token="${cfAPIToken}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
         fi
-    elif [[ "${dnsAPIType}" == "aliyun" ]]; then
+    elif [[ "${dnsAPIType:-}" == "aliyun" ]]; then
         successCard "DNS API 生成证书中"
-        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
     else
         successCard "生成证书中"
-        sudo "$HOME/.acme.sh/acme.sh" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+        sudo "$HOME/.acme.sh/acme.sh" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
     fi
 }
 
@@ -160,53 +160,53 @@ installTLS() {
     readAcmeTLS
     local tlsDomain=${domain}
 
-    if [[ -f "/etc/padm/tls/${tlsDomain}.crt" && -f "/etc/padm/tls/${tlsDomain}.key" && -n $(cat "/etc/padm/tls/${tlsDomain}.crt") ]] || [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus}" == "true" ]]; then
+    if [[ -f "/etc/padm/tls/${tlsDomain}.crt" && -f "/etc/padm/tls/${tlsDomain}.key" && -n $(cat "/etc/padm/tls/${tlsDomain}.crt") ]] || [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
         successCard "检测到证书"
         renewalTLS
 
         if [[ -z $(find /etc/padm/tls/ -name "${tlsDomain}.crt") ]] || [[ -z $(find /etc/padm/tls/ -name "${tlsDomain}.key") ]] || [[ -z $(cat "/etc/padm/tls/${tlsDomain}.crt") ]]; then
-            if [[ "${installedDNSAPIStatus}" == "true" ]]; then
-                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null
+            if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || return 1
             else
-                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null
+                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || return 1
             fi
 
         else
-            if [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus}" == "true" ]]; then
+            if [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 if [[ -z "${lastInstallationConfig}" ]]; then
                     statusCard "TLS 证书" "如未过期或者自定义证书请选择 [n]"
                     autoRead tls_reinstall "是否重新安装？[y/n]:" reInstallStatus
                     if [[ "${reInstallStatus}" == "y" ]]; then
                         cleanDirectoryContent /etc/padm/tls
-                        installTLS "$1"
+                        installTLS "$1" || return 1
                     fi
                 fi
             fi
         fi
 
     elif [[ -d "$HOME/.acme.sh" ]] && [[ ! -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" || ! -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" ]]; then
-        switchDNSAPI
-        if [[ -z "${dnsAPIType}" ]]; then
+        switchDNSAPI || return 1
+        if [[ -z "${dnsAPIType:-}" ]]; then
             statusCard "TLS 证书申请方式" "不采用 API 申请证书"
             successCard "安装TLS证书，需要依赖80端口"
             allowPort 80
         fi
 
-        switchSSLType
-        customSSLEmail
+        switchSSLType || return 1
+        customSSLEmail || return 1
         selectAcmeInstallSSL
 
-        if [[ "${installedDNSAPIStatus}" == "true" ]]; then
-            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null
+        if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || true
         else
-            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null
+            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || true
         fi
 
         if [[ ! -f "/etc/padm/tls/${tlsDomain}.crt" || ! -f "/etc/padm/tls/${tlsDomain}.key" ]] || [[ -z $(cat "/etc/padm/tls/${tlsDomain}.key") || -z $(cat "/etc/padm/tls/${tlsDomain}.crt") ]]; then
-            tail -n 10 /etc/padm/tls/acme.log
-            if [[ ${installTLSCount} == "1" ]]; then
+            tail -n 10 /etc/padm/tls/acme.log 2>/dev/null || true
+            if [[ ${installTLSCount:-} == "1" ]]; then
                 errorCard "TLS安装失败，请检查acme日志"
-                exit 0
+                return 1
             fi
 
             installTLSCount=1
@@ -215,17 +215,17 @@ installTLS() {
             if tail -n 10 /etc/padm/tls/acme.log | grep -q "Could not validate email address as valid"; then
                 errorCard "邮箱无法通过SSL厂商验证，请重新输入"
                 echo
-                customSSLEmail "validate email"
-                installTLS "$1"
+                customSSLEmail "validate email" || return 1
+                installTLS "$1" || return 1
             else
-                installTLS "$1"
+                installTLS "$1" || return 1
             fi
         fi
 
         successCard "TLS生成成功"
     else
         statusCard "acme.sh" "未安装 acme.sh"
-        exit 0
+        return 1
     fi
 }
 
@@ -308,10 +308,10 @@ renewalTLS() {
             sslRenewalDays=180
         fi
     fi
-    if [[ -d "$HOME/.acme.sh/${domain}_ecc" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus}" == "true" ]]; then
+    if [[ -d "$HOME/.acme.sh/${domain}_ecc" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
         modifyTime=
 
-        if [[ "${installedDNSAPIStatus}" == "true" ]]; then
+        if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
             modifyTime=$(stat --format=%z "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
         else
             modifyTime=$(stat --format=%z "$HOME/.acme.sh/${domain}_ecc/${domain}.cer")
@@ -345,7 +345,7 @@ renewalTLS() {
                 handleSingBox stop
             fi
 
-            if [[ "${installedDNSAPIStatus}" == "true" ]]; then
+            if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath /etc/padm/tls/"${domain}.crt" --keypath /etc/padm/tls/"${domain}.key" --ecc
             else
                 sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${domain}" --fullchainpath /etc/padm/tls/"${domain}.crt" --keypath /etc/padm/tls/"${domain}.key" --ecc
@@ -361,4 +361,3 @@ renewalTLS() {
         errorCard "未安装本机 TLS 证书；无域名 Reality 不需要这里，域名 Reality 或传统 TLS 请检查 acme 与 /etc/padm/tls"
     fi
 }
-

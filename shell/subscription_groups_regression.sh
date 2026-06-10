@@ -842,6 +842,86 @@ runNetworkCheckReturnFailureRegression() (
     [[ ! -e "${writeProbe}" ]]
 )
 
+runTlsFailureReturnRegression() (
+    local root="${TMP_DIR}/tls-failure-return"
+    local oldHome="${HOME}"
+    local emailRcFile="${root}/email.rc"
+    local dnsRcFile="${root}/dns-api.rc"
+    local caRcFile="${root}/ca.rc"
+    local installRcFile="${root}/install.rc"
+    local xrayRcFile="${root}/xray.rc"
+    local reachedFile="${root}/reached"
+    local shellRc
+
+    mkdir -p "${root}/home"
+    HOME="${root}/home"
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    menuItem() { return 0; }
+    menuRecommendedItem() { return 0; }
+    progressCard() { return 0; }
+    autoRead() {
+        case "$3" in
+        sslEmailStatus) printf -v "$3" 'n' ;;
+        cfAPIToken) printf -v "$3" 'token' ;;
+        cfZoneID) printf -v "$3" '' ;;
+        selectSSLType) printf -v "$3" '3' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+
+    captureFailureReturn() {
+        local rcFile=$1
+        shift
+        rm -f "${rcFile}"
+        set +e
+        (
+            set +e
+            "$@" >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ "$(<"${rcFile}")" == "1" ]]
+    }
+
+    captureFailureReturn "${emailRcFile}" customSSLEmail "validate email"
+
+    dnsTLSDomain=example
+    captureFailureReturn "${dnsRcFile}" initDNSAPIConfig cloudflare
+
+    dnsAPIType=cloudflare
+    sslType=
+    captureFailureReturn "${caRcFile}" switchSSLType
+
+    domain=missing.example.com
+    currentHost=
+    installedDNSAPIStatus=
+    installTLSCount=
+    captureFailureReturn "${installRcFile}" installTLS 1
+
+    btDomain=
+    readLastInstallationConfig() { return 0; }
+    unInstallSubscribe() { return 0; }
+    installTools() { return 0; }
+    initTLSNginxConfig() { return 0; }
+    installTLS() { return 1; }
+    randomPathFunction() {
+        printf 'reached\n' >"${reachedFile}"
+        return 0
+    }
+
+    captureFailureReturn "${xrayRcFile}" xrayCoreInstall
+    [[ ! -e "${reachedFile}" ]]
+
+    HOME="${oldHome}"
+)
+
 runConfigTransactionRegression() {
     local targetFile="${TMP_DIR}/transaction.json"
     local backupFile="${targetFile}.bak"
@@ -5363,6 +5443,7 @@ runRegressionTransactionCore() {
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
+        runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression
 }
