@@ -189,7 +189,15 @@ runRegressionStep() {
     if [[ "${PADM_REGRESSION_VERBOSE:-}" == "1" ]]; then
         printf 'regression-start:%s\n' "${name}"
     fi
-    if "$@"; then
+    set +e
+    (
+        trap - EXIT INT TERM
+        set -e
+        "$@"
+    )
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 0 ]]; then
         endMs=$(regressionNowMs)
         elapsedMs=$((endMs - startMs))
         if [[ "${PADM_REGRESSION_VERBOSE:-}" == "1" || "${name}" == total:* || "${elapsedMs}" -ge "${thresholdMs}" ]]; then
@@ -197,7 +205,6 @@ runRegressionStep() {
         fi
         return 0
     else
-        rc=$?
         endMs=$(regressionNowMs)
         elapsedMs=$((endMs - startMs))
         printf 'regression-fail:%s:%sms:rc=%s\n' "${name}" "${elapsedMs}" "${rc}" >&2

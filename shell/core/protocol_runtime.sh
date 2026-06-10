@@ -572,15 +572,23 @@ initXrayRealityPort() {
         if [[ -z "${realityPort}" ]]; then
             realityPort=$((RANDOM % 20001 + 10000))
         fi
+        if ! validPortNumber "${realityPort}"; then
+            errorCard "Reality 端口输入错误"
+            return 1
+        fi
         if [[ -n "${realityPort}" && "${xrayVLESSRealityPort}" == "${realityPort}" ]]; then
             handleXray stop
         else
-            checkPort "${realityPort}"
+            checkPort "${realityPort}" || return 1
         fi
     fi
     if [[ -z "${realityPort}" ]]; then
-        initXrayRealityPort
+        initXrayRealityPort || return 1
     else
+        if ! validPortNumber "${realityPort}"; then
+            errorCard "Reality 端口输入错误"
+            return 1
+        fi
         allowPort "${realityPort}"
         statusCard "Reality 端口" "${realityPort}"
     fi
@@ -605,15 +613,23 @@ initXrayXHTTPort() {
         if [[ -z "${xHTTPort}" ]]; then
             xHTTPort=$((RANDOM % 20001 + 10000))
         fi
+        if ! validPortNumber "${xHTTPort}"; then
+            errorCard "Reality XHTTP 端口输入错误"
+            return 1
+        fi
         if [[ -n "${xHTTPort}" && "${xrayVLESSRealityXHTTPort}" == "${xHTTPort}" ]]; then
             handleXray stop
         else
-            checkPort "${xHTTPort}"
+            checkPort "${xHTTPort}" || return 1
         fi
     fi
     if [[ -z "${xHTTPort}" ]]; then
-        initXrayXHTTPort
+        initXrayXHTTPort || return 1
     else
+        if ! validPortNumber "${xHTTPort}"; then
+            errorCard "Reality XHTTP 端口输入错误"
+            return 1
+        fi
         allowPort "${xHTTPort}"
         allowPort "${xHTTPort}" "udp"
         statusCard "Reality XHTTP 端口" "${xHTTPort}"

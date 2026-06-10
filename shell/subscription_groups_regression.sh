@@ -497,6 +497,97 @@ runCorePortFileTransactionRegression() {
     rm -rf "${configPath}"
 }
 
+runXrayRealityPortFailureRegression() (
+    local xrayRoot="${TMP_DIR}/xray-reality-port-failure"
+    local oldConfigPath="${configPath:-}"
+    local oldSelectCustomInstallType="${selectCustomInstallType:-}"
+    local oldCurrentUUID="${currentUUID:-}"
+    local oldCurrentClients="${currentClients:-}"
+    local oldRealityPort="${realityPort:-}"
+    local oldXHTTPort="${xHTTPort:-}"
+    local oldXrayRealityPort="${xrayVLESSRealityPort:-}"
+    local oldXrayXHTTPort="${xrayVLESSRealityXHTTPort:-}"
+    local oldLastInstallationConfig="${lastInstallationConfig:-}"
+    local allowCalls=0
+
+    configPath="${xrayRoot}/"
+    mkdir -p "${configPath}"
+    currentUUID=existing-user
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=
+    lastInstallationConfig=true
+    realityPort=70000
+    xHTTPort=
+    initXrayClients() { printf '[]\n'; }
+    addXrayOutbound() { return 0; }
+    installSniffing() { return 0; }
+    writeGeneratedJsonFile() {
+        local targetFile=$1
+        local outputFile
+        shift 2
+        if [[ "${targetFile}" == /etc/padm/xray/conf/* ]]; then
+            outputFile="${configPath}${targetFile#/etc/padm/xray/conf/}"
+        else
+            outputFile="${targetFile}"
+        fi
+        mkdir -p "$(dirname "${outputFile}")"
+        cat >"${outputFile}"
+    }
+    initRealityProfile() { return 0; }
+    initRealityKey() {
+        realityPrivateKey=private
+        realityPublicKey=public
+    }
+    initRealityMldsa65() {
+        realityMldsa65Seed=seed
+        realityMldsa65Verify=verify
+    }
+    allowPort() {
+        allowCalls=$((allowCalls + 1))
+        return 0
+    }
+
+    ! validPortNumber 999999999999999999999
+
+    if initXrayRealityPort 2>/dev/null; then
+        return 1
+    fi
+    [[ "${allowCalls}" == "0" ]]
+
+    xHTTPort=bad-port
+    if initXrayXHTTPort 2>/dev/null; then
+        return 1
+    fi
+    [[ "${allowCalls}" == "0" ]]
+
+    selectCustomInstallType=",7,"
+    xHTTPort=
+    if initXrayConfig custom 1 true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${allowCalls}" == "0" ]]
+    [[ ! -e "${configPath}07_VLESS_vision_reality_inbounds.json" ]]
+
+    selectCustomInstallType=",12,"
+    realityPort=10888
+    xHTTPort=bad-port
+    if initXrayConfig custom 1 true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${allowCalls}" == "0" ]]
+    [[ ! -e "${configPath}12_VLESS_XHTTP_inbounds.json" ]]
+
+    configPath="${oldConfigPath}"
+    selectCustomInstallType="${oldSelectCustomInstallType}"
+    currentUUID="${oldCurrentUUID}"
+    currentClients="${oldCurrentClients}"
+    realityPort="${oldRealityPort}"
+    xHTTPort="${oldXHTTPort}"
+    xrayVLESSRealityPort="${oldXrayRealityPort}"
+    xrayVLESSRealityXHTTPort="${oldXrayXHTTPort}"
+    lastInstallationConfig="${oldLastInstallationConfig}"
+)
+
 runConfigTransactionRegression() {
     local targetFile="${TMP_DIR}/transaction.json"
     local backupFile="${targetFile}.bak"
@@ -3554,7 +3645,7 @@ runMenuSmokeLightRegression() {
     manageCDN() { recordMenuAction manageCDN; }
 
     installMenu <<<"6"
-    assertMenuAction menu
+    assertMenuAction selectCoreInstall
     grep -q "不知道怎么选时，建议直接选 1" <<<"${output}"
     grep -q "entry 是客户端连接地址" <<<"${output}"
 
@@ -4566,6 +4657,8 @@ runUpdatePadmVersionPromptRegression() {
     errorLog="${TMP_DIR}/update-padm-error.log"
     installDir="${TMP_DIR}/update-padm-install"
     mkdir -p "${installDir}"
+    : >"${successLog}"
+    : >"${errorLog}"
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
     chmod 700 "${installDir}/install.sh"
 
@@ -4604,6 +4697,7 @@ EOF
 
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
     chmod 700 "${installDir}/install.sh"
+    : >"${successLog}"
     : >"${errorLog}"
     (
         REGRESSION_ERROR_CARD_LOG="${errorLog}"
@@ -4808,34 +4902,32 @@ runInstallModulePathsRegression() {
 }
 
 runRegressionPlatform() {
-    local rc=0
-    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression || rc=1
-    runRegressionStep cleanup-trap runCleanupTrapRegression || rc=1
-    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression || rc=1
-    runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression || rc=1
-    runRegressionStep install-entry-refresh runInstallEnsureModulesRegression || rc=1
-    runRegressionStep install-module-paths runInstallModulePathsRegression || rc=1
-    runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression || rc=1
-    runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression || rc=1
-    runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression || rc=1
-    runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression || rc=1
-    runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression || rc=1
-    runRegressionStep rhel-like-detection runRhelLikeDetectionRegression || rc=1
-    runRegressionStep fedora-detection runFedoraDetectionRegression || rc=1
-    return "${rc}"
+    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
+        runRegressionStep cleanup-trap runCleanupTrapRegression &&
+        runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
+        runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
+        runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
+        runRegressionStep install-module-paths runInstallModulePathsRegression &&
+        runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&
+        runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression &&
+        runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression &&
+        runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression &&
+        runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression &&
+        runRegressionStep rhel-like-detection runRhelLikeDetectionRegression &&
+        runRegressionStep fedora-detection runFedoraDetectionRegression
 }
 
 runRegressionPlatformIo() {
-    runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression
-    runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression
-    runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression
-    runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression
-    runRegressionStep apt-key-install-failure runAptKeyInstallFailureRegression
-    runRegressionStep nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureRegression
-    runRegressionStep base-package-batch runBasePackageBatchRegression
-    runRegressionStep package-rollback-failure runPackageRollbackFailureRegression
-    runRegressionStep package-command-stdin runPackageCommandStdinRegression
-    runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression
+    runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression &&
+        runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression &&
+        runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression &&
+        runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression &&
+        runRegressionStep apt-key-install-failure runAptKeyInstallFailureRegression &&
+        runRegressionStep nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureRegression &&
+        runRegressionStep base-package-batch runBasePackageBatchRegression &&
+        runRegressionStep package-rollback-failure runPackageRollbackFailureRegression &&
+        runRegressionStep package-command-stdin runPackageCommandStdinRegression &&
+        runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression
 }
 
 runTlsRenewalExistingCertificateRegression() {
@@ -4937,14 +5029,14 @@ runRegressionTls() {
 }
 
 runRegressionFast() {
-    runRegressionStep platform runRegressionPlatform
-    runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression
-    runRegressionStep ui-smoke-light runMenuSmokeLightRegression
+    runRegressionStep platform runRegressionPlatform &&
+        runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
+        runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }
 
 runRegressionFastReality() {
-    runRegressionFast
-    runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
+    runRegressionFast &&
+        runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
 }
 
 runRegressionUi() {
@@ -4991,64 +5083,65 @@ runRegressionSubscription() {
 }
 
 runRegressionRealityCandidates() {
-    runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
-    runRegressionStep reality-asn-scan-plan runRealityAsnScanPlanRegression
-    runRegressionStep reality-candidates-full runRealityCandidateFullRegression
+    runRegressionStep reality-candidates-fast runRealityCandidateFastRegression &&
+        runRegressionStep reality-asn-scan-plan runRealityAsnScanPlanRegression &&
+        runRegressionStep reality-candidates-full runRealityCandidateFullRegression
 }
 
 runRegressionRealityStream() {
-    runRegressionStep reality-stream-enable runRealityStreamEnableRegression
-    runRegressionStep reality-stream-disable runRealityStreamDisableRegression
+    runRegressionStep reality-stream-enable runRealityStreamEnableRegression &&
+        runRegressionStep reality-stream-disable runRealityStreamDisableRegression
 }
 
 runRegressionRuntime() {
-    runRegressionStep runtime-core runRuntimeAndRealityRegression
-    runRegressionStep reality-config runRealityConfigRegression
+    runRegressionStep runtime-core runRuntimeAndRealityRegression &&
+        runRegressionStep reality-config runRealityConfigRegression
 }
 
 runRegressionTransactionCore() {
-    runRegressionStep config-transaction runConfigTransactionRegression
-    runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression
-    runRegressionStep user-config-write runUserConfigWriteRegression
-    runRegressionStep remove-user runRemoveUserRegression
+    runRegressionStep config-transaction runConfigTransactionRegression &&
+        runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
+        runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
+        runRegressionStep user-config-write runUserConfigWriteRegression &&
+        runRegressionStep remove-user runRemoveUserRegression
 }
 
 runRegressionTransactionSubscription() {
-    runRegressionStep subscribe-server-name runSubscribeServerNameRegression
-    runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
-    runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
-    runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
+    runRegressionStep subscribe-server-name runSubscribeServerNameRegression &&
+        runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression &&
+        runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression &&
+        runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
 }
 
 runRegressionTransactionSystem() {
-    runRegressionStep nginx-service-failure runNginxServiceFailureRegression
-    runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression
-    runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression
-    runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
+    runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
+        runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
+        runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
+        runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
 }
 
 runRegressionTransaction() {
-    runRegressionTransactionCore
-    runRegressionTransactionSubscription
-    runRegressionTransactionSystem
+    runRegressionTransactionCore &&
+        runRegressionTransactionSubscription &&
+        runRegressionTransactionSystem
 }
 
 runRegressionRemoteControl() {
-    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
-    runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
-    runRegressionStep remote-control-health runRemoteControlHealthRegression
-    runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression
-    runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression
-    runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
+    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
+        runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
+        runRegressionStep remote-control-health runRemoteControlHealthRegression &&
+        runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&
+        runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression &&
+        runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
 
 runRegressionAll() {
-    runRegressionRouting
-    runRegressionSubscription
-    runRegressionRuntime
-    runRegressionTransaction
-    runRegressionRemoteControl
-    runRegressionUi
+    runRegressionRouting &&
+        runRegressionSubscription &&
+        runRegressionRuntime &&
+        runRegressionTransaction &&
+        runRegressionRemoteControl &&
+        runRegressionUi
 }
 
 regressionName=${1:-fast}

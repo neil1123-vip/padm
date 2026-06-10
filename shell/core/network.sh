@@ -52,6 +52,11 @@ allowPort() {
     fi
 }
 
+validPortNumber() {
+    local port=$1
+    [[ "${port}" =~ ^[0-9]{1,5}$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535))
+}
+
 # 获取公网 IP
 hasIPv6Connectivity() {
     [[ -n "$(curl --connect-timeout 2 -s -6 http://www.cloudflare.com/cdn-cgi/trace | grep "ip" | cut -d "=" -f 2)" ]]
@@ -296,7 +301,7 @@ checkPort() {
             sleep 1
         else
             errorCard "已取消安装，请手动处理${port}端口占用后重新执行"
-            exit 0
+            return 1
         fi
     else
         autoRead stop_port_process_confirm "是否停止占用${port}端口的进程并继续安装？[y/n]:" stopPortProcessStatus
@@ -305,14 +310,13 @@ checkPort() {
             sleep 1
         else
             errorCard "已取消安装，请手动处理${port}端口占用后重新执行"
-            exit 0
+            return 1
         fi
     fi
 
     if lsof -i "tcp:${port}" | grep -q LISTEN; then
         errorCard "${port}端口仍被占用，请手动关闭后安装\n"
         lsof -nP -i "tcp:${port}" | grep LISTEN
-        exit 0
+        return 1
     fi
 }
-

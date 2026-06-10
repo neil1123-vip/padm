@@ -175,7 +175,7 @@ EOF
     fi
     # VLESS_Reality_XHTTP_TLS
     if protocolSelectionIncludes "${selectCustomInstallType}" 12 "$1"; then
-        initXrayXHTTPort
+        initXrayXHTTPort || return 1
         initRealityProfile
         initRealityKey
         initRealityMldsa65
@@ -302,7 +302,7 @@ EOF
         menuLine "生成 Xray Reality Vision 入站配置"
         menuClose
 
-        initXrayRealityPort
+        initXrayRealityPort || return 1
         initRealityProfile
         initRealityKey
         initRealityMldsa65
