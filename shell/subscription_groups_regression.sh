@@ -963,6 +963,151 @@ runServiceQueueApplyPropagationRegression() (
     [[ ! -e "${reachedFile}" ]]
 )
 
+runReloadCorePropagationRegression() (
+    local root="${TMP_DIR}/reload-core-propagation"
+    local alpnConfig="${root}/alpn.json"
+    local vlessConfig="${root}/vless.json"
+    local vlessState="${root}/vless-state.json"
+    local fakeXray="${root}/xray"
+    local successMarker="${root}/success"
+    local refreshMarker="${root}/refresh"
+    local subscribeMarker="${root}/subscribe"
+    local originalContent rc
+
+    mkdir -p "${root}/nginx"
+    statusCard() { return 0; }
+    successCard() {
+        printf 'success\n' >>"${successMarker}"
+        return 0
+    }
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    cleanDirectoryContent() { return 0; }
+
+    cat >"${alpnConfig}" <<'JSON'
+{"inbounds":[{"streamSettings":{"tlsSettings":{"alpn":["http/1.1"]}}}]}
+JSON
+    traditionalTlsFallbackConfigFile() { printf '%s\n' "${alpnConfig}"; }
+    padmCreateTempFileForTarget() {
+        local -n targetRef=$1
+        local targetFile=$2
+        targetRef="${targetFile}.tmp"
+        return 0
+    }
+    padmRemoveCleanupPath() { rm -f "$1"; }
+    commitGeneratedJsonFile() {
+        local tmpFile=$1
+        local targetFile=$2
+        mv "${tmpFile}" "${targetFile}"
+    }
+    reloadCore() { return 1; }
+
+    originalContent=$(<"${alpnConfig}")
+    rm -f "${successMarker}"
+    set +e
+    applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    cat >"${fakeXray}" <<'SH'
+#!/usr/bin/env bash
+case "$1" in
+--version)
+    printf 'Xray 25.9.5\n'
+    ;;
+vlessenc)
+    printf '{"encryption":"mlkem768x25519plus.native.enc","decryption":"mlkem768x25519plus.native.dec"}\n'
+    ;;
+-test)
+    exit 0
+    ;;
+esac
+SH
+    chmod +x "${fakeXray}"
+    cat >"${vlessConfig}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"id":"u","flow":"xtls-rprx-vision"}],"decryption":"none","fallbacks":[]}}]}
+JSON
+    originalContent=$(<"${vlessConfig}")
+    coreInstallType=1
+    PADM_XRAY_BINARY="${fakeXray}"
+    PADM_XRAY_CONF_DIR="${root}"
+    PADM_VLESS_REALITY_CONFIG_FILE="${vlessConfig}"
+    PADM_VLESS_XHTTP_CONFIG_FILE="${root}/missing-xhttp.json"
+    PADM_VLESS_ENCRYPTION_STATE_FILE="${vlessState}"
+    readNginxSubscribe() {
+        printf 'refresh\n' >"${refreshMarker}"
+        subscribePort=443
+        nginxConfigPath="${root}/nginx/"
+    }
+    subscribe() { return 0; }
+
+    rm -f "${refreshMarker}" "${vlessState}"
+    set +e
+    setVlessRealityEncryption enable >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
+    [[ ! -e "${vlessState}" ]]
+    [[ ! -e "${refreshMarker}" ]]
+
+    reloadCore() { return 0; }
+    subscribe() { return 1; }
+    readNginxSubscribe() {
+        subscribePort=443
+        nginxConfigPath="${root}/nginx/"
+    }
+    set +e
+    refreshVlessEncryptionSubscriptions >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+
+    subscribePort=
+    readNginxSubscribe() {
+        subscribePort=
+        nginxConfigPath="${root}/nginx/"
+    }
+    showAccounts() { return 1; }
+    set +e
+    refreshVlessEncryptionSubscriptions >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+
+    initXrayConfig() { return 0; }
+    reloadCore() { return 1; }
+    subscribe() {
+        printf 'subscribe\n' >"${subscribeMarker}"
+        return 0
+    }
+    rm -f "${subscribeMarker}"
+    set +e
+    regenerateRealityProfile >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${subscribeMarker}" ]]
+
+    reloadCore() { return 0; }
+    subscribe() {
+        printf 'subscribe\n' >"${subscribeMarker}"
+        return 1
+    }
+    rm -f "${subscribeMarker}"
+    set +e
+    regenerateRealityProfile >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${subscribeMarker}" ]]
+)
+
 runConfigTransactionRegression() {
     local targetFile="${TMP_DIR}/transaction.json"
     local backupFile="${targetFile}.bak"
@@ -5486,6 +5631,7 @@ runRegressionTransactionCore() {
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
+        runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression
 }

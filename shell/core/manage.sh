@@ -69,13 +69,19 @@ vlessEncryptionStateSummary() {
 refreshVlessEncryptionSubscriptions() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        subscribe renew >/dev/null
+        if ! subscribe renew >/dev/null; then
+            errorCard "刷新 VLESS Encryption 公网订阅失败"
+            return 1
+        fi
         successCard "已刷新 default 公网订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段"
     else
         cleanDirectoryContent /etc/padm/subscribe_local/default
         cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
         cleanDirectoryContent /etc/padm/subscribe_local/sing-box
-        showAccounts >/dev/null
+        if ! showAccounts >/dev/null; then
+            errorCard "刷新 VLESS Encryption 本地订阅失败"
+            return 1
+        fi
         successCard "已刷新本地 default 订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段"
     fi
 }
@@ -193,9 +199,19 @@ setVlessRealityEncryption() {
         menuClose
         return 1
     fi
+    if ! reloadCore; then
+        mv "${backupFile}" "${configFile}"
+        if [[ -f "${stateBackupFile}" ]]; then
+            mv "${stateBackupFile}" "${stateFile}"
+        else
+            rm -f "${stateFile}"
+        fi
+        rm -f "${stateTmpFile}"
+        errorCard "核心重载失败，已回滚 VLESS Encryption 修改"
+        return 1
+    fi
     rm -f "${backupFile}" "${stateBackupFile}" "${stateTmpFile}"
-    reloadCore
-    refreshVlessEncryptionSubscriptions
+    refreshVlessEncryptionSubscriptions || return 1
     return 0
 }
 
@@ -583,8 +599,12 @@ applyTraditionalTlsAlpn() {
         menuClose
         return 1
     fi
+    if ! reloadCore; then
+        mv "${backupFile}" "${configFile}"
+        errorCard "核心重载失败，已回滚 ALPN 修改"
+        return 1
+    fi
     rm -f "${backupFile}"
-    reloadCore
     successCard "ALPN 配置已更新"
 }
 
@@ -1845,8 +1865,8 @@ regenerateRealityProfile() {
         initSingBoxConfig custom 1 true || return 1
     fi
 
-    reloadCore
-    subscribe false
+    reloadCore || return 1
+    subscribe false || return 1
 }
 
 manageReality() {
