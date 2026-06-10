@@ -1610,9 +1610,14 @@ runRuntimeTempDirRegression() (
     mkdir -p "${tmpRoot}" "${targetRoot}"
     TMPDIR="${tmpRoot}"
 
+    [[ "$(padmTmpFilePath padm-runtime-direct.log)" == "${tmpRoot}/padm-runtime-direct.log" ]]
     [[ "$(traditionalTlsAlpnTestLog)" == "${tmpRoot}/padm-alpn-xray-test.log" ]]
     [[ "$(xhttpConfigTestLog)" == "${tmpRoot}/padm-xhttp-test.log" ]]
     [[ "$(tuicConfigTestLog)" == "${tmpRoot}/padm-tuic-test.log" ]]
+    [[ "$(coreXrayConfigTestLog)" == "${tmpRoot}/padm-core-xray-test.log" ]]
+    [[ "$(coreXrayUpgradeTestLog)" == "${tmpRoot}/padm-core-xray-upgrade-test.log" ]]
+    [[ "$(coreSingBoxConfigTestLog)" == "${tmpRoot}/padm-core-sing-box-test.log" ]]
+    [[ "$(coreSingBoxUpgradeTestLog)" == "${tmpRoot}/padm-core-sing-box-upgrade-test.log" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
@@ -2109,6 +2114,9 @@ runServiceQueueApplyPropagationRegression() (
     mkdir -p "${root}"
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/core/services.sh"
+    TMPDIR="${root}/tmp"
+    mkdir -p "${TMPDIR}"
+    [[ "$(xrayStartTestLog)" == "${TMPDIR}/padm-xray-start-test.log" ]]
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceCallsFile}"
         return 1

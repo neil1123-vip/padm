@@ -211,10 +211,36 @@ coreServiceState() {
 
 validateXrayConfigWithBinary() {
     local binary=${1:-/etc/padm/xray/xray}
-    local logFile=${2:-/tmp/padm-core-xray-test.log}
+    local logFile=${2:-$(coreXrayConfigTestLog)}
     [[ -x "${binary}" ]] || return 1
     [[ -d /etc/padm/xray/conf ]] || return 1
     "${binary}" -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1
+}
+
+coreTmpFilePath() {
+    local fileName=$1
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath "${fileName}"
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/${fileName}"
+    fi
+}
+
+coreXrayConfigTestLog() {
+    coreTmpFilePath padm-core-xray-test.log
+}
+
+coreXrayUpgradeTestLog() {
+    coreTmpFilePath padm-core-xray-upgrade-test.log
+}
+
+coreSingBoxConfigTestLog() {
+    coreTmpFilePath padm-core-sing-box-test.log
+}
+
+coreSingBoxUpgradeTestLog() {
+    coreTmpFilePath padm-core-sing-box-upgrade-test.log
 }
 
 singBoxConfigInstalled() {
@@ -223,7 +249,7 @@ singBoxConfigInstalled() {
 
 validateSingBoxConfigWithBinary() {
     local binary=${1:-/etc/padm/sing-box/sing-box}
-    local logFile=${2:-/tmp/padm-core-sing-box-test.log}
+    local logFile=${2:-$(coreSingBoxConfigTestLog)}
     [[ -x "${binary}" ]] || return 1
     singBoxConfigInstalled || return 2
     "${binary}" merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1 || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
@@ -261,17 +287,20 @@ coreValidationStateWithPaths() {
 
 coreValidationState() {
     local core=$1
+    local logFile
     if [[ "${core}" == "xray" ]]; then
-        if validateXrayConfigWithBinary /etc/padm/xray/xray /tmp/padm-core-xray-test.log; then
+        logFile=$(coreXrayConfigTestLog)
+        if validateXrayConfigWithBinary /etc/padm/xray/xray "${logFile}"; then
             echo "通过"
         else
-            echo "失败，查看 /tmp/padm-core-xray-test.log"
+            echo "失败，查看 ${logFile}"
         fi
     elif [[ "${core}" == "sing-box" ]]; then
-        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box /tmp/padm-core-sing-box-test.log; then
+        logFile=$(coreSingBoxConfigTestLog)
+        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
             echo "通过"
         else
-            echo "失败，查看 /tmp/padm-core-sing-box-test.log"
+            echo "失败，查看 ${logFile}"
         fi
     fi
 }
@@ -314,7 +343,7 @@ showCoreStatusOverview() {
     menuLine "Xray-core: $(coreDisplayState "${xrayVersion}")"
     menuLine "Xray 服务: $(coreDisplayState "$(coreServiceState xray xrayRunning)")"
     if [[ -x "${xrayBinary}" ]]; then
-        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" /tmp/padm-core-xray-test.log)")"
+        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" "$(coreXrayConfigTestLog)")")"
         if [[ -n "${geoVersion}" ]]; then
             menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / $(coreDisplayState "${geoVersion}") / 自动更新 $(coreDisplayState "${geoCron}")"
         else
@@ -334,7 +363,8 @@ showCoreStatusOverview() {
 
 installDownloadedXrayBinary() {
     local version=$1
-    local tmpDir oldBinary backupBinary newBinary
+    local tmpDir oldBinary backupBinary newBinary logFile
+    logFile=$(coreXrayUpgradeTestLog)
     padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.XXXXXX || return 1
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
         padmRemoveCleanupPath "${tmpDir}"
@@ -351,9 +381,9 @@ installDownloadedXrayBinary() {
         errorCard "Xray-core 资产中未找到 xray 二进制"
         return 1
     fi
-    if [[ -d /etc/padm/xray/conf ]] && ! validateXrayConfigWithBinary "${newBinary}" /tmp/padm-core-xray-upgrade-test.log; then
+    if [[ -d /etc/padm/xray/conf ]] && ! validateXrayConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
-        statusCard "Xray 配置校验失败" "已取消升级" "排查日志: /tmp/padm-core-xray-upgrade-test.log"
+        statusCard "Xray 配置校验失败" "已取消升级" "排查日志: ${logFile}"
         return 1
     fi
 
@@ -379,13 +409,14 @@ installDownloadedXrayBinary() {
     handleXray start
     SERVICE_QUEUE_ALLOW_FAILURE=
     padmRemoveCleanupPath "${tmpDir}"
-    statusCard "Xray-core 更新失败" "已尝试恢复旧二进制" "排查日志: /tmp/padm-core-xray-upgrade-test.log"
+    statusCard "Xray-core 更新失败" "已尝试恢复旧二进制" "排查日志: ${logFile}"
     return 1
 }
 
 installDownloadedSingBoxBinary() {
     local version=$1
-    local tmpDir asset oldBinary backupBinary extractedDir newBinary
+    local tmpDir asset oldBinary backupBinary extractedDir newBinary logFile
+    logFile=$(coreSingBoxUpgradeTestLog)
     padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
     asset="sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
@@ -404,9 +435,9 @@ installDownloadedSingBoxBinary() {
         errorCard "sing-box 资产中未找到 sing-box 二进制"
         return 1
     fi
-    if [[ -d /etc/padm/sing-box/conf ]] && ! validateSingBoxConfigWithBinary "${newBinary}" /tmp/padm-core-sing-box-upgrade-test.log; then
+    if [[ -d /etc/padm/sing-box/conf ]] && ! validateSingBoxConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
-        statusCard "sing-box 配置校验失败" "已取消升级" "排查日志: /tmp/padm-core-sing-box-upgrade-test.log"
+        statusCard "sing-box 配置校验失败" "已取消升级" "排查日志: ${logFile}"
         return 1
     fi
 
@@ -432,7 +463,7 @@ installDownloadedSingBoxBinary() {
     handleSingBox start
     SERVICE_QUEUE_ALLOW_FAILURE=
     padmRemoveCleanupPath "${tmpDir}"
-    statusCard "sing-box 更新失败" "已尝试恢复旧二进制" "排查日志: /tmp/padm-core-sing-box-upgrade-test.log"
+    statusCard "sing-box 更新失败" "已尝试恢复旧二进制" "排查日志: ${logFile}"
     return 1
 }
 
@@ -502,10 +533,12 @@ xrayVersionManageMenu() {
         upgradeXrayCore false "${version}"
         ;;
     4)
-        if validateXrayConfigWithBinary /etc/padm/xray/xray /tmp/padm-core-xray-test.log; then
+        local logFile
+        logFile=$(coreXrayConfigTestLog)
+        if validateXrayConfigWithBinary /etc/padm/xray/xray "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
-            statusCard "Xray 配置校验" "失败" "排查日志: /tmp/padm-core-xray-test.log"
+            statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
         fi
         ;;
     5) updateGeoSite ;;
@@ -1245,17 +1278,21 @@ coreConfigMaintenanceMenu() {
     autoRead core_config_maintenance "请选择:" selectMaintenance
     case "${selectMaintenance}" in
     1)
-        if validateXrayConfigWithBinary /etc/padm/xray/xray /tmp/padm-core-xray-test.log; then
+        local logFile
+        logFile=$(coreXrayConfigTestLog)
+        if validateXrayConfigWithBinary /etc/padm/xray/xray "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
-            statusCard "Xray 配置校验" "失败" "排查日志: /tmp/padm-core-xray-test.log"
+            statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
         fi
         ;;
     2)
-        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box /tmp/padm-core-sing-box-test.log; then
+        local logFile
+        logFile=$(coreSingBoxConfigTestLog)
+        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
             statusCard "sing-box 配置校验" "通过"
         else
-            statusCard "sing-box 配置校验" "失败" "排查日志: /tmp/padm-core-sing-box-test.log" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
+            statusCard "sing-box 配置校验" "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
     3) updateGeoSite ;;
@@ -1356,10 +1393,12 @@ singBoxVersionManageMenu() {
         upgradeSingBoxCore false "${version}"
         ;;
     4)
-        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box /tmp/padm-core-sing-box-test.log; then
+        local logFile
+        logFile=$(coreSingBoxConfigTestLog)
+        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
             statusCard "sing-box 配置校验" "通过"
         else
-            statusCard "sing-box 配置校验" "失败" "排查日志: /tmp/padm-core-sing-box-test.log" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
+            statusCard "sing-box 配置校验" "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
     5) coreServiceControlMenu sing-box ;;

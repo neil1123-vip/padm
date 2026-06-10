@@ -3,6 +3,15 @@
 SERVICE_ACTIONS=
 SERVICE_QUEUE_ALLOW_FAILURE=
 
+xrayStartTestLog() {
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath padm-xray-start-test.log
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/padm-xray-start-test.log"
+    fi
+}
+
 serviceQueueAdd() {
     local serviceName=$1
     local action=$2
@@ -221,10 +230,12 @@ xrayRunning() {
 
 # 操作 Xray-core
 handleXray() {
+    local logFile
     if [[ -n $(find /bin /usr/bin -name "systemctl") ]] && [[ -n $(find /etc/systemd/system/ -name "xray.service") ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
-            if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-xray-start-test.log 2>&1; then
-                statusCard "Xray 配置校验失败" "已取消启动" "排查日志: /tmp/padm-xray-start-test.log"
+            logFile=$(xrayStartTestLog)
+            if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
+                statusCard "Xray 配置校验失败" "已取消启动" "排查日志: ${logFile}"
                 [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
                 exit 0
             fi
@@ -234,8 +245,9 @@ handleXray() {
         fi
     elif [[ -f "/etc/init.d/xray" ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
-            if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-xray-start-test.log 2>&1; then
-                statusCard "Xray 配置校验失败" "已取消启动" "排查日志: /tmp/padm-xray-start-test.log"
+            logFile=$(xrayStartTestLog)
+            if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
+                statusCard "Xray 配置校验失败" "已取消启动" "排查日志: ${logFile}"
                 [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
                 exit 0
             fi

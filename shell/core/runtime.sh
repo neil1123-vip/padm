@@ -50,6 +50,12 @@ padmCreateTempFileForTarget() {
     padmCreateTempPath "${resultVar}" "${targetDir}/.${targetName}.${label}.XXXXXX"
 }
 
+padmTmpFilePath() {
+    local fileName=$1
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/${fileName}"
+}
+
 padmForgetCleanupPath() {
     local path=$1
     padmUnregisterCleanupPath "${path}"
@@ -84,9 +90,8 @@ writeGeneratedJsonFile() {
     local targetFile=$1
     local tmpPrefix=$2
     local tmpFile
-    local tmpBase="${TMPDIR:-/tmp}"
 
-    padmCreateTempPath tmpFile "${tmpBase%/}/${tmpPrefix}.XXXXXX" || return 1
+    padmCreateTempPath tmpFile "$(padmTmpFilePath "${tmpPrefix}.XXXXXX")" || return 1
     cat >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     commitGeneratedJsonFile "${tmpFile}" "${targetFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
@@ -111,9 +116,8 @@ padmCleanupTempPaths() {
 
 installUserCrontabContent() {
     local tmpFile
-    local tmpBase="${TMPDIR:-/tmp}"
 
-    padmCreateTempPath tmpFile "${tmpBase%/}/padm-crontab.XXXXXX" || return 1
+    padmCreateTempPath tmpFile "$(padmTmpFilePath "padm-crontab.XXXXXX")" || return 1
     printf '%s\n' "$1" | sed '/^$/d' >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     crontab "${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     padmRemoveCleanupPath "${tmpFile}"
