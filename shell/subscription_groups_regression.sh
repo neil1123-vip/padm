@@ -2450,6 +2450,84 @@ runSingBoxUninstallFailurePropagationRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
+runCoreCleanupFailurePropagationRegression() (
+    local root="${TMP_DIR}/core-cleanup-failure"
+    local serviceLog="${root}/service.log"
+    local rmLog="${root}/rm.log"
+    local errorLog="${root}/error.log"
+    local reachedFile="${root}/reached"
+    local queueLog="${root}/queue.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${errorLog}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 1
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    cleanUp xrayDel >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -q 'Xray 服务停止失败，已取消清理旧核心' "${errorLog}"
+    [[ ! -s "${rmLog}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${errorLog}"
+    : >"${queueLog}"
+    command rm -f "${reachedFile}"
+    readLastInstallationConfig() { return 0; }
+    unInstallSubscribe() { return 0; }
+    installTools() { return 0; }
+    installSingBox() { return 0; }
+    installSingBoxService() { return 0; }
+    initSingBoxConfig() { return 0; }
+    serviceQueueRestart() {
+        printf 'restart:%s\n' "$1" >>"${queueLog}"
+        return 0
+    }
+    serviceQueueApply() {
+        printf 'apply\n' >>"${queueLog}"
+        return 0
+    }
+    checkGFWStatue() {
+        printf 'reached\n' >"${reachedFile}"
+        return 0
+    }
+    showAccounts() {
+        printf 'reached\n' >"${reachedFile}"
+        return 0
+    }
+
+    set +e
+    installSingBoxReality >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -s "${queueLog}" ]]
+    [[ ! -e "${reachedFile}" ]]
+)
+
 runReloadCorePropagationRegression() (
     local root="${TMP_DIR}/reload-core-propagation"
     local alpnConfig="${root}/alpn.json"
@@ -7627,6 +7705,7 @@ runRegressionTransactionCore() {
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
+        runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
         runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression &&

@@ -995,7 +995,7 @@ installXrayReality() {
     installXray 2 false
     installXrayService 3
     initXrayConfig custom 4 || return 1
-    cleanUp singBoxDel
+    cleanUp singBoxDel || return 1
 
     serviceQueueRestart xray
     serviceQueueApply || return 1
@@ -1016,7 +1016,7 @@ installSingBoxReality() {
     installSingBox 2
     installSingBoxService 3
     initSingBoxConfig custom 4 || return 1
-    cleanUp xrayDel
+    cleanUp xrayDel || return 1
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
     # 生成账号
@@ -1125,7 +1125,7 @@ customXrayInstall() {
         installXray 7 false
         installXrayService 8
         initXrayConfig custom 9 || return 1
-        cleanUp singBoxDel
+        cleanUp singBoxDel || return 1
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             installCronTLS 10
         fi
@@ -1188,7 +1188,7 @@ customSingBoxInstall() {
         installSingBox 4
         installSingBoxService 5
         initSingBoxConfig custom 6 || return 1
-        cleanUp xrayDel
+        cleanUp xrayDel || return 1
         installCronTLS 7
         serviceQueueRestart sing-box
         serviceQueueRestart nginx
@@ -1263,7 +1263,7 @@ xrayCoreInstall() {
     installXray 6 false
     installXrayService 7
     initXrayConfig all 8 || return 1
-    cleanUp singBoxDel
+    cleanUp singBoxDel || return 1
     installCronTLS 9
     if [[ -n "${btDomain}" ]]; then
         statusCard "跳过伪装网站" "检测到宝塔面板/1Panel"
@@ -1308,7 +1308,7 @@ singBoxInstall() {
     installSingBoxService 6
     initSingBoxConfig all 7 || return 1
 
-    cleanUp xrayDel
+    cleanUp xrayDel || return 1
     installCronTLS 8
 
     serviceQueueRestart sing-box

@@ -395,12 +395,12 @@ unInstallSingBox() {
 # 清理核心安装残留
 cleanUp() {
     if [[ "$1" == "xrayDel" ]]; then
-        handleXray stop
-        rm -rf /etc/padm/xray/*
+        runCoreServiceActionAllowFailure handleXray stop || { errorCard "Xray 服务停止失败，已取消清理旧核心"; return 1; }
+        rm -rf /etc/padm/xray/* || { errorCard "Xray 文件清理失败"; return 1; }
     elif [[ "$1" == "singBoxDel" ]]; then
-        handleSingBox stop
-        rm -rf /etc/padm/sing-box/conf/config.json >/dev/null 2>&1
-        cleanDirectoryContent /etc/padm/sing-box/conf/config
+        runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消清理旧核心"; return 1; }
+        rm -rf /etc/padm/sing-box/conf/config.json >/dev/null 2>&1 || { errorCard "sing-box 主配置清理失败"; return 1; }
+        cleanDirectoryContent /etc/padm/sing-box/conf/config || { errorCard "sing-box 分片配置清理失败"; return 1; }
     fi
 }
 
