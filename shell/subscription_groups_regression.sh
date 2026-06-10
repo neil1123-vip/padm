@@ -3337,12 +3337,14 @@ runCleanLastInstallationConfigFailureRegression() (
     local serviceLog="${root}/service.log"
     local cleanupLog="${root}/cleanup.log"
     local errorLog="${root}/error.log"
+    local installLog="${root}/install.log"
     local mode rc
 
     mkdir -p "${root}/nginx" "${root}/static"
     : >"${serviceLog}"
     : >"${cleanupLog}"
     : >"${errorLog}"
+    : >"${installLog}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
 
     currentDefaultPort=443
@@ -3395,6 +3397,20 @@ runCleanLastInstallationConfigFailureRegression() (
         printf 'rm:%s\n' "$*" >>"${cleanupLog}"
         return 0
     }
+    unInstallSubscribe() { printf 'uninstall-subscribe\n' >>"${installLog}"; return 0; }
+    installTools() { printf 'install-tools:%s\n' "$*" >>"${installLog}"; return 0; }
+    initTLSNginxConfig() { printf 'init-tls:%s\n' "$*" >>"${installLog}"; return 0; }
+    installTLS() { printf 'install-tls:%s\n' "$*" >>"${installLog}"; return 0; }
+    randomPathFunction() { printf 'random-path:%s\n' "$*" >>"${installLog}"; return 0; }
+    installXray() { printf 'install-xray:%s\n' "$*" >>"${installLog}"; return 0; }
+    installXrayService() { printf 'install-xray-service:%s\n' "$*" >>"${installLog}"; return 0; }
+    initXrayConfig() { printf 'init-xray-config:%s\n' "$*" >>"${installLog}"; return 0; }
+    cleanUp() { printf 'cleanup-core:%s\n' "$*" >>"${installLog}"; return 0; }
+    installCronTLS() { printf 'install-cron:%s\n' "$*" >>"${installLog}"; return 0; }
+    nginxBlog() { printf 'nginx-blog:%s\n' "$*" >>"${installLog}"; return 0; }
+    updateRedirectNginxConf() { printf 'update-redirect\n' >>"${installLog}"; return 0; }
+    checkGFWStatue() { printf 'check-gfw:%s\n' "$*" >>"${installLog}"; return 0; }
+    showAccounts() { printf 'show-accounts:%s\n' "$*" >>"${installLog}"; return 0; }
 
     runCleanFailureCase() {
         local failureMode=$1
@@ -3437,6 +3453,21 @@ runCleanLastInstallationConfigFailureRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     grep -qx 'xray:stop:true' "${serviceLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    mode=xray-stop-fail
+    : >"${serviceLog}"
+    : >"${cleanupLog}"
+    : >"${installLog}"
+    btDomain=
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    xrayCoreInstall >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    [[ ! -s "${installLog}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 

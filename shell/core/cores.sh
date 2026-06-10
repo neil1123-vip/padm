@@ -993,7 +993,7 @@ initSingBoxClients() {
 # 安装 Xray-core
 installXrayReality() {
     selectCustomInstallType=",7,"
-    readLastInstallationConfig
+    readLastInstallationConfig || return 1
     unInstallSubscribe
     totalProgress=6
     installTools 1
@@ -1020,7 +1020,7 @@ installXrayReality() {
 installSingBoxReality() {
 
     selectCustomInstallType=",7,"
-    readLastInstallationConfig
+    readLastInstallationConfig || return 1
     unInstallSubscribe
     totalProgress=6
     installTools 1
@@ -1095,7 +1095,7 @@ customXrayInstall() {
         selectCustomInstallType=",${selectCustomInstallType},"
     fi
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" ",0,1,3,4,7,12,"; then
-        readLastInstallationConfig
+        readLastInstallationConfig || return 1
         unInstallSubscribe
         # checkBTPanel
         # check1Panel
@@ -1186,7 +1186,7 @@ customSingBoxInstall() {
     fi
 
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" ",0,1,3,4,6,7,8,9,10,11,13,"; then
-        readLastInstallationConfig
+        readLastInstallationConfig || return 1
         unInstallSubscribe
         totalProgress=9
         installTools 1
@@ -1252,7 +1252,7 @@ selectCoreInstall() {
 
 # Xray-core 个性化安装
 xrayCoreInstall() {
-    readLastInstallationConfig
+    readLastInstallationConfig || return 1
     unInstallSubscribe
     # checkBTPanel
     # check1Panel
@@ -1296,7 +1296,7 @@ xrayCoreInstall() {
 
 # sing-box 全部安装
 singBoxInstall() {
-    readLastInstallationConfig
+    readLastInstallationConfig || return 1
     unInstallSubscribe
     # checkBTPanel
     # check1Panel
