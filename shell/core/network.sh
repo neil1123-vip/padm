@@ -189,8 +189,14 @@ EOF
 
 # 检查端口实际开放状态
 checkPortOpen() {
-    handleSingBox stop >/dev/null 2>&1
-    handleXray stop >/dev/null 2>&1
+    if ! runCoreServiceActionAllowFailure handleSingBox stop >/dev/null 2>&1; then
+        errorCard "sing-box 服务停止失败，无法检测端口开放状态"
+        return 1
+    fi
+    if ! runCoreServiceActionAllowFailure handleXray stop >/dev/null 2>&1; then
+        errorCard "Xray 服务停止失败，无法检测端口开放状态"
+        return 1
+    fi
     cleanAgentNginxConf
 
     local port=$1
@@ -201,7 +207,10 @@ checkPortOpen() {
 
     if [[ -z "${btDomain}" ]]; then
 
-        handleNginx stop
+        if ! runCoreServiceActionAllowFailure handleNginx stop; then
+            statusCard "Nginx 停止失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 关闭失败日志"
+            return 1
+        fi
         # 初始化 Nginx 端口检测配置
         local listenIPv6PortConfig=
 
@@ -213,7 +222,11 @@ checkPortOpen() {
             rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
             return 1
         fi
-        handleNginx start
+        if ! runCoreServiceActionAllowFailure handleNginx start; then
+            statusCard "Nginx 启动失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
+            rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
+            return 1
+        fi
         if [[ -z $(pgrep -f "nginx") ]]; then
             statusCard "Nginx 启动失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
             rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
@@ -223,7 +236,10 @@ checkPortOpen() {
         checkPortOpenResult=$(curl -s -m 10 "http://${domain}:${port}/checkPort")
         localIP=$(curl -s -m 10 "http://${domain}:${port}/ip")
         rm "${nginxConfigPath}checkPortOpen.conf"
-        handleNginx stop
+        if ! runCoreServiceActionAllowFailure handleNginx stop; then
+            errorCard "Nginx 服务停止失败，端口检测配置已删除"
+            return 1
+        fi
         if [[ "${checkPortOpenResult}" == "fjkvymb6len" ]]; then
             successCard "检测到${port}端口已开放"
         else

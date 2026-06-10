@@ -2164,6 +2164,9 @@ runNetworkCheckReturnFailureRegression() (
     local portRcFile="${root}/port.rc"
     local templateRcFile="${root}/template.rc"
     local writeProbe="${root}/template.write"
+    local serviceLog="${root}/port-services.log"
+    local writeLog="${root}/port-write.log"
+    local mode=
     local dnsShellRc ipShellRc portShellRc templateShellRc
 
     mkdir -p "${root}/nginx"
@@ -2199,14 +2202,33 @@ runNetworkCheckReturnFailureRegression() (
 
     btDomain=
     nginxConfigPath="${root}/nginx/"
-    handleSingBox() { return 0; }
-    handleXray() { return 0; }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "sing-box-stop-fail" ]] && return 1
+        return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "xray-stop-fail" ]] && return 1
+        return 0
+    }
     cleanAgentNginxConf() { return 0; }
     allowPort() { return 0; }
-    handleNginx() { return 0; }
+    handleNginx() {
+        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
+        [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
+        return 0
+    }
     hasIPv6Connectivity() { return 1; }
-    writeCheckPortOpenNginxConfig() { return 1; }
+    writeCheckPortOpenNginxConfig() {
+        printf 'write:%s\n' "${mode}" >>"${writeLog}"
+        [[ "${mode}" != "write-fail" ]]
+    }
 
+    mode=write-fail
+    : >"${serviceLog}"
+    : >"${writeLog}"
     set +e
     (
         set +e
@@ -2217,6 +2239,41 @@ runNetworkCheckReturnFailureRegression() (
     set -e
     [[ "${portShellRc}" == "0" ]]
     [[ "$(<"${portRcFile}")" == "1" ]]
+    grep -qx 'write:write-fail' "${writeLog}"
+
+    runPortServiceFailureCase() {
+        local failureMode=$1
+        local rc
+        mode="${failureMode}"
+        : >"${serviceLog}"
+        : >"${writeLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        checkPortOpen 443 example.com >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
+    runPortServiceFailureCase sing-box-stop-fail
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    ! grep -q '^xray:' "${serviceLog}"
+    [[ ! -s "${writeLog}" ]]
+
+    runPortServiceFailureCase xray-stop-fail
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    ! grep -q '^nginx:' "${serviceLog}"
+    [[ ! -s "${writeLog}" ]]
+
+    runPortServiceFailureCase nginx-stop-fail
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    [[ ! -s "${writeLog}" ]]
+
+    runPortServiceFailureCase nginx-start-fail
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'write:nginx-start-fail' "${writeLog}"
 
     currentUUID=existing-user
     currentClients='[]'
@@ -3143,6 +3200,72 @@ JSON
         grep -q '核心重载失败' "${errorLog}"
         jq -e '.log.access == "'"${entryLogBase}"'access.log"' "${entryConfigPath}00_log.json" >/dev/null
         jq -e '.inbounds[0].streamSettings.realitySettings.show == true' "${realityVisionFile}" >/dev/null
+    )
+
+    (
+        local serviceLog="${TMP_DIR}/entry-helper-tls-init-service.log"
+        local errorLog="${TMP_DIR}/entry-helper-tls-init-error.log"
+        local rc
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        currentHost=tls-init.example.com
+        lastInstallationConfig=true
+        selectCoreType=2
+        domain=
+        handleNginx() {
+            printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            return 1
+        }
+        errorCard() {
+            printf '%s\n' "$*" >>"${errorLog}"
+        }
+        set +e
+        initTLSNginxConfig 1 >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -q 'TLS 初始化' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    )
+
+    (
+        local serviceLog="${TMP_DIR}/entry-helper-port-service.log"
+        local errorLog="${TMP_DIR}/entry-helper-port-error.log"
+        local allowMarker="${TMP_DIR}/entry-helper-port-allow"
+        local rc
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        rm -f "${allowMarker}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        btDomain=
+        currentPort=
+        customPort=
+        xrayVLESSRealityPort=443
+        domain=port.example.com
+        handleXray() {
+            printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            return 1
+        }
+        autoRead() {
+            printf -v "$3" '443'
+        }
+        allowPort() {
+            printf 'allow\n' >"${allowMarker}"
+        }
+        errorCard() {
+            printf '%s\n' "$*" >>"${errorLog}"
+        }
+        set +e
+        customPortFunction >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -q '无法复用当前 Reality 端口' "${errorLog}"
+        [[ ! -e "${allowMarker}" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
     PATH="${oldPath}"

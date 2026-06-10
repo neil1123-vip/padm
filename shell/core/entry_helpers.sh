@@ -20,7 +20,10 @@ thirdPartyTcpScriptPath() {
 }
 
 initTLSNginxConfig() {
-    handleNginx stop
+    if ! runCoreServiceActionAllowFailure handleNginx stop; then
+        errorCard "Nginx 服务停止失败，已取消 TLS 初始化"
+        return 1
+    fi
     progressCard "$1" "初始化 Nginx 证书验证配置"
     if [[ -n "${currentHost}" && -z "${lastInstallationConfig}" ]]; then
         echo
@@ -50,7 +53,10 @@ initTLSNginxConfig() {
             customPortFunction || return 1
         fi
         # 修改配置
-        handleNginx stop
+        if ! runCoreServiceActionAllowFailure handleNginx stop; then
+            errorCard "Nginx 服务停止失败，已取消 TLS 初始化"
+            return 1
+        fi
     fi
 }
 
@@ -165,7 +171,10 @@ customPortFunction() {
                 port=443
             fi
             if [[ "${port}" == "${xrayVLESSRealityPort}" ]]; then
-                handleXray stop
+                if ! runCoreServiceActionAllowFailure handleXray stop; then
+                    errorCard "Xray 服务停止失败，无法复用当前 Reality 端口"
+                    return 1
+                fi
             fi
         fi
 
