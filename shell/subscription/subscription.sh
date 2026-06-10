@@ -15,26 +15,36 @@ ensureSubscriptionControlNginxLocation() {
 
 writeSubscribeNginxConfig() {
     local targetPath="${nginxConfigPath}subscribe.conf"
-    local tmpPath="${targetPath}.tmp"
+    local tmpPath
+    local backupPath=
     local tmpBase="${TMPDIR:-/tmp}"
     local nginxTestLog="${tmpBase%/}/padm-subscribe-nginx-test.log"
-    mkdir -p "$(dirname "${targetPath}")"
-    cat >"${tmpPath}"
+    padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
+    if ! cat >"${tmpPath}"; then
+        padmRemoveCleanupPath "${tmpPath}"
+        return 1
+    fi
     if command -v nginx >/dev/null 2>&1; then
-        local backupPath="${targetPath}.bak"
-        [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
-        mv "${tmpPath}" "${targetPath}"
+        if [[ -f "${targetPath}" ]]; then
+            padmCreateTempFileForTarget backupPath "${targetPath}" backup || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+            cp "${targetPath}" "${backupPath}" || { padmRemoveCleanupPath "${tmpPath}"; padmRemoveCleanupPath "${backupPath}"; return 1; }
+        fi
+        if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
+            padmRemoveCleanupPath "${tmpPath}"
+            [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
+            return 1
+        fi
         if ! nginx -t >"${nginxTestLog}" 2>&1; then
-            if [[ -f "${backupPath}" ]]; then
-                mv "${backupPath}" "${targetPath}"
+            if [[ -n "${backupPath}" && -f "${backupPath}" ]]; then
+                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || return 1
             else
-                rm -f "${targetPath}"
+                rm -f "${targetPath}" || return 1
             fi
             return 1
         fi
-        rm -f "${backupPath}"
+        [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
     else
-        mv "${tmpPath}" "${targetPath}"
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     fi
 }
 

@@ -2995,6 +2995,19 @@ EOF
     [[ "$(<"${targetPath}")" == "old config" ]]
     grep -qxF 'nginx validate fail' "${nginxTmpRoot}/padm-subscribe-nginx-test.log"
     [[ ! -e "${targetPath}.tmp" ]]
+    ! compgen -G "${TMP_DIR}/nginx-subscribe/.subscribe.conf.*" >/dev/null
+    printf 'old config\n' >"${targetPath}"
+    (
+        commitGeneratedFile() { return 1; }
+        if writeSubscribeNginxConfig <<'EOF' 2>/dev/null
+commit fail config
+EOF
+        then
+            exit 1
+        fi
+    )
+    [[ "$(<"${targetPath}")" == "old config" ]]
+    ! compgen -G "${TMP_DIR}/nginx-subscribe/.subscribe.conf.*" >/dev/null
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     writeSubscribeNginxConfig <<'EOF'
 new config
@@ -3003,6 +3016,7 @@ EOF
     grep -qxF 'nginx validate success' "${nginxTmpRoot}/padm-subscribe-nginx-test.log"
     [[ ! -e "${targetPath}.tmp" ]]
     [[ ! -e "${targetPath}.bak" ]]
+    ! compgen -G "${TMP_DIR}/nginx-subscribe/.subscribe.conf.*" >/dev/null
     PATH="${oldPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_FAKE_NGINX_VALIDATE_MODE
