@@ -489,6 +489,28 @@ handleFirewall() {
 readonly PADM_BBR_SYSCTL_CONF="/etc/sysctl.d/99-padm-bbr.conf"
 readonly PADM_BBR_STATE_FILE="/etc/padm/padm-bbr.state"
 
+bbrTmpPath() {
+    local template=$1
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath "${template}"
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/${template}"
+    fi
+}
+
+bbrSysctlLog() {
+    bbrTmpPath padm-bbr-sysctl.log
+}
+
+bbrStateTempTemplate() {
+    bbrTmpPath 'padm-bbr-state.XXXXXX'
+}
+
+bbrSysctlTempTemplate() {
+    bbrTmpPath 'padm-bbr-sysctl.XXXXXX'
+}
+
 readSysctlValue() {
     local key=$1
     sysctl -n "${key}" 2>/dev/null || true
@@ -548,9 +570,11 @@ commitPadmBbrFile() {
 restorePadmBbrRuntime() {
     local congestion=$1
     local qdisc=$2
+    local logFile
+    logFile=$(bbrSysctlLog)
 
-    sysctl -w "net.ipv4.tcp_congestion_control=${congestion}" >>/tmp/padm-bbr-sysctl.log 2>&1 || true
-    sysctl -w "net.core.default_qdisc=${qdisc}" >>/tmp/padm-bbr-sysctl.log 2>&1 || true
+    sysctl -w "net.ipv4.tcp_congestion_control=${congestion}" >>"${logFile}" 2>&1 || true
+    sysctl -w "net.core.default_qdisc=${qdisc}" >>"${logFile}" 2>&1 || true
 }
 
 enableOfficialBbrFq() {
@@ -564,14 +588,15 @@ enableOfficialBbrFq() {
         return
     fi
 
-    local previousCongestion previousQdisc stateTmp sysctlTmp
+    local previousCongestion previousQdisc stateTmp sysctlTmp logFile
+    logFile=$(bbrSysctlLog)
     previousCongestion="$(readSysctlValue net.ipv4.tcp_congestion_control)"
     previousQdisc="$(readSysctlValue net.core.default_qdisc)"
     previousCongestion=${previousCongestion:-cubic}
     previousQdisc=${previousQdisc:-fq_codel}
 
     mkdir -p "$(dirname "${PADM_BBR_STATE_FILE}")"
-    padmCreateTempPath stateTmp /tmp/padm-bbr-state.XXXXXX || { statusCard "BBR 启用失败" "无法创建状态临时文件"; bbrInstall; return; }
+    padmCreateTempPath stateTmp "$(bbrStateTempTemplate)" || { statusCard "BBR 启用失败" "无法创建状态临时文件"; bbrInstall; return; }
     cat >"${stateTmp}" <<EOF
 previous_congestion=${previousCongestion}
 previous_qdisc=${previousQdisc}
@@ -583,7 +608,7 @@ EOF
         return
     fi
 
-    padmCreateTempPath sysctlTmp /tmp/padm-bbr-sysctl.XXXXXX || { rm -f "${PADM_BBR_STATE_FILE}"; statusCard "BBR 启用失败" "无法创建 sysctl 临时文件"; bbrInstall; return; }
+    padmCreateTempPath sysctlTmp "$(bbrSysctlTempTemplate)" || { rm -f "${PADM_BBR_STATE_FILE}"; statusCard "BBR 启用失败" "无法创建 sysctl 临时文件"; bbrInstall; return; }
     cat >"${sysctlTmp}" <<EOF
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
@@ -596,10 +621,10 @@ EOF
         return
     fi
 
-    if ! sysctl -p "${PADM_BBR_SYSCTL_CONF}" >/tmp/padm-bbr-sysctl.log 2>&1; then
+    if ! sysctl -p "${PADM_BBR_SYSCTL_CONF}" >"${logFile}" 2>&1; then
         rm -f "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
-        statusCard "BBR 启用失败" "sysctl 应用失败，已删除本次写入并尝试恢复原运行值" "日志：/tmp/padm-bbr-sysctl.log"
+        statusCard "BBR 启用失败" "sysctl 应用失败，已删除本次写入并尝试恢复原运行值" "日志：${logFile}"
         bbrInstall
         return
     fi
@@ -609,7 +634,7 @@ EOF
     else
         rm -f "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
-        statusCard "BBR 启用失败" "配置已应用但当前状态未完全匹配，已删除本次写入并尝试恢复原运行值" "请查看下方状态和 /tmp/padm-bbr-sysctl.log"
+        statusCard "BBR 启用失败" "配置已应用但当前状态未完全匹配，已删除本次写入并尝试恢复原运行值" "请查看下方状态和 ${logFile}"
     fi
     printNetworkOptimizationStatus
     bbrInstall
@@ -630,9 +655,11 @@ disablePadmBbr() {
     fi
 
     rm -f "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
-    sysctl --system >/tmp/padm-bbr-sysctl.log 2>&1 || true
-    sysctl -w "net.ipv4.tcp_congestion_control=${previous_congestion:-${previousCongestion}}" >>/tmp/padm-bbr-sysctl.log 2>&1 || true
-    sysctl -w "net.core.default_qdisc=${previous_qdisc:-${previousQdisc}}" >>/tmp/padm-bbr-sysctl.log 2>&1 || true
+    local logFile
+    logFile=$(bbrSysctlLog)
+    sysctl --system >"${logFile}" 2>&1 || true
+    sysctl -w "net.ipv4.tcp_congestion_control=${previous_congestion:-${previousCongestion}}" >>"${logFile}" 2>&1 || true
+    sysctl -w "net.core.default_qdisc=${previous_qdisc:-${previousQdisc}}" >>"${logFile}" 2>&1 || true
     statusCard "padm BBR 已关闭" "已删除 ${PADM_BBR_SYSCTL_CONF}" "已尝试恢复启用前的拥塞控制和 qdisc" "未改动用户其它 sysctl 配置"
     printNetworkOptimizationStatus
     bbrInstall
