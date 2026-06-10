@@ -3113,6 +3113,38 @@ JSON
 JSON
     updateRealityShowConfig "${realityXhttpFile}" false
     jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityXhttpFile}" >/dev/null
+
+    (
+        local errorLog="${TMP_DIR}/entry-helper-check-log-error.log"
+        local reloadCalls=0 readCalls=0 rc
+        : >"${errorLog}"
+        coreInstallType=1
+        configPath="${entryConfigPath}"
+        realityStatus=7
+        writeXrayLogConfig "${entryConfigPath}00_log.json" "${entryLogBase}" false
+        autoRead() {
+            readCalls=$((readCalls + 1))
+            printf -v "$3" '1'
+        }
+        reloadCore() {
+            reloadCalls=$((reloadCalls + 1))
+            return 1
+        }
+        errorCard() {
+            printf '%s\n' "$*" >>"${errorLog}"
+        }
+        set +e
+        checkLog >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "${readCalls}" == "1" ]]
+        [[ "${reloadCalls}" == "1" ]]
+        grep -q '核心重载失败' "${errorLog}"
+        jq -e '.log.access == "'"${entryLogBase}"'access.log"' "${entryConfigPath}00_log.json" >/dev/null
+        jq -e '.inbounds[0].streamSettings.realitySettings.show == true' "${realityVisionFile}" >/dev/null
+    )
+
     PATH="${oldPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_FAKE_NGINX_VALIDATE_MODE

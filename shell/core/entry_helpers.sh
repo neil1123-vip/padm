@@ -833,7 +833,10 @@ checkLog() {
         if [[ ${realityStatus} == "12" ]]; then
             updateRealityShowConfig "${configPath}12_VLESS_XHTTP_inbounds.json" "${realityLogShow}" || return 1
         fi
-        reloadCore
+        if ! reloadCore; then
+            errorCard "日志配置已写入，但核心重载失败，请检查核心服务日志"
+            return 1
+        fi
         checkLog 1
         ;;
     2)
