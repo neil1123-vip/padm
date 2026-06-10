@@ -287,6 +287,34 @@ resolveInstalledTLSDomain() {
     done
 }
 
+restoreServicesAfterTLSRenewal() {
+    local status=0
+    reloadCore || status=1
+    runCoreServiceActionAllowFailure handleNginx start || status=1
+    return "${status}"
+}
+
+stopServicesForTLSRenewal() {
+    if ! runCoreServiceActionAllowFailure handleNginx stop; then
+        errorCard "Nginx 服务停止失败，已取消 TLS 续期"
+        return 1
+    fi
+
+    if [[ "${coreInstallType}" == "1" ]]; then
+        if ! runCoreServiceActionAllowFailure handleXray stop; then
+            errorCard "Xray 服务停止失败，已取消 TLS 续期"
+            runCoreServiceActionAllowFailure handleNginx start >/dev/null 2>&1 || true
+            return 1
+        fi
+    elif [[ "${coreInstallType}" == "2" ]]; then
+        if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+            errorCard "sing-box 服务停止失败，已取消 TLS 续期"
+            runCoreServiceActionAllowFailure handleNginx start >/dev/null 2>&1 || true
+            return 1
+        fi
+    fi
+}
+
 # 更新 TLS 证书
 renewalTLS() {
 
@@ -336,22 +364,23 @@ renewalTLS() {
             "证书过期前最后一天自动更新，如更新失败请手动更新"
 
         if [[ ${remainingDays} -le 1 ]]; then
+            local installDomain="${domain}"
             statusCard "TLS 证书" "重新生成证书"
-            handleNginx stop
-
-            if [[ "${coreInstallType}" == "1" ]]; then
-                handleXray stop
-            elif [[ "${coreInstallType}" == "2" ]]; then
-                handleSingBox stop
-            fi
+            stopServicesForTLSRenewal || return 1
 
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath /etc/padm/tls/"${domain}.crt" --keypath /etc/padm/tls/"${domain}.key" --ecc
-            else
-                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${domain}" --fullchainpath /etc/padm/tls/"${domain}.crt" --keypath /etc/padm/tls/"${domain}.key" --ecc
+                installDomain="*.${dnsTLSDomain}"
             fi
-            reloadCore
-            handleNginx start
+            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${installDomain}" --fullchainpath /etc/padm/tls/"${domain}.crt" --keypath /etc/padm/tls/"${domain}.key" --ecc || {
+                local installStatus=$?
+                errorCard "TLS 证书安装失败，正在尝试恢复服务"
+                restoreServicesAfterTLSRenewal || errorCard "TLS 证书安装失败，且服务恢复失败"
+                return "${installStatus}"
+            }
+            if ! restoreServicesAfterTLSRenewal; then
+                errorCard "TLS 证书已安装，但服务恢复失败"
+                return 1
+            fi
         else
             successCard "证书有效"
         fi

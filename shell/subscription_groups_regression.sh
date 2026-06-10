@@ -7682,8 +7682,130 @@ runTlsRenewalExistingCertificateRegression() {
     dnsTLSDomain="${oldDnsTLSDomain}"
 }
 
+runTlsRenewalFailurePropagationRegression() (
+    local root="${TMP_DIR}/tls-renew-failure-propagation"
+    local tlsDir="${root}/certs"
+    local homeDir="${root}/home"
+    local serviceLog="${root}/services.log"
+    local commandLog="${root}/commands.log"
+    local statusLog="${root}/status.log"
+    local errorLog="${root}/error.log"
+    local mode rc
+
+    mkdir -p "${tlsDir}" "${homeDir}"
+    HOME="${homeDir}"
+    PADM_TLS_DIR="${tlsDir}"
+    currentHost=renew.example.com
+    domain=
+    tlsDomain=
+    dnsTLSDomain=
+    installedDNSAPIStatus=
+    coreInstallType=1
+    sslRenewalDays=90
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    export REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    progressCard() { return 0; }
+    handleNginx() {
+        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
+        [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
+        return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
+        return 0
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+    reloadCore() {
+        printf 'reload\n' >>"${serviceLog}"
+        [[ "${mode}" == "reload-fail" ]] && return 1
+        return 0
+    }
+    stat() {
+        if [[ "$1" == "--format=%z" && "${2:-}" == *"/renew.example.com_ecc/renew.example.com.cer" ]]; then
+            date -d '89 days ago' '+%F %T.000000000 %z'
+            return 0
+        fi
+        command stat "$@"
+    }
+    sudo() {
+        printf 'sudo:%s\n' "$*" >>"${commandLog}"
+        [[ "${mode}" == "install-fail" ]] && return 1
+        return 0
+    }
+    prepareRenewalFixture() {
+        rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
+        mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/renew.example.com_ecc"
+        printf 'cert\n' >"${tlsDir}/renew.example.com.crt"
+        printf 'key\n' >"${tlsDir}/renew.example.com.key"
+        printf 'cert\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.cer"
+        printf 'key\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.key"
+        : >"${serviceLog}"
+        : >"${commandLog}"
+        : >"${statusLog}"
+        : >"${errorLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+    }
+    runRenewalCase() {
+        mode=$1
+        prepareRenewalFixture
+        set +e
+        renewalTLS >/dev/null 2>&1
+        rc=$?
+        set -e
+    }
+
+    runRenewalCase nginx-stop-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    ! grep -q '^sudo:' "${commandLog}"
+    ! grep -q '^xray:stop:' "${serviceLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    runRenewalCase xray-stop-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    ! grep -q '^sudo:' "${commandLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    runRenewalCase install-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    runRenewalCase reload-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    runRenewalCase nginx-start-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+)
+
 runRegressionTls() {
-    runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression
+    runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
+        runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 }
 
 runRegressionFast() {
@@ -7774,6 +7896,7 @@ runRegressionTransactionCore() {
         runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
+        runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression &&
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
