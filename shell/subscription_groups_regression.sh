@@ -1628,6 +1628,12 @@ runRuntimeTempDirRegression() (
     [[ "$(bbrSysctlTempTemplate)" == "${tmpRoot}/padm-bbr-sysctl.XXXXXX" ]]
     [[ "$(singBoxVMessHTTPUpgradeNginxTestLog)" == "${tmpRoot}/padm-sing-box-vmess-httpupgrade-nginx-test.log" ]]
     [[ "$(thirdPartyTcpScriptPath)" == "${tmpRoot}/padm-tcpx.sh" ]]
+    [[ "$(realityScannerDir)" == "${tmpRoot}/RealiTLScanner" ]]
+    [[ "$(realityScannerOutputPath 123)" == "${tmpRoot}/padm-realitlscanner-123.csv" ]]
+    [[ "$(realityScannerOutputPath 123 sample-2)" == "${tmpRoot}/padm-realitlscanner-123-sample-2.csv" ]]
+    [[ "$(realityTargetXrayTestLog)" == "${tmpRoot}/padm-reality-target-xray-test.log" ]]
+    [[ "$(realityTargetSingBoxTestLog)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
+    [[ "$(realityTargetBackupTemplate)" == "${tmpRoot}/padm-reality-target.XXXXXX" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null

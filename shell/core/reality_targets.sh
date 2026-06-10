@@ -32,6 +32,42 @@ realityTargetStatusBlock() {
     fi
 }
 
+realityTargetTmpPath() {
+    local template=$1
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath "${template}"
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/${template}"
+    fi
+}
+
+realityScannerDir() {
+    realityTargetTmpPath RealiTLScanner
+}
+
+realityScannerOutputPath() {
+    local stamp=$1
+    local suffix=${2:-}
+    if [[ -n "${suffix}" ]]; then
+        realityTargetTmpPath "padm-realitlscanner-${stamp}-${suffix}.csv"
+    else
+        realityTargetTmpPath "padm-realitlscanner-${stamp}.csv"
+    fi
+}
+
+realityTargetXrayTestLog() {
+    realityTargetTmpPath padm-reality-target-xray-test.log
+}
+
+realityTargetSingBoxTestLog() {
+    realityTargetTmpPath padm-reality-target-sing-box-test.log
+}
+
+realityTargetBackupTemplate() {
+    realityTargetTmpPath 'padm-reality-target.XXXXXX'
+}
+
 realityTargetScoreStyle() {
     case $1 in
     A) uiStyle ok A ;;
@@ -1722,10 +1758,10 @@ runRealityScannerRange() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "扫描范围为空"
         return 1
     }
-    scannerDir="/tmp/RealiTLScanner"
+    scannerDir=$(realityScannerDir)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
-    outputFile="/tmp/padm-realitlscanner-$(date +%s).csv"
+    outputFile=$(realityScannerOutputPath "$(date +%s)")
     startAt=$(date +%s)
     realityTargetProgressLine "RealiTLScanner 扫描范围：${scanRange} 已耗时：0s"
     "${scannerBin}" -addr "${scanRange}" -thread 20 -timeout 3 -out "${outputFile}" &
@@ -1757,7 +1793,7 @@ runRealityScannerTargetFile() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "目标列表为空"
         return 1
     }
-    scannerDir="/tmp/RealiTLScanner"
+    scannerDir=$(realityScannerDir)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     total=$(wc -l <"${targetFile}" | tr -d ' ')
@@ -1776,7 +1812,7 @@ runRealityScannerTargetFile() {
             padmRemoveCleanupPath "${batchFile}"
             break
         }
-        outputFile="/tmp/padm-realitlscanner-$(date +%s)-sample-${batchIndex}.csv"
+        outputFile=$(realityScannerOutputPath "$(date +%s)" "sample-${batchIndex}")
         startAt=$(date +%s)
         realityTargetProgressLine "RealiTLScanner 抽样扫描进度：$((processed + 1))-$((processed + batchCount))/${total} 已耗时：0s"
         "${scannerBin}" -in "${batchFile}" -thread 20 -timeout 3 -out "${outputFile}" &
@@ -1819,14 +1855,14 @@ runRealityScannerPrefixFile() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "prefix 列表为空"
         return 1
     }
-    scannerDir="/tmp/RealiTLScanner"
+    scannerDir=$(realityScannerDir)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     total=$(wc -l <"${prefixFile}" | tr -d ' ')
     while IFS= read -r prefix; do
         [[ -n "${prefix}" ]] || continue
         index=$((index + 1))
-        outputFile="/tmp/padm-realitlscanner-$(date +%s)-${index}.csv"
+        outputFile=$(realityScannerOutputPath "$(date +%s)" "${index}")
         startAt=$(date +%s)
         realityTargetProgressLine "RealiTLScanner 扫描 prefix ${index}/${total}：${prefix} 已耗时：0s"
         "${scannerBin}" -addr "${prefix}" -thread 20 -timeout 3 -out "${outputFile}" &
@@ -2397,14 +2433,17 @@ applyRealityTargetToInstalledConfigs() {
 }
 
 validateRealityTargetConfigAfterChange() {
+    local logFile
     if [[ -f "/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json" || -f "/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json" ]]; then
         if [[ -x "/etc/padm/xray/xray" ]]; then
-            /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-reality-target-xray-test.log 2>&1 || return 1
+            logFile=$(realityTargetXrayTestLog)
+            /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1 || return 1
         fi
     fi
     if [[ -f "/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json" || -f "/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json" ]]; then
         if [[ -x "/etc/padm/sing-box/sing-box" ]]; then
-            /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >/tmp/padm-reality-target-sing-box-test.log 2>&1 || return 1
+            logFile=$(realityTargetSingBoxTestLog)
+            /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1 || return 1
         fi
     fi
 }
@@ -2443,7 +2482,7 @@ changeInstalledRealityTarget() {
     local target=$1
     local sni=$2
     local backupDir
-    padmCreateTempPath backupDir -d /tmp/padm-reality-target.XXXXXX || return 1
+    padmCreateTempPath backupDir -d "$(realityTargetBackupTemplate)" || return 1
     backupRealityTargetConfigs "${backupDir}"
     if ! applyRealityTargetToInstalledConfigs "${target}" "${sni}"; then
         restoreRealityTargetConfigs "${backupDir}"
@@ -2453,7 +2492,7 @@ changeInstalledRealityTarget() {
     if ! validateRealityTargetConfigAfterChange; then
         restoreRealityTargetConfigs "${backupDir}"
         padmRemoveCleanupPath "${backupDir}"
-        realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: /tmp/padm-reality-target-xray-test.log" "sing-box 日志: /tmp/padm-reality-target-sing-box-test.log"
+        realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetXrayTestLog)" "sing-box 日志: $(realityTargetSingBoxTestLog)"
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
