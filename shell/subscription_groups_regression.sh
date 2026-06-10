@@ -4384,6 +4384,26 @@ SH
     fi
     [[ "$(<"${targetPath}")" == "backup config" ]]
     [[ ! -e "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]
+    printf 'backup config\n' >"${PADM_ALONE_NGINX_BACKUP_FILE}"
+    printf 'changed config\n' >"${targetPath}"
+    (
+        local errorLog="${TMP_DIR}/nginx-302-restore-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        cp() {
+            if [[ "$1" == "${PADM_ALONE_NGINX_BACKUP_FILE}" && "$2" == "${targetPath}" ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if checkNginx302 >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "$(<"${targetPath}")" == "changed config" ]]
+        [[ -e "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]
+        grep -q '恢复备份失败' "${errorLog}"
+    )
+    rm -f "${PADM_ALONE_NGINX_BACKUP_FILE}"
     curl() { printf '302 Found\n'; }
     checkNginx302
     unset -f curl

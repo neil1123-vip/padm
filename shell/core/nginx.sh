@@ -851,7 +851,7 @@ checkNginx302() {
         return 0
     fi
     errorCard "302重定向设置失败，请仔细检查是否和示例相同"
-    backupNginxConfig restoreBackup
+    backupNginxConfig restoreBackup || errorCard "Nginx 配置恢复备份失败，请手动检查 $(aloneNginxBackupFile)"
     return 1
 }
 
@@ -865,15 +865,17 @@ backupNginxConfig() {
     local backupFile
     backupFile=$(aloneNginxBackupFile)
     if [[ "$1" == "backup" ]]; then
-        mkdir -p "$(dirname "${backupFile}")"
-        cp "${nginxConfigPath}alone.conf" "${backupFile}"
+        mkdir -p "$(dirname "${backupFile}")" || { errorCard "nginx配置备份目录创建失败"; return 1; }
+        cp "${nginxConfigPath}alone.conf" "${backupFile}" || { errorCard "nginx配置文件备份失败"; return 1; }
         successCard "nginx配置文件备份成功"
+        return 0
     fi
 
     if [[ "$1" == "restoreBackup" ]] && [[ -f "${backupFile}" ]]; then
-        cp "${backupFile}" "${nginxConfigPath}alone.conf"
+        cp "${backupFile}" "${nginxConfigPath}alone.conf" || { errorCard "nginx配置文件恢复备份失败"; return 1; }
         successCard "nginx配置文件恢复备份成功"
-        rm "${backupFile}"
+        rm "${backupFile}" || { errorCard "nginx配置备份文件删除失败: ${backupFile}"; return 1; }
+        return 0
     fi
 
 }
