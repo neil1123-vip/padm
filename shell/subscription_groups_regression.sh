@@ -6666,12 +6666,14 @@ EOF
 }
 
 runInstallRefreshRestoresBackupRegression() {
-    local fixtureDir archiveRoot outputLog archiveDirName
+    local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir
     fixtureDir="${TMP_DIR}/install-refresh-restore"
     archiveDirName="padm-main"
     archiveRoot="${fixtureDir}/archive/${archiveDirName}"
     outputLog="${fixtureDir}/refresh.log"
-    mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${archiveRoot}/shell" "${archiveRoot}/documents"
+    refreshTmpRoot="${fixtureDir}/tmp"
+    oldTmpDir="${TMPDIR:-}"
+    mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${archiveRoot}/shell" "${archiveRoot}/documents" "${refreshTmpRoot}"
     printf 'old-shell\n' >"${fixtureDir}/shell/marker"
     printf 'old-doc\n' >"${fixtureDir}/documents/marker"
     printf 'old-readme\n' >"${fixtureDir}/README.md"
@@ -6681,8 +6683,9 @@ runInstallRefreshRestoresBackupRegression() {
 
     (
         set +e
+        TMPDIR="${refreshTmpRoot}"
         eval "$(awk '
-            /^restoreScriptModuleBackup\(\)/ { capture = 1 }
+            /^scriptTmpPath\(\)/ { capture = 1 }
             /^ensureScriptModules\(\)/ { capture = 0 }
             capture { print }
         ' "${PROJECT_ROOT}/install.sh")"
@@ -6712,6 +6715,10 @@ runInstallRefreshRestoresBackupRegression() {
     [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
     [[ ! -e "${fixtureDir}/.padm-ref" ]]
     [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
+    if find "${refreshTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
 runInstallEnsureModulesRegression() {
@@ -6820,21 +6827,33 @@ EOF
 }
 
 runInstallModulePathsRegression() {
-    local outputList
+    local outputList moduleTmpRoot oldTmpDir moduleListBefore moduleListAfter
     outputList="${TMP_DIR}/install-module-paths.txt"
+    moduleTmpRoot="${TMP_DIR}/install-module-paths-tmp"
+    oldTmpDir="${TMPDIR:-}"
+    mkdir -p "${moduleTmpRoot}"
     (
+        TMPDIR="${moduleTmpRoot}"
         eval "$(awk '
-            /^modulePaths\(\)/ { capture = 1 }
-            /^scriptModulesReady\(\)/ { capture = 0 }
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
             capture { print }
         ' "${PROJECT_ROOT}/install.sh")"
         SCRIPT_DIR="${PROJECT_ROOT}"
+        SCRIPT_MANIFEST_FILE="${TMP_DIR}/install-module-paths-manifest"
+        SCRIPT_EXPECTED_REF_FILE="${TMP_DIR}/install-module-paths-entry-ref"
+        SCRIPT_REF_FILE="${TMP_DIR}/install-module-paths-ref"
+        moduleListBefore=$(find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' | wc -l | tr -d ' ')
         modulePaths
+        scriptModulesReady >/dev/null
+        moduleListAfter=$(find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' | wc -l | tr -d ' ')
+        [[ "${moduleListBefore}" == "0" && "${moduleListAfter}" == "0" ]]
     ) | sort >"${outputList}"
     grep -q '^shell/core/bootstrap\.sh$' "${outputList}"
     grep -q '^shell/core/menu\.sh$' "${outputList}"
     grep -q '^shell/subscription/wireguard_control\.sh$' "${outputList}"
     ! grep -q '^REQUIRED_MODULE_PATHS' "${PROJECT_ROOT}/install.sh"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
 runRegressionPlatform() {

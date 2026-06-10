@@ -7,6 +7,20 @@ SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
 SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
 SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
 
+scriptTmpPath() {
+    local template=$1
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/${template}"
+}
+
+scriptCreateTempPath() {
+    mktemp "$(scriptTmpPath "$1")"
+}
+
+scriptCreateTempDir() {
+    mktemp -d "$(scriptTmpPath "$1")"
+}
+
 restoreScriptModuleBackup() {
     local backupDir=$1
     local scriptDir=$2
@@ -34,7 +48,7 @@ fetchRemoteRef() {
 refreshScriptModules() {
     local remoteRef=$1
     local tmpDir archiveDir backupDir copyStatus archiveUrl archiveCandidate
-    tmpDir=$(mktemp -d /tmp/padm.XXXXXX) || exit 1
+    tmpDir=$(scriptCreateTempDir padm.XXXXXX) || exit 1
     backupDir="${SCRIPT_DIR}/.padm-update-backup"
     trap 'restoreScriptModuleBackup "${backupDir}" "${SCRIPT_DIR}"; rm -rf "${backupDir}" "${tmpDir}"' EXIT INT TERM
     archiveUrl="${REPO_ZIP_URL}"
@@ -136,7 +150,7 @@ modulePaths() {
 
 scriptModulesReady() {
     local moduleList requiredPath localRef expectedRef
-    moduleList=$(mktemp /tmp/padm-modules.XXXXXX) || return 1
+    moduleList=$(scriptCreateTempPath padm-modules.XXXXXX) || return 1
     if ! modulePaths >"${moduleList}"; then
         rm -f "${moduleList}"
         return 1
@@ -170,7 +184,7 @@ writeModuleManifest() {
     local manifestPath=$1
     local requiredPath moduleList
     command -v sha256sum >/dev/null 2>&1 || return 0
-    moduleList=$(mktemp /tmp/padm-modules.XXXXXX) || return 1
+    moduleList=$(scriptCreateTempPath padm-modules.XXXXXX) || return 1
     if ! modulePaths >"${moduleList}"; then
         rm -f "${moduleList}"
         return 1
