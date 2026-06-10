@@ -2607,7 +2607,11 @@ runCoreInstallServiceActionFailureRegression() (
     installTLS() { printf 'installTLS:%s\n' "$*" >>"${callLog}"; return 0; }
     randomPathFunction() { printf 'path:%s\n' "$*" >>"${callLog}"; return 0; }
     nginxBlog() { printf 'nginxBlog:%s\n' "$*" >>"${callLog}"; return 0; }
-    updateRedirectNginxConf() { printf 'redirect\n' >>"${callLog}"; return 0; }
+    updateRedirectNginxConf() {
+        printf 'redirect\n' >>"${callLog}"
+        [[ "${mode}" == "redirect-fail" ]] && return 1
+        return 0
+    }
     installXray() { printf 'installXray:%s\n' "$*" >>"${callLog}"; return 0; }
     installXrayService() { printf 'installXrayService:%s\n' "$*" >>"${callLog}"; return 0; }
     initXrayConfig() { printf 'initXrayConfig:%s\n' "$*" >>"${callLog}"; return 0; }
@@ -2673,6 +2677,18 @@ runCoreInstallServiceActionFailureRegression() (
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
+    resetInstallServiceFixture redirect-fail
+    set +e
+    customXrayInstall 0 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'redirect' "${callLog}"
+    ! grep -q '^nginx:start:' "${serviceLog}"
+    ! grep -q '^installXray:' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
     resetInstallServiceFixture xray-start-fail
     set +e
     xrayCoreInstall >/dev/null 2>&1
@@ -2682,6 +2698,17 @@ runCoreInstallServiceActionFailureRegression() (
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
     grep -q '^installXray:' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture redirect-fail
+    set +e
+    xrayCoreInstall >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'redirect' "${callLog}"
+    ! grep -q '^xray:stop:' "${serviceLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
@@ -4063,6 +4090,37 @@ SH
     grep -q 'server_name example.com;' "${targetPath}"
     [[ ! -e "${targetPath}.tmp" ]]
     [[ ! -e "${targetPath}.bak" ]]
+
+    (
+        local serviceLog="${TMP_DIR}/nginx-alone-service.log"
+        local errorLog="${TMP_DIR}/nginx-alone-error.log"
+        local rcFile="${TMP_DIR}/nginx-alone-redirect.rc"
+        local shellRc
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        rm -f "${rcFile}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        handleNginx() {
+            printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
+            exit 0
+        }
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        (
+            set +e
+            updateRedirectNginxConf >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ -s "${rcFile}" ]]
+        [[ "$(<"${rcFile}")" == "1" ]]
+        grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -q 'Nginx 服务停止失败' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    )
 
     printf 'keep\nreturn 302 https://example.org;\nreturn 302 $scheme://example.org$request_uri;\n' >"${targetPath}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=fail

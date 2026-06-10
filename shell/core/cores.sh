@@ -1129,7 +1129,7 @@ customXrayInstall() {
             nginxBlog 6
         fi
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-            updateRedirectNginxConf
+            updateRedirectNginxConf || return 1
             coreInstallServiceAction "Nginx 服务启动失败，已取消 Xray 安装" handleNginx start || return 1
         fi
 
@@ -1282,7 +1282,7 @@ xrayCoreInstall() {
     else
         nginxBlog 10
     fi
-    updateRedirectNginxConf
+    updateRedirectNginxConf || return 1
     coreInstallServiceAction "Xray 服务停止失败，已取消安装收尾" handleXray stop || return 1
     sleep 2
     coreInstallServiceAction "Xray 服务启动失败，已取消安装收尾" handleXray start || return 1

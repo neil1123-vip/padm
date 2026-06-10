@@ -827,7 +827,10 @@ EOF
         errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
         return 1
     fi
-    handleNginx stop
+    if ! runCoreServiceActionAllowFailure handleNginx stop; then
+        errorCard "Nginx 服务停止失败，已取消更新重定向配置"
+        return 1
+    fi
 }
 
 # 移除 Nginx 302 配置
