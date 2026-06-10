@@ -24,13 +24,65 @@ scriptCreateTempDir() {
 restoreScriptModuleBackup() {
     local backupDir=$1
     local scriptDir=$2
+    local restoreStatus=0
     [[ -d "${backupDir}" ]] || return 0
-    rm -rf "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest"
-    [[ -e "${backupDir}/shell" ]] && mv "${backupDir}/shell" "${scriptDir}/shell"
-    [[ -e "${backupDir}/documents" ]] && mv "${backupDir}/documents" "${scriptDir}/documents"
-    [[ -e "${backupDir}/assets" ]] && mv "${backupDir}/assets" "${scriptDir}/assets"
-    [[ -e "${backupDir}/README.md" ]] && mv "${backupDir}/README.md" "${scriptDir}/README.md"
-    [[ -e "${backupDir}/.padm-module-manifest" ]] && mv "${backupDir}/.padm-module-manifest" "${scriptDir}/.padm-module-manifest"
+    rm -rf "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest" || return 1
+    [[ -e "${backupDir}/shell" ]] && { mv "${backupDir}/shell" "${scriptDir}/shell" || restoreStatus=1; }
+    [[ -e "${backupDir}/documents" ]] && { mv "${backupDir}/documents" "${scriptDir}/documents" || restoreStatus=1; }
+    [[ -e "${backupDir}/assets" ]] && { mv "${backupDir}/assets" "${scriptDir}/assets" || restoreStatus=1; }
+    [[ -e "${backupDir}/README.md" ]] && { mv "${backupDir}/README.md" "${scriptDir}/README.md" || restoreStatus=1; }
+    [[ -e "${backupDir}/.padm-module-manifest" ]] && { mv "${backupDir}/.padm-module-manifest" "${scriptDir}/.padm-module-manifest" || restoreStatus=1; }
+    return "${restoreStatus}"
+}
+
+cleanupScriptModuleRefresh() {
+    local backupDir=$1
+    local scriptDir=$2
+    local tmpDir=$3
+    if [[ -d "${backupDir}" ]]; then
+        if restoreScriptModuleBackup "${backupDir}" "${scriptDir}"; then
+            rm -rf "${backupDir}"
+        else
+            printf '完整安装包替换中断，旧模块恢复失败，请手动检查备份目录: %s\n' "${backupDir}" >&2
+        fi
+    fi
+    rm -rf "${tmpDir}"
+}
+
+backupScriptModuleItem() {
+    local sourcePath=$1
+    local backupPath=$2
+    [[ -e "${sourcePath}" ]] || return 0
+    if [[ -d "${sourcePath}" ]]; then
+        cp -R "${sourcePath}" "${backupPath}"
+    else
+        cp "${sourcePath}" "${backupPath}"
+    fi
+}
+
+backupScriptModules() {
+    local backupDir=$1
+    local scriptDir=$2
+    backupScriptModuleItem "${scriptDir}/shell" "${backupDir}/shell" || return 1
+    backupScriptModuleItem "${scriptDir}/documents" "${backupDir}/documents" || return 1
+    backupScriptModuleItem "${scriptDir}/assets" "${backupDir}/assets" || return 1
+    backupScriptModuleItem "${scriptDir}/README.md" "${backupDir}/README.md" || return 1
+    backupScriptModuleItem "${scriptDir}/.padm-module-manifest" "${backupDir}/.padm-module-manifest" || return 1
+}
+
+failScriptModuleRefreshAfterBackup() {
+    local backupDir=$1
+    local scriptDir=$2
+    local tmpDir=$3
+    if restoreScriptModuleBackup "${backupDir}" "${scriptDir}"; then
+        printf '完整安装包替换失败，已恢复旧模块\n'
+        rm -rf "${backupDir}"
+    else
+        printf '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录: %s\n' "${backupDir}"
+    fi
+    rm -rf "${tmpDir}"
+    trap - EXIT INT TERM
+    exit 1
 }
 
 fetchRemoteRef() {
@@ -50,7 +102,7 @@ refreshScriptModules() {
     local tmpDir archiveDir backupDir copyStatus archiveUrl archiveCandidate
     tmpDir=$(scriptCreateTempDir padm.XXXXXX) || exit 1
     backupDir="${SCRIPT_DIR}/.padm-update-backup"
-    trap 'restoreScriptModuleBackup "${backupDir}" "${SCRIPT_DIR}"; rm -rf "${backupDir}" "${tmpDir}"' EXIT INT TERM
+    trap 'rm -rf "${tmpDir}"' EXIT INT TERM
     archiveUrl="${REPO_ZIP_URL}"
     if [[ -n "${remoteRef}" ]]; then
         archiveUrl="https://github.com/neil1123-vip/padm/archive/${remoteRef}.tar.gz"
@@ -82,13 +134,21 @@ refreshScriptModules() {
         exit 1
     fi
 
-    rm -rf "${backupDir}"
-    mkdir -p "${backupDir}"
-    [[ -e "${SCRIPT_DIR}/shell" ]] && mv "${SCRIPT_DIR}/shell" "${backupDir}/shell"
-    [[ -e "${SCRIPT_DIR}/documents" ]] && mv "${SCRIPT_DIR}/documents" "${backupDir}/documents"
-    [[ -e "${SCRIPT_DIR}/assets" ]] && mv "${SCRIPT_DIR}/assets" "${backupDir}/assets"
-    [[ -e "${SCRIPT_DIR}/README.md" ]] && mv "${SCRIPT_DIR}/README.md" "${backupDir}/README.md"
-    [[ -e "${SCRIPT_MANIFEST_FILE}" ]] && mv "${SCRIPT_MANIFEST_FILE}" "${backupDir}/.padm-module-manifest"
+    if [[ -e "${backupDir}" ]]; then
+        printf '存在未处理模块备份目录，请手动检查后重试: %s\n' "${backupDir}"
+        rm -rf "${tmpDir}"
+        trap - EXIT INT TERM
+        exit 1
+    fi
+    mkdir -p "${backupDir}" || { rm -rf "${tmpDir}"; trap - EXIT INT TERM; exit 1; }
+    if ! backupScriptModules "${backupDir}" "${SCRIPT_DIR}"; then
+        printf '旧模块备份失败，已取消完整安装包替换\n'
+        rm -rf "${backupDir}" "${tmpDir}"
+        trap - EXIT INT TERM
+        exit 1
+    fi
+    trap 'cleanupScriptModuleRefresh "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' EXIT INT TERM
+    rm -rf "${SCRIPT_DIR}/shell" "${SCRIPT_DIR}/documents" "${SCRIPT_DIR}/assets" "${SCRIPT_DIR}/README.md" "${SCRIPT_MANIFEST_FILE}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
 
     cp -R "${archiveDir}/shell" "${SCRIPT_DIR}/"
     copyStatus=$?
@@ -106,20 +166,12 @@ refreshScriptModules() {
     fi
 
     if [[ ${copyStatus} -ne 0 ]]; then
-        restoreScriptModuleBackup "${backupDir}" "${SCRIPT_DIR}"
-        printf '完整安装包替换失败，已恢复旧模块\n'
-        rm -rf "${backupDir}" "${tmpDir}"
-        trap - EXIT INT TERM
-        exit 1
+        failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
     fi
 
     writeModuleManifest "${SCRIPT_MANIFEST_FILE}" || copyStatus=$?
     if [[ ${copyStatus} -ne 0 ]]; then
-        restoreScriptModuleBackup "${backupDir}" "${SCRIPT_DIR}"
-        printf '完整安装包替换失败，已恢复旧模块\n'
-        rm -rf "${backupDir}" "${tmpDir}"
-        trap - EXIT INT TERM
-        exit 1
+        failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
     fi
 
     [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_REF_FILE}"

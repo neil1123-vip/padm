@@ -8991,12 +8991,16 @@ EOF
 }
 
 runInstallRefreshRestoresBackupRegression() {
-    local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir
+    local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
     fixtureDir="${TMP_DIR}/install-refresh-restore"
     archiveDirName="padm-main"
     archiveRoot="${fixtureDir}/archive/${archiveDirName}"
     outputLog="${fixtureDir}/refresh.log"
     refreshTmpRoot="${fixtureDir}/tmp"
+    restoreFailureDir="${TMP_DIR}/install-refresh-restore-failure"
+    restoreFailureArchiveRoot="${restoreFailureDir}/archive/${archiveDirName}"
+    restoreFailureOutputLog="${restoreFailureDir}/refresh.log"
+    restoreFailureTmpRoot="${restoreFailureDir}/tmp"
     oldTmpDir="${TMPDIR:-}"
     mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${archiveRoot}/shell" "${archiveRoot}/documents" "${refreshTmpRoot}"
     printf 'old-shell\n' >"${fixtureDir}/shell/marker"
@@ -9027,7 +9031,7 @@ runInstallRefreshRestoresBackupRegression() {
         }
         curl() { tar -cz -C "${fixtureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
         cp() {
-            if [[ "$1" == "-R" && "$2" == *"/documents" ]]; then
+            if [[ "$1" == "-R" && "$2" == "${archiveRoot}/documents" ]]; then
                 return 1
             fi
             command cp "$@"
@@ -9041,6 +9045,59 @@ runInstallRefreshRestoresBackupRegression() {
     [[ ! -e "${fixtureDir}/.padm-ref" ]]
     [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
     if find "${refreshTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
+
+    mkdir -p "${restoreFailureDir}/shell" "${restoreFailureDir}/documents" "${restoreFailureArchiveRoot}/shell" "${restoreFailureArchiveRoot}/documents" "${restoreFailureTmpRoot}"
+    printf 'old-shell\n' >"${restoreFailureDir}/shell/marker"
+    printf 'old-doc\n' >"${restoreFailureDir}/documents/marker"
+    printf 'old-readme\n' >"${restoreFailureDir}/README.md"
+    printf 'new-shell\n' >"${restoreFailureArchiveRoot}/shell/marker"
+    printf 'new-doc\n' >"${restoreFailureArchiveRoot}/documents/marker"
+    printf 'new-readme\n' >"${restoreFailureArchiveRoot}/README.md"
+
+    (
+        set +e
+        TMPDIR="${restoreFailureTmpRoot}"
+        eval "$(awk '
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="${restoreFailureDir}"
+        REPO_ARCHIVE_DIR="${archiveDirName}"
+        SCRIPT_REF_FILE="${restoreFailureDir}/.padm-ref"
+        SCRIPT_MANIFEST_FILE="${restoreFailureDir}/.padm-module-manifest"
+        REPO_ZIP_URL="fixture.tar.gz"
+        command() {
+            if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        curl() { tar -cz -C "${restoreFailureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
+        cp() {
+            if [[ "$1" == "-R" && "$2" == "${restoreFailureArchiveRoot}/documents" ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        mv() {
+            if [[ "$1" == "${restoreFailureDir}/.padm-update-backup/documents" && "$2" == "${restoreFailureDir}/documents" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        refreshScriptModules new-ref
+    ) >"${restoreFailureOutputLog}" 2>&1
+    grep -q '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录' "${restoreFailureOutputLog}"
+    grep -q "${restoreFailureDir}/.padm-update-backup" "${restoreFailureOutputLog}"
+    [[ -d "${restoreFailureDir}/.padm-update-backup" ]]
+    [[ "$(<"${restoreFailureDir}/shell/marker")" == "old-shell" ]]
+    [[ -d "${restoreFailureDir}/.padm-update-backup/documents" ]]
+    [[ "$(<"${restoreFailureDir}/.padm-update-backup/documents/marker")" == "old-doc" ]]
+    [[ ! -e "${restoreFailureDir}/.padm-ref" ]]
+    if find "${restoreFailureTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
         return 1
     fi
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
