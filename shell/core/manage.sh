@@ -809,6 +809,29 @@ corePortApplyFileTransaction() {
     padmRemoveCleanupPath "${backupDir}"
 }
 
+corePortApplyReloadTransaction() {
+    local action=$1
+    local backupDir
+    local tmpBase="${TMPDIR:-/tmp}"
+    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-core-port.XXXXXX" || return 1
+    corePortBackupFiles "${backupDir}"
+    shift
+    if ! "${action}" "$@" || ! corePortValidateFiles; then
+        corePortRollbackFiles "${backupDir}"
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    fi
+    if reloadCore; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 0
+    fi
+
+    corePortRollbackFiles "${backupDir}"
+    reloadCore || errorCard "入口端口核心重载失败，已恢复旧配置；恢复后核心重载仍失败，请检查核心服务日志"
+    padmRemoveCleanupPath "${backupDir}"
+    return 1
+}
+
 writeCoreDokodemoInbound() {
     local fileName=$1
     local port=$2
@@ -859,10 +882,6 @@ addCorePort() {
         autoRead extra_core_ports "请输入端口号:" newPort
         autoRead extra_core_default_port "请输入默认的端口号，同时会更改订阅端口以及节点端口，[回车]默认443:" defaultPort
 
-        if [[ -n "${defaultPort}" ]]; then
-            rm -f "$(corePortDefaultFile)"
-        fi
-
         if [[ -n "${newPort}" ]]; then
             local parsedPorts=
             local settingsPort=443
@@ -877,13 +896,12 @@ addCorePort() {
                 allowPort "${port}"
                 allowPort "${port}" "udp"
             done <<<"${parsedPorts}"
-            if ! corePortApplyFileTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
-                errorCard "入口端口配置写入失败，已恢复旧配置"
+            if ! corePortApplyReloadTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
+                errorCard "入口端口配置写入或重载失败，已恢复旧配置"
                 return 1
             fi
 
             successCard "添加完毕"
-            reloadCore
             addCorePort
         fi
     elif [[ "${selectNewPortType}" == "3" ]]; then
@@ -892,12 +910,11 @@ addCorePort() {
         local port
         port=$(corePortResolveByIndex "${portIndex}")
         if [[ -n "${port}" ]]; then
-            if ! corePortApplyFileTransaction corePortRemove "${port}"; then
-                errorCard "入口端口删除失败，已恢复旧配置"
+            if ! corePortApplyReloadTransaction corePortRemove "${port}"; then
+                errorCard "入口端口删除或重载失败，已恢复旧配置"
                 return 1
             fi
 
-            reloadCore
             addCorePort
         else
             statusCard "输入错误" "编号输入错误，请重新选择"

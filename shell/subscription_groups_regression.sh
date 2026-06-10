@@ -1700,6 +1700,45 @@ runCorePortFileTransactionRegression() {
     corePortApplyFileTransaction corePortRemove 2083
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2083.json" ]]
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
+
+    local reloadCalls=0 errorLog="${TMP_DIR}/core-port-reload-error.log"
+    : >"${errorLog}"
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
+    }
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
+        [[ "${reloadCalls}" != "1" ]]
+    }
+
+    original2053=$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")
+    if corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443 2>/dev/null; then
+        return 1
+    fi
+    [[ "${reloadCalls}" == "2" ]]
+    [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
+    [[ ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
+
+    reloadCalls=0
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
+        [[ "${reloadCalls}" != "1" ]]
+    }
+    if corePortApplyReloadTransaction corePortRemove 2053 2>/dev/null; then
+        return 1
+    fi
+    [[ "${reloadCalls}" == "2" ]]
+    [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
+    grep -q "恢复后核心重载仍失败" "${errorLog}" && return 1
+
+    reloadCalls=0
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
+        return 0
+    }
+    corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443
+    [[ "${reloadCalls}" == "1" ]]
+    [[ -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
     if find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' | grep -q .; then
         return 1
     fi
