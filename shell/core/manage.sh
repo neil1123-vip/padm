@@ -2028,8 +2028,8 @@ configTransactionCommit() {
     local refreshFn=$7
     local reloadFn=${8:-reloadCore}
 
-    cp "${configFile}" "${backupFile}"
-    mv "${configFile}.tmp" "${configFile}"
+    cp "${configFile}" "${backupFile}" || return 1
+    mv "${configFile}.tmp" "${configFile}" || { rm -f "${backupFile}" "${configFile}.tmp"; return 1; }
     if ! "${validateFn}"; then
         mv "${backupFile}" "${configFile}"
         rm -f "${backupFile}" "${configFile}.tmp"
@@ -2039,9 +2039,30 @@ configTransactionCommit() {
         menuClose
         return 1
     fi
+    if ! "${reloadFn}"; then
+        if mv "${backupFile}" "${configFile}"; then
+            rm -f "${configFile}.tmp"
+            echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
+            if "${reloadFn}" >/dev/null 2>&1; then
+                menuLine "已回滚本次修改"
+            else
+                menuLine "已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
+            fi
+            menuClose
+        else
+            echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
+            menuLine "核心重载失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
+            menuClose
+        fi
+        return 1
+    fi
     rm -f "${backupFile}"
-    "${reloadFn}"
-    "${refreshFn}"
+    if ! "${refreshFn}"; then
+        echoContent title "\n┌─ 订阅刷新失败 ────────────────────────────────"
+        menuLine "核心配置已更新，但订阅刷新失败，请手动刷新订阅"
+        menuClose
+        return 1
+    fi
     successCard "${successMessage}"
 }
 

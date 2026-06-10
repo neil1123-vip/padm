@@ -3230,6 +3230,8 @@ runConfigTransactionRegression() {
     local reloadCountFile="${TMP_DIR}/transaction-reload-count"
     local refreshCountFile="${TMP_DIR}/transaction-refresh-count"
     local validateMode=success
+    local reloadMode=success
+    local refreshMode=success
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
     local checkPortTmpRoot="${TMP_DIR}/check-port-tmp"
@@ -3240,10 +3242,12 @@ runConfigTransactionRegression() {
 
     transactionReloadMock() {
         printf '1\n' >>"${reloadCountFile}"
+        [[ "${reloadMode}" == "success" ]]
     }
 
     transactionRefreshMock() {
         printf '1\n' >>"${refreshCountFile}"
+        [[ "${refreshMode}" == "success" ]]
     }
 
     transactionValidateMock() {
@@ -3276,6 +3280,36 @@ JSON
     [[ ! -e "${backupFile}" ]]
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "1" ]]
     [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
+
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
+    originalContent=$(<"${targetFile}")
+    rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
+    reloadMode=fail
+    refreshMode=success
+    if configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${targetFile}")" == "${originalContent}" ]]
+    [[ ! -e "${targetFile}.tmp" ]]
+    [[ ! -e "${backupFile}" ]]
+    [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "2" ]]
+    [[ ! -e "${refreshCountFile}" ]]
+
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
+    rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
+    reloadMode=success
+    refreshMode=fail
+    if configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e '.mode == "new" and .port == 8443' "${targetFile}" >/dev/null
+    [[ ! -e "${targetFile}.tmp" ]]
+    [[ ! -e "${backupFile}" ]]
+    [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "1" ]]
+    [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
+    refreshMode=success
 
     mkdir -p "${TMP_DIR}/fake-bin" "${checkPortNginxDir}"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
