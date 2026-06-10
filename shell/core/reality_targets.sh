@@ -2365,14 +2365,31 @@ showRealityTargetPqcStatus() {
     showRealityTargetCachedQuality "${target}" || true
 }
 
+realityXrayVisionConfigPath() {
+    printf '%s\n' "${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}"
+}
+
+realityXrayXhttpConfigPath() {
+    printf '%s\n' "${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}"
+}
+
+realitySingBoxVisionConfigPath() {
+    printf '%s\n' "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}"
+}
+
+realitySingBoxGrpcConfigPath() {
+    printf '%s\n' "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}"
+}
+
 applyRealityTargetToInstalledConfigs() {
     local target=$1
     local sni=$2
     local parsed host port changed=false
-    local xrayRealityConfigPath="${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}"
-    local xrayXhttpConfigPath="${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}"
-    local singBoxRealityConfigPath="${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}"
-    local singBoxGrpcConfigPath="${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}"
+    local xrayRealityConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
+    xrayRealityConfigPath=$(realityXrayVisionConfigPath)
+    xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
+    singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
+    singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
     port=${parsed##*:}
@@ -2432,15 +2449,25 @@ applyRealityTargetToInstalledConfigs() {
     return 0
 }
 
+restoreRealityTargetRuntimeState() {
+    realityTargetHost=$1
+    realityTargetPort=$2
+    realitySNI=$3
+    xrayVLESSRealitySNI=$4
+    xrayVLESSRealityXHTTPSNI=$5
+    singBoxVLESSRealityVisionSNI=$6
+    singBoxVLESSRealityGRPCSNI=$7
+}
+
 validateRealityTargetConfigAfterChange() {
     local logFile
-    if [[ -f "/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json" || -f "/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json" ]]; then
+    if [[ -f "$(realityXrayVisionConfigPath)" || -f "$(realityXrayXhttpConfigPath)" ]]; then
         if [[ -x "/etc/padm/xray/xray" ]]; then
             logFile=$(realityTargetXrayTestLog)
             /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1 || return 1
         fi
     fi
-    if [[ -f "/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json" || -f "/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json" ]]; then
+    if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
         if [[ -x "/etc/padm/sing-box/sing-box" ]]; then
             logFile=$(realityTargetSingBoxTestLog)
             /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1 || return 1
@@ -2450,19 +2477,44 @@ validateRealityTargetConfigAfterChange() {
 
 backupRealityTargetConfigs() {
     local backupDir=$1
-    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box"
-    [[ -f "/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json" ]] && cp /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json"
-    [[ -f "/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json" ]] && cp /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json"
-    [[ -f "/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json" ]] && cp /etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json"
-    [[ -f "/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json" ]] && cp /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json"
+    local xrayRealityConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
+    local status=0
+    xrayRealityConfigPath=$(realityXrayVisionConfigPath)
+    xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
+    singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
+    singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
+    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" || return 1
+    if [[ -f "${xrayRealityConfigPath}" ]]; then
+        cp "${xrayRealityConfigPath}" "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" || status=1
+    fi
+    if [[ -f "${xrayXhttpConfigPath}" ]]; then
+        cp "${xrayXhttpConfigPath}" "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" || status=1
+    fi
+    if [[ -f "${singBoxRealityConfigPath}" ]]; then
+        cp "${singBoxRealityConfigPath}" "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" || status=1
+    fi
+    if [[ -f "${singBoxGrpcConfigPath}" ]]; then
+        cp "${singBoxGrpcConfigPath}" "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" || status=1
+    fi
+    return "${status}"
 }
 
 restoreRealityTargetConfigs() {
     local backupDir=$1
-    [[ -f "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]] && cp "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json
-    [[ -f "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" ]] && cp "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json
-    [[ -f "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" ]] && cp "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" /etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json
-    [[ -f "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" ]] && cp "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json
+    local status=0
+    if [[ -f "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]; then
+        cp "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" "$(realityXrayVisionConfigPath)" || status=1
+    fi
+    if [[ -f "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" ]]; then
+        cp "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" "$(realityXrayXhttpConfigPath)" || status=1
+    fi
+    if [[ -f "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" ]]; then
+        cp "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" "$(realitySingBoxVisionConfigPath)" || status=1
+    fi
+    if [[ -f "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" ]]; then
+        cp "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" "$(realitySingBoxGrpcConfigPath)" || status=1
+    fi
+    return "${status}"
 }
 
 refreshSubscriptionsAfterRealityTargetChange() {
@@ -2482,21 +2534,43 @@ changeInstalledRealityTarget() {
     local target=$1
     local sni=$2
     local backupDir
+    local previousRealityTargetHost="${realityTargetHost:-}"
+    local previousRealityTargetPort="${realityTargetPort:-}"
+    local previousRealitySNI="${realitySNI:-}"
+    local previousXrayVLESSRealitySNI="${xrayVLESSRealitySNI:-}"
+    local previousXrayVLESSRealityXHTTPSNI="${xrayVLESSRealityXHTTPSNI:-}"
+    local previousSingBoxVLESSRealityVisionSNI="${singBoxVLESSRealityVisionSNI:-}"
+    local previousSingBoxVLESSRealityGRPCSNI="${singBoxVLESSRealityGRPCSNI:-}"
     padmCreateTempPath backupDir -d "$(realityTargetBackupTemplate)" || return 1
-    backupRealityTargetConfigs "${backupDir}"
+    if ! backupRealityTargetConfigs "${backupDir}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        realityTargetStatusBlock red "REALITY 目标站" "配置备份失败，已取消切换"
+        return 1
+    fi
     if ! applyRealityTargetToInstalledConfigs "${target}" "${sni}"; then
-        restoreRealityTargetConfigs "${backupDir}"
+        restoreRealityTargetConfigs "${backupDir}" || true
         padmRemoveCleanupPath "${backupDir}"
         return 1
     fi
     if ! validateRealityTargetConfigAfterChange; then
-        restoreRealityTargetConfigs "${backupDir}"
+        restoreRealityTargetConfigs "${backupDir}" || realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，且回滚配置失败"
+        restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
         padmRemoveCleanupPath "${backupDir}"
         realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetXrayTestLog)" "sing-box 日志: $(realityTargetSingBoxTestLog)"
         return 1
     fi
+    if ! reloadCore; then
+        restoreRealityTargetConfigs "${backupDir}" || realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，且回滚配置失败"
+        restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
+        if reloadCore; then
+            realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，已回滚配置"
+        else
+            realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，已回滚配置" "恢复旧配置后重载仍失败，请检查核心服务日志"
+        fi
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    fi
     padmRemoveCleanupPath "${backupDir}"
-    reloadCore
     refreshSubscriptionsAfterRealityTargetChange
     realityTargetStatusBlock green "REALITY 目标站" "已更新为 ${realityTargetHost}:${realityTargetPort}" "SNI=${realitySNI}"
 }
