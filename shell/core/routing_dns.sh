@@ -104,10 +104,10 @@ EOF
         if [[ -n "${singBoxConfigPath}" ]]; then
             echoContent yellow "录入示例:www.netflix.com,www.google.com"
             autoRead sni_singbox_domains "请按照上面示例录入域名:" singboxDomainList
-            addSingBoxDNSConfig "${setSNIP}" "${singboxDomainList}" "predefined"
+            addSingBoxDNSConfig "${setSNIP}" "${singboxDomainList}" "predefined" || return 1
         fi
+        reloadCore || return 1
         statusCard "DNS/hosts 覆盖" "规则写入成功"
-        reloadCore
     else
         errorCard "IP不可为空"
     fi
@@ -257,7 +257,7 @@ setUnlockDNS() {
             fi
         fi
 
-        reloadCore
+        reloadCore || return 1
 
         echoContent title "\n┌─ DNS 分流排障建议 ─────────────────────────────────"
         menuLine "如仍无法观看，可先重启 VPS 后再测试客户端"
@@ -306,7 +306,7 @@ EOF
         fi
     fi
 
-    reloadCore
+    reloadCore || return 1
 
     successCard "卸载成功"
 
@@ -349,7 +349,7 @@ EOF
         fi
     fi
 
-    reloadCore
+    reloadCore || return 1
     successCard "卸载成功"
 
     exit 0

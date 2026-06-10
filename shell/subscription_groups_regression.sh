@@ -473,6 +473,117 @@ runBTRoutingFailureReturnRegression() (
     [[ ! -e "${successMarker}" ]]
 )
 
+runDNSRoutingFailureReturnRegression() (
+    local root="${TMP_DIR}/dns-routing-failure"
+    local reloadMarker="${root}/reload"
+    local statusMarker="${root}/status"
+    local successMarker="${root}/success"
+    local rc
+
+    mkdir -p "${root}"
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    getDLCMatchedRuleValue() { printf 'domain:%s\n' "$1"; }
+    statusCard() {
+        printf 'status\n' >"${statusMarker}"
+        return 0
+    }
+    successCard() {
+        printf 'success\n' >"${successMarker}"
+        return 0
+    }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        return 1
+    }
+
+    (
+        mkdir -p "${root}/dns-xray"
+        configPath="${root}/dns-xray/"
+        singBoxConfigPath=
+        coreInstallType=1
+        autoRead() {
+            case "$3" in
+            setDNS) printf -v "$3" '8.8.8.8' ;;
+            domainList) printf -v "$3" 'example.com' ;;
+            *) printf -v "$3" '' ;;
+            esac
+        }
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        set +e
+        setUnlockDNS >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ -e "${reloadMarker}" ]]
+    )
+
+    (
+        mkdir -p "${root}/sni-xray"
+        configPath="${root}/sni-xray/"
+        singBoxConfigPath=
+        coreInstallType=1
+        autoRead() {
+            case "$3" in
+            setSNIP) printf -v "$3" '203.0.113.10' ;;
+            xrayDomainList) printf -v "$3" 'example.com' ;;
+            *) printf -v "$3" '' ;;
+            esac
+        }
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        set +e
+        setUnlockSNI >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ -e "${reloadMarker}" ]]
+        [[ ! -e "${statusMarker}" ]]
+    )
+
+    (
+        mkdir -p "${root}/sni-sing-box"
+        configPath=
+        singBoxConfigPath="${root}/sni-sing-box/"
+        coreInstallType=2
+        autoRead() {
+            case "$3" in
+            setSNIP) printf -v "$3" '203.0.113.10' ;;
+            singboxDomainList) printf -v "$3" 'example.com' ;;
+            *) printf -v "$3" '' ;;
+            esac
+        }
+        addSingBoxDNSConfig() { return 1; }
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        set +e
+        setUnlockSNI >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ ! -e "${reloadMarker}" ]]
+        [[ ! -e "${statusMarker}" ]]
+    )
+
+    (
+        mkdir -p "${root}/remove-dns"
+        configPath="${root}/remove-dns/"
+        singBoxConfigPath=
+        coreInstallType=1
+        cat >"${configPath}11_dns.json" <<'JSON'
+{"dns":{"servers":["8.8.8.8"]}}
+JSON
+        rm -f "${reloadMarker}" "${successMarker}"
+        set +e
+        removeUnlockDNS >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ -e "${reloadMarker}" ]]
+        [[ ! -e "${successMarker}" ]]
+    )
+)
+
 runUserConfigWriteRegression() {
     local targetPath="${TMP_DIR}/user-config.json"
     cat >"${targetPath}" <<'JSON'
@@ -5800,6 +5911,7 @@ runRegressionRouting() {
     runRegressionStep routing-core runRoutingRegression
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
+    runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }
 
