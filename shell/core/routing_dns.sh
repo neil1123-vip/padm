@@ -155,9 +155,9 @@ addSingBoxDNSConfig() {
     local actionType=${3:-}
 
     local rules=
-    rules=$(initSingBoxRules "${domainList}" "dns")
+    rules=$(initSingBoxRules "${domainList}" "dns") || { errorCard "sing-box DNS 规则生成失败，已保留旧配置"; return 1; }
     local domainRules suffixRules ruleSet ruleSetTag
-    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag
+    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ "${actionType}" == "predefined" ]]; then
             local predefined={}
@@ -251,7 +251,7 @@ setUnlockDNS() {
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
-            addSingBoxOutbound 01_direct_outbound
+            addSingBoxOutbound 01_direct_outbound || { errorCard "sing-box direct 出站写入失败，已保留旧配置"; return 1; }
             if ! addSingBoxDNSConfig "${setDNS}" "${domainList}"; then
                 return 1
             fi

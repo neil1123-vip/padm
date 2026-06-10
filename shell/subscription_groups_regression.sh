@@ -1118,6 +1118,20 @@ runDNSRoutingFailureReturnRegression() (
     }
 
     (
+        mkdir -p "${root}/dns-sing-box-helper"
+        configPath=
+        singBoxConfigPath="${root}/dns-sing-box-helper/"
+        printf '{"dns":{"servers":["old"]}}\n' >"${singBoxConfigPath}dns.json"
+        splitSingBoxRules() { return 1; }
+        set +e
+        addSingBoxDNSConfig "1.1.1.1" "example.com" >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        jq -e '.dns.servers == ["old"]' "${singBoxConfigPath}dns.json" >/dev/null
+    )
+
+    (
         mkdir -p "${root}/dns-xray"
         configPath="${root}/dns-xray/"
         singBoxConfigPath=
@@ -1136,6 +1150,29 @@ runDNSRoutingFailureReturnRegression() (
         set -e
         [[ "${rc}" == "1" ]]
         [[ -e "${reloadMarker}" ]]
+    )
+
+    (
+        mkdir -p "${root}/dns-sing-box-outbound"
+        configPath=
+        singBoxConfigPath="${root}/dns-sing-box-outbound/"
+        coreInstallType=2
+        autoRead() {
+            case "$3" in
+            setDNS) printf -v "$3" '8.8.8.8' ;;
+            domainList) printf -v "$3" 'example.com' ;;
+            *) printf -v "$3" '' ;;
+            esac
+        }
+        addSingBoxOutbound() { return 1; }
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        set +e
+        setUnlockDNS >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ ! -e "${reloadMarker}" ]]
+        [[ ! -e "${singBoxConfigPath}dns.json" ]]
     )
 
     (
