@@ -402,7 +402,7 @@ singBoxTuicInstall() {
     selectCustomInstallType=",9,"
     initSingBoxConfig custom 2 true || return 1
     installSingBoxService 3
-    reloadCore
+    reloadCore || return 1
     showAccounts 4
 }
 
@@ -419,7 +419,7 @@ singBoxHysteria2Install() {
     selectCustomInstallType=",6,"
     initSingBoxConfig custom 2 true || return 1
     installSingBoxService 3
-    reloadCore
+    reloadCore || return 1
     showAccounts 4
 }
 

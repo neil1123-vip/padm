@@ -2471,6 +2471,57 @@ runSingBoxUninstallFailurePropagationRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
+runSingBoxProtocolReloadFailureRegression() (
+    local root="${TMP_DIR}/sing-box-protocol-reload-failure"
+    local reachedFile="${root}/accounts"
+    local callLog="${root}/calls.log"
+    local tuicRc hysteriaRc
+
+    mkdir -p "${root}"
+    : >"${callLog}"
+    currentProtocolHasAny() { return 0; }
+    installSingBox() {
+        printf 'install:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    initSingBoxConfig() {
+        printf 'config:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    installSingBoxService() {
+        printf 'service:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    reloadCore() {
+        printf 'reload\n' >>"${callLog}"
+        return 1
+    }
+    showAccounts() {
+        printf 'accounts\n' >"${reachedFile}"
+        return 0
+    }
+
+    set +e
+    singBoxTuicInstall >/dev/null 2>&1
+    tuicRc=$?
+    set -e
+    [[ "${tuicRc}" == "1" ]]
+    grep -qx 'config:custom 2 true' "${callLog}"
+    grep -qx 'reload' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+
+    : >"${callLog}"
+    rm -f "${reachedFile}"
+    set +e
+    singBoxHysteria2Install >/dev/null 2>&1
+    hysteriaRc=$?
+    set -e
+    [[ "${hysteriaRc}" == "1" ]]
+    grep -qx 'config:custom 2 true' "${callLog}"
+    grep -qx 'reload' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
+)
+
 runCoreCleanupFailurePropagationRegression() (
     local root="${TMP_DIR}/core-cleanup-failure"
     local serviceLog="${root}/service.log"
@@ -7726,6 +7777,7 @@ runRegressionTransactionCore() {
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
+        runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
         runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
         runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
