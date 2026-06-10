@@ -411,6 +411,10 @@ EOF
 
 
 # 初始化 sing-box 配置文件
+stopSingBoxBeforeTemplateWrite() {
+    runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消写入配置"; return 1; }
+}
+
 initSingBoxConfig() {
     progressCard "$2" "初始化 sing-box 配置"
 
@@ -469,7 +473,7 @@ initSingBoxConfig() {
 
         checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
-        handleSingBox stop
+        stopSingBoxBeforeTemplateWrite || return 1
 
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json padm-sing-box-vless-tcp <<EOF || { errorCard "sing-box VLESS Vision 入站模板提交失败"; return 1; }
@@ -505,7 +509,7 @@ EOF
 
         checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
-        handleSingBox stop
+        stopSingBoxBeforeTemplateWrite || return 1
         randomPathFunction
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json padm-sing-box-vless-ws <<EOF || { errorCard "sing-box VLESS WS 入站模板提交失败"; return 1; }
@@ -547,7 +551,7 @@ EOF
 
         checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
-        handleSingBox stop
+        stopSingBoxBeforeTemplateWrite || return 1
         randomPathFunction
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/05_VMess_WS_inbounds.json padm-sing-box-vmess-ws <<EOF || { errorCard "sing-box VMess WS 入站模板提交失败"; return 1; }
@@ -809,7 +813,7 @@ EOF
 
         checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
-        handleSingBox stop
+        stopSingBoxBeforeTemplateWrite || return 1
         randomPathFunction
         rm -rf "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" >/dev/null 2>&1
         checkPortOpen "${result[-1]}" "${domain}" || return 1

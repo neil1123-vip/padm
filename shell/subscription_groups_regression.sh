@@ -1907,6 +1907,7 @@ runRealityProfileFailureRegression() (
 runCoreTemplateReturnFailureRegression() (
     local mode=xray
     local xrayRc singBoxRc
+    local stopRc writeCalls=0 serviceLog="${TMP_DIR}/core-template-service.log"
 
     currentUUID=existing-user
     currentClients='[]'
@@ -1921,7 +1922,10 @@ runCoreTemplateReturnFailureRegression() (
     addXrayOutbound() { return 0; }
     checkDNSIP() { return 0; }
     removeNginxDefaultConf() { return 0; }
-    handleSingBox() { return 0; }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "${mode}" != "stop-fail" ]]
+    }
     checkPortOpen() { return 0; }
     readSingBoxPortResult() {
         local -n resultRef=$1
@@ -1931,6 +1935,7 @@ runCoreTemplateReturnFailureRegression() (
     writeGeneratedJsonFile() {
         local targetFile=$1
         shift 2
+        writeCalls=$((writeCalls + 1))
         if [[ "${mode}" == "xray" && "${targetFile}" == "/etc/padm/xray/conf/09_routing.json" ]]; then
             return 1
         fi
@@ -1946,13 +1951,29 @@ runCoreTemplateReturnFailureRegression() (
     set -e
     [[ "${xrayRc}" != "0" ]]
 
+    mode=stop-fail
+    selectCustomInstallType=",0,"
+    writeCalls=0
+    : >"${serviceLog}"
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    initSingBoxConfig custom 1 true 2>/dev/null
+    stopRc=$?
+    set -e
+    [[ "${stopRc}" != "0" ]]
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    [[ "${writeCalls}" == "0" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
     mode=sing-box
     selectCustomInstallType=",0,"
+    writeCalls=0
     set +e
     initSingBoxConfig custom 1 true 2>/dev/null
     singBoxRc=$?
     set -e
     [[ "${singBoxRc}" != "0" ]]
+    [[ "${writeCalls}" != "0" ]]
 )
 
 runCoreBinaryInstallCopyFailureRegression() (
