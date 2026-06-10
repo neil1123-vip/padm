@@ -1848,7 +1848,7 @@ runCorePortFileTransactionRegression() {
     mkdir -p "${configPath}"
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-newPort-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2083_default.json" 2083 443 tcp dokodemo-door-newPort-2083
-    local original2053 original2083
+    local original2053 original2083 keptBackup
     original2053=$(<"${configPath}02_dokodemodoor_inbounds_2053.json")
     original2083=$(<"${configPath}02_dokodemodoor_inbounds_2083_default.json")
     if corePortApplyFileTransaction corePortWriteAddFiles $'2053\n2083' 2053 'bad-port' 2>/dev/null; then
@@ -1880,6 +1880,46 @@ runCorePortFileTransactionRegression() {
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
     }
+
+    : >"${errorLog}"
+    (
+        cp() {
+            if [[ "${2:-}" == "${portTmpRoot}"/padm-core-port.*/* ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if corePortApplyFileTransaction corePortWriteAddFiles 2443 2443 443 2>/dev/null; then
+            return 1
+        fi
+        [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
+        [[ ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
+        if find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' | grep -q .; then
+            return 1
+        fi
+    ) || return 1
+    grep -q "入口端口配置备份失败" "${errorLog}"
+
+    : >"${errorLog}"
+    (
+        cp() {
+            if [[ "${2:-}" == "${configPath}"02_dokodemodoor_inbounds_2053_default.json ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if corePortApplyFileTransaction corePortWriteAddFiles 2443 2443 'bad-port' 2>/dev/null; then
+            return 1
+        fi
+    ) || return 1
+    grep -q "入口端口配置回滚失败" "${errorLog}"
+    keptBackup=$(find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' -print -quit)
+    [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
+    [[ -f "${keptBackup}/02_dokodemodoor_inbounds_2053_default.json" ]]
+    rm -rf "${keptBackup}"
+    printf '%s\n' "${original2053}" >"${configPath}02_dokodemodoor_inbounds_2053_default.json"
+    rm -f "${configPath}02_dokodemodoor_inbounds_2443_default.json"
+
     reloadCore() {
         reloadCalls=$((reloadCalls + 1))
         [[ "${reloadCalls}" != "1" ]]
@@ -1904,6 +1944,31 @@ runCorePortFileTransactionRegression() {
     [[ "${reloadCalls}" == "2" ]]
     [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
     grep -q "恢复后核心重载仍失败" "${errorLog}" && return 1
+
+    reloadCalls=0
+    : >"${errorLog}"
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
+        [[ "${reloadCalls}" != "1" ]]
+    }
+    (
+        cp() {
+            if [[ "${2:-}" == "${configPath}"02_dokodemodoor_inbounds_2053_default.json ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443 2>/dev/null; then
+            return 1
+        fi
+    ) || return 1
+    [[ "${reloadCalls}" == "1" ]]
+    grep -q "入口端口核心重载失败，且旧配置恢复失败" "${errorLog}"
+    keptBackup=$(find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' -print -quit)
+    [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
+    rm -rf "${keptBackup}"
+    printf '%s\n' "${original2053}" >"${configPath}02_dokodemodoor_inbounds_2053_default.json"
+    rm -f "${configPath}02_dokodemodoor_inbounds_2443_default.json"
 
     reloadCalls=0
     reloadCore() {

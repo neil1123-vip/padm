@@ -822,32 +822,34 @@ corePortDefaultFile() {
 
 corePortRemove() {
     local port=$1
-    rm -f "${configPath}02_dokodemodoor_inbounds_${port}.json" \
-        "${configPath}02_dokodemodoor_inbounds_${port}_default.json" \
-        "${configPath}02_dokodemodoor_inbounds_hysteria_${port}.json"
+    local status=0
+    rm -f "${configPath}02_dokodemodoor_inbounds_${port}.json" || status=1
+    rm -f "${configPath}02_dokodemodoor_inbounds_${port}_default.json" || status=1
+    rm -f "${configPath}02_dokodemodoor_inbounds_hysteria_${port}.json" || status=1
+    return "${status}"
 }
 
 corePortBackupFiles() {
     local backupDir=$1
     local file base
-    mkdir -p "${backupDir}"
+    mkdir -p "${backupDir}" || return 1
     for file in "${configPath}"02_dokodemodoor_inbounds_*.json; do
         [[ -f "${file}" ]] || continue
         base=${file##*/}
-        cp "${file}" "${backupDir}/${base}"
+        cp "${file}" "${backupDir}/${base}" || return 1
     done
 }
 
 corePortRollbackFiles() {
     local backupDir=$1
-    rm -f "${configPath}"02_dokodemodoor_inbounds_*.json
-    if [[ -d "${backupDir}" ]]; then
-        local file
-        for file in "${backupDir}"/*.json; do
-            [[ -f "${file}" ]] || continue
-            cp "${file}" "${configPath}${file##*/}"
-        done
-    fi
+    local file status=0
+    [[ -d "${backupDir}" ]] || return 1
+    rm -f "${configPath}"02_dokodemodoor_inbounds_*.json || status=1
+    for file in "${backupDir}"/*.json; do
+        [[ -f "${file}" ]] || continue
+        cp "${file}" "${configPath}${file##*/}" || status=1
+    done
+    return "${status}"
 }
 
 corePortValidateFiles() {
@@ -862,12 +864,13 @@ corePortWriteAddFiles() {
     local ports=$1
     local defaultPort=$2
     local settingsPort=$3
-    local port fileName hysteriaFileName
+    local port fileName hysteriaFileName defaultFile
     if [[ -n "${defaultPort}" ]]; then
-        rm -f "$(corePortDefaultFile)"
+        defaultFile=$(corePortDefaultFile || true)
+        [[ -z "${defaultFile}" ]] || rm -f "${defaultFile}" || return 1
     fi
     while read -r port; do
-        corePortRemove "${port}"
+        corePortRemove "${port}" || return 1
         if [[ -n "${defaultPort}" && "${port}" == "${defaultPort}" ]]; then
             fileName="${configPath}02_dokodemodoor_inbounds_${port}_default.json"
         else
@@ -875,9 +878,9 @@ corePortWriteAddFiles() {
         fi
         if [[ -n ${hysteriaPort:-} ]]; then
             hysteriaFileName="${configPath}02_dokodemodoor_inbounds_hysteria_${port}.json"
-            writeCoreDokodemoInbound "${hysteriaFileName}" "${port}" "${hysteriaPort}" udp "dokodemo-door-newPort-hysteria-${port}"
+            writeCoreDokodemoInbound "${hysteriaFileName}" "${port}" "${hysteriaPort}" udp "dokodemo-door-newPort-hysteria-${port}" || return 1
         fi
-        writeCoreDokodemoInbound "${fileName}" "${port}" "${settingsPort}" tcp "dokodemo-door-newPort-${port}"
+        writeCoreDokodemoInbound "${fileName}" "${port}" "${settingsPort}" tcp "dokodemo-door-newPort-${port}" || return 1
     done <<<"${ports}"
 }
 
@@ -886,11 +889,19 @@ corePortApplyFileTransaction() {
     local backupDir
     local tmpBase="${TMPDIR:-/tmp}"
     padmCreateTempPath backupDir -d "${tmpBase%/}/padm-core-port.XXXXXX" || return 1
-    corePortBackupFiles "${backupDir}"
+    if ! corePortBackupFiles "${backupDir}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        errorCard "入口端口配置备份失败"
+        return 1
+    fi
     shift
     if ! "${action}" "$@" || ! corePortValidateFiles; then
-        corePortRollbackFiles "${backupDir}"
-        padmRemoveCleanupPath "${backupDir}"
+        if corePortRollbackFiles "${backupDir}"; then
+            padmRemoveCleanupPath "${backupDir}"
+        else
+            padmForgetCleanupPath "${backupDir}"
+            errorCard "入口端口配置回滚失败，请手动检查备份目录: ${backupDir}"
+        fi
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
@@ -901,11 +912,19 @@ corePortApplyReloadTransaction() {
     local backupDir
     local tmpBase="${TMPDIR:-/tmp}"
     padmCreateTempPath backupDir -d "${tmpBase%/}/padm-core-port.XXXXXX" || return 1
-    corePortBackupFiles "${backupDir}"
+    if ! corePortBackupFiles "${backupDir}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        errorCard "入口端口配置备份失败"
+        return 1
+    fi
     shift
     if ! "${action}" "$@" || ! corePortValidateFiles; then
-        corePortRollbackFiles "${backupDir}"
-        padmRemoveCleanupPath "${backupDir}"
+        if corePortRollbackFiles "${backupDir}"; then
+            padmRemoveCleanupPath "${backupDir}"
+        else
+            padmForgetCleanupPath "${backupDir}"
+            errorCard "入口端口配置回滚失败，请手动检查备份目录: ${backupDir}"
+        fi
         return 1
     fi
     if reloadCore; then
@@ -913,7 +932,11 @@ corePortApplyReloadTransaction() {
         return 0
     fi
 
-    corePortRollbackFiles "${backupDir}"
+    if ! corePortRollbackFiles "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "入口端口核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
     reloadCore || errorCard "入口端口核心重载失败，已恢复旧配置；恢复后核心重载仍失败，请检查核心服务日志"
     padmRemoveCleanupPath "${backupDir}"
     return 1
@@ -925,7 +948,8 @@ writeCoreDokodemoInbound() {
     local targetPort=$3
     local network=$4
     local tag=$5
-    cat <<EOF >"${fileName}"
+    mkdir -p "$(dirname "${fileName}")" || return 1
+    cat <<EOF >"${fileName}" || return 1
 {
   "inbounds": [
     {
@@ -984,7 +1008,7 @@ addCorePort() {
                 allowPort "${port}" "udp"
             done <<<"${parsedPorts}"
             if ! corePortApplyReloadTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
-                errorCard "入口端口配置写入或重载失败，已恢复旧配置"
+                errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
                 return 1
             fi
 
@@ -998,7 +1022,7 @@ addCorePort() {
         port=$(corePortResolveByIndex "${portIndex}")
         if [[ -n "${port}" ]]; then
             if ! corePortApplyReloadTransaction corePortRemove "${port}"; then
-                errorCard "入口端口删除或重载失败，已恢复旧配置"
+                errorCard "入口端口删除或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
                 return 1
             fi
 
