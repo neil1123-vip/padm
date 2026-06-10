@@ -440,6 +440,149 @@ JSON
     [[ ! -e "${xrayFile}.tmp" ]]
 }
 
+runUserMutationFailurePropagationRegression() (
+    local root="${TMP_DIR}/user-mutation-failure"
+    local xrayRoot="${root}/xray/"
+    local singBoxRoot="${root}/sing-box/"
+    local userFile="${xrayRoot}02_VLESS_TCP_inbounds.json"
+    local reloadMarker="${root}/reload"
+    local subscribeMarker="${root}/subscribe"
+    local successMarker="${root}/success"
+    local menuMarker="${root}/menu"
+    local mode=write-fail
+    local rc
+
+    mkdir -p "${xrayRoot}" "${singBoxRoot}"
+    configPath="${xrayRoot}"
+    singBoxConfigPath="${singBoxRoot}"
+    coreInstallType=1
+    frontingType=
+    frontingTypeReality=02_VLESS_TCP_inbounds
+
+    statusCard() { return 0; }
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    successCard() {
+        printf 'success\n' >"${successMarker}"
+        return 0
+    }
+    autoRead() {
+        case "$3" in
+        userNum) printf -v "$3" '1' ;;
+        delUserIndex) printf -v "$3" '1' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    readConfigHostPathUUID() { return 0; }
+    customUUID() { currentCustomUUID=uuid-new; }
+    customUserEmail() { currentCustomEmail=email-new; }
+    currentProtocolHas() { [[ "$1" == "0" ]]; }
+    initXrayClients() {
+        if [[ "${mode}" == "write-fail" ]]; then
+            printf '[\n'
+        else
+            printf '[{"id":"uuid-new","email":"email-new"}]\n'
+        fi
+    }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" ]]
+    }
+    readNginxSubscribe() {
+        subscribePort=443
+    }
+    subscribe() {
+        printf 'subscribe\n' >"${subscribeMarker}"
+        [[ "${mode}" != "subscribe-fail" ]]
+    }
+    manageSubscription() {
+        printf 'menu\n' >"${menuMarker}"
+        return 0
+    }
+
+    writeBaseUserConfig() {
+        cat >"${userFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"id":"uuid-old","email":"old-VLESS_TCP/TLS_Vision"}]}}]}
+JSON
+    }
+
+    writeBaseUserConfig
+    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
+    mode=write-fail
+    set +e
+    addUser >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+    [[ ! -e "${menuMarker}" ]]
+
+    writeBaseUserConfig
+    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
+    mode=reload-fail
+    set +e
+    addUser >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${subscribeMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+    [[ ! -e "${menuMarker}" ]]
+
+    writeBaseUserConfig
+    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
+    mode=subscribe-fail
+    set +e
+    addUser >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ -e "${subscribeMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+    [[ ! -e "${menuMarker}" ]]
+
+    removeUserFromConfigFiles() { [[ "${mode}" != "write-fail" ]]; }
+
+    writeBaseUserConfig
+    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
+    mode=write-fail
+    set +e
+    removeUser >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${subscribeMarker}" ]]
+    [[ ! -e "${menuMarker}" ]]
+
+    writeBaseUserConfig
+    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
+    mode=reload-fail
+    set +e
+    removeUser >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${subscribeMarker}" ]]
+    [[ ! -e "${menuMarker}" ]]
+
+    writeBaseUserConfig
+    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
+    mode=subscribe-fail
+    set +e
+    removeUser >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ -e "${subscribeMarker}" ]]
+    [[ ! -e "${menuMarker}" ]]
+)
+
 runPortAndPanelHelperRegression() {
     parsedCorePorts=$(corePortParseList '2053, 2083,2053')
     [[ "${parsedCorePorts}" == $'2053\n2083' ]]
@@ -5633,7 +5776,8 @@ runRegressionTransactionCore() {
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
-        runRegressionStep remove-user runRemoveUserRegression
+        runRegressionStep remove-user runRemoveUserRegression &&
+        runRegressionStep user-mutation-failure-propagation runUserMutationFailurePropagationRegression
 }
 
 runRegressionTransactionSubscription() {

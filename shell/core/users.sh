@@ -92,21 +92,23 @@ removeUserFromConfigFiles() {
     local targetId=$1
     local targetAccount=$2
     local configFile=
-    removeUserFromConfigFile "${configPath}02_VLESS_TCP_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}03_VLESS_WS_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}04_trojan_gRPC_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}05_VMess_WS_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}06_VLESS_gRPC_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}04_trojan_TCP_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}07_VLESS_vision_reality_inbounds.json" ".inbounds[1].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}08_VLESS_vision_gRPC_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${singBoxConfigPath}06_hysteria2_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${singBoxConfigPath}09_tuic_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${singBoxConfigPath}10_naive_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}11_VMess_HTTPUpgrade_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${configPath}13_anytls_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}"
-    removeUserFromConfigFile "${singBoxConfigPath}13_anytls_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}"
+    local status=0
+    removeUserFromConfigFile "${configPath}02_VLESS_TCP_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}03_VLESS_WS_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}04_trojan_gRPC_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}05_VMess_WS_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}06_VLESS_gRPC_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}04_trojan_TCP_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}07_VLESS_vision_reality_inbounds.json" ".inbounds[1].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}08_VLESS_vision_gRPC_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${singBoxConfigPath}06_hysteria2_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${singBoxConfigPath}09_tuic_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${singBoxConfigPath}10_naive_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}11_VMess_HTTPUpgrade_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${configPath}13_anytls_inbounds.json" ".inbounds[0].settings.clients" "${targetId}" "${targetAccount}" || status=1
+    removeUserFromConfigFile "${singBoxConfigPath}13_anytls_inbounds.json" ".inbounds[0].users" "${targetId}" "${targetAccount}" || status=1
+    return "${status}"
 }
 
 # 添加用户
@@ -143,7 +145,7 @@ addUser() {
             elif [[ "${coreInstallType}" == "2" ]]; then
                 clients=$(initSingBoxClients 0 "${uuid}" "${email}")
             fi
-            writeUserConfigJq "${configPath}02_VLESS_TCP_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}02_VLESS_TCP_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
 
         # VLESS WS
@@ -155,7 +157,7 @@ addUser() {
                 clients=$(initSingBoxClients 1 "${uuid}" "${email}")
             fi
 
-            writeUserConfigJq "${configPath}03_VLESS_WS_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}03_VLESS_WS_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
 
         # Trojan gRPC
@@ -167,7 +169,7 @@ addUser() {
                 clients=$(initSingBoxClients 2 "${uuid}" "${email}")
             fi
 
-            writeUserConfigJq "${configPath}04_trojan_gRPC_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}04_trojan_gRPC_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
         # VMess WS
         if currentProtocolHas 3; then
@@ -178,7 +180,7 @@ addUser() {
                 clients=$(initSingBoxClients 3 "${uuid}" "${email}")
             fi
 
-            writeUserConfigJq "${configPath}05_VMess_WS_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}05_VMess_WS_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
         # Trojan TCP
         if currentProtocolHas 4; then
@@ -188,7 +190,7 @@ addUser() {
             elif [[ "${coreInstallType}" == "2" ]]; then
                 clients=$(initSingBoxClients 4 "${uuid}" "${email}")
             fi
-            writeUserConfigJq "${configPath}04_trojan_TCP_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}04_trojan_TCP_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
 
         # VLESS gRPC
@@ -199,7 +201,7 @@ addUser() {
             elif [[ "${coreInstallType}" == "2" ]]; then
                 clients=$(initSingBoxClients 5 "${uuid}" "${email}")
             fi
-            writeUserConfigJq "${configPath}06_VLESS_gRPC_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}06_VLESS_gRPC_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
 
         # VLESS Reality Vision
@@ -213,7 +215,7 @@ addUser() {
                 clients=$(initSingBoxClients 7 "${uuid}" "${email}")
                 realityUserConfig=".inbounds[0].users"
             fi
-            writeUserConfigJq "${configPath}07_VLESS_vision_reality_inbounds.json" "${realityUserConfig} = ${clients}"
+            writeUserConfigJq "${configPath}07_VLESS_vision_reality_inbounds.json" "${realityUserConfig} = ${clients}" || return 1
         fi
 
         # VLESS Reality gRPC
@@ -224,7 +226,7 @@ addUser() {
             elif [[ "${coreInstallType}" == "2" ]]; then
                 clients=$(initSingBoxClients 8 "${uuid}" "${email}")
             fi
-            writeUserConfigJq "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
 
         # hysteria2
@@ -237,7 +239,7 @@ addUser() {
                 clients=$(initSingBoxClients 6 "${uuid}" "${email}")
             fi
 
-            writeUserConfigJq "${singBoxConfigPath}06_hysteria2_inbounds.json" ".inbounds[0].users = ${clients}"
+            writeUserConfigJq "${singBoxConfigPath}06_hysteria2_inbounds.json" ".inbounds[0].users = ${clients}" || return 1
         fi
 
         # TUIC
@@ -249,13 +251,13 @@ addUser() {
                 clients=$(initSingBoxClients 9 "${uuid}" "${email}")
             fi
 
-            writeUserConfigJq "${singBoxConfigPath}09_tuic_inbounds.json" ".inbounds[0].users = ${clients}"
+            writeUserConfigJq "${singBoxConfigPath}09_tuic_inbounds.json" ".inbounds[0].users = ${clients}" || return 1
         fi
         # Naive
         if currentProtocolHas 10; then
             local clients=
             clients=$(initSingBoxClients 10 "${uuid}" "${email}")
-            writeUserConfigJq "${singBoxConfigPath}10_naive_inbounds.json" ".inbounds[0].users = ${clients}"
+            writeUserConfigJq "${singBoxConfigPath}10_naive_inbounds.json" ".inbounds[0].users = ${clients}" || return 1
         fi
         # VMess HTTPUpgrade
         if currentProtocolHas 11; then
@@ -266,22 +268,22 @@ addUser() {
                 clients=$(initSingBoxClients 11 "${uuid}" "${email}")
             fi
 
-            writeUserConfigJq "${configPath}11_VMess_HTTPUpgrade_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}11_VMess_HTTPUpgrade_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
         # AnyTLS
         if currentProtocolHas 13; then
             local clients=
             clients=$(initSingBoxClients 13 "${uuid}" "${email}")
 
-            writeUserConfigJq "${configPath}13_anytls_inbounds.json" "${userConfig} = ${clients}"
+            writeUserConfigJq "${configPath}13_anytls_inbounds.json" "${userConfig} = ${clients}" || return 1
         fi
     done
-    reloadCore
-    successCard "添加完成"
+    reloadCore || return 1
     readNginxSubscribe
     if [[ -n "${subscribePort}" ]]; then
-        subscribe false
+        subscribe false || return 1
     fi
+    successCard "添加完成"
     manageSubscription 1
 }
 # 移除用户
@@ -321,11 +323,11 @@ removeUser() {
     targetLabel=$(echo "${targetUser}" | jq -r '.email // .name // .username // ""')
     targetAccount=$(removeUserAccountName "${targetLabel}")
 
-    removeUserFromConfigFiles "${targetId}" "${targetAccount}"
-    reloadCore
+    removeUserFromConfigFiles "${targetId}" "${targetAccount}" || return 1
+    reloadCore || return 1
     readNginxSubscribe
     if [[ -n "${subscribePort}" ]]; then
-        subscribe false
+        subscribe false || return 1
     fi
     manageSubscription 1
 }
