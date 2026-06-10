@@ -28,6 +28,8 @@ serviceQueueRestart() {
 serviceQueueApply() {
     local entry serviceName action
     local status=0
+    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
+    SERVICE_QUEUE_ALLOW_FAILURE=true
     while read -r entry; do
         [[ -n "${entry}" ]] || continue
         serviceName=${entry%%:*}
@@ -66,6 +68,7 @@ serviceQueueApply() {
         esac
     done <<<"${SERVICE_ACTIONS}"
     SERVICE_ACTIONS=
+    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
     return "${status}"
 }
 

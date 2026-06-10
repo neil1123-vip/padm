@@ -1985,9 +1985,40 @@ runServiceQueueApplyPropagationRegression() (
     local root="${TMP_DIR}/service-queue-propagation"
     local rcFile="${root}/install.rc"
     local reachedFile="${root}/show-accounts"
+    local serviceCallsFile="${root}/service-calls"
     local shellRc
 
     mkdir -p "${root}"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/core/services.sh"
+    handleNginx() {
+        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceCallsFile}"
+        return 1
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceCallsFile}"
+        return 1
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceCallsFile}"
+        return 1
+    }
+    SERVICE_ACTIONS=
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    serviceQueueStart nginx
+    serviceQueueStop xray
+    serviceQueueStop sing-box
+    set +e
+    serviceQueueApply >/dev/null 2>&1
+    local queueRc=$?
+    set -e
+    [[ "${queueRc}" == "1" ]]
+    grep -qx 'nginx:start:true' "${serviceCallsFile}"
+    grep -qx 'xray:stop:true' "${serviceCallsFile}"
+    grep -qx 'sing-box:stop:true' "${serviceCallsFile}"
+    [[ -z "${SERVICE_ACTIONS}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }
     installTools() { return 0; }
