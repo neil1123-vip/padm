@@ -708,32 +708,32 @@ downloadGitHubReleaseAsset() {
 
 # 初始化安装目录
 mkdirTools() {
-    mkdir -p /etc/padm/tls
-    mkdir -p /etc/padm/subscribe_local/default
-    mkdir -p /etc/padm/subscribe_local/clashMeta
-
-    mkdir -p /etc/padm/subscribe_remote/default
-    mkdir -p /etc/padm/subscribe_remote/clashMeta
-
-    mkdir -p /etc/padm/subscribe/default
-    mkdir -p /etc/padm/subscribe/clashMetaProfiles
-    mkdir -p /etc/padm/subscribe/clashMeta
-
-    mkdir -p /etc/padm/subscribe/sing-box
-    mkdir -p /etc/padm/subscribe/sing-box_profiles
-    mkdir -p /etc/padm/subscribe_local/sing-box
-
-    mkdir -p /etc/padm/xray/conf
-    mkdir -p /etc/padm/xray/reality_scan
-    mkdir -p /etc/padm/xray/tmp
-    mkdir -p /etc/systemd/system/
-    mkdir -p "$(padmTmpFilePath padm-tls)"
-
-    mkdir -p /etc/padm/warp
-
-    mkdir -p /etc/padm/sing-box/conf/config
-
-    mkdir -p /usr/share/nginx/html/
+    local dir status=0
+    local dirs=(
+        /etc/padm/tls
+        /etc/padm/subscribe_local/default
+        /etc/padm/subscribe_local/clashMeta
+        /etc/padm/subscribe_remote/default
+        /etc/padm/subscribe_remote/clashMeta
+        /etc/padm/subscribe/default
+        /etc/padm/subscribe/clashMetaProfiles
+        /etc/padm/subscribe/clashMeta
+        /etc/padm/subscribe/sing-box
+        /etc/padm/subscribe/sing-box_profiles
+        /etc/padm/subscribe_local/sing-box
+        /etc/padm/xray/conf
+        /etc/padm/xray/reality_scan
+        /etc/padm/xray/tmp
+        /etc/systemd/system/
+        "$(padmTmpFilePath padm-tls)"
+        /etc/padm/warp
+        /etc/padm/sing-box/conf/config
+        /usr/share/nginx/html/
+    )
+    for dir in "${dirs[@]}"; do
+        mkdir -p "${dir}" || status=1
+    done
+    return "${status}"
 }
 
 # 检查 root 权限

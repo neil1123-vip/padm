@@ -310,7 +310,10 @@ handleScriptCommand() {
         exit $?
     elif [[ "${cronName}" == "InstallSubscription" ]]; then
         local installStatus
-        mkdirTools
+        if ! mkdirTools; then
+            errorCard "初始化安装目录失败"
+            exit 1
+        fi
         installSubscribe
         installStatus=$?
         if [[ "${installStatus}" -eq 0 ]]; then

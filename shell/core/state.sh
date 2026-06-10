@@ -476,7 +476,10 @@ cleanLastInstallationConfig() {
     frontingType=
     frontingTypeReality=
     readInstallType
-    mkdirTools
+    if ! mkdirTools; then
+        errorCard "初始化安装目录失败"
+        return 1
+    fi
     successCard "上次安装配置已清空"
 }
 

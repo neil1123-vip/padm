@@ -1780,9 +1780,28 @@ runRuntimeTempDirRegression() (
     local targetRoot="${TMP_DIR}/runtime-tempdir-target"
     local crontabPathMarker="${TMP_DIR}/runtime-crontab-path.txt"
     local jsonFile="${targetRoot}/state.json"
+    local mkdirToolsLog="${TMP_DIR}/runtime-mkdir-tools.log"
+    local mkdirStatus
 
     mkdir -p "${tmpRoot}" "${targetRoot}"
     TMPDIR="${tmpRoot}"
+
+    : >"${mkdirToolsLog}"
+    set +e
+    (
+        mkdir() {
+            printf '%s\n' "$*" >>"${mkdirToolsLog}"
+            [[ "$*" == "-p /etc/padm/xray/conf" ]] && return 1
+            return 0
+        }
+        mkdirTools
+    )
+    mkdirStatus=$?
+    set -e
+    [[ "${mkdirStatus}" == "1" ]]
+    grep -qx -- '-p /etc/padm/xray/conf' "${mkdirToolsLog}"
+    grep -qx -- "-p ${tmpRoot}/padm-tls" "${mkdirToolsLog}"
+    grep -qx -- '-p /usr/share/nginx/html/' "${mkdirToolsLog}"
 
     [[ "$(padmTmpFilePath padm-runtime-direct.log)" == "${tmpRoot}/padm-runtime-direct.log" ]]
     [[ "$(traditionalTlsAlpnTestLog)" == "${tmpRoot}/padm-alpn-xray-test.log" ]]

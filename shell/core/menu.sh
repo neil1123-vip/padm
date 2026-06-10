@@ -224,7 +224,10 @@ menu() {
     menuDangerItem 8 "高级/危险操作" "卸载和实验性高风险开关"
     menuLine "新人建议：1 安装与重装里先看怎么选；安装后 2 查看订阅"
     menuClose
-    mkdirTools
+    if ! mkdirTools; then
+        errorCard "初始化安装目录失败"
+        return 1
+    fi
     aliasInstall
     autoRead main_menu "请选择:" selectMainMenuType
     case ${selectMainMenuType} in
