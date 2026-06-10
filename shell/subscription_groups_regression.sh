@@ -588,6 +588,112 @@ runXrayRealityPortFailureRegression() (
     lastInstallationConfig="${oldLastInstallationConfig}"
 )
 
+runRealityProfileFailureRegression() (
+    local root="${TMP_DIR}/reality-profile-failure"
+    local xrayRoot="${root}/xray/"
+    local singBoxRoot="${root}/sing-box/"
+    local entryHostFile="${root}/reality_entry_host"
+    local allowCalls=0
+    local keyCalls=0
+    local portReads=0
+
+    mkdir -p "${xrayRoot}" "${singBoxRoot}"
+    configPath="${xrayRoot}"
+    singBoxConfigPath="${singBoxRoot}"
+    currentUUID=existing-user
+    currentClients='[]'
+    domain=
+    currentHost=
+    lastInstallationConfig=true
+    AUTO_ENTRY_HOST=node.example.com
+    AUTO_REALITY_TARGET=www.microsoft.com:443
+    PADM_REALITY_ENTRY_HOST_FILE="${entryHostFile}"
+    realityPort=10888
+    xHTTPort=10889
+    singBoxVLESSRealityVisionPort=10890
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=
+    realityTargetHost=
+    realityTargetPort=
+    realityEntryHost=
+
+    initXrayClients() { printf '[]\n'; }
+    initSingBoxClients() { printf '[]\n'; }
+    addXrayOutbound() { return 0; }
+    installSniffing() { return 0; }
+    initRealityKey() {
+        keyCalls=$((keyCalls + 1))
+        realityPrivateKey=private
+        realityPublicKey=public
+    }
+    initRealityMldsa65() { return 0; }
+    allowPort() {
+        allowCalls=$((allowCalls + 1))
+        return 0
+    }
+    readSingBoxPortResult() {
+        local -n resultRef=$1
+        portReads=$((portReads + 1))
+        resultRef=(10890)
+        return 0
+    }
+    writeGeneratedJsonFile() {
+        local targetFile=$1
+        local outputFile
+        shift 2
+        case "${targetFile}" in
+        /etc/padm/xray/conf/*)
+            outputFile="${xrayRoot}${targetFile#/etc/padm/xray/conf/}"
+            ;;
+        /etc/padm/sing-box/conf/config/*)
+            outputFile="${singBoxRoot}${targetFile#/etc/padm/sing-box/conf/config/}"
+            ;;
+        *)
+            outputFile="${targetFile}"
+            ;;
+        esac
+        mkdir -p "$(dirname "${outputFile}")"
+        cat >"${outputFile}"
+    }
+
+    initRealityProfile
+    [[ "$(<"${entryHostFile}")" == "node.example.com" ]]
+    rm -f "${entryHostFile}"
+    AUTO_REALITY_TARGET=bad.example.com:70000
+    realityTargetHost=
+    realityTargetPort=
+    realitySNI=
+    realityEntryHost=
+
+    selectCustomInstallType=",7,"
+    if initXrayConfig custom 1 true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${allowCalls}" == "0" ]]
+    [[ "${keyCalls}" == "0" ]]
+    [[ ! -e "${entryHostFile}" ]]
+    [[ ! -e "${xrayRoot}07_VLESS_vision_reality_inbounds.json" ]]
+
+    selectCustomInstallType=",12,"
+    if initXrayConfig custom 1 true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${allowCalls}" == "0" ]]
+    [[ "${keyCalls}" == "0" ]]
+    [[ ! -e "${entryHostFile}" ]]
+    [[ ! -e "${xrayRoot}12_VLESS_XHTTP_inbounds.json" ]]
+
+    selectCustomInstallType=",7,"
+    if initSingBoxConfig custom 1 true 2>/dev/null; then
+        return 1
+    fi
+    [[ "${allowCalls}" == "0" ]]
+    [[ "${keyCalls}" == "0" ]]
+    [[ "${portReads}" == "0" ]]
+    [[ ! -e "${entryHostFile}" ]]
+    [[ ! -e "${singBoxRoot}07_VLESS_vision_reality_inbounds.json" ]]
+)
+
 runConfigTransactionRegression() {
     local targetFile="${TMP_DIR}/transaction.json"
     local backupFile="${targetFile}.bak"
@@ -1758,6 +1864,10 @@ runRuntimeAndRealityRegression() {
     parseRealityTargetInput "example.org:8443"
     [[ "${realityTargetHost}" == "example.org" ]]
     [[ "${realityTargetPort}" == "8443" ]]
+    ! parseRealityTargetInput "bad.example.org:70000"
+    [[ "${realityTargetHost}" == "example.org" ]]
+    [[ "${realityTargetPort}" == "8443" ]]
+    [[ "${realitySNI}" == "example.org" ]]
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 4096')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "A" ]]
     showRealityTargetQuality "www.microsoft.com:443"
@@ -5102,6 +5212,7 @@ runRegressionTransactionCore() {
     runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
+        runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression
 }

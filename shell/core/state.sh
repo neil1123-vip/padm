@@ -487,6 +487,7 @@ readLastInstallationConfig() {
 
 # 检查文件目录以及path路径
 readConfigHostPathUUID() {
+    local realityEntryHostPath
     currentPath=
     currentDefaultPort=
     currentUUID=
@@ -599,8 +600,13 @@ readConfigHostPathUUID() {
             currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" | awk -F "[/]" '{print $2}')
         fi
     fi
-    if [[ -f "/etc/padm/reality_entry_host" ]]; then
-        realityEntryHost=$(head -1 /etc/padm/reality_entry_host)
+    if declare -F realityEntryHostFile >/dev/null 2>&1; then
+        realityEntryHostPath=$(realityEntryHostFile)
+    else
+        realityEntryHostPath="${PADM_REALITY_ENTRY_HOST_FILE:-/etc/padm/reality_entry_host}"
+    fi
+    if [[ -f "${realityEntryHostPath}" ]]; then
+        realityEntryHost=$(head -1 "${realityEntryHostPath}")
     fi
     if [[ -f "/etc/padm/cdn" ]] && [[ -n "$(head -1 /etc/padm/cdn)" ]]; then
         currentCDNAddress=$(head -1 /etc/padm/cdn)
@@ -685,4 +691,3 @@ showInstallStatus() {
         fi
     fi
 }
-

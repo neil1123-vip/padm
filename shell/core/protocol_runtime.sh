@@ -473,6 +473,10 @@ collectEntryProfile() {
     fi
 }
 
+realityEntryHostFile() {
+    printf '%s\n' "${PADM_REALITY_ENTRY_HOST_FILE:-/etc/padm/reality_entry_host}"
+}
+
 printRealityTargetProfile() {
     statusCard "Reality 客户端入口" "${realityEntryHost:-未知}" "Reality 伪装目标: ${realityTargetHost}:${realityTargetPort:-443}" "Reality SNI: ${realitySNI:-${realityTargetHost}}"
 }
@@ -484,11 +488,11 @@ collectRealityProfile() {
     collectEntryProfile
 
     if [[ -n "${AUTO_REALITY_TARGET:-}" ]]; then
-        parseRealityTargetInput "${AUTO_REALITY_TARGET}" || exit 1
+        parseRealityTargetInput "${AUTO_REALITY_TARGET}" || return 1
         printRealityTargetProfile
         return 0
     elif [[ -n "${realityTargetHost:-}" ]]; then
-        parseRealityTargetInput "${realityTargetHost}:${realityTargetPort:-443}" || exit 1
+        parseRealityTargetInput "${realityTargetHost}:${realityTargetPort:-443}" || return 1
         printRealityTargetProfile
         return 0
     fi
@@ -524,7 +528,7 @@ collectRealityProfile() {
         if [[ -z "${targetInput}" ]]; then
             selectDefaultRealityTarget
         else
-            parseRealityTargetInput "${targetInput}" || exit 1
+            parseRealityTargetInput "${targetInput}" || return 1
         fi
         ;;
     4)
@@ -542,15 +546,18 @@ collectRealityProfile() {
 }
 
 persistRealityEntryProfile() {
+    local entryHostFile tmpFile
     [[ -n "${realityEntryHost:-}" ]] || return 0
-    mkdir -p /etc/padm
-    printf '%s\n' "${realityEntryHost}" >/etc/padm/reality_entry_host
+    entryHostFile=$(realityEntryHostFile)
+    padmCreateTempFileForTarget tmpFile "${entryHostFile}" reality-entry || return 1
+    printf '%s\n' "${realityEntryHost}" >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    commitGeneratedFile "${tmpFile}" "${entryHostFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 # 初始化REALITY配置
 initRealityProfile() {
-    collectRealityProfile
-    persistRealityEntryProfile
+    collectRealityProfile || return 1
+    persistRealityEntryProfile || return 1
 }
 
 

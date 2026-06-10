@@ -175,8 +175,8 @@ EOF
     fi
     # VLESS_Reality_XHTTP_TLS
     if protocolSelectionIncludes "${selectCustomInstallType}" 12 "$1"; then
+        initRealityProfile || return 1
         initXrayXHTTPort || return 1
-        initRealityProfile
         initRealityKey
         initRealityMldsa65
         writeGeneratedJsonFile /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json padm-xray-xhttp <<EOF || { errorCard "Xray XHTTP 入站模板提交失败"; exit 1; }
@@ -302,8 +302,8 @@ EOF
         menuLine "生成 Xray Reality Vision 入站配置"
         menuClose
 
+        initRealityProfile || return 1
         initXrayRealityPort || return 1
-        initRealityProfile
         initRealityKey
         initRealityMldsa65
         writeGeneratedJsonFile /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json padm-xray-reality <<EOF || { errorCard "Xray Reality 入站模板提交失败"; exit 1; }
@@ -584,7 +584,7 @@ EOF
         echoContent title "\n┌─ 配置 VLESS Reality Vision ────────────────────────"
         menuLine "开始配置 VLESS Reality Vision 协议端口"
         menuClose
-        initRealityProfile
+        initRealityProfile || return 1
         initRealityKey
         echo
         readSingBoxPortResult result "${singBoxVLESSRealityVisionPort}" || return 1
@@ -626,7 +626,7 @@ EOF
         echoContent title "\n┌─ 配置 VLESS Reality gRPC ──────────────────────────"
         menuLine "开始配置 VLESS Reality gRPC 协议端口"
         menuClose
-        initRealityProfile
+        initRealityProfile || return 1
         initRealityKey
         echo
         readSingBoxPortResult result "${singBoxVLESSRealityGRPCPort}" || return 1

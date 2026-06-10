@@ -1419,14 +1419,16 @@ selectRandomRealityTargetCandidate() {
 
 parseRealityTargetInput() {
     local targetInput=$1
-    local parsed
+    local parsed targetHost targetPort
     parsed=$(parseHostPort "${targetInput}" 443)
-    realityTargetHost=${parsed%:*}
-    realityTargetPort=${parsed##*:}
-    if ! validateRealityTarget "${realityTargetHost}" "${realityTargetPort}"; then
+    targetHost=${parsed%:*}
+    targetPort=${parsed##*:}
+    if ! validateRealityTarget "${targetHost}" "${targetPort}"; then
         realityTargetStatusBlock red "REALITY 目标站" "伪装目标不合法: ${targetInput}"
         return 1
     fi
+    realityTargetHost=${targetHost}
+    realityTargetPort=${targetPort}
     realitySNI=${AUTO_REALITY_SERVER_NAME:-${realityTargetHost}}
 }
 
