@@ -394,14 +394,25 @@ addNginx302ToFile() {
             inserted = 1
         }
         END { if (!inserted) exit 1 }
-    ' "${targetPath}" >"${tmpPath}" && mv "${tmpPath}" "${targetPath}"
+    ' "${targetPath}" >"${tmpPath}" || {
+        rm -f "${tmpPath}" >/dev/null 2>&1
+        ALONE_NGINX_CONFIG_ERROR="Nginx 302 配置编辑失败，请手动检查 ${targetPath}"
+        errorCard "${ALONE_NGINX_CONFIG_ERROR}"
+        return 1
+    }
+    mv "${tmpPath}" "${targetPath}" || {
+        rm -f "${tmpPath}" >/dev/null 2>&1
+        ALONE_NGINX_CONFIG_ERROR="Nginx 302 配置提交失败，请手动检查 ${targetPath}"
+        errorCard "${ALONE_NGINX_CONFIG_ERROR}"
+        return 1
+    }
 }
 
 # 添加 302 重定向配置
 addNginx302() {
     local redirectTarget=$1
     if ! updateAloneNginxConfig addNginx302ToFile "${redirectTarget}"; then
-        errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
+        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
         return 1
     fi
 }

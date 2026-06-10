@@ -687,7 +687,14 @@ restoreAloneNginxConfigBackup() {
     if mv "${backupPath}" "${targetPath}"; then
         return 0
     fi
-    errorCard "Nginx 配置检测失败，且旧 alone.conf 恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+    ALONE_NGINX_CONFIG_ERROR="Nginx 配置检测失败，且旧 alone.conf 恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+    errorCard "${ALONE_NGINX_CONFIG_ERROR}"
+    return 1
+}
+
+aloneNginxConfigWriteError() {
+    ALONE_NGINX_CONFIG_ERROR=$1
+    errorCard "${ALONE_NGINX_CONFIG_ERROR}"
     return 1
 }
 
@@ -696,23 +703,34 @@ writeAloneNginxConfig() {
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
     local logFile
-    mkdir -p "$(dirname "${targetPath}")"
-    cat >"${tmpPath}"
+    ALONE_NGINX_CONFIG_ERROR=
+    mkdir -p "$(dirname "${targetPath}")" || { aloneNginxConfigWriteError "Nginx 配置目录创建失败，请手动检查 ${targetPath}"; return 1; }
+    cat >"${tmpPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置临时文件写入失败，请手动检查 ${tmpPath}"; return 1; }
     if command -v nginx >/dev/null 2>&1; then
-        [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
-        mv "${tmpPath}" "${targetPath}"
+        if [[ -f "${targetPath}" ]] && ! cp "${targetPath}" "${backupPath}"; then
+            rm -f "${tmpPath}" >/dev/null 2>&1
+            aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
+            return 1
+        fi
+        if ! mv "${tmpPath}" "${targetPath}"; then
+            rm -f "${tmpPath}" >/dev/null 2>&1
+            [[ -f "${backupPath}" ]] && rm -f "${backupPath}" >/dev/null 2>&1
+            aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
+            return 1
+        fi
         logFile=$(aloneNginxTestLog)
         if ! nginx -t >"${logFile}" 2>&1; then
             if [[ -f "${backupPath}" ]]; then
                 restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             else
-                rm -f "${targetPath}" || { errorCard "Nginx 配置检测失败，且新 alone.conf 清理失败，请手动检查 ${targetPath}"; return 1; }
+                rm -f "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置检测失败，且新 alone.conf 清理失败，请手动检查 ${targetPath}"; return 1; }
+                aloneNginxConfigWriteError "Nginx 配置检测失败，已删除新 alone.conf"
             fi
             return 1
         fi
-        rm -f "${backupPath}"
+        rm -f "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
     else
-        mv "${tmpPath}" "${targetPath}"
+        mv "${tmpPath}" "${targetPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
     fi
 }
 
@@ -721,31 +739,44 @@ updateAloneNginxConfig() {
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
     local logFile
+    ALONE_NGINX_CONFIG_ERROR=
     [[ -f "${targetPath}" ]] || return 0
-    cp "${targetPath}" "${tmpPath}"
+    if ! cp "${targetPath}" "${tmpPath}"; then
+        aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"
+        return 1
+    fi
     "$@" "${tmpPath}" || {
         rm -f "${tmpPath}"
         return 1
     }
     if command -v nginx >/dev/null 2>&1; then
-        cp "${targetPath}" "${backupPath}"
-        mv "${tmpPath}" "${targetPath}"
+        if ! cp "${targetPath}" "${backupPath}"; then
+            rm -f "${tmpPath}" >/dev/null 2>&1
+            aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
+            return 1
+        fi
+        if ! mv "${tmpPath}" "${targetPath}"; then
+            rm -f "${tmpPath}" >/dev/null 2>&1
+            rm -f "${backupPath}" >/dev/null 2>&1
+            aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
+            return 1
+        fi
         logFile=$(aloneNginxTestLog)
         if ! nginx -t >"${logFile}" 2>&1; then
             restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             return 1
         fi
-        rm -f "${backupPath}"
+        rm -f "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
     else
-        mv "${tmpPath}" "${targetPath}"
+        mv "${tmpPath}" "${targetPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
     fi
 }
 
 removeNginx302FromFile() {
     local targetPath=$1
     local tmpPath="${targetPath}.rewrite"
-    awk '!(/return 302/ && $0 !~ /request_uri/)' "${targetPath}" >"${tmpPath}"
-    mv "${tmpPath}" "${targetPath}"
+    awk '!(/return 302/ && $0 !~ /request_uri/)' "${targetPath}" >"${tmpPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 302 配置编辑失败，请手动检查 ${targetPath}"; return 1; }
+    mv "${tmpPath}" "${targetPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 302 配置提交失败，请手动检查 ${targetPath}"; return 1; }
 }
 
 # 修改 Nginx 重定向配置
@@ -761,7 +792,7 @@ updateRedirectNginxConf() {
         nginxH2Conf="listen 127.0.0.1:31302 so_keepalive=on proxy_protocol;http2 on;"
     fi
 
-    if ! {
+    if ! writeAloneNginxConfig < <(
         cat <<EOF
     server {
     		listen 127.0.0.1:31300;
@@ -888,8 +919,8 @@ server {
 	}
 }
 EOF
-    } | writeAloneNginxConfig; then
-        errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
+    ); then
+        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
         return 1
     fi
     if ! runCoreServiceActionAllowFailure handleNginx stop; then
@@ -901,7 +932,7 @@ EOF
 # 移除 Nginx 302 配置
 removeNginx302() {
     if ! updateAloneNginxConfig removeNginx302FromFile; then
-        errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
+        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
         return 1
     fi
 }

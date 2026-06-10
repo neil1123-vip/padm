@@ -4852,6 +4852,50 @@ SH
 
     printf 'old config\n' >"${targetPath}"
     (
+        local errorLog="${TMP_DIR}/nginx-alone-write-backup-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        cp() {
+            if [[ "$1" == "${targetPath}" && "$2" == "${targetPath}.bak" ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        export PADM_FAKE_NGINX_VALIDATE_MODE=success
+        if updateRedirectNginxConf >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "$(<"${targetPath}")" == "old config" ]]
+        [[ ! -e "${targetPath}.tmp" ]]
+        [[ ! -e "${targetPath}.bak" ]]
+        grep -q 'Nginx 配置备份失败' "${errorLog}"
+        ! grep -q '已恢复旧 alone.conf' "${errorLog}"
+    ) || return 1
+
+    printf 'old config\n' >"${targetPath}"
+    (
+        local errorLog="${TMP_DIR}/nginx-alone-write-commit-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        mv() {
+            if [[ "$1" == "${targetPath}.tmp" && "$2" == "${targetPath}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        export PADM_FAKE_NGINX_VALIDATE_MODE=success
+        if updateRedirectNginxConf >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "$(<"${targetPath}")" == "old config" ]]
+        [[ ! -e "${targetPath}.tmp" ]]
+        [[ ! -e "${targetPath}.bak" ]]
+        grep -q 'Nginx 配置提交失败' "${errorLog}"
+        ! grep -q '已恢复旧 alone.conf' "${errorLog}"
+    ) || return 1
+
+    printf 'old config\n' >"${targetPath}"
+    (
         local errorLog="${TMP_DIR}/nginx-alone-write-restore-error.log"
         : >"${errorLog}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
@@ -4867,6 +4911,28 @@ SH
         grep -q 'server_name example.com;' "${targetPath}"
         [[ "$(<"${targetPath}.bak")" == "old config" ]]
         grep -q '旧 alone.conf 恢复失败' "${errorLog}"
+    ) || return 1
+    printf 'old config\n' >"${targetPath}"
+    rm -f "${targetPath}.bak"
+
+    (
+        local errorLog="${TMP_DIR}/nginx-alone-write-backup-cleanup-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        rm() {
+            if [[ "$1" == "-f" && "$2" == "${targetPath}.bak" ]]; then
+                return 1
+            fi
+            command rm "$@"
+        }
+        export PADM_FAKE_NGINX_VALIDATE_MODE=success
+        if updateRedirectNginxConf >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q 'server_name example.com;' "${targetPath}"
+        [[ "$(<"${targetPath}.bak")" == "old config" ]]
+        grep -q 'Nginx 配置备份清理失败' "${errorLog}"
+        ! grep -q '已恢复旧 alone.conf' "${errorLog}"
     ) || return 1
     printf 'old config\n' >"${targetPath}"
     rm -f "${targetPath}.bak"
@@ -4951,11 +5017,41 @@ SH
     addNginx302 https://redirect.example
     grep -q "return 302 'https://redirect.example';" "${targetPath}"
 
+    printf 'server {\nlocation / {\n}\n}\n' >"${targetPath}"
+    (
+        local errorLog="${TMP_DIR}/nginx-alone-update-commit-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        mv() {
+            if [[ "$1" == "${targetPath}.tmp" && "$2" == "${targetPath}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        if addNginx302 https://commit-fail.example >/dev/null 2>&1; then
+            return 1
+        fi
+        ! grep -q 'commit-fail.example' "${targetPath}"
+        [[ ! -e "${targetPath}.tmp" ]]
+        [[ ! -e "${targetPath}.bak" ]]
+        grep -q 'Nginx 配置提交失败' "${errorLog}"
+        ! grep -q '已恢复旧 alone.conf' "${errorLog}"
+    ) || return 1
+
     printf 'server {\n}\n' >"${targetPath}"
-    if addNginx302 https://missing-location.example 2>/dev/null; then
-        return 1
-    fi
-    ! grep -q 'missing-location.example' "${targetPath}"
+    (
+        local errorLog="${TMP_DIR}/nginx-alone-add-editor-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        if addNginx302 https://missing-location.example >/dev/null 2>&1; then
+            return 1
+        fi
+        ! grep -q 'missing-location.example' "${targetPath}"
+        [[ ! -e "${targetPath}.tmp" ]]
+        [[ ! -e "${targetPath}.tmp.rewrite" ]]
+        grep -q 'Nginx 302 配置编辑失败' "${errorLog}"
+        ! grep -q '已恢复旧 alone.conf' "${errorLog}"
+    ) || return 1
 
     PADM_ALONE_NGINX_BACKUP_FILE="${TMP_DIR}/alone_backup.conf"
     printf 'backup config\n' >"${PADM_ALONE_NGINX_BACKUP_FILE}"
