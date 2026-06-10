@@ -3129,6 +3129,27 @@ JSON
     [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
     [[ ! -e "${successMarker}" ]]
 
+    printf '%s\n' "${originalContent}" >"${alpnConfig}"
+    rm -f "${successMarker}" "${alpnConfig}.alpn.bak"
+    (
+        mv() {
+            if [[ "$1" == "${alpnConfig}.alpn.bak" && "$2" == "${alpnConfig}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        set +e
+        applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        jq -e '.inbounds[0].streamSettings.tlsSettings.alpn == ["h2","http/1.1"]' "${alpnConfig}" >/dev/null
+        [[ "$(<"${alpnConfig}.alpn.bak")" == "${originalContent}" ]]
+        [[ ! -e "${successMarker}" ]]
+    ) || return 1
+    printf '%s\n' "${originalContent}" >"${alpnConfig}"
+    rm -f "${alpnConfig}.alpn.bak"
+
     cat >"${fakeXray}" <<'SH'
 #!/usr/bin/env bash
 case "$1" in

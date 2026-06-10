@@ -471,6 +471,17 @@ traditionalTlsAlpnTestLog() {
     printf '%s\n' "${tmpBase%/}/padm-alpn-xray-test.log"
 }
 
+restoreTraditionalTlsAlpnBackup() {
+    local backupFile=$1
+    local configFile=$2
+    local reason=$3
+    if mv "${backupFile}" "${configFile}"; then
+        return 0
+    fi
+    errorCard "${reason}，且旧配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
+    return 1
+}
+
 traditionalTlsCurrentAlpn() {
     local configFile
     configFile=$(traditionalTlsFallbackConfigFile)
@@ -621,7 +632,9 @@ applyTraditionalTlsAlpn() {
         return 1
     fi
     if [[ -x /etc/padm/xray/xray ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"$(traditionalTlsAlpnTestLog)" 2>&1; then
-        mv "${backupFile}" "${configFile}"
+        if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "Xray 配置校验失败"; then
+            return 1
+        fi
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
         menuLine "已回滚本次 ALPN 修改"
         menuLine "排查日志：$(traditionalTlsAlpnTestLog)"
@@ -629,7 +642,9 @@ applyTraditionalTlsAlpn() {
         return 1
     fi
     if ! reloadCore; then
-        mv "${backupFile}" "${configFile}"
+        if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "核心重载失败"; then
+            return 1
+        fi
         errorCard "核心重载失败，已回滚 ALPN 修改"
         return 1
     fi
