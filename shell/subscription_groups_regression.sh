@@ -403,6 +403,7 @@ runAccessControlFailureReturnCase() {
     local uninstallMarker="${root}/uninstall"
     local removeMarker="${root}/remove"
     local restoreMarker="${root}/restore"
+    local cleanupMarker="${root}/cleanup"
     local reloadMarker="${root}/reload"
     local successMarker="${root}/success"
     local removeChoice=1
@@ -437,6 +438,10 @@ runAccessControlFailureReturnCase() {
     }
     accessControlBackupRestore() {
         printf 'restore\n' >"${restoreMarker}"
+        [[ "${mode}" != *"restore-fail" ]]
+    }
+    accessControlBackupCleanup() {
+        printf 'cleanup\n' >"${cleanupMarker}"
         return 0
     }
     addXrayRouting() {
@@ -456,14 +461,14 @@ runAccessControlFailureReturnCase() {
         [[ "${mode}" != "remove-fail" ]]
     }
     validateAccessControlConfig() {
-        [[ "${mode}" != "validate-fail" ]]
+        [[ "${mode}" != "validate-fail" && "${mode}" != "validate-restore-fail" ]]
     }
     reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
+        printf 'reload\n' >>"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" && "${mode}" != "reload-restore-fail" ]]
     }
 
-    rm -f "${backupMarker}" "${addMarker}" "${outboundMarker}" "${uninstallMarker}" "${removeMarker}" "${restoreMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${backupMarker}" "${addMarker}" "${outboundMarker}" "${uninstallMarker}" "${removeMarker}" "${restoreMarker}" "${cleanupMarker}" "${reloadMarker}" "${successMarker}"
     set +e
     if [[ "${action}" == "remove" ]]; then
         removeAccessControlMenu >/dev/null 2>&1
@@ -491,19 +496,42 @@ runAccessControlFailureReturnCase() {
         [[ -e "${backupMarker}" ]]
         [[ -e "${addMarker}" ]]
         [[ -e "${outboundMarker}" ]]
+        [[ -e "${restoreMarker}" ]]
+        [[ -e "${cleanupMarker}" ]]
+        [[ ! -e "${reloadMarker}" ]]
+        ;;
+    validate-restore-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ -e "${addMarker}" ]]
+        [[ -e "${outboundMarker}" ]]
+        [[ -e "${restoreMarker}" ]]
+        [[ ! -e "${cleanupMarker}" ]]
         [[ ! -e "${reloadMarker}" ]]
         ;;
     reload-fail)
         [[ -e "${backupMarker}" ]]
         [[ -e "${addMarker}" ]]
         [[ -e "${outboundMarker}" ]]
+        [[ -e "${restoreMarker}" ]]
+        [[ -e "${cleanupMarker}" ]]
         [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
+        ;;
+    reload-restore-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ -e "${addMarker}" ]]
+        [[ -e "${outboundMarker}" ]]
+        [[ -e "${restoreMarker}" ]]
+        [[ ! -e "${cleanupMarker}" ]]
+        [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "1" ]]
         ;;
     remove-fail)
         [[ -e "${backupMarker}" ]]
         [[ -e "${uninstallMarker}" ]]
         [[ -e "${removeMarker}" ]]
         [[ -e "${restoreMarker}" ]]
+        [[ -e "${cleanupMarker}" ]]
         [[ ! -e "${reloadMarker}" ]]
         ;;
     esac
@@ -515,9 +543,94 @@ runAccessControlFailureReturnRegression() {
     runAccessControlFailureReturnCase backup-fail add &&
         runAccessControlFailureReturnCase add-fail add &&
         runAccessControlFailureReturnCase validate-fail add &&
+        runAccessControlFailureReturnCase validate-restore-fail add &&
         runAccessControlFailureReturnCase reload-fail add &&
+        runAccessControlFailureReturnCase reload-restore-fail add &&
         runAccessControlFailureReturnCase remove-fail remove
 }
+
+runAccessControlConfigTransactionRegression() (
+    local root="${TMP_DIR}/access-control-config-transaction"
+    local statusLog="${root}/status.log"
+    local rc reloadCalls=0
+
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    PADM_ACCESS_CONTROL_BACKUP_DIR="${root}/backup"
+    coreInstallType=1
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    : >"${statusLog}"
+
+    echoContent() { printf 'title:%s\n' "$*" >>"${statusLog}"; }
+    menuLine() { printf 'menu:%s\n' "$*" >>"${statusLog}"; }
+    menuClose() { printf 'close\n' >>"${statusLog}"; }
+    errorCard() { printf 'error:%s\n' "$*" >>"${statusLog}"; }
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
+        [[ "${reloadCalls}" -gt 1 ]]
+    }
+
+    cat >"${configPath}09_routing.json" <<'JSON'
+{"routing":{"rules":[{"outboundTag":"old","domain":["domain:old.example"]}]}}
+JSON
+    cat >"${singBoxConfigPath}block_domain_route.json" <<'JSON'
+{"route":{"rules":[{"domain_suffix":["old.example"],"action":"reject"}]}}
+JSON
+    accessControlBackupCreate
+    cat >"${configPath}09_routing.json" <<'JSON'
+{"routing":{"rules":[{"outboundTag":"new","domain":["domain:new.example"]}]}}
+JSON
+    cat >"${configPath}blackhole_out.json" <<'JSON'
+{"outbounds":[{"tag":"blackhole_out"}]}
+JSON
+    cat >"${singBoxConfigPath}block_domain_route.json" <<'JSON'
+{"route":{"rules":[{"domain_suffix":["new.example"],"action":"reject"}]}}
+JSON
+    cat >"${singBoxConfigPath}cn_block_route.json" <<'JSON'
+{"route":{"rules":[{"rule_set":["geosite-cn"],"action":"reject"}]}}
+JSON
+
+    set +e
+    applyAccessControlConfigChange >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${reloadCalls}" == "2" ]]
+    jq -e '.routing.rules[0].outboundTag == "old"' "${configPath}09_routing.json" >/dev/null
+    [[ ! -e "${configPath}blackhole_out.json" ]]
+    jq -e '.route.rules[0].domain_suffix == ["old.example"]' "${singBoxConfigPath}block_domain_route.json" >/dev/null
+    [[ ! -e "${singBoxConfigPath}cn_block_route.json" ]]
+    [[ ! -e "${PADM_ACCESS_CONTROL_BACKUP_DIR}" ]]
+    grep -q '核心重载失败，已回滚本次修改' "${statusLog}"
+
+    rm -rf "${root}"
+    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    : >"${statusLog}"
+    reloadCalls=0
+    cat >"${configPath}09_routing.json" <<'JSON'
+{"routing":{"rules":[{"outboundTag":"old","domain":["domain:old.example"]}]}}
+JSON
+    accessControlBackupCreate
+    cat >"${configPath}09_routing.json" <<'JSON'
+{"routing":{"rules":[{"outboundTag":"new","domain":["domain:new.example"]}]}}
+JSON
+    cp() {
+        if [[ "$1" == "${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray/09_routing.json" && "$2" == "${configPath}09_routing.json" ]]; then
+            return 1
+        fi
+        command cp "$@"
+    }
+    set +e
+    applyAccessControlConfigChange >/dev/null 2>&1
+    rc=$?
+    set -e
+    unset -f cp
+    [[ "${rc}" == "1" ]]
+    [[ "${reloadCalls}" == "1" ]]
+    [[ -d "${PADM_ACCESS_CONTROL_BACKUP_DIR}" ]]
+    [[ -f "${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray/09_routing.json" ]]
+    grep -q '核心重载失败，且回滚失败' "${statusLog}"
+)
 
 runBTRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/bt-routing-failure"
@@ -9757,6 +9870,7 @@ runRegressionMenuSmoke() {
 runRegressionRouting() {
     runRegressionStep routing-core runRoutingRegression
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
+    runRegressionStep routing-access-control-config-transaction runAccessControlConfigTransactionRegression
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
     runRegressionStep routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
     runRegressionStep routing-warp-failure-return runWARPRoutingFailureReturnRegression

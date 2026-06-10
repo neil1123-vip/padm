@@ -99,7 +99,11 @@ showSingBoxAccessRuleFile() {
 }
 
 accessControlAbortChange() {
-    accessControlBackupRestore
+    if accessControlBackupRestore; then
+        accessControlBackupCleanup || errorCard "访问控制修改失败，旧配置已恢复，但备份目录清理失败: $(accessControlBackupDir)"
+    else
+        errorCard "访问控制修改失败，且回滚失败，请手动检查备份目录: $(accessControlBackupDir)"
+    fi
     return 1
 }
 
@@ -344,7 +348,12 @@ validateAccessIPList() {
 }
 
 accessControlBackupDir() {
-    echo "${PADM_ACCESS_CONTROL_BACKUP_DIR:-/tmp/padm-access-control-backup}"
+    if [[ -n "${PADM_ACCESS_CONTROL_BACKUP_DIR:-}" ]]; then
+        printf '%s\n' "${PADM_ACCESS_CONTROL_BACKUP_DIR}"
+        return 0
+    fi
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/padm-access-control-backup"
 }
 
 accessControlXrayTestLog() {
@@ -368,7 +377,7 @@ accessControlSingBoxTestLog() {
 accessControlBackupCreate() {
     local backupDir
     backupDir=$(accessControlBackupDir)
-    rm -rf "${backupDir}" >/dev/null 2>&1
+    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
     if [[ -n "${configPath}" ]]; then
         for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
@@ -389,49 +398,89 @@ accessControlBackupCreate() {
 
 accessControlBackupRestore() {
     local backupDir
+    local status=0
     backupDir=$(accessControlBackupDir)
+    [[ -d "${backupDir}" ]] || return 1
     if [[ -n "${configPath}" ]]; then
         for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
-            rm -f "${configPath}${file}" >/dev/null 2>&1
-            [[ -f "${backupDir}/xray/${file}" ]] && cp "${backupDir}/xray/${file}" "${configPath}${file}"
+            rm -f "${configPath}${file}" >/dev/null 2>&1 || status=1
+            if [[ -f "${backupDir}/xray/${file}" ]]; then
+                cp "${backupDir}/xray/${file}" "${configPath}${file}" || status=1
+            fi
         done
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
         for file in block_domain_route.json block_domain_outbound.json block_ip_route.json block_ip_outbound.json cn_block_route.json cn_block_outbound.json cn_block_ip_route.json 00_allow_domain_route.json 01_direct_outbound.json; do
-            rm -f "${singBoxConfigPath}${file}" >/dev/null 2>&1
-            [[ -f "${backupDir}/sing-box/${file}" ]] && cp "${backupDir}/sing-box/${file}" "${singBoxConfigPath}${file}"
+            rm -f "${singBoxConfigPath}${file}" >/dev/null 2>&1 || status=1
+            if [[ -f "${backupDir}/sing-box/${file}" ]]; then
+                cp "${backupDir}/sing-box/${file}" "${singBoxConfigPath}${file}" || status=1
+            fi
         done
     fi
+    return "${status}"
+}
+
+accessControlBackupCleanup() {
+    rm -rf "$(accessControlBackupDir)" >/dev/null 2>&1 || return 1
+}
+
+reportAccessControlApplyFailure() {
+    local title=$1
+    local message=$2
+    local logFile=${3:-}
+    echoContent title "\n┌─ ${title} ─────────────────────────────────"
+    menuLine "${message}"
+    [[ -n "${logFile}" ]] && menuLine "排查日志：${logFile}"
+    menuClose
 }
 
 validateAccessControlConfig() {
     local logFile
+    ACCESS_CONTROL_FAILURE_TITLE=
+    ACCESS_CONTROL_FAILURE_LOG=
     if [[ "${coreInstallType}" == "1" && -x /etc/padm/xray/xray ]]; then
         logFile=$(accessControlXrayTestLog)
         if ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
-            accessControlBackupRestore
-            echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
-            menuLine "访问控制配置未通过校验，已回滚本次修改"
-            menuLine "排查日志：${logFile}"
-            menuClose
+            ACCESS_CONTROL_FAILURE_TITLE="Xray 配置校验失败"
+            ACCESS_CONTROL_FAILURE_LOG="${logFile}"
             return 1
         fi
     fi
     if [[ -n "${singBoxConfigPath}" && -x /etc/padm/sing-box/sing-box ]]; then
         logFile=$(accessControlSingBoxTestLog)
         if ! /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1; then
-            accessControlBackupRestore
-            echoContent title "\n┌─ sing-box 配置校验失败 ─────────────────────────────"
-            menuLine "访问控制配置未通过校验，已回滚本次修改"
-            menuLine "排查日志：${logFile}"
-            menuClose
+            ACCESS_CONTROL_FAILURE_TITLE="sing-box 配置校验失败"
+            ACCESS_CONTROL_FAILURE_LOG="${logFile}"
             return 1
         fi
     fi
-    rm -rf "$(accessControlBackupDir)" >/dev/null 2>&1
 }
 
 applyAccessControlConfigChange() {
-    validateAccessControlConfig || return 1
-    reloadCore || return 1
+    local backupDir
+    backupDir=$(accessControlBackupDir)
+    if ! validateAccessControlConfig; then
+        if accessControlBackupRestore; then
+            accessControlBackupCleanup || true
+            reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "访问控制配置未通过校验，已回滚本次修改" "${ACCESS_CONTROL_FAILURE_LOG:-}"
+        else
+            reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "访问控制配置未通过校验，且回滚失败，请手动检查备份目录: ${backupDir}" "${ACCESS_CONTROL_FAILURE_LOG:-}"
+        fi
+        return 1
+    fi
+    if ! reloadCore; then
+        if ! accessControlBackupRestore; then
+            reportAccessControlApplyFailure "访问控制重载失败" "核心重载失败，且回滚失败，请手动检查备份目录: ${backupDir}"
+            return 1
+        fi
+        accessControlBackupCleanup || true
+        if reloadCore; then
+            reportAccessControlApplyFailure "访问控制重载失败" "核心重载失败，已回滚本次修改"
+        else
+            reportAccessControlApplyFailure "访问控制重载失败" "核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
+        fi
+        return 1
+    fi
+    accessControlBackupCleanup || errorCard "访问控制已应用，但备份目录清理失败: ${backupDir}"
+    return 0
 }
