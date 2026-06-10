@@ -589,6 +589,7 @@ runVMessRoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local outboundMarker="${root}/outbound"
     local routingMarker="${root}/routing"
+    local uninstallRoutingMarker="${root}/uninstall-routing"
     local reloadMarker="${root}/reload"
     local successMarker="${root}/success"
     local mode=invalid-port
@@ -619,6 +620,34 @@ runVMessRoutingFailureReturnRegression() (
         *) printf -v "$3" '' ;;
         esac
     }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" ]]
+    }
+
+    mode=success
+    configPath="${root}/success-xray/"
+    mkdir -p "${configPath}"
+    cat >"${configPath}09_routing.json" <<'JSON'
+{"routing":{"type":"field","rules":[{"type":"field","domain":["domain:legacy.example"],"outboundTag":"VMess-out"}]}}
+JSON
+    cat >"${configPath}VMess-out.json" <<'JSON'
+{"outbounds":[{"tag":"VMess-out","protocol":"vmess"}]}
+JSON
+    rm -f "${reloadMarker}" "${successMarker}"
+    (
+        setVMessWSRoutingOutbounds >/dev/null 2>&1
+    )
+    [[ -e "${reloadMarker}" ]]
+    [[ -e "${successMarker}" ]]
+    jq -e '
+      .outbounds[0].tag == "vmess-out" and
+      .outbounds[0].protocol == "vmess" and
+      .outbounds[0].streamSettings.wsSettings.path == "/ws"
+    ' "${configPath}vmess-out.json" >/dev/null
+    jq -e '[.routing.rules[] | select(.outboundTag == "vmess-out")] | length == 1' "${configPath}09_routing.json" >/dev/null
+    ! jq -e '.routing.rules[] | select(.outboundTag == "VMess-out")' "${configPath}09_routing.json" >/dev/null
+
     removeXrayOutbound() {
         printf 'remove\n' >"${removeMarker}"
         return 0
@@ -632,16 +661,11 @@ runVMessRoutingFailureReturnRegression() (
         return 0
     }
     unInstallRouting() {
-        printf 'routing\n' >"${routingMarker}"
+        printf 'uninstall-routing\n' >"${uninstallRoutingMarker}"
         return 0
     }
-    reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
-    }
-
     mode=invalid-port
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
     set +e
     setVMessWSRoutingOutbounds >/dev/null 2>&1
     rc=$?
@@ -649,15 +673,17 @@ runVMessRoutingFailureReturnRegression() (
     [[ "${rc}" == "1" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${outboundMarker}" ]]
+    [[ ! -e "${uninstallRoutingMarker}" ]]
     [[ ! -e "${successMarker}" ]]
 
     mode=outbound-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
     set +e
     setVMessWSRoutingOutbounds >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallRoutingMarker}" ]]
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${routingMarker}" ]]
@@ -665,26 +691,27 @@ runVMessRoutingFailureReturnRegression() (
     [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
     set +e
     setVMessWSRoutingOutbounds >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallRoutingMarker}" ]]
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ -e "${reloadMarker}" ]]
     [[ ! -e "${successMarker}" ]]
 
-    rm -f "${removeMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${removeMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
     set +e
     removeVMessWSRouting >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${removeMarker}" ]]
-    [[ -e "${routingMarker}" ]]
+    [[ -e "${uninstallRoutingMarker}" ]]
     [[ -e "${reloadMarker}" ]]
     [[ ! -e "${successMarker}" ]]
 )

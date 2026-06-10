@@ -30,6 +30,9 @@ vmessWSRouting() {
 
 # 设置 VMess WS TLS 出站
 setVMessWSRoutingOutbounds() {
+    local outboundTag="vmess-out"
+    local legacyOutboundTag="VMess-out"
+
     autoRead vmess_ws_address "请输入VMess+WS+TLS的地址:" setVMessWSTLSAddress
     echoContent title "\n┌─ VMess WS TLS 分流规则 ────────────────────────────"
     menuLine "录入示例：netflix,openai"
@@ -65,9 +68,11 @@ setVMessWSRoutingOutbounds() {
         elif [[ "${setVMessWSTLSPath}" != */* ]]; then
             setVMessWSTLSPath="/${setVMessWSTLSPath}"
         fi
-        removeXrayOutbound VMess-out || return 1
-        addXrayOutbound "VMess-out" || return 1
-        addXrayRouting VMess-out outboundTag "${domainList}" || return 1
+        unInstallRouting "${legacyOutboundTag}" outboundTag || return 1
+        removeXrayOutbound "${legacyOutboundTag}" || return 1
+        removeXrayOutbound "${outboundTag}" || return 1
+        addXrayOutbound "${outboundTag}" || return 1
+        addXrayRouting "${outboundTag}" outboundTag "${domainList}" || return 1
         reloadCore || return 1
         successCard "添加分流成功"
         exit 0
@@ -78,9 +83,13 @@ setVMessWSRoutingOutbounds() {
 
 # 移除 VMess WS TLS 分流
 removeVMessWSRouting() {
+    local outboundTag="vmess-out"
+    local legacyOutboundTag="VMess-out"
 
-    removeXrayOutbound VMess-out || return 1
-    unInstallRouting VMess-out outboundTag || return 1
+    unInstallRouting "${legacyOutboundTag}" outboundTag || return 1
+    unInstallRouting "${outboundTag}" outboundTag || return 1
+    removeXrayOutbound "${legacyOutboundTag}" || return 1
+    removeXrayOutbound "${outboundTag}" || return 1
 
     reloadCore || return 1
     successCard "卸载成功"
