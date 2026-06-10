@@ -4307,6 +4307,27 @@ SH
     [[ "$(<"${targetPath}")" == "old config" ]]
     [[ ! -e "${targetPath}.tmp" ]]
 
+    printf 'old config\n' >"${targetPath}"
+    (
+        local errorLog="${TMP_DIR}/nginx-alone-write-restore-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        mv() {
+            if [[ "$1" == "${targetPath}.bak" && "$2" == "${targetPath}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        if updateRedirectNginxConf 2>/dev/null; then
+            return 1
+        fi
+        grep -q 'server_name example.com;' "${targetPath}"
+        [[ "$(<"${targetPath}.bak")" == "old config" ]]
+        grep -q '旧 alone.conf 恢复失败' "${errorLog}"
+    ) || return 1
+    printf 'old config\n' >"${targetPath}"
+    rm -f "${targetPath}.bak"
+
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     updateRedirectNginxConf
     grep -q 'server_name example.com;' "${targetPath}"
@@ -4350,6 +4371,26 @@ SH
         return 1
     fi
     grep -q 'return 302 https://example.org;' "${targetPath}"
+
+    (
+        local errorLog="${TMP_DIR}/nginx-alone-update-restore-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        mv() {
+            if [[ "$1" == "${targetPath}.bak" && "$2" == "${targetPath}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        if removeNginx302 2>/dev/null; then
+            return 1
+        fi
+        ! grep -q 'return 302 https://example.org;' "${targetPath}"
+        grep -q 'return 302 https://example.org;' "${targetPath}.bak"
+        grep -q '旧 alone.conf 恢复失败' "${errorLog}"
+    ) || return 1
+    printf 'keep\nreturn 302 https://example.org;\nreturn 302 $scheme://example.org$request_uri;\n' >"${targetPath}"
+    rm -f "${targetPath}.bak"
 
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     removeNginx302

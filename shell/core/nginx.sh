@@ -626,6 +626,16 @@ removeNginxDefaultConf() {
     fi
 }
 
+restoreAloneNginxConfigBackup() {
+    local backupPath=$1
+    local targetPath=$2
+    if mv "${backupPath}" "${targetPath}"; then
+        return 0
+    fi
+    errorCard "Nginx 配置检测失败，且旧 alone.conf 恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+    return 1
+}
+
 writeAloneNginxConfig() {
     local targetPath="${nginxConfigPath}alone.conf"
     local tmpPath="${targetPath}.tmp"
@@ -639,9 +649,9 @@ writeAloneNginxConfig() {
         logFile=$(aloneNginxTestLog)
         if ! nginx -t >"${logFile}" 2>&1; then
             if [[ -f "${backupPath}" ]]; then
-                mv "${backupPath}" "${targetPath}"
+                restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             else
-                rm -f "${targetPath}"
+                rm -f "${targetPath}" || { errorCard "Nginx 配置检测失败，且新 alone.conf 清理失败，请手动检查 ${targetPath}"; return 1; }
             fi
             return 1
         fi
@@ -667,7 +677,7 @@ updateAloneNginxConfig() {
         mv "${tmpPath}" "${targetPath}"
         logFile=$(aloneNginxTestLog)
         if ! nginx -t >"${logFile}" 2>&1; then
-            mv "${backupPath}" "${targetPath}"
+            restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             return 1
         fi
         rm -f "${backupPath}"
