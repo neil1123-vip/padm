@@ -2638,11 +2638,15 @@ runSubscribeServerNameRegression() {
 runSubscribeNginxConfigWriteRegression() {
     local targetPath="${TMP_DIR}/nginx-subscribe/subscribe.conf"
     local oldPath="${PATH}"
-    mkdir -p "${TMP_DIR}/fake-bin" "${TMP_DIR}/nginx-subscribe"
+    local oldTmpDir="${TMPDIR:-}"
+    local nginxTmpRoot="${TMP_DIR}/nginx-subscribe-tmp"
+    mkdir -p "${TMP_DIR}/fake-bin" "${TMP_DIR}/nginx-subscribe" "${nginxTmpRoot}"
+    TMPDIR="${nginxTmpRoot}"
     nginxConfigPath="${TMP_DIR}/nginx-subscribe/"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
+printf 'nginx validate %s\n' "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}"
 [[ "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}" == "success" ]]
 SH
     chmod +x "${TMP_DIR}/fake-bin/nginx"
@@ -2656,15 +2660,18 @@ EOF
         return 1
     fi
     [[ "$(<"${targetPath}")" == "old config" ]]
+    grep -qxF 'nginx validate fail' "${nginxTmpRoot}/padm-subscribe-nginx-test.log"
     [[ ! -e "${targetPath}.tmp" ]]
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     writeSubscribeNginxConfig <<'EOF'
 new config
 EOF
     [[ "$(<"${targetPath}")" == "new config" ]]
+    grep -qxF 'nginx validate success' "${nginxTmpRoot}/padm-subscribe-nginx-test.log"
     [[ ! -e "${targetPath}.tmp" ]]
     [[ ! -e "${targetPath}.bak" ]]
     PATH="${oldPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
@@ -2818,16 +2825,22 @@ runSubscribeUserOutputTransactionRegression() {
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
     local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
     local oldScriptDir="${SCRIPT_DIR}"
+    local oldTmpDir="${TMPDIR:-}"
     local localDir="${TMP_DIR}/subscribe-user-local"
     local publicDir="${TMP_DIR}/subscribe-user-public"
+    local userTmpRoot="${TMP_DIR}/subscribe-user-tmp"
+    local stageMarker="${TMP_DIR}/subscribe-user-stage-dirs.txt"
     local email="atomic-user"
     local emailMd5="atomic-md5"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     export PADM_SUBSCRIBE_DIR="${publicDir}"
+    TMPDIR="${userTmpRoot}"
     SCRIPT_DIR="${PROJECT_ROOT}"
     subscribeType=https
     subscribeSalt=salt
-    mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box" "${publicDir}/default" "${publicDir}/clashMeta" "${publicDir}/clashMetaProfiles" "${publicDir}/sing-box" "${publicDir}/sing-box_profiles"
+    mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box" "${publicDir}/default" "${publicDir}/clashMeta" "${publicDir}/clashMetaProfiles" "${publicDir}/sing-box" "${publicDir}/sing-box_profiles" "${userTmpRoot}"
+    : >"${stageMarker}"
+    eval "$(declare -f clashMetaConfig | sed '1s/^clashMetaConfig/originalClashMetaConfig/')"
 
     writeOldSubscribeOutputs() {
         printf 'old-default\n' >"${publicDir}/default/${emailMd5}"
@@ -2841,6 +2854,11 @@ runSubscribeUserOutputTransactionRegression() {
         printf 'vless://new-node#atomic-user\n' >"${localDir}/default/${email}"
         printf '  - name: atomic-user\n    type: vless\n' >"${localDir}/clashMeta/${email}"
         printf '[{"tag":"atomic-user","type":"direct"}]\n' >"${localDir}/sing-box/${email}"
+    }
+
+    clashMetaConfig() {
+        find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-subscribe-user.*' -print >>"${stageMarker}" 2>/dev/null || true
+        originalClashMetaConfig "$@"
     }
 
     writeOldSubscribeOutputs
@@ -2919,6 +2937,13 @@ runSubscribeUserOutputTransactionRegression() {
 
     writeLocalSubscribeOutputs
     renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true
+    grep -q . "${stageMarker}"
+    while IFS= read -r path; do
+        [[ -z "${path}" || "${path}" == "${userTmpRoot}"/padm-subscribe-user.* ]] || return 1
+    done <"${stageMarker}"
+    if find "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
     [[ "$(base64 -d <"${publicDir}/default/${emailMd5}")" == "vless://new-node#atomic-user" ]]
     grep -q '^proxies:$' "${publicDir}/clashMeta/${emailMd5}"
     grep -q 'atomic-user' "${publicDir}/clashMeta/${emailMd5}"
@@ -2950,6 +2975,7 @@ runSubscribeUserOutputTransactionRegression() {
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     SCRIPT_DIR="${oldScriptDir}"
 }
 
@@ -4184,6 +4210,51 @@ JSON
     jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
 }
 
+runSubscriptionSyncTempDirRegression() (
+    local oldTmpDir="${TMPDIR:-}"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
+    local tmpRoot="${TMP_DIR}/subscription-sync-tmp"
+    local syncConfigRoot="${TMP_DIR}/subscription-sync-tempdir-config"
+    local localDir="${TMP_DIR}/subscription-sync-tempdir-local"
+    local publicDir="${TMP_DIR}/subscription-sync-tempdir-public"
+    local backupDir
+    local outputBackupDir
+
+    mkdir -p "${tmpRoot}" "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box" "${localDir}/default" "${publicDir}/default"
+    TMPDIR="${tmpRoot}"
+    configPath="${syncConfigRoot}/xray/"
+    singBoxConfigPath="${syncConfigRoot}/sing-box/"
+    cat >"${configPath}01_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"}]}}]}
+JSON
+
+    backupDir=$(subscriptionSyncCreateConfigBackups)
+    [[ "${backupDir}" == "${tmpRoot}"/padm-subscription-sync-backup.* ]]
+    [[ -f "${backupDir}/manifest" ]]
+    padmRemoveCleanupPath "${backupDir}"
+
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    export PADM_SUBSCRIBE_DIR="${publicDir}"
+    printf 'local\n' >"${localDir}/default/user"
+    printf 'public\n' >"${publicDir}/default/user"
+    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups)
+    [[ "${outputBackupDir}" == "${tmpRoot}"/padm-subscription-output-backup.* ]]
+    [[ -f "${outputBackupDir}/local.exists" && -f "${outputBackupDir}/public.exists" ]]
+    padmRemoveCleanupPath "${outputBackupDir}"
+
+    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runRemoteSubscribeFetchRegression() {
     local publicDir="${TMP_DIR}/remote-subscribe-public"
     local localDir="${TMP_DIR}/remote-subscribe-local"
@@ -4193,10 +4264,17 @@ runRemoteSubscribeFetchRegression() {
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
     local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
     local oldFakeRemoteSubscribeMode="${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local remoteTmpRoot="${TMP_DIR}/remote-subscribe-tmp"
+    local fetchTmpMarker="${TMP_DIR}/remote-subscribe-fetch-tmpdirs.txt"
+    local stageTmpMarker="${TMP_DIR}/remote-subscribe-stage-tmpdirs.txt"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     export PADM_SUBSCRIBE_DIR="${publicDir}"
-    rm -rf "${publicDir}" "${localDir}"
-    mkdir -p "${publicDir}/default" "${publicDir}/clashMeta" "${localDir}/sing-box"
+    TMPDIR="${remoteTmpRoot}"
+    rm -rf "${publicDir}" "${localDir}" "${remoteTmpRoot}"
+    mkdir -p "${publicDir}/default" "${publicDir}/clashMeta" "${localDir}/sing-box" "${remoteTmpRoot}"
+    : >"${fetchTmpMarker}"
+    : >"${stageTmpMarker}"
 
     writeRemoteSubscribeOldOutputs() {
         printf 'old-default\n' >"${publicDir}/default/${emailMd5}"
@@ -4212,8 +4290,14 @@ runRemoteSubscribeFetchRegression() {
     appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"
     cmp -s "${uniqueFile}" <(printf '%s\n' old same new)
 
+    recordRemoteSubscribeTmpDirs() {
+        find "${remoteTmpRoot}" -maxdepth 1 -type d -name 'padm-remote-subscribe-fetch.*' -print >>"${fetchTmpMarker}" 2>/dev/null || true
+        find "${remoteTmpRoot}" -maxdepth 1 -type d -name 'padm-remote-subscribe-stage.*' -print >>"${stageTmpMarker}" 2>/dev/null || true
+    }
+
     fetchRemoteSubscribeContent() {
         local url=$1
+        recordRemoteSubscribeTmpDirs
         case "${url}" in
         *remote1.example*/s/clashMeta/*)
             printf '%s\n' 'proxies:' '- name: "user@example.com"'
@@ -4258,6 +4342,17 @@ runRemoteSubscribeFetchRegression() {
     [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
     [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
     [[ "$(<"${localDir}/sing-box/${email}")" == "{bad local json" ]]
+    grep -q . "${fetchTmpMarker}"
+    grep -q . "${stageTmpMarker}"
+    while IFS= read -r path; do
+        [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-fetch.* ]] || return 1
+    done <"${fetchTmpMarker}"
+    while IFS= read -r path; do
+        [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-stage.* ]] || return 1
+    done <"${stageTmpMarker}"
+    if find "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
 
     writeRemoteSubscribeOldOutputs
     unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
@@ -4279,6 +4374,7 @@ runRemoteSubscribeFetchRegression() {
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
     if [[ -n "${oldFakeRemoteSubscribeMode}" ]]; then export PADM_FAKE_REMOTE_SUBSCRIBE_MODE="${oldFakeRemoteSubscribeMode}"; else unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE; fi
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
 runRemoteControlConcurrencyRegression() (
@@ -6777,6 +6873,7 @@ runRegressionSubscriptionOutput() {
 
 runRegressionSubscriptionState() {
     runRegressionStep subscription-state runSubscriptionGroupStateRegression
+    runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
 }
 
 runRegressionSubscriptionRemoteFetch() {

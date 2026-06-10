@@ -1629,11 +1629,12 @@ renderSubscribeUserOutputs() {
     local updateRemoteStatus=$4
     local showStatus=$5
     local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath
+    local tmpBase="${TMPDIR:-/tmp}"
     local rc=0
 
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
-    padmCreateTempPath stageDir -d /tmp/padm-subscribe-user.XXXXXX || return 1
+    padmCreateTempPath stageDir -d "${tmpBase%/}/padm-subscribe-user.XXXXXX" || return 1
     mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/clashMetaProfiles" "${stageDir}/sing-box" "${stageDir}/sing-box_profiles"
 
     defaultPath="${stageDir}/default/${emailMd5}"

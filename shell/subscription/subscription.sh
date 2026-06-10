@@ -16,13 +16,15 @@ ensureSubscriptionControlNginxLocation() {
 writeSubscribeNginxConfig() {
     local targetPath="${nginxConfigPath}subscribe.conf"
     local tmpPath="${targetPath}.tmp"
+    local tmpBase="${TMPDIR:-/tmp}"
+    local nginxTestLog="${tmpBase%/}/padm-subscribe-nginx-test.log"
     mkdir -p "$(dirname "${targetPath}")"
     cat >"${tmpPath}"
     if command -v nginx >/dev/null 2>&1; then
         local backupPath="${targetPath}.bak"
         [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
         mv "${tmpPath}" "${targetPath}"
-        if ! nginx -t >/tmp/padm-subscribe-nginx-test.log 2>&1; then
+        if ! nginx -t >"${nginxTestLog}" 2>&1; then
             if [[ -f "${backupPath}" ]]; then
                 mv "${backupPath}" "${targetPath}"
             else
@@ -208,9 +210,10 @@ updateRemoteSubscribe() {
     local email=$2
     local line=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget
+    local tmpBase="${TMPDIR:-/tmp}"
 
-    padmCreateTempPath tmpDir -d /tmp/padm-remote-subscribe-fetch.XXXXXX || return 1
-    padmCreateTempPath stageDir -d /tmp/padm-remote-subscribe-stage.XXXXXX || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    padmCreateTempPath tmpDir -d "${tmpBase%/}/padm-remote-subscribe-fetch.XXXXXX" || return 1
+    padmCreateTempPath stageDir -d "${tmpBase%/}/padm-remote-subscribe-stage.XXXXXX" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     publicBase=$(subscribePublicBaseDir)
     localBase=$(subscribeLocalBaseDir)
     mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/sing-box"
