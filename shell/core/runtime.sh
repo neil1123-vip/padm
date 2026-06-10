@@ -829,8 +829,8 @@ cleanDirectoryContent() {
         menuClose
         exit 1
     fi
-    mkdir -p "${targetPath}"
-    find "${targetPath}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    mkdir -p "${targetPath}" || return 1
+    find "${targetPath}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || return 1
 }
 
 

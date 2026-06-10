@@ -4134,7 +4134,11 @@ runCleanLastInstallationConfigFailureRegression() (
         printf 'clean-agent\n' >>"${cleanupLog}"
         [[ "${mode}" != "clean-fail" ]]
     }
-    cleanDirectoryContent() { printf 'clean-dir:%s\n' "$1" >>"${cleanupLog}"; }
+    cleanDirectoryContent() {
+        printf 'clean-dir:%s\n' "$1" >>"${cleanupLog}"
+        [[ "${mode}" == "clean-dir-tls-fail" && "$1" == "/etc/padm/tls" ]] && return 1
+        return 0
+    }
     readInstallType() { printf 'read-install-type\n' >>"${cleanupLog}"; }
     mkdirTools() { printf 'mkdir-tools\n' >>"${cleanupLog}"; }
     statusCard() { return 0; }
@@ -4145,10 +4149,12 @@ runCleanLastInstallationConfigFailureRegression() (
     lsof() { return 1; }
     systemctl() {
         printf 'systemctl:%s\n' "$*" >>"${cleanupLog}"
+        [[ "${mode}" == "daemon-reload-fail" && "$*" == "daemon-reload" ]] && return 1
         return 0
     }
     rm() {
         printf 'rm:%s\n' "$*" >>"${cleanupLog}"
+        [[ "${mode}" == "rm-warp-fail" && "$*" == "-rf /etc/padm/warp/config" ]] && return 1
         return 0
     }
     unInstallSubscribe() { printf 'uninstall-subscribe\n' >>"${installLog}"; return 0; }
@@ -4215,6 +4221,47 @@ runCleanLastInstallationConfigFailureRegression() (
     ! grep -q '^clean-dir:' "${cleanupLog}"
     ! grep -q '^read-install-type$' "${cleanupLog}"
     grep -q 'Nginx 配置清理失败，已取消清空上次安装配置' "${errorLog}"
+
+    runCleanupStepFailureCase() {
+        local failureMode=$1
+        local expectedError=$2
+        local expectedLastStep=$3
+        local forbiddenNextStep=$4
+        mode="${failureMode}"
+        : >"${serviceLog}"
+        : >"${cleanupLog}"
+        : >"${errorLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        cleanLastInstallationConfig >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -qxF "${expectedLastStep}" "${cleanupLog}"
+        ! grep -qxF "${forbiddenNextStep}" "${cleanupLog}"
+        ! grep -q '^read-install-type$' "${cleanupLog}"
+        ! grep -q '^mkdir-tools$' "${cleanupLog}"
+        grep -q "${expectedError}" "${errorLog}"
+    }
+
+    runCleanupStepFailureCase clean-dir-tls-fail \
+        'TLS 目录清理失败，已取消清空上次安装配置' \
+        'clean-dir:/etc/padm/tls' \
+        'clean-dir:/etc/padm/subscribe'
+
+    runCleanupStepFailureCase rm-warp-fail \
+        'WARP 配置清理失败，已取消清空上次安装配置' \
+        'rm:-rf /etc/padm/warp/config' \
+        'rm:-f /etc/padm/cdn'
+
+    runCleanupStepFailureCase daemon-reload-fail \
+        'systemd 配置重载失败，已取消清空上次安装配置' \
+        'systemctl:daemon-reload' \
+        'read-install-type'
 
     mode=xray-stop-fail
     : >"${serviceLog}"

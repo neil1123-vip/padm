@@ -410,19 +410,58 @@ cleanLastInstallationConfig() {
         errorCard "Nginx 配置清理失败，已取消清空上次安装配置"
         return 1
     fi
-    cleanDirectoryContent /etc/padm/xray/conf
-    rm -rf /etc/padm/sing-box/conf/config.json >/dev/null 2>&1
-    cleanDirectoryContent /etc/padm/sing-box/conf/config
-    cleanDirectoryContent /etc/padm/tls
-    cleanDirectoryContent /etc/padm/subscribe
-    cleanDirectoryContent /etc/padm/subscribe_local
-    cleanDirectoryContent /etc/padm/subscribe_remote
-    rm -rf /etc/padm/warp/config >/dev/null 2>&1
-    rm -f /etc/padm/cdn >/dev/null 2>&1
-    rm -f /etc/padm/reality_entry_host >/dev/null 2>&1
-    rm -f "${nginxConfigPath}alone.conf" "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" "${nginxConfigPath}subscribe.conf" "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
-    rm -f /etc/systemd/system/xray.service /etc/systemd/system/sing-box.service >/dev/null 2>&1
-    systemctl daemon-reload >/dev/null 2>&1
+    if ! cleanDirectoryContent /etc/padm/xray/conf; then
+        errorCard "Xray 配置目录清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! rm -rf /etc/padm/sing-box/conf/config.json >/dev/null 2>&1; then
+        errorCard "sing-box 主配置清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! cleanDirectoryContent /etc/padm/sing-box/conf/config; then
+        errorCard "sing-box 分片配置目录清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! cleanDirectoryContent /etc/padm/tls; then
+        errorCard "TLS 目录清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! cleanDirectoryContent /etc/padm/subscribe; then
+        errorCard "订阅发布目录清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! cleanDirectoryContent /etc/padm/subscribe_local; then
+        errorCard "本地订阅目录清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! cleanDirectoryContent /etc/padm/subscribe_remote; then
+        errorCard "远程订阅目录清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! rm -rf /etc/padm/warp/config >/dev/null 2>&1; then
+        errorCard "WARP 配置清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! rm -f /etc/padm/cdn >/dev/null 2>&1; then
+        errorCard "CDN 状态清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! rm -f /etc/padm/reality_entry_host >/dev/null 2>&1; then
+        errorCard "Reality entry host 清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! rm -f "${nginxConfigPath}alone.conf" "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" "${nginxConfigPath}subscribe.conf" "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1; then
+        errorCard "Nginx 残留配置清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! rm -f /etc/systemd/system/xray.service /etc/systemd/system/sing-box.service >/dev/null 2>&1; then
+        errorCard "核心服务文件清理失败，已取消清空上次安装配置"
+        return 1
+    fi
+    if ! systemctl daemon-reload >/dev/null 2>&1; then
+        errorCard "systemd 配置重载失败，已取消清空上次安装配置"
+        return 1
+    fi
 
     if [[ -n "${oldPorts}" ]]; then
         statusCard "端口释放检查" "检查上次安装端口释放状态"
