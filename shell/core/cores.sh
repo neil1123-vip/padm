@@ -174,16 +174,24 @@ coreLatestReleaseTag() {
 }
 
 xrayInstalled() {
-    [[ -x /etc/padm/xray/xray ]]
+    [[ -x "$(coreXrayBinaryPath)" ]]
 }
 
 singBoxInstalled() {
-    [[ -x /etc/padm/sing-box/sing-box ]]
+    [[ -x "$(coreSingBoxBinaryPath)" ]]
+}
+
+coreXrayBinaryPath() {
+    printf '%s\n' "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+}
+
+coreSingBoxBinaryPath() {
+    printf '%s\n' "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
 }
 
 getXrayCurrentVersion() {
     if xrayInstalled; then
-        /etc/padm/xray/xray --version 2>/dev/null | awk 'NR==1 {print "v"$2}'
+        "$(coreXrayBinaryPath)" --version 2>/dev/null | awk 'NR==1 {print "v"$2}'
     else
         echo "未安装"
     fi
@@ -191,7 +199,7 @@ getXrayCurrentVersion() {
 
 getSingBoxCurrentVersion() {
     if singBoxInstalled; then
-        /etc/padm/sing-box/sing-box version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}'
+        "$(coreSingBoxBinaryPath)" version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}'
     else
         echo "未安装"
     fi
@@ -374,6 +382,44 @@ showCoreStatusOverview() {
     menuClose
 }
 
+runCoreServiceActionAllowFailure() {
+    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
+    SERVICE_QUEUE_ALLOW_FAILURE=true
+    "$@"
+    local rc=$?
+    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
+    return "${rc}"
+}
+
+restoreCoreBinaryBackup() {
+    local backupBinary=$1
+    local targetBinary=$2
+    [[ -f "${backupBinary}" ]] || return 0
+    cp "${backupBinary}" "${targetBinary}" || return 1
+    chmod 655 "${targetBinary}" >/dev/null 2>&1 || return 1
+}
+
+finalizeFailedCoreBinaryInstall() {
+    local coreName=$1
+    local backupBinary=$2
+    local targetBinary=$3
+    local startFunction=$4
+    local logFile=$5
+    local restoreMessage="无旧二进制需要恢复"
+
+    if [[ -f "${backupBinary}" ]]; then
+        if restoreCoreBinaryBackup "${backupBinary}" "${targetBinary}"; then
+            restoreMessage="已恢复旧二进制"
+            rm -f "${backupBinary}" >/dev/null 2>&1 || true
+        else
+            restoreMessage="旧二进制恢复失败"
+        fi
+    fi
+    runCoreServiceActionAllowFailure "${startFunction}" start >/dev/null 2>&1 || true
+    statusCard "${coreName} 更新失败" "${restoreMessage}" "排查日志: ${logFile}"
+    return 1
+}
+
 installDownloadedXrayBinary() {
     local version=$1
     local tmpDir oldBinary backupBinary newBinary logFile
@@ -400,30 +446,38 @@ installDownloadedXrayBinary() {
         return 1
     fi
 
-    oldBinary=/etc/padm/xray/xray
+    oldBinary=$(coreXrayBinaryPath)
     backupBinary="${oldBinary}.bak.$(date +%s)"
-    mkdir -p /etc/padm/xray
-    [[ -f "${oldBinary}" ]] && cp "${oldBinary}" "${backupBinary}"
-    handleXray stop
-    cp "${newBinary}" "${oldBinary}"
-    chmod 655 "${oldBinary}"
-    successCard "Xray-core更新成功"
-    SERVICE_QUEUE_ALLOW_FAILURE=true
-    handleXray start
-    SERVICE_QUEUE_ALLOW_FAILURE=
+    if ! mkdir -p "$(dirname "${oldBinary}")"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "Xray-core 安装目录创建失败"
+        return 1
+    fi
+    if [[ -f "${oldBinary}" ]] && ! cp "${oldBinary}" "${backupBinary}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "Xray-core 旧二进制备份失败"
+        return 1
+    fi
+    if ! runCoreServiceActionAllowFailure handleXray stop; then
+        padmRemoveCleanupPath "${tmpDir}"
+        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}" >/dev/null 2>&1 || true
+        statusCard "Xray-core 更新失败" "Xray 服务停止失败，已取消替换" "排查日志: ${logFile}"
+        return 1
+    fi
+    if ! cp "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        finalizeFailedCoreBinaryInstall "Xray-core" "${backupBinary}" "${oldBinary}" handleXray "${logFile}"
+        return 1
+    fi
+    runCoreServiceActionAllowFailure handleXray start || true
     if xrayInstalled && xrayRunning; then
+        successCard "Xray-core更新成功"
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}"
         return 0
     fi
-    [[ -f "${backupBinary}" ]] && cp "${backupBinary}" "${oldBinary}"
-    chmod 655 "${oldBinary}" >/dev/null 2>&1
-    SERVICE_QUEUE_ALLOW_FAILURE=true
-    handleXray start
-    SERVICE_QUEUE_ALLOW_FAILURE=
     padmRemoveCleanupPath "${tmpDir}"
-    statusCard "Xray-core 更新失败" "已尝试恢复旧二进制" "排查日志: ${logFile}"
-    return 1
+    finalizeFailedCoreBinaryInstall "Xray-core" "${backupBinary}" "${oldBinary}" handleXray "${logFile}"
 }
 
 installDownloadedSingBoxBinary() {
@@ -454,30 +508,38 @@ installDownloadedSingBoxBinary() {
         return 1
     fi
 
-    oldBinary=/etc/padm/sing-box/sing-box
+    oldBinary=$(coreSingBoxBinaryPath)
     backupBinary="${oldBinary}.bak.$(date +%s)"
-    mkdir -p /etc/padm/sing-box
-    [[ -f "${oldBinary}" ]] && cp "${oldBinary}" "${backupBinary}"
-    handleSingBox stop
-    cp "${newBinary}" "${oldBinary}"
-    chmod 655 "${oldBinary}"
-    successCard "sing-box更新成功"
-    SERVICE_QUEUE_ALLOW_FAILURE=true
-    handleSingBox start
-    SERVICE_QUEUE_ALLOW_FAILURE=
+    if ! mkdir -p "$(dirname "${oldBinary}")"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "sing-box 安装目录创建失败"
+        return 1
+    fi
+    if [[ -f "${oldBinary}" ]] && ! cp "${oldBinary}" "${backupBinary}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "sing-box 旧二进制备份失败"
+        return 1
+    fi
+    if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+        padmRemoveCleanupPath "${tmpDir}"
+        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}" >/dev/null 2>&1 || true
+        statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
+        return 1
+    fi
+    if ! cp "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
+        return 1
+    fi
+    runCoreServiceActionAllowFailure handleSingBox start || true
     if singBoxInstalled && singBoxRunning; then
+        successCard "sing-box更新成功"
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}"
         return 0
     fi
-    [[ -f "${backupBinary}" ]] && cp "${backupBinary}" "${oldBinary}"
-    chmod 655 "${oldBinary}" >/dev/null 2>&1
-    SERVICE_QUEUE_ALLOW_FAILURE=true
-    handleSingBox start
-    SERVICE_QUEUE_ALLOW_FAILURE=
     padmRemoveCleanupPath "${tmpDir}"
-    statusCard "sing-box 更新失败" "已尝试恢复旧二进制" "排查日志: ${logFile}"
-    return 1
+    finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
 }
 
 confirmCoreUpgrade() {

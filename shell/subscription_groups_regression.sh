@@ -1955,6 +1955,148 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${singBoxRc}" != "0" ]]
 )
 
+runCoreBinaryInstallCopyFailureRegression() (
+    local root="${TMP_DIR}/core-binary-copy-failure"
+    local xrayBinary="${root}/xray/xray"
+    local singBoxBinary="${root}/sing-box/sing-box"
+    local statusLog="${root}/status.log"
+    local successLog="${root}/success.log"
+    local serviceLog="${root}/service.log"
+    local copyFailureLog="${root}/copy-failure.log"
+    local xrayRc singBoxRc
+
+    mkdir -p "$(dirname "${xrayBinary}")" "$(dirname "${singBoxBinary}")" "${root}/tmp"
+    printf 'old-xray\n' >"${xrayBinary}"
+    printf 'old-sing-box\n' >"${singBoxBinary}"
+    chmod 755 "${xrayBinary}" "${singBoxBinary}"
+
+    PADM_XRAY_BINARY="${xrayBinary}"
+    PADM_SINGBOX_BINARY="${singBoxBinary}"
+    xrayCoreCPUVendor=linux-64
+    singBoxCoreCPUVendor=-linux-amd64
+    REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    REGRESSION_SUCCESS_CARD_LOG="${successLog}"
+    : >"${statusLog}"
+    : >"${successLog}"
+    : >"${serviceLog}"
+    : >"${copyFailureLog}"
+
+    padmCreateTempPath() {
+        local resultVar=$1
+        local path
+        shift
+        if [[ "${1:-}" == "-d" ]]; then
+            path=$(mktemp -d "${root}/tmp/core.XXXXXX") || return 1
+        else
+            path=$(mktemp "${root}/tmp/core.XXXXXX") || return 1
+        fi
+        printf -v "${resultVar}" '%s' "${path}"
+    }
+    padmRemoveCleanupPath() {
+        rm -rf "$1"
+    }
+    padmForgetCleanupPath() { return 0; }
+    downloadGitHubReleaseAsset() {
+        local outputDir= assetName=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -P)
+                outputDir=$2
+                shift 2
+                ;;
+            *)
+                assetName=$1
+                shift
+                ;;
+            esac
+        done
+        mkdir -p "${outputDir}"
+        : >"${outputDir}/${assetName}"
+    }
+    unzip() {
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -d)
+                dest=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+            esac
+        done
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
+        chmod 755 "${dest}/xray"
+    }
+    tar() {
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -C)
+                dest=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+            esac
+        done
+        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+    }
+    cp() {
+        local sourcePath=$1
+        local targetPath=$2
+        if [[ "${targetPath}" == "${xrayBinary}" && "${sourcePath}" != ${xrayBinary}.bak.* ]]; then
+            printf 'xray\n' >>"${copyFailureLog}"
+            return 1
+        fi
+        if [[ "${targetPath}" == "${singBoxBinary}" && "${sourcePath}" != ${singBoxBinary}.bak.* ]]; then
+            printf 'sing-box\n' >>"${copyFailureLog}"
+            return 1
+        fi
+        command cp "$@"
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+    xrayRunning() { return 1; }
+    singBoxRunning() { return 1; }
+    validateXrayConfigWithBinary() { return 0; }
+    validateSingBoxConfigWithBinary() { return 0; }
+
+    SERVICE_QUEUE_ALLOW_FAILURE=
+    set +e
+    installDownloadedXrayBinary v1.2.3 >/dev/null 2>&1
+    xrayRc=$?
+    installDownloadedSingBoxBinary v1.2.3 >/dev/null 2>&1
+    singBoxRc=$?
+    set -e
+
+    [[ "${xrayRc}" == "1" ]]
+    [[ "${singBoxRc}" == "1" ]]
+    [[ "$(<"${xrayBinary}")" == "old-xray" ]]
+    [[ "$(<"${singBoxBinary}")" == "old-sing-box" ]]
+    grep -qx 'xray' "${copyFailureLog}"
+    grep -qx 'sing-box' "${copyFailureLog}"
+    grep -q 'Xray-core 更新失败' "${statusLog}"
+    grep -q 'sing-box 更新失败' "${statusLog}"
+    ! grep -q 'Xray-core更新成功' "${successLog}"
+    ! grep -q 'sing-box更新成功' "${successLog}"
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:start:true' "${serviceLog}"
+    [[ -z "${SERVICE_QUEUE_ALLOW_FAILURE}" ]]
+)
+
 runNetworkCheckReturnFailureRegression() (
     local root="${TMP_DIR}/network-check-return"
     local dnsRcFile="${root}/dns.rc"
@@ -7300,6 +7442,7 @@ runRegressionTransactionCore() {
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
+        runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
