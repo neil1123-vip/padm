@@ -3087,6 +3087,95 @@ runSingBoxMergeStartFailureRegression() (
     [[ -z "${SERVICE_QUEUE_ALLOW_FAILURE}" ]]
 )
 
+runSingBoxMergeConfigTransactionRegression() (
+    local root="${TMP_DIR}/sing-box-merge-config-transaction"
+    local confDir="${root}/conf"
+    local shardDir="${confDir}/config"
+    local binary="${root}/fake-sing-box"
+    local outputFile="${confDir}/config.json"
+    local rc
+
+    mkdir -p "${shardDir}"
+    cat >"${binary}" <<'SH'
+#!/usr/bin/env bash
+[[ "$1" == "merge" ]] || exit 2
+output=$2
+shift 2
+dest=
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+    -D)
+        dest=$2
+        shift 2
+        ;;
+    -C)
+        shift 2
+        ;;
+    *)
+        shift
+        ;;
+    esac
+done
+[[ -n "${dest}" ]] || exit 2
+case "${PADM_FAKE_SINGBOX_MERGE_MODE:-success}" in
+fail)
+    exit 1
+    ;;
+empty)
+    : >"${dest%/}/${output}"
+    exit 0
+    ;;
+*)
+    printf '{"merged":true}\n' >"${dest%/}/${output}"
+    exit 0
+    ;;
+esac
+SH
+    chmod +x "${binary}"
+    PADM_SINGBOX_BINARY="${binary}"
+    singBoxConfigPath="${shardDir}/"
+
+    printf '{"old":true}\n' >"${outputFile}"
+    export PADM_FAKE_SINGBOX_MERGE_MODE=fail
+    set +e
+    singBoxMergeConfig >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${outputFile}")" == '{"old":true}' ]]
+    ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+
+    export PADM_FAKE_SINGBOX_MERGE_MODE=empty
+    set +e
+    singBoxMergeConfig >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${outputFile}")" == '{"old":true}' ]]
+    ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+
+    export PADM_FAKE_SINGBOX_MERGE_MODE=success
+    (
+        mv() {
+            if [[ "$2" == "${outputFile}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        set +e
+        singBoxMergeConfig >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+    ) || return 1
+    [[ "$(<"${outputFile}")" == '{"old":true}' ]]
+    ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+
+    singBoxMergeConfig
+    [[ "$(<"${outputFile}")" == '{"merged":true}' ]]
+    ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+)
+
 runSingBoxUninstallFailurePropagationRegression() (
     local root="${TMP_DIR}/sing-box-uninstall-failure"
     local configDir="${root}/conf/config/"
@@ -10547,6 +10636,7 @@ runRegressionTransactionCore() {
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep core-install-service-action-failure runCoreInstallServiceActionFailureRegression &&
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
+        runRegressionStep sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
         runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
         runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&

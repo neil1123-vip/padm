@@ -426,8 +426,23 @@ singBoxHysteria2Install() {
 
 # 合并 sing-box 配置
 singBoxMergeConfig() {
-    rm /etc/padm/sing-box/conf/config.json >/dev/null 2>&1
-    /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >/dev/null 2>&1
+    local binary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
+    local configDir="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+    local confDir outputFile tmpFile tmpName
+
+    configDir="${configDir%/}/"
+    confDir="$(dirname -- "${configDir%/}")"
+    outputFile="${confDir}/config.json"
+
+    padmCreateTempFileForTarget tmpFile "${outputFile}" merge || return 1
+    tmpName=$(basename -- "${tmpFile}")
+    rm -f "${tmpFile}" >/dev/null 2>&1 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+
+    if ! "${binary}" merge "${tmpName}" -C "${configDir}" -D "${confDir}/" >/dev/null 2>&1 || [[ ! -s "${tmpFile}" ]]; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    commitGeneratedFile "${tmpFile}" "${outputFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 
