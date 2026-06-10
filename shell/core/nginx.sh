@@ -25,6 +25,28 @@ realityStreamSplitNginxConf() {
     fi
 }
 
+nginxTmpTemplate() {
+    local template=$1
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath "${template}"
+    else
+        local tmpBase="${TMPDIR:-/tmp}"
+        printf '%s\n' "${tmpBase%/}/${template}"
+    fi
+}
+
+realityStreamEnableBackupTemplate() {
+    nginxTmpTemplate 'padm-reality-stream.XXXXXX'
+}
+
+realityStreamDisableBackupTemplate() {
+    nginxTmpTemplate 'padm-reality-stream-disable.XXXXXX'
+}
+
+aloneNginxTestLog() {
+    nginxTmpTemplate 'padm-alone-nginx-test.log'
+}
+
 realityStreamXrayBinary() {
     echo "${PADM_REALITY_STREAM_XRAY_BINARY:-/etc/padm/xray/xray}"
 }
@@ -413,7 +435,7 @@ configureRealityStreamSplit() {
     publicPort=443
     currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
     currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
-    padmCreateTempPath backupDir -d /tmp/padm-reality-stream.XXXXXX || return 1
+    padmCreateTempPath backupDir -d "$(realityStreamEnableBackupTemplate)" || return 1
     backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json"
     backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json"
     backupRealityStreamFile "$(realityStreamSplitConfFile)" "${backupDir}/stream.conf"
@@ -560,7 +582,7 @@ disableRealityStreamSplit() {
         return
     fi
 
-    padmCreateTempPath backupDir -d /tmp/padm-reality-stream-disable.XXXXXX || return 1
+    padmCreateTempPath backupDir -d "$(realityStreamDisableBackupTemplate)" || return 1
     backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json"
     backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json"
     backupRealityStreamFile "${confFile}" "${backupDir}/stream.conf"
@@ -608,12 +630,14 @@ writeAloneNginxConfig() {
     local targetPath="${nginxConfigPath}alone.conf"
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
+    local logFile
     mkdir -p "$(dirname "${targetPath}")"
     cat >"${tmpPath}"
     if command -v nginx >/dev/null 2>&1; then
         [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
         mv "${tmpPath}" "${targetPath}"
-        if ! nginx -t >/tmp/padm-alone-nginx-test.log 2>&1; then
+        logFile=$(aloneNginxTestLog)
+        if ! nginx -t >"${logFile}" 2>&1; then
             if [[ -f "${backupPath}" ]]; then
                 mv "${backupPath}" "${targetPath}"
             else
@@ -631,6 +655,7 @@ updateAloneNginxConfig() {
     local targetPath="${nginxConfigPath}alone.conf"
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
+    local logFile
     [[ -f "${targetPath}" ]] || return 0
     cp "${targetPath}" "${tmpPath}"
     "$@" "${tmpPath}" || {
@@ -640,7 +665,8 @@ updateAloneNginxConfig() {
     if command -v nginx >/dev/null 2>&1; then
         cp "${targetPath}" "${backupPath}"
         mv "${tmpPath}" "${targetPath}"
-        if ! nginx -t >/tmp/padm-alone-nginx-test.log 2>&1; then
+        logFile=$(aloneNginxTestLog)
+        if ! nginx -t >"${logFile}" 2>&1; then
             mv "${backupPath}" "${targetPath}"
             return 1
         fi

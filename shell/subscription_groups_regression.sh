@@ -1620,6 +1620,9 @@ runRuntimeTempDirRegression() (
     [[ "$(coreSingBoxUpgradeTestLog)" == "${tmpRoot}/padm-core-sing-box-upgrade-test.log" ]]
     [[ "$(accessControlXrayTestLog)" == "${tmpRoot}/padm-access-xray-test.log" ]]
     [[ "$(accessControlSingBoxTestLog)" == "${tmpRoot}/padm-access-sing-box-test.log" ]]
+    [[ "$(aloneNginxTestLog)" == "${tmpRoot}/padm-alone-nginx-test.log" ]]
+    [[ "$(realityStreamEnableBackupTemplate)" == "${tmpRoot}/padm-reality-stream.XXXXXX" ]]
+    [[ "$(realityStreamDisableBackupTemplate)" == "${tmpRoot}/padm-reality-stream-disable.XXXXXX" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
@@ -3102,15 +3105,18 @@ runSubscribeReturnFailureRegression() (
 
 runRealityStreamDisableRegression() {
     local oldPath="${PATH}"
+    local oldTmpDir="${TMPDIR:-}"
     local fakeBin="${TMP_DIR}/fake-reality-stream-bin"
     local streamDir="${TMP_DIR}/reality-stream"
+    local streamTmpRoot="${TMP_DIR}/reality-stream-disable-tmp"
     local visionFile="${streamDir}/07_VLESS_vision_reality_inbounds.json"
     local xhttpFile="${streamDir}/12_VLESS_XHTTP_inbounds.json"
     local stateFile="${streamDir}/reality_stream_split.json"
     local streamConf="${streamDir}/padm-reality.conf"
     local nginxMainConf="${streamDir}/nginx.conf"
     local originalVision originalXHTTP originalState originalStreamConf originalNginxConf
-    mkdir -p "${fakeBin}" "${streamDir}"
+    mkdir -p "${fakeBin}" "${streamDir}" "${streamTmpRoot}"
+    TMPDIR="${streamTmpRoot}"
     cat >"${fakeBin}/nginx" <<'SH'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
@@ -3185,23 +3191,30 @@ EOF
     [[ ! -e "${stateFile}" ]]
     [[ ! -e "${streamConf}" ]]
     ! grep -q 'padm stream include start' "${nginxMainConf}"
+    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+        return 1
+    fi
 
     PATH="${oldPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_REALITY_STREAM_STATE_FILE PADM_REALITY_STREAM_CONF_FILE PADM_REALITY_STREAM_NGINX_CONF PADM_REALITY_STREAM_XRAY_BINARY PADM_REALITY_STREAM_XRAY_CONF_DIR PADM_REALITY_STREAM_VISION_CONFIG_FILE PADM_REALITY_STREAM_XHTTP_CONFIG_FILE PADM_FAKE_REALITY_STREAM_NGINX_VALIDATE_MODE PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE
 }
 
 runRealityStreamEnableRegression() {
     local oldPath="${PATH}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
+    local oldTmpDir="${TMPDIR:-}"
     local fakeBin="${TMP_DIR}/fake-reality-stream-enable-bin"
     local streamDir="${TMP_DIR}/reality-stream-enable"
+    local streamTmpRoot="${TMP_DIR}/reality-stream-enable-tmp"
     local visionFile="${streamDir}/07_VLESS_vision_reality_inbounds.json"
     local xhttpFile="${streamDir}/12_VLESS_XHTTP_inbounds.json"
     local stateFile="${streamDir}/reality_stream_split.json"
     local streamConf="${streamDir}/padm-reality.conf"
     local nginxMainConf="${streamDir}/nginx.conf"
     local originalVision originalXHTTP originalNginxConf
-    mkdir -p "${fakeBin}" "${streamDir}"
+    mkdir -p "${fakeBin}" "${streamDir}" "${streamTmpRoot}"
+    TMPDIR="${streamTmpRoot}"
     cat >"${fakeBin}/nginx" <<'SH'
 #!/usr/bin/env bash
 if [[ "$1" == "-V" ]]; then
@@ -3301,9 +3314,13 @@ EOF
     grep -q 'site.example.com padm_website;' "${streamConf}"
     grep -q 'padm stream include start' "${nginxMainConf}"
     [[ ! -e "${streamConf}.tmp" ]]
+    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+        return 1
+    fi
 
     PATH="${oldPath}"
     AUTO_INSTALL="${oldAutoInstall}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_REALITY_STREAM_STATE_FILE PADM_REALITY_STREAM_CONF_FILE PADM_REALITY_STREAM_NGINX_CONF PADM_REALITY_STREAM_XRAY_BINARY PADM_REALITY_STREAM_XRAY_CONF_DIR PADM_REALITY_STREAM_VISION_CONFIG_FILE PADM_REALITY_STREAM_XHTTP_CONFIG_FILE PADM_FAKE_REALITY_STREAM_NGINX_VALIDATE_MODE PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE AUTO_REALITY_STREAM_ENABLE AUTO_REALITY_STREAM_DOMAINS AUTO_REALITY_STREAM_DEFAULT_PROTOCOL AUTO_REALITY_STREAM_WEBSITE_PORT AUTO_REALITY_STREAM_VISION_PORT
 }
 
