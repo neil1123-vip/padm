@@ -63,6 +63,16 @@ resolveSubscribeServerName() {
     availableSubscribeCertificateDomain
 }
 
+runSubscribeNginxAction() {
+    local action=$1
+    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
+    SERVICE_QUEUE_ALLOW_FAILURE=true
+    handleNginx "${action}"
+    local rc=$?
+    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
+    return "${rc}"
+}
+
 # 安装订阅服务
 installSubscribe() {
     readNginxSubscribe
@@ -72,7 +82,7 @@ installSubscribe() {
     local SSLType=
     local listenIPv6=
     local subscribeServerName=
-    if [[ -n "${AUTO_SUBSCRIBE_PORT}" && "${subscribePort}" != "${AUTO_SUBSCRIBE_PORT}" ]]; then
+    if [[ -n "${AUTO_SUBSCRIBE_PORT:-}" && "${subscribePort}" != "${AUTO_SUBSCRIBE_PORT}" ]]; then
         subscribePort=
     fi
     if [[ -z "${subscribePort}" ]]; then
@@ -142,11 +152,16 @@ EOF
             return 1
         fi
         bootStartup nginx
-        handleNginx stop
-        handleNginx start
+        if ! runSubscribeNginxAction stop || ! runSubscribeNginxAction start; then
+            errorCard "订阅 Nginx 服务重载失败"
+            return 1
+        fi
     fi
     if [[ -z $(pgrep -f "nginx") ]]; then
-        handleNginx start
+        if ! runSubscribeNginxAction start; then
+            errorCard "订阅 Nginx 服务启动失败"
+            return 1
+        fi
     fi
 }
 

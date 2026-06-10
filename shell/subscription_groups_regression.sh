@@ -2948,6 +2948,110 @@ EOF
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
+runSubscribeNginxServiceFailureRegression() (
+    local root="${TMP_DIR}/subscribe-nginx-service-failure"
+    local oldPath="${PATH}"
+    local serviceLog="${root}/service.log"
+    local errorLog="${root}/error.log"
+    local mode=reload
+    local rc writeCalls controlCalls bootCalls
+
+    mkdir -p "${root}/fake-bin" "${root}/nginx" "${root}/static" "${root}/tls"
+    cat >"${root}/fake-bin/nginx" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == "-v" ]]; then
+    printf 'nginx version: nginx/1.26.0\n' >&2
+    exit 0
+fi
+exit 0
+SH
+    chmod +x "${root}/fake-bin/nginx"
+    PATH="${root}/fake-bin:${PATH}"
+    nginxConfigPath="${root}/nginx/"
+    nginxStaticPath="${root}/static"
+    export PADM_TLS_DIR="${root}/tls"
+    currentHost=subscribe.example.com
+    printf 'cert\n' >"${PADM_TLS_DIR}/subscribe.example.com.crt"
+    printf 'key\n' >"${PADM_TLS_DIR}/subscribe.example.com.key"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    : >"${serviceLog}"
+    : >"${errorLog}"
+
+    readNginxSubscribe() {
+        if [[ "${mode}" == "reload" ]]; then
+            subscribePort=
+        else
+            subscribePort=39778
+        fi
+    }
+    readSingBoxPortResult() {
+        local -n resultRef=$1
+        resultRef=(39778)
+        return 0
+    }
+    nginxBlog() { return 0; }
+    hasIPv6Connectivity() { return 1; }
+    writeSubscribeNginxConfig() {
+        writeCalls=$((writeCalls + 1))
+        cat >/dev/null
+        return 0
+    }
+    installSubscriptionControlService() {
+        controlCalls=$((controlCalls + 1))
+        return 0
+    }
+    bootStartup() {
+        bootCalls=$((bootCalls + 1))
+        return 0
+    }
+    handleNginx() {
+        printf '%s:%s:%s\n' "${mode}" "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" != "start" ]]
+    }
+    pgrep() {
+        [[ "${mode}" == "existing-port" ]] && return 1
+        return 0
+    }
+
+    writeCalls=0
+    controlCalls=0
+    bootCalls=0
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${writeCalls}" == "1" ]]
+    [[ "${controlCalls}" == "1" ]]
+    [[ "${bootCalls}" == "1" ]]
+    grep -qx 'reload:stop:true' "${serviceLog}"
+    grep -qx 'reload:start:true' "${serviceLog}"
+    grep -q '订阅 Nginx 服务重载失败' "${errorLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    mode=existing-port
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    writeCalls=0
+    controlCalls=0
+    bootCalls=0
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${writeCalls}" == "0" ]]
+    [[ "${controlCalls}" == "0" ]]
+    [[ "${bootCalls}" == "0" ]]
+    grep -qx 'existing-port:start:true' "${serviceLog}"
+    grep -q '订阅 Nginx 服务启动失败' "${errorLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    PATH="${oldPath}"
+)
+
 runSingBoxPortFailureRegression() (
     local result=()
     local subscribeRoot="${TMP_DIR}/subscribe-port-failure"
@@ -7407,6 +7511,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep sing-box-subscribe-write runSingBoxSubscribeWriteRegression
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression
     runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
+    runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
     runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
@@ -7456,6 +7561,7 @@ runRegressionTransactionCore() {
 runRegressionTransactionSubscription() {
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression &&
         runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression &&
+        runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression &&
         runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression &&
         runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
 }
