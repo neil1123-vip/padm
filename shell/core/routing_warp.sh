@@ -82,17 +82,19 @@ addWireGuardRoute() {
     local domainList=$3
     if [[ "${coreInstallType}" == "1" ]]; then
 
-        addXrayRouting "wireguard_out_${type}" "${tag}" "${domainList}"
-        addXrayOutbound "wireguard_out_${type}"
+        addXrayOutbound "wireguard_out_${type}" || return 1
+        if [[ -n "${domainList}" ]]; then
+            addXrayRouting "wireguard_out_${type}" "${tag}" "${domainList}" || return 1
+        fi
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
 
-        addSingBoxRouteRule "wireguard_endpoints_${type}" "${domainList}" "wireguard_endpoints_${type}_route"
         if [[ -n "${domainList}" ]]; then
-            addSingBoxOutbound "01_direct_outbound"
+            addSingBoxOutbound "01_direct_outbound" || return 1
+            addSingBoxRouteRule "wireguard_endpoints_${type}" "${domainList}" "wireguard_endpoints_${type}_route" || return 1
         fi
 
-        addSingBoxWireGuardEndpoints "${type}"
+        addSingBoxWireGuardEndpoints "${type}" || return 1
     fi
 }
 
@@ -103,19 +105,19 @@ unInstallWireGuard() {
 
         if [[ "${type}" == "IPv4" ]]; then
             if [[ ! -f "${configPath}wireguard_out_IPv6.json" ]]; then
-                rm -rf /etc/padm/warp/config >/dev/null 2>&1
+                rm -rf /etc/padm/warp/config >/dev/null 2>&1 || return 1
             fi
         elif [[ "${type}" == "IPv6" ]]; then
             if [[ ! -f "${configPath}wireguard_out_IPv4.json" ]]; then
-                rm -rf /etc/padm/warp/config >/dev/null 2>&1
+                rm -rf /etc/padm/warp/config >/dev/null 2>&1 || return 1
             fi
         fi
     fi
 
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ ! -f "${singBoxConfigPath}wireguard_endpoints_IPv6_route.json" && ! -f "${singBoxConfigPath}wireguard_endpoints_IPv4_route.json" ]]; then
-            rm "${singBoxConfigPath}wireguard_outbound.json" >/dev/null 2>&1
-            rm -rf /etc/padm/warp/config >/dev/null 2>&1
+            rm -f "${singBoxConfigPath}wireguard_outbound.json" >/dev/null 2>&1 || return 1
+            rm -rf /etc/padm/warp/config >/dev/null 2>&1 || return 1
         fi
     fi
 }
@@ -124,19 +126,19 @@ removeWireGuardRoute() {
     local type=$1
     if [[ "${coreInstallType}" == "1" ]]; then
 
-        unInstallRouting wireguard_out_"${type}" outboundTag
+        unInstallRouting wireguard_out_"${type}" outboundTag || return 1
 
-        removeXrayOutbound "wireguard_out_${type}"
+        removeXrayOutbound "wireguard_out_${type}" || return 1
         if [[ ! -f "${configPath}IPv4_out.json" ]]; then
-            addXrayOutbound IPv4_out
+            addXrayOutbound IPv4_out || return 1
         fi
     fi
 
     if [[ -n "${singBoxConfigPath}" ]]; then
-        removeSingBoxRouteRule "wireguard_endpoints_${type}"
+        removeSingBoxRouteRule "wireguard_endpoints_${type}" || return 1
     fi
 
-    unInstallWireGuard "${type}"
+    unInstallWireGuard "${type}" || return 1
 }
 # WARP 第三方分流管理
 warpRoutingReg() {
@@ -153,8 +155,8 @@ warpRoutingReg() {
     menuReturnItem 5 "返回 WARP 出站" "回到 WARP 出站菜单"
     menuClose
     autoRead warp_ipv4_menu "请选择:" warpStatus
-    installWarpReg
-    readConfigWarpReg
+    installWarpReg || return 1
+    readConfigWarpReg || return 1
     local address=
     if [[ ${type} == "IPv4" ]]; then
         address="172.16.0.2/32"
@@ -162,7 +164,9 @@ warpRoutingReg() {
         address="${addressWarpReg}/128"
     else
         errorCard "IP获取失败，退出安装"
+        return 1
     fi
+    local successMessage=
 
     if [[ "${warpStatus}" == "1" ]]; then
         showWireGuardDomain "${type}"
@@ -174,8 +178,12 @@ warpRoutingReg() {
         menuClose
 
         autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
-        addWireGuardRoute "${type}" outboundTag "${domainList}"
-        successCard "添加完毕"
+        if [[ -z "${domainList}" ]]; then
+            errorCard "域名不可为空"
+            return 1
+        fi
+        addWireGuardRoute "${type}" outboundTag "${domainList}" || return 1
+        successMessage="添加完毕"
 
     elif [[ "${warpStatus}" == "3" ]]; then
 
@@ -185,48 +193,46 @@ warpRoutingReg() {
         autoConfirm warp_global_confirm "确认设置 WARP 全局出站？" n warpOutStatus
 
         if [[ "${warpOutStatus}" == "y" ]]; then
-            readConfigWarpReg
+            readConfigWarpReg || return 1
             if [[ "${coreInstallType}" == "1" ]]; then
-                addXrayOutbound "wireguard_out_${type}"
+                addXrayOutbound "wireguard_out_${type}" || return 1
+                rm -f "${configPath}09_routing.json" >/dev/null 2>&1 || return 1
                 if [[ "${type}" == "IPv4" ]]; then
-                    removeXrayOutbound "wireguard_out_IPv6"
+                    removeXrayOutbound "wireguard_out_IPv6" || return 1
                 elif [[ "${type}" == "IPv6" ]]; then
-                    removeXrayOutbound "wireguard_out_IPv4"
+                    removeXrayOutbound "wireguard_out_IPv4" || return 1
                 fi
 
-                removeXrayOutbound IPv4_out
-                removeXrayOutbound IPv6_out
-                removeXrayOutbound z_direct_outbound
-                removeXrayOutbound blackhole_out
-                removeXrayOutbound socks5_outbound
-
-                rm ${configPath}09_routing.json >/dev/null 2>&1
+                removeXrayOutbound IPv4_out || return 1
+                removeXrayOutbound IPv6_out || return 1
+                removeXrayOutbound z_direct_outbound || return 1
+                removeXrayOutbound blackhole_out || return 1
+                removeXrayOutbound socks5_outbound || return 1
             fi
 
             if [[ -n "${singBoxConfigPath}" ]]; then
 
-                removeSingBoxConfig IPv4_out
-                removeSingBoxConfig IPv6_out
-                removeSingBoxConfig 01_direct_outbound
+                removeSingBoxConfig IPv4_out || return 1
+                removeSingBoxConfig IPv6_out || return 1
+                removeSingBoxConfig 01_direct_outbound || return 1
 
                 # 删除所有分流规则
-                removeSingBoxConfig wireguard_endpoints_IPv4_route
-                removeSingBoxConfig wireguard_endpoints_IPv6_route
+                removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
+                removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
 
-                removeSingBoxConfig IPv6_route
-                removeSingBoxConfig socks5_02_inbound_route
+                removeSingBoxConfig IPv6_route || return 1
+                removeSingBoxConfig socks5_02_inbound_route || return 1
 
-                addSingBoxWireGuardEndpoints "${type}"
-                addWireGuardRoute "${type}" outboundTag ""
+                addWireGuardRoute "${type}" outboundTag "" || return 1
                 if [[ "${type}" == "IPv4" ]]; then
-                    removeSingBoxConfig wireguard_endpoints_IPv6
+                    removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
                 else
-                    removeSingBoxConfig wireguard_endpoints_IPv4
+                    removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
                 fi
 
             fi
 
-            successCard "WARP全局出站设置完毕"
+            successMessage="WARP全局出站设置完毕"
         else
             statusCard "已取消" "未设置 WARP 全局出站"
             warpRoutingReg "$1" "${type}"
@@ -234,21 +240,13 @@ warpRoutingReg() {
         fi
 
     elif [[ "${warpStatus}" == "4" ]]; then
-        if [[ "${coreInstallType}" == "1" ]]; then
-            unInstallRouting "wireguard_out_${type}" outboundTag
-
-            removeXrayOutbound "wireguard_out_${type}"
-            addXrayOutbound "z_direct_outbound"
-        fi
-
+        removeWireGuardRoute "${type}" || return 1
         if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig "wireguard_endpoints_${type}_route"
-
-            removeSingBoxConfig "wireguard_endpoints_${type}"
-            addSingBoxOutbound "01_direct_outbound"
+            removeSingBoxConfig "wireguard_endpoints_${type}" || return 1
+            addSingBoxOutbound "01_direct_outbound" || return 1
         fi
 
-        successCard "卸载WARP ${type}分流完毕"
+        successMessage="卸载WARP ${type}分流完毕"
     elif [[ "${warpStatus}" == "5" ]]; then
         warpRoutingMenu
         return 0
@@ -258,7 +256,8 @@ warpRoutingReg() {
         warpRoutingReg "$1" "${type}"
         return 0
     fi
-    reloadCore
+    reloadCore || return 1
+    [[ -n "${successMessage}" ]] && successCard "${successMessage}"
 }
 
 
