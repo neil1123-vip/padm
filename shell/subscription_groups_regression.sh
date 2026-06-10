@@ -7422,7 +7422,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local nginxFakeBin nginxTarget
     local mainStateSnapshot
     local wireGuardApplyShouldFail= installControlShouldFail= refreshControlShouldFail= serviceQueueShouldFail=
-    local addSourceShouldFail= setCredentialShouldFail=
+    local addSourceShouldFail= setCredentialShouldFail= restoreStateWriteShouldFail= restoreGroupsWriteShouldFail=
     local actions=
 
     # Restore the real subscription functions because earlier UI smoke tests
@@ -7485,6 +7485,20 @@ runSubscriptionWireGuardMenuFlowRegression() (
         [[ "${wireGuardApplyShouldFail}" == "true" ]] && return 1
         mkdir -p "$(dirname "$(subscriptionWireGuardConfigFile)")"
         printf 'Address = %s\n' "$(subscriptionWireGuardReadState | jq -r '.address')" >"$(subscriptionWireGuardConfigFile)"
+    }
+    eval "$(declare -f subscriptionWireGuardWriteState | sed '1s/^subscriptionWireGuardWriteState/originalSubscriptionWireGuardWriteState/')"
+    subscriptionWireGuardWriteState() {
+        if [[ "${restoreStateWriteShouldFail}" == "true" && "${*: -1}" == '$previousState' ]]; then
+            return 1
+        fi
+        originalSubscriptionWireGuardWriteState "$@"
+    }
+    eval "$(declare -f subscriptionGroupsStateWrite | sed '1s/^subscriptionGroupsStateWrite/originalSubscriptionGroupsStateWrite/')"
+    subscriptionGroupsStateWrite() {
+        if [[ "${restoreGroupsWriteShouldFail}" == "true" && "${*: -1}" == '$previousGroupsState' ]]; then
+            return 1
+        fi
+        originalSubscriptionGroupsStateWrite "$@"
     }
     installSubscriptionControlService() {
         recordMenuAction installSubscriptionControlService
@@ -7579,6 +7593,19 @@ edge-a
         return 1
     fi
 
+    wireGuardApplyShouldFail=true
+    restoreStateWriteShouldFail=true
+    resetMenuActions
+    if subscriptionWireGuardAddPeerFromCredential "edge-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        wireGuardApplyShouldFail=
+        restoreStateWriteShouldFail=
+        return 1
+    fi
+    wireGuardApplyShouldFail=
+    restoreStateWriteShouldFail=
+    assertMenuAction 'errorCard:WireGuard 被控服务器服务应用失败，且旧状态恢复失败'
+    subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-restore-fail")' >/dev/null
+
     addSourceShouldFail=true
     if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
         addSourceShouldFail=
@@ -7599,6 +7626,22 @@ edge-a
         return 1
     fi
     if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+        return 1
+    fi
+
+    setCredentialShouldFail=true
+    restoreGroupsWriteShouldFail=true
+    resetMenuActions
+    if subscriptionWireGuardAddPeerFromCredential "edge-groups-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        setCredentialShouldFail=
+        restoreGroupsWriteShouldFail=
+        return 1
+    fi
+    setCredentialShouldFail=
+    restoreGroupsWriteShouldFail=
+    assertMenuAction 'errorCard:订阅来源凭据写入失败，且旧状态恢复失败'
+    subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-groups-restore-fail")' >/dev/null
+    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-groups-restore-fail")' >/dev/null 2>&1; then
         return 1
     fi
 

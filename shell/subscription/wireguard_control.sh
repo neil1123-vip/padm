@@ -208,6 +208,41 @@ subscriptionWireGuardRestoreGroupsState() {
     subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || return 1
 }
 
+subscriptionWireGuardReportRestoreFailure() {
+    local failureTitle=$1
+    local groupsFile=
+    if declare -F subscriptionGroupsFile >/dev/null 2>&1; then
+        groupsFile=$(subscriptionGroupsFile)
+    fi
+    if [[ -n "${groupsFile}" ]]; then
+        errorCard "${failureTitle}，且旧状态恢复失败" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)" "请手动检查订阅组状态文件：${groupsFile}"
+    else
+        errorCard "${failureTitle}，且旧状态恢复失败" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)"
+    fi
+}
+
+subscriptionWireGuardRestoreStateOrReport() {
+    local previousState=$1
+    local failureTitle=$2
+    if ! subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1; then
+        subscriptionWireGuardReportRestoreFailure "${failureTitle}"
+        return 1
+    fi
+}
+
+subscriptionWireGuardRestoreStateAndGroupsOrReport() {
+    local previousState=$1
+    local previousGroupsState=$2
+    local failureTitle=$3
+    local restoreFailed=false
+    subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || restoreFailed=true
+    subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || restoreFailed=true
+    if [[ "${restoreFailed}" == "true" ]]; then
+        subscriptionWireGuardReportRestoreFailure "${failureTitle}"
+        return 1
+    fi
+}
+
 subscriptionWireGuardRole() {
     subscriptionWireGuardReadState | jq -r '.role'
 }
@@ -467,7 +502,7 @@ initSubscriptionWireGuardMain() {
         return 1
       }
     applySubscriptionWireGuardService || {
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 主控服务启动失败" || return 1
         errorCard "WireGuard 主控服务启动失败"
         return 1
     }
@@ -517,22 +552,22 @@ initSubscriptionWireGuardControlled() {
         return 1
       }
     applySubscriptionWireGuardService || {
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控服务启动失败" || return 1
         errorCard "WireGuard 被控服务启动失败"
         return 1
     }
     installSubscriptionControlService || {
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "被控控制服务安装失败" || return 1
         errorCard "被控控制服务安装失败"
         return 1
     }
     refreshSubscriptionWireGuardNginxControl || {
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置失败" || return 1
         errorCard "WireGuard Nginx 控制面配置失败"
         return 1
     }
     serviceQueueApply || {
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" || return 1
         errorCard "WireGuard Nginx 控制面重载失败"
         return 1
     }
@@ -607,7 +642,7 @@ importSubscriptionWireGuardMainCredential() {
         return 1
       }
     applySubscriptionWireGuardService || {
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 主控接入服务启动失败" || return 1
         errorCard "WireGuard 主控接入服务启动失败"
         return 1
     }
@@ -673,7 +708,7 @@ subscriptionWireGuardAddPeerFromCredential() {
     token=$(jq -r '.token' <<<"${credentialJson}")
     previousState=$(subscriptionWireGuardReadState) || return 1
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
+        errorCard "订阅组状态读取失败"
         return 1
     }
     subscriptionWireGuardWriteState \
@@ -682,18 +717,15 @@ subscriptionWireGuardAddPeerFromCredential() {
       --arg publicKey "${publicKey}" \
       'if any(.peers[]?; .id == $id) then .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end) else .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, enabled:true}] end' || return 1
     if ! applySubscriptionWireGuardService; then
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
-        subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "WireGuard 被控服务器服务应用失败" || return 1
         return 1
     fi
     if ! addSubscriptionSourceState "${alias}" "${alias}" "${host}" "${controlPort}"; then
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
-        subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源状态写入失败" || return 1
         return 1
     fi
     if ! setSubscriptionSourceCredential "${alias}" "${host}" "${controlPort}" "${token}"; then
-        subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || true
-        subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || true
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源凭据写入失败" || return 1
         return 1
     fi
 }
