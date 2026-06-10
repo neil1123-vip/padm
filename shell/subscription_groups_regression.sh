@@ -5201,6 +5201,8 @@ runRealityStreamDisableRegression() {
     local stateFile="${streamDir}/reality_stream_split.json"
     local streamConf="${streamDir}/padm-reality.conf"
     local nginxMainConf="${streamDir}/nginx.conf"
+    local serviceMode=success
+    local serviceLog="${TMP_DIR}/reality-stream-disable-services.log"
     local originalVision originalXHTTP originalState originalStreamConf originalNginxConf
     mkdir -p "${fakeBin}" "${streamDir}" "${streamTmpRoot}"
     TMPDIR="${streamTmpRoot}"
@@ -5223,6 +5225,29 @@ SH
     export PADM_REALITY_STREAM_XRAY_CONF_DIR="${streamDir}"
     export PADM_REALITY_STREAM_VISION_CONFIG_FILE="${visionFile}"
     export PADM_REALITY_STREAM_XHTTP_CONFIG_FILE="${xhttpFile}"
+    : >"${serviceLog}"
+
+    reloadCore() {
+        printf 'reload:%s\n' "${serviceMode}" >>"${serviceLog}"
+        [[ "${serviceMode}" == "reload-fail" ]] && return 1
+        return 0
+    }
+
+    serviceQueueRestart() {
+        printf 'restart:%s:%s\n' "$*" "${serviceMode}" >>"${serviceLog}"
+        return 0
+    }
+
+    serviceQueueApply() {
+        printf 'apply:%s\n' "${serviceMode}" >>"${serviceLog}"
+        [[ "${serviceMode}" == "service-fail" ]] && return 1
+        return 0
+    }
+
+    realityStreamRefreshSubscribeIfInstalled() {
+        printf 'refresh\n' >>"${serviceLog}"
+        return 0
+    }
 
     writeRealityStreamFixture() {
         cat >"${visionFile}" <<'JSON'
@@ -5272,6 +5297,50 @@ EOF
 
     writeRealityStreamFixture
     export PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE=success
+    serviceMode=reload-fail
+    : >"${serviceLog}"
+    set +e
+    disableRealityStreamSplit >/dev/null 2>&1
+    local disableStatus=$?
+    set -e
+    if [[ "${disableStatus}" -eq 0 ]]; then
+        return 1
+    fi
+    [[ "$(<"${visionFile}")" == "${originalVision}" ]]
+    [[ "$(<"${xhttpFile}")" == "${originalXHTTP}" ]]
+    [[ "$(<"${stateFile}")" == "${originalState}" ]]
+    [[ "$(<"${streamConf}")" == "${originalStreamConf}" ]]
+    [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
+    ! grep -q '^refresh$' "${serviceLog}"
+    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+        return 1
+    fi
+
+    writeRealityStreamFixture
+    serviceMode=service-fail
+    : >"${serviceLog}"
+    set +e
+    disableRealityStreamSplit >/dev/null 2>&1
+    disableStatus=$?
+    set -e
+    if [[ "${disableStatus}" -eq 0 ]]; then
+        return 1
+    fi
+    [[ "$(<"${visionFile}")" == "${originalVision}" ]]
+    [[ "$(<"${xhttpFile}")" == "${originalXHTTP}" ]]
+    [[ "$(<"${stateFile}")" == "${originalState}" ]]
+    [[ "$(<"${streamConf}")" == "${originalStreamConf}" ]]
+    [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
+    grep -q '^restart:nginx:service-fail$' "${serviceLog}"
+    ! grep -q '^refresh$' "${serviceLog}"
+    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+        return 1
+    fi
+
+    writeRealityStreamFixture
+    serviceMode=success
+    : >"${serviceLog}"
+    export PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE=success
     disableRealityStreamSplit
     jq -e '(.inbounds[0].listen | not) and .inbounds[0].port == 443' "${visionFile}" >/dev/null
     jq -e '.inbounds[0].listen == "0.0.0.0" and .inbounds[0].port == 443' "${xhttpFile}" >/dev/null
@@ -5299,6 +5368,10 @@ runRealityStreamEnableRegression() {
     local stateFile="${streamDir}/reality_stream_split.json"
     local streamConf="${streamDir}/padm-reality.conf"
     local nginxMainConf="${streamDir}/nginx.conf"
+    local serviceMode=success
+    local serviceLog="${TMP_DIR}/reality-stream-enable-services.log"
+    local errorLog="${TMP_DIR}/reality-stream-enable-errors.log"
+    local keptBackup
     local originalVision originalXHTTP originalNginxConf
     mkdir -p "${fakeBin}" "${streamDir}" "${streamTmpRoot}"
     TMPDIR="${streamTmpRoot}"
@@ -5316,7 +5389,15 @@ SH
 [[ "$1" == "-test" ]]
 [[ "${PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE:-success}" == "success" ]]
 SH
-    chmod +x "${fakeBin}/nginx" "${fakeBin}/fake-xray"
+    cat >"${fakeBin}/cp" <<'SH'
+#!/usr/bin/env bash
+target="${@: -1}"
+if [[ "${PADM_FAKE_REALITY_STREAM_CP_MODE:-success}" == "restore-vision-fail" && "${target}" == "${PADM_FAKE_REALITY_STREAM_VISION_FILE:-}" ]]; then
+    exit 1
+fi
+PATH="${PADM_FAKE_REALITY_STREAM_OLD_PATH:-/usr/bin:/bin}" exec cp "$@"
+SH
+    chmod +x "${fakeBin}/nginx" "${fakeBin}/fake-xray" "${fakeBin}/cp"
     PATH="${fakeBin}:${PATH}"
     export PADM_REALITY_STREAM_STATE_FILE="${stateFile}"
     export PADM_REALITY_STREAM_CONF_FILE="${streamConf}"
@@ -5325,6 +5406,9 @@ SH
     export PADM_REALITY_STREAM_XRAY_CONF_DIR="${streamDir}"
     export PADM_REALITY_STREAM_VISION_CONFIG_FILE="${visionFile}"
     export PADM_REALITY_STREAM_XHTTP_CONFIG_FILE="${xhttpFile}"
+    export PADM_FAKE_REALITY_STREAM_OLD_PATH="${oldPath}"
+    export PADM_FAKE_REALITY_STREAM_VISION_FILE="${visionFile}"
+    export PADM_FAKE_REALITY_STREAM_CP_MODE=success
     AUTO_INSTALL=true
     coreInstallType=1
     currentInstallProtocolType=",7,12"
@@ -5333,6 +5417,35 @@ SH
     AUTO_REALITY_STREAM_DEFAULT_PROTOCOL=1
     AUTO_REALITY_STREAM_WEBSITE_PORT=8443
     AUTO_REALITY_STREAM_VISION_PORT=2443
+    : >"${serviceLog}"
+    : >"${errorLog}"
+
+    reloadCore() {
+        printf 'reload:%s\n' "${serviceMode}" >>"${serviceLog}"
+        [[ "${serviceMode}" == "reload-fail" ]] && return 1
+        return 0
+    }
+
+    serviceQueueRestart() {
+        printf 'restart:%s:%s\n' "$*" "${serviceMode}" >>"${serviceLog}"
+        return 0
+    }
+
+    serviceQueueApply() {
+        printf 'apply:%s\n' "${serviceMode}" >>"${serviceLog}"
+        [[ "${serviceMode}" == "service-fail" ]] && return 1
+        return 0
+    }
+
+    realityStreamRefreshSubscribeIfInstalled() {
+        printf 'refresh\n' >>"${serviceLog}"
+        return 0
+    }
+
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
+    }
+
     realityStreamWarnPublic443Status() {
         return 0
     }
@@ -5395,6 +5508,75 @@ EOF
 
     writeRealityStreamEnableFixture
     export PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE=success
+    serviceMode=reload-fail
+    export PADM_FAKE_REALITY_STREAM_CP_MODE=success
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    set +e
+    configureRealityStreamSplit >/dev/null 2>&1
+    enableStatus=$?
+    set -e
+    if [[ "${enableStatus}" -eq 0 ]]; then
+        return 1
+    fi
+    [[ "$(<"${visionFile}")" == "${originalVision}" ]]
+    [[ "$(<"${xhttpFile}")" == "${originalXHTTP}" ]]
+    [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
+    [[ ! -e "${stateFile}" ]]
+    [[ ! -e "${streamConf}" ]]
+    ! grep -q '^refresh$' "${serviceLog}"
+    grep -q 'Reality 443 共存分流服务应用失败' "${errorLog}"
+    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+        return 1
+    fi
+
+    writeRealityStreamEnableFixture
+    serviceMode=service-fail
+    export PADM_FAKE_REALITY_STREAM_CP_MODE=success
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    set +e
+    configureRealityStreamSplit >/dev/null 2>&1
+    enableStatus=$?
+    set -e
+    if [[ "${enableStatus}" -eq 0 ]]; then
+        return 1
+    fi
+    [[ "$(<"${visionFile}")" == "${originalVision}" ]]
+    [[ "$(<"${xhttpFile}")" == "${originalXHTTP}" ]]
+    [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
+    [[ ! -e "${stateFile}" ]]
+    [[ ! -e "${streamConf}" ]]
+    grep -q '^restart:nginx:service-fail$' "${serviceLog}"
+    ! grep -q '^refresh$' "${serviceLog}"
+    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+        return 1
+    fi
+
+    writeRealityStreamEnableFixture
+    serviceMode=reload-fail
+    export PADM_FAKE_REALITY_STREAM_CP_MODE=restore-vision-fail
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    set +e
+    configureRealityStreamSplit >/dev/null 2>&1
+    enableStatus=$?
+    set -e
+    if [[ "${enableStatus}" -eq 0 ]]; then
+        return 1
+    fi
+    jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443' "${visionFile}" >/dev/null
+    grep -q '回滚失败' "${errorLog}"
+    keptBackup=$(find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' -print -quit)
+    [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
+    rm -rf "${keptBackup}"
+    export PADM_FAKE_REALITY_STREAM_CP_MODE=success
+
+    writeRealityStreamEnableFixture
+    serviceMode=success
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    export PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE=success
     configureRealityStreamSplit
     jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443' "${visionFile}" >/dev/null
     jq -e '.enabled == true and .default_protocol == "vision" and .protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2443' "${stateFile}" >/dev/null
@@ -5408,7 +5590,7 @@ EOF
     PATH="${oldPath}"
     AUTO_INSTALL="${oldAutoInstall}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-    unset PADM_REALITY_STREAM_STATE_FILE PADM_REALITY_STREAM_CONF_FILE PADM_REALITY_STREAM_NGINX_CONF PADM_REALITY_STREAM_XRAY_BINARY PADM_REALITY_STREAM_XRAY_CONF_DIR PADM_REALITY_STREAM_VISION_CONFIG_FILE PADM_REALITY_STREAM_XHTTP_CONFIG_FILE PADM_FAKE_REALITY_STREAM_NGINX_VALIDATE_MODE PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE AUTO_REALITY_STREAM_ENABLE AUTO_REALITY_STREAM_DOMAINS AUTO_REALITY_STREAM_DEFAULT_PROTOCOL AUTO_REALITY_STREAM_WEBSITE_PORT AUTO_REALITY_STREAM_VISION_PORT
+    unset PADM_REALITY_STREAM_STATE_FILE PADM_REALITY_STREAM_CONF_FILE PADM_REALITY_STREAM_NGINX_CONF PADM_REALITY_STREAM_XRAY_BINARY PADM_REALITY_STREAM_XRAY_CONF_DIR PADM_REALITY_STREAM_VISION_CONFIG_FILE PADM_REALITY_STREAM_XHTTP_CONFIG_FILE PADM_FAKE_REALITY_STREAM_NGINX_VALIDATE_MODE PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE PADM_FAKE_REALITY_STREAM_OLD_PATH PADM_FAKE_REALITY_STREAM_VISION_FILE PADM_FAKE_REALITY_STREAM_CP_MODE AUTO_REALITY_STREAM_ENABLE AUTO_REALITY_STREAM_DOMAINS AUTO_REALITY_STREAM_DEFAULT_PROTOCOL AUTO_REALITY_STREAM_WEBSITE_PORT AUTO_REALITY_STREAM_VISION_PORT
 }
 
 assertCapturedSubscribeOutputs() {

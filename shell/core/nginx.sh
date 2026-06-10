@@ -150,9 +150,9 @@ backupRealityStreamFile() {
     local file=$1
     local backup=$2
     if [[ -f "${file}" ]]; then
-        cp "${file}" "${backup}"
+        cp "${file}" "${backup}" || return 1
     else
-        rm -f "${backup}" >/dev/null 2>&1
+        rm -f "${backup}" >/dev/null 2>&1 || return 1
     fi
 }
 
@@ -160,25 +160,78 @@ restoreRealityStreamFile() {
     local file=$1
     local backup=$2
     if [[ -f "${backup}" ]]; then
-        cp "${backup}" "${file}"
+        mkdir -p "$(dirname "${file}")" || return 1
+        cp "${backup}" "${file}" || return 1
     else
-        rm -f "${file}" >/dev/null 2>&1
+        rm -f "${file}" >/dev/null 2>&1 || return 1
     fi
 }
 
 realityStreamRollback() {
     local tmpDir=$1
+    local status=0
     [[ -n "${tmpDir}" && -d "${tmpDir}" ]] || return 0
-    restoreRealityStreamFile "$(realityStreamVisionConfigFile)" "${tmpDir}/vision.json"
-    restoreRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${tmpDir}/xhttp.json"
-    restoreRealityStreamFile "$(realityStreamSplitConfFile)" "${tmpDir}/stream.conf"
-    restoreRealityStreamFile "$(realityStreamSplitStateFile)" "${tmpDir}/state.json"
-    restoreRealityStreamFile "$(realityStreamSplitNginxConf)" "${tmpDir}/nginx.conf"
+    restoreRealityStreamFile "$(realityStreamVisionConfigFile)" "${tmpDir}/vision.json" || status=1
+    restoreRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${tmpDir}/xhttp.json" || status=1
+    restoreRealityStreamFile "$(realityStreamSplitConfFile)" "${tmpDir}/stream.conf" || status=1
+    restoreRealityStreamFile "$(realityStreamSplitStateFile)" "${tmpDir}/state.json" || status=1
+    restoreRealityStreamFile "$(realityStreamSplitNginxConf)" "${tmpDir}/nginx.conf" || status=1
+    return "${status}"
 }
 
 removeRealityStreamBackup() {
     local tmpDir=$1
     [[ -n "${tmpDir}" && -d "${tmpDir}" ]] && padmRemoveCleanupPath "${tmpDir}"
+}
+
+backupRealityStreamState() {
+    local backupDir=$1
+    backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json" || return 1
+    backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json" || return 1
+    backupRealityStreamFile "$(realityStreamSplitConfFile)" "${backupDir}/stream.conf" || return 1
+    backupRealityStreamFile "$(realityStreamSplitStateFile)" "${backupDir}/state.json" || return 1
+    backupRealityStreamFile "$(realityStreamSplitNginxConf)" "${backupDir}/nginx.conf" || return 1
+}
+
+realityStreamRollbackAndFail() {
+    local backupDir=$1
+    local reason=$2
+    if realityStreamRollback "${backupDir}"; then
+        removeRealityStreamBackup "${backupDir}"
+        errorCard "${reason}，已自动恢复本次修改"
+    else
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，且回滚失败，请手动检查备份目录: ${backupDir}"
+    fi
+    return 1
+}
+
+realityStreamApplyServicesOrRollback() {
+    local backupDir=$1
+    local reason=$2
+    local restoreServiceStatus=0
+    if reloadCore; then
+        serviceQueueRestart nginx
+        if serviceQueueApply; then
+            removeRealityStreamBackup "${backupDir}"
+            return 0
+        fi
+    fi
+    if ! realityStreamRollback "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，且回滚失败，请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
+    reloadCore || restoreServiceStatus=1
+    serviceQueueRestart nginx
+    serviceQueueApply || restoreServiceStatus=1
+    removeRealityStreamBackup "${backupDir}"
+    if [[ "${restoreServiceStatus}" -eq 0 ]]; then
+        errorCard "${reason}，已回滚本次修改"
+    else
+        errorCard "${reason}，已回滚本次修改；恢复旧配置后服务应用仍失败，请检查核心和 Nginx 服务日志"
+    fi
+    return 1
 }
 
 ensureRealityStreamNginxInclude() {
@@ -436,11 +489,11 @@ configureRealityStreamSplit() {
     currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
     currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
     padmCreateTempPath backupDir -d "$(realityStreamEnableBackupTemplate)" || return 1
-    backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json"
-    backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json"
-    backupRealityStreamFile "$(realityStreamSplitConfFile)" "${backupDir}/stream.conf"
-    backupRealityStreamFile "$(realityStreamSplitStateFile)" "${backupDir}/state.json"
-    backupRealityStreamFile "$(realityStreamSplitNginxConf)" "${backupDir}/nginx.conf"
+    if ! backupRealityStreamState "${backupDir}"; then
+        removeRealityStreamBackup "${backupDir}"
+        errorCard "无法创建 Reality 443 共存分流配置备份"
+        return 1
+    fi
 
     if currentProtocolHas 7 && currentProtocolHas 12; then
         echoContent title "\n┌─ 默认 Reality 后端 ───────────────────────────────"
@@ -464,7 +517,6 @@ configureRealityStreamSplit() {
     websitePort=${websitePort:-8443}
     if [[ ! "${websitePort}" =~ ^[0-9]+$ || "${websitePort}" -lt 1 || "${websitePort}" -gt 65535 ]]; then
         errorCard "网站后端端口不合法"
-        realityStreamRollback "${backupDir}"
         removeRealityStreamBackup "${backupDir}"
         return 1
     fi
@@ -480,9 +532,7 @@ configureRealityStreamSplit() {
             return 1
         fi
         if ! realityStreamPatchXrayConfig vision "${visionInternalPort}" "$(realityStreamVisionConfigFile)"; then
-            errorCard "无法写入 Reality Vision 后端配置"
-            realityStreamRollback "${backupDir}"
-            removeRealityStreamBackup "${backupDir}"
+            realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality Vision 后端配置"
             return 1
         fi
         defaultInternalPort=${visionInternalPort}
@@ -497,31 +547,23 @@ configureRealityStreamSplit() {
             return 1
         fi
         if ! realityStreamPatchXrayConfig xhttp "${xhttpInternalPort}" "$(realityStreamXHTTPConfigFile)"; then
-            errorCard "无法写入 Reality XHTTP 后端配置"
-            realityStreamRollback "${backupDir}"
-            removeRealityStreamBackup "${backupDir}"
+            realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality XHTTP 后端配置"
             return 1
         fi
         defaultInternalPort=${xhttpInternalPort}
     fi
 
     if [[ -z "${defaultInternalPort}" ]]; then
-        errorCard "未找到 Reality 默认后端端口"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "未找到 Reality 默认后端端口"
         return 1
     fi
 
     ensureRealityStreamNginxInclude || {
-        errorCard "无法写入 Nginx stream include"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "无法写入 Nginx stream include"
         return 1
     }
     if ! renderRealityStreamSplitNginxConf "${websiteDomains}" "${websitePort}" "${defaultInternalPort}"; then
-        errorCard "无法写入 Reality 443 共存 Nginx stream 配置"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality 443 共存 Nginx stream 配置"
         return 1
     fi
 
@@ -547,28 +589,19 @@ configureRealityStreamSplit() {
         | if $visionInternalPort != "" then .protocols.vision = {public_port: ($publicPort | tonumber), restore_port: ($visionRestorePort | tonumber), internal_port: ($visionInternalPort | tonumber)} else . end
         | if $xhttpInternalPort != "" then .protocols.xhttp = {public_port: ($publicPort | tonumber), restore_port: ($xhttpRestorePort | tonumber), internal_port: ($xhttpInternalPort | tonumber)} else . end
     ' >"${stateFile}"; then
-        errorCard "无法写入 Reality 443 共存状态"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "无法写入 Reality 443 共存状态"
         return 1
     fi
 
     if ! nginx -t; then
-        errorCard "Nginx配置检测失败，已自动恢复本次修改"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "Nginx 配置检测失败"
         return 1
     fi
     if ! "$(realityStreamXrayBinary)" -test -confdir "$(realityStreamXrayConfDir)"; then
-        errorCard "Xray配置检测失败，已自动恢复本次修改"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "Xray 配置检测失败"
         return 1
     fi
-    removeRealityStreamBackup "${backupDir}"
-    reloadCore || return 1
-    serviceQueueRestart nginx
-    serviceQueueApply || return 1
+    realityStreamApplyServicesOrRollback "${backupDir}" "Reality 443 共存分流服务应用失败" || return 1
     realityStreamRefreshSubscribeIfInstalled
     successCard "Reality 443 共存分流配置完成"
 }
@@ -583,35 +616,40 @@ disableRealityStreamSplit() {
     fi
 
     padmCreateTempPath backupDir -d "$(realityStreamDisableBackupTemplate)" || return 1
-    backupRealityStreamFile "$(realityStreamVisionConfigFile)" "${backupDir}/vision.json"
-    backupRealityStreamFile "$(realityStreamXHTTPConfigFile)" "${backupDir}/xhttp.json"
-    backupRealityStreamFile "${confFile}" "${backupDir}/stream.conf"
-    backupRealityStreamFile "${stateFile}" "${backupDir}/state.json"
-    backupRealityStreamFile "$(realityStreamSplitNginxConf)" "${backupDir}/nginx.conf"
+    if ! backupRealityStreamState "${backupDir}"; then
+        removeRealityStreamBackup "${backupDir}"
+        errorCard "无法创建 Reality 443 共存分流配置备份"
+        return 1
+    fi
 
     visionPublicPort=$(realityStreamStoredPublicPortForProtocol vision)
     xhttpPublicPort=$(realityStreamStoredPublicPortForProtocol xhttp)
-    [[ -n "${visionPublicPort}" ]] && realityStreamRestoreXrayConfig vision "${visionPublicPort}" "$(realityStreamVisionConfigFile)"
-    [[ -n "${xhttpPublicPort}" ]] && realityStreamRestoreXrayConfig xhttp "${xhttpPublicPort}" "$(realityStreamXHTTPConfigFile)"
+    if [[ -n "${visionPublicPort}" ]] && ! realityStreamRestoreXrayConfig vision "${visionPublicPort}" "$(realityStreamVisionConfigFile)"; then
+        realityStreamRollbackAndFail "${backupDir}" "无法恢复 Reality Vision 公网端口配置"
+        return 1
+    fi
+    if [[ -n "${xhttpPublicPort}" ]] && ! realityStreamRestoreXrayConfig xhttp "${xhttpPublicPort}" "$(realityStreamXHTTPConfigFile)"; then
+        realityStreamRollbackAndFail "${backupDir}" "无法恢复 Reality XHTTP 公网端口配置"
+        return 1
+    fi
 
-    rm -f "${confFile}" "${stateFile}" >/dev/null 2>&1
-    removeRealityStreamNginxInclude
+    if ! rm -f "${confFile}" "${stateFile}" >/dev/null 2>&1; then
+        realityStreamRollbackAndFail "${backupDir}" "无法删除 Reality 443 共存分流状态"
+        return 1
+    fi
+    if ! removeRealityStreamNginxInclude; then
+        realityStreamRollbackAndFail "${backupDir}" "无法移除 Nginx stream include"
+        return 1
+    fi
     if command -v nginx >/dev/null 2>&1 && ! nginx -t; then
-        errorCard "Nginx 配置检测失败，已恢复 Reality 443 共存配置"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "Nginx 配置检测失败"
         return 1
     fi
     if ! "$(realityStreamXrayBinary)" -test -confdir "$(realityStreamXrayConfDir)"; then
-        errorCard "Xray 配置检测失败，已恢复 Reality 443 共存配置"
-        realityStreamRollback "${backupDir}"
-        removeRealityStreamBackup "${backupDir}"
+        realityStreamRollbackAndFail "${backupDir}" "Xray 配置检测失败"
         return 1
     fi
-    removeRealityStreamBackup "${backupDir}"
-    reloadCore || return 1
-    serviceQueueRestart nginx
-    serviceQueueApply || return 1
+    realityStreamApplyServicesOrRollback "${backupDir}" "关闭 Reality 443 共存分流服务应用失败" || return 1
     realityStreamRefreshSubscribeIfInstalled
     successCard "已关闭 Reality 443 共存分流"
 }
