@@ -5652,6 +5652,39 @@ JSON
     [[ "${singBoxVLESSRealityGRPCSNI}" == "old-sni.example.com" ]]
     [[ ! -s "${refreshLog}" ]]
     grep -q '核心重载失败，已回滚配置' "${statusLog}"
+
+    : >"${statusLog}"
+    : >"${refreshLog}"
+    reloadCalls=0
+    realityTargetHost=old.example.com
+    realityTargetPort=443
+    realitySNI=old-sni.example.com
+    xrayVLESSRealitySNI=old-sni.example.com
+    xrayVLESSRealityXHTTPSNI=old-sni.example.com
+    singBoxVLESSRealityVisionSNI=old-sni.example.com
+    singBoxVLESSRealityGRPCSNI=old-sni.example.com
+    cat >"${xrayVision}" <<'JSON'
+{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
+JSON
+    cp() {
+        if [[ "$1" == */xray/07_VLESS_vision_reality_inbounds.json && "$2" == "${xrayVision}" ]]; then
+            return 1
+        fi
+        command cp "$@"
+    }
+    set +e
+    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
+    rc=$?
+    set -e
+    unset -f cp
+    [[ "${rc}" == "1" ]]
+    [[ "${reloadCalls}" == "1" ]]
+    [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "new.example.com:8443" ]]
+    [[ "${realityTargetHost}" == "new.example.com" ]]
+    [[ "${realityTargetPort}" == "8443" ]]
+    [[ ! -s "${refreshLog}" ]]
+    grep -q '核心重载失败，且回滚配置失败' "${statusLog}"
+    ! grep -q '核心重载失败，已回滚配置' "${statusLog}"
 )
 
 runRealityConfigChangeSubscriptionRefreshFailureRegression() (

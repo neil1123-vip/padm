@@ -2553,14 +2553,22 @@ changeInstalledRealityTarget() {
         return 1
     fi
     if ! validateRealityTargetConfigAfterChange; then
-        restoreRealityTargetConfigs "${backupDir}" || realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，且回滚配置失败"
+        if ! restoreRealityTargetConfigs "${backupDir}"; then
+            realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，且回滚配置失败" "备份目录: ${backupDir}"
+            padmForgetCleanupPath "${backupDir}"
+            return 1
+        fi
         restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
         padmRemoveCleanupPath "${backupDir}"
         realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetXrayTestLog)" "sing-box 日志: $(realityTargetSingBoxTestLog)"
         return 1
     fi
     if ! reloadCore; then
-        restoreRealityTargetConfigs "${backupDir}" || realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，且回滚配置失败"
+        if ! restoreRealityTargetConfigs "${backupDir}"; then
+            realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，且回滚配置失败" "备份目录: ${backupDir}"
+            padmForgetCleanupPath "${backupDir}"
+            return 1
+        fi
         restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
         if reloadCore; then
             realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，已回滚配置"
