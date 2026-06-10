@@ -2527,6 +2527,7 @@ runNetworkCheckReturnFailureRegression() (
     local templateRcFile="${root}/template.rc"
     local writeProbe="${root}/template.write"
     local serviceLog="${root}/port-services.log"
+    local cleanLog="${root}/port-clean.log"
     local writeLog="${root}/port-write.log"
     local mode=
     local dnsShellRc ipShellRc portShellRc templateShellRc
@@ -2574,7 +2575,10 @@ runNetworkCheckReturnFailureRegression() (
         [[ "${mode}" == "xray-stop-fail" ]] && return 1
         return 0
     }
-    cleanAgentNginxConf() { return 0; }
+    cleanAgentNginxConf() {
+        printf 'clean:%s\n' "${mode}" >>"${cleanLog}"
+        [[ "${mode}" != "clean-fail" ]]
+    }
     allowPort() { return 0; }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
@@ -2588,8 +2592,26 @@ runNetworkCheckReturnFailureRegression() (
         [[ "${mode}" != "write-fail" ]]
     }
 
+    mode=clean-fail
+    : >"${serviceLog}"
+    : >"${cleanLog}"
+    : >"${writeLog}"
+    set +e
+    (
+        set +e
+        checkPortOpen 443 example.com >/dev/null 2>&1
+        printf '%s\n' "$?" >"${portRcFile}"
+    )
+    portShellRc=$?
+    set -e
+    [[ "${portShellRc}" == "0" ]]
+    [[ "$(<"${portRcFile}")" == "1" ]]
+    grep -qx 'clean:clean-fail' "${cleanLog}"
+    [[ ! -s "${writeLog}" ]]
+
     mode=write-fail
     : >"${serviceLog}"
+    : >"${cleanLog}"
     : >"${writeLog}"
     set +e
     (
@@ -2608,6 +2630,7 @@ runNetworkCheckReturnFailureRegression() (
         local rc
         mode="${failureMode}"
         : >"${serviceLog}"
+        : >"${cleanLog}"
         : >"${writeLog}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
         set +e
@@ -4107,7 +4130,10 @@ runCleanLastInstallationConfigFailureRegression() (
         [[ "${mode}" == "nginx-stop-fail" ]] && return 1
         return 0
     }
-    cleanAgentNginxConf() { printf 'clean-agent\n' >>"${cleanupLog}"; }
+    cleanAgentNginxConf() {
+        printf 'clean-agent\n' >>"${cleanupLog}"
+        [[ "${mode}" != "clean-fail" ]]
+    }
     cleanDirectoryContent() { printf 'clean-dir:%s\n' "$1" >>"${cleanupLog}"; }
     readInstallType() { printf 'read-install-type\n' >>"${cleanupLog}"; }
     mkdirTools() { printf 'mkdir-tools\n' >>"${cleanupLog}"; }
@@ -4170,6 +4196,25 @@ runCleanLastInstallationConfigFailureRegression() (
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'sing-box:stop:true' "${serviceLog}"
     grep -qx 'nginx:stop:true' "${serviceLog}"
+
+    mode=clean-fail
+    : >"${serviceLog}"
+    : >"${cleanupLog}"
+    : >"${errorLog}"
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    cleanLastInstallationConfig >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'clean-agent' "${cleanupLog}"
+    ! grep -q '^clean-dir:' "${cleanupLog}"
+    ! grep -q '^read-install-type$' "${cleanupLog}"
+    grep -q 'Nginx 配置清理失败，已取消清空上次安装配置' "${errorLog}"
 
     mode=xray-stop-fail
     : >"${serviceLog}"

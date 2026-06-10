@@ -2,9 +2,11 @@
 
 # 清理本脚本管理的 Nginx 配置
 cleanAgentNginxConf() {
-    rm -f "${nginxConfigPath}alone.conf" "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" "${nginxConfigPath}subscribe.conf" "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
-    rm -f "$(realityStreamSplitConfFile)" "$(realityStreamSplitStateFile)" >/dev/null 2>&1
-    removeRealityStreamNginxInclude
+    local status=0
+    rm -f "${nginxConfigPath}alone.conf" "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" "${nginxConfigPath}subscribe.conf" "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1 || status=1
+    rm -f "$(realityStreamSplitConfFile)" "$(realityStreamSplitStateFile)" >/dev/null 2>&1 || status=1
+    removeRealityStreamNginxInclude || status=1
+    return "${status}"
 }
 
 

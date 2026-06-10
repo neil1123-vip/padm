@@ -220,7 +220,10 @@ checkPortOpen() {
         errorCard "Xray 服务停止失败，无法检测端口开放状态"
         return 1
     fi
-    cleanAgentNginxConf
+    if ! cleanAgentNginxConf; then
+        errorCard "Nginx 配置清理失败，无法检测端口开放状态"
+        return 1
+    fi
 
     local port=$1
     local domain=$2
