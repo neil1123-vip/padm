@@ -4407,6 +4407,58 @@ JSON
     grep -q '核心重载失败，已回滚配置' "${statusLog}"
 )
 
+runRealityConfigChangeSubscriptionRefreshFailureRegression() (
+    local root="${TMP_DIR}/reality-config-change-subscription-refresh-failure"
+    local xrayVision="${root}/xray-vision.json"
+    local statusLog="${root}/status.log"
+    local rc reloadCalls=0 refreshCalls=0
+
+    mkdir -p "${root}"
+    cat >"${xrayVision}" <<'JSON'
+{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
+JSON
+    realityTargetHost=old.example.com
+    realityTargetPort=443
+    realitySNI=old-sni.example.com
+    xrayVLESSRealitySNI=old-sni.example.com
+    xrayVLESSRealityXHTTPSNI=old-sni.example.com
+    singBoxVLESSRealityVisionSNI=old-sni.example.com
+    singBoxVLESSRealityGRPCSNI=old-sni.example.com
+    PADM_REALITY_XRAY_VISION_CONFIG_FILE="${xrayVision}"
+    PADM_REALITY_XRAY_XHTTP_CONFIG_FILE="${root}/missing-xhttp.json"
+    PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${root}/missing-singbox-vision.json"
+    PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${root}/missing-singbox-grpc.json"
+    : >"${statusLog}"
+
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
+        return 0
+    }
+    refreshSubscriptionsAfterRealityTargetChange() {
+        refreshCalls=$((refreshCalls + 1))
+        return 1
+    }
+    realityTargetStatusBlock() {
+        printf '%s\n' "$*" >>"${statusLog}"
+    }
+
+    set +e
+    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
+    rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    [[ "${reloadCalls}" == "1" ]]
+    [[ "${refreshCalls}" == "1" ]]
+    [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "new.example.com:8443" ]]
+    [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.serverNames[0]' "${xrayVision}")" == "new-sni.example.com" ]]
+    [[ "${realityTargetHost}" == "new.example.com" ]]
+    [[ "${realityTargetPort}" == "8443" ]]
+    [[ "${realitySNI}" == "new-sni.example.com" ]]
+    grep -q '订阅刷新失败' "${statusLog}"
+    ! grep -q '^green REALITY 目标站 已更新为' "${statusLog}"
+)
+
 runXHTTPDownloadSettingsRegression() {
     local xhttpConfigFile="${TMP_DIR}/xhttp-download-settings.json"
     local oldConfigFile="${PADM_XHTTP_CONFIG_FILE:-}"
@@ -4509,6 +4561,7 @@ runRealityConfigRegression() {
     runRegressionStep reality-config-scanner runRealityConfigScannerRegression
     runRegressionStep reality-config-apply runRealityConfigApplyRegression
     runRegressionStep reality-config-change-reload-failure runRealityConfigChangeReloadFailureRegression
+    runRegressionStep reality-config-change-subscription-refresh-failure runRealityConfigChangeSubscriptionRefreshFailureRegression
     runRegressionStep reality-config-xhttp-download-settings runXHTTPDownloadSettingsRegression
     runRegressionStep reality-config-refresh-subscription runRealityConfigRefreshSubscriptionRegression
     runRegressionStep reality-config-import-skip runRealityConfigImportSkipRegression

@@ -2571,6 +2571,9 @@ changeInstalledRealityTarget() {
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
-    refreshSubscriptionsAfterRealityTargetChange
+    if ! refreshSubscriptionsAfterRealityTargetChange; then
+        realityTargetStatusBlock yellow "REALITY 目标站" "目标站已更新为 ${realityTargetHost}:${realityTargetPort}" "SNI=${realitySNI}" "订阅刷新失败，请检查订阅输出后重试"
+        return 1
+    fi
     realityTargetStatusBlock green "REALITY 目标站" "已更新为 ${realityTargetHost}:${realityTargetPort}" "SNI=${realitySNI}"
 }
