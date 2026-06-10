@@ -3426,6 +3426,28 @@ SH
     [[ "$(<"${checkPortTarget}")" == "old config" ]]
     grep -qxF 'check-port validate fail' "${checkPortTmpRoot}/padm-check-port-open-nginx-test.log"
     [[ ! -e "${checkPortTarget}.tmp" ]]
+
+    printf 'old config\n' >"${checkPortTarget}"
+    rm -f "${checkPortTarget}.bak"
+    export PADM_FAKE_NGINX_VALIDATE_MODE=fail
+    (
+        mv() {
+            if [[ "$1" == "${checkPortTarget}.bak" && "$2" == "${checkPortTarget}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        if writeCheckPortOpenNginxConfig 443 example.com '' 2>/dev/null; then
+            return 1
+        fi
+        [[ "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR}" == *"旧配置恢复失败"* ]]
+        [[ "$(<"${checkPortTarget}")" != "old config" ]]
+        [[ "$(<"${checkPortTarget}.bak")" == "old config" ]]
+        [[ ! -e "${checkPortTarget}.tmp" ]]
+    ) || return 1
+    printf 'old config\n' >"${checkPortTarget}"
+    rm -f "${checkPortTarget}.bak"
+
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     writeCheckPortOpenNginxConfig 443 example.com 'listen [::]:443;'
     grep -qxF 'check-port validate success' "${checkPortTmpRoot}/padm-check-port-open-nginx-test.log"

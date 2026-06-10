@@ -151,8 +151,10 @@ writeCheckPortOpenNginxConfig() {
     local backupPath="${targetPath}.bak"
     local tmpBase="${TMPDIR:-/tmp}"
     local nginxTestLog="${tmpBase%/}/padm-check-port-open-nginx-test.log"
-    mkdir -p "$(dirname "${targetPath}")"
-    cat >"${tmpPath}" <<EOF
+    local hadBackup=false
+    CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
+    mkdir -p "$(dirname "${targetPath}")" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目录创建失败"; return 1; }
+    cat >"${tmpPath}" <<EOF || { rm -f "${tmpPath}" >/dev/null 2>&1; CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置临时文件写入失败"; return 1; }
 server {
     listen ${port};
     ${listenIPv6PortConfig}
@@ -171,19 +173,40 @@ server {
 }
 EOF
     if command -v nginx >/dev/null 2>&1; then
-        [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
-        mv "${tmpPath}" "${targetPath}"
-        if ! nginx -t >"${nginxTestLog}" 2>&1; then
-            if [[ -f "${backupPath}" ]]; then
-                mv "${backupPath}" "${targetPath}"
-            else
-                rm -f "${targetPath}"
-            fi
+        if [[ -f "${targetPath}" ]]; then
+            cp "${targetPath}" "${backupPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 旧配置备份失败"; return 1; }
+            hadBackup=true
+        fi
+        if ! mv "${tmpPath}" "${targetPath}"; then
+            rm -f "${tmpPath}" >/dev/null 2>&1
+            [[ "${hadBackup}" == "true" ]] && rm -f "${backupPath}" >/dev/null 2>&1
+            CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置提交失败"
             return 1
         fi
-        rm -f "${backupPath}"
+        if ! nginx -t >"${nginxTestLog}" 2>&1; then
+            if [[ "${hadBackup}" == "true" && -f "${backupPath}" ]]; then
+                if ! mv "${backupPath}" "${targetPath}"; then
+                    CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+                    return 1
+                fi
+            else
+                if ! rm -f "${targetPath}"; then
+                    CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败，且新配置清理失败，请手动检查 ${targetPath}"
+                    return 1
+                fi
+            fi
+            CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败"
+            return 1
+        fi
+        if [[ "${hadBackup}" == "true" ]]; then
+            rm -f "${backupPath}" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
+        fi
     else
-        mv "${tmpPath}" "${targetPath}"
+        if ! mv "${tmpPath}" "${targetPath}"; then
+            rm -f "${tmpPath}" >/dev/null 2>&1
+            CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置提交失败"
+            return 1
+        fi
     fi
 }
 
@@ -218,8 +241,7 @@ checkPortOpen() {
             listenIPv6PortConfig="listen [::]:${port};"
         fi
         if ! writeCheckPortOpenNginxConfig "${port}" "${domain}" "${listenIPv6PortConfig}"; then
-            statusCard "Nginx 配置校验失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 配置错误" "也可以执行 nginx -t 查看配置错误"
-            rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
+            statusCard "Nginx 配置校验失败" "无法检测 ${port} 端口开放状态" "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR:-请检查上方 Nginx 配置错误}" "也可以执行 nginx -t 查看配置错误"
             return 1
         fi
         if ! runCoreServiceActionAllowFailure handleNginx start; then
