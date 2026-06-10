@@ -3410,6 +3410,49 @@ JSON
     printf '%s\n' "${originalContent}" >"${vlessConfig}"
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
     (
+        cp() {
+            if [[ "$1" == "${vlessConfig}" && "$2" == "${vlessConfig}.vlessenc.bak" ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        reloadCore() { return 0; }
+        set +e
+        setVlessRealityEncryption enable >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
+        [[ ! -e "${vlessConfig}.vlessenc.bak" ]]
+        [[ ! -e "${vlessState}" ]]
+        [[ ! -e "${refreshMarker}" ]]
+    ) || return 1
+
+    printf '%s\n' "${originalContent}" >"${vlessConfig}"
+    rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
+    (
+        mv() {
+            if [[ "$1" == "${vlessState}.tmp" && "$2" == "${vlessState}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        reloadCore() { return 0; }
+        set +e
+        setVlessRealityEncryption enable >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
+        [[ ! -e "${vlessConfig}.vlessenc.bak" ]]
+        [[ ! -e "${vlessState}" ]]
+        [[ ! -e "${vlessState}.tmp" ]]
+        [[ ! -e "${refreshMarker}" ]]
+    ) || return 1
+
+    printf '%s\n' "${originalContent}" >"${vlessConfig}"
+    rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
+    (
         mv() {
             if [[ "$1" == "${vlessConfig}.vlessenc.bak" && "$2" == "${vlessConfig}" ]]; then
                 return 1
@@ -3428,6 +3471,29 @@ JSON
     ) || return 1
     printf '%s\n' "${originalContent}" >"${vlessConfig}"
     rm -f "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
+
+    local reloadLog="${root}/reloads"
+    reloadCore() { printf 'reload\n' >>"${reloadLog}"; return 0; }
+    subscribe() {
+        printf 'subscribe\n' >"${subscribeMarker}"
+        return 1
+    }
+    readNginxSubscribe() {
+        subscribePort=443
+        nginxConfigPath="${root}/nginx/"
+    }
+    rm -f "${refreshMarker}" "${subscribeMarker}" "${reloadLog}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
+    set +e
+    setVlessRealityEncryption enable >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
+    [[ ! -e "${vlessState}" ]]
+    [[ ! -e "${vlessConfig}.vlessenc.bak" ]]
+    [[ ! -e "${vlessState}.bak" ]]
+    [[ -e "${subscribeMarker}" ]]
+    [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
 
     reloadCore() { return 0; }
     subscribe() { return 1; }
@@ -5880,6 +5946,8 @@ runRealityConfigVlessEncryptionRegression() {
     local vlessTmpMarker="${TMP_DIR}/vlessenc-tmp-files.txt"
     local vlessOriginalConfig
     local vlessOriginalState
+    local vlessEnabledConfig
+    local vlessEnabledState
     local vlessValidateMode=success
     mkdir -p "${vlessTmpRoot}"
     : >"${vlessTmpMarker}"
@@ -5942,6 +6010,26 @@ JSON
     jq -e '.enabled == true and .encryption == "mlkem768x25519plus.native.0rtt.test"' "${vlessStateFile}" >/dev/null
     [[ ! -e "${vlessConfigFile}.vlessenc.bak" ]]
     [[ ! -e "${vlessStateFile}.bak" ]]
+    vlessEnabledConfig=$(<"${vlessConfigFile}")
+    vlessEnabledState=$(<"${vlessStateFile}")
+    (
+        rm() {
+            local arg
+            for arg in "$@"; do
+                [[ "${arg}" == "${vlessStateFile}" ]] && return 1
+            done
+            command rm "$@"
+        }
+        set +e
+        setVlessRealityEncryption disable >/dev/null 2>&1
+        local disableStatus=$?
+        set -e
+        [[ "${disableStatus}" == "1" ]]
+        [[ "$(<"${vlessConfigFile}")" == "${vlessEnabledConfig}" ]]
+        [[ "$(<"${vlessStateFile}")" == "${vlessEnabledState}" ]]
+        [[ ! -e "${vlessConfigFile}.vlessenc.bak" ]]
+        [[ ! -e "${vlessStateFile}.bak" ]]
+    ) || return 1
     setVlessRealityEncryption disable
     jq -e '.inbounds[0].settings.decryption == "none" and (.inbounds[0].settings.fallbacks | not)' "${vlessConfigFile}" >/dev/null
     [[ ! -e "${vlessStateFile}" ]]

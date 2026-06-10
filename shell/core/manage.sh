@@ -151,12 +151,23 @@ setVlessRealityEncryption() {
     backupFile="${configFile}.vlessenc.bak"
     stateBackupFile="${stateFile}.bak"
     stateTmpFile="${stateFile}.tmp"
-    cp "${configFile}" "${backupFile}"
+    if ! cp "${configFile}" "${backupFile}"; then
+        errorCard "创建 VLESS Encryption 配置备份失败，请手动检查 ${configFile}"
+        return 1
+    fi
     if [[ -f "${stateFile}" ]]; then
-        cp "${stateFile}" "${stateBackupFile}"
+        if ! cp "${stateFile}" "${stateBackupFile}"; then
+            rm -f "${backupFile}"
+            errorCard "创建 VLESS Encryption 状态备份失败，请手动检查 ${stateFile}"
+            return 1
+        fi
         hadStateBackup=true
     else
-        rm -f "${stateBackupFile}"
+        if ! rm -f "${stateBackupFile}" >/dev/null 2>&1; then
+            rm -f "${backupFile}"
+            errorCard "清理 VLESS Encryption 旧状态备份失败，请手动检查 ${stateBackupFile}"
+            return 1
+        fi
     fi
 
     if [[ "${mode}" == "enable" ]]; then
@@ -201,16 +212,20 @@ setVlessRealityEncryption() {
             end
         ' "${configFile}" >"${configFile}.tmp"; then
             errorCard "写入 Xray 配置失败，已取消启用"
-            mv "${backupFile}" "${configFile}"
+            restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "写入 Xray 配置失败" || return 1
             rm -f "${configFile}.tmp" "${stateBackupFile}"
             return 1
         fi
-        mkdir -p "$(dirname "${stateFile}")"
+        if ! mkdir -p "$(dirname "${stateFile}")"; then
+            errorCard "创建 VLESS Encryption 状态目录失败，已取消启用"
+            rm -f "${configFile}.tmp" "${stateTmpFile}"
+            restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "创建 VLESS Encryption 状态目录失败" || return 1
+            return 1
+        fi
         if ! jq -n --arg encryption "${encryption}" --arg decryption "${decryption}" '{enabled:true,encryption:$encryption,decryption:$decryption}' >"${stateTmpFile}"; then
             errorCard "写入 VLESS Encryption 状态失败，已取消启用"
-            mv "${backupFile}" "${configFile}"
-            [[ -f "${stateBackupFile}" ]] && mv "${stateBackupFile}" "${stateFile}"
             rm -f "${configFile}.tmp" "${stateTmpFile}"
+            restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "写入 VLESS Encryption 状态失败" || return 1
             return 1
         fi
     else
@@ -222,18 +237,36 @@ setVlessRealityEncryption() {
             end
         ' "${configFile}" >"${configFile}.tmp"; then
             errorCard "写入 Xray 配置失败，已取消关闭"
-            mv "${backupFile}" "${configFile}"
-            rm -f "${configFile}.tmp" "${stateBackupFile}"
+            rm -f "${configFile}.tmp"
+            restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "写入 Xray 配置失败" || return 1
             return 1
         fi
     fi
 
-    mv "${configFile}.tmp" "${configFile}"
+    if ! mv "${configFile}.tmp" "${configFile}"; then
+        errorCard "提交 VLESS Encryption 配置失败，请手动检查 ${configFile}、${configFile}.tmp 和 ${backupFile}"
+        rm -f "${stateTmpFile}"
+        return 1
+    fi
     if [[ "${mode}" == "enable" ]]; then
-        mv "${stateTmpFile}" "${stateFile}"
+        if ! mv "${stateTmpFile}" "${stateFile}"; then
+            if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "提交 VLESS Encryption 状态失败"; then
+                rm -f "${stateTmpFile}"
+                return 1
+            fi
+            rm -f "${stateTmpFile}"
+            errorCard "提交 VLESS Encryption 状态失败，已恢复旧配置"
+            return 1
+        fi
         chmod 600 "${stateFile}" 2>/dev/null || true
     else
-        rm -f "${stateFile}"
+        if ! rm -f "${stateFile}" >/dev/null 2>&1; then
+            if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "删除 VLESS Encryption 状态失败"; then
+                return 1
+            fi
+            errorCard "删除 VLESS Encryption 状态失败，已恢复旧配置"
+            return 1
+        fi
     fi
 
     if ! validateVlessEncryptionConfig; then
@@ -257,8 +290,21 @@ setVlessRealityEncryption() {
         errorCard "核心重载失败，已回滚 VLESS Encryption 修改"
         return 1
     fi
+    if ! refreshVlessEncryptionSubscriptions; then
+        if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "刷新 VLESS Encryption 订阅失败"; then
+            rm -f "${stateTmpFile}"
+            return 1
+        fi
+        if ! reloadCore; then
+            rm -f "${stateTmpFile}"
+            errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置；恢复旧配置后核心重载失败，请检查核心服务日志"
+            return 1
+        fi
+        rm -f "${backupFile}" "${stateBackupFile}" "${stateTmpFile}"
+        errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置"
+        return 1
+    fi
     rm -f "${backupFile}" "${stateBackupFile}" "${stateTmpFile}"
-    refreshVlessEncryptionSubscriptions || return 1
     return 0
 }
 
