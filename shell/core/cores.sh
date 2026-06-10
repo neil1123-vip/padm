@@ -886,7 +886,7 @@ installXrayReality() {
     # 安装 Xray
     installXray 2 false
     installXrayService 3
-    initXrayConfig custom 4
+    initXrayConfig custom 4 || return 1
     cleanUp singBoxDel
 
     serviceQueueRestart xray
@@ -907,7 +907,7 @@ installSingBoxReality() {
 
     installSingBox 2
     installSingBoxService 3
-    initSingBoxConfig custom 4
+    initSingBoxConfig custom 4 || return 1
     cleanUp xrayDel
     serviceQueueRestart sing-box
     serviceQueueApply
@@ -1016,7 +1016,7 @@ customXrayInstall() {
         # 安装 Xray
         installXray 7 false
         installXrayService 8
-        initXrayConfig custom 9
+        initXrayConfig custom 9 || return 1
         cleanUp singBoxDel
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             installCronTLS 10
@@ -1079,7 +1079,7 @@ customSingBoxInstall() {
 
         installSingBox 4
         installSingBoxService 5
-        initSingBoxConfig custom 6
+        initSingBoxConfig custom 6 || return 1
         cleanUp xrayDel
         installCronTLS 7
         serviceQueueRestart sing-box
@@ -1154,7 +1154,7 @@ xrayCoreInstall() {
     # 安装 Xray
     installXray 6 false
     installXrayService 7
-    initXrayConfig all 8
+    initXrayConfig all 8 || return 1
     cleanUp singBoxDel
     installCronTLS 9
     if [[ -n "${btDomain}" ]]; then
@@ -1198,7 +1198,7 @@ singBoxInstall() {
 
     installSingBox 5
     installSingBoxService 6
-    initSingBoxConfig all 7
+    initSingBoxConfig all 7 || return 1
 
     cleanUp xrayDel
     installCronTLS 8

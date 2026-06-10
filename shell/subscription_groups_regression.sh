@@ -694,6 +694,57 @@ runRealityProfileFailureRegression() (
     [[ ! -e "${singBoxRoot}07_VLESS_vision_reality_inbounds.json" ]]
 )
 
+runCoreTemplateReturnFailureRegression() (
+    local mode=xray
+    local xrayRc singBoxRc
+
+    currentUUID=existing-user
+    currentClients='[]'
+    domain=tls.example.com
+    currentHost=tls.example.com
+    lastInstallationConfig=true
+    selectCustomInstallType=",7,"
+    singBoxVLESSVisionPort=10890
+
+    initXrayClients() { printf '[]\n'; }
+    initSingBoxClients() { printf '[]\n'; }
+    addXrayOutbound() { return 0; }
+    checkDNSIP() { return 0; }
+    removeNginxDefaultConf() { return 0; }
+    handleSingBox() { return 0; }
+    checkPortOpen() { return 0; }
+    readSingBoxPortResult() {
+        local -n resultRef=$1
+        resultRef=(10890)
+        return 0
+    }
+    writeGeneratedJsonFile() {
+        local targetFile=$1
+        shift 2
+        if [[ "${mode}" == "xray" && "${targetFile}" == "/etc/padm/xray/conf/09_routing.json" ]]; then
+            return 1
+        fi
+        if [[ "${mode}" == "sing-box" && "${targetFile}" == "/etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json" ]]; then
+            return 1
+        fi
+        cat >/dev/null
+    }
+
+    set +e
+    initXrayConfig custom 1 true 2>/dev/null
+    xrayRc=$?
+    set -e
+    [[ "${xrayRc}" != "0" ]]
+
+    mode=sing-box
+    selectCustomInstallType=",0,"
+    set +e
+    initSingBoxConfig custom 1 true 2>/dev/null
+    singBoxRc=$?
+    set -e
+    [[ "${singBoxRc}" != "0" ]]
+)
+
 runConfigTransactionRegression() {
     local targetFile="${TMP_DIR}/transaction.json"
     local backupFile="${targetFile}.bak"
@@ -5213,6 +5264,7 @@ runRegressionTransactionCore() {
         runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
+        runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression
 }

@@ -1831,7 +1831,7 @@ manageRealityTarget() {
 regenerateRealityProfile() {
     if [[ "${coreInstallType}" == "1" ]]; then
         selectCustomInstallType=",7,"
-        initXrayConfig custom 1 true
+        initXrayConfig custom 1 true || return 1
     elif [[ "${coreInstallType}" == "2" ]]; then
         if currentProtocolHas 7; then
             selectCustomInstallType=",7,"
@@ -1839,7 +1839,7 @@ regenerateRealityProfile() {
         if currentProtocolHas 8; then
             selectCustomInstallType="${selectCustomInstallType},8,"
         fi
-        initSingBoxConfig custom 1 true
+        initSingBoxConfig custom 1 true || return 1
     fi
 
     reloadCore

@@ -47,7 +47,7 @@ initXrayConfig() {
 
     # log
     if [[ ! -f "/etc/padm/xray/conf/00_log.json" ]]; then
-        writeGeneratedJsonFile /etc/padm/xray/conf/00_log.json padm-xray-log <<EOF || { errorCard "Xray 日志配置模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/00_log.json padm-xray-log <<EOF || { errorCard "Xray 日志配置模板提交失败"; return 1; }
 {
   "log": {
     "error": "/etc/padm/xray/error.log",
@@ -59,7 +59,7 @@ EOF
     fi
 
     if [[ ! -f "/etc/padm/xray/conf/12_policy.json" ]]; then
-        writeGeneratedJsonFile /etc/padm/xray/conf/12_policy.json padm-xray-policy <<EOF || { errorCard "Xray policy 配置模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/12_policy.json padm-xray-policy <<EOF || { errorCard "Xray policy 配置模板提交失败"; return 1; }
 {
   "policy": {
       "levels": {
@@ -76,7 +76,7 @@ EOF
     addXrayOutbound "z_direct_outbound"
     # dns
     if [[ ! -f "/etc/padm/xray/conf/11_dns.json" ]]; then
-        writeGeneratedJsonFile /etc/padm/xray/conf/11_dns.json padm-xray-dns <<EOF || { errorCard "Xray DNS 配置模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/11_dns.json padm-xray-dns <<EOF || { errorCard "Xray DNS 配置模板提交失败"; return 1; }
 {
     "dns": {
         "servers": [
@@ -87,7 +87,7 @@ EOF
 EOF
     fi
     # routing
-    writeGeneratedJsonFile /etc/padm/xray/conf/09_routing.json padm-xray-routing <<EOF || { errorCard "Xray routing 配置模板提交失败"; exit 1; }
+    writeGeneratedJsonFile /etc/padm/xray/conf/09_routing.json padm-xray-routing <<EOF || { errorCard "Xray routing 配置模板提交失败"; return 1; }
 {
   "routing": {
     "rules": [
@@ -111,7 +111,7 @@ EOF
     # Trojan TCP
     if protocolSelectionIncludes "${selectCustomInstallType}" 4 "$1"; then
         fallbacksList='{"dest":31296,"xver":1},{"alpn":"h2","dest":31302,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/04_trojan_TCP_inbounds.json padm-xray-trojan <<EOF || { errorCard "Xray Trojan TCP 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/04_trojan_TCP_inbounds.json padm-xray-trojan <<EOF || { errorCard "Xray Trojan TCP 入站模板提交失败"; return 1; }
 {
 "inbounds":[
 	{
@@ -146,7 +146,7 @@ EOF
     # VLESS_WS_TLS
     if protocolSelectionIncludes "${selectCustomInstallType}" 1 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'ws","dest":31297,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/03_VLESS_WS_inbounds.json padm-xray-vless-ws <<EOF || { errorCard "Xray VLESS WS 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/03_VLESS_WS_inbounds.json padm-xray-vless-ws <<EOF || { errorCard "Xray VLESS WS 入站模板提交失败"; return 1; }
 {
 "inbounds":[
     {
@@ -179,7 +179,7 @@ EOF
         initXrayXHTTPort || return 1
         initRealityKey
         initRealityMldsa65
-        writeGeneratedJsonFile /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json padm-xray-xhttp <<EOF || { errorCard "Xray XHTTP 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json padm-xray-xhttp <<EOF || { errorCard "Xray XHTTP 入站模板提交失败"; return 1; }
 {
 "inbounds":[
     {
@@ -229,7 +229,7 @@ EOF
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 3 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'vws","dest":31299,"xver":1}'
-        writeGeneratedJsonFile /etc/padm/xray/conf/05_VMess_WS_inbounds.json padm-xray-vmess-ws <<EOF || { errorCard "Xray VMess WS 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/05_VMess_WS_inbounds.json padm-xray-vmess-ws <<EOF || { errorCard "Xray VMess WS 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -258,7 +258,7 @@ EOF
     # VLESS Vision
     if protocolSelectionIncludes "${selectCustomInstallType}" 0 "$1"; then
 
-        writeGeneratedJsonFile /etc/padm/xray/conf/02_VLESS_TCP_inbounds.json padm-xray-vless-tcp <<EOF || { errorCard "Xray VLESS TCP 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/02_VLESS_TCP_inbounds.json padm-xray-vless-tcp <<EOF || { errorCard "Xray VLESS TCP 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -306,7 +306,7 @@ EOF
         initXrayRealityPort || return 1
         initRealityKey
         initRealityMldsa65
-        writeGeneratedJsonFile /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json padm-xray-reality <<EOF || { errorCard "Xray Reality 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json padm-xray-reality <<EOF || { errorCard "Xray Reality 入站模板提交失败"; return 1; }
 {
   "inbounds": [
     {
@@ -472,7 +472,7 @@ initSingBoxConfig() {
         handleSingBox stop
 
         checkPortOpen "${result[-1]}" "${domain}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json padm-sing-box-vless-tcp <<EOF || { errorCard "sing-box VLESS Vision 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json padm-sing-box-vless-tcp <<EOF || { errorCard "sing-box VLESS Vision 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -508,7 +508,7 @@ EOF
         handleSingBox stop
         randomPathFunction
         checkPortOpen "${result[-1]}" "${domain}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json padm-sing-box-vless-ws <<EOF || { errorCard "sing-box VLESS WS 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json padm-sing-box-vless-ws <<EOF || { errorCard "sing-box VLESS WS 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -550,7 +550,7 @@ EOF
         handleSingBox stop
         randomPathFunction
         checkPortOpen "${result[-1]}" "${domain}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/05_VMess_WS_inbounds.json padm-sing-box-vmess-ws <<EOF || { errorCard "sing-box VMess WS 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/05_VMess_WS_inbounds.json padm-sing-box-vmess-ws <<EOF || { errorCard "sing-box VMess WS 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -589,7 +589,7 @@ EOF
         echo
         readSingBoxPortResult result "${singBoxVLESSRealityVisionPort}" || return 1
         statusCard "VLESS Reality Vision端口" "${result[-1]}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json padm-sing-box-reality <<EOF || { errorCard "sing-box Reality Vision 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json padm-sing-box-reality <<EOF || { errorCard "sing-box Reality Vision 入站模板提交失败"; return 1; }
 {
   "inbounds": [
     {
@@ -631,7 +631,7 @@ EOF
         echo
         readSingBoxPortResult result "${singBoxVLESSRealityGRPCPort}" || return 1
         statusCard "VLESS Reality gPRC端口" "${result[-1]}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json padm-sing-box-reality-grpc <<EOF || { errorCard "sing-box Reality gRPC 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json padm-sing-box-reality-grpc <<EOF || { errorCard "sing-box Reality gRPC 入站模板提交失败"; return 1; }
 {
   "inbounds": [
     {
@@ -676,7 +676,7 @@ EOF
         readSingBoxPortResult result "${singBoxHysteria2Port}" || return 1
         statusCard "Hysteria2端口" "${result[-1]}"
         initHysteria2Network
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json padm-sing-box-hysteria2 <<EOF || { errorCard "sing-box Hysteria2 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json padm-sing-box-hysteria2 <<EOF || { errorCard "sing-box Hysteria2 入站模板提交失败"; return 1; }
 {
     "inbounds": [
         {
@@ -710,7 +710,7 @@ EOF
         echo
         readSingBoxPortResult result "${singBoxTrojanPort}" || return 1
         statusCard "Trojan端口" "${result[-1]}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/04_trojan_TCP_inbounds.json padm-sing-box-trojan <<EOF || { errorCard "sing-box Trojan TCP 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/04_trojan_TCP_inbounds.json padm-sing-box-trojan <<EOF || { errorCard "sing-box Trojan TCP 入站模板提交失败"; return 1; }
 {
     "inbounds": [
         {
@@ -740,7 +740,7 @@ EOF
         readSingBoxPortResult result "${singBoxTuicPort}" || return 1
         statusCard "Tuic端口" "${result[-1]}"
         initTuicProtocol
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/09_tuic_inbounds.json padm-sing-box-tuic <<EOF || { errorCard "sing-box TUIC 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/09_tuic_inbounds.json padm-sing-box-tuic <<EOF || { errorCard "sing-box TUIC 入站模板提交失败"; return 1; }
 {
      "inbounds": [
         {
@@ -777,7 +777,7 @@ EOF
         echo
         readSingBoxPortResult result "${singBoxNaivePort}" || return 1
         statusCard "Naive端口" "${result[-1]}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/10_naive_inbounds.json padm-sing-box-naive <<EOF || { errorCard "sing-box Naive 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/10_naive_inbounds.json padm-sing-box-naive <<EOF || { errorCard "sing-box Naive 入站模板提交失败"; return 1; }
 {
      "inbounds": [
         {
@@ -815,7 +815,7 @@ EOF
         checkPortOpen "${result[-1]}" "${domain}"
         singBoxNginxConfig "$1" "${result[-1]}"
         bootStartup nginx
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json padm-sing-box-vmess-httpupgrade <<EOF || { errorCard "sing-box VMess HTTPUpgrade 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json padm-sing-box-vmess-httpupgrade <<EOF || { errorCard "sing-box VMess HTTPUpgrade 入站模板提交失败"; return 1; }
 {
     "inbounds":[
         {
@@ -843,7 +843,7 @@ EOF
         echo
         readSingBoxPortResult result "${singBoxAnyTLSPort}" || return 1
         statusCard "AnyTLS端口" "${result[-1]}"
-        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/13_anytls_inbounds.json padm-sing-box-anytls <<EOF || { errorCard "sing-box AnyTLS 入站模板提交失败"; exit 1; }
+        writeGeneratedJsonFile /etc/padm/sing-box/conf/config/13_anytls_inbounds.json padm-sing-box-anytls <<EOF || { errorCard "sing-box AnyTLS 入站模板提交失败"; return 1; }
 {
     "inbounds": [
         {
