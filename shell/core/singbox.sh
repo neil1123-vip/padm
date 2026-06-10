@@ -12,15 +12,20 @@ addSingBoxRouteRule() {
     if [[ -f "${singBoxConfigPath}${routingName}.json" ]]; then
         autoRead singbox_route_history "读取到上次的配置，是否保留？[y/n]:" historyRouteStatus
         if [[ "${historyRouteStatus}" == "y" ]]; then
-            domainList="${domainList},$(jq -rc '.route.rules[0].rule_set[]?' "${singBoxConfigPath}${routingName}.json" | awk -F "[_]" '{print $2}' | paste -sd ',')"
-            domainList="${domainList},$(jq -rc '.route.rules[0].domain[]?,.route.rules[0].domain_suffix[]?' "${singBoxConfigPath}${routingName}.json" | paste -sd ',')"
+            local historyRuleSetLines historyRuleSets historyDomainLines historyDomains
+            historyRuleSetLines=$(jq -rc '.route.rules[0].rule_set[]?' "${singBoxConfigPath}${routingName}.json") || return 1
+            historyRuleSets=$(printf '%s\n' "${historyRuleSetLines}" | awk -F "[_]" '{print $2}' | paste -sd ',')
+            historyDomainLines=$(jq -rc '.route.rules[0].domain[]?,.route.rules[0].domain_suffix[]?' "${singBoxConfigPath}${routingName}.json") || return 1
+            historyDomains=$(printf '%s\n' "${historyDomainLines}" | paste -sd ',')
+            domainList="${domainList},${historyRuleSets}"
+            domainList="${domainList},${historyDomains}"
         fi
 
     fi
     local rules=
-    rules=$(initSingBoxRules "${domainList}" "${routingName}")
+    rules=$(initSingBoxRules "${domainList}" "${routingName}") || return 1
     local domainRules suffixRules ruleSet ruleSetTag
-    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag
+    splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || return 1
     if [[ -n "${singBoxConfigPath}" ]]; then
         local routeAction='"outbound": "'"${outboundTag}"'"'
         if [[ "${outboundTag}" == *block* ]]; then
@@ -41,7 +46,7 @@ addSingBoxRouteRule() {
   }
 }
 EOF
-        updateRoutingJsonConfig "${singBoxConfigPath}${routingName}.json" 'if .route.rule_set == [] then del(.route.rule_set) else . end | (.route.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))'
+        updateRoutingJsonConfig "${singBoxConfigPath}${routingName}.json" 'if .route.rule_set == [] then del(.route.rule_set) else . end | (.route.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))' || return 1
     fi
 
 }
@@ -51,7 +56,7 @@ EOF
 removeSingBoxRouteRule() {
     local outboundTag=$1
     if [[ -f "${singBoxConfigPath}${outboundTag}_route.json" ]]; then
-        updateRoutingJsonConfig "${singBoxConfigPath}${outboundTag}_route.json" 'del(.route.rules[] | select(.outbound == $outboundTag or .action == "reject"))' --arg outboundTag "${outboundTag}"
+        updateRoutingJsonConfig "${singBoxConfigPath}${outboundTag}_route.json" 'del(.route.rules[] | select(.outbound == $outboundTag or .action == "reject"))' --arg outboundTag "${outboundTag}" || return 1
     fi
 }
 

@@ -271,7 +271,9 @@ addSingBoxIPRouteRule() {
 
     local historyIPs=
     if [[ -f "${singBoxConfigPath}${routingName}.json" ]]; then
-        historyIPs=$(jq -r '.route.rules[0].ip_cidr[]?' "${singBoxConfigPath}${routingName}.json" | paste -sd ',')
+        local historyIPLines
+        historyIPLines=$(jq -r '.route.rules[0].ip_cidr[]?' "${singBoxConfigPath}${routingName}.json") || return 1
+        historyIPs=$(printf '%s\n' "${historyIPLines}" | paste -sd ',')
     fi
 
     if [[ -n "${historyIPs}" ]]; then
@@ -279,7 +281,7 @@ addSingBoxIPRouteRule() {
     fi
 
     local ipCIDR=[]
-    ipCIDR=$(echo "${ipList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^cn$/geoip:cn/' | grep -v '^$' | sort -n | uniq | jq -R . | jq -s .)
+    ipCIDR=$(echo "${ipList}" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^cn$/geoip:cn/' | grep -v '^$' | sort -n | uniq | jq -R . | jq -s .) || return 1
 
     local routeAction='"outbound": "'"${outboundTag}"'"'
     if [[ "${outboundTag}" == *block* ]]; then
@@ -342,9 +344,9 @@ unInstallRouting() {
 
     if [[ -f "${configPath}09_routing.json" ]]; then
         if [[ -n "${protocol}" ]]; then
-            updateRoutingJsonConfig "${configPath}09_routing.json" 'del(.routing.rules[] | select(.[$type] == $tag and ((.protocol // []) | index($protocol))))' --arg type "${type}" --arg tag "${tag}" --arg protocol "${protocol}"
+            updateRoutingJsonConfig "${configPath}09_routing.json" 'del(.routing.rules[] | select(.[$type] == $tag and ((.protocol // []) | index($protocol))))' --arg type "${type}" --arg tag "${tag}" --arg protocol "${protocol}" || return 1
         else
-            updateRoutingJsonConfig "${configPath}09_routing.json" 'del(.routing.rules[] | select(.[$type] == $tag and (.protocol == null)))' --arg type "${type}" --arg tag "${tag}"
+            updateRoutingJsonConfig "${configPath}09_routing.json" 'del(.routing.rules[] | select(.[$type] == $tag and (.protocol == null)))' --arg type "${type}" --arg tag "${tag}" || return 1
         fi
     fi
 }
@@ -448,8 +450,11 @@ splitSingBoxRules() {
     local -n suffixRulesRef=$3
     local -n ruleSetRef=$4
     local -n ruleSetTagRef=$5
-    local parsedRules
-    mapfile -t parsedRules < <(jq -c '.domainRules, .suffixRules, .ruleSet, (.ruleSet | map(.tag))' <<<"${rules}")
+    local parsedOutput
+    parsedOutput=$(jq -c '.domainRules, .suffixRules, .ruleSet, (.ruleSet | map(.tag))' <<<"${rules}") || return 1
+    local -a parsedRules
+    mapfile -t parsedRules <<<"${parsedOutput}"
+    [[ ${#parsedRules[@]} -eq 4 ]] || return 1
     domainRulesRef=${parsedRules[0]:-[]}
     suffixRulesRef=${parsedRules[1]:-[]}
     ruleSetRef=${parsedRules[2]:-[]}

@@ -91,6 +91,10 @@ runRoutingRegression() {
 YAML
     rulesJson=$(initSingBoxRules "openai,example.com,full:api.example.com" "regression")
     jq -e '.ruleSet[0].tag == "geosite_openai_regression" and .suffixRules == ["example.com"] and .domainRules == ["api.example.com"]' <<<"${rulesJson}" >/dev/null
+    local splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag
+    if splitSingBoxRules '{bad-json' splitDomainRules splitSuffixRules splitRuleSet splitRuleSetTag 2>/dev/null; then
+        return 1
+    fi
     addSingBoxRouteRule "test_outbound" "openai,example.com,full:api.example.com" "test_route"
     jq -e '
       .route.rules[0].rule_set == ["geosite_openai_test_route"] and
@@ -110,11 +114,24 @@ YAML
     [[ "$(<"${singBoxConfigPath}test_route.json")" == "${originalContent}" ]]
     [[ ! -e "${singBoxConfigPath}test_route.json.tmp" ]]
     ! compgen -G "${singBoxConfigPath}.test_route.json.*" >/dev/null
+    (
+        autoRead() { printf -v "$3" 'y'; }
+        printf '{bad-json\n' >"${singBoxConfigPath}bad_history_route.json"
+        if addSingBoxRouteRule "test_outbound" "example.net" "bad_history_route" 2>/dev/null; then
+            exit 1
+        fi
+    )
+    rm -f "${singBoxConfigPath}bad_history_route.json"
     addSingBoxIPRouteRule "block_ip_outbound" "1.1.1.0/24,cn" "block_ip_route"
     jq -e '
       (.route.rules[0].ip_cidr | sort) == (["1.1.1.0/24", "geoip:cn"] | sort) and
       .route.rules[0].action == "reject"
     ' "${singBoxConfigPath}block_ip_route.json" >/dev/null
+    printf '{bad-json\n' >"${singBoxConfigPath}bad_ip_route.json"
+    if addSingBoxIPRouteRule "block_ip_outbound" "2.2.2.2" "bad_ip_route" 2>/dev/null; then
+        return 1
+    fi
+    rm -f "${singBoxConfigPath}bad_ip_route.json"
     cat >"${singBoxConfigPath}block_ip_outbound_route.json" <<'JSON'
 {"route":{"rules":[{"action":"reject","domain":["example.com"]},{"outbound":"keep_outbound","domain":["keep.example.com"]}]}}
 JSON
@@ -129,6 +146,11 @@ JSON
     fi
     [[ "$(<"${singBoxConfigPath}block_ip_outbound_route.json")" == "${originalContent}" ]]
     [[ ! -e "${singBoxConfigPath}block_ip_outbound_route.json.tmp" ]]
+    printf '{bad-json\n' >"${singBoxConfigPath}block_ip_outbound_route.json"
+    if removeSingBoxRouteRule "block_ip_outbound" 2>/dev/null; then
+        return 1
+    fi
+    rm -f "${singBoxConfigPath}block_ip_outbound_route.json"
     addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route"
     jq -e '
       .route.rules[0].rule_set == ["geoip_cn_cn_block_ip_route"] and
@@ -335,6 +357,10 @@ JSON
     fi
     [[ "$(<"${configPath}09_routing.json")" == "${originalContent}" ]]
     [[ ! -e "${configPath}09_routing.json.tmp" ]]
+    printf '{bad-json\n' >"${configPath}09_routing.json"
+    if unInstallRouting blackhole_out outboundTag 2>/dev/null; then
+        return 1
+    fi
     cat >"${configPath}09_routing.json" <<'JSON'
 {"routing":{"rules":[{"outboundTag":"blackhole_out","domain":["geosite:cn"]},{"outboundTag":"blackhole_ip_out","ip":["geoip:cn"]},{"outboundTag":"keep_out","domain":["domain:keep.example"]}]}}
 JSON
