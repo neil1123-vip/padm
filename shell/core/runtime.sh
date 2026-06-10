@@ -727,7 +727,7 @@ mkdirTools() {
     mkdir -p /etc/padm/xray/reality_scan
     mkdir -p /etc/padm/xray/tmp
     mkdir -p /etc/systemd/system/
-    mkdir -p /tmp/padm-tls/
+    mkdir -p "$(padmTmpFilePath padm-tls)"
 
     mkdir -p /etc/padm/warp
 
