@@ -91,6 +91,34 @@ refreshVlessEncryptionSubscriptions() {
     fi
 }
 
+restoreVlessEncryptionBackup() {
+    local backupFile=$1
+    local configFile=$2
+    local stateBackupFile=$3
+    local stateFile=$4
+    local hadStateBackup=$5
+    local stateMode=$6
+    local reason=$7
+    local restoreFailed=false
+    if ! mv "${backupFile}" "${configFile}"; then
+        errorCard "${reason}，且 VLESS Encryption 配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
+        return 1
+    fi
+    if [[ "${hadStateBackup}" == "true" ]]; then
+        if ! mv "${stateBackupFile}" "${stateFile}"; then
+            restoreFailed=true
+        fi
+    elif [[ "${stateMode}" == "remove" ]]; then
+        if ! rm -f "${stateFile}" >/dev/null 2>&1; then
+            restoreFailed=true
+        fi
+    fi
+    if [[ "${restoreFailed}" == "true" ]]; then
+        errorCard "${reason}，且 VLESS Encryption 状态恢复失败，请手动检查 ${stateFile} 和 ${stateBackupFile}"
+        return 1
+    fi
+}
+
 setVlessRealityEncryption() {
     local mode=$1
     local configFile
@@ -106,6 +134,7 @@ setVlessRealityEncryption() {
     local tmpBase
     local encryption
     local decryption
+    local hadStateBackup=false
     configFile=$(vlessEncryptionConfigFile)
     stateFile=$(vlessEncryptionStateFile)
     xrayBinary=$(vlessEncryptionXrayBinary)
@@ -125,6 +154,7 @@ setVlessRealityEncryption() {
     cp "${configFile}" "${backupFile}"
     if [[ -f "${stateFile}" ]]; then
         cp "${stateFile}" "${stateBackupFile}"
+        hadStateBackup=true
     else
         rm -f "${stateBackupFile}"
     fi
@@ -207,11 +237,9 @@ setVlessRealityEncryption() {
     fi
 
     if ! validateVlessEncryptionConfig; then
-        mv "${backupFile}" "${configFile}"
-        if [[ -f "${stateBackupFile}" ]]; then
-            mv "${stateBackupFile}" "${stateFile}"
-        elif [[ "${mode}" == "enable" ]]; then
-            rm -f "${stateFile}"
+        if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "Xray 配置校验失败"; then
+            rm -f "${stateTmpFile}"
+            return 1
         fi
         rm -f "${stateTmpFile}"
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
@@ -221,11 +249,9 @@ setVlessRealityEncryption() {
         return 1
     fi
     if ! reloadCore; then
-        mv "${backupFile}" "${configFile}"
-        if [[ -f "${stateBackupFile}" ]]; then
-            mv "${stateBackupFile}" "${stateFile}"
-        else
-            rm -f "${stateFile}"
+        if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "核心重载失败"; then
+            rm -f "${stateTmpFile}"
+            return 1
         fi
         rm -f "${stateTmpFile}"
         errorCard "核心重载失败，已回滚 VLESS Encryption 修改"

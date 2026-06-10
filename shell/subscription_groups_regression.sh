@@ -3192,6 +3192,28 @@ JSON
     [[ ! -e "${vlessState}" ]]
     [[ ! -e "${refreshMarker}" ]]
 
+    printf '%s\n' "${originalContent}" >"${vlessConfig}"
+    rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
+    (
+        mv() {
+            if [[ "$1" == "${vlessConfig}.vlessenc.bak" && "$2" == "${vlessConfig}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        set +e
+        setVlessRealityEncryption enable >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        jq -e '.inbounds[0].settings.decryption == "mlkem768x25519plus.native.dec"' "${vlessConfig}" >/dev/null
+        [[ "$(<"${vlessConfig}.vlessenc.bak")" == "${originalContent}" ]]
+        [[ -e "${vlessState}" ]]
+        [[ ! -e "${refreshMarker}" ]]
+    ) || return 1
+    printf '%s\n' "${originalContent}" >"${vlessConfig}"
+    rm -f "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
+
     reloadCore() { return 0; }
     subscribe() { return 1; }
     readNginxSubscribe() {
