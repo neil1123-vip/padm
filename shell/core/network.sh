@@ -127,7 +127,7 @@ checkDNSIP() {
         ipType=6
         if [[ "${dnsIP}" == *"network unreachable"* || -z "${dnsIP}" ]]; then
             errorCard "无法通过DNS获取域名IPv6地址，退出安装"
-            exit 0
+            return 1
         fi
     fi
     local publicIP=
@@ -135,10 +135,11 @@ checkDNSIP() {
     publicIP=$(getPublicIP "${ipType}")
     if [[ "${publicIP}" != "${dnsIP}" ]]; then
         statusCard "域名 IP 不一致" "当前 VPS IP：${publicIP}" "DNS 解析 IP：${dnsIP}" "请检查域名解析是否生效且正确"
-        exit 0
+        return 1
     else
         successCard "域名IP校验通过"
     fi
+    return 0
 }
 
 writeCheckPortOpenNginxConfig() {
@@ -193,6 +194,7 @@ checkPortOpen() {
     local port=$1
     local domain=$2
     local checkPortOpenResult=
+    local localIP=
     allowPort "${port}"
 
     if [[ -z "${btDomain}" ]]; then
@@ -207,13 +209,13 @@ checkPortOpen() {
         if ! writeCheckPortOpenNginxConfig "${port}" "${domain}" "${listenIPv6PortConfig}"; then
             statusCard "Nginx 配置校验失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 配置错误" "也可以执行 nginx -t 查看配置错误"
             rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
-            exit 0
+            return 1
         fi
         handleNginx start
         if [[ -z $(pgrep -f "nginx") ]]; then
             statusCard "Nginx 启动失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
             rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
-            exit 0
+            return 1
         fi
         # 检查域名和端口开放状态
         checkPortOpenResult=$(curl -s -m 10 "http://${domain}:${port}/checkPort")
@@ -233,10 +235,11 @@ checkPortOpen() {
                     statusCard "端口开放检测失败" "错误日志：${checkPortOpenResult}" "请将此错误日志通过 issues 提交反馈"
                 fi
             fi
-            exit 0
+            return 1
         fi
-        checkIP "${localIP}"
+        checkIP "${localIP}" || return 1
     fi
+    return 0
 }
 
 
@@ -264,14 +267,15 @@ checkIP() {
         if [[ -n ${localIP} ]]; then
             statusCard "检测返回值异常" "异常结果：${localIP}" "建议手动卸载 Nginx 后重新执行脚本"
         fi
-        exit 0
+        return 1
     else
         if [[ "${extraIP}" == *.* || "${extraIP}" == *:* ]]; then
             statusCard "检测到多个 IP" "请确认是否关闭 Cloudflare 云朵" "关闭云朵后等待三分钟再重试" "检测到的 IP：${localIP}"
-            exit 0
+            return 1
         fi
         successCard "检查当前域名IP正确"
     fi
+    return 0
 }
 
 # 检测端口是否占用

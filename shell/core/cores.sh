@@ -985,7 +985,7 @@ customXrayInstall() {
             statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
             handleXray stop
             if [[ "${selectCustomInstallType}" != ",7," || -n "${realityOnlyWithDomain}" ]]; then
-                customPortFunction
+                customPortFunction || return 1
             fi
         else
             # 申请tls
@@ -993,7 +993,7 @@ customXrayInstall() {
                 if [[ -n "${realityOnlyWithDomain}" ]]; then
                     statusCard "域名 Reality 证书" "将为自有入口域名申请本机 TLS 证书" "该证书用于客户端连接入口和前置 TLS，不是 Reality target/SNI 伪装目标证书"
                 fi
-                initTLSNginxConfig 2
+                initTLSNginxConfig 2 || return 1
                 installTLS 3
             else
                 statusCard "跳过 TLS 证书" "仅安装无域名 Reality"
@@ -1072,7 +1072,7 @@ customSingBoxInstall() {
         installTools 1
         # 申请tls
         if protocolSelectionNeedsTLS "${selectCustomInstallType}"; then
-            initTLSNginxConfig 2
+            initTLSNginxConfig 2 || return 1
             installTLS 3
             handleNginx stop
         fi
@@ -1142,10 +1142,10 @@ xrayCoreInstall() {
     if [[ -n "${btDomain}" ]]; then
         statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
         handleXray stop
-        customPortFunction
+        customPortFunction || return 1
     else
         # 申请tls
-        initTLSNginxConfig 3
+        initTLSNginxConfig 3 || return 1
         installTLS 4
     fi
 
@@ -1187,10 +1187,10 @@ singBoxInstall() {
     if [[ -n "${btDomain}" ]]; then
         statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
         handleXray stop
-        customPortFunction
+        customPortFunction || return 1
     else
         # 申请tls
-        initTLSNginxConfig 3
+        initTLSNginxConfig 3 || return 1
         installTLS 4
     fi
 

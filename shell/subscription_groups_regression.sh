@@ -745,6 +745,103 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${singBoxRc}" != "0" ]]
 )
 
+runNetworkCheckReturnFailureRegression() (
+    local root="${TMP_DIR}/network-check-return"
+    local dnsRcFile="${root}/dns.rc"
+    local ipRcFile="${root}/ip.rc"
+    local portRcFile="${root}/port.rc"
+    local templateRcFile="${root}/template.rc"
+    local writeProbe="${root}/template.write"
+    local dnsShellRc ipShellRc portShellRc templateShellRc
+
+    mkdir -p "${root}/nginx"
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    progressCard() { return 0; }
+    sleep() { return 0; }
+    dig() { return 1; }
+    getPublicIP() { printf '203.0.113.10\n'; }
+
+    set +e
+    (
+        set +e
+        checkDNSIP bad.example.com >/dev/null 2>&1
+        printf '%s\n' "$?" >"${dnsRcFile}"
+    )
+    dnsShellRc=$?
+    (
+        set +e
+        checkIP "" >/dev/null 2>&1
+        printf '%s\n' "$?" >"${ipRcFile}"
+    )
+    ipShellRc=$?
+    set -e
+    [[ "${dnsShellRc}" == "0" ]]
+    [[ "${ipShellRc}" == "0" ]]
+    [[ "$(<"${dnsRcFile}")" == "1" ]]
+    [[ "$(<"${ipRcFile}")" == "1" ]]
+
+    btDomain=
+    nginxConfigPath="${root}/nginx/"
+    handleSingBox() { return 0; }
+    handleXray() { return 0; }
+    cleanAgentNginxConf() { return 0; }
+    allowPort() { return 0; }
+    handleNginx() { return 0; }
+    hasIPv6Connectivity() { return 1; }
+    writeCheckPortOpenNginxConfig() { return 1; }
+
+    set +e
+    (
+        set +e
+        checkPortOpen 443 example.com >/dev/null 2>&1
+        printf '%s\n' "$?" >"${portRcFile}"
+    )
+    portShellRc=$?
+    set -e
+    [[ "${portShellRc}" == "0" ]]
+    [[ "$(<"${portRcFile}")" == "1" ]]
+
+    currentUUID=existing-user
+    currentClients='[]'
+    domain=tls.example.com
+    currentHost=tls.example.com
+    lastInstallationConfig=true
+    selectCustomInstallType=",0,"
+    singBoxVLESSVisionPort=10890
+
+    initSingBoxClients() { printf '[]\n'; }
+    readSingBoxPortResult() {
+        local -n resultRef=$1
+        resultRef=(10890)
+        return 0
+    }
+    checkDNSIP() { return 1; }
+    removeNginxDefaultConf() { return 0; }
+    checkPortOpen() { return 0; }
+    writeGeneratedJsonFile() {
+        printf 'called\n' >"${writeProbe}"
+        cat >/dev/null
+    }
+    setSniffRouting() { return 0; }
+
+    set +e
+    (
+        set +e
+        initSingBoxConfig custom 1 true >/dev/null 2>&1
+        printf '%s\n' "$?" >"${templateRcFile}"
+    )
+    templateShellRc=$?
+    set -e
+    [[ "${templateShellRc}" == "0" ]]
+    [[ "$(<"${templateRcFile}")" == "1" ]]
+    [[ ! -e "${writeProbe}" ]]
+)
+
 runConfigTransactionRegression() {
     local targetFile="${TMP_DIR}/transaction.json"
     local backupFile="${targetFile}.bak"
@@ -5265,6 +5362,7 @@ runRegressionTransactionCore() {
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
+        runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression
 }

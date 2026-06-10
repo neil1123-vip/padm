@@ -467,11 +467,11 @@ initSingBoxConfig() {
         readSingBoxPortResult result "${singBoxVLESSVisionPort}" || return 1
         statusCard "VLESS Vision端口" "${result[-1]}"
 
-        checkDNSIP "${domain}"
+        checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
         handleSingBox stop
 
-        checkPortOpen "${result[-1]}" "${domain}"
+        checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json padm-sing-box-vless-tcp <<EOF || { errorCard "sing-box VLESS Vision 入站模板提交失败"; return 1; }
 {
     "inbounds":[
@@ -503,11 +503,11 @@ EOF
         readSingBoxPortResult result "${singBoxVLESSWSPort}" || return 1
         statusCard "VLESS WS端口" "${result[-1]}"
 
-        checkDNSIP "${domain}"
+        checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
         handleSingBox stop
         randomPathFunction
-        checkPortOpen "${result[-1]}" "${domain}"
+        checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json padm-sing-box-vless-ws <<EOF || { errorCard "sing-box VLESS WS 入站模板提交失败"; return 1; }
 {
     "inbounds":[
@@ -545,11 +545,11 @@ EOF
         readSingBoxPortResult result "${singBoxVMessWSPort}" || return 1
         statusCard "VMess ws端口" "${result[-1]}"
 
-        checkDNSIP "${domain}"
+        checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
         handleSingBox stop
         randomPathFunction
-        checkPortOpen "${result[-1]}" "${domain}"
+        checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/05_VMess_WS_inbounds.json padm-sing-box-vmess-ws <<EOF || { errorCard "sing-box VMess WS 入站模板提交失败"; return 1; }
 {
     "inbounds":[
@@ -807,12 +807,12 @@ EOF
         readSingBoxPortResult result "${singBoxVMessHTTPUpgradePort}" || return 1
         statusCard "VMess HTTPUpgrade端口" "${result[-1]}"
 
-        checkDNSIP "${domain}"
+        checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf
         handleSingBox stop
         randomPathFunction
         rm -rf "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" >/dev/null 2>&1
-        checkPortOpen "${result[-1]}" "${domain}"
+        checkPortOpen "${result[-1]}" "${domain}" || return 1
         singBoxNginxConfig "$1" "${result[-1]}"
         bootStartup nginx
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json padm-sing-box-vmess-httpupgrade <<EOF || { errorCard "sing-box VMess HTTPUpgrade 入站模板提交失败"; return 1; }

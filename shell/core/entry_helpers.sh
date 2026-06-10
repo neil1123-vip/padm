@@ -29,7 +29,7 @@ initTLSNginxConfig() {
     else
         dnsTLSDomain=$(echo "${domain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')
         if [[ "${selectCoreType}" == "1" ]]; then
-            customPortFunction
+            customPortFunction || return 1
         fi
         # 修改配置
         handleNginx stop
@@ -154,17 +154,17 @@ customPortFunction() {
                 allowPort "${port}"
                 statusCard "TLS 入口端口" "${port}"
                 if [[ -z "${btDomain}" ]]; then
-                    checkDNSIP "${domain}"
+                    checkDNSIP "${domain}" || return 1
                     removeNginxDefaultConf
-                    checkPortOpen "${port}" "${domain}"
+                    checkPortOpen "${port}" "${domain}" || return 1
                 fi
             else
                 errorCard "端口输入错误"
-                exit 0
+                return 1
             fi
         else
             errorCard "端口不可为空"
-            exit 0
+            return 1
         fi
     fi
 }
