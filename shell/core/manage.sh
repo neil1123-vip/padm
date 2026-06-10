@@ -2037,12 +2037,18 @@ configTransactionCommit() {
     cp "${configFile}" "${backupFile}" || return 1
     mv "${configFile}.tmp" "${configFile}" || { rm -f "${backupFile}" "${configFile}.tmp"; return 1; }
     if ! "${validateFn}"; then
-        mv "${backupFile}" "${configFile}"
-        rm -f "${backupFile}" "${configFile}.tmp"
-        "${validateFn}" >/dev/null 2>&1 || true
-        echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
-        menuLine "${rollbackMessage}"
-        menuClose
+        if mv "${backupFile}" "${configFile}"; then
+            rm -f "${backupFile}" "${configFile}.tmp"
+            "${validateFn}" >/dev/null 2>&1 || true
+            echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
+            menuLine "${rollbackMessage}"
+            menuClose
+        else
+            rm -f "${configFile}.tmp"
+            echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
+            menuLine "配置校验失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
+            menuClose
+        fi
         return 1
     fi
     if ! "${reloadFn}"; then

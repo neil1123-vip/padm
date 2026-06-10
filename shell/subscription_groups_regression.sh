@@ -3269,6 +3269,30 @@ JSON
     [[ ! -e "${reloadCountFile}" ]]
     [[ ! -e "${refreshCountFile}" ]]
 
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
+    originalContent=$(<"${targetFile}")
+    rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
+    validateMode=fail
+    (
+        mv() {
+            if [[ "$1" == "${backupFile}" && "$2" == "${targetFile}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+        if configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "$(<"${targetFile}")" != "${originalContent}" ]]
+        jq -e '.mode == "new" and .port == 8443' "${targetFile}" >/dev/null
+        [[ "$(<"${backupFile}")" == "${originalContent}" ]]
+        [[ ! -e "${targetFile}.tmp" ]]
+        [[ ! -e "${reloadCountFile}" ]]
+        [[ ! -e "${refreshCountFile}" ]]
+    ) || return 1
+
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
     rm -f "${backupFile}"
     jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
     validateMode=success
