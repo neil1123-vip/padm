@@ -1461,7 +1461,7 @@ singBoxVersionManageMenu() {
     menuItem 4 "校验配置" "执行 sing-box merge + check"
     menuItem 5 "服务控制" "启动、停止、重启 sing-box"
     local logStatus=
-    if [[ -f /etc/padm/sing-box/conf/config/log.json && "$(jq -r .log.disabled /etc/padm/sing-box/conf/config/log.json)" == "false" ]]; then
+    if [[ -f "$(singBoxLogConfigFile)" && "$(jq -r .log.disabled "$(singBoxLogConfigFile)")" == "false" ]]; then
         menuItem 6 "关闭 debug 日志" "停止写入 sing-box debug 日志"
         logStatus=true
     else
@@ -1504,9 +1504,23 @@ singBoxVersionManageMenu() {
 }
 
 
+singBoxLogConfigFile() {
+    printf '%s\n' "${PADM_SINGBOX_LOG_CONFIG_FILE:-/etc/padm/sing-box/conf/config/log.json}"
+}
+
 # sing-box 日志
 singBoxLog() {
-    cat <<EOF >/etc/padm/sing-box/conf/config/log.json
+    local targetPath
+    local tmpPath backupPath hadBackup=false
+    targetPath=$(singBoxLogConfigFile)
+    mkdir -p "$(dirname "${targetPath}")" || { errorCard "sing-box 日志目录创建失败"; return 1; }
+    padmCreateTempFileForTarget tmpPath "${targetPath}" log || return 1
+    if [[ -f "${targetPath}" ]]; then
+        padmCreateTempFileForTarget backupPath "${targetPath}" backup || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+        cp "${targetPath}" "${backupPath}" || { padmRemoveCleanupPath "${backupPath}"; padmRemoveCleanupPath "${tmpPath}"; return 1; }
+        hadBackup=true
+    fi
+    cat <<EOF >"${tmpPath}"
 {
   "log": {
     "disabled": $1,
@@ -1516,7 +1530,39 @@ singBoxLog() {
   }
 }
 EOF
+    if ! commitGeneratedJsonFile "${tmpPath}" "${targetPath}"; then
+        if [[ -n "${backupPath}" ]]; then
+            padmRemoveCleanupPath "${backupPath}"
+        fi
+        padmRemoveCleanupPath "${tmpPath}"
+        errorCard "sing-box 日志配置写入失败"
+        return 1
+    fi
 
     serviceQueueRestart sing-box
-    serviceQueueApply
+    if serviceQueueApply; then
+        if [[ -n "${backupPath}" ]]; then
+            padmRemoveCleanupPath "${backupPath}"
+        fi
+        return 0
+    fi
+    if [[ "${hadBackup}" == "true" ]]; then
+        if ! commitGeneratedFile "${backupPath}" "${targetPath}" 644; then
+            padmForgetCleanupPath "${backupPath}"
+            errorCard "sing-box 日志配置重载失败，且旧配置恢复失败，请手动检查 ${targetPath}，备份文件：${backupPath}"
+            backupPath=
+            return 1
+        fi
+        backupPath=
+    else
+        if ! rm -f "${targetPath}" >/dev/null 2>&1; then
+            errorCard "sing-box 日志配置重载失败，且新配置清理失败，请手动检查 ${targetPath}"
+            return 1
+        fi
+    fi
+    if [[ -n "${backupPath}" ]]; then
+        padmRemoveCleanupPath "${backupPath}"
+    fi
+    errorCard "sing-box 日志配置重载失败，已回滚日志配置"
+    return 1
 }

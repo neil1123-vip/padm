@@ -2825,6 +2825,97 @@ runSingBoxUninstallFailurePropagationRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
+runSingBoxLogTransactionRegression() (
+    local root="${TMP_DIR}/sing-box-log-transaction"
+    local targetPath="${root}/conf/config/log.json"
+    local serviceLog="${root}/service.log"
+    local errorLog="${root}/error.log"
+    local applyMode rc
+
+    set +e
+    mkdir -p "$(dirname "${targetPath}")" || return 1
+    export PADM_SINGBOX_LOG_CONFIG_FILE="${targetPath}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    serviceQueueRestart() {
+        printf 'restart:%s\n' "$1" >>"${serviceLog}"
+        return 0
+    }
+    serviceQueueApply() {
+        printf 'apply:%s\n' "${applyMode}" >>"${serviceLog}"
+        [[ "${applyMode}" == "fail" ]] && return 1
+        return 0
+    }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    runSingBoxLogCase() {
+        local disabled=$1
+        local expectedRc=$2
+        local rcFile="${root}/sing-box-log.rc"
+        PADM_REGRESSION_APPLY_MODE="${applyMode}" \
+            PADM_SINGBOX_LOG_CONFIG_FILE="${targetPath}" \
+            bash -c '
+                set +e
+                source "$1/shell/core/runtime.sh"
+                source "$1/shell/core/services.sh"
+                source "$1/shell/core/cores.sh"
+                serviceLog=$2
+                errorLog=$3
+                disabled=$4
+                rcFile=$5
+                serviceQueueRestart() {
+                    printf "restart:%s\n" "$1" >>"${serviceLog}"
+                    return 0
+                }
+                serviceQueueApply() {
+                    printf "apply:%s\n" "${PADM_REGRESSION_APPLY_MODE}" >>"${serviceLog}"
+                    [[ "${PADM_REGRESSION_APPLY_MODE}" == "fail" ]] && return 1
+                    return 0
+                }
+                errorCard() { printf "%s\n" "$*" >>"${errorLog}"; }
+                singBoxLog "${disabled}" >/dev/null 2>&1
+                printf "%s\n" "$?" >"${rcFile}"
+            ' _ "${PROJECT_ROOT}" "${serviceLog}" "${errorLog}" "${disabled}" "${rcFile}" || return 1
+        rc=$(<"${rcFile}") || return 1
+        if [[ "${rc}" != "${expectedRc}" ]]; then
+            printf 'singBoxLog rc mismatch: expected=%s actual=%s\n' "${expectedRc}" "${rc}" >&2
+            return 1
+        fi
+        return 0
+    }
+
+    printf '{"log":{"disabled":true,"level":"warning"}}\n' >"${targetPath}" || return 1
+    : >"${serviceLog}" || return 1
+    : >"${errorLog}" || return 1
+    applyMode=fail
+    runSingBoxLogCase false 1 || return 1
+    jq -e '.log.disabled == true and .log.level == "warning"' "${targetPath}" >/dev/null || return 1
+    grep -qx 'restart:sing-box' "${serviceLog}" || return 1
+    grep -qx 'apply:fail' "${serviceLog}" || return 1
+    grep -q 'sing-box 日志配置重载失败' "${errorLog}" || return 1
+    ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
+
+    rm -f "${targetPath}" || return 1
+    : >"${serviceLog}" || return 1
+    : >"${errorLog}" || return 1
+    applyMode=fail
+    runSingBoxLogCase false 1 || return 1
+    [[ ! -e "${targetPath}" ]] || return 1
+    grep -qx 'restart:sing-box' "${serviceLog}" || return 1
+    grep -qx 'apply:fail' "${serviceLog}" || return 1
+    grep -q 'sing-box 日志配置重载失败' "${errorLog}" || return 1
+    ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
+
+    : >"${serviceLog}" || return 1
+    : >"${errorLog}" || return 1
+    applyMode=success
+    runSingBoxLogCase false 0 || return 1
+    jq -e '.log.disabled == false and .log.level == "debug" and .log.output == "/etc/padm/sing-box/conf/box.log"' "${targetPath}" >/dev/null || return 1
+    grep -qx 'restart:sing-box' "${serviceLog}" || return 1
+    grep -qx 'apply:success' "${serviceLog}" || return 1
+    [[ ! -s "${errorLog}" ]] || return 1
+    ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
+    return 0
+)
+
 runSingBoxProtocolReloadFailureRegression() (
     local root="${TMP_DIR}/sing-box-protocol-reload-failure"
     local reachedFile="${root}/accounts"
@@ -8997,6 +9088,7 @@ runRegressionTransactionCore() {
         runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
         runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
         runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
+        runRegressionStep sing-box-log-transaction runSingBoxLogTransactionRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression &&
         runRegressionStep user-mutation-failure-propagation runUserMutationFailurePropagationRegression
