@@ -2087,6 +2087,7 @@ runCoreBinaryInstallCopyFailureRegression() (
     local serviceLog="${root}/service.log"
     local copyFailureLog="${root}/copy-failure.log"
     local xrayRc singBoxRc
+    local restoreCopyShouldFail= xrayStartShouldFail= singBoxStartShouldFail=
 
     mkdir -p "$(dirname "${xrayBinary}")" "$(dirname "${singBoxBinary}")" "${root}/tmp"
     printf 'old-xray\n' >"${xrayBinary}"
@@ -2172,6 +2173,10 @@ runCoreBinaryInstallCopyFailureRegression() (
     cp() {
         local sourcePath=$1
         local targetPath=$2
+        if [[ "${restoreCopyShouldFail}" == "true" && "${sourcePath}" == "${xrayBinary}.bak.restore-fail" && "${targetPath}" == "${xrayBinary}" ]]; then
+            printf 'restore-xray\n' >>"${copyFailureLog}"
+            return 1
+        fi
         if [[ "${targetPath}" == "${xrayBinary}" && "${sourcePath}" != ${xrayBinary}.bak.* ]]; then
             printf 'xray\n' >>"${copyFailureLog}"
             return 1
@@ -2184,10 +2189,12 @@ runCoreBinaryInstallCopyFailureRegression() (
     }
     handleXray() {
         printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "start" && "${xrayStartShouldFail}" == "true" ]] && return 1
         return 0
     }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
         return 0
     }
     xrayRunning() { return 1; }
@@ -2211,6 +2218,7 @@ runCoreBinaryInstallCopyFailureRegression() (
     grep -qx 'sing-box' "${copyFailureLog}"
     grep -q 'Xray-core 更新失败' "${statusLog}"
     grep -q 'sing-box 更新失败' "${statusLog}"
+    grep -q '旧服务已尝试恢复启动' "${statusLog}"
     ! grep -q 'Xray-core更新成功' "${successLog}"
     ! grep -q 'sing-box更新成功' "${successLog}"
     grep -qx 'xray:stop:true' "${serviceLog}"
@@ -2218,6 +2226,39 @@ runCoreBinaryInstallCopyFailureRegression() (
     grep -qx 'sing-box:stop:true' "${serviceLog}"
     grep -qx 'sing-box:start:true' "${serviceLog}"
     [[ -z "${SERVICE_QUEUE_ALLOW_FAILURE}" ]]
+
+    : >"${statusLog}"
+    : >"${serviceLog}"
+    printf 'new-xray\n' >"${xrayBinary}"
+    printf 'old-xray\n' >"${xrayBinary}.bak.service-fail"
+    xrayStartShouldFail=true
+    set +e
+    finalizeFailedCoreBinaryInstall "Xray-core" "${xrayBinary}.bak.service-fail" "${xrayBinary}" handleXray "/tmp/xray.log" >/dev/null 2>&1
+    xrayRc=$?
+    set -e
+    xrayStartShouldFail=
+    [[ "${xrayRc}" == "1" ]]
+    [[ "$(<"${xrayBinary}")" == "old-xray" ]]
+    [[ ! -e "${xrayBinary}.bak.service-fail" ]]
+    grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
+
+    : >"${statusLog}"
+    : >"${serviceLog}"
+    printf 'new-xray\n' >"${xrayBinary}"
+    printf 'old-xray\n' >"${xrayBinary}.bak.restore-fail"
+    restoreCopyShouldFail=true
+    set +e
+    finalizeFailedCoreBinaryInstall "Xray-core" "${xrayBinary}.bak.restore-fail" "${xrayBinary}" handleXray "/tmp/xray.log" >/dev/null 2>&1
+    xrayRc=$?
+    set -e
+    restoreCopyShouldFail=
+    [[ "${xrayRc}" == "1" ]]
+    [[ "$(<"${xrayBinary}")" == "new-xray" ]]
+    [[ -e "${xrayBinary}.bak.restore-fail" ]]
+    grep -q '旧二进制恢复失败' "${statusLog}"
+    grep -q '旧二进制未恢复，已跳过服务启动' "${statusLog}"
+    ! grep -q 'xray:start:true' "${serviceLog}"
 )
 
 runNetworkCheckReturnFailureRegression() (

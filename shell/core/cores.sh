@@ -415,17 +415,28 @@ finalizeFailedCoreBinaryInstall() {
     local startFunction=$4
     local logFile=$5
     local restoreMessage="无旧二进制需要恢复"
+    local serviceRestoreMessage="未尝试恢复服务"
+    local restoredBinary=false
 
     if [[ -f "${backupBinary}" ]]; then
         if restoreCoreBinaryBackup "${backupBinary}" "${targetBinary}"; then
             restoreMessage="已恢复旧二进制"
+            restoredBinary=true
             rm -f "${backupBinary}" >/dev/null 2>&1 || true
         else
             restoreMessage="旧二进制恢复失败"
         fi
     fi
-    runCoreServiceActionAllowFailure "${startFunction}" start >/dev/null 2>&1 || true
-    statusCard "${coreName} 更新失败" "${restoreMessage}" "排查日志: ${logFile}"
+    if [[ "${restoredBinary}" == "true" ]]; then
+        if runCoreServiceActionAllowFailure "${startFunction}" start >/dev/null 2>&1; then
+            serviceRestoreMessage="旧服务已尝试恢复启动"
+        else
+            serviceRestoreMessage="旧服务恢复启动失败，请手动检查服务状态"
+        fi
+    elif [[ -f "${backupBinary}" ]]; then
+        serviceRestoreMessage="旧二进制未恢复，已跳过服务启动"
+    fi
+    statusCard "${coreName} 更新失败" "${restoreMessage}" "${serviceRestoreMessage}" "排查日志: ${logFile}"
     return 1
 }
 
