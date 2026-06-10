@@ -8,8 +8,7 @@ blacklist() {
 accessControlMenu() {
     if [[ -z "${configPath}" ]]; then
         errorCard "未安装，请使用脚本安装"
-        menu
-        exit 0
+        return 1
     fi
 
     echoContent title "\n┌─ 访问控制 ─────────────────────────────────────────"
@@ -99,6 +98,11 @@ showSingBoxAccessRuleFile() {
     jq -r '.route.rule_set[]?.url? // empty' "${file}" | sed 's/^/    /' || true
 }
 
+accessControlAbortChange() {
+    accessControlBackupRestore
+    return 1
+}
+
 addBlockedDomains() {
     local domainList
     echoContent title "\n┌─ 添加域名阻断 ─────────────────────────────────────"
@@ -109,18 +113,17 @@ addBlockedDomains() {
     autoRead access_block_domains "请录入要阻断的域名或规则:" domainList
     if [[ -z "${domainList}" ]]; then
         errorCard "域名不可为空"
-        accessControlMenu
-        return
+        return 1
     fi
 
-    accessControlBackupCreate
+    accessControlBackupCreate || return 1
     if [[ "${coreInstallType}" == "1" ]]; then
-        addXrayRouting blackhole_out outboundTag "${domainList}"
-        addXrayOutbound blackhole_out
+        addXrayRouting blackhole_out outboundTag "${domainList}" || { accessControlAbortChange; return 1; }
+        addXrayOutbound blackhole_out || { accessControlAbortChange; return 1; }
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
-        addSingBoxRouteRule "block_domain_outbound" "${domainList}" "block_domain_route"
-        addSingBoxOutbound "01_direct_outbound"
+        addSingBoxRouteRule "block_domain_outbound" "${domainList}" "block_domain_route" || { accessControlAbortChange; return 1; }
+        addSingBoxOutbound "01_direct_outbound" || { accessControlAbortChange; return 1; }
     fi
     applyAccessControlConfigChange || return 1
     successCard "域名阻断规则已添加"
@@ -132,20 +135,19 @@ addBlockedIPs() {
     menuLine "录入示例：1.1.1.1,8.8.8.8,1.1.1.0/24,2400:3200::/32,cn"
     menuClose
     autoRead access_block_ips "请录入 IP/CIDR:" ipList
-    normalizedIPs=$(validateAccessIPList "${ipList}") || { errorCard "IP/CIDR 格式错误"; accessControlMenu; return; }
+    normalizedIPs=$(validateAccessIPList "${ipList}") || { errorCard "IP/CIDR 格式错误"; return 1; }
     if [[ -z "${normalizedIPs}" ]]; then
         errorCard "IP/CIDR 不可为空"
-        accessControlMenu
-        return
+        return 1
     fi
 
-    accessControlBackupCreate
+    accessControlBackupCreate || return 1
     if [[ "${coreInstallType}" == "1" ]]; then
-        addXrayIPRouting blackhole_ip_out outboundTag "${normalizedIPs}"
-        addXrayOutbound blackhole_ip_out
+        addXrayIPRouting blackhole_ip_out outboundTag "${normalizedIPs}" || { accessControlAbortChange; return 1; }
+        addXrayOutbound blackhole_ip_out || { accessControlAbortChange; return 1; }
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
-        addSingBoxIPRouteRule "block_ip_outbound" "${normalizedIPs}" "block_ip_route"
+        addSingBoxIPRouteRule "block_ip_outbound" "${normalizedIPs}" "block_ip_route" || { accessControlAbortChange; return 1; }
     fi
     applyAccessControlConfigChange || return 1
     successCard "IP/CIDR 阻断规则已添加"
@@ -160,18 +162,17 @@ addDirectAllowDomains() {
     autoRead access_allow_domains "请录入直连例外域名:" allowDomainList
     if [[ -z "${allowDomainList}" ]]; then
         errorCard "域名不可为空"
-        accessControlMenu
-        return
+        return 1
     fi
 
-    accessControlBackupCreate
+    accessControlBackupCreate || return 1
     if [[ "${coreInstallType}" == "1" ]]; then
-        addXrayRouting allow_domain_direct_outbound outboundTag "${allowDomainList}" "top"
-        addXrayOutbound allow_domain_direct_outbound
+        addXrayRouting allow_domain_direct_outbound outboundTag "${allowDomainList}" "top" || { accessControlAbortChange; return 1; }
+        addXrayOutbound allow_domain_direct_outbound || { accessControlAbortChange; return 1; }
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
-        addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route"
-        addSingBoxOutbound "01_direct_outbound"
+        addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route" || { accessControlAbortChange; return 1; }
+        addSingBoxOutbound "01_direct_outbound" || { accessControlAbortChange; return 1; }
     fi
     applyAccessControlConfigChange || return 1
     successCard "直连例外已添加"
@@ -200,18 +201,28 @@ manageRegionalBlockPolicy() {
         allowDomainList="${allowDomainList},${extraAllowDomainList}"
     fi
 
-    accessControlBackupCreate
+    accessControlBackupCreate || return 1
     if [[ "${coreInstallType}" == "1" ]]; then
-        [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]] && { addXrayRouting blackhole_out outboundTag "cn"; addXrayOutbound blackhole_out; }
-        [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]] && { addXrayIPRouting blackhole_ip_out outboundTag "cn"; addXrayOutbound blackhole_ip_out; }
-        addXrayRouting allow_domain_direct_outbound outboundTag "${allowDomainList}" "top"
-        addXrayOutbound allow_domain_direct_outbound
+        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
+            addXrayRouting blackhole_out outboundTag "cn" || { accessControlAbortChange; return 1; }
+            addXrayOutbound blackhole_out || { accessControlAbortChange; return 1; }
+        fi
+        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
+            addXrayIPRouting blackhole_ip_out outboundTag "cn" || { accessControlAbortChange; return 1; }
+            addXrayOutbound blackhole_ip_out || { accessControlAbortChange; return 1; }
+        fi
+        addXrayRouting allow_domain_direct_outbound outboundTag "${allowDomainList}" "top" || { accessControlAbortChange; return 1; }
+        addXrayOutbound allow_domain_direct_outbound || { accessControlAbortChange; return 1; }
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then
-        [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]] && { addSingBoxRouteRule "cn_block_outbound" "cn" "cn_block_route"; }
-        [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]] && { addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route"; }
-        addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route"
-        addSingBoxOutbound "01_direct_outbound"
+        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "2" ]]; then
+            addSingBoxRouteRule "cn_block_outbound" "cn" "cn_block_route" || { accessControlAbortChange; return 1; }
+        fi
+        if [[ "${policyStatus}" == "1" || "${policyStatus}" == "3" ]]; then
+            addSingBoxGeoIPRouteRule "block_ip_outbound" "cn" "cn_block_ip_route" || { accessControlAbortChange; return 1; }
+        fi
+        addSingBoxRouteRule "01_direct_outbound" "${allowDomainList}" "00_allow_domain_route" || { accessControlAbortChange; return 1; }
+        addSingBoxOutbound "01_direct_outbound" || { accessControlAbortChange; return 1; }
     fi
     applyAccessControlConfigChange || return 1
     successCard "区域阻断策略已应用"
@@ -227,15 +238,18 @@ removeAccessControlMenu() {
     menuReturnItem 6 "返回" "回到访问控制"
     menuClose
     autoRead access_remove_menu "请选择:" removeStatus
-    accessControlBackupCreate
     case "${removeStatus}" in
-    1) removeAccessControlByKind domain ;;
-    2) removeAccessControlByKind ip ;;
-    3) removeAccessControlByKind allow ;;
-    4) removeAccessControlByKind region ;;
-    5) removeAccessControlByKind all ;;
+    1|2|3|4|5) ;;
     6) accessControlMenu; return ;;
     *) errorCard "选择错误，请重新选择"; removeAccessControlMenu; return ;;
+    esac
+    accessControlBackupCreate || return 1
+    case "${removeStatus}" in
+    1) removeAccessControlByKind domain || { accessControlAbortChange; return 1; } ;;
+    2) removeAccessControlByKind ip || { accessControlAbortChange; return 1; } ;;
+    3) removeAccessControlByKind allow || { accessControlAbortChange; return 1; } ;;
+    4) removeAccessControlByKind region || { accessControlAbortChange; return 1; } ;;
+    5) removeAccessControlByKind all || { accessControlAbortChange; return 1; } ;;
     esac
     applyAccessControlConfigChange || return 1
     successCard "访问控制规则已移除"
@@ -246,27 +260,27 @@ removeAccessControlByKind() {
     if [[ "${coreInstallType}" == "1" ]]; then
         case "${kind}" in
         domain)
-            unInstallRouting blackhole_out outboundTag
-            removeXrayOutbound blackhole_out
+            unInstallRouting blackhole_out outboundTag || return 1
+            removeXrayOutbound blackhole_out || return 1
             ;;
         ip)
-            unInstallRouting blackhole_ip_out outboundTag
-            removeXrayOutbound blackhole_ip_out
+            unInstallRouting blackhole_ip_out outboundTag || return 1
+            removeXrayOutbound blackhole_ip_out || return 1
             ;;
         allow)
-            unInstallRouting allow_domain_direct_outbound outboundTag
-            removeXrayOutbound allow_domain_direct_outbound
+            unInstallRouting allow_domain_direct_outbound outboundTag || return 1
+            removeXrayOutbound allow_domain_direct_outbound || return 1
             ;;
         region)
-            removeXrayRegionalRules
+            removeXrayRegionalRules || return 1
             ;;
         all)
-            unInstallRouting blackhole_out outboundTag
-            unInstallRouting blackhole_ip_out outboundTag
-            unInstallRouting allow_domain_direct_outbound outboundTag
-            removeXrayOutbound blackhole_out
-            removeXrayOutbound blackhole_ip_out
-            removeXrayOutbound allow_domain_direct_outbound
+            unInstallRouting blackhole_out outboundTag || return 1
+            unInstallRouting blackhole_ip_out outboundTag || return 1
+            unInstallRouting allow_domain_direct_outbound outboundTag || return 1
+            removeXrayOutbound blackhole_out || return 1
+            removeXrayOutbound blackhole_ip_out || return 1
+            removeXrayOutbound allow_domain_direct_outbound || return 1
             ;;
         esac
     fi
@@ -274,30 +288,30 @@ removeAccessControlByKind() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         case "${kind}" in
         domain)
-            removeSingBoxConfig "block_domain_route"
-            removeSingBoxConfig "block_domain_outbound"
+            removeSingBoxConfig "block_domain_route" || return 1
+            removeSingBoxConfig "block_domain_outbound" || return 1
             ;;
         ip)
-            removeSingBoxConfig "block_ip_route"
-            removeSingBoxConfig "block_ip_outbound"
+            removeSingBoxConfig "block_ip_route" || return 1
+            removeSingBoxConfig "block_ip_outbound" || return 1
             ;;
         allow)
-            removeSingBoxConfig "00_allow_domain_route"
+            removeSingBoxConfig "00_allow_domain_route" || return 1
             ;;
         region)
-            removeSingBoxConfig "cn_block_route"
-            removeSingBoxConfig "cn_block_outbound"
-            removeSingBoxConfig "cn_block_ip_route"
+            removeSingBoxConfig "cn_block_route" || return 1
+            removeSingBoxConfig "cn_block_outbound" || return 1
+            removeSingBoxConfig "cn_block_ip_route" || return 1
             ;;
         all)
-            removeSingBoxConfig "block_domain_route"
-            removeSingBoxConfig "block_domain_outbound"
-            removeSingBoxConfig "block_ip_route"
-            removeSingBoxConfig "block_ip_outbound"
-            removeSingBoxConfig "cn_block_route"
-            removeSingBoxConfig "cn_block_outbound"
-            removeSingBoxConfig "cn_block_ip_route"
-            removeSingBoxConfig "00_allow_domain_route"
+            removeSingBoxConfig "block_domain_route" || return 1
+            removeSingBoxConfig "block_domain_outbound" || return 1
+            removeSingBoxConfig "block_ip_route" || return 1
+            removeSingBoxConfig "block_ip_outbound" || return 1
+            removeSingBoxConfig "cn_block_route" || return 1
+            removeSingBoxConfig "cn_block_outbound" || return 1
+            removeSingBoxConfig "cn_block_ip_route" || return 1
+            removeSingBoxConfig "00_allow_domain_route" || return 1
             ;;
         esac
     fi
@@ -308,7 +322,7 @@ removeXrayRegionalRules() {
         updateRoutingJsonConfig "${configPath}09_routing.json" '
             del(.routing.rules[] | select((.outboundTag == "blackhole_out") and ((.domain // []) | index("geosite:cn")))) |
             del(.routing.rules[] | select((.outboundTag == "blackhole_ip_out") and ((.ip // []) | index("geoip:cn"))))
-        '
+        ' || return 1
     fi
 }
 

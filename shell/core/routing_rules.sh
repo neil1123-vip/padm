@@ -147,7 +147,7 @@ addXrayRouting() {
 
     if [[ -z "${tag}" || -z "${type}" || -z "${domain}" ]]; then
         errorCard "参数错误"
-        exit 0
+        return 1
     fi
 
     local routingRule=
@@ -169,7 +169,7 @@ addXrayRouting() {
 EOF
     fi
     local routingRule=
-    routingRule=$(jq -r ".routing.rules[]|select(.outboundTag==\"${tag}\" and (.protocol == null))" ${configPath}09_routing.json)
+    routingRule=$(jq -r ".routing.rules[]|select(.outboundTag==\"${tag}\" and (.protocol == null))" "${configPath}09_routing.json") || return 1
 
     if [[ -z "${routingRule}" ]]; then
         routingRule="{\"type\": \"field\",\"domain\": [],\"outboundTag\": \"${tag}\"}"
@@ -187,20 +187,20 @@ EOF
     done < <(echo "${domain}" | tr ',' '\n')
     if [[ ${#newRules[@]} -gt 0 ]]; then
         local rulesJson
-        rulesJson=$(printf '%s\n' "${newRules[@]}" | jq -R -s 'split("\n") | map(select(length > 0))')
-        routingRule=$(jq -r --argjson rules "${rulesJson}" '.domain += $rules' <<<"${routingRule}")
+        rulesJson=$(printf '%s\n' "${newRules[@]}" | jq -R -s 'split("\n") | map(select(length > 0))') || return 1
+        routingRule=$(jq -r --argjson rules "${rulesJson}" '.domain += $rules' <<<"${routingRule}") || return 1
     fi
 
     unInstallRouting "${tag}" "${type}" || return 1
-    if ! grep -q "gstatic.com" ${configPath}09_routing.json && [[ "${tag}" == "blackhole_out" ]]; then
+    if ! grep -q "gstatic.com" "${configPath}09_routing.json" && [[ "${tag}" == "blackhole_out" ]]; then
         updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type": "field","domain": ["domain:gstatic.com"],"outboundTag": "allow_domain_direct_outbound"}]' || return 1
-        addXrayOutbound allow_domain_direct_outbound
+        addXrayOutbound allow_domain_direct_outbound || return 1
     fi
 
     if [[ "${rulePosition}" == "top" ]]; then
-        updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules = [$routingRule] + .routing.rules' --argjson routingRule "${routingRule}"
+        updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules = [$routingRule] + .routing.rules' --argjson routingRule "${routingRule}" || return 1
     else
-        updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [$routingRule]' --argjson routingRule "${routingRule}"
+        updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [$routingRule]' --argjson routingRule "${routingRule}" || return 1
     fi
 }
 
@@ -214,7 +214,7 @@ addXrayIPRouting() {
 
     if [[ -z "${tag}" || -z "${type}" || -z "${ipList}" ]]; then
         errorCard "参数错误"
-        exit 0
+        return 1
     fi
 
     if [[ ! -f "${configPath}09_routing.json" ]]; then
@@ -229,7 +229,7 @@ EOF
     fi
 
     local routingRule=
-    routingRule=$(jq -r ".routing.rules[]|select(.outboundTag==\"${tag}\" and (.protocol == null) and (.ip != null))" ${configPath}09_routing.json)
+    routingRule=$(jq -r ".routing.rules[]|select(.outboundTag==\"${tag}\" and (.protocol == null) and (.ip != null))" "${configPath}09_routing.json") || return 1
     if [[ -z "${routingRule}" ]]; then
         routingRule="{\"type\": \"field\",\"ip\": [],\"outboundTag\": \"${tag}\"}"
     fi
@@ -254,12 +254,12 @@ EOF
     done < <(echo "${ipList}" | tr ',' '\n')
     if [[ ${#newRules[@]} -gt 0 ]]; then
         local rulesJson
-        rulesJson=$(printf '%s\n' "${newRules[@]}" | jq -R -s 'split("\n") | map(select(length > 0))')
-        routingRule=$(jq -r --argjson rules "${rulesJson}" '.ip += $rules' <<<"${routingRule}")
+        rulesJson=$(printf '%s\n' "${newRules[@]}" | jq -R -s 'split("\n") | map(select(length > 0))') || return 1
+        routingRule=$(jq -r --argjson rules "${rulesJson}" '.ip += $rules' <<<"${routingRule}") || return 1
     fi
 
     unInstallRouting "${tag}" "${type}" || return 1
-    updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [$routingRule]' --argjson routingRule "${routingRule}"
+    updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [$routingRule]' --argjson routingRule "${routingRule}" || return 1
 }
 
 # 添加 sing-box IP 屏蔽路由规则

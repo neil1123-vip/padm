@@ -366,30 +366,131 @@ JSON
     ! validateAccessIPList 'bad-ip' >/dev/null
 }
 
-runAccessControlFailureReturnRegression() {
-    local marker="${TMP_DIR}/access-control-return.marker"
-
-    rm -f "${marker}"
+runAccessControlFailureReturnCase() {
     (
-        configPath="${TMP_DIR}/access-control-return/xray/"
-        singBoxConfigPath=
-        coreInstallType=1
-        mkdir -p "${configPath}"
-        autoRead() { printf -v "$3" 'example.com'; }
-        accessControlBackupCreate() { return 0; }
-        addXrayRouting() { return 0; }
-        addXrayOutbound() { return 0; }
-        validateAccessControlConfig() { return 1; }
-        reloadCore() { return 0; }
+    local mode=$1
+    local action=$2
+    local root="${TMP_DIR}/access-control-return-${mode}"
+    local backupMarker="${root}/backup"
+    local addMarker="${root}/add"
+    local outboundMarker="${root}/outbound"
+    local uninstallMarker="${root}/uninstall"
+    local removeMarker="${root}/remove"
+    local restoreMarker="${root}/restore"
+    local reloadMarker="${root}/reload"
+    local successMarker="${root}/success"
+    local removeChoice=1
+    local rc
 
-        set +e
+    configPath="${root}/xray/"
+    singBoxConfigPath=
+    coreInstallType=1
+    mkdir -p "${configPath}"
+
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuItem() { return 0; }
+    menuDangerItem() { return 0; }
+    menuReturnItem() { return 0; }
+    menuClose() { return 0; }
+    successCard() {
+        printf 'success\n' >"${successMarker}"
+        return 0
+    }
+    autoRead() {
+        case "$1" in
+        access_block_domains) printf -v "$3" 'example.com' ;;
+        access_remove_menu) printf -v "$3" "${removeChoice}" ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    accessControlBackupCreate() {
+        printf 'backup\n' >"${backupMarker}"
+        [[ "${mode}" != "backup-fail" ]]
+    }
+    accessControlBackupRestore() {
+        printf 'restore\n' >"${restoreMarker}"
+        return 0
+    }
+    addXrayRouting() {
+        printf 'add\n' >"${addMarker}"
+        [[ "${mode}" != "add-fail" ]]
+    }
+    addXrayOutbound() {
+        printf 'outbound\n' >"${outboundMarker}"
+        [[ "${mode}" != "outbound-fail" ]]
+    }
+    unInstallRouting() {
+        printf 'uninstall\n' >"${uninstallMarker}"
+        [[ "${mode}" != "uninstall-fail" ]]
+    }
+    removeXrayOutbound() {
+        printf 'remove\n' >"${removeMarker}"
+        [[ "${mode}" != "remove-fail" ]]
+    }
+    validateAccessControlConfig() {
+        [[ "${mode}" != "validate-fail" ]]
+    }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" ]]
+    }
+
+    rm -f "${backupMarker}" "${addMarker}" "${outboundMarker}" "${uninstallMarker}" "${removeMarker}" "${restoreMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    if [[ "${action}" == "remove" ]]; then
+        removeAccessControlMenu >/dev/null 2>&1
+    else
         addBlockedDomains >/dev/null 2>&1
-        local rc=$?
-        set -e
-        [[ "${rc}" == "1" ]] || exit 1
-        : >"${marker}"
-    ) || return 1
-    [[ -f "${marker}" ]]
+    fi
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+
+    case "${mode}" in
+    backup-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ ! -e "${addMarker}" ]]
+        [[ ! -e "${reloadMarker}" ]]
+        ;;
+    add-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ -e "${addMarker}" ]]
+        [[ -e "${restoreMarker}" ]]
+        [[ ! -e "${outboundMarker}" ]]
+        [[ ! -e "${reloadMarker}" ]]
+        ;;
+    validate-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ -e "${addMarker}" ]]
+        [[ -e "${outboundMarker}" ]]
+        [[ ! -e "${reloadMarker}" ]]
+        ;;
+    reload-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ -e "${addMarker}" ]]
+        [[ -e "${outboundMarker}" ]]
+        [[ -e "${reloadMarker}" ]]
+        ;;
+    remove-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ -e "${uninstallMarker}" ]]
+        [[ -e "${removeMarker}" ]]
+        [[ -e "${restoreMarker}" ]]
+        [[ ! -e "${reloadMarker}" ]]
+        ;;
+    esac
+    [[ ! -e "${successMarker}" ]]
+    )
+}
+
+runAccessControlFailureReturnRegression() {
+    runAccessControlFailureReturnCase backup-fail add &&
+        runAccessControlFailureReturnCase add-fail add &&
+        runAccessControlFailureReturnCase validate-fail add &&
+        runAccessControlFailureReturnCase reload-fail add &&
+        runAccessControlFailureReturnCase remove-fail remove
 }
 
 runBTRoutingFailureReturnRegression() (
