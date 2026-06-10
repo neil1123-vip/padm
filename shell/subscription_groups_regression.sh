@@ -6683,6 +6683,7 @@ runRemoteControlServerRefreshRegression() (
 
     eval "$(declare -f subscriptionControlApplyAccountPlan | sed '1s/^subscriptionControlApplyAccountPlan/originalSubscriptionControlApplyAccountPlan/')"
     eval "$(declare -f subscriptionSyncSetUsersInFile | sed '1s/^subscriptionSyncSetUsersInFile/originalSubscriptionSyncSetUsersInFile/')"
+    eval "$(declare -f subscriptionSyncPlanFromAccounts | sed '1s/^subscriptionSyncPlanFromAccounts/originalSubscriptionSyncPlanFromAccounts/')"
     eval "$(declare -f renderSubscribeUserOutputs | sed '1s/^renderSubscribeUserOutputs/originalRenderSubscribeUserOutputs/')"
 
     subscriptionSyncPlanFromAccounts() {
@@ -6870,6 +6871,77 @@ JSON
     if [[ -n "${refreshRollbackOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${refreshRollbackOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
     renderSubscribeUserOutputs() {
         originalRenderSubscribeUserOutputs "$@"
+    }
+
+    local restoreFailureRoot="${TMP_DIR}/remote-control-restore-failure"
+    local restoreFailureLocalDir="${restoreFailureRoot}/subscribe_local"
+    local restoreFailurePublicDir="${restoreFailureRoot}/subscribe"
+    local restoreFailureOldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local restoreFailureOldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
+    local restoreFailureOldScriptDir="${SCRIPT_DIR}"
+    local restoreFailureOldTmpDir="${TMPDIR:-}"
+    local restoreFailureBackupDirs=()
+    mkdir -p "${restoreFailureRoot}/xray" "${restoreFailureLocalDir}/default" "${restoreFailurePublicDir}/default"
+    configPath="${restoreFailureRoot}/xray/"
+    singBoxConfigPath="${restoreFailureRoot}/xray/"
+    TMPDIR="${restoreFailureRoot}"
+    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+    export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureLocalDir}"
+    export PADM_SUBSCRIBE_DIR="${restoreFailurePublicDir}"
+    SCRIPT_DIR="${PROJECT_ROOT}"
+    printf 'old local\n' >"${restoreFailureLocalDir}/default/existing"
+    printf 'old public\n' >"${restoreFailurePublicDir}/default/existing-md5"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    coreInstallType=1
+    subscriptionSyncPlanFromAccounts() {
+        printf '{"create":["sub_restore_fail"],"remove":[]}'
+    }
+    subscriptionControlApplyAccountPlan() {
+        originalSubscriptionControlApplyAccountPlan "$@"
+    }
+    renderSubscribeUserOutputs() {
+        originalRenderSubscribeUserOutputs "$@"
+        return 1
+    }
+    cp() {
+        if [[ "$1" == "-a" && "$2" == "${restoreFailureRoot}"/padm-subscription-output-backup.*/*/. && "$3" == "${restoreFailureLocalDir}/" ]]; then
+            return 1
+        fi
+        command cp "$@"
+    }
+    set +e
+    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"restore-fail","uuid":"88888888-8888-8888-8888-888888888888"}],"dry_run":false}' >"${responseFile}.restore-failure"
+    local restoreFailureStatus=$?
+    set -e
+    unset -f cp
+    [[ "${restoreFailureStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed" and (.error_detail.message | contains("订阅输出恢复失败"))' "${responseFile}.restore-failure" >/dev/null
+    mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
+    [[ "${#restoreFailureBackupDirs[@]}" == "2" ]]
+    find "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*' | grep -q .
+    [[ ! -e "${restoreFailureLocalDir}/default/existing" || "$(<"${restoreFailureLocalDir}/default/existing")" != "old local" ]]
+    if find "${restoreFailureRoot}/xray" -name '*.sync.*' | grep -q .; then
+        return 1
+    fi
+    if [[ -n "${restoreFailureOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${restoreFailureOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${restoreFailureOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    coreInstallType="${oldCoreInstallType}"
+    SCRIPT_DIR="${restoreFailureOldScriptDir}"
+    if [[ -n "${restoreFailureOldTmpDir}" ]]; then export TMPDIR="${restoreFailureOldTmpDir}"; else unset TMPDIR; fi
+    renderSubscribeUserOutputs() {
+        originalRenderSubscribeUserOutputs "$@"
+    }
+    subscriptionControlApplyAccountPlan() {
+        originalSubscriptionControlApplyAccountPlan "$@"
+    }
+    subscriptionSyncPlanFromAccounts() {
+        originalSubscriptionSyncPlanFromAccounts "$@"
     }
 
     subscriptionControlApplyAccountPlan() {

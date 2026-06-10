@@ -443,7 +443,7 @@ class Handler(BaseHTTPRequestHandler):
         env["PADM_CONTROL_TOKEN"] = self.token()
         env["PADM_SKIP_REMOTE_REF_CHECK"] = "1"
         try:
-            result = subprocess.run(cmd, input=payload, text=True, capture_output=True, timeout=SCRIPT_TIMEOUT, env=env)
+            result = subprocess.run(cmd, input=payload, text=True, capture_output=True, timeout=SCRIPT_TIMEOUT, env=env, encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return {"ok": False, "error": "script_timeout", "error_detail": {"type": "script_timeout", "message": "脚本执行超时"}}
         except OSError:
@@ -467,7 +467,7 @@ class Handler(BaseHTTPRequestHandler):
         if length > MAX_BODY_SIZE:
             self.respond(413, {"ok": False, "error": "payload_too_large"})
             return
-        payload = self.rfile.read(length).decode() if length > 0 else ""
+        payload = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else ""
         body = self.call_script(endpoint, payload)
         self.respond(self.response_status(endpoint, body), body)
 
@@ -684,12 +684,22 @@ subscriptionControlRestoreAppliedPlan() {
     local previousGroupsState=$1
     local configBackupDir=$2
     local outputBackupDir=${3:-}
-    subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || true
+    SUBSCRIPTION_CONTROL_RESTORE_ERROR=
+    if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
+        SUBSCRIPTION_CONTROL_RESTORE_ERROR="控制面同步失败后状态恢复失败"
+        return 1
+    fi
     if [[ -n "${configBackupDir}" ]]; then
-        subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1 || true
+        if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
+            SUBSCRIPTION_CONTROL_RESTORE_ERROR="控制面同步失败后配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+            return 1
+        fi
     fi
     if [[ -n "${outputBackupDir}" ]]; then
-        subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1 || true
+        if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
+            SUBSCRIPTION_CONTROL_RESTORE_ERROR="控制面同步失败后订阅输出恢复失败，请手动检查备份目录: ${outputBackupDir}"
+            return 1
+        fi
     fi
 }
 
@@ -737,6 +747,7 @@ subscriptionControlApplySync() {
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
     configBackupDir=$(subscriptionSyncCreateConfigBackups) || return 1
     outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || { padmRemoveCleanupPath "${configBackupDir}"; return 1; }
+    SUBSCRIPTION_CONTROL_RESTORE_ERROR=
     if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
         padmRemoveCleanupPath "${configBackupDir}"
         padmRemoveCleanupPath "${outputBackupDir}"
@@ -745,18 +756,26 @@ subscriptionControlApplySync() {
     fi
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
         if ! subscriptionSyncReconcileLocalServices; then
-            subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"
-            padmRemoveCleanupPath "${configBackupDir}"
-            padmRemoveCleanupPath "${outputBackupDir}"
-            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:"本机服务重建失败"}, plan:$plan}'
+            if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
+                padmRemoveCleanupPath "${configBackupDir}"
+                padmRemoveCleanupPath "${outputBackupDir}"
+            else
+                padmForgetCleanupPath "${configBackupDir}"
+                padmForgetCleanupPath "${outputBackupDir}"
+            fi
+            jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-本机服务重建失败}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:$message}, plan:$plan}'
             return 1
         fi
     else
         if ! subscriptionControlRefreshPublishedSubscriptions; then
-            subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"
-            padmRemoveCleanupPath "${configBackupDir}"
-            padmRemoveCleanupPath "${outputBackupDir}"
-            jq -n --argjson plan "${plan}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:"订阅发布刷新失败"}, plan:$plan}'
+            if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
+                padmRemoveCleanupPath "${configBackupDir}"
+                padmRemoveCleanupPath "${outputBackupDir}"
+            else
+                padmForgetCleanupPath "${configBackupDir}"
+                padmForgetCleanupPath "${outputBackupDir}"
+            fi
+            jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-订阅发布刷新失败}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:$message}, plan:$plan}'
             return 1
         fi
     fi
