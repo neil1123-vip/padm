@@ -33,7 +33,12 @@ vlessEncryptionConfigFile() {
 validateVlessEncryptionConfig() {
     local xrayBinary
     xrayBinary=$(vlessEncryptionXrayBinary)
-    "${xrayBinary}" -test -confdir "$(vlessEncryptionXrayConfDir)" >/tmp/padm-xray-test.log 2>&1
+    "${xrayBinary}" -test -confdir "$(vlessEncryptionXrayConfDir)" >"$(vlessEncryptionXrayTestLog)" 2>&1
+}
+
+vlessEncryptionXrayTestLog() {
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/padm-xray-test.log"
 }
 
 xrayVersionAtLeast() {
@@ -96,6 +101,9 @@ setVlessRealityEncryption() {
     local xrayBinary
     local xrayVersion
     local vlessEncOutput
+    local vlessEncOut
+    local vlessEncErr
+    local tmpBase
     local encryption
     local decryption
     configFile=$(vlessEncryptionConfigFile)
@@ -128,15 +136,28 @@ setVlessRealityEncryption() {
             rm -f "${backupFile}" "${stateBackupFile}"
             return 1
         fi
-        if ! "${xrayBinary}" vlessenc >/tmp/padm-vlessenc.out 2>/tmp/padm-vlessenc.err; then
+        tmpBase="${TMPDIR:-/tmp}"
+        padmCreateTempPath vlessEncOut "${tmpBase%/}/padm-vlessenc.out.XXXXXX" || {
+            rm -f "${backupFile}" "${stateBackupFile}"
+            return 1
+        }
+        padmCreateTempPath vlessEncErr "${tmpBase%/}/padm-vlessenc.err.XXXXXX" || {
+            padmRemoveCleanupPath "${vlessEncOut}"
+            rm -f "${backupFile}" "${stateBackupFile}"
+            return 1
+        }
+        if ! "${xrayBinary}" vlessenc >"${vlessEncOut}" 2>"${vlessEncErr}"; then
             errorCard "xray vlessenc 执行失败，请先确认当前 Xray-core 支持该命令"
-            rm -f "${backupFile}" "${stateBackupFile}" /tmp/padm-vlessenc.out /tmp/padm-vlessenc.err
+            padmRemoveCleanupPath "${vlessEncOut}"
+            padmRemoveCleanupPath "${vlessEncErr}"
+            rm -f "${backupFile}" "${stateBackupFile}"
             return 1
         fi
-        vlessEncOutput=$(cat /tmp/padm-vlessenc.out)
+        vlessEncOutput=$(cat "${vlessEncOut}")
         encryption=$(printf '%s\n' "${vlessEncOutput}" | extractVlessEncField encryption)
         decryption=$(printf '%s\n' "${vlessEncOutput}" | extractVlessEncField decryption)
-        rm -f /tmp/padm-vlessenc.out /tmp/padm-vlessenc.err
+        padmRemoveCleanupPath "${vlessEncOut}"
+        padmRemoveCleanupPath "${vlessEncErr}"
         if [[ -z "${encryption}" || -z "${decryption}" ]]; then
             errorCard "无法解析 xray vlessenc 输出，已取消启用"
             rm -f "${backupFile}" "${stateBackupFile}"
@@ -195,7 +216,7 @@ setVlessRealityEncryption() {
         rm -f "${stateTmpFile}"
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
         menuLine "已回滚本次 VLESS Encryption 修改"
-        menuLine "排查日志：/tmp/padm-xray-test.log"
+        menuLine "排查日志：$(vlessEncryptionXrayTestLog)"
         menuClose
         return 1
     fi
@@ -768,7 +789,8 @@ corePortWriteAddFiles() {
 corePortApplyFileTransaction() {
     local action=$1
     local backupDir
-    padmCreateTempPath backupDir -d /tmp/padm-core-port.XXXXXX || return 1
+    local tmpBase="${TMPDIR:-/tmp}"
+    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-core-port.XXXXXX" || return 1
     corePortBackupFiles "${backupDir}"
     shift
     if ! "${action}" "$@" || ! corePortValidateFiles; then

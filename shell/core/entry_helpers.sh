@@ -388,6 +388,7 @@ updatePadm() {
     local installPath="${installDir}/install.sh"
     local backupPath="${installDir}/install.sh.bak"
     local tmpDir newInstall
+    local tmpBase="${TMPDIR:-/tmp}"
     if ! mkdir -p "${installDir}"; then
         errorCard "更新入口目录创建失败"
         return 1
@@ -395,9 +396,9 @@ updatePadm() {
     progressCard "$1" "更新管理脚本"
 
     if declare -F padmCreateTempPath >/dev/null 2>&1; then
-        padmCreateTempPath tmpDir -d /tmp/padm-update.XXXXXX || { errorCard "更新入口临时目录创建失败"; return 1; }
+        padmCreateTempPath tmpDir -d "${tmpBase%/}/padm-update.XXXXXX" || { errorCard "更新入口临时目录创建失败"; return 1; }
     else
-        tmpDir=$(mktemp -d /tmp/padm-update.XXXXXX) || { errorCard "更新入口临时目录创建失败"; return 1; }
+        tmpDir=$(mktemp -d "${tmpBase%/}/padm-update.XXXXXX") || { errorCard "更新入口临时目录创建失败"; return 1; }
     fi
     newInstall="${tmpDir}/install.sh"
 

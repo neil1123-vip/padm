@@ -84,8 +84,9 @@ writeGeneratedJsonFile() {
     local targetFile=$1
     local tmpPrefix=$2
     local tmpFile
+    local tmpBase="${TMPDIR:-/tmp}"
 
-    padmCreateTempPath tmpFile "/tmp/${tmpPrefix}.XXXXXX" || return 1
+    padmCreateTempPath tmpFile "${tmpBase%/}/${tmpPrefix}.XXXXXX" || return 1
     cat >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     commitGeneratedJsonFile "${tmpFile}" "${targetFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
@@ -110,8 +111,9 @@ padmCleanupTempPaths() {
 
 installUserCrontabContent() {
     local tmpFile
+    local tmpBase="${TMPDIR:-/tmp}"
 
-    padmCreateTempPath tmpFile /tmp/padm-crontab.XXXXXX || return 1
+    padmCreateTempPath tmpFile "${tmpBase%/}/padm-crontab.XXXXXX" || return 1
     printf '%s\n' "$1" | sed '/^$/d' >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     crontab "${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     padmRemoveCleanupPath "${tmpFile}"

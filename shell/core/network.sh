@@ -149,6 +149,8 @@ writeCheckPortOpenNginxConfig() {
     local targetPath="${nginxConfigPath}checkPortOpen.conf"
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
+    local tmpBase="${TMPDIR:-/tmp}"
+    local nginxTestLog="${tmpBase%/}/padm-check-port-open-nginx-test.log"
     mkdir -p "$(dirname "${targetPath}")"
     cat >"${tmpPath}" <<EOF
 server {
@@ -171,7 +173,7 @@ EOF
     if command -v nginx >/dev/null 2>&1; then
         [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
         mv "${tmpPath}" "${targetPath}"
-        if ! nginx -t >/tmp/padm-check-port-open-nginx-test.log 2>&1; then
+        if ! nginx -t >"${nginxTestLog}" 2>&1; then
             if [[ -f "${backupPath}" ]]; then
                 mv "${backupPath}" "${targetPath}"
             else

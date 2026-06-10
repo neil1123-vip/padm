@@ -1600,7 +1600,40 @@ runPortAndPanelHelperRegression() {
     rm -rf "${configPath}"
 }
 
+runRuntimeTempDirRegression() (
+    local oldTmpDir="${TMPDIR:-}"
+    local tmpRoot="${TMP_DIR}/runtime-tmp"
+    local targetRoot="${TMP_DIR}/runtime-tempdir-target"
+    local crontabPathMarker="${TMP_DIR}/runtime-crontab-path.txt"
+    local jsonFile="${targetRoot}/state.json"
+
+    mkdir -p "${tmpRoot}" "${targetRoot}"
+    TMPDIR="${tmpRoot}"
+
+    printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
+    jq -e '.ok == true' "${jsonFile}" >/dev/null
+    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*' | grep -q .; then
+        return 1
+    fi
+
+    crontab() {
+        printf '%s\n' "$1" >"${crontabPathMarker}"
+        grep -qxF '15 1 * * * echo ok' "$1"
+    }
+    installUserCrontabContent $'\n15 1 * * * echo ok\n'
+    [[ "$(<"${crontabPathMarker}")" == "${tmpRoot}"/padm-crontab.* ]]
+    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-crontab.*' | grep -q .; then
+        return 1
+    fi
+
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runCorePortFileTransactionRegression() {
+    local oldTmpDir="${TMPDIR:-}"
+    local portTmpRoot="${TMP_DIR}/core-port-tmp"
+    mkdir -p "${portTmpRoot}"
+    TMPDIR="${portTmpRoot}"
     mkdir -p "${configPath}"
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-newPort-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2083_default.json" 2083 443 tcp dokodemo-door-newPort-2083
@@ -1630,7 +1663,11 @@ runCorePortFileTransactionRegression() {
     corePortApplyFileTransaction corePortRemove 2083
     [[ ! -e "${configPath}02_dokodemodoor_inbounds_2083.json" ]]
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
+    if find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' | grep -q .; then
+        return 1
+    fi
     rm -rf "${configPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
 runXrayRealityPortFailureRegression() (
@@ -2283,8 +2320,12 @@ runConfigTransactionRegression() {
     local refreshCountFile="${TMP_DIR}/transaction-refresh-count"
     local validateMode=success
     local oldPath="${PATH}"
+    local oldTmpDir="${TMPDIR:-}"
+    local checkPortTmpRoot="${TMP_DIR}/check-port-tmp"
     local checkPortNginxDir="${TMP_DIR}/check-port-nginx/"
     local checkPortTarget="${checkPortNginxDir}checkPortOpen.conf"
+    mkdir -p "${checkPortTmpRoot}"
+    TMPDIR="${checkPortTmpRoot}"
 
     transactionReloadMock() {
         printf '1\n' >>"${reloadCountFile}"
@@ -2329,6 +2370,7 @@ JSON
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
+printf 'check-port validate %s\n' "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}"
 [[ "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}" == "success" ]]
 SH
     chmod +x "${TMP_DIR}/fake-bin/nginx"
@@ -2340,14 +2382,17 @@ SH
         return 1
     fi
     [[ "$(<"${checkPortTarget}")" == "old config" ]]
+    grep -qxF 'check-port validate fail' "${checkPortTmpRoot}/padm-check-port-open-nginx-test.log"
     [[ ! -e "${checkPortTarget}.tmp" ]]
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
     writeCheckPortOpenNginxConfig 443 example.com 'listen [::]:443;'
+    grep -qxF 'check-port validate success' "${checkPortTmpRoot}/padm-check-port-open-nginx-test.log"
     grep -q 'server_name example.com;' "${checkPortTarget}"
     grep -q 'listen \[::\]:443;' "${checkPortTarget}"
     [[ ! -e "${checkPortTarget}.tmp" ]]
     [[ ! -e "${checkPortTarget}.bak" ]]
     PATH="${oldPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
@@ -3530,9 +3575,15 @@ runRealityConfigVlessEncryptionRegression() {
     local vlessConfigDir="${TMP_DIR}/vlessenc-xray-conf"
     local vlessConfigFile="${vlessConfigDir}/07_VLESS_vision_reality_inbounds.json"
     local vlessStateFile="${TMP_DIR}/vlessenc-state.json"
+    local oldTmpDir="${TMPDIR:-}"
+    local vlessTmpRoot="${TMP_DIR}/vlessenc-tmp"
+    local vlessTmpMarker="${TMP_DIR}/vlessenc-tmp-files.txt"
     local vlessOriginalConfig
     local vlessOriginalState
     local vlessValidateMode=success
+    mkdir -p "${vlessTmpRoot}"
+    : >"${vlessTmpMarker}"
+    TMPDIR="${vlessTmpRoot}"
     cat >"${fakeXrayBinary}" <<'SH'
 #!/usr/bin/env bash
 case "$1" in
@@ -3540,6 +3591,7 @@ case "$1" in
     printf 'Xray 25.9.5 test\n'
     ;;
 vlessenc)
+    find "${TMPDIR:-/tmp}" -maxdepth 1 -type f \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) -print >>"${PADM_FAKE_VLESSENC_TMP_MARKER}" 2>/dev/null || true
     printf '{"encryption":"mlkem768x25519plus.native.0rtt.test","decryption":"mlkem768x25519plus.native.0rtt.test"}\n'
     ;;
 -test)
@@ -3566,6 +3618,7 @@ JSON
     export PADM_VLESS_REALITY_CONFIG_FILE="${vlessConfigFile}"
     export PADM_VLESS_XHTTP_CONFIG_FILE="${TMP_DIR}/missing-xhttp.json"
     export PADM_VLESS_ENCRYPTION_STATE_FILE="${vlessStateFile}"
+    export PADM_FAKE_VLESSENC_TMP_MARKER="${vlessTmpMarker}"
     export PADM_FAKE_XRAY_VALIDATE_MODE="fail"
     coreInstallType=1
     if setVlessRealityEncryption enable; then
@@ -3576,6 +3629,12 @@ JSON
     [[ ! -e "${vlessConfigFile}.tmp" ]]
     [[ ! -e "${vlessConfigFile}.vlessenc.bak" ]]
     [[ ! -e "${vlessStateFile}.tmp" ]]
+    grep -q "${vlessTmpRoot}/padm-vlessenc.out" "${vlessTmpMarker}"
+    grep -q "${vlessTmpRoot}/padm-vlessenc.err" "${vlessTmpMarker}"
+    [[ -f "${vlessTmpRoot}/padm-xray-test.log" ]]
+    if find "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) | grep -q .; then
+        return 1
+    fi
 
     export PADM_FAKE_XRAY_VALIDATE_MODE="success"
     setVlessRealityEncryption enable
@@ -3586,7 +3645,11 @@ JSON
     setVlessRealityEncryption disable
     jq -e '.inbounds[0].settings.decryption == "none" and (.inbounds[0].settings.fallbacks | not)' "${vlessConfigFile}" >/dev/null
     [[ ! -e "${vlessStateFile}" ]]
-    unset PADM_XRAY_BINARY PADM_XRAY_CONF_DIR PADM_VLESS_REALITY_CONFIG_FILE PADM_VLESS_XHTTP_CONFIG_FILE PADM_VLESS_ENCRYPTION_STATE_FILE PADM_FAKE_XRAY_VALIDATE_MODE
+    if find "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) | grep -q .; then
+        return 1
+    fi
+    unset PADM_XRAY_BINARY PADM_XRAY_CONF_DIR PADM_VLESS_REALITY_CONFIG_FILE PADM_VLESS_XHTTP_CONFIG_FILE PADM_VLESS_ENCRYPTION_STATE_FILE PADM_FAKE_XRAY_VALIDATE_MODE PADM_FAKE_VLESSENC_TMP_MARKER
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
 runRealityConfigScannerRegression() {
@@ -6459,13 +6522,18 @@ regressionEnsureScriptModules() {
 }
 
 runUpdatePadmVersionPromptRegression() {
-    local successLog errorLog installDir
+    local successLog errorLog installDir updateTmpRoot downloadDirLog oldTmpDir
     successLog="${TMP_DIR}/update-padm-success.log"
     errorLog="${TMP_DIR}/update-padm-error.log"
     installDir="${TMP_DIR}/update-padm-install"
-    mkdir -p "${installDir}"
+    updateTmpRoot="${TMP_DIR}/update-padm-tmp"
+    downloadDirLog="${TMP_DIR}/update-padm-download-dirs.log"
+    oldTmpDir="${TMPDIR:-}"
+    mkdir -p "${installDir}" "${updateTmpRoot}"
+    : >"${downloadDirLog}"
     : >"${successLog}"
     : >"${errorLog}"
+    TMPDIR="${updateTmpRoot}"
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
     chmod 700 "${installDir}/install.sh"
 
@@ -6480,6 +6548,7 @@ runUpdatePadmVersionPromptRegression() {
                 case "$1" in
                 -P)
                     mkdir -p "$2"
+                    printf '%s\n' "$2" >>"${downloadDirLog}"
                     cat >"$2/install.sh" <<'EOF'
 #!/usr/bin/env bash
 ensureScriptModules() { :; }
@@ -6499,6 +6568,10 @@ EOF
     ) >"${TMP_DIR}/update-padm-run-ok.log" 2>&1
     grep -q '更新入口已下载，正在重新打开新版脚本' "${successLog}"
     grep -q 'new-entry-ok' "${successLog}" && return 1
+    grep -qx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*" "${downloadDirLog}"
+    if find "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
     [[ ! -e "${installDir}/install.sh.bak" ]]
     "${installDir}/install.sh" | grep -q 'new-entry-ok'
 
@@ -6516,6 +6589,7 @@ EOF
                 case "$1" in
                 -P)
                     mkdir -p "$2"
+                    printf '%s\n' "$2" >>"${downloadDirLog}"
                     cat >"$2/install.sh" <<'EOF'
 #!/usr/bin/env bash
 ensureScriptModules() { :; }
@@ -6533,7 +6607,12 @@ EOF
         updatePadm 1
     ) >"${TMP_DIR}/update-padm-run-fail.log" 2>&1 && return 1
     grep -q '新版入口执行失败，已恢复旧入口' "${errorLog}"
+    grep -qx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*" "${downloadDirLog}"
+    if find "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
     "${installDir}/install.sh" | grep -q 'old-entry'
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
 runInstallRefreshRestoresBackupRegression() {
@@ -6909,6 +6988,7 @@ runRegressionRealityStream() {
 
 runRegressionRuntime() {
     runRegressionStep runtime-core runRuntimeAndRealityRegression &&
+        runRegressionStep runtime-tempdir runRuntimeTempDirRegression &&
         runRegressionStep reality-config runRealityConfigRegression
 }
 
