@@ -93,7 +93,7 @@ EOF
     fi
 
     if [[ -n "${changed}" && -n "${configPath}" ]]; then
-        reloadCore
+        reloadCore || return 1
     fi
 }
 

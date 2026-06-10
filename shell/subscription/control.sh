@@ -206,11 +206,12 @@ subscriptionRemoteControlHealthAll() {
     local source
     local sources
     local tmpDir
+    local tmpBase="${TMPDIR:-/tmp}"
     local outputFile
     local index=0
     local pids=()
     sources=$(subscriptionRemoteControlSources)
-    padmCreateTempPath tmpDir -d /tmp/padm-remote-health.XXXXXX || return 1
+    padmCreateTempPath tmpDir -d "${tmpBase%/}/padm-remote-health.XXXXXX" || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         subscriptionRemoteWriteCheckedResult "${source}" health "${outputFile}" &
@@ -255,11 +256,12 @@ subscriptionRemoteSyncPlan() {
     local source
     local sources
     local tmpDir
+    local tmpBase="${TMPDIR:-/tmp}"
     local outputFile
     local index=0
     local pids=()
     sources=$(subscriptionRemoteControlSources)
-    padmCreateTempPath tmpDir -d /tmp/padm-remote-plan.XXXXXX || return 1
+    padmCreateTempPath tmpDir -d "${tmpBase%/}/padm-remote-plan.XXXXXX" || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         subscriptionRemoteWriteCheckedResult "${source}" plan "${outputFile}" &

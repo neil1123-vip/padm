@@ -3934,7 +3934,7 @@ runSubscriptionGroupStateRegression() {
     jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
     removeSubscriptionSourceState ip-edge
 
-    local credential decodedCredential invalidCredential
+    local credential decodedCredential invalidCredential oldWireGuardDir selfRefHost
     credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
     decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
     jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
@@ -4063,7 +4063,7 @@ JSON
         local quotaMenuStatus
         menuLine() { printf 'menu:%s\n' "$*"; }
         menuClose() { return 0; }
-        subscriptionSyncApplyAccountPlan() {
+        subscriptionSyncApplyAccountPlanTransaction() {
             return 42
         }
         reloadCore() {
@@ -4079,7 +4079,6 @@ JSON
         [[ "${quotaMenuOutput}" == *"待处理订阅：1"* ]]
         [[ "${quotaMenuOutput}" == *"动作：停用超额订阅并移除本机托管账号"* ]]
     )
-    jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
     (
         subscriptionSyncPlanFromAccounts() {
             jq -n '{create:[], remove:["sub_team_a"]}'
@@ -4123,17 +4122,26 @@ JSON
     currentHost="self.example.com"
     subscribeDomain="self.example.com"
     subscribePort=39778
-    subscriptionGroupsStateWrite '
+    oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
+    PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/subscription-state-wireguard"
+    mkdir -p "$(subscriptionWireGuardDir)"
+    cat >"$(subscriptionWireGuardStateFile)" <<'JSON'
+{"enabled":true,"role":"main","address":"10.77.0.1/24","peers":[]}
+JSON
+    selfRefHost=$(subscriptionWireGuardReadState | jq -r '.address // empty')
+    selfRefHost=$(subscriptionWireGuardAddressHost "${selfRefHost}")
+    subscriptionGroupsStateWrite --arg selfRefHost "${selfRefHost}" '
       .groups[0].sources |= map(if .id == "remote-edge" then .enabled = false else . end) |
-      .groups[0].sources += [{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.1","port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}] |
+      .groups[0].sources += [{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"wireguard","transport":"wireguard","host":$selfRefHost,"port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}] |
       .groups[0].user_groups = (.groups[0].user_groups | map(if .id == "team-a" then .allowed_sources = ["self-ref"] else . end))
     '
     subscriptionRemoteControlRequest() {
-        printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n'
+        return 19
     }
     subscriptionRemoteSyncPlan | jq -e '.[] | select(.source_id == "self-ref" and .status == "self_reference" and .error_detail.type == "self_reference")' >/dev/null
     runSubscriptionRemoteSync | jq -e '.[] | contains("self-ref")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "self-ref" and .sync_status == "failed" and .last_sync_error.type == "self_reference")' >/dev/null
+    if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
     local stateSnapshot badBackup legacyBackup menuBackup
     stateSnapshot=$(<"$(subscriptionGroupsFile)")
     if subscriptionGroupsStateWrite '.groups = "broken" | .dangling = ' 2>/dev/null; then
@@ -4960,9 +4968,11 @@ runLocalTrafficAccountsBatchRegression() (
     local singBoxConfig="${TMP_DIR}/traffic-sing-box-conf/"
     local accounts
     local snapshot
+    local reloadMarker="${TMP_DIR}/traffic-reload"
     mkdir -p "${xrayConfig}" "${singBoxConfig}"
     configPath="${xrayConfig}"
     singBoxConfigPath="${singBoxConfig}"
+    coreInstallType=1
     cat >"${xrayConfig}01_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-vless"},{"email":"admin-root"}]}},{"users":[{"name":"sub_team_b-hysteria2"}]}]}
 JSON
@@ -4978,6 +4988,16 @@ JSON
     fi
     snapshot=$(collectLocalTrafficSnapshot)
     jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
+
+    rm -f "${singBoxConfig}03_inbounds.json" "${reloadMarker}"
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        return 1
+    }
+    if ensureXrayTrafficStatsConfig >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ -e "${reloadMarker}" ]]
 )
 
 runDpkgInstalledPatternRegression() {
