@@ -8,7 +8,7 @@ checkIPv6() {
 
         errorCard "不支持ipv6"
 
-        exit 0
+        return 1
 
     fi
 
@@ -32,7 +32,9 @@ ipv6Routing() {
 
 
 
-    checkIPv6
+    checkIPv6 || return 1
+
+    local successMessage=
 
     progressCard "1" "IPv6 分流"
 
@@ -70,11 +72,16 @@ ipv6Routing() {
 
         autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
 
+        if [[ -z "${domainList}" ]]; then
+            errorCard "域名不可为空"
+            return 1
+        fi
+
         if [[ "${coreInstallType}" == "1" ]]; then
 
-            addXrayRouting IPv6_out outboundTag "${domainList}"
+            addXrayOutbound IPv6_out || return 1
 
-            addXrayOutbound IPv6_out
+            addXrayRouting IPv6_out outboundTag "${domainList}" || return 1
 
         fi
 
@@ -82,19 +89,19 @@ ipv6Routing() {
 
         if [[ -n "${singBoxConfigPath}" ]]; then
 
-            addSingBoxRouteRule "IPv6_out" "${domainList}" "IPv6_route"
+            addSingBoxOutbound 01_direct_outbound || return 1
 
-            addSingBoxOutbound 01_direct_outbound
+            addSingBoxOutbound IPv6_out || return 1
 
-            addSingBoxOutbound IPv6_out
+            addSingBoxOutbound IPv4_out || return 1
 
-            addSingBoxOutbound IPv4_out
+            addSingBoxRouteRule "IPv6_out" "${domainList}" "IPv6_route" || return 1
 
         fi
 
 
 
-        successCard "添加完毕"
+        successMessage="添加完毕"
 
 
 
@@ -116,23 +123,23 @@ ipv6Routing() {
 
             if [[ "${coreInstallType}" == "1" ]]; then
 
-                addXrayOutbound IPv6_out
+                addXrayOutbound IPv6_out || return 1
 
-                removeXrayOutbound IPv4_out
+                rm -f "${configPath}09_routing.json" >/dev/null 2>&1 || return 1
 
-                removeXrayOutbound z_direct_outbound
+                removeXrayOutbound IPv4_out || return 1
 
-                removeXrayOutbound blackhole_out
+                removeXrayOutbound z_direct_outbound || return 1
 
-                removeXrayOutbound wireguard_out_IPv4
+                removeXrayOutbound blackhole_out || return 1
 
-                removeXrayOutbound wireguard_out_IPv6
+                removeXrayOutbound wireguard_out_IPv4 || return 1
 
-                removeXrayOutbound socks5_outbound
+                removeXrayOutbound wireguard_out_IPv6 || return 1
+
+                removeXrayOutbound socks5_outbound || return 1
 
 
-
-                rm ${configPath}09_routing.json >/dev/null 2>&1
 
             fi
 
@@ -140,33 +147,33 @@ ipv6Routing() {
 
 
 
-                removeSingBoxConfig IPv4_out
+                removeSingBoxConfig IPv4_out || return 1
 
 
 
-                removeSingBoxConfig wireguard_endpoints_IPv4_route
+                removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
 
-                removeSingBoxConfig wireguard_endpoints_IPv6_route
+                removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
 
-                removeSingBoxConfig wireguard_endpoints_IPv4
+                removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
 
-                removeSingBoxConfig wireguard_endpoints_IPv6
-
-
-
-                removeSingBoxConfig socks5_02_inbound_route
+                removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
 
 
 
-                removeSingBoxConfig IPv6_route
+                removeSingBoxConfig socks5_02_inbound_route || return 1
 
 
 
-                removeSingBoxConfig 01_direct_outbound
+                removeSingBoxConfig IPv6_route || return 1
 
 
 
-                addSingBoxOutbound IPv6_out
+                removeSingBoxConfig 01_direct_outbound || return 1
+
+
+
+                addSingBoxOutbound IPv6_out || return 1
 
 
 
@@ -174,7 +181,7 @@ ipv6Routing() {
 
 
 
-            successCard "IPv6全局出站设置完毕"
+            successMessage="IPv6全局出站设置完毕"
 
         else
 
@@ -194,13 +201,13 @@ ipv6Routing() {
 
         if [[ "${coreInstallType}" == "1" ]]; then
 
-            unInstallRouting IPv6_out outboundTag
+            unInstallRouting IPv6_out outboundTag || return 1
 
 
 
-            removeXrayOutbound IPv6_out
+            removeXrayOutbound IPv6_out || return 1
 
-            addXrayOutbound "z_direct_outbound"
+            addXrayOutbound "z_direct_outbound" || return 1
 
         fi
 
@@ -208,17 +215,17 @@ ipv6Routing() {
 
         if [[ -n "${singBoxConfigPath}" ]]; then
 
-            removeSingBoxConfig IPv6_out
+            removeSingBoxConfig IPv6_out || return 1
 
-            removeSingBoxConfig "IPv6_route"
+            removeSingBoxConfig "IPv6_route" || return 1
 
-            addSingBoxOutbound "01_direct_outbound"
+            addSingBoxOutbound "01_direct_outbound" || return 1
 
         fi
 
 
 
-        successCard "IPv6分流卸载成功"
+        successMessage="IPv6分流卸载成功"
 
     elif [[ "${ipv6Status}" == "5" ]]; then
 
@@ -238,7 +245,8 @@ ipv6Routing() {
 
 
 
-    reloadCore
+    reloadCore || return 1
+    [[ -n "${successMessage}" ]] && successCard "${successMessage}"
 
 }
 

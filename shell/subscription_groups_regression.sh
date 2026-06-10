@@ -473,6 +473,162 @@ runBTRoutingFailureReturnRegression() (
     [[ ! -e "${successMarker}" ]]
 )
 
+runIPv6RoutingFailureReturnRegression() (
+    local root="${TMP_DIR}/ipv6-routing-failure"
+    local outboundMarker="${root}/outbound"
+    local routingMarker="${root}/routing"
+    local removeMarker="${root}/remove"
+    local uninstallMarker="${root}/uninstall"
+    local reloadMarker="${root}/reload"
+    local successMarker="${root}/success"
+    local mode=success
+    local menuChoice=2
+    local rc
+
+    mkdir -p "${root}/xray"
+    configPath="${root}/xray/"
+    singBoxConfigPath=
+    coreInstallType=1
+
+    errorCard() { return 0; }
+    statusCard() { return 0; }
+    warnCard() { return 0; }
+    echoContent() { return 0; }
+    progressCard() { return 0; }
+    menuLine() { return 0; }
+    menuItem() { return 0; }
+    menuDangerItem() { return 0; }
+    menuReturnItem() { return 0; }
+    menuClose() { return 0; }
+    successCard() {
+        printf 'success\n' >"${successMarker}"
+        return 0
+    }
+    hasIPv6Connectivity() { return 0; }
+    autoConfirm() {
+        printf -v "$4" 'y'
+        return 0
+    }
+    autoRead() {
+        case "$3" in
+        ipv6Status) printf -v "$3" "${menuChoice}" ;;
+        domainList)
+            if [[ "${mode}" == "empty-domain" ]]; then
+                printf -v "$3" ''
+            else
+                printf -v "$3" 'example.com'
+            fi
+            ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    addXrayOutbound() {
+        printf 'outbound:%s\n' "$1" >>"${outboundMarker}"
+        [[ "${mode}" != "outbound-fail" ]]
+    }
+    addXrayRouting() {
+        printf 'routing\n' >"${routingMarker}"
+        [[ "${mode}" != "routing-fail" ]]
+    }
+    removeXrayOutbound() {
+        printf 'remove:%s\n' "$1" >>"${removeMarker}"
+        return 0
+    }
+    unInstallRouting() {
+        printf 'uninstall\n' >"${uninstallMarker}"
+        [[ "${mode}" != "uninstall-fail" ]]
+    }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" ]]
+    }
+
+    hasIPv6Connectivity() { return 1; }
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    ipv6Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    hasIPv6Connectivity() { return 0; }
+    mode=empty-domain
+    menuChoice=2
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    ipv6Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${outboundMarker}" ]]
+    [[ ! -e "${routingMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=routing-fail
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    ipv6Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${outboundMarker}" ]]
+    [[ -e "${routingMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=reload-fail
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    ipv6Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=outbound-fail
+    menuChoice=3
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    ipv6Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${outboundMarker}" ]]
+    [[ ! -e "${removeMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=uninstall-fail
+    menuChoice=4
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    ipv6Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallMarker}" ]]
+    [[ ! -e "${removeMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=reload-fail
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    ipv6Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallMarker}" ]]
+    [[ -e "${removeMarker}" ]]
+    [[ -e "${outboundMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+)
+
 runDNSRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/dns-routing-failure"
     local reloadMarker="${root}/reload"
@@ -6043,6 +6199,7 @@ runRegressionRouting() {
     runRegressionStep routing-core runRoutingRegression
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
+    runRegressionStep routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
     runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
     runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
