@@ -463,6 +463,11 @@ traditionalTlsHasH2Fallback() {
     [[ -f "${configFile}" ]] && jq -e '.inbounds[0].settings.fallbacks[]? | select(.alpn == "h2")' "${configFile}" >/dev/null 2>&1
 }
 
+traditionalTlsAlpnTestLog() {
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/padm-alpn-xray-test.log"
+}
+
 traditionalTlsCurrentAlpn() {
     local configFile
     configFile=$(traditionalTlsFallbackConfigFile)
@@ -612,11 +617,11 @@ applyTraditionalTlsAlpn() {
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
-    if [[ -x /etc/padm/xray/xray ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-alpn-xray-test.log 2>&1; then
+    if [[ -x /etc/padm/xray/xray ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"$(traditionalTlsAlpnTestLog)" 2>&1; then
         mv "${backupFile}" "${configFile}"
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
         menuLine "已回滚本次 ALPN 修改"
-        menuLine "排查日志：/tmp/padm-alpn-xray-test.log"
+        menuLine "排查日志：$(traditionalTlsAlpnTestLog)"
         menuClose
         return 1
     fi
@@ -2022,7 +2027,12 @@ configTransactionCommit() {
 
 validateXHTTPConfigUpdate() {
     [[ -x /etc/padm/xray/xray ]] || return 0
-    /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >/tmp/padm-xhttp-test.log 2>&1
+    /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"$(xhttpConfigTestLog)" 2>&1
+}
+
+xhttpConfigTestLog() {
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/padm-xhttp-test.log"
 }
 
 commitXHTTPConfigUpdate() {
@@ -2035,7 +2045,7 @@ commitXHTTPConfigUpdate() {
         return 1
     fi
     backupFile="${configFile}.xhttp.bak"
-    configTransactionCommit "${configFile}" "${backupFile}" validateXHTTPConfigUpdate "XHTTP 配置校验失败" "已回滚本次 XHTTP 修改；排查日志：/tmp/padm-xhttp-test.log" "${successMessage}" refreshXHTTPSubscriptions
+    configTransactionCommit "${configFile}" "${backupFile}" validateXHTTPConfigUpdate "XHTTP 配置校验失败" "已回滚本次 XHTTP 修改；排查日志：$(xhttpConfigTestLog)" "${successMessage}" refreshXHTTPSubscriptions
 }
 
 applyXHTTPConfigUpdate() {
@@ -2503,7 +2513,12 @@ refreshTuicSubscriptions() {
 
 validateTuicConfigUpdate() {
     [[ -x /etc/padm/sing-box/sing-box ]] || return 0
-    /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >/tmp/padm-tuic-test.log 2>&1
+    /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"$(tuicConfigTestLog)" 2>&1
+}
+
+tuicConfigTestLog() {
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/padm-tuic-test.log"
 }
 
 commitTuicConfigUpdate() {
@@ -2516,7 +2531,7 @@ commitTuicConfigUpdate() {
         return 1
     fi
     backupFile="${configFile}.tuic.bak"
-    configTransactionCommit "${configFile}" "${backupFile}" validateTuicConfigUpdate "Tuic 配置校验失败" "已回滚本次 Tuic 修改；排查日志：/tmp/padm-tuic-test.log" "${successMessage}" refreshTuicSubscriptions
+    configTransactionCommit "${configFile}" "${backupFile}" validateTuicConfigUpdate "Tuic 配置校验失败" "已回滚本次 Tuic 修改；排查日志：$(tuicConfigTestLog)" "${successMessage}" refreshTuicSubscriptions
 }
 
 applyTuicConfigUpdate() {

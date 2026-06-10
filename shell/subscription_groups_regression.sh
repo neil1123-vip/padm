@@ -1610,6 +1610,10 @@ runRuntimeTempDirRegression() (
     mkdir -p "${tmpRoot}" "${targetRoot}"
     TMPDIR="${tmpRoot}"
 
+    [[ "$(traditionalTlsAlpnTestLog)" == "${tmpRoot}/padm-alpn-xray-test.log" ]]
+    [[ "$(xhttpConfigTestLog)" == "${tmpRoot}/padm-xhttp-test.log" ]]
+    [[ "$(tuicConfigTestLog)" == "${tmpRoot}/padm-tuic-test.log" ]]
+
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
     if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*' | grep -q .; then
