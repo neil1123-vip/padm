@@ -417,7 +417,10 @@ showUserSubscriptionLinks() {
     local userSubscriptionId=$1
     local accountName
     accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
-    subscribe false
+    if ! subscribe false; then
+        errorCard "订阅输出刷新失败，请检查订阅配置"
+        return 1
+    fi
     statusCard "用户订阅链接" "已刷新 ${accountName} 的订阅输出，请把上方该账号的链接发给对方" "如果上方没有该账号，先执行同步生成托管账号"
 }
 
@@ -466,7 +469,13 @@ manageUserSubscriptionItem() {
         2) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
         3) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
         4) setUserSubscriptionTrafficLimitMenu "${userSubscriptionId}" ;;
-        5) toggleUserSubscriptionState "${userSubscriptionId}"; successCard "用户订阅状态已切换" ;;
+        5)
+            if toggleUserSubscriptionState "${userSubscriptionId}"; then
+                successCard "用户订阅状态已切换"
+            else
+                errorCard "用户订阅状态切换失败"
+            fi
+            ;;
         6) showSubscriptionLocalSyncPlan ;;
         7) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
         8) return ;;
@@ -495,8 +504,14 @@ setUserSubscriptionSourcesMenu() {
         errorCard "服务器范围不能为空；直接回车使用本机 main"
         return 1
     fi
-    sourceJson=$(printf '%s' "${sourceIds}" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))')
-    setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"
+    if ! sourceJson=$(printf '%s' "${sourceIds}" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))'); then
+        errorCard "服务器范围解析失败"
+        return 1
+    fi
+    if ! setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"; then
+        errorCard "节点范围更新失败"
+        return 1
+    fi
     successCard "节点范围已更新"
 }
 
@@ -508,7 +523,10 @@ setUserSubscriptionTrafficLimitMenu() {
         errorCard "订阅额度必须是数字"
         return 1
     fi
-    setUserSubscriptionTrafficLimit "${userSubscriptionId}" "${limit}"
+    if ! setUserSubscriptionTrafficLimit "${userSubscriptionId}" "${limit}"; then
+        errorCard "订阅额度更新失败"
+        return 1
+    fi
     successCard "订阅额度已更新" "超限停用和批量处理请到 流量与限额 执行"
 }
 

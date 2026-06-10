@@ -3791,6 +3791,146 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -q '用户订阅已删除' "${successLog}"
 )
 
+runUserSubscriptionMenuMutationFailureRegression() (
+    local root="${TMP_DIR}/user-subscription-menu-mutation-failure"
+    local callLog="${root}/calls.log"
+    local successLog="${root}/success.log"
+    local statusLog="${root}/status.log"
+    local errorLog="${root}/error.log"
+    local mode rc menuStep=0
+
+    mkdir -p "${root}"
+    : >"${callLog}"
+    : >"${successLog}"
+    : >"${statusLog}"
+    : >"${errorLog}"
+
+    resetLogs() {
+        : >"${callLog}"
+        : >"${successLog}"
+        : >"${statusLog}"
+        : >"${errorLog}"
+        menuStep=0
+    }
+    autoRead() {
+        local key=$1
+        local targetVar=$3
+        case "${key}" in
+        user_subscription_sources) printf -v "${targetVar}" 'main,remote-a' ;;
+        user_subscription_traffic_limit) printf -v "${targetVar}" '100' ;;
+        user_subscription_item_menu)
+            menuStep=$((menuStep + 1))
+            if [[ "${menuStep}" == "1" ]]; then
+                printf -v "${targetVar}" '5'
+            else
+                printf -v "${targetVar}" '8'
+            fi
+            ;;
+        *) printf -v "${targetVar}" '' ;;
+        esac
+    }
+    subscriptionSyncAccountName() {
+        printf 'sub_%s\n' "$1"
+    }
+    subscribe() {
+        printf 'subscribe:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "subscribe-fail" ]]
+    }
+    listSubscriptionSources() {
+        printf 'main:本机:main:https:127.0.0.1:443:true:ok\n'
+        printf 'remote-a:远端:remote:https:10.0.0.2:39778:true:ok\n'
+    }
+    setUserSubscriptionSources() {
+        printf 'sources:%s:%s\n' "$1" "$2" >>"${callLog}"
+        [[ "${mode}" != "sources-fail" ]]
+    }
+    setUserSubscriptionTrafficLimit() {
+        printf 'limit:%s:%s\n' "$1" "$2" >>"${callLog}"
+        [[ "${mode}" != "limit-fail" ]]
+    }
+    selectUserSubscriptionId() {
+        printf 'team-a\n'
+    }
+    showUserSubscriptions() { return 0; }
+    showUserSubscriptionTraffic() { return 0; }
+    showSubscriptionLocalSyncPlan() { return 0; }
+    removeUserSubscriptionMenu() { return 0; }
+    toggleUserSubscriptionState() {
+        printf 'toggle:%s\n' "$1" >>"${callLog}"
+        [[ "${mode}" != "toggle-fail" ]]
+    }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuItem() { return 0; }
+    menuDangerItem() { return 0; }
+    menuReturnItem() { return 0; }
+    menuClose() { return 0; }
+    userResultCard() { return 0; }
+    successCard() {
+        printf '%s\n' "$*" >>"${successLog}"
+    }
+    statusCard() {
+        printf '%s\n' "$*" >>"${statusLog}"
+    }
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
+    }
+
+    mode=subscribe-fail
+    resetLogs
+    set +e
+    showUserSubscriptionLinks team-a >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'subscribe:false' "${callLog}"
+    grep -q '订阅输出刷新失败' "${errorLog}"
+    [[ ! -s "${statusLog}" ]]
+
+    mode=sources-fail
+    resetLogs
+    set +e
+    setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -q '^sources:team-a:' "${callLog}"
+    grep -q '节点范围更新失败' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    mode=limit-fail
+    resetLogs
+    set +e
+    setUserSubscriptionTrafficLimitMenu team-a >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'limit:team-a:100' "${callLog}"
+    grep -q '订阅额度更新失败' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    mode=toggle-fail
+    resetLogs
+    manageUserSubscriptionItem >/dev/null 2>&1
+    grep -qx 'toggle:team-a' "${callLog}"
+    grep -q '用户订阅状态切换失败' "${errorLog}"
+    ! grep -q '用户订阅状态已切换' "${successLog}"
+
+    mode=success
+    resetLogs
+    showUserSubscriptionLinks team-a >/dev/null 2>&1
+    grep -q '用户订阅链接' "${statusLog}"
+    resetLogs
+    setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
+    grep -q '节点范围已更新' "${successLog}"
+    resetLogs
+    setUserSubscriptionTrafficLimitMenu team-a >/dev/null 2>&1
+    grep -q '订阅额度已更新' "${successLog}"
+    resetLogs
+    manageUserSubscriptionItem >/dev/null 2>&1
+    grep -q '用户订阅状态已切换' "${successLog}"
+)
+
 runRealityStreamDisableRegression() {
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
@@ -8137,6 +8277,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
     runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
+    runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
 }
 
 runRegressionSubscription() {
@@ -8191,6 +8332,7 @@ runRegressionTransactionSubscription() {
         runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression &&
         runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression &&
         runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression &&
+        runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression &&
         runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
 }
 
