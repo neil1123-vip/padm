@@ -551,8 +551,7 @@ installTools() {
                 menuLine "可尝试写入 NAT64 DNS："
                 menuLine "sed -i \"1i\\nameserver 2a00:1098:2b::1\\nnameserver 2a00:1098:2c::1\\nnameserver 2a01:4f8:c2c:123f::1\\nnameserver 2a01:4f9:c010:3f02::1\" /etc/resolv.conf"
                 menuClose
-                rollbackPackageInstallTransaction
-                exit 0
+                failPackageInstallTransaction "acme.sh安装结果校验失败"
             fi
         fi
     fi
