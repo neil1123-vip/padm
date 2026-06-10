@@ -922,6 +922,47 @@ runTlsFailureReturnRegression() (
     HOME="${oldHome}"
 )
 
+runServiceQueueApplyPropagationRegression() (
+    local root="${TMP_DIR}/service-queue-propagation"
+    local rcFile="${root}/install.rc"
+    local reachedFile="${root}/show-accounts"
+    local shellRc
+
+    mkdir -p "${root}"
+    readLastInstallationConfig() { return 0; }
+    unInstallSubscribe() { return 0; }
+    installTools() { return 0; }
+    handleNginx() { return 0; }
+    subscriptionWireGuardControlEnabled() { return 1; }
+    refreshSubscriptionWireGuardNginxControl() { return 0; }
+    installXray() { return 0; }
+    installXrayService() { return 0; }
+    initXrayConfig() { return 0; }
+    cleanUp() { return 0; }
+    serviceQueueRestart() { return 0; }
+    serviceQueueApply() { return 1; }
+    checkGFWStatue() {
+        printf 'reached\n' >"${reachedFile}"
+        return 0
+    }
+    showAccounts() {
+        printf 'reached\n' >"${reachedFile}"
+        return 0
+    }
+
+    set +e
+    (
+        set +e
+        installXrayReality >/dev/null 2>&1
+        printf '%s\n' "$?" >"${rcFile}"
+    )
+    shellRc=$?
+    set -e
+    [[ "${shellRc}" == "0" ]]
+    [[ "$(<"${rcFile}")" == "1" ]]
+    [[ ! -e "${reachedFile}" ]]
+)
+
 runConfigTransactionRegression() {
     local targetFile="${TMP_DIR}/transaction.json"
     local backupFile="${targetFile}.bak"
@@ -5444,6 +5485,7 @@ runRegressionTransactionCore() {
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
+        runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression
 }

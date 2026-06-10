@@ -544,9 +544,9 @@ configureRealityStreamSplit() {
         return 1
     fi
     removeRealityStreamBackup "${backupDir}"
-    reloadCore
+    reloadCore || return 1
     serviceQueueRestart nginx
-    serviceQueueApply
+    serviceQueueApply || return 1
     realityStreamRefreshSubscribeIfInstalled
     successCard "Reality 443 共存分流配置完成"
 }
@@ -587,9 +587,9 @@ disableRealityStreamSplit() {
         return 1
     fi
     removeRealityStreamBackup "${backupDir}"
-    reloadCore
+    reloadCore || return 1
     serviceQueueRestart nginx
-    serviceQueueApply
+    serviceQueueApply || return 1
     realityStreamRefreshSubscribeIfInstalled
     successCard "已关闭 Reality 443 共存分流"
 }

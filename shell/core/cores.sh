@@ -890,7 +890,7 @@ installXrayReality() {
     cleanUp singBoxDel
 
     serviceQueueRestart xray
-    serviceQueueApply
+    serviceQueueApply || return 1
     # 生成账号
     checkGFWStatue 5
     showAccounts 6
@@ -910,7 +910,7 @@ installSingBoxReality() {
     initSingBoxConfig custom 4 || return 1
     cleanUp xrayDel
     serviceQueueRestart sing-box
-    serviceQueueApply
+    serviceQueueApply || return 1
     # 生成账号
     checkGFWStatue 5
     showAccounts 6
@@ -1023,7 +1023,7 @@ customXrayInstall() {
         fi
 
         serviceQueueRestart xray
-        serviceQueueApply
+        serviceQueueApply || return 1
         # 生成账号
         checkGFWStatue 11
         showAccounts 12
@@ -1084,7 +1084,7 @@ customSingBoxInstall() {
         installCronTLS 7
         serviceQueueRestart sing-box
         serviceQueueRestart nginx
-        serviceQueueApply
+        serviceQueueApply || return 1
         # 生成账号
         checkGFWStatue 8
         showAccounts 9
@@ -1205,7 +1205,7 @@ singBoxInstall() {
 
     serviceQueueRestart sing-box
     serviceQueueStart nginx
-    serviceQueueApply
+    serviceQueueApply || return 1
     # 生成账号
     showAccounts 9
 }

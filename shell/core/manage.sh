@@ -491,11 +491,14 @@ manageTraditionalTlsRedirect() {
             return 1
         fi
         serviceQueueRestart nginx
-        serviceQueueApply
+        if ! serviceQueueApply; then
+            backupNginxConfig restoreBackup
+            return 1
+        fi
         if [[ -z $(pgrep -f "nginx") ]]; then
             backupNginxConfig restoreBackup
             serviceQueueStart nginx
-            serviceQueueApply
+            serviceQueueApply || return 1
             return 1
         fi
         if ! checkNginx302; then
