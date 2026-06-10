@@ -630,7 +630,10 @@ updateGeoSite() {
         exit 1
     fi
 
-    reloadCore
+    if ! reloadCore; then
+        statusCard "Geo 数据" "Geo 数据已更新，但核心重载失败，请检查核心服务日志"
+        return 1
+    fi
     statusCard "Geo 数据" "更新完毕"
 }
 

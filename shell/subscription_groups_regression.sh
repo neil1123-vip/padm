@@ -2522,6 +2522,39 @@ runSingBoxProtocolReloadFailureRegression() (
     [[ ! -e "${reachedFile}" ]]
 )
 
+runGeoUpdateReloadFailureRegression() (
+    local root="${TMP_DIR}/geo-update-reload-failure"
+    local callLog="${root}/calls.log"
+    local statusLog="${root}/status.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${callLog}"
+    : >"${statusLog}"
+    ensureXrayGeoFiles() {
+        printf 'geo:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    reloadCore() {
+        printf 'reload\n' >>"${callLog}"
+        return 1
+    }
+    statusCard() {
+        printf '%s\n' "$*" >>"${statusLog}"
+    }
+
+    set +e
+    updateGeoSite >/dev/null 2>&1
+    rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    grep -qx 'geo:/etc/padm/xray force' "${callLog}"
+    grep -qx 'reload' "${callLog}"
+    grep -q '核心重载失败' "${statusLog}"
+    ! grep -q '更新完毕' "${statusLog}"
+)
+
 runCoreCleanupFailurePropagationRegression() (
     local root="${TMP_DIR}/core-cleanup-failure"
     local serviceLog="${root}/service.log"
@@ -8027,6 +8060,7 @@ runRegressionTransactionCore() {
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
         runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
+        runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
         runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
         runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
