@@ -68,6 +68,93 @@ sniRouting() {
     esac
 }
 
+dnsRoutingBackupDir() {
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        printf '%s\n' "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        return 0
+    fi
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/padm-dns-routing-backup"
+}
+
+dnsRoutingBackupCreate() {
+    local backupDir
+    backupDir=$(dnsRoutingBackupDir)
+    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
+    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
+    if [[ -n "${configPath:-}" && -f "${configPath}11_dns.json" ]]; then
+        cp "${configPath}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
+    fi
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        if [[ -f "${singBoxConfigPath}dns.json" ]]; then
+            cp "${singBoxConfigPath}dns.json" "${backupDir}/sing-box/dns.json" || return 1
+        fi
+        if [[ -f "${singBoxConfigPath}01_direct_outbound.json" ]]; then
+            cp "${singBoxConfigPath}01_direct_outbound.json" "${backupDir}/sing-box/01_direct_outbound.json" || return 1
+        fi
+    fi
+    return 0
+}
+
+dnsRoutingBackupRestore() {
+    local backupDir
+    local status=0
+    backupDir=$(dnsRoutingBackupDir)
+    [[ -d "${backupDir}" ]] || return 1
+    if [[ -n "${configPath:-}" ]]; then
+        rm -f "${configPath}11_dns.json" >/dev/null 2>&1 || status=1
+        if [[ -f "${backupDir}/xray/11_dns.json" ]]; then
+            cp "${backupDir}/xray/11_dns.json" "${configPath}11_dns.json" || status=1
+        fi
+    fi
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        rm -f "${singBoxConfigPath}dns.json" >/dev/null 2>&1 || status=1
+        if [[ -f "${backupDir}/sing-box/dns.json" ]]; then
+            cp "${backupDir}/sing-box/dns.json" "${singBoxConfigPath}dns.json" || status=1
+        fi
+        rm -f "${singBoxConfigPath}01_direct_outbound.json" >/dev/null 2>&1 || status=1
+        if [[ -f "${backupDir}/sing-box/01_direct_outbound.json" ]]; then
+            cp "${backupDir}/sing-box/01_direct_outbound.json" "${singBoxConfigPath}01_direct_outbound.json" || status=1
+        fi
+    fi
+    return "${status}"
+}
+
+dnsRoutingBackupCleanup() {
+    rm -rf "$(dnsRoutingBackupDir)" >/dev/null 2>&1 || return 1
+}
+
+dnsRoutingAbortChange() {
+    local reason=$1
+    if dnsRoutingBackupRestore; then
+        dnsRoutingBackupCleanup || errorCard "${reason}，旧配置已恢复，但备份目录清理失败: $(dnsRoutingBackupDir)"
+    else
+        errorCard "${reason}，且旧配置恢复失败，请手动检查备份目录: $(dnsRoutingBackupDir)"
+    fi
+    return 1
+}
+
+dnsRoutingReloadOrRollback() {
+    local title=$1
+    local backupDir
+    backupDir=$(dnsRoutingBackupDir)
+    if reloadCore; then
+        dnsRoutingBackupCleanup || errorCard "${title}已应用，但备份目录清理失败: ${backupDir}"
+        return 0
+    fi
+    if ! dnsRoutingBackupRestore; then
+        errorCard "${title}核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
+    dnsRoutingBackupCleanup || true
+    if reloadCore; then
+        errorCard "${title}核心重载失败，已回滚本次修改"
+    else
+        errorCard "${title}核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
+    fi
+    return 1
+}
+
 # DNS/hosts 配置写入
 setUnlockSNI() {
     autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP
@@ -77,6 +164,7 @@ setUnlockSNI() {
         menuLine "sing-box 支持 geosite 名称和具体域名，具体域名按 domain_suffix 写入"
         menuClose
 
+        dnsRoutingBackupCreate || { errorCard "DNS/hosts 覆盖配置备份失败，已取消修改"; return 1; }
         if [[ "${coreInstallType}" == 1 ]]; then
             autoRead sni_xray_domains "请按照上面示例录入域名:" xrayDomainList
             local hosts={}
@@ -98,15 +186,16 @@ setUnlockSNI() {
 EOF
             then
                 errorCard "DNS/hosts 覆盖配置写入失败，已保留旧配置"
+                dnsRoutingAbortChange "DNS/hosts 覆盖配置写入失败"
                 return 1
             fi
         fi
         if [[ -n "${singBoxConfigPath}" ]]; then
             echoContent yellow "录入示例:www.netflix.com,www.google.com"
             autoRead sni_singbox_domains "请按照上面示例录入域名:" singboxDomainList
-            addSingBoxDNSConfig "${setSNIP}" "${singboxDomainList}" "predefined" || return 1
+            addSingBoxDNSConfig "${setSNIP}" "${singboxDomainList}" "predefined" || { dnsRoutingAbortChange "DNS/hosts 覆盖配置写入失败"; return 1; }
         fi
-        reloadCore || return 1
+        dnsRoutingReloadOrRollback "DNS/hosts 覆盖" || return 1
         statusCard "DNS/hosts 覆盖" "规则写入成功"
     else
         errorCard "IP不可为空"
@@ -246,18 +335,21 @@ setUnlockDNS() {
         menuClose
         autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
 
+        dnsRoutingBackupCreate || { errorCard "DNS 分流配置备份失败，已取消修改"; return 1; }
         if ! addXrayDNSConfig "${setDNS}" "${domainList}"; then
+            dnsRoutingAbortChange "DNS 分流配置写入失败"
             return 1
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
-            addSingBoxOutbound 01_direct_outbound || { errorCard "sing-box direct 出站写入失败，已保留旧配置"; return 1; }
+            addSingBoxOutbound 01_direct_outbound || { errorCard "sing-box direct 出站写入失败，已保留旧配置"; dnsRoutingAbortChange "DNS 分流配置写入失败"; return 1; }
             if ! addSingBoxDNSConfig "${setDNS}" "${domainList}"; then
+                dnsRoutingAbortChange "DNS 分流配置写入失败"
                 return 1
             fi
         fi
 
-        reloadCore || return 1
+        dnsRoutingReloadOrRollback "DNS 分流" || return 1
 
         echoContent title "\n┌─ DNS 分流排障建议 ─────────────────────────────────"
         menuLine "如仍无法观看，可先重启 VPS 后再测试客户端"
@@ -272,6 +364,7 @@ setUnlockDNS() {
 
 # 移除 DNS 分流
 removeUnlockDNS() {
+    dnsRoutingBackupCreate || { errorCard "DNS 分流配置备份失败，已取消移除"; return 1; }
     if [[ "${coreInstallType}" == "1" && -f "${configPath}11_dns.json" ]]; then
         if ! writeRoutingJsonConfig "${configPath}11_dns.json" <<EOF
 {
@@ -284,6 +377,7 @@ removeUnlockDNS() {
 EOF
         then
             errorCard "DNS 分流配置移除失败，已保留旧配置"
+            dnsRoutingAbortChange "DNS 分流配置移除失败"
             return 1
         fi
     fi
@@ -302,11 +396,12 @@ EOF
 EOF
         then
             errorCard "sing-box DNS 分流配置移除失败，已保留旧配置"
+            dnsRoutingAbortChange "DNS 分流配置移除失败"
             return 1
         fi
     fi
 
-    reloadCore || return 1
+    dnsRoutingReloadOrRollback "DNS 分流" || return 1
 
     successCard "卸载成功"
 
@@ -315,6 +410,7 @@ EOF
 
 # 移除 DNS/hosts 覆盖
 removeUnlockSNI() {
+    dnsRoutingBackupCreate || { errorCard "DNS/hosts 覆盖配置备份失败，已取消移除"; return 1; }
     if [[ "${coreInstallType}" == 1 ]]; then
         if ! writeRoutingJsonConfig "${configPath}11_dns.json" <<EOF
 {
@@ -327,6 +423,7 @@ removeUnlockSNI() {
 EOF
         then
             errorCard "DNS/hosts 覆盖配置移除失败，已保留旧配置"
+            dnsRoutingAbortChange "DNS/hosts 覆盖配置移除失败"
             return 1
         fi
     fi
@@ -345,11 +442,12 @@ EOF
 EOF
         then
             errorCard "sing-box DNS/hosts 覆盖配置移除失败，已保留旧配置"
+            dnsRoutingAbortChange "DNS/hosts 覆盖配置移除失败"
             return 1
         fi
     fi
 
-    reloadCore || return 1
+    dnsRoutingReloadOrRollback "DNS/hosts 覆盖" || return 1
     successCard "卸载成功"
 
     exit 0

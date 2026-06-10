@@ -1223,10 +1223,15 @@ runDNSRoutingFailureReturnRegression() (
     local reloadMarker="${root}/reload"
     local statusMarker="${root}/status"
     local successMarker="${root}/success"
+    local errorLog="${root}/error.log"
     local rc
 
     mkdir -p "${root}"
-    errorCard() { return 0; }
+    PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
+        return 0
+    }
     echoContent() { return 0; }
     menuLine() { return 0; }
     menuClose() { return 0; }
@@ -1240,7 +1245,7 @@ runDNSRoutingFailureReturnRegression() (
         return 0
     }
     reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
+        printf 'reload\n' >>"${reloadMarker}"
         return 1
     }
 
@@ -1263,6 +1268,7 @@ runDNSRoutingFailureReturnRegression() (
         configPath="${root}/dns-xray/"
         singBoxConfigPath=
         coreInstallType=1
+        printf '{"dns":{"servers":["old-xray"]}}\n' >"${configPath}11_dns.json"
         autoRead() {
             case "$3" in
             setDNS) printf -v "$3" '8.8.8.8' ;;
@@ -1270,13 +1276,18 @@ runDNSRoutingFailureReturnRegression() (
             *) printf -v "$3" '' ;;
             esac
         }
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
         [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
+        jq -e '.dns.servers == ["old-xray"]' "${configPath}11_dns.json" >/dev/null
+        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        grep -q 'DNS 分流核心重载失败，已回滚本次修改' "${errorLog}"
     )
 
     (
@@ -1292,7 +1303,8 @@ runDNSRoutingFailureReturnRegression() (
             esac
         }
         addSingBoxOutbound() { return 1; }
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1300,6 +1312,8 @@ runDNSRoutingFailureReturnRegression() (
         [[ "${rc}" == "1" ]]
         [[ ! -e "${reloadMarker}" ]]
         [[ ! -e "${singBoxConfigPath}dns.json" ]]
+        [[ ! -e "${singBoxConfigPath}01_direct_outbound.json" ]]
+        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
     )
 
     (
@@ -1307,6 +1321,7 @@ runDNSRoutingFailureReturnRegression() (
         configPath="${root}/sni-xray/"
         singBoxConfigPath=
         coreInstallType=1
+        printf '{"dns":{"servers":["old-sni"]}}\n' >"${configPath}11_dns.json"
         autoRead() {
             case "$3" in
             setSNIP) printf -v "$3" '203.0.113.10' ;;
@@ -1314,13 +1329,17 @@ runDNSRoutingFailureReturnRegression() (
             *) printf -v "$3" '' ;;
             esac
         }
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
         set +e
         setUnlockSNI >/dev/null 2>&1
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
         [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
+        jq -e '.dns.servers == ["old-sni"]' "${configPath}11_dns.json" >/dev/null
+        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ ! -e "${statusMarker}" ]]
     )
 
@@ -1329,6 +1348,7 @@ runDNSRoutingFailureReturnRegression() (
         configPath=
         singBoxConfigPath="${root}/sni-sing-box/"
         coreInstallType=2
+        printf '{"dns":{"servers":["old-sing-sni"]}}\n' >"${singBoxConfigPath}dns.json"
         autoRead() {
             case "$3" in
             setSNIP) printf -v "$3" '203.0.113.10' ;;
@@ -1337,7 +1357,8 @@ runDNSRoutingFailureReturnRegression() (
             esac
         }
         addSingBoxDNSConfig() { return 1; }
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}"
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
         set +e
         setUnlockSNI >/dev/null 2>&1
         rc=$?
@@ -1345,6 +1366,8 @@ runDNSRoutingFailureReturnRegression() (
         [[ "${rc}" == "1" ]]
         [[ ! -e "${reloadMarker}" ]]
         [[ ! -e "${statusMarker}" ]]
+        jq -e '.dns.servers == ["old-sing-sni"]' "${singBoxConfigPath}dns.json" >/dev/null
+        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
     )
 
     (
@@ -1355,14 +1378,52 @@ runDNSRoutingFailureReturnRegression() (
         cat >"${configPath}11_dns.json" <<'JSON'
 {"dns":{"servers":["8.8.8.8"]}}
 JSON
-        rm -f "${reloadMarker}" "${successMarker}"
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
         set +e
         removeUnlockDNS >/dev/null 2>&1
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
         [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
+        jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
+        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ ! -e "${successMarker}" ]]
+    )
+
+    (
+        mkdir -p "${root}/dns-xray-restore-fail"
+        configPath="${root}/dns-xray-restore-fail/"
+        singBoxConfigPath=
+        coreInstallType=1
+        printf '{"dns":{"servers":["old-restore"]}}\n' >"${configPath}11_dns.json"
+        autoRead() {
+            case "$3" in
+            setDNS) printf -v "$3" '8.8.8.8' ;;
+            domainList) printf -v "$3" 'example.com' ;;
+            *) printf -v "$3" '' ;;
+            esac
+        }
+        cp() {
+            if [[ "$1" == "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" && "$2" == "${configPath}11_dns.json" ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        set +e
+        setUnlockDNS >/dev/null 2>&1
+        rc=$?
+        set -e
+        unset -f cp
+        [[ "${rc}" == "1" ]]
+        [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "1" ]]
+        [[ -d "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" ]]
+        grep -q 'DNS 分流核心重载失败，且旧配置恢复失败' "${errorLog}"
     )
 )
 
