@@ -584,6 +584,111 @@ JSON
     )
 )
 
+runVMessRoutingFailureReturnRegression() (
+    local root="${TMP_DIR}/vmess-routing-failure"
+    local removeMarker="${root}/remove"
+    local outboundMarker="${root}/outbound"
+    local routingMarker="${root}/routing"
+    local reloadMarker="${root}/reload"
+    local successMarker="${root}/success"
+    local mode=invalid-port
+    local rc
+
+    mkdir -p "${root}"
+    errorCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    successCard() {
+        printf 'success\n' >"${successMarker}"
+        return 0
+    }
+    autoRead() {
+        case "$3" in
+        setVMessWSTLSAddress) printf -v "$3" 'edge.example.com' ;;
+        domainList) printf -v "$3" 'example.com' ;;
+        setVMessWSTLSPort)
+            if [[ "${mode}" == "invalid-port" ]]; then
+                printf -v "$3" 'bad-port'
+            else
+                printf -v "$3" '443'
+            fi
+            ;;
+        setVMessWSTLSUUID) printf -v "$3" '11111111-1111-1111-1111-111111111111' ;;
+        setVMessWSTLSPath) printf -v "$3" 'ws' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    removeXrayOutbound() {
+        printf 'remove\n' >"${removeMarker}"
+        return 0
+    }
+    addXrayOutbound() {
+        printf 'outbound\n' >"${outboundMarker}"
+        [[ "${mode}" != "outbound-fail" ]]
+    }
+    addXrayRouting() {
+        printf 'routing\n' >"${routingMarker}"
+        return 0
+    }
+    unInstallRouting() {
+        printf 'routing\n' >"${routingMarker}"
+        return 0
+    }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" ]]
+    }
+
+    mode=invalid-port
+    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    setVMessWSRoutingOutbounds >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${removeMarker}" ]]
+    [[ ! -e "${outboundMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=outbound-fail
+    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    setVMessWSRoutingOutbounds >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${removeMarker}" ]]
+    [[ -e "${outboundMarker}" ]]
+    [[ ! -e "${routingMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=reload-fail
+    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    setVMessWSRoutingOutbounds >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${removeMarker}" ]]
+    [[ -e "${outboundMarker}" ]]
+    [[ -e "${routingMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    rm -f "${removeMarker}" "${routingMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    removeVMessWSRouting >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${removeMarker}" ]]
+    [[ -e "${routingMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+)
+
 runUserConfigWriteRegression() {
     local targetPath="${TMP_DIR}/user-config.json"
     cat >"${targetPath}" <<'JSON'
@@ -5912,6 +6017,7 @@ runRegressionRouting() {
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
     runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
+    runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }
 
