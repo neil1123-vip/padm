@@ -800,6 +800,170 @@ runWARPRoutingFailureReturnRegression() (
     [[ ! -e "${successMarker}" ]]
 )
 
+runSocks5RoutingFailureReturnRegression() (
+    local root="${TMP_DIR}/socks5-routing-failure"
+    local outboundMarker="${root}/outbound"
+    local routingMarker="${root}/routing"
+    local uninstallMarker="${root}/uninstall"
+    local removeMarker="${root}/remove"
+    local reloadMarker="${root}/reload"
+    local stopMarker="${root}/stop"
+    local successMarker="${root}/success"
+    local menuChoice=1
+    local uninstallChoice=1
+    local mode=invalid-port
+    local rc
+
+    mkdir -p "${root}/xray" "${root}/sing-box"
+    configPath="${root}/xray/"
+    singBoxConfigPath=
+    coreInstallType=1
+
+    errorCard() { return 0; }
+    statusCard() { return 0; }
+    warnCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuItem() { return 0; }
+    menuDangerItem() { return 0; }
+    menuReturnItem() { return 0; }
+    menuClose() { return 0; }
+    successCard() {
+        printf 'success\n' >"${successMarker}"
+        return 0
+    }
+    autoConfirm() {
+        printf -v "$4" 'y'
+        return 0
+    }
+    autoRead() {
+        case "$1" in
+        socks5_outbound_menu) printf -v "$3" "${menuChoice}" ;;
+        socks5_uninstall_menu) printf -v "$3" "${uninstallChoice}" ;;
+        socks5_outbound_ip) printf -v "$3" '127.0.0.1' ;;
+        socks5_outbound_port)
+            if [[ "${mode}" == "invalid-port" ]]; then
+                printf -v "$3" 'bad-port'
+            else
+                printf -v "$3" '1080'
+            fi
+            ;;
+        socks5_outbound_username) printf -v "$3" 'user' ;;
+        socks5_outbound_password) printf -v "$3" 'pass' ;;
+        socks5_outbound_domains) printf -v "$3" 'example.com' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    addXrayOutbound() {
+        printf 'outbound:%s\n' "$1" >>"${outboundMarker}"
+        [[ "${mode}" != "outbound-fail" ]]
+    }
+    unInstallRouting() {
+        printf 'uninstall\n' >"${uninstallMarker}"
+        [[ "${mode}" != "uninstall-fail" ]]
+    }
+    removeXrayOutbound() {
+        printf 'remove:%s\n' "$1" >>"${removeMarker}"
+        return 0
+    }
+    reloadCore() {
+        printf 'reload\n' >"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" ]]
+    }
+    handleSingBox() {
+        printf 'stop\n' >"${stopMarker}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && [[ "${mode}" != "stop-fail" ]]
+    }
+
+    mode=invalid-port
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    setSocks5Outbound >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${outboundMarker}" ]]
+
+    mode=outbound-fail
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    setSocks5Outbound >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${outboundMarker}" ]]
+
+    mode=uninstall-fail
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    setSocks5OutboundRouting >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+
+    setSocks5Outbound() {
+        printf 'outbound-config\n' >"${outboundMarker}"
+        return 0
+    }
+    setSocks5OutboundRouting() {
+        printf 'routing\n' >"${routingMarker}"
+        return 0
+    }
+
+    mode=reload-fail
+    menuChoice=1
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    socks5OutboundRoutingMenu >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${outboundMarker}" ]]
+    [[ -e "${routingMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=stop-fail
+    uninstallChoice=2
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${stopMarker}" "${successMarker}"
+    set +e
+    removeSocks5Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${stopMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=uninstall-fail
+    uninstallChoice=1
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    removeSocks5Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallMarker}" ]]
+    [[ ! -e "${removeMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+
+    mode=reload-fail
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    set +e
+    removeSocks5Routing >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${uninstallMarker}" ]]
+    [[ -e "${removeMarker}" ]]
+    [[ -e "${outboundMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
+    [[ ! -e "${successMarker}" ]]
+)
+
 runDNSRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/dns-routing-failure"
     local reloadMarker="${root}/reload"
@@ -6372,6 +6536,7 @@ runRegressionRouting() {
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
     runRegressionStep routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
     runRegressionStep routing-warp-failure-return runWARPRoutingFailureReturnRegression
+    runRegressionStep routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
     runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
     runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression

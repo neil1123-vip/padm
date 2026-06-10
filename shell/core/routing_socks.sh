@@ -4,7 +4,7 @@
 socks5Routing() {
     if [[ -z "${coreInstallType}" ]]; then
         errorCard "未安装任意协议，请先进入主菜单 -> 安装与重装"
-        exit 0
+        return 1
     fi
     echoContent title "\n┌─ Socks5 分流 ──────────────────────────────────────"
     menuLine "用于两台机器之间中继出站，不建议把入站暴露给不可信网络"
@@ -49,11 +49,11 @@ socks5InboundRoutingMenu() {
     case ${selectType} in
     1)
         totalProgress=1
-        installSingBox 1
-        installSingBoxService 1
-        setSocks5Inbound
-        setSocks5InboundRouting
-        reloadCore
+        installSingBox 1 || return 1
+        installSingBoxService 1 || return 1
+        setSocks5Inbound || return 1
+        setSocks5InboundRouting || return 1
+        reloadCore || return 1
         socks5InboundRoutingMenu
         ;;
     2)
@@ -61,8 +61,8 @@ socks5InboundRoutingMenu() {
         socks5InboundRoutingMenu
         ;;
     3)
-        setSocks5InboundRouting addRules
-        reloadCore
+        setSocks5InboundRouting addRules || return 1
+        reloadCore || return 1
         socks5InboundRoutingMenu
         ;;
     4)
@@ -101,15 +101,16 @@ socks5OutboundRoutingMenu() {
     autoRead socks5_outbound_menu "请选择:" selectType
     case ${selectType} in
     1)
-        setSocks5Outbound
-        setSocks5OutboundRouting
-        reloadCore
+        setSocks5Outbound || return 1
+        setSocks5OutboundRouting || return 1
+        reloadCore || return 1
         socks5OutboundRoutingMenu
         ;;
     2)
-        setSocks5Outbound
-        setSocks5OutboundRoutingAll
-        reloadCore
+        setSocks5Outbound || return 1
+        setSocks5OutboundRoutingAll || return 1
+        reloadCore || return 1
+        successCard "Socks5全局出站设置完毕"
         socks5OutboundRoutingMenu
         ;;
     3)
@@ -118,8 +119,8 @@ socks5OutboundRoutingMenu() {
         socks5OutboundRoutingMenu
         ;;
     4)
-        setSocks5OutboundRouting addRules
-        reloadCore
+        setSocks5OutboundRouting addRules || return 1
+        reloadCore || return 1
         socks5OutboundRoutingMenu
         ;;
     5)
@@ -143,30 +144,31 @@ setSocks5OutboundRoutingAll() {
 
     if [[ "${socksOutStatus}" == "y" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
-            removeXrayOutbound IPv4_out
-            removeXrayOutbound IPv6_out
-            removeXrayOutbound z_direct_outbound
-            removeXrayOutbound blackhole_out
-            removeXrayOutbound wireguard_out_IPv4
-            removeXrayOutbound wireguard_out_IPv6
+            removeXrayOutbound IPv4_out || return 1
+            removeXrayOutbound IPv6_out || return 1
+            removeXrayOutbound z_direct_outbound || return 1
+            removeXrayOutbound blackhole_out || return 1
+            removeXrayOutbound wireguard_out_IPv4 || return 1
+            removeXrayOutbound wireguard_out_IPv6 || return 1
 
-            rm ${configPath}09_routing.json >/dev/null 2>&1
+            rm -f "${configPath}09_routing.json" >/dev/null 2>&1 || return 1
         fi
         if [[ -n "${singBoxConfigPath}" ]]; then
 
-            removeSingBoxConfig IPv4_out
-            removeSingBoxConfig IPv6_out
+            removeSingBoxConfig IPv4_out || return 1
+            removeSingBoxConfig IPv6_out || return 1
 
-            removeSingBoxConfig wireguard_endpoints_IPv4_route
-            removeSingBoxConfig wireguard_endpoints_IPv6_route
-            removeSingBoxConfig wireguard_endpoints_IPv4
-            removeSingBoxConfig wireguard_endpoints_IPv6
+            removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
+            removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
+            removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
+            removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
 
-            removeSingBoxConfig socks5_01_outbound_route
-            removeSingBoxConfig 01_direct_outbound
+            removeSingBoxConfig socks5_01_outbound_route || return 1
+            removeSingBoxConfig 01_direct_outbound || return 1
         fi
-
-        successCard "Socks5全局出站设置完毕"
+    else
+        statusCard "已取消" "未设置 Socks5 全局出站"
+        return 1
     fi
 }
 # Socks5 分流规则
@@ -204,6 +206,15 @@ showXrayRoutingRules() {
     fi
 }
 
+stopSocks5SingBox() {
+    local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
+    SERVICE_QUEUE_ALLOW_FAILURE=true
+    handleSingBox stop
+    local stopStatus=$?
+    SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
+    return "${stopStatus}"
+}
+
 # 卸载 Socks5 分流
 removeSocks5Routing() {
     echoContent title "\n┌─ 卸载 Socks5 分流 ─────────────────────────────────"
@@ -215,47 +226,49 @@ removeSocks5Routing() {
     autoRead socks5_uninstall_menu "请选择:" unInstallSocks5RoutingStatus
     if [[ "${unInstallSocks5RoutingStatus}" == "1" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
-            removeXrayOutbound socks5_outbound
-            unInstallRouting socks5_outbound outboundTag
+            unInstallRouting socks5_outbound outboundTag || return 1
+            removeXrayOutbound socks5_outbound || return 1
 
-            addXrayOutbound z_direct_outbound
+            addXrayOutbound z_direct_outbound || return 1
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig socks5_outbound
-            removeSingBoxConfig socks5_01_outbound_route
-            addSingBoxOutbound 01_direct_outbound
+            removeSingBoxConfig socks5_outbound || return 1
+            removeSingBoxConfig socks5_01_outbound_route || return 1
+            addSingBoxOutbound 01_direct_outbound || return 1
         fi
 
     elif [[ "${unInstallSocks5RoutingStatus}" == "2" ]]; then
 
-        removeSingBoxConfig 20_socks5_inbounds
-        removeSingBoxConfig socks5_02_inbound_route
-        removeSingBoxConfig sniff_socks5_inbound
-        removeSingBoxConfig "strategy_ipv4_only_socks5_inbound"
-        removeSingBoxConfig "strategy_ipv6_only_socks5_inbound"
+        if [[ -n "${singBoxConfigPath}" ]]; then
+            removeSingBoxConfig 20_socks5_inbounds || return 1
+            removeSingBoxConfig socks5_02_inbound_route || return 1
+            removeSingBoxConfig sniff_socks5_inbound || return 1
+            removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || return 1
+            removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || return 1
+        fi
 
-        handleSingBox stop
+        stopSocks5SingBox || return 1
     elif [[ "${unInstallSocks5RoutingStatus}" == "3" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
-            removeXrayOutbound socks5_outbound
-            unInstallRouting socks5_outbound outboundTag
-            addXrayOutbound z_direct_outbound
+            unInstallRouting socks5_outbound outboundTag || return 1
+            removeXrayOutbound socks5_outbound || return 1
+            addXrayOutbound z_direct_outbound || return 1
         fi
 
         if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig socks5_outbound
-            removeSingBoxConfig socks5_01_outbound_route
-            removeSingBoxConfig 20_socks5_inbounds
-            removeSingBoxConfig socks5_02_inbound_route
-            removeSingBoxConfig sniff_socks5_inbound
-            removeSingBoxConfig "strategy_ipv4_only_socks5_inbound"
-            removeSingBoxConfig "strategy_ipv6_only_socks5_inbound"
+            removeSingBoxConfig socks5_outbound || return 1
+            removeSingBoxConfig socks5_01_outbound_route || return 1
+            removeSingBoxConfig 20_socks5_inbounds || return 1
+            removeSingBoxConfig socks5_02_inbound_route || return 1
+            removeSingBoxConfig sniff_socks5_inbound || return 1
+            removeSingBoxConfig "strategy_ipv4_only_socks5_inbound" || return 1
+            removeSingBoxConfig "strategy_ipv6_only_socks5_inbound" || return 1
 
-            addSingBoxOutbound 01_direct_outbound
+            addSingBoxOutbound 01_direct_outbound || return 1
         fi
 
-        handleSingBox stop
+        stopSocks5SingBox || return 1
     elif [[ "${unInstallSocks5RoutingStatus}" == "4" ]]; then
         socks5Routing
         return
@@ -264,8 +277,8 @@ removeSocks5Routing() {
         removeSocks5Routing
         return
     fi
+    reloadCore || return 1
     successCard "卸载完毕"
-    reloadCore
 }
 # 写入 Socks5 入站配置
 writeSocks5InboundConfig() {
@@ -312,6 +325,10 @@ setSocks5Inbound() {
             socks5RoutingUUID=$(/etc/padm/sing-box/sing-box generate uuid)
         fi
     fi
+    if [[ -z "${socks5RoutingUUID}" ]]; then
+        errorCard "UUID生成失败"
+        return 1
+    fi
     echo
     echoContent green "用户名称：${socks5RoutingUUID}"
     echoContent green "用户密码：${socks5RoutingUUID}"
@@ -330,27 +347,28 @@ setSocks5Inbound() {
         domainStrategy="ipv6_only"
     else
         errorCard "选择类型错误"
-        exit 0
+        return 1
     fi
     local socks5InboundPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}20_socks5_inbounds.json"
     writeSocks5InboundConfig "${socks5InboundPath}" "${result[-1]}" "${socks5RoutingUUID}" || return 1
-    setStrategyRouting socks5_inbound "${domainStrategy}"
+    setStrategyRouting socks5_inbound "${domainStrategy}" || return 1
 }
 
 
 # Socks5 inbound routing 规则
 setSocks5InboundRouting() {
 
-    singBoxConfigPath=/etc/padm/sing-box/conf/config/
+    singBoxConfigPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+    local action="${1:-}"
 
-    if [[ "$1" == "addRules" && ! -f "${singBoxConfigPath}socks5_02_inbound_route.json" && ! -f "${configPath}09_routing.json" ]]; then
+    if [[ "${action}" == "addRules" && ! -f "${singBoxConfigPath}socks5_02_inbound_route.json" && ! -f "${configPath}09_routing.json" ]]; then
         errorCard "请安装入站分流后再添加分流规则"
         errorCard "如已选择允许所有网站，请重新安装分流后设置规则"
-        exit 0
+        return 1
     fi
     local socks5InboundRoutingIPs=
-    if [[ "$1" == "addRules" ]]; then
-        socks5InboundRoutingIPs=$(jq .route.rules[0].source_ip_cidr "${singBoxConfigPath}socks5_02_inbound_route.json")
+    if [[ "${action}" == "addRules" ]]; then
+        socks5InboundRoutingIPs=$(jq .route.rules[0].source_ip_cidr "${singBoxConfigPath}socks5_02_inbound_route.json") || return 1
     else
         echoContent title "\n┌─ Socks5 入站访问源 ────────────────────────────────"
         menuLine "请输入允许访问的 IP 地址，多个 IP 用英文逗号分隔"
@@ -360,9 +378,9 @@ setSocks5InboundRouting() {
 
         if [[ -z "${socks5InboundRoutingIPs}" ]]; then
             errorCard "IP不可为空"
-            exit 0
+            return 1
         fi
-        socks5InboundRoutingIPs=$(echo "\"${socks5InboundRoutingIPs}"\" | jq -c '.|split(",")')
+        socks5InboundRoutingIPs=$(echo "\"${socks5InboundRoutingIPs}"\" | jq -c '.|split(",")') || return 1
     fi
 
     echoContent title "\n┌─ Socks5 域名分流 ─────────────────────────────────"
@@ -373,21 +391,21 @@ setSocks5InboundRouting() {
 
     autoRead socks5_inbound_allow_all "是否允许所有网站？请选择[y/n]:" socks5InboundRoutingDomainStatus
     if [[ "${socks5InboundRoutingDomainStatus}" == "y" ]]; then
-        addSingBoxRouteRule "01_direct_outbound" "" "socks5_02_inbound_route"
+        addSingBoxRouteRule "01_direct_outbound" "" "socks5_02_inbound_route" || return 1
         updateRoutingJsonConfig "${singBoxConfigPath}socks5_02_inbound_route.json" '.route.rules[0].inbound = ["socks5_inbound"] | .route.rules[0].source_ip_cidr = $sourceIPs' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
 
-        addSingBoxOutbound "01_direct_outbound"
+        addSingBoxOutbound "01_direct_outbound" || return 1
     else
         echoContent yellow "录入示例:netflix,openai,example.com\n"
         autoRead socks5_inbound_domains "域名:" socks5InboundRoutingDomain
         if [[ -z "${socks5InboundRoutingDomain}" ]]; then
             errorCard "域名不可为空"
-            exit 0
+            return 1
         fi
-        addSingBoxRouteRule "01_direct_outbound" "${socks5InboundRoutingDomain}" "socks5_02_inbound_route"
+        addSingBoxRouteRule "01_direct_outbound" "${socks5InboundRoutingDomain}" "socks5_02_inbound_route" || return 1
         updateRoutingJsonConfig "${singBoxConfigPath}socks5_02_inbound_route.json" '.route.rules[0].inbound = ["socks5_inbound"] | .route.rules[0].source_ip_cidr = $sourceIPs' --argjson sourceIPs "${socks5InboundRoutingIPs}" || return 1
 
-        addSingBoxOutbound "01_direct_outbound"
+        addSingBoxOutbound "01_direct_outbound" || return 1
     fi
 
 }
@@ -403,25 +421,25 @@ setSocks5Outbound() {
     autoRead socks5_outbound_ip "请输入落地机IP地址:" socks5RoutingOutboundIP
     if [[ -z "${socks5RoutingOutboundIP}" ]]; then
         errorCard "IP不可为空"
-        exit 0
+        return 1
     fi
     echo
     autoRead socks5_outbound_port "请输入落地机端口:" socks5RoutingOutboundPort
-    if [[ -z "${socks5RoutingOutboundPort}" ]]; then
-        errorCard "端口不可为空"
-        exit 0
+    if ! validPortNumber "${socks5RoutingOutboundPort}"; then
+        errorCard "端口不合法"
+        return 1
     fi
     echo
     autoRead socks5_outbound_username "请输入用户名:" socks5RoutingOutboundUserName
     if [[ -z "${socks5RoutingOutboundUserName}" ]]; then
         errorCard "用户名不可为空"
-        exit 0
+        return 1
     fi
     echo
     autoRead socks5_outbound_password "请输入用户密码:" socks5RoutingOutboundPassword
     if [[ -z "${socks5RoutingOutboundPassword}" ]]; then
         errorCard "用户密码不可为空"
-        exit 0
+        return 1
     fi
     echo
     if [[ -n "${singBoxConfigPath}" ]]; then
@@ -442,16 +460,17 @@ setSocks5Outbound() {
 EOF
     fi
     if [[ "${coreInstallType}" == "1" ]]; then
-        addXrayOutbound socks5_outbound
+        addXrayOutbound socks5_outbound || return 1
     fi
 }
 
 # Socks5 outbound routing 规则
 setSocks5OutboundRouting() {
+    local action="${1:-}"
 
-    if [[ "$1" == "addRules" && ! -f "${singBoxConfigPath}socks5_01_outbound_route.json" && ! -f "${configPath}09_routing.json" ]]; then
+    if [[ "${action}" == "addRules" && ! -f "${singBoxConfigPath}socks5_01_outbound_route.json" && ! -f "${configPath}09_routing.json" ]]; then
         errorCard "请安装出站分流后再添加分流规则"
-        exit 0
+        return 1
     fi
 
     echoContent title "\n┌─ Socks5 域名分流 ─────────────────────────────────"
@@ -462,16 +481,19 @@ setSocks5OutboundRouting() {
     echoContent yellow "录入示例:netflix,openai,example.com\n"
     autoRead socks5_outbound_domains "域名:" socks5RoutingOutboundDomain
     if [[ -z "${socks5RoutingOutboundDomain}" ]]; then
-        errorCard "IP不可为空"
-        exit 0
+        errorCard "域名不可为空"
+        return 1
     fi
-    addSingBoxRouteRule "socks5_outbound" "${socks5RoutingOutboundDomain}" "socks5_01_outbound_route"
-    addSingBoxOutbound "01_direct_outbound"
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        addSingBoxOutbound "01_direct_outbound" || return 1
+        addSingBoxRouteRule "socks5_outbound" "${socks5RoutingOutboundDomain}" "socks5_01_outbound_route" || return 1
+    fi
 
     if [[ "${coreInstallType}" == "1" ]]; then
 
-        unInstallRouting "socks5_outbound" "outboundTag"
+        unInstallRouting "socks5_outbound" "outboundTag" || return 1
         local domainRules=[]
+        local routingRule=
         while read -r line; do
             if echo "${routingRule}" | grep -q "${line}"; then
                 statusCard "规则已存在" "${line} 已存在，跳过"
@@ -490,6 +512,6 @@ setSocks5OutboundRouting() {
 }
 EOF
         fi
-        updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type": "field","domain": $domainRules,"outboundTag": "socks5_outbound"}]' --argjson domainRules "${domainRules}"
+        updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type": "field","domain": $domainRules,"outboundTag": "socks5_outbound"}]' --argjson domainRules "${domainRules}" || return 1
     fi
 }
