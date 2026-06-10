@@ -167,18 +167,40 @@ singBoxRunning() {
     return 1
 }
 
+singBoxSystemdServiceFile() {
+    printf '%s\n' "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}"
+}
+
+singBoxOpenRcServiceFile() {
+    printf '%s\n' "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}"
+}
+
+handleSingBoxMergeFailure() {
+    errorCard "sing-box配置合并失败"
+    menuLine "$(uiStyle warn "请手动执行以下命令查看 merge 错误日志：")"
+    menuLine "$(uiStyle value "/etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/")"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
+    exit 0
+}
+
 # 操作 sing-box
 handleSingBox() {
-    if [[ -f "/etc/systemd/system/sing-box.service" ]]; then
+    if [[ -f "$(singBoxSystemdServiceFile)" ]]; then
         if ! singBoxRunning && [[ "$1" == "start" ]]; then
-            singBoxMergeConfig
+            if ! singBoxMergeConfig; then
+                handleSingBoxMergeFailure
+                return 1
+            fi
             systemctl start sing-box.service
         elif singBoxRunning && [[ "$1" == "stop" ]]; then
             systemctl stop sing-box.service
         fi
-    elif [[ -f "/etc/init.d/sing-box" ]]; then
+    elif [[ -f "$(singBoxOpenRcServiceFile)" ]]; then
         if ! singBoxRunning && [[ "$1" == "start" ]]; then
-            singBoxMergeConfig
+            if ! singBoxMergeConfig; then
+                handleSingBoxMergeFailure
+                return 1
+            fi
             rc-service sing-box start
         elif singBoxRunning && [[ "$1" == "stop" ]]; then
             rc-service sing-box stop

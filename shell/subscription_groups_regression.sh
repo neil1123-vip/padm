@@ -2207,6 +2207,47 @@ runServiceQueueApplyPropagationRegression() (
     [[ ! -e "${reachedFile}" ]]
 )
 
+runSingBoxMergeStartFailureRegression() (
+    local root="${TMP_DIR}/sing-box-merge-start-failure"
+    local serviceFile="${root}/sing-box.service"
+    local mergeMarker="${root}/merge"
+    local systemctlMarker="${root}/systemctl"
+    local queueRc
+
+    mkdir -p "${root}"
+    touch "${serviceFile}"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/core/services.sh"
+
+    PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${serviceFile}"
+    SERVICE_ACTIONS=
+    SERVICE_QUEUE_ALLOW_FAILURE=
+    singBoxRunning() { return 1; }
+    singBoxMergeConfig() {
+        printf 'merge\n' >"${mergeMarker}"
+        return 1
+    }
+    systemctl() {
+        printf '%s\n' "$*" >"${systemctlMarker}"
+        return 0
+    }
+    errorCard() { return 0; }
+    menuLine() { return 0; }
+    uiStyle() { shift; printf '%s\n' "$*"; }
+
+    serviceQueueStart sing-box
+    set +e
+    serviceQueueApply >/dev/null 2>&1
+    queueRc=$?
+    set -e
+
+    [[ "${queueRc}" == "1" ]]
+    [[ -e "${mergeMarker}" ]]
+    [[ ! -e "${systemctlMarker}" ]]
+    [[ -z "${SERVICE_ACTIONS}" ]]
+    [[ -z "${SERVICE_QUEUE_ALLOW_FAILURE}" ]]
+)
+
 runReloadCorePropagationRegression() (
     local root="${TMP_DIR}/reload-core-propagation"
     local alpnConfig="${root}/alpn.json"
@@ -7262,6 +7303,7 @@ runRegressionTransactionCore() {
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
+        runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression &&
