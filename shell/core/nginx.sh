@@ -235,19 +235,34 @@ realityStreamApplyServicesOrRollback() {
 }
 
 ensureRealityStreamNginxInclude() {
-    local nginxMainConf
+    local nginxMainConf streamConf streamDir includePattern tmpFile
     nginxMainConf=$(realityStreamSplitNginxConf)
     [[ -n "${nginxMainConf}" && -f "${nginxMainConf}" ]] || return 1
+    streamConf=$(realityStreamSplitConfFile)
+    streamDir=$(dirname -- "${streamConf}")
+    includePattern="${streamDir%/}/*.conf"
+    mkdir -p "${streamDir}" || return 1
 
-    mkdir -p "$(dirname "$(realityStreamSplitConfFile)")"
-    if ! grep -q "padm stream include start" "${nginxMainConf}"; then
-        cat <<'EOF' >>"${nginxMainConf}"
+    padmCreateTempFileForTarget tmpFile "${nginxMainConf}" nginx || return 1
+    if ! awk '
+        /# padm stream include start/ {skip=1; next}
+        /# padm stream include end/ {skip=0; next}
+        skip != 1 {print}
+    ' "${nginxMainConf}" >"${tmpFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    if ! cat <<EOF >>"${tmpFile}"
 
 # padm stream include start
-include /etc/nginx/stream.d/*.conf;
+include ${includePattern};
 # padm stream include end
 EOF
+    then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
     fi
+    commitGeneratedFile "${tmpFile}" "${nginxMainConf}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 removeRealityStreamNginxInclude() {

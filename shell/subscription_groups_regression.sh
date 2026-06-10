@@ -5713,6 +5713,7 @@ EOF
     jq -e '.enabled == true and .default_protocol == "vision" and .protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2443' "${stateFile}" >/dev/null
     grep -q 'site.example.com padm_website;' "${streamConf}"
     grep -q 'padm stream include start' "${nginxMainConf}"
+    grep -Fq "include ${streamDir}/*.conf;" "${nginxMainConf}"
     [[ ! -e "${streamConf}.tmp" ]]
     if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
         return 1
