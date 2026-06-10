@@ -360,7 +360,7 @@ check1Panel() {
 
 # 卸载 sing-box
 unInstallSingBox() {
-    local type=$1
+    local type=${1:-}
     if [[ -n "${singBoxConfigPath}" ]]; then
         if grep -q 'tuic' </etc/padm/sing-box/conf/config.json && [[ "${type}" == "tuic" ]]; then
             rm "${singBoxConfigPath}09_tuic_inbounds.json"
@@ -379,11 +379,14 @@ unInstallSingBox() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         statusCard "保留配置" "检测到有其他配置，保留 sing-box 核心"
         serviceQueueRestart sing-box
-        serviceQueueApply
+        serviceQueueApply || { errorCard "sing-box 服务重启失败"; return 1; }
     else
-        handleSingBox stop
-        rm /etc/systemd/system/sing-box.service
-        rm -rf /etc/padm/sing-box/*
+        if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+            errorCard "sing-box 服务停止失败，已取消卸载"
+            return 1
+        fi
+        rm -f /etc/systemd/system/sing-box.service || { errorCard "sing-box systemd 服务文件删除失败"; return 1; }
+        rm -rf /etc/padm/sing-box/* || { errorCard "sing-box 文件清理失败"; return 1; }
         successCard "sing-box 卸载完成"
     fi
 }

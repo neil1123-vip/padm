@@ -2390,6 +2390,66 @@ runSingBoxMergeStartFailureRegression() (
     [[ -z "${SERVICE_QUEUE_ALLOW_FAILURE}" ]]
 )
 
+runSingBoxUninstallFailurePropagationRegression() (
+    local root="${TMP_DIR}/sing-box-uninstall-failure"
+    local configDir="${root}/conf/config/"
+    local serviceLog="${root}/service.log"
+    local rmLog="${root}/rm.log"
+    local errorLog="${root}/error.log"
+    local rc
+
+    mkdir -p "${configDir}"
+    printf '{}\n' >"${configDir}config.json"
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${errorLog}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    singBoxConfigPath="${configDir}"
+    readInstallType() { return 0; }
+    serviceQueueRestart() {
+        printf 'restart:%s\n' "$1" >>"${serviceLog}"
+        return 0
+    }
+    serviceQueueApply() {
+        printf 'apply\n' >>"${serviceLog}"
+        return 1
+    }
+
+    set +e
+    unInstallSingBox other >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'restart:sing-box' "${serviceLog}"
+    grep -qx 'apply' "${serviceLog}"
+    grep -q 'sing-box 服务重启失败' "${errorLog}"
+
+    singBoxConfigPath=
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${errorLog}"
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    handleSingBox() {
+        printf 'handle:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 1
+    }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    unInstallSingBox >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'handle:stop:true' "${serviceLog}"
+    grep -q 'sing-box 服务停止失败，已取消卸载' "${errorLog}"
+    [[ ! -s "${rmLog}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+)
+
 runReloadCorePropagationRegression() (
     local root="${TMP_DIR}/reload-core-propagation"
     local alpnConfig="${root}/alpn.json"
@@ -7552,6 +7612,7 @@ runRegressionTransactionCore() {
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
+        runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
         runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
         runRegressionStep remove-user runRemoveUserRegression &&
