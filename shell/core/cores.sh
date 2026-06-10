@@ -1346,12 +1346,40 @@ coreServiceControlMenu() {
     menuClose
     autoRead core_service_control "请选择:" selectServiceAction
     case "${selectServiceAction}" in
-    1) serviceQueueStart "${serviceName}"; serviceQueueApply ;;
-    2) serviceQueueStop "${serviceName}"; serviceQueueApply ;;
-    3) serviceQueueRestart "${serviceName}"; serviceQueueApply ;;
+    1) coreServiceControlAction "${serviceName}" start ;;
+    2) coreServiceControlAction "${serviceName}" stop ;;
+    3) coreServiceControlAction "${serviceName}" restart ;;
     4) coreVersionManageMenu ;;
     *) errorCard "输入有误，请重新输入"; coreServiceControlMenu "${core}" ;;
     esac
+}
+
+coreServiceControlAction() {
+    local serviceName=$1
+    local action=$2
+    local actionName=$action
+    case "${action}" in
+    start)
+        actionName="启动"
+        serviceQueueStart "${serviceName}"
+        ;;
+    stop)
+        actionName="停止"
+        serviceQueueStop "${serviceName}"
+        ;;
+    restart)
+        actionName="重启"
+        serviceQueueRestart "${serviceName}"
+        ;;
+    *)
+        errorCard "服务操作不支持: ${action}"
+        return 1
+        ;;
+    esac
+    if ! serviceQueueApply; then
+        errorCard "${serviceName} 服务${actionName}失败"
+        return 1
+    fi
 }
 
 coreConfigMaintenanceMenu() {

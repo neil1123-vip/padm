@@ -7363,6 +7363,7 @@ runMenuSmokeRegression() {
     local oldConfigPath="${configPath:-}"
     local oldCoreInstallType="${coreInstallType:-}"
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
+    local serviceQueueShouldFail=
     local wgChoice
     local wgAction
     local wgActions=(
@@ -7494,6 +7495,14 @@ runMenuSmokeRegression() {
     singBoxConfigInstalled() { return 1; }
     crontab() { return 1; }
     coreReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; return 1; }
+    serviceQueueStart() { recordMenuAction "serviceQueueStart:$*"; }
+    serviceQueueStop() { recordMenuAction "serviceQueueStop:$*"; }
+    serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
+    serviceQueueApply() {
+        recordMenuAction serviceQueueApply
+        [[ "${serviceQueueShouldFail}" == "true" ]] && return 1
+        return 0
+    }
     subscriptionGroupsStateRead() {
         if [[ "$1" == "-r" ]]; then
             recordMenuAction "subscriptionGroupsStateRead:$*"
@@ -7790,6 +7799,20 @@ y
         printf 'menu-smoke failed: core menu fetched release versions while rendering overview\n' >&2
         return 1
     fi
+    resetMenuActions
+    coreServiceControlMenu xray <<<"3"
+    assertMenuAction 'serviceQueueRestart:xray'
+    assertMenuAction serviceQueueApply
+    serviceQueueShouldFail=true
+    resetMenuActions
+    if coreServiceControlMenu sing-box <<<"3" >/dev/null 2>&1; then
+        serviceQueueShouldFail=
+        return 1
+    fi
+    serviceQueueShouldFail=
+    assertMenuAction 'serviceQueueRestart:sing-box'
+    assertMenuAction serviceQueueApply
+    assertMenuAction 'errorCard:sing-box 服务重启失败'
 
     configPath="${oldConfigPath}"
     coreInstallType="${oldCoreInstallType}"
