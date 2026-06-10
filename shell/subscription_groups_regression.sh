@@ -2275,6 +2275,59 @@ runNetworkCheckReturnFailureRegression() (
     grep -qx 'nginx:start:true' "${serviceLog}"
     grep -qx 'write:nginx-start-fail' "${writeLog}"
 
+    portProcessKind=padm
+    lsof() {
+        case "$*" in
+        "-i tcp:8443"|"-nP -i tcp:8443")
+            case "${portProcessKind}" in
+            padm) printf 'xray 123 root 3u IPv4 TCP *:8443 (LISTEN)\n' ;;
+            nginx) printf 'nginx 123 root 3u IPv4 TCP *:8443 (LISTEN)\n' ;;
+            none) return 1 ;;
+            esac
+            ;;
+        "-ti tcp:8443")
+            printf '123\n'
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    }
+    autoRead() {
+        printf -v "$3" 'y'
+    }
+    systemctl() {
+        printf 'systemctl:%s\n' "$*" >>"${serviceLog}"
+        return 0
+    }
+    runCheckPortStopFailureCase() {
+        local failureMode=$1
+        local processKind=$2
+        local rc
+        mode="${failureMode}"
+        portProcessKind="${processKind}"
+        : >"${serviceLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        checkPort 8443 >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
+    runCheckPortStopFailureCase xray-stop-fail padm
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    ! grep -q '^sing-box:' "${serviceLog}"
+
+    runCheckPortStopFailureCase sing-box-stop-fail padm
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+
+    runCheckPortStopFailureCase nginx-stop-fail nginx
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    ! grep -q '^systemctl:' "${serviceLog}"
+
     currentUUID=existing-user
     currentClients='[]'
     domain=tls.example.com
