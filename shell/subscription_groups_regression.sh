@@ -3714,6 +3714,83 @@ runSubscribeReturnFailureRegression() (
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
 )
 
+runRemoveUserSubscriptionMenuFailureRegression() (
+    local root="${TMP_DIR}/remove-user-subscription-menu-failure"
+    local callLog="${root}/calls.log"
+    local successLog="${root}/success.log"
+    local errorLog="${root}/error.log"
+    local mode rc
+
+    mkdir -p "${root}"
+    : >"${callLog}"
+    : >"${successLog}"
+    : >"${errorLog}"
+
+    autoRead() {
+        printf -v "$3" 'yes'
+    }
+    subscriptionSyncAccountName() {
+        printf 'sub_%s\n' "$1"
+    }
+    removeUserSubscriptionState() {
+        printf 'state:%s\n' "$1" >>"${callLog}"
+        [[ "${mode}" != "state-fail" ]]
+    }
+    subscriptionSyncRemoveAccount() {
+        printf 'account:%s\n' "$1" >>"${callLog}"
+        [[ "${mode}" != "account-fail" ]]
+    }
+    reloadCore() {
+        printf 'reload\n' >>"${callLog}"
+        [[ "${mode}" != "reload-fail" ]]
+    }
+    successCard() {
+        printf '%s\n' "$*" >>"${successLog}"
+    }
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
+    }
+    statusCard() { return 0; }
+
+    runRemoveCase() {
+        mode=$1
+        : >"${callLog}"
+        : >"${successLog}"
+        : >"${errorLog}"
+        set +e
+        removeUserSubscriptionMenu team-a >/dev/null 2>&1
+        rc=$?
+        set -e
+    }
+
+    runRemoveCase state-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'state:team-a' "${callLog}"
+    ! grep -q '^account:' "${callLog}"
+    ! grep -qx 'reload' "${callLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase account-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'state:team-a' "${callLog}"
+    grep -qx 'account:sub_team-a' "${callLog}"
+    ! grep -qx 'reload' "${callLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase reload-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'state:team-a' "${callLog}"
+    grep -qx 'account:sub_team-a' "${callLog}"
+    grep -qx 'reload' "${callLog}"
+    grep -q '核心重载失败' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase success
+    [[ "${rc}" == "0" ]]
+    grep -qx 'reload' "${callLog}"
+    grep -q '用户订阅已删除' "${successLog}"
+)
+
 runRealityStreamDisableRegression() {
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
@@ -8059,6 +8136,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
+    runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
 }
 
 runRegressionSubscription() {
@@ -8112,6 +8190,7 @@ runRegressionTransactionSubscription() {
         runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression &&
         runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression &&
         runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression &&
+        runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression &&
         runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
 }
 

@@ -429,9 +429,18 @@ removeUserSubscriptionMenu() {
         statusCard "已取消" "操作未执行"
         return 1
     fi
-    removeUserSubscriptionState "${userSubscriptionId}"
-    subscriptionSyncRemoveAccount "$(subscriptionSyncAccountName "${userSubscriptionId}")"
-    reloadCore
+    if ! removeUserSubscriptionState "${userSubscriptionId}"; then
+        errorCard "用户订阅状态删除失败"
+        return 1
+    fi
+    if ! subscriptionSyncRemoveAccount "$(subscriptionSyncAccountName "${userSubscriptionId}")"; then
+        errorCard "用户订阅状态已删除，但托管账号配置移除失败，请检查本机配置"
+        return 1
+    fi
+    if ! reloadCore; then
+        errorCard "用户订阅状态和托管账号已删除，但核心重载失败，请检查核心服务日志"
+        return 1
+    fi
     successCard "用户订阅已删除"
 }
 
