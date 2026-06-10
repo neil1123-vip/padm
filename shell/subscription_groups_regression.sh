@@ -3332,6 +3332,98 @@ runUninstallNginxCleanupRegression() {
     PADM_NGINX_CONF_FALLBACK_DIR="${oldFallbackDir}"
 }
 
+runUninstallServiceStopFailureRegression() (
+    local root="${TMP_DIR}/uninstall-service-stop"
+    local serviceLog="${root}/service.log"
+    local actionLog="${root}/actions.log"
+    local errorLog="${root}/errors.log"
+    local rcFile="${root}/uninstall.rc"
+    local mode shellRc
+
+    mkdir -p "${root}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    autoRead() { printf -v "$3" 'y'; }
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    menu() { return 0; }
+    pgrep() { return 1; }
+    removeInstallPath() {
+        printf 'remove:%s:%s\n' "$1" "$2" >>"${actionLog}"
+        return 0
+    }
+    cleanupSubscriptionWireGuardControlOnUninstall() {
+        printf 'wireguard-cleanup\n' >>"${actionLog}"
+        return 0
+    }
+    removePadmNginxConfigFragments() {
+        printf 'nginx-fragments\n' >>"${actionLog}"
+        return 0
+    }
+    unInstallSubscribe() {
+        printf 'unsubscribe-cleanup\n' >>"${actionLog}"
+        return 0
+    }
+    handleNginx() {
+        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        if [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]]; then
+            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
+            exit 0
+        fi
+        return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        if [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]]; then
+            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
+            exit 0
+        fi
+        return 0
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        if [[ "${mode}" == "sing-box-stop-fail" && "$1" == "stop" ]]; then
+            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
+            exit 0
+        fi
+        return 0
+    }
+
+    runUninstallStopFailureCase() {
+        mode=$1
+        : >"${serviceLog}"
+        : >"${actionLog}"
+        : >"${errorLog}"
+        rm -f "${rcFile}"
+        release=centos
+        coreInstallType=1
+        singBoxConfigPath="${root}/sing-box-conf/"
+        nginxStaticPath="${root}/static"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        (
+            set +e
+            unInstall >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ "$(<"${rcFile}")" == "1" ]]
+        grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        grep -qxF 'remove:/etc/padm:PADM配置目录' "${actionLog}"
+        grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        grep -q '卸载未完全完成' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
+    runUninstallStopFailureCase nginx-stop-fail
+    runUninstallStopFailureCase xray-stop-fail
+    runUninstallStopFailureCase sing-box-stop-fail
+)
+
 runCleanLastInstallationConfigFailureRegression() (
     local root="${TMP_DIR}/clean-last-installation"
     local serviceLog="${root}/service.log"
@@ -8866,6 +8958,7 @@ runRegressionTransactionSystem() {
     runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
         runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
+        runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
         runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
         runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
 }
