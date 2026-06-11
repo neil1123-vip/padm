@@ -7331,6 +7331,30 @@ JSON
         [[ "${quotaMenuOutput}" == *"动作：停用超额订阅并移除本机托管账号"* ]]
     )
     (
+        local quotaTxRoot="${TMP_DIR}/subscription-quota-transaction"
+        local quotaTxPlan
+        local quotaTxStatus
+        mkdir -p "${quotaTxRoot}/groups"
+        export PADM_SUBSCRIPTION_GROUPS_DIR="${quotaTxRoot}/groups"
+        cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}}}]}
+JSON
+        quotaTxPlan=$(subscriptionQuotaDryRunPlan)
+        subscriptionSyncApplyAccountPlanTransaction() {
+            return 1
+        }
+        set +e
+        applySubscriptionQuotaPlanTransaction "${quotaTxPlan}"
+        quotaTxStatus=$?
+        set -e
+        [[ "${quotaTxStatus}" == "1" ]]
+        jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
+        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
+        if find "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+            return 1
+        fi
+    )
+    (
         subscriptionSyncPlanFromAccounts() {
             jq -n '{create:[], remove:["sub_team_a"]}'
         }

@@ -525,6 +525,40 @@ applySubscriptionQuotaPlanAccounts() {
     return "${rc}"
 }
 
+applySubscriptionQuotaPlanTransaction() {
+    local quotaPlan=$1
+    local backupFile
+    local quotaError=
+
+    SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
+    backupFile=$(createSubscriptionGroupsBackup) || {
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="限额自动执行前订阅状态备份失败"
+        return 1
+    }
+    if ! applySubscriptionQuotaPlan "${quotaPlan}"; then
+        quotaError="限额自动执行时，停用超额分享订阅失败"
+    fi
+    if ! applySubscriptionQuotaPlanAccounts "${quotaPlan}"; then
+        if [[ -n "${quotaError}" ]]; then
+            quotaError="${quotaError}；${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行时，移除本机托管账号失败}"
+        else
+            quotaError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行时，移除本机托管账号失败}"
+        fi
+    fi
+    if [[ -z "${quotaError}" ]]; then
+        padmRemoveCleanupPath "${backupFile}"
+        return 0
+    fi
+    if ! restoreSubscriptionGroupsBackup "${backupFile}"; then
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${quotaError}，且订阅状态恢复失败，请手动检查备份文件: ${backupFile}"
+        padmForgetCleanupPath "${backupFile}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${backupFile}"
+    SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${quotaError}，已恢复旧订阅状态"
+    return 1
+}
+
 executeSubscriptionQuotaPlanMenu() {
     local quotaPlan
     local confirm=
@@ -543,10 +577,7 @@ executeSubscriptionQuotaPlanMenu() {
         statusCard "已取消" "超限处理未执行"
         return 0
     fi
-    if ! applySubscriptionQuotaPlan "${quotaPlan}"; then
-        rc=1
-    fi
-    if ! applySubscriptionQuotaPlanAccounts "${quotaPlan}"; then
+    if ! applySubscriptionQuotaPlanTransaction "${quotaPlan}"; then
         rc=1
     fi
     if [[ "${rc}" -eq 0 ]]; then
@@ -584,12 +615,8 @@ runSubscriptionGroupSync() {
                 failures=$(jq '. + ["限额自动执行计划格式无效"]' <<<"${failures}")
                 rc=1
             elif [[ "$(jq 'length' <<<"${quotaPlan}")" != "0" ]]; then
-                if ! applySubscriptionQuotaPlan "${quotaPlan}"; then
-                    failures=$(jq '. + ["限额自动执行时，停用超额分享订阅失败"]' <<<"${failures}")
-                    rc=1
-                fi
-                if ! applySubscriptionQuotaPlanAccounts "${quotaPlan}"; then
-                    failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行时，移除本机托管账号失败}" '. + [$message]' <<<"${failures}")
+                if ! applySubscriptionQuotaPlanTransaction "${quotaPlan}"; then
+                    failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行失败}" '. + [$message]' <<<"${failures}")
                     rc=1
                 fi
             fi
