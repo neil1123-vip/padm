@@ -64,6 +64,10 @@ realityTargetSingBoxTestLog() {
     realityTargetTmpPath padm-reality-target-sing-box-test.log
 }
 
+realityTargetApplyLog() {
+    realityTargetTmpPath padm-reality-target-apply.log
+}
+
 realityTargetBackupTemplate() {
     realityTargetTmpPath 'padm-reality-target.XXXXXX'
 }
@@ -2385,11 +2389,16 @@ applyRealityTargetToInstalledConfigs() {
     local target=$1
     local sni=$2
     local parsed host port changed=false
+    local applyLog
     local xrayRealityConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
+    REALITY_TARGET_APPLY_FAILURE_LOG=
+    REALITY_TARGET_APPLY_FAILURE_PATH=
     xrayRealityConfigPath=$(realityXrayVisionConfigPath)
     xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
     singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
     singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
+    applyLog=$(realityTargetApplyLog)
+    rm -f "${applyLog}" >/dev/null 2>&1 || true
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
     port=${parsed##*:}
@@ -2400,45 +2409,63 @@ applyRealityTargetToInstalledConfigs() {
     [[ -n "${sni}" ]] || sni=${host}
 
     if [[ -f "${xrayRealityConfigPath}" ]]; then
-        updateRoutingJsonConfig "${xrayRealityConfigPath}" '
+        if ! updateRoutingJsonConfig "${xrayRealityConfigPath}" '
           .inbounds[1].streamSettings.realitySettings.target = $target |
           .inbounds[1].streamSettings.realitySettings.serverNames = [$sni]
-        ' --arg target "${host}:${port}" --arg sni "${sni}" || return 1
+        ' --arg target "${host}:${port}" --arg sni "${sni}" 2>"${applyLog}"; then
+            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
+            REALITY_TARGET_APPLY_FAILURE_PATH="${xrayRealityConfigPath}"
+            return 1
+        fi
         changed=true
     fi
 
     if [[ -f "${xrayXhttpConfigPath}" ]]; then
-        updateRoutingJsonConfig "${xrayXhttpConfigPath}" '
+        if ! updateRoutingJsonConfig "${xrayXhttpConfigPath}" '
           .inbounds[0].streamSettings.realitySettings.target = $target |
           .inbounds[0].streamSettings.realitySettings.serverNames = [$sni] |
           .inbounds[0].streamSettings.xhttpSettings.host = $sni
-        ' --arg target "${host}:${port}" --arg sni "${sni}" || return 1
+        ' --arg target "${host}:${port}" --arg sni "${sni}" 2>"${applyLog}"; then
+            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
+            REALITY_TARGET_APPLY_FAILURE_PATH="${xrayXhttpConfigPath}"
+            return 1
+        fi
         changed=true
     fi
 
     if [[ -f "${singBoxRealityConfigPath}" ]]; then
-        updateRoutingJsonConfig "${singBoxRealityConfigPath}" '
+        if ! updateRoutingJsonConfig "${singBoxRealityConfigPath}" '
           .inbounds[0].tls.server_name = $sni |
           .inbounds[0].tls.reality.handshake.server = $host |
           .inbounds[0].tls.reality.handshake.server_port = ($port | tonumber)
-        ' --arg host "${host}" --arg port "${port}" --arg sni "${sni}" || return 1
+        ' --arg host "${host}" --arg port "${port}" --arg sni "${sni}" 2>"${applyLog}"; then
+            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
+            REALITY_TARGET_APPLY_FAILURE_PATH="${singBoxRealityConfigPath}"
+            return 1
+        fi
         changed=true
     fi
 
     if [[ -f "${singBoxGrpcConfigPath}" ]]; then
-        updateRoutingJsonConfig "${singBoxGrpcConfigPath}" '
+        if ! updateRoutingJsonConfig "${singBoxGrpcConfigPath}" '
           .inbounds[0].tls.server_name = $sni |
           .inbounds[0].tls.reality.handshake.server = $host |
           .inbounds[0].tls.reality.handshake.server_port = ($port | tonumber)
-        ' --arg host "${host}" --arg port "${port}" --arg sni "${sni}" || return 1
+        ' --arg host "${host}" --arg port "${port}" --arg sni "${sni}" 2>"${applyLog}"; then
+            REALITY_TARGET_APPLY_FAILURE_LOG="${applyLog}"
+            REALITY_TARGET_APPLY_FAILURE_PATH="${singBoxGrpcConfigPath}"
+            return 1
+        fi
         changed=true
     fi
 
     if [[ "${changed}" != "true" ]]; then
+        rm -f "${applyLog}" >/dev/null 2>&1 || true
         realityTargetStatusBlock yellow "REALITY 目标站" "未发现可更新的 Reality 配置文件"
         return 1
     fi
 
+    rm -f "${applyLog}" >/dev/null 2>&1 || true
     realityTargetHost=${host}
     realityTargetPort=${port}
     realitySNI=${sni}
@@ -2534,6 +2561,7 @@ changeInstalledRealityTarget() {
     local target=$1
     local sni=$2
     local backupDir
+    local applyFailureLog applyFailurePath
     local previousRealityTargetHost="${realityTargetHost:-}"
     local previousRealityTargetPort="${realityTargetPort:-}"
     local previousRealitySNI="${realitySNI:-}"
@@ -2548,12 +2576,21 @@ changeInstalledRealityTarget() {
         return 1
     fi
     if ! applyRealityTargetToInstalledConfigs "${target}" "${sni}"; then
+        applyFailureLog="${REALITY_TARGET_APPLY_FAILURE_LOG:-}"
+        applyFailurePath="${REALITY_TARGET_APPLY_FAILURE_PATH:-}"
         if ! restoreRealityTargetConfigs "${backupDir}"; then
-            realityTargetStatusBlock red "REALITY 目标站" "配置应用失败，且回滚配置失败" "备份目录: ${backupDir}"
+            if [[ -n "${applyFailureLog}" ]]; then
+                realityTargetStatusBlock red "REALITY 目标站" "配置应用失败，且回滚配置失败" "失败文件: ${applyFailurePath}" "备份目录: ${backupDir}" "排查日志: ${applyFailureLog}"
+            else
+                realityTargetStatusBlock red "REALITY 目标站" "配置应用失败，且回滚配置失败" "备份目录: ${backupDir}"
+            fi
             padmForgetCleanupPath "${backupDir}"
             return 1
         fi
         padmRemoveCleanupPath "${backupDir}"
+        if [[ -n "${applyFailureLog}" ]]; then
+            realityTargetStatusBlock red "REALITY 目标站" "配置应用失败，已回滚" "失败文件: ${applyFailurePath}" "排查日志: ${applyFailureLog}"
+        fi
         return 1
     fi
     if ! validateRealityTargetConfigAfterChange; then

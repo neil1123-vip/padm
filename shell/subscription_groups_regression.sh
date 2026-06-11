@@ -6571,6 +6571,7 @@ runRealityConfigChangeReloadFailureRegression() (
     local singBoxGrpc="${root}/singbox-grpc.json"
     local statusLog="${root}/status.log"
     local refreshLog="${root}/refresh.log"
+    local applyLog
     local rc reloadCalls=0 preservedBackupDir
 
     mkdir -p "${root}" "${root}/tmp"
@@ -6598,6 +6599,7 @@ JSON
     PADM_REALITY_XRAY_XHTTP_CONFIG_FILE="${xrayXhttp}"
     PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${singBoxVision}"
     PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${singBoxGrpc}"
+    applyLog=$(realityTargetApplyLog)
     : >"${statusLog}"
     : >"${refreshLog}"
 
@@ -6651,6 +6653,37 @@ JSON
     cat >"${xrayXhttp}" <<'JSON'
 {bad-json
 JSON
+    set +e
+    changeInstalledRealityTarget "new.example.com:8443" "new-sni.example.com"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${reloadCalls}" == "0" ]]
+    [[ "$(jq -r '.inbounds[1].streamSettings.realitySettings.target' "${xrayVision}")" == "old.example.com:443" ]]
+    [[ "${realityTargetHost}" == "old.example.com" ]]
+    [[ "${realityTargetPort}" == "443" ]]
+    [[ ! -s "${refreshLog}" ]]
+    grep -q '配置应用失败，已回滚' "${statusLog}"
+    grep -q "失败文件: ${xrayXhttp}" "${statusLog}"
+    grep -q "排查日志: ${applyLog}" "${statusLog}"
+    grep -q 'Invalid numeric literal' "${applyLog}"
+
+    : >"${statusLog}"
+    : >"${refreshLog}"
+    reloadCalls=0
+    realityTargetHost=old.example.com
+    realityTargetPort=443
+    realitySNI=old-sni.example.com
+    xrayVLESSRealitySNI=old-sni.example.com
+    xrayVLESSRealityXHTTPSNI=old-sni.example.com
+    singBoxVLESSRealityVisionSNI=old-sni.example.com
+    singBoxVLESSRealityGRPCSNI=old-sni.example.com
+    cat >"${xrayVision}" <<'JSON'
+{"inbounds":[{}, {"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]}}}]}
+JSON
+    cat >"${xrayXhttp}" <<'JSON'
+{bad-json
+JSON
     cp() {
         if [[ "$1" == */xray/07_VLESS_vision_reality_inbounds.json && "$2" == "${xrayVision}" ]]; then
             return 1
@@ -6669,7 +6702,9 @@ JSON
     [[ "${realityTargetPort}" == "443" ]]
     [[ ! -s "${refreshLog}" ]]
     grep -q '配置应用失败，且回滚配置失败' "${statusLog}"
-    preservedBackupDir=$(sed -n 's/.*备份目录: //p' "${statusLog}" | tail -n 1)
+    grep -q "失败文件: ${xrayXhttp}" "${statusLog}"
+    grep -q "排查日志: ${applyLog}" "${statusLog}"
+    preservedBackupDir=$(sed -n 's/.*备份目录: \([^ ]*\).*/\1/p' "${statusLog}" | tail -n 1)
     [[ -n "${preservedBackupDir}" && -d "${preservedBackupDir}" ]]
     [[ -f "${preservedBackupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]
 
