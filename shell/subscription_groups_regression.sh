@@ -8430,6 +8430,8 @@ runSubscriptionControlServiceInstallRegression() (
     local knownToken="known-control-token"
     local installStatus
     local oldPath="${PATH}"
+    local oldServerScript
+    local oldServiceFile
 
     mkdir -p "${fakeBin}" "${controlRoot}"
     cat >"${fakeBin}/python3" <<'SH'
@@ -8454,12 +8456,22 @@ is-active)
     [[ "${PADM_FAKE_SYSTEMCTL_ACTIVE:-}" == "true" ]] && exit 0
     exit 3
     ;;
+is-enabled)
+    [[ "${PADM_FAKE_SYSTEMCTL_ENABLED:-}" == "true" ]] && exit 0
+    exit 1
+    ;;
 restart)
     [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "restart" ]] && exit 1
     exit 0
     ;;
 enable)
     [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && exit 1
+    exit 0
+    ;;
+stop)
+    exit 0
+    ;;
+disable)
     exit 0
     ;;
 *)
@@ -8498,10 +8510,14 @@ SH
     set -e
     PADM_FAKE_SYSTEMCTL_FAIL=
     [[ "${installStatus}" -ne 0 ]]
+    [[ ! -e "$(subscriptionControlServerScript)" ]]
+    [[ ! -e "$(subscriptionControlServiceFile)" ]]
+    [[ "${SUBSCRIPTION_CONTROL_INSTALL_ERROR}" == *"已恢复安装前状态"* ]]
 
     PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/health-fail"
     mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
     printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
+    : >"${actionsFile}"
     export PADM_FAKE_HEALTH_FAIL=true
     set +e
     installSubscriptionControlService
@@ -8509,6 +8525,33 @@ SH
     set -e
     PADM_FAKE_HEALTH_FAIL=
     [[ "${installStatus}" -ne 0 ]]
+    [[ ! -e "$(subscriptionControlServerScript)" ]]
+    [[ ! -e "$(subscriptionControlServiceFile)" ]]
+    [[ "${SUBSCRIPTION_CONTROL_INSTALL_ERROR}" == *"已恢复安装前状态"* ]]
+
+    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/health-rollback"
+    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")" "$(dirname "$(subscriptionControlServerScript)")" "$(dirname "$(subscriptionControlServiceFile)")"
+    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
+    printf 'old-server\n' >"$(subscriptionControlServerScript)"
+    printf 'old-service\n' >"$(subscriptionControlServiceFile)"
+    oldServerScript=$(subscriptionControlServerScript)
+    oldServiceFile=$(subscriptionControlServiceFile)
+    : >"${actionsFile}"
+    export PADM_FAKE_SYSTEMCTL_ACTIVE=true
+    export PADM_FAKE_SYSTEMCTL_ENABLED=true
+    export PADM_FAKE_HEALTH_FAIL=true
+    set +e
+    installSubscriptionControlService
+    installStatus=$?
+    set -e
+    PADM_FAKE_SYSTEMCTL_ACTIVE=
+    PADM_FAKE_SYSTEMCTL_ENABLED=
+    PADM_FAKE_HEALTH_FAIL=
+    [[ "${installStatus}" -ne 0 ]]
+    [[ "$(<"${oldServerScript}")" == "old-server" ]]
+    [[ "$(<"${oldServiceFile}")" == "old-service" ]]
+    [[ "$(grep -c '^daemon-reload$' "${actionsFile}")" == "2" ]]
+    [[ "$(grep -c '^restart padm-subscription-control.service$' "${actionsFile}")" == "2" ]]
 )
 
 runSubscriptionControlServerResponseRegression() (

@@ -504,11 +504,69 @@ sys.exit(0 if payload.get("ok") is True else 1)
 PY
 }
 
+subscriptionControlRestoreServiceInstall() {
+    local backupDir=$1
+    local serviceWasActive=${2:-false}
+    local serviceWasEnabled=${3:-false}
+    local serviceName="padm-subscription-control.service"
+    local rollbackFailed=false
+
+    if ! checkLogBackupRestore "${backupDir}"; then
+        rollbackFailed=true
+    fi
+    if ! systemctl daemon-reload >/dev/null 2>&1; then
+        rollbackFailed=true
+    fi
+    if [[ "${serviceWasActive}" == "true" ]]; then
+        if ! systemctl restart "${serviceName}" >/dev/null 2>&1; then
+            rollbackFailed=true
+        fi
+    else
+        if systemctl is-active --quiet "${serviceName}" >/dev/null 2>&1; then
+            if ! systemctl stop "${serviceName}" >/dev/null 2>&1; then
+                rollbackFailed=true
+            fi
+        fi
+        if [[ "${serviceWasEnabled}" == "true" ]]; then
+            if ! systemctl enable "${serviceName}" >/dev/null 2>&1; then
+                rollbackFailed=true
+            fi
+        elif systemctl is-enabled --quiet "${serviceName}" >/dev/null 2>&1; then
+            if ! systemctl disable "${serviceName}" >/dev/null 2>&1; then
+                rollbackFailed=true
+            fi
+        fi
+    fi
+    [[ "${rollbackFailed}" != "true" ]]
+}
+
+subscriptionControlFailInstall() {
+    local backupDir=$1
+    local reason=$2
+    local serviceWasActive=${3:-false}
+    local serviceWasEnabled=${4:-false}
+
+    SUBSCRIPTION_CONTROL_INSTALL_ERROR=
+    if subscriptionControlRestoreServiceInstall "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        SUBSCRIPTION_CONTROL_INSTALL_ERROR="${reason}，已恢复安装前状态"
+    else
+        padmForgetCleanupPath "${backupDir}"
+        SUBSCRIPTION_CONTROL_INSTALL_ERROR="${reason}，且安装前状态恢复失败，请手动检查备份目录: ${backupDir}"
+    fi
+    return 1
+}
+
 installSubscriptionControlService() {
     local serviceFile
+    local serverScript
     local tmpFile
     local token
     local i
+    local backupDir=
+    local serviceWasActive=false
+    local serviceWasEnabled=false
+    SUBSCRIPTION_CONTROL_INSTALL_ERROR=
     if ! command -v python3 >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
         return 0
     fi
@@ -516,36 +574,70 @@ installSubscriptionControlService() {
     token=$(subscriptionControlToken) || return 1
     [[ -n "${token}" ]] || return 1
     subscriptionGroupsSecureStateFiles || return 1
-    writeSubscriptionControlServer || return 1
+    serverScript=$(subscriptionControlServerScript)
     serviceFile=$(subscriptionControlServiceFile)
-    padmCreateTempFileForTarget tmpFile "${serviceFile}" service || return 1
-    cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    if systemctl is-active --quiet padm-subscription-control.service; then
+        serviceWasActive=true
+    fi
+    if systemctl is-enabled --quiet padm-subscription-control.service; then
+        serviceWasEnabled=true
+    fi
+    checkLogBackupCreate backupDir "${serverScript}" "${serviceFile}" || return 1
+    writeSubscriptionControlServer || {
+        subscriptionControlFailInstall "${backupDir}" "订阅控制服务脚本写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        return 1
+    }
+    padmCreateTempFileForTarget tmpFile "${serviceFile}" service || {
+        subscriptionControlFailInstall "${backupDir}" "订阅控制服务配置临时文件创建失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        return 1
+    }
+    if ! cat >"${tmpFile}" <<EOF
 [Unit]
 Description=padm subscription control
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env python3 $(subscriptionControlServerScript)
+ExecStart=/usr/bin/env python3 ${serverScript}
 Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    commitGeneratedFile "${tmpFile}" "${serviceFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-    systemctl daemon-reload || return 1
+    then
+        padmRemoveCleanupPath "${tmpFile}"
+        subscriptionControlFailInstall "${backupDir}" "订阅控制服务配置临时文件写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        return 1
+    fi
+    commitGeneratedFile "${tmpFile}" "${serviceFile}" 644 || {
+        padmRemoveCleanupPath "${tmpFile}"
+        subscriptionControlFailInstall "${backupDir}" "订阅控制服务配置写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        return 1
+    }
+    if ! systemctl daemon-reload; then
+        subscriptionControlFailInstall "${backupDir}" "订阅控制服务 daemon-reload 失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        return 1
+    fi
     if systemctl is-active --quiet padm-subscription-control.service; then
-        systemctl restart padm-subscription-control.service >/dev/null 2>&1 || return 1
+        if ! systemctl restart padm-subscription-control.service >/dev/null 2>&1; then
+            subscriptionControlFailInstall "${backupDir}" "订阅控制服务重启失败" "${serviceWasActive}" "${serviceWasEnabled}"
+            return 1
+        fi
     else
-        systemctl enable --now padm-subscription-control.service >/dev/null 2>&1 || return 1
+        if ! systemctl enable --now padm-subscription-control.service >/dev/null 2>&1; then
+            subscriptionControlFailInstall "${backupDir}" "订阅控制服务启动失败" "${serviceWasActive}" "${serviceWasEnabled}"
+            return 1
+        fi
     fi
     for ((i = 0; i < 20; i++)); do
         if subscriptionControlHealthCheck "${token}" >/dev/null 2>&1; then
+            padmRemoveCleanupPath "${backupDir}"
             return 0
         fi
         sleep 0.25
     done
+    subscriptionControlFailInstall "${backupDir}" "订阅控制服务健康检查失败" "${serviceWasActive}" "${serviceWasEnabled}"
     return 1
 }
 
