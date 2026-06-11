@@ -1777,7 +1777,7 @@ renderAllSubscribeUserOutputs() {
         fi
 
         if ! renderSubscribeUserOutputs "${email}" "${emailMd5}" "${currentDomain}" "${updateOtherSubscribeStatus:-}" "${showStatus}"; then
-            errorCard "订阅生成失败，已保留旧订阅输出"
+            errorCard "${SUBSCRIBE_USER_OUTPUT_ERROR:-订阅生成失败，已保留旧订阅输出}"
             return 1
         fi
 
@@ -1804,10 +1804,11 @@ renderSubscribeUserOutputs() {
     local currentDomain=$3
     local updateRemoteStatus=$4
     local showStatus=$5
-    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath
+    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath subscribeBackupDir
+    local commitFailed=false
     local tmpBase="${TMPDIR:-/tmp}"
-    local rc=0
 
+    SUBSCRIBE_USER_OUTPUT_ERROR=
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
     padmCreateTempPath stageDir -d "${tmpBase%/}/padm-subscribe-user.XXXXXX" || return 1
@@ -1871,13 +1872,39 @@ renderSubscribeUserOutputs() {
         commitGeneratedJsonFile "${singBoxTmpPath}" "${singBoxPath}" || { padmRemoveCleanupPath "${singBoxTmpPath}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     fi
 
-    commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}" || rc=1
-    commitSubscribeUserOutputFile "${clashPath}" "${publicBase}/clashMeta/${emailMd5}" || rc=1
-    commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}" || rc=1
-    commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}" || rc=1
-    commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}" || rc=1
+    checkLogBackupCreate subscribeBackupDir \
+        "${publicBase}/default/${emailMd5}" \
+        "${publicBase}/clashMeta/${emailMd5}" \
+        "${publicBase}/clashMetaProfiles/${emailMd5}" \
+        "${publicBase}/sing-box_profiles/${emailMd5}" \
+        "${publicBase}/sing-box/${emailMd5}" || {
+        padmRemoveCleanupPath "${stageDir}"
+        SUBSCRIBE_USER_OUTPUT_ERROR="订阅输出备份失败，已取消发布"
+        return 1
+    }
+
+    commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}" || commitFailed=true
+    commitSubscribeUserOutputFile "${clashPath}" "${publicBase}/clashMeta/${emailMd5}" || commitFailed=true
+    commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}" || commitFailed=true
+    commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}" || commitFailed=true
+    commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}" || commitFailed=true
+
+    if [[ "${commitFailed}" == "true" ]]; then
+        if ! checkLogBackupRestore "${subscribeBackupDir}"; then
+            padmForgetCleanupPath "${subscribeBackupDir}"
+            padmRemoveCleanupPath "${stageDir}"
+            SUBSCRIBE_USER_OUTPUT_ERROR="订阅生成失败，且旧订阅输出恢复失败，请手动检查备份目录: ${subscribeBackupDir}"
+            return 1
+        fi
+        padmRemoveCleanupPath "${subscribeBackupDir}"
+        padmRemoveCleanupPath "${stageDir}"
+        SUBSCRIBE_USER_OUTPUT_ERROR="订阅生成失败，已恢复旧订阅输出"
+        return 1
+    fi
+
+    padmRemoveCleanupPath "${subscribeBackupDir}"
     padmRemoveCleanupPath "${stageDir}"
-    return "${rc}"
+    return 0
 }
 
 # 订阅

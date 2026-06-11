@@ -5353,6 +5353,7 @@ runSubscribeUserOutputTransactionRegression() {
     mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box" "${publicDir}/default" "${publicDir}/clashMeta" "${publicDir}/clashMetaProfiles" "${publicDir}/sing-box" "${publicDir}/sing-box_profiles" "${userTmpRoot}"
     : >"${stageMarker}"
     eval "$(declare -f clashMetaConfig | sed '1s/^clashMetaConfig/originalClashMetaConfig/')"
+    eval "$(declare -f commitSubscribeUserOutputFile | sed '1s/^commitSubscribeUserOutputFile/originalCommitSubscribeUserOutputFile/')"
 
     writeOldSubscribeOutputs() {
         printf 'old-default\n' >"${publicDir}/default/${emailMd5}"
@@ -5446,6 +5447,31 @@ runSubscribeUserOutputTransactionRegression() {
     [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
     [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
     [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
+
+    writeOldSubscribeOutputs
+    writeLocalSubscribeOutputs
+    (
+        local commitCalls=0
+        commitSubscribeUserOutputFile() {
+            commitCalls=$((commitCalls + 1))
+            if [[ "${commitCalls}" == "2" ]]; then
+                return 1
+            fi
+            originalCommitSubscribeUserOutputFile "$@"
+        }
+        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
+            return 1
+        fi
+        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "订阅生成失败，已恢复旧订阅输出" ]]
+        [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+        [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+        [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
+        [[ "$(<"${publicDir}/sing-box_profiles/${emailMd5}")" == "old-sing-profile" ]]
+        [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
+        if find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+            return 1
+        fi
+    )
 
     writeLocalSubscribeOutputs
     renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true
