@@ -5680,6 +5680,45 @@ runSubscribeLocalRollbackRegression() (
     if [[ -n "${oldSubscribeSalt}" ]]; then subscribeSalt="${oldSubscribeSalt}"; else unset subscribeSalt; fi
 )
 
+runSubscriptionGroupsMigrationBackupRegression() (
+    local root="${TMP_DIR}/subscription-groups-migration-backup"
+    local groupsDir="${root}/subscribe_groups"
+    local backupsDir="${groupsDir}/backups"
+    local stateFile="${groupsDir}/groups.json"
+    local errorLog="${root}/error.log"
+    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local rc
+
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
+    TMPDIR="${root}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    mkdir -p "${groupsDir}"
+    cat >"${stateFile}" <<'JSON'
+{"version":1,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"本机","role":"main","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+
+    cp() {
+        return 1
+    }
+
+    set +e
+    migrateSubscriptionGroupsState >/dev/null 2>&1
+    rc=$?
+    set -e
+    unset -f cp
+    [[ "${rc}" == "1" ]]
+    [[ -f "${stateFile}" ]]
+    [[ "$(jq -r '.version' "${stateFile}")" == "1" ]]
+    if find "${backupsDir}" -maxdepth 1 -type f -name 'groups-pre-migrate-*.json' | grep -q .; then
+        return 1
+    fi
+
+    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runRefreshLocalSubscriptionsRollbackRegression() (
     local root="${TMP_DIR}/refresh-local-subscriptions-rollback"
     local localDir="${root}/subscribe_local"
@@ -11856,6 +11895,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
     runRegressionStep subscribe-local-rollback runSubscribeLocalRollbackRegression
+    runRegressionStep subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegression
     runRegressionStep refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
     runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
