@@ -233,7 +233,10 @@ createSubscriptionGroupsBackup() {
     ensureSubscriptionGroupsState || return 1
     mkdir -p "${backupDir}" || return 1
     backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S').json"
-    cp "$(subscriptionGroupsFile)" "${backupFile}" || return 1
+    if ! cp "$(subscriptionGroupsFile)" "${backupFile}"; then
+        rm -f -- "${backupFile}" >/dev/null 2>&1 || true
+        return 1
+    fi
     echo "${backupFile}"
 }
 

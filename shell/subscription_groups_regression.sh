@@ -5719,6 +5719,46 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionGroupsBackupFailureRegression() (
+    local root="${TMP_DIR}/subscription-groups-backup-failure"
+    local groupsDir="${root}/subscribe_groups"
+    local backupsDir="${groupsDir}/backups"
+    local stateFile="${groupsDir}/groups.json"
+    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local beforeSnapshot
+    local backupFile=()
+    local rc
+
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
+    TMPDIR="${root}"
+    mkdir -p "${groupsDir}"
+    cat >"${stateFile}" <<'JSON'
+{"version":1,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"本机","role":"main","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    beforeSnapshot=$(<"${stateFile}")
+
+    cp() {
+        return 1
+    }
+
+    set +e
+    backupFile=$(createSubscriptionGroupsBackup)
+    rc=$?
+    set -e
+    unset -f cp
+    [[ "${rc}" == "1" ]]
+    [[ -z "${backupFile}" ]]
+    [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
+    if find "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+        return 1
+    fi
+
+    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runRefreshLocalSubscriptionsRollbackRegression() (
     local root="${TMP_DIR}/refresh-local-subscriptions-rollback"
     local localDir="${root}/subscribe_local"
@@ -11896,6 +11936,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
     runRegressionStep subscribe-local-rollback runSubscribeLocalRollbackRegression
     runRegressionStep subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegression
+    runRegressionStep subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
     runRegressionStep refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
     runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
