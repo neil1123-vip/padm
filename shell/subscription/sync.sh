@@ -361,6 +361,34 @@ subscriptionSyncRestoreSubscribeOutputBackups() {
     subscriptionSyncRestoreBackupPath "${publicBase}" "${backupDir}" public || return 1
 }
 
+subscriptionSyncRollbackLocalApply() {
+    local configBackupDir=$1
+    local outputBackupDir=$2
+    local reason=$3
+    local configRestored=true
+    local outputRestored=true
+
+    SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
+    if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
+        configRestored=false
+    fi
+    if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
+        outputRestored=false
+    fi
+
+    if [[ "${configRestored}" == "true" && "${outputRestored}" == "true" ]]; then
+        return 0
+    fi
+    if [[ "${configRestored}" != "true" && "${outputRestored}" != "true" ]]; then
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${reason}，且配置与订阅输出恢复失败，请手动检查备份目录: ${configBackupDir} 和 ${outputBackupDir}"
+    elif [[ "${configRestored}" != "true" ]]; then
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${reason}，且配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+    else
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${reason}，且订阅输出恢复失败，请手动检查备份目录: ${outputBackupDir}"
+    fi
+    return 1
+}
+
 subscriptionSyncApplyAccountPlanTransaction() {
     local syncPlan=$1
     local reloadFn=${2:-}
@@ -537,6 +565,10 @@ runSubscriptionGroupSync() {
     local remoteFailures='[]'
     local syncPlan
     local quotaPlan='[]'
+    local configBackupDir=
+    local outputBackupDir=
+    local localSyncReady=false
+    local localSyncFailure=
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -572,12 +604,62 @@ runSubscriptionGroupSync() {
         subscriptionSyncMarkResult partial "${failures}" || true
         return 1
     }
-    if ! subscriptionSyncApplyAccountPlanTransaction "${syncPlan}"; then
-        failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-本机同步计划应用失败}" '. + [$message]' <<<"${failures}")
+    configBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+        failures=$(jq '. + ["本机同步前配置备份失败"]' <<<"${failures}")
+        rc=1
+    }
+    if [[ -n "${configBackupDir}" ]]; then
+        outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
+            padmRemoveCleanupPath "${configBackupDir}"
+            configBackupDir=
+            failures=$(jq '. + ["本机同步前订阅输出备份失败"]' <<<"${failures}")
+            rc=1
+        }
+    fi
+    if [[ -n "${configBackupDir}" && -n "${outputBackupDir}" ]]; then
+        if ! subscriptionSyncApplyAccountPlanTransaction "${syncPlan}"; then
+            failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-本机同步计划应用失败}" '. + [$message]' <<<"${failures}")
+            padmRemoveCleanupPath "${configBackupDir}"
+            padmRemoveCleanupPath "${outputBackupDir}"
+            configBackupDir=
+            outputBackupDir=
+            rc=1
+        elif ! subscriptionSyncReconcileLocalServices "${skipSubscribeRefresh}"; then
+            localSyncFailure="本机同步后服务重建失败"
+            if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}"; then
+                padmRemoveCleanupPath "${configBackupDir}"
+                padmRemoveCleanupPath "${outputBackupDir}"
+                if subscriptionSyncReconcileLocalServices true; then
+                    localSyncFailure="${localSyncFailure}，已恢复旧配置"
+                else
+                    localSyncFailure="${localSyncFailure}，已恢复旧配置；恢复旧配置后服务重建仍失败，请检查核心服务日志"
+                fi
+            else
+                padmForgetCleanupPath "${configBackupDir}"
+                padmForgetCleanupPath "${outputBackupDir}"
+                localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
+            fi
+            failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
+            configBackupDir=
+            outputBackupDir=
+            rc=1
+        else
+            padmRemoveCleanupPath "${configBackupDir}"
+            padmRemoveCleanupPath "${outputBackupDir}"
+            configBackupDir=
+            outputBackupDir=
+            localSyncReady=true
+        fi
+    else
         rc=1
     fi
 
-    if subscriptionGroupRemoteSyncEnabled; then
+    if [[ "${localSyncReady}" != "true" ]] && subscriptionGroupRemoteSyncEnabled; then
+        failures=$(jq '. + ["本机同步未完成，已跳过被控服务器同步"]' <<<"${failures}")
+        rc=1
+    fi
+
+    if [[ "${localSyncReady}" == "true" && subscriptionGroupRemoteSyncEnabled ]]; then
         remoteFailures=$(runSubscriptionRemoteSync)
         failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
         if [[ "${remoteFailures}" != "[]" ]]; then
@@ -585,9 +667,11 @@ runSubscriptionGroupSync() {
         fi
     fi
 
-    if ! subscriptionSyncReconcileLocalServices "${skipSubscribeRefresh}"; then
-        failures=$(jq '. + ["本机同步后服务重建失败"]' <<<"${failures}")
-        rc=1
+    if [[ "${localSyncReady}" != "true" && -n "${configBackupDir}" ]]; then
+        padmRemoveCleanupPath "${configBackupDir}"
+    fi
+    if [[ "${localSyncReady}" != "true" && -n "${outputBackupDir}" ]]; then
+        padmRemoveCleanupPath "${outputBackupDir}"
     fi
 
     if ! collectSubscriptionTraffic; then
@@ -604,7 +688,11 @@ runSubscriptionGroupSync() {
         if ! subscriptionSyncMarkResult partial "${failures}"; then
             rc=1
         fi
-        statusCard "订阅同步" "本机自动同步完成，被控服务器待后续通道同步"
+        if [[ "${localSyncReady}" == "true" ]]; then
+            statusCard "订阅同步" "本机自动同步完成，被控服务器待后续通道同步"
+        else
+            statusCard "订阅同步" "本机同步未完全完成，请先处理本机错误后再试被控服务器同步"
+        fi
     fi
     return "${rc}"
 }

@@ -7573,6 +7573,171 @@ JSON
         fi
     )
 
+    (
+        local syncRoot="${TMP_DIR}/subscription-group-sync-apply-failure"
+        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
+        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
+        local syncPublicFile="${syncRoot}/subscribe/default/user"
+        local remoteLog="${syncRoot}/remote.log"
+        local reconcileLog="${syncRoot}/reconcile.log"
+        local statusLog="${syncRoot}/status.log"
+        local resultStatus="${syncRoot}/mark-status.log"
+        local resultFailures="${syncRoot}/mark-failures.log"
+        local originalConfig
+        local syncStatus
+
+        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
+        configPath="${syncRoot}/xray/"
+        singBoxConfigPath="${syncRoot}/xray/"
+        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
+        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
+        TMPDIR="${syncRoot}/tmp"
+        cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+        cat >"${syncConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
+JSON
+        printf 'old-local\n' >"${syncLocalFile}"
+        printf 'old-public\n' >"${syncPublicFile}"
+        originalConfig=$(<"${syncConfigFile}")
+
+        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+        subscriptionGroupRemoteSyncEnabled() { return 0; }
+        collectSubscriptionTraffic() { return 0; }
+        readInstallType() { return 0; }
+        readInstallProtocolType() { return 0; }
+        readConfigHostPathUUID() { return 0; }
+        subscriptionSyncPlan() {
+            printf '{"create":["sub_team_a"],"remove":[]}'
+        }
+        subscriptionSyncApplyAccountPlanTransaction() {
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败"
+            return 1
+        }
+        subscriptionSyncReconcileLocalServices() {
+            printf 'reconcile\n' >>"${reconcileLog}"
+            return 0
+        }
+        runSubscriptionRemoteSync() {
+            printf 'remote\n' >>"${remoteLog}"
+            printf '[]'
+        }
+        subscriptionSyncMarkResult() {
+            printf '%s\n' "$1" >"${resultStatus}"
+            printf '%s\n' "$2" >"${resultFailures}"
+            return 0
+        }
+        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
+        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
+
+        set +e
+        runSubscriptionGroupSync
+        syncStatus=$?
+        set -e
+        [[ "${syncStatus}" == "1" ]]
+        [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
+        [[ "$(<"${syncLocalFile}")" == "old-local" ]]
+        [[ "$(<"${syncPublicFile}")" == "old-public" ]]
+        [[ ! -e "${remoteLog}" ]]
+        [[ ! -e "${reconcileLog}" ]]
+        grep -q '本机同步计划应用失败' "${resultFailures}"
+        grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
+        grep -q '本机同步未完全完成' "${statusLog}"
+        grep -qx 'partial' "${resultStatus}"
+        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+            return 1
+        fi
+    )
+
+    (
+        local syncRoot="${TMP_DIR}/subscription-group-sync-reconcile-rollback"
+        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
+        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
+        local syncPublicFile="${syncRoot}/subscribe/default/user"
+        local remoteLog="${syncRoot}/remote.log"
+        local reconcileLog="${syncRoot}/reconcile.log"
+        local statusLog="${syncRoot}/status.log"
+        local resultStatus="${syncRoot}/mark-status.log"
+        local resultFailures="${syncRoot}/mark-failures.log"
+        local originalConfig
+        local syncStatus
+
+        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
+        configPath="${syncRoot}/xray/"
+        singBoxConfigPath="${syncRoot}/xray/"
+        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
+        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
+        TMPDIR="${syncRoot}/tmp"
+        cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+        cat >"${syncConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
+JSON
+        printf 'old-local\n' >"${syncLocalFile}"
+        printf 'old-public\n' >"${syncPublicFile}"
+        originalConfig=$(<"${syncConfigFile}")
+
+        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+        subscriptionGroupRemoteSyncEnabled() { return 0; }
+        collectSubscriptionTraffic() { return 0; }
+        readInstallType() { return 0; }
+        readInstallProtocolType() { return 0; }
+        readConfigHostPathUUID() { return 0; }
+        subscriptionSyncPlan() {
+            printf '{"create":["sub_team_a"],"remove":[]}'
+        }
+        subscriptionSyncApplyAccountPlanTransaction() {
+            cat >"${syncConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_new-main"}]}}]}
+JSON
+            return 0
+        }
+        subscriptionSyncReconcileLocalServices() {
+            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
+            if [[ -z "${1:-}" ]]; then
+                printf 'new-local\n' >"${syncLocalFile}"
+                printf 'new-public\n' >"${syncPublicFile}"
+                return 1
+            fi
+            return 0
+        }
+        runSubscriptionRemoteSync() {
+            printf 'remote\n' >>"${remoteLog}"
+            printf '[]'
+        }
+        subscriptionSyncMarkResult() {
+            printf '%s\n' "$1" >"${resultStatus}"
+            printf '%s\n' "$2" >"${resultFailures}"
+            return 0
+        }
+        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
+        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
+
+        set +e
+        runSubscriptionGroupSync
+        syncStatus=$?
+        set -e
+        [[ "${syncStatus}" == "1" ]]
+        [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
+        [[ "$(<"${syncLocalFile}")" == "old-local" ]]
+        [[ "$(<"${syncPublicFile}")" == "old-public" ]]
+        [[ ! -e "${remoteLog}" ]]
+        [[ "$(wc -l <"${reconcileLog}" | tr -d ' ')" == "2" ]]
+        grep -qx '<empty>' "${reconcileLog}"
+        grep -qx 'true' "${reconcileLog}"
+        grep -q '本机同步后服务重建失败，已恢复旧配置' "${resultFailures}"
+        grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
+        grep -q '本机同步未完全完成' "${statusLog}"
+        grep -qx 'partial' "${resultStatus}"
+        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+            return 1
+        fi
+    )
+
     configPath="${oldConfigPath}"
     singBoxConfigPath="${oldSingBoxConfigPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
