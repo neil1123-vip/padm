@@ -198,7 +198,7 @@ subscriptionWireGuardRestoreStateAndConfig() {
     if [[ -n "${previousAddress}" ]]; then
         applySubscriptionWireGuardService >/dev/null 2>&1 || return 1
     else
-        stopSubscriptionWireGuardControlService >/dev/null 2>&1 || true
+        stopSubscriptionWireGuardControlService >/dev/null 2>&1 || return 1
         rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || return 1
     fi
 }
@@ -362,9 +362,11 @@ refreshSubscriptionWireGuardNginxControl() {
 
 stopSubscriptionWireGuardControlService() {
     if command -v systemctl >/dev/null 2>&1; then
-        systemctl disable --now "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
+        systemctl disable --now "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1
     elif command -v wg-quick >/dev/null 2>&1; then
-        wg-quick down "$(subscriptionWireGuardInterface)" >/dev/null 2>&1 || true
+        wg-quick down "$(subscriptionWireGuardInterface)" >/dev/null 2>&1
+    else
+        return 1
     fi
 }
 
@@ -771,8 +773,17 @@ restartSubscriptionWireGuardControl() {
 }
 
 disableSubscriptionWireGuardControl() {
-    stopSubscriptionWireGuardControlService
+    local previousState
+    previousState=$(subscriptionWireGuardReadState) || {
+        errorCard "WireGuard 控制面状态读取失败"
+        return 1
+    }
+    if ! stopSubscriptionWireGuardControlService; then
+        errorCard "WireGuard 控制面停用失败"
+        return 1
+    fi
     subscriptionWireGuardWriteState '.enabled = false' || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 控制面关闭状态写入失败" || return 1
         errorCard "WireGuard 控制面状态写入失败"
         return 1
     }

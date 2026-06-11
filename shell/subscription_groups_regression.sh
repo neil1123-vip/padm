@@ -8844,6 +8844,8 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local mainStateSnapshot
     local wireGuardApplyShouldFail= installControlShouldFail= refreshControlShouldFail= serviceQueueShouldFail=
     local addSourceShouldFail= setCredentialShouldFail= restoreStateWriteShouldFail= restoreGroupsWriteShouldFail=
+    local disableStateWriteShouldFail=
+    local stopShouldFail=
     local actions=
 
     # Restore the real subscription functions because earlier UI smoke tests
@@ -8894,6 +8896,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         subscriptionWireGuardWriteState --arg endpointHost "${endpointHost}" '.enabled = true | .role = "main" | .address = "10.77.0.1/24" | .endpoint_host = $endpointHost | .public_key = "public-key" | .listen_port = 51820 | .control_port = 39778'
         applySubscriptionWireGuardService
     }
+    eval "$(declare -f disableSubscriptionWireGuardControl | sed '1s/^disableSubscriptionWireGuardControl/originalDisableSubscriptionWireGuardControl/')"
     disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; subscriptionWireGuardWriteState '.enabled = false'; }
     installSubscriptionWireGuardTools() { return 0; }
     subscriptionWireGuardEnsureKeys() {
@@ -8910,6 +8913,9 @@ runSubscriptionWireGuardMenuFlowRegression() (
     eval "$(declare -f subscriptionWireGuardWriteState | sed '1s/^subscriptionWireGuardWriteState/originalSubscriptionWireGuardWriteState/')"
     subscriptionWireGuardWriteState() {
         if [[ "${restoreStateWriteShouldFail}" == "true" && "${*: -1}" == '$previousState' ]]; then
+            return 1
+        fi
+        if [[ "${disableStateWriteShouldFail}" == "true" && "${*: -1}" == ".enabled = false" ]]; then
             return 1
         fi
         originalSubscriptionWireGuardWriteState "$@"
@@ -8935,6 +8941,11 @@ runSubscriptionWireGuardMenuFlowRegression() (
     serviceQueueApply() {
         recordMenuAction serviceQueueApply
         [[ "${serviceQueueShouldFail}" == "true" ]] && return 1
+        return 0
+    }
+    stopSubscriptionWireGuardControlService() {
+        recordMenuAction stopSubscriptionWireGuardControlService
+        [[ "${stopShouldFail}" == "true" ]] && return 1
         return 0
     }
     eval "$(declare -f addSubscriptionSourceState | sed '1s/^addSubscriptionSourceState/originalAddSubscriptionSourceState/')"
@@ -9129,6 +9140,41 @@ edge-a
     assertMenuAction installSubscriptionControlService
     assertMenuAction refreshSubscriptionWireGuardNginxControl
     subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
+
+    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+    stopShouldFail=true
+    resetMenuActions
+    if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+        stopShouldFail=
+        return 1
+    fi
+    stopShouldFail=
+    assertMenuAction 'errorCard:WireGuard 控制面停用失败'
+    subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
+    grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
+
+    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+    disableStateWriteShouldFail=true
+    resetMenuActions
+    if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+        disableStateWriteShouldFail=
+        return 1
+    fi
+    disableStateWriteShouldFail=
+    assertMenuAction 'errorCard:WireGuard 控制面状态写入失败'
+    subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
+    grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+
+    local restoreStopState='{"enabled":false,"role":"uninitialized","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"address":"","endpoint_host":"","public_key":"","peers":[]}'
+    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+    stopShouldFail=true
+    if subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1; then
+        stopShouldFail=
+        return 1
+    fi
+    stopShouldFail=
+    grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
 
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
     currentHost="${oldCurrentHost}"
