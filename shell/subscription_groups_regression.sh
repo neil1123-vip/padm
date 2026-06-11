@@ -8903,6 +8903,8 @@ runLocalTrafficAccountsBatchRegression() (
     local accounts
     local snapshot
     local reloadMarker="${TMP_DIR}/traffic-reload"
+    local originalStats
+    local originalPolicy
     mkdir -p "${xrayConfig}" "${singBoxConfig}"
     configPath="${xrayConfig}"
     singBoxConfigPath="${singBoxConfig}"
@@ -8923,7 +8925,22 @@ JSON
     snapshot=$(collectLocalTrafficSnapshot)
     jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
 
-    rm -f "${singBoxConfig}03_inbounds.json" "${reloadMarker}"
+    rm -f "${singBoxConfig}03_inbounds.json" "${reloadMarker}" "${xrayConfig}13_stats_api.json" "${xrayConfig}12_policy.json"
+    printf '{bad-json\n' >"${xrayConfig}12_policy.json"
+    if ensureXrayTrafficStatsConfig >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -e "${xrayConfig}13_stats_api.json" ]]
+    [[ "$(<"${xrayConfig}12_policy.json")" == "{bad-json" ]]
+
+    cat >"${xrayConfig}13_stats_api.json" <<'JSON'
+{"stats":{"old":true}}
+JSON
+    cat >"${xrayConfig}12_policy.json" <<'JSON'
+{"policy":{"levels":{"0":{"statsUserUplink":false,"statsUserDownlink":false}},"system":{"statsInboundUplink":false,"statsInboundDownlink":false,"statsOutboundUplink":false,"statsOutboundDownlink":false}}}
+JSON
+    originalStats=$(<"${xrayConfig}13_stats_api.json")
+    originalPolicy=$(<"${xrayConfig}12_policy.json")
     reloadCore() {
         printf 'reload\n' >"${reloadMarker}"
         return 1
@@ -8932,6 +8949,23 @@ JSON
         return 1
     fi
     [[ -e "${reloadMarker}" ]]
+    [[ "$(<"${xrayConfig}13_stats_api.json")" == "${originalStats}" ]]
+    [[ "$(<"${xrayConfig}12_policy.json")" == "${originalPolicy}" ]]
+)
+
+runCheckLogBackupMissingRestoreRegression() (
+    local root="${TMP_DIR}/check-log-backup-restore"
+    local restoreBackupDir
+    mkdir -p "${root}"
+    printf 'old-policy\n' >"${root}/policy.json"
+
+    checkLogBackupCreate restoreBackupDir "${root}/stats.json" "${root}/policy.json"
+    printf 'new-stats\n' >"${root}/stats.json"
+    printf 'new-policy\n' >"${root}/policy.json"
+
+    checkLogBackupRestore "${restoreBackupDir}"
+    [[ ! -e "${root}/stats.json" ]]
+    [[ "$(<"${root}/policy.json")" == "old-policy" ]]
 )
 
 runDpkgInstalledPatternRegression() {
@@ -11049,6 +11083,7 @@ runInstallModulePathsRegression() {
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
+        runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&

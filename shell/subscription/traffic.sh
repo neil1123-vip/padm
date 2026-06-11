@@ -1,14 +1,50 @@
 #!/usr/bin/env bash
 
+restoreXrayTrafficStatsConfigBackup() {
+    local backupDir=$1
+    checkLogBackupRestore "${backupDir}" >/dev/null 2>&1
+}
+
+failXrayTrafficStatsConfigChange() {
+    local backupDir=$1
+    local reason=$2
+    local retryReload=${3:-false}
+
+    if ! restoreXrayTrafficStatsConfigBackup "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${backupDir}"
+    if [[ "${retryReload}" == "true" ]]; then
+        if reloadCore; then
+            errorCard "${reason}，已回滚流量统计配置"
+        else
+            errorCard "${reason}，已回滚流量统计配置；恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        fi
+        return 1
+    fi
+    errorCard "${reason}，已回滚流量统计配置"
+    return 1
+}
+
 ensureXrayTrafficStatsConfig() {
     local xrayConfigPath=${configPath:-/etc/padm/xray/conf/}
     local statsConfig=${xrayConfigPath}13_stats_api.json
     local policyConfig=${xrayConfigPath}12_policy.json
     local tmpFile
     local policyTmp
+    local trafficBackupDir
     local changed=
     [[ "${coreInstallType}" == "1" && -d "${xrayConfigPath}" ]] || return 0
-    padmCreateTempFileForTarget tmpFile "${statsConfig}" stats || return 1
+    checkLogBackupCreate trafficBackupDir "${statsConfig}" "${policyConfig}" || {
+        errorCard "Xray 流量统计配置备份失败，已取消更新"
+        return 1
+    }
+    padmCreateTempFileForTarget tmpFile "${statsConfig}" stats || {
+        failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计 stats 临时文件创建失败"
+        return 1
+    }
     if ! cat <<EOF >"${tmpFile}"
 {
   "stats": {},
@@ -44,17 +80,25 @@ ensureXrayTrafficStatsConfig() {
 EOF
     then
         padmRemoveCleanupPath "${tmpFile}"
+        failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计 stats 配置生成失败"
         return 1
     fi
     if [[ -f "${statsConfig}" ]] && cmp -s "${tmpFile}" "${statsConfig}"; then
         padmRemoveCleanupPath "${tmpFile}"
     else
-        commitGeneratedJsonFile "${tmpFile}" "${statsConfig}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+        commitGeneratedJsonFile "${tmpFile}" "${statsConfig}" || {
+            padmRemoveCleanupPath "${tmpFile}"
+            failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计 stats 配置写入失败"
+            return 1
+        }
         changed=true
     fi
 
     if [[ ! -f "${policyConfig}" ]]; then
-        padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || return 1
+        padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || {
+            failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略默认配置临时文件创建失败"
+            return 1
+        }
         if ! cat <<EOF >"${policyTmp}"
 {
   "policy": {
@@ -67,12 +111,20 @@ EOF
 EOF
         then
             padmRemoveCleanupPath "${policyTmp}"
+            failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略默认配置生成失败"
             return 1
         fi
-        commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || { padmRemoveCleanupPath "${policyTmp}"; return 1; }
+        commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || {
+            padmRemoveCleanupPath "${policyTmp}"
+            failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略默认配置写入失败"
+            return 1
+        }
         changed=true
     fi
-    padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || return 1
+    padmCreateTempFileForTarget policyTmp "${policyConfig}" policy || {
+        failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略配置临时文件创建失败"
+        return 1
+    }
     if ! jq '
       .policy.levels["0"].statsUserUplink = true |
       .policy.levels["0"].statsUserDownlink = true |
@@ -82,19 +134,27 @@ EOF
       .policy.system.statsOutboundDownlink = true
     ' "${policyConfig}" >"${policyTmp}"; then
         padmRemoveCleanupPath "${policyTmp}"
-        errorCard "Xray 流量统计策略配置生成失败"
+        failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略配置生成失败"
         return 1
     fi
     if cmp -s "${policyTmp}" "${policyConfig}"; then
         padmRemoveCleanupPath "${policyTmp}"
     else
-        commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || { padmRemoveCleanupPath "${policyTmp}"; return 1; }
+        commitGeneratedJsonFile "${policyTmp}" "${policyConfig}" || {
+            padmRemoveCleanupPath "${policyTmp}"
+            failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计策略配置写入失败"
+            return 1
+        }
         changed=true
     fi
 
     if [[ -n "${changed}" && -n "${configPath}" ]]; then
-        reloadCore || return 1
+        if ! reloadCore; then
+            failXrayTrafficStatsConfigChange "${trafficBackupDir}" "Xray 流量统计配置更新后核心重载失败" true
+            return 1
+        fi
     fi
+    padmRemoveCleanupPath "${trafficBackupDir}"
 }
 
 collectLocalTrafficAccounts() {

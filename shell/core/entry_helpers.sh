@@ -846,7 +846,7 @@ checkLogBackupCreate() {
                 return 1
             }
         else
-            printf '\t%s\tmissing\n' "${targetPath}" >>"${manifest}" || {
+            printf -- '-\t%s\tmissing\n' "${targetPath}" >>"${manifest}" || {
                 padmRemoveCleanupPath "${backupDir}"
                 return 1
             }
@@ -866,6 +866,13 @@ checkLogBackupRestore() {
     manifest="${backupDir}/manifest"
     [[ -f "${manifest}" ]] || return 1
     while IFS=$'\t' read -r backupFile targetPath state; do
+        # Older manifests wrote missing entries with a leading tab. Bash read with
+        # whitespace IFS collapses that shape into "<path>\tmissing", so normalize it.
+        if [[ -z "${state}" && "${targetPath}" == "missing" && -n "${backupFile}" ]]; then
+            targetPath="${backupFile}"
+            state=missing
+            backupFile=
+        fi
         [[ -n "${targetPath}" ]] || continue
         case "${state}" in
         file)
