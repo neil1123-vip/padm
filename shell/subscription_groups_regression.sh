@@ -3093,11 +3093,32 @@ runSingBoxMergeConfigTransactionRegression() (
     local shardDir="${confDir}/config"
     local binary="${root}/fake-sing-box"
     local outputFile="${confDir}/config.json"
+    local checkLog="${root}/check.log"
+    local commitMarker="${root}/commit.log"
+    local logFile="${root}/merge.log"
     local rc
 
     mkdir -p "${shardDir}"
     cat >"${binary}" <<'SH'
 #!/usr/bin/env bash
+if [[ "$1" == "check" ]]; then
+    shift
+    config=
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+        -c)
+            config=$2
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+        esac
+    done
+    printf 'check:%s\n' "${config}" >>"${PADM_FAKE_SINGBOX_CHECK_LOG}"
+    [[ "${PADM_FAKE_SINGBOX_CHECK_MODE:-success}" == "success" ]]
+    exit
+fi
 [[ "$1" == "merge" ]] || exit 2
 output=$2
 shift 2
@@ -3134,6 +3155,7 @@ SH
     chmod +x "${binary}"
     PADM_SINGBOX_BINARY="${binary}"
     singBoxConfigPath="${shardDir}/"
+    export PADM_FAKE_SINGBOX_CHECK_LOG="${checkLog}"
 
     printf '{"old":true}\n' >"${outputFile}"
     export PADM_FAKE_SINGBOX_MERGE_MODE=fail
@@ -3155,24 +3177,50 @@ SH
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
 
     export PADM_FAKE_SINGBOX_MERGE_MODE=success
+    mv() {
+        if [[ "$#" -eq 2 && "$2" == "${outputFile}" ]]; then
+            printf 'commit\n' >"${commitMarker}"
+            return 1
+        fi
+        command mv "$@"
+    }
+    set +e
     (
-        mv() {
-            if [[ "$2" == "${outputFile}" ]]; then
-                return 1
-            fi
-            command mv "$@"
-        }
-        set +e
         singBoxMergeConfig >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-    ) || return 1
+    )
+    rc=$?
+    set -e
+    unset -f mv
+    [[ "${rc}" == "1" ]]
+    [[ -e "${commitMarker}" ]]
     [[ "$(<"${outputFile}")" == '{"old":true}' ]]
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
 
     singBoxMergeConfig
     [[ "$(<"${outputFile}")" == '{"merged":true}' ]]
+    ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+
+    printf '{"runtime":true}\n' >"${outputFile}"
+    : >"${checkLog}"
+    : >"${logFile}"
+    export PADM_FAKE_SINGBOX_MERGE_MODE=success
+    export PADM_FAKE_SINGBOX_CHECK_MODE=success
+    singBoxMergeConfigForValidation "${binary}" "${logFile}" check
+    [[ "$(<"${outputFile}")" == '{"runtime":true}' ]]
+    grep -q '^check:' "${checkLog}"
+    ! grep -qx "check:${outputFile}" "${checkLog}"
+    ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
+
+    : >"${checkLog}"
+    export PADM_FAKE_SINGBOX_CHECK_MODE=fail
+    set +e
+    singBoxMergeConfigForValidation "${binary}" "${logFile}" check >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${outputFile}")" == '{"runtime":true}' ]]
+    grep -q '^check:' "${checkLog}"
+    ! grep -qx "check:${outputFile}" "${checkLog}"
     ! compgen -G "${confDir}/.config.json.merge.*" >/dev/null
 )
 

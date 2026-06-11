@@ -2470,7 +2470,7 @@ validateRealityTargetConfigAfterChange() {
     if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
         if [[ -x "/etc/padm/sing-box/sing-box" ]]; then
             logFile=$(realityTargetSingBoxTestLog)
-            /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1 || return 1
+            singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "${logFile}" || return 1
         fi
     fi
 }

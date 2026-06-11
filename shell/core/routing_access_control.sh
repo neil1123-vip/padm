@@ -448,7 +448,7 @@ validateAccessControlConfig() {
     fi
     if [[ -n "${singBoxConfigPath}" && -x /etc/padm/sing-box/sing-box ]]; then
         logFile=$(accessControlSingBoxTestLog)
-        if ! /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1; then
+        if ! singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "${logFile}"; then
             ACCESS_CONTROL_FAILURE_TITLE="sing-box 配置校验失败"
             ACCESS_CONTROL_FAILURE_LOG="${logFile}"
             return 1

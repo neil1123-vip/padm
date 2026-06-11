@@ -424,24 +424,68 @@ singBoxHysteria2Install() {
 }
 
 
+singBoxConfigShardDir() {
+    local configDir="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
+
+    configDir="${configDir%/}/"
+    printf '%s\n' "${configDir}"
+}
+
+singBoxConfigConfDir() {
+    local configDir confDir
+    configDir=$(singBoxConfigShardDir)
+    confDir="$(dirname -- "${configDir%/}")"
+    printf '%s\n' "${confDir}"
+}
+
+singBoxMergedConfigFile() {
+    printf '%s/config.json\n' "$(singBoxConfigConfDir)"
+}
+
+singBoxMergeConfigToTemp() {
+    local resultVar=$1
+    local binary="${2:-${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}}"
+    local logFile="${3:-/dev/null}"
+    local configDir confDir outputFile mergedTmpFile tmpName
+
+    configDir=$(singBoxConfigShardDir)
+    confDir=$(singBoxConfigConfDir)
+    outputFile=$(singBoxMergedConfigFile)
+
+    padmCreateTempFileForTarget mergedTmpFile "${outputFile}" merge || return 1
+    tmpName=$(basename -- "${mergedTmpFile}")
+    rm -f "${mergedTmpFile}" >/dev/null 2>&1 || { padmRemoveCleanupPath "${mergedTmpFile}"; return 1; }
+
+    if ! "${binary}" merge "${tmpName}" -C "${configDir}" -D "${confDir}/" >"${logFile}" 2>&1 || [[ ! -s "${mergedTmpFile}" ]]; then
+        padmRemoveCleanupPath "${mergedTmpFile}"
+        return 1
+    fi
+    printf -v "${resultVar}" '%s' "${mergedTmpFile}"
+}
+
+singBoxMergeConfigForValidation() {
+    local binary="${1:-${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}}"
+    local logFile="${2:-/dev/null}"
+    local checkMode="${3:-}"
+    local tmpFile
+
+    singBoxMergeConfigToTemp tmpFile "${binary}" "${logFile}" || return 1
+    if [[ "${checkMode}" == "check" ]]; then
+        if ! "${binary}" check -c "${tmpFile}" >>"${logFile}" 2>&1; then
+            padmRemoveCleanupPath "${tmpFile}"
+            return 1
+        fi
+    fi
+    padmRemoveCleanupPath "${tmpFile}"
+}
+
 # 合并 sing-box 配置
 singBoxMergeConfig() {
     local binary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
-    local configDir="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
-    local confDir outputFile tmpFile tmpName
+    local outputFile tmpFile
 
-    configDir="${configDir%/}/"
-    confDir="$(dirname -- "${configDir%/}")"
-    outputFile="${confDir}/config.json"
-
-    padmCreateTempFileForTarget tmpFile "${outputFile}" merge || return 1
-    tmpName=$(basename -- "${tmpFile}")
-    rm -f "${tmpFile}" >/dev/null 2>&1 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-
-    if ! "${binary}" merge "${tmpName}" -C "${configDir}" -D "${confDir}/" >/dev/null 2>&1 || [[ ! -s "${tmpFile}" ]]; then
-        padmRemoveCleanupPath "${tmpFile}"
-        return 1
-    fi
+    outputFile=$(singBoxMergedConfigFile)
+    singBoxMergeConfigToTemp tmpFile "${binary}" /dev/null || return 1
     commitGeneratedFile "${tmpFile}" "${outputFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 

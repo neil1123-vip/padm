@@ -273,8 +273,7 @@ validateSingBoxConfigWithBinary() {
     local logFile=${2:-$(coreSingBoxConfigTestLog)}
     [[ -x "${binary}" ]] || return 1
     singBoxConfigInstalled || return 2
-    "${binary}" merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"${logFile}" 2>&1 || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
-    "${binary}" check -c /etc/padm/sing-box/conf/config.json >>"${logFile}" 2>&1 || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
+    singBoxMergeConfigForValidation "${binary}" "${logFile}" check || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
 }
 
 appendSingBoxCompatibilityHints() {

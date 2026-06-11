@@ -2683,7 +2683,7 @@ refreshTuicSubscriptions() {
 
 validateTuicConfigUpdate() {
     [[ -x /etc/padm/sing-box/sing-box ]] || return 0
-    /etc/padm/sing-box/sing-box merge config.json -C /etc/padm/sing-box/conf/config/ -D /etc/padm/sing-box/conf/ >"$(tuicConfigTestLog)" 2>&1
+    singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "$(tuicConfigTestLog)"
 }
 
 tuicConfigTestLog() {
