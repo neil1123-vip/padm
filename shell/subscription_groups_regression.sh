@@ -2689,6 +2689,10 @@ runNetworkCheckReturnFailureRegression() (
     [[ "${portShellRc}" == "0" ]]
     [[ "$(<"${portRcFile}")" == "1" ]]
     grep -qx 'allow:443' "${serviceLog}"
+    ! grep -q '^sing-box:' "${serviceLog}"
+    ! grep -q '^xray:' "${serviceLog}"
+    ! grep -q '^nginx:' "${serviceLog}"
+    [[ ! -s "${cleanLog}" ]]
     [[ ! -s "${writeLog}" ]]
 
     portProcessKind=padm

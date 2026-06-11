@@ -212,6 +212,12 @@ EOF
 
 # 检查端口实际开放状态
 checkPortOpen() {
+    local port=$1
+    local domain=$2
+    local checkPortOpenResult=
+    local localIP=
+
+    allowPort "${port}" || return 1
     if ! runCoreServiceActionAllowFailure handleSingBox stop >/dev/null 2>&1; then
         errorCard "sing-box 服务停止失败，无法检测端口开放状态"
         return 1
@@ -224,12 +230,6 @@ checkPortOpen() {
         errorCard "Nginx 配置清理失败，无法检测端口开放状态"
         return 1
     fi
-
-    local port=$1
-    local domain=$2
-    local checkPortOpenResult=
-    local localIP=
-    allowPort "${port}" || return 1
 
     if [[ -z "${btDomain}" ]]; then
 
