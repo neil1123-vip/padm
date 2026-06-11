@@ -430,24 +430,17 @@ subscriptionSyncApplyAccountPlanTransaction() {
 
 subscriptionSyncReconcileLocalServices() {
     local skipSubscribeRefresh=${1:-}
-    local rc=0
-    reloadCore || rc=1
+    reloadCore || return 1
     readNginxSubscribe
-    if ! installSubscriptionControlService; then
-        rc=1
-    fi
+    installSubscriptionControlService || return 1
     if ensureSubscriptionControlNginxLocation; then
-        if ! serviceQueueRestart nginx; then
-            rc=1
-        fi
-        if ! serviceQueueApply; then
-            rc=1
-        fi
+        serviceQueueRestart nginx || return 1
+        serviceQueueApply || return 1
     fi
     if [[ -n "${subscribePort}" && -z "${skipSubscribeRefresh}" ]]; then
-        subscribe false || rc=1
+        subscribe false || return 1
     fi
-    return "${rc}"
+    return 0
 }
 
 subscriptionSyncMarkResult() {

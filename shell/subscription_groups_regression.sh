@@ -7920,6 +7920,141 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionSyncReconcileEarlyExitRegression() (
+    local root="${TMP_DIR}/subscription-sync-reconcile-early-exit"
+    local callLog="${root}/calls.log"
+    local rc
+
+    mkdir -p "${root}"
+
+    (
+        : >"${callLog}"
+        subscribePort=
+        reloadCore() {
+            printf 'reload\n' >>"${callLog}"
+            return 1
+        }
+        readNginxSubscribe() {
+            printf 'read\n' >>"${callLog}"
+            subscribePort=39778
+        }
+        installSubscriptionControlService() {
+            printf 'install\n' >>"${callLog}"
+            return 0
+        }
+        ensureSubscriptionControlNginxLocation() {
+            printf 'ensure\n' >>"${callLog}"
+            return 0
+        }
+        serviceQueueRestart() {
+            printf 'restart:%s\n' "$1" >>"${callLog}"
+            return 0
+        }
+        serviceQueueApply() {
+            printf 'apply\n' >>"${callLog}"
+            return 0
+        }
+        subscribe() {
+            printf 'subscribe:%s\n' "$*" >>"${callLog}"
+            return 0
+        }
+        set +e
+        subscriptionSyncReconcileLocalServices
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'reload' "${callLog}"
+        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "1" ]]
+    )
+
+    (
+        : >"${callLog}"
+        subscribePort=
+        reloadCore() {
+            printf 'reload\n' >>"${callLog}"
+            return 0
+        }
+        readNginxSubscribe() {
+            printf 'read\n' >>"${callLog}"
+            subscribePort=39778
+        }
+        installSubscriptionControlService() {
+            printf 'install\n' >>"${callLog}"
+            return 1
+        }
+        ensureSubscriptionControlNginxLocation() {
+            printf 'ensure\n' >>"${callLog}"
+            return 0
+        }
+        serviceQueueRestart() {
+            printf 'restart:%s\n' "$1" >>"${callLog}"
+            return 0
+        }
+        serviceQueueApply() {
+            printf 'apply\n' >>"${callLog}"
+            return 0
+        }
+        subscribe() {
+            printf 'subscribe:%s\n' "$*" >>"${callLog}"
+            return 0
+        }
+        set +e
+        subscriptionSyncReconcileLocalServices
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'reload' "${callLog}"
+        grep -qx 'read' "${callLog}"
+        grep -qx 'install' "${callLog}"
+        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "3" ]]
+    )
+
+    (
+        : >"${callLog}"
+        subscribePort=
+        reloadCore() {
+            printf 'reload\n' >>"${callLog}"
+            return 0
+        }
+        readNginxSubscribe() {
+            printf 'read\n' >>"${callLog}"
+            subscribePort=39778
+        }
+        installSubscriptionControlService() {
+            printf 'install\n' >>"${callLog}"
+            return 0
+        }
+        ensureSubscriptionControlNginxLocation() {
+            printf 'ensure\n' >>"${callLog}"
+            return 0
+        }
+        serviceQueueRestart() {
+            printf 'restart:%s\n' "$1" >>"${callLog}"
+            return 0
+        }
+        serviceQueueApply() {
+            printf 'apply\n' >>"${callLog}"
+            return 1
+        }
+        subscribe() {
+            printf 'subscribe:%s\n' "$*" >>"${callLog}"
+            return 0
+        }
+        set +e
+        subscriptionSyncReconcileLocalServices
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'reload' "${callLog}"
+        grep -qx 'read' "${callLog}"
+        grep -qx 'install' "${callLog}"
+        grep -qx 'ensure' "${callLog}"
+        grep -qx 'restart:nginx' "${callLog}"
+        grep -qx 'apply' "${callLog}"
+        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "6" ]]
+    )
+)
+
 runRemoteSubscribeFetchRegression() {
     local publicDir="${TMP_DIR}/remote-subscribe-public"
     local localDir="${TMP_DIR}/remote-subscribe-local"
@@ -11453,6 +11588,7 @@ runRegressionSubscriptionState() {
     runRegressionStep subscription-state runSubscriptionGroupStateRegression
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
     runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
+    runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
 }
 
 runRegressionSubscriptionRemoteFetch() {
