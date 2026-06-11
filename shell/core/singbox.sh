@@ -496,8 +496,8 @@ initSingBoxPort() {
     local promptHistory=${2:-true}
     if [[ -n "${port}" && "${promptHistory}" != "true" ]]; then
         if ((port >= 1 && port <= 65535)); then
-            allowPort "${port}"
-            allowPort "${port}" "udp"
+            allowPort "${port}" || return 1
+            allowPort "${port}" "udp" || return 1
             echo "${port}"
             return
         else
@@ -521,8 +521,8 @@ initSingBoxPort() {
             port=$((RANDOM % 50001 + 10000))
         fi
         if ((port >= 1 && port <= 65535)); then
-            allowPort "${port}"
-            allowPort "${port}" "udp"
+            allowPort "${port}" || return 1
+            allowPort "${port}" "udp" || return 1
             echo "${port}"
         else
             errorCard "端口输入错误"

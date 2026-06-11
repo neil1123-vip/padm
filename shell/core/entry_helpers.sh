@@ -180,7 +180,7 @@ customPortFunction() {
 
         if [[ -n "${port}" ]]; then
             if ((port >= 1 && port <= 65535)); then
-                allowPort "${port}"
+                allowPort "${port}" || return 1
                 statusCard "TLS 入口端口" "${port}"
                 if [[ -z "${btDomain}" ]]; then
                     checkDNSIP "${domain}" || return 1

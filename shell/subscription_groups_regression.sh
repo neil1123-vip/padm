@@ -2660,6 +2660,27 @@ runNetworkCheckReturnFailureRegression() (
     grep -qx 'nginx:start:true' "${serviceLog}"
     grep -qx 'write:nginx-start-fail' "${writeLog}"
 
+    allowPort() {
+        printf 'allow:%s\n' "$*" >>"${serviceLog}"
+        return 1
+    }
+    mode=
+    : >"${serviceLog}"
+    : >"${cleanLog}"
+    : >"${writeLog}"
+    set +e
+    (
+        set +e
+        checkPortOpen 443 example.com >/dev/null 2>&1
+        printf '%s\n' "$?" >"${portRcFile}"
+    )
+    portShellRc=$?
+    set -e
+    [[ "${portShellRc}" == "0" ]]
+    [[ "$(<"${portRcFile}")" == "1" ]]
+    grep -qx 'allow:443' "${serviceLog}"
+    [[ ! -s "${writeLog}" ]]
+
     portProcessKind=padm
     lsof() {
         case "$*" in

@@ -26,8 +26,8 @@ initHysteriaPort() {
         statusCard "端口输入" "端口不合法"
         initHysteriaPort "$2"
     fi
-    allowPort "${hysteriaPort}"
-    allowPort "${hysteriaPort}" "udp"
+    allowPort "${hysteriaPort}" || return 1
+    allowPort "${hysteriaPort}" "udp" || return 1
 }
 
 
@@ -160,7 +160,7 @@ addPortHopping() {
                     statusCard "端口跳跃" "端口跳跃添加失败"
                     exit 0
                 fi
-                allowPort "${portStart}:${portEnd}" udp
+                allowPort "${portStart}:${portEnd}" udp || return 1
             fi
             statusCard "端口跳跃" "端口跳跃添加成功"
         fi
@@ -293,8 +293,8 @@ initTuicPort() {
         initTuicPort "$2"
     fi
     statusCard "Tuic 端口" "${tuicPort}"
-    allowPort "${tuicPort}"
-    allowPort "${tuicPort}" "udp"
+    allowPort "${tuicPort}" || return 1
+    allowPort "${tuicPort}" "udp" || return 1
 }
 
 
@@ -599,7 +599,7 @@ initXrayRealityPort() {
             errorCard "Reality 端口输入错误"
             return 1
         fi
-        allowPort "${realityPort}"
+        allowPort "${realityPort}" || return 1
         statusCard "Reality 端口" "${realityPort}"
     fi
 
@@ -643,8 +643,8 @@ initXrayXHTTPort() {
             errorCard "Reality XHTTP 端口输入错误"
             return 1
         fi
-        allowPort "${xHTTPort}"
-        allowPort "${xHTTPort}" "udp"
+        allowPort "${xHTTPort}" || return 1
+        allowPort "${xHTTPort}" "udp" || return 1
         statusCard "Reality XHTTP 端口" "${xHTTPort}"
     fi
 }

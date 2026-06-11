@@ -1022,8 +1022,8 @@ addCorePort() {
                 settingsPort=${customPort}
             fi
             while read -r port; do
-                allowPort "${port}"
-                allowPort "${port}" "udp"
+                allowPort "${port}" || return 1
+                allowPort "${port}" "udp" || return 1
             done <<<"${parsedPorts}"
             if ! corePortApplyReloadTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
                 errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"

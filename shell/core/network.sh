@@ -17,7 +17,7 @@ allowPort() {
                 if ! sudo ufw allow "$1/${type}" || ! checkUFWAllowPort "$1"; then
                     sudo ufw delete allow "$1/${type}" >/dev/null 2>&1 || true
                     errorCard "$1端口开放失败，已尝试回滚本次 ufw 规则"
-                    exit 1
+                    return 1
                 fi
             fi
         fi
@@ -27,7 +27,7 @@ allowPort() {
                 firewall-cmd --zone=public --remove-port="${firewallPort}/${type}" --permanent >/dev/null 2>&1 || true
                 firewall-cmd --reload >/dev/null 2>&1 || true
                 errorCard "$1端口开放失败，已尝试回滚本次 firewalld 规则"
-                exit 1
+                return 1
             fi
         fi
     elif rc-update show 2>/dev/null | grep -q ufw; then
@@ -36,7 +36,7 @@ allowPort() {
                 if ! sudo ufw allow "$1/${type}" || ! checkUFWAllowPort "$1"; then
                     sudo ufw delete allow "$1/${type}" >/dev/null 2>&1 || true
                     errorCard "$1端口开放失败，已尝试回滚本次 ufw 规则"
-                    exit 1
+                    return 1
                 fi
             fi
         fi
@@ -46,7 +46,7 @@ allowPort() {
                 iptables -D INPUT -p "${type}" --dport "$1" -m comment --comment "allow $1/${type}(neil1123-vip)" -j ACCEPT >/dev/null 2>&1 || true
                 netfilter-persistent save >/dev/null 2>&1 || true
                 errorCard "$1端口开放失败，已尝试回滚本次 iptables 规则"
-                exit 1
+                return 1
             fi
         fi
     fi
@@ -229,7 +229,7 @@ checkPortOpen() {
     local domain=$2
     local checkPortOpenResult=
     local localIP=
-    allowPort "${port}"
+    allowPort "${port}" || return 1
 
     if [[ -z "${btDomain}" ]]; then
 

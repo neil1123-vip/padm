@@ -189,7 +189,7 @@ installTLS() {
         if [[ -z "${dnsAPIType:-}" ]]; then
             statusCard "TLS 证书申请方式" "不采用 API 申请证书"
             successCard "安装TLS证书，需要依赖80端口"
-            allowPort 80
+            allowPort 80 || return 1
         fi
 
         switchSSLType || return 1
