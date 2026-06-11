@@ -600,6 +600,7 @@ runSubscriptionGroupSync() {
     local outputBackupDir=
     local localSyncReady=false
     local localSyncFailure=
+    local remoteSyncEnabled=false
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -681,12 +682,16 @@ runSubscriptionGroupSync() {
         rc=1
     fi
 
-    if [[ "${localSyncReady}" != "true" ]] && subscriptionGroupRemoteSyncEnabled; then
+    if subscriptionGroupRemoteSyncEnabled; then
+        remoteSyncEnabled=true
+    fi
+
+    if [[ "${localSyncReady}" != "true" && "${remoteSyncEnabled}" == "true" ]]; then
         failures=$(jq '. + ["本机同步未完成，已跳过被控服务器同步"]' <<<"${failures}")
         rc=1
     fi
 
-    if [[ "${localSyncReady}" == "true" && subscriptionGroupRemoteSyncEnabled ]]; then
+    if [[ "${localSyncReady}" == "true" && "${remoteSyncEnabled}" == "true" ]]; then
         remoteFailures=$(runSubscriptionRemoteSync)
         failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
         if [[ "${remoteFailures}" != "[]" ]]; then
@@ -716,7 +721,11 @@ runSubscriptionGroupSync() {
             rc=1
         fi
         if [[ "${localSyncReady}" == "true" ]]; then
-            statusCard "订阅同步" "本机自动同步完成，被控服务器待后续通道同步"
+            if [[ "${remoteSyncEnabled}" == "true" && "${remoteFailures}" != "[]" ]]; then
+                statusCard "订阅同步" "本机自动同步完成，但被控服务器同步失败，请查看失败列表"
+            else
+                statusCard "订阅同步" "本机自动同步完成，但部分步骤失败，请查看失败列表"
+            fi
         else
             statusCard "订阅同步" "本机同步未完全完成，请先处理本机错误后再试被控服务器同步"
         fi
