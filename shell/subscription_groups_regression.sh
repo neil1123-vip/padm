@@ -5579,6 +5579,80 @@ runSubscribeReturnFailureRegression() (
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
 )
 
+runRefreshLocalSubscriptionsRollbackRegression() (
+    local root="${TMP_DIR}/refresh-local-subscriptions-rollback"
+    local localDir="${root}/subscribe_local"
+    local errorLog="${root}/error.log"
+    local callLog="${root}/calls.log"
+    local beforeSnapshot="${root}/before.txt"
+    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local cleanCalls=0
+    local rc
+
+    captureRefreshLocalSnapshot() {
+        find "${localDir}" -type f -printf '%P\t' -exec cat {} \; | sort
+    }
+
+    mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    TMPDIR="${root}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    printf 'old salt\n' >"${localDir}/subscribeSalt"
+    printf 'old default\n' >"${localDir}/default/existing"
+    printf 'old clash\n' >"${localDir}/clashMeta/existing"
+    printf '["old"]\n' >"${localDir}/sing-box/existing"
+    captureRefreshLocalSnapshot >"${beforeSnapshot}"
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    showAccounts() {
+        printf 'showAccounts\n' >>"${callLog}"
+        printf 'new default\n' >"${localDir}/default/existing"
+        printf 'new clash\n' >"${localDir}/clashMeta/existing"
+        printf '["new"]\n' >"${localDir}/sing-box/existing"
+        printf 'new default user\n' >"${localDir}/default/new-user"
+        return 1
+    }
+    set +e
+    refreshLocalSubscriptions "Tuic" "已刷新本地订阅" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    diff -u "${beforeSnapshot}" <(captureRefreshLocalSnapshot)
+    grep -q '重建本地订阅失败，已恢复旧本地订阅' "${errorLog}"
+    grep -qx 'showAccounts' "${callLog}"
+    ! find "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*' | grep -q .
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    cleanCalls=0
+    cleanDirectoryContent() {
+        cleanCalls=$((cleanCalls + 1))
+        printf 'clean:%s\n' "$1" >>"${callLog}"
+        mkdir -p "$1" || return 1
+        find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || return 1
+        [[ "${cleanCalls}" -lt 2 ]]
+    }
+    showAccounts() {
+        printf 'showAccounts\n' >>"${callLog}"
+        return 0
+    }
+    set +e
+    refreshLocalSubscriptions "XHTTP" "已刷新本地订阅" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${cleanCalls}" == "2" ]]
+    diff -u "${beforeSnapshot}" <(captureRefreshLocalSnapshot)
+    grep -q '清理本地订阅目录失败，已恢复旧本地订阅' "${errorLog}"
+    ! grep -q '^showAccounts$' "${callLog}"
+    ! find "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*' | grep -q .
+
+    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runRemoveUserSubscriptionMenuFailureRegression() (
     local root="${TMP_DIR}/remove-user-subscription-menu-failure"
     local callLog="${root}/calls.log"
@@ -11657,6 +11731,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
     runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
+    runRegressionStep refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
     runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
     runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression

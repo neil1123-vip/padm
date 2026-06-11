@@ -84,20 +84,49 @@ refreshVlessEncryptionSubscriptions() {
     fi
 }
 
+refreshLocalSubscriptionsRollback() {
+    local localBase=$1
+    local backupDir=$2
+    local reason=$3
+
+    if ! subscriptionSyncRestoreBackupPath "${localBase}" "${backupDir}" local; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，且旧本地订阅恢复失败，请手动检查备份目录：${backupDir}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${backupDir}"
+    errorCard "${reason}，已恢复旧本地订阅"
+    return 1
+}
+
 refreshLocalSubscriptions() {
     local featureName=$1
     local successMessage=$2
+    local localBase backupDir
+    local tmpBase="${TMPDIR:-/tmp}"
 
-    if ! cleanDirectoryContent /etc/padm/subscribe_local/default ||
-        ! cleanDirectoryContent /etc/padm/subscribe_local/clashMeta ||
-        ! cleanDirectoryContent /etc/padm/subscribe_local/sing-box; then
-        errorCard "刷新 ${featureName} 本地订阅失败：清理本地订阅目录失败"
+    localBase=$(subscribeLocalBaseDir)
+    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-refresh-local-subscriptions.XXXXXX" || {
+        errorCard "刷新 ${featureName} 本地订阅失败：创建备份目录失败"
+        return 1
+    }
+    if ! subscriptionSyncBackupPath "${localBase}" "${backupDir}" local; then
+        padmRemoveCleanupPath "${backupDir}"
+        errorCard "刷新 ${featureName} 本地订阅失败：备份旧本地订阅失败"
+        return 1
+    fi
+
+    if ! cleanDirectoryContent "${localBase}/default" ||
+        ! cleanDirectoryContent "${localBase}/clashMeta" ||
+        ! cleanDirectoryContent "${localBase}/sing-box"; then
+        refreshLocalSubscriptionsRollback "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：清理本地订阅目录失败"
         return 1
     fi
     if ! showAccounts >/dev/null; then
-        errorCard "刷新 ${featureName} 本地订阅失败"
+        refreshLocalSubscriptionsRollback "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：重建本地订阅失败"
         return 1
     fi
+    padmRemoveCleanupPath "${backupDir}"
     successCard "${successMessage}"
 }
 
