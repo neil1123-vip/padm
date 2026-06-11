@@ -286,7 +286,11 @@ updateRemoteSubscribe() {
 
         clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed "s/\"${email}/\"${email}_${serverAlias}/g")
         if [[ -n "${clashMetaProxies}" && "${clashMetaProxies}" != *nginx* ]]; then
-            appendUniqueLines "${clashMetaProxies}" "${clashTarget}"
+            if ! appendUniqueLines "${clashMetaProxies}" "${clashTarget}"; then
+                padmRemoveCleanupPath "${tmpDir}"
+                padmRemoveCleanupPath "${stageDir}"
+                return 1
+            fi
             successCard "clashMeta订阅 ${remoteUrl}:${email} 更新成功"
         else
             errorCard "clashMeta订阅 ${remoteUrl}:${email} 拉取失败或不存在"
@@ -296,7 +300,11 @@ updateRemoteSubscribe() {
         if [[ -n "${default}" && "${default}" != *nginx* ]]; then
             default=$(echo "${default}" | { base64 -d 2>/dev/null || true; } | sed "s/#${email}/#${email}_${serverAlias}/g")
             if [[ -n "${default}" ]]; then
-                appendUniqueLines "${default}" "${defaultTarget}"
+                if ! appendUniqueLines "${default}" "${defaultTarget}"; then
+                    padmRemoveCleanupPath "${tmpDir}"
+                    padmRemoveCleanupPath "${stageDir}"
+                    return 1
+                fi
                 successCard "通用订阅 ${remoteUrl}:${email} 更新成功"
             else
                 errorCard "通用订阅 ${remoteUrl}:${email} 解码失败"

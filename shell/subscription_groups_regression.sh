@@ -8182,6 +8182,8 @@ runRemoteSubscribeFetchRegression() {
         printf '[{"tag":"old-local"}]\n' >"${localDir}/sing-box/${email}"
     }
 
+    eval "$(declare -f appendUniqueLines | sed '1s/^appendUniqueLines/originalAppendUniqueLines/')"
+
     listRemoteSubscribeSources() {
         printf '%s\n' 'remote1.example:443:r1:https' 'remote2.example:443:r2:https' 'remote3.example:443:r3:https'
     }
@@ -8264,6 +8266,27 @@ runRemoteSubscribeFetchRegression() {
     [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
     [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
     [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
+
+    writeRemoteSubscribeOldOutputs
+    (
+        local appendCalls=0
+        appendUniqueLines() {
+            appendCalls=$((appendCalls + 1))
+            if [[ "${appendCalls}" == "2" ]]; then
+                return 1
+            fi
+            originalAppendUniqueLines "$@"
+        }
+        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+            return 1
+        fi
+        [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+        [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+        jq -e '.[0].tag == "old-local"' "${localDir}/sing-box/${email}" >/dev/null
+        [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
+        [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
+        [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
+    )
 
     updateRemoteSubscribe "${emailMd5}" "${email}"
     [[ "$(grep -cFx -- '- name: "user@example.com_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
