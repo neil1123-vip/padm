@@ -537,11 +537,8 @@ applySubscriptionQuotaPlanTransaction() {
     }
     if ! applySubscriptionQuotaPlan "${quotaPlan}"; then
         quotaError="限额自动执行时，停用超额分享订阅失败"
-    fi
-    if ! applySubscriptionQuotaPlanAccounts "${quotaPlan}"; then
-        if [[ -n "${quotaError}" ]]; then
-            quotaError="${quotaError}；${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行时，移除本机托管账号失败}"
-        else
+    else
+        if ! applySubscriptionQuotaPlanAccounts "${quotaPlan}"; then
             quotaError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-限额自动执行时，移除本机托管账号失败}"
         fi
     fi
