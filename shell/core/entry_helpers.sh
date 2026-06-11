@@ -927,35 +927,35 @@ checkLog() {
 
     case ${selectAccessLogType} in
     1)
-        local backupDir
+        local logBackupDir
         local -a backupTargets=("${configPath}00_log.json")
         [[ ${realityStatus} == "7" ]] && backupTargets+=("${configPath}07_VLESS_vision_reality_inbounds.json")
         [[ ${realityStatus} == "12" ]] && backupTargets+=("${configPath}12_VLESS_XHTTP_inbounds.json")
-        checkLogBackupCreate backupDir "${backupTargets[@]}" || {
+        checkLogBackupCreate logBackupDir "${backupTargets[@]}" || {
             errorCard "日志配置备份失败，已取消修改"
             return 1
         }
         if [[ "${logStatus}" == "false" ]]; then
             realityLogShow=true
             if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" true; then
-                if ! checkLogBackupRestore "${backupDir}"; then
-                    padmForgetCleanupPath "${backupDir}"
-                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                if ! checkLogBackupRestore "${logBackupDir}"; then
+                    padmForgetCleanupPath "${logBackupDir}"
+                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
                     return 1
                 fi
-                padmRemoveCleanupPath "${backupDir}"
+                padmRemoveCleanupPath "${logBackupDir}"
                 errorCard "写入日志配置失败，已回滚本次日志修改"
                 return 1
             fi
         elif [[ "${logStatus}" == "true" ]]; then
             realityLogShow=false
             if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" false; then
-                if ! checkLogBackupRestore "${backupDir}"; then
-                    padmForgetCleanupPath "${backupDir}"
-                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                if ! checkLogBackupRestore "${logBackupDir}"; then
+                    padmForgetCleanupPath "${logBackupDir}"
+                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
                     return 1
                 fi
-                padmRemoveCleanupPath "${backupDir}"
+                padmRemoveCleanupPath "${logBackupDir}"
                 errorCard "写入日志配置失败，已回滚本次日志修改"
                 return 1
             fi
@@ -963,35 +963,35 @@ checkLog() {
 
         if [[ ${realityStatus} == "7" ]]; then
             if ! updateRealityShowConfig "${configPath}07_VLESS_vision_reality_inbounds.json" "${realityLogShow}"; then
-                if ! checkLogBackupRestore "${backupDir}"; then
-                    padmForgetCleanupPath "${backupDir}"
-                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                if ! checkLogBackupRestore "${logBackupDir}"; then
+                    padmForgetCleanupPath "${logBackupDir}"
+                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
                     return 1
                 fi
-                padmRemoveCleanupPath "${backupDir}"
+                padmRemoveCleanupPath "${logBackupDir}"
                 errorCard "Reality 日志联动配置写入失败，已回滚本次日志修改"
                 return 1
             fi
         fi
         if [[ ${realityStatus} == "12" ]]; then
             if ! updateRealityShowConfig "${configPath}12_VLESS_XHTTP_inbounds.json" "${realityLogShow}"; then
-                if ! checkLogBackupRestore "${backupDir}"; then
-                    padmForgetCleanupPath "${backupDir}"
-                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                if ! checkLogBackupRestore "${logBackupDir}"; then
+                    padmForgetCleanupPath "${logBackupDir}"
+                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
                     return 1
                 fi
-                padmRemoveCleanupPath "${backupDir}"
+                padmRemoveCleanupPath "${logBackupDir}"
                 errorCard "Reality 日志联动配置写入失败，已回滚本次日志修改"
                 return 1
             fi
         fi
         if ! reloadCore; then
-            if ! checkLogBackupRestore "${backupDir}"; then
-                padmForgetCleanupPath "${backupDir}"
-                errorCard "日志配置更新后核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+            if ! checkLogBackupRestore "${logBackupDir}"; then
+                padmForgetCleanupPath "${logBackupDir}"
+                errorCard "日志配置更新后核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
                 return 1
             fi
-            padmRemoveCleanupPath "${backupDir}"
+            padmRemoveCleanupPath "${logBackupDir}"
             if reloadCore; then
                 errorCard "核心重载失败，已回滚日志配置修改"
             else
@@ -999,7 +999,7 @@ checkLog() {
             fi
             return 1
         fi
-        padmRemoveCleanupPath "${backupDir}"
+        padmRemoveCleanupPath "${logBackupDir}"
         checkLog 1
         ;;
     2)

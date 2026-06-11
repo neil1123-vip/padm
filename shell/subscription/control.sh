@@ -563,7 +563,7 @@ installSubscriptionControlService() {
     local tmpFile
     local token
     local i
-    local backupDir=
+    local serviceBackupDir=
     local serviceWasActive=false
     local serviceWasEnabled=false
     SUBSCRIPTION_CONTROL_INSTALL_ERROR=
@@ -582,13 +582,13 @@ installSubscriptionControlService() {
     if systemctl is-enabled --quiet padm-subscription-control.service; then
         serviceWasEnabled=true
     fi
-    checkLogBackupCreate backupDir "${serverScript}" "${serviceFile}" || return 1
+    checkLogBackupCreate serviceBackupDir "${serverScript}" "${serviceFile}" || return 1
     writeSubscriptionControlServer || {
-        subscriptionControlFailInstall "${backupDir}" "订阅控制服务脚本写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务脚本写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
         return 1
     }
     padmCreateTempFileForTarget tmpFile "${serviceFile}" service || {
-        subscriptionControlFailInstall "${backupDir}" "订阅控制服务配置临时文件创建失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务配置临时文件创建失败" "${serviceWasActive}" "${serviceWasEnabled}"
         return 1
     }
     if ! cat >"${tmpFile}" <<EOF
@@ -607,37 +607,37 @@ WantedBy=multi-user.target
 EOF
     then
         padmRemoveCleanupPath "${tmpFile}"
-        subscriptionControlFailInstall "${backupDir}" "订阅控制服务配置临时文件写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务配置临时文件写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
         return 1
     fi
     commitGeneratedFile "${tmpFile}" "${serviceFile}" 644 || {
         padmRemoveCleanupPath "${tmpFile}"
-        subscriptionControlFailInstall "${backupDir}" "订阅控制服务配置写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务配置写入失败" "${serviceWasActive}" "${serviceWasEnabled}"
         return 1
     }
     if ! systemctl daemon-reload; then
-        subscriptionControlFailInstall "${backupDir}" "订阅控制服务 daemon-reload 失败" "${serviceWasActive}" "${serviceWasEnabled}"
+        subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务 daemon-reload 失败" "${serviceWasActive}" "${serviceWasEnabled}"
         return 1
     fi
     if systemctl is-active --quiet padm-subscription-control.service; then
         if ! systemctl restart padm-subscription-control.service >/dev/null 2>&1; then
-            subscriptionControlFailInstall "${backupDir}" "订阅控制服务重启失败" "${serviceWasActive}" "${serviceWasEnabled}"
+            subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务重启失败" "${serviceWasActive}" "${serviceWasEnabled}"
             return 1
         fi
     else
         if ! systemctl enable --now padm-subscription-control.service >/dev/null 2>&1; then
-            subscriptionControlFailInstall "${backupDir}" "订阅控制服务启动失败" "${serviceWasActive}" "${serviceWasEnabled}"
+            subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务启动失败" "${serviceWasActive}" "${serviceWasEnabled}"
             return 1
         fi
     fi
     for ((i = 0; i < 20; i++)); do
         if subscriptionControlHealthCheck "${token}" >/dev/null 2>&1; then
-            padmRemoveCleanupPath "${backupDir}"
+            padmRemoveCleanupPath "${serviceBackupDir}"
             return 0
         fi
         sleep 0.25
     done
-    subscriptionControlFailInstall "${backupDir}" "订阅控制服务健康检查失败" "${serviceWasActive}" "${serviceWasEnabled}"
+    subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务健康检查失败" "${serviceWasActive}" "${serviceWasEnabled}"
     return 1
 }
 
