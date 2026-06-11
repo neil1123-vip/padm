@@ -8723,16 +8723,45 @@ JSON
     subscriptionControlApplyAccountPlan() {
         return 0
     }
-    subscriptionSyncReconcileLocalServices() {
-        reconcileCalls=$((reconcileCalls + 1))
-        return 1
-    }
-    set +e
-    PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}"
-    local reconcileStatus=$?
-    set -e
-    [[ "${reconcileStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed"' "${responseFile}" >/dev/null
+    (
+        local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry.log"
+        reconcileCalls=0
+        : >"${reconcileLog}"
+        subscriptionSyncReconcileLocalServices() {
+            reconcileCalls=$((reconcileCalls + 1))
+            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
+            [[ -n "${1:-}" ]]
+        }
+        set +e
+        PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}"
+        local reconcileStatus=$?
+        set -e
+        [[ "${reconcileStatus}" -ne 0 ]]
+        [[ "${reconcileCalls}" == "2" ]]
+        grep -qx '<empty>' "${reconcileLog}"
+        grep -qx 'true' "${reconcileLog}"
+        jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("已恢复旧配置")) and ((.error_detail.message | contains("恢复旧配置后服务重建仍失败")) | not)' "${responseFile}" >/dev/null
+    )
+
+    (
+        local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry-fail.log"
+        reconcileCalls=0
+        : >"${reconcileLog}"
+        subscriptionSyncReconcileLocalServices() {
+            reconcileCalls=$((reconcileCalls + 1))
+            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
+            return 1
+        }
+        set +e
+        PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}.reconcile-retry-fail"
+        local reconcileStatus=$?
+        set -e
+        [[ "${reconcileStatus}" -ne 0 ]]
+        [[ "${reconcileCalls}" == "2" ]]
+        grep -qx '<empty>' "${reconcileLog}"
+        grep -qx 'true' "${reconcileLog}"
+        jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("恢复旧配置后服务重建仍失败"))' "${responseFile}.reconcile-retry-fail" >/dev/null
+    )
 
     subscriptionSyncPlanFromAccounts() {
         printf '{"create":[null],"remove":[]}'
