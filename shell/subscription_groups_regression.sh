@@ -442,7 +442,7 @@ runAccessControlFailureReturnCase() {
     }
     accessControlBackupCleanup() {
         printf 'cleanup\n' >"${cleanupMarker}"
-        return 0
+        [[ "${mode}" != "cleanup-fail" ]]
     }
     addXrayRouting() {
         printf 'add\n' >"${addMarker}"
@@ -526,6 +526,15 @@ runAccessControlFailureReturnCase() {
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "1" ]]
         ;;
+    cleanup-fail)
+        [[ -e "${backupMarker}" ]]
+        [[ -e "${addMarker}" ]]
+        [[ -e "${outboundMarker}" ]]
+        [[ ! -e "${restoreMarker}" ]]
+        [[ -e "${cleanupMarker}" ]]
+        [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "1" ]]
+        ;;
     remove-fail)
         [[ -e "${backupMarker}" ]]
         [[ -e "${uninstallMarker}" ]]
@@ -546,6 +555,7 @@ runAccessControlFailureReturnRegression() {
         runAccessControlFailureReturnCase validate-restore-fail add &&
         runAccessControlFailureReturnCase reload-fail add &&
         runAccessControlFailureReturnCase reload-restore-fail add &&
+        runAccessControlFailureReturnCase cleanup-fail add &&
         runAccessControlFailureReturnCase remove-fail remove
 }
 

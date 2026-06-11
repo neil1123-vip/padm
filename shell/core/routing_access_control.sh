@@ -481,6 +481,9 @@ applyAccessControlConfigChange() {
         fi
         return 1
     fi
-    accessControlBackupCleanup || errorCard "访问控制已应用，但备份目录清理失败: ${backupDir}"
+    if ! accessControlBackupCleanup; then
+        errorCard "访问控制已应用，但备份目录清理失败: ${backupDir}"
+        return 1
+    fi
     return 0
 }
