@@ -816,6 +816,73 @@ updateRealityShowConfig() {
     updateRoutingJsonConfig "${targetPath}" '.inbounds[0].streamSettings.realitySettings.show = $showStatus' --argjson showStatus "${showStatus}"
 }
 
+checkLogBackupCreate() {
+    local resultVar=$1
+    shift
+    local tmpBase="${TMPDIR:-/tmp}"
+    local backupDir
+    local manifest
+    local targetPath
+    local backupFile
+    local backupIndex=0
+
+    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-check-log-backup.XXXXXX" || return 1
+    manifest="${backupDir}/manifest"
+    : >"${manifest}" || {
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    }
+    for targetPath in "$@"; do
+        [[ -n "${targetPath}" ]] || continue
+        if [[ -f "${targetPath}" ]]; then
+            printf -v backupFile '%s/%06d.json' "${backupDir}" "${backupIndex}"
+            backupIndex=$((backupIndex + 1))
+            cp -p "${targetPath}" "${backupFile}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+            printf '%s\t%s\tfile\n' "${backupFile}" "${targetPath}" >>"${manifest}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+        else
+            printf '\t%s\tmissing\n' "${targetPath}" >>"${manifest}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+        fi
+    done
+    printf -v "${resultVar}" '%s' "${backupDir}"
+}
+
+checkLogBackupRestore() {
+    local backupDir=$1
+    local manifest
+    local backupFile
+    local targetPath
+    local state
+    local status=0
+
+    manifest="${backupDir}/manifest"
+    [[ -f "${manifest}" ]] || return 1
+    while IFS=$'\t' read -r backupFile targetPath state; do
+        [[ -n "${targetPath}" ]] || continue
+        case "${state}" in
+        file)
+            mkdir -p "$(dirname "${targetPath}")" || status=1
+            cp -p "${backupFile}" "${targetPath}" || status=1
+            ;;
+        missing)
+            rm -f "${targetPath}" >/dev/null 2>&1 || status=1
+            ;;
+        *)
+            status=1
+            ;;
+        esac
+    done <"${manifest}"
+    return "${status}"
+}
+
 # 日志管理
 checkLog() {
     if [[ "${coreInstallType}" == "2" ]]; then
@@ -853,24 +920,79 @@ checkLog() {
 
     case ${selectAccessLogType} in
     1)
+        local backupDir
+        local -a backupTargets=("${configPath}00_log.json")
+        [[ ${realityStatus} == "7" ]] && backupTargets+=("${configPath}07_VLESS_vision_reality_inbounds.json")
+        [[ ${realityStatus} == "12" ]] && backupTargets+=("${configPath}12_VLESS_XHTTP_inbounds.json")
+        checkLogBackupCreate backupDir "${backupTargets[@]}" || {
+            errorCard "日志配置备份失败，已取消修改"
+            return 1
+        }
         if [[ "${logStatus}" == "false" ]]; then
             realityLogShow=true
-            writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" true || return 1
+            if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" true; then
+                if ! checkLogBackupRestore "${backupDir}"; then
+                    padmForgetCleanupPath "${backupDir}"
+                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                    return 1
+                fi
+                padmRemoveCleanupPath "${backupDir}"
+                errorCard "写入日志配置失败，已回滚本次日志修改"
+                return 1
+            fi
         elif [[ "${logStatus}" == "true" ]]; then
             realityLogShow=false
-            writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" false || return 1
+            if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" false; then
+                if ! checkLogBackupRestore "${backupDir}"; then
+                    padmForgetCleanupPath "${backupDir}"
+                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                    return 1
+                fi
+                padmRemoveCleanupPath "${backupDir}"
+                errorCard "写入日志配置失败，已回滚本次日志修改"
+                return 1
+            fi
         fi
 
         if [[ ${realityStatus} == "7" ]]; then
-            updateRealityShowConfig "${configPath}07_VLESS_vision_reality_inbounds.json" "${realityLogShow}" || return 1
+            if ! updateRealityShowConfig "${configPath}07_VLESS_vision_reality_inbounds.json" "${realityLogShow}"; then
+                if ! checkLogBackupRestore "${backupDir}"; then
+                    padmForgetCleanupPath "${backupDir}"
+                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                    return 1
+                fi
+                padmRemoveCleanupPath "${backupDir}"
+                errorCard "Reality 日志联动配置写入失败，已回滚本次日志修改"
+                return 1
+            fi
         fi
         if [[ ${realityStatus} == "12" ]]; then
-            updateRealityShowConfig "${configPath}12_VLESS_XHTTP_inbounds.json" "${realityLogShow}" || return 1
+            if ! updateRealityShowConfig "${configPath}12_VLESS_XHTTP_inbounds.json" "${realityLogShow}"; then
+                if ! checkLogBackupRestore "${backupDir}"; then
+                    padmForgetCleanupPath "${backupDir}"
+                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                    return 1
+                fi
+                padmRemoveCleanupPath "${backupDir}"
+                errorCard "Reality 日志联动配置写入失败，已回滚本次日志修改"
+                return 1
+            fi
         fi
         if ! reloadCore; then
-            errorCard "日志配置已写入，但核心重载失败，请检查核心服务日志"
+            if ! checkLogBackupRestore "${backupDir}"; then
+                padmForgetCleanupPath "${backupDir}"
+                errorCard "日志配置更新后核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+                return 1
+            fi
+            padmRemoveCleanupPath "${backupDir}"
+            if reloadCore; then
+                errorCard "核心重载失败，已回滚日志配置修改"
+            else
+                errorCard "核心重载失败，已回滚日志配置修改；恢复旧配置后核心重载仍失败，请检查核心服务日志"
+            fi
             return 1
         fi
+        padmRemoveCleanupPath "${backupDir}"
         checkLog 1
         ;;
     2)

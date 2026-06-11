@@ -80,15 +80,25 @@ refreshVlessEncryptionSubscriptions() {
         fi
         successCard "已刷新 default 公网订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段"
     else
-        cleanDirectoryContent /etc/padm/subscribe_local/default
-        cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
-        cleanDirectoryContent /etc/padm/subscribe_local/sing-box
-        if ! showAccounts >/dev/null; then
-            errorCard "刷新 VLESS Encryption 本地订阅失败"
-            return 1
-        fi
-        successCard "已刷新本地 default 订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段"
+        refreshLocalSubscriptions "VLESS Encryption" "已刷新本地 default 订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段" || return 1
     fi
+}
+
+refreshLocalSubscriptions() {
+    local featureName=$1
+    local successMessage=$2
+
+    if ! cleanDirectoryContent /etc/padm/subscribe_local/default ||
+        ! cleanDirectoryContent /etc/padm/subscribe_local/clashMeta ||
+        ! cleanDirectoryContent /etc/padm/subscribe_local/sing-box; then
+        errorCard "刷新 ${featureName} 本地订阅失败：清理本地订阅目录失败"
+        return 1
+    fi
+    if ! showAccounts >/dev/null; then
+        errorCard "刷新 ${featureName} 本地订阅失败"
+        return 1
+    fi
+    successCard "${successMessage}"
 }
 
 restoreVlessEncryptionBackup() {
@@ -287,7 +297,11 @@ setVlessRealityEncryption() {
             return 1
         fi
         rm -f "${stateTmpFile}"
-        errorCard "核心重载失败，已回滚 VLESS Encryption 修改"
+        if reloadCore; then
+            errorCard "核心重载失败，已回滚 VLESS Encryption 修改"
+        else
+            errorCard "核心重载失败，已回滚 VLESS Encryption 修改；恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        fi
         return 1
     fi
     if ! refreshVlessEncryptionSubscriptions; then
@@ -717,7 +731,11 @@ applyTraditionalTlsAlpn() {
         if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "核心重载失败"; then
             return 1
         fi
-        errorCard "核心重载失败，已回滚 ALPN 修改"
+        if reloadCore; then
+            errorCard "核心重载失败，已回滚 ALPN 修改"
+        else
+            errorCard "核心重载失败，已回滚 ALPN 修改；恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        fi
         return 1
     fi
     rm -f "${backupFile}"
@@ -2124,14 +2142,7 @@ refreshXHTTPSubscriptions() {
         fi
         successCard "已刷新公网订阅"
     else
-        cleanDirectoryContent /etc/padm/subscribe_local/default
-        cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
-        cleanDirectoryContent /etc/padm/subscribe_local/sing-box
-        if ! showAccounts >/dev/null; then
-            errorCard "刷新 XHTTP 本地订阅失败"
-            return 1
-        fi
-        successCard "已刷新本地订阅"
+        refreshLocalSubscriptions "XHTTP" "已刷新本地订阅" || return 1
     fi
 }
 
@@ -2670,14 +2681,7 @@ refreshTuicSubscriptions() {
         fi
         successCard "已刷新公网订阅"
     else
-        cleanDirectoryContent /etc/padm/subscribe_local/default
-        cleanDirectoryContent /etc/padm/subscribe_local/clashMeta
-        cleanDirectoryContent /etc/padm/subscribe_local/sing-box
-        if ! showAccounts >/dev/null; then
-            errorCard "刷新 Tuic 本地订阅失败"
-            return 1
-        fi
-        successCard "已刷新本地订阅"
+        refreshLocalSubscriptions "Tuic" "已刷新本地订阅" || return 1
     fi
 }
 

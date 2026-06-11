@@ -424,26 +424,84 @@ showUserSubscriptionLinks() {
     statusCard "用户订阅链接" "已刷新 ${accountName} 的订阅输出，请把上方该账号的链接发给对方" "如果上方没有该账号，先执行同步生成托管账号"
 }
 
+removeUserSubscriptionRollback() {
+    local previousGroupsState=$1
+    local configBackupDir=$2
+    local reason=$3
+    local stateRestored=true
+    local configRestored=true
+
+    if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
+        stateRestored=false
+    fi
+    if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
+        configRestored=false
+    fi
+
+    if [[ "${configRestored}" == "true" ]]; then
+        padmRemoveCleanupPath "${configBackupDir}"
+    else
+        padmForgetCleanupPath "${configBackupDir}"
+    fi
+
+    if [[ "${stateRestored}" != "true" && "${configRestored}" != "true" ]]; then
+        errorCard "${reason}，且订阅状态与托管账号配置恢复失败，请手动检查 $(subscriptionGroupsFile) 和备份目录: ${configBackupDir}"
+        return 1
+    fi
+    if [[ "${stateRestored}" != "true" ]]; then
+        errorCard "${reason}，且订阅状态恢复失败，请手动检查 $(subscriptionGroupsFile)"
+        return 1
+    fi
+    if [[ "${configRestored}" != "true" ]]; then
+        errorCard "${reason}，且托管账号配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+        return 1
+    fi
+}
+
 removeUserSubscriptionMenu() {
     local userSubscriptionId=$1
     local confirm=
+    local previousGroupsState
+    local configBackupDir
+    local accountName
     autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应 sub_ 托管账号。确认请输入 yes：" confirm
     if [[ "${confirm}" != "yes" ]]; then
         statusCard "已取消" "操作未执行"
         return 1
     fi
+    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
+        errorCard "读取当前订阅状态失败，请手动检查 $(subscriptionGroupsFile)"
+        return 1
+    }
+    configBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+        errorCard "删除订阅前托管账号配置备份失败，请手动检查本机配置"
+        return 1
+    }
+    accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
     if ! removeUserSubscriptionState "${userSubscriptionId}"; then
+        padmRemoveCleanupPath "${configBackupDir}"
         errorCard "用户订阅状态删除失败"
         return 1
     fi
-    if ! subscriptionSyncRemoveAccount "$(subscriptionSyncAccountName "${userSubscriptionId}")"; then
-        errorCard "用户订阅状态已删除，但托管账号配置移除失败，请检查本机配置"
+    if ! subscriptionSyncRemoveAccount "${accountName}"; then
+        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${configBackupDir}" "托管账号配置移除失败"; then
+            return 1
+        fi
+        errorCard "托管账号配置移除失败，已恢复旧配置"
         return 1
     fi
     if ! reloadCore; then
-        errorCard "用户订阅状态和托管账号已删除，但核心重载失败，请检查核心服务日志"
+        if ! removeUserSubscriptionRollback "${previousGroupsState}" "${configBackupDir}" "核心重载失败"; then
+            return 1
+        fi
+        if reloadCore; then
+            errorCard "核心重载失败，已恢复旧配置"
+        else
+            errorCard "核心重载失败，已恢复旧配置；恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        fi
         return 1
     fi
+    padmRemoveCleanupPath "${configBackupDir}"
     successCard "用户订阅已删除"
 }
 

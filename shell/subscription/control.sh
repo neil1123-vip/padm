@@ -666,16 +666,27 @@ subscriptionControlApplyAccountPlan() {
     local desiredUsers=$2
     local createAccounts
     local previousGroupsState
+    local applyError=
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
     createAccounts=$(jq -c '.create' <<<"${plan}") || return 1
     if ! subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"; then
-        subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || true
+        applyError="控制面同步期望用户状态写入失败"
+        if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}，且订阅状态恢复失败，请手动检查 $(subscriptionGroupsFile)"
+            return 1
+        fi
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}"
         return 1
     fi
     if ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
-        subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1 || true
+        applyError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-控制面同步计划应用失败}"
+        if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}，且订阅状态恢复失败，请手动检查 $(subscriptionGroupsFile)"
+            return 1
+        fi
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}"
         return 1
     fi
 }
@@ -684,22 +695,36 @@ subscriptionControlRestoreAppliedPlan() {
     local previousGroupsState=$1
     local configBackupDir=$2
     local outputBackupDir=${3:-}
+    local restoreFailed=false
+    local restoreError=
     SUBSCRIPTION_CONTROL_RESTORE_ERROR=
     if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-        SUBSCRIPTION_CONTROL_RESTORE_ERROR="控制面同步失败后状态恢复失败"
-        return 1
+        restoreFailed=true
+        restoreError="控制面同步失败后状态恢复失败"
     fi
     if [[ -n "${configBackupDir}" ]]; then
         if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
-            SUBSCRIPTION_CONTROL_RESTORE_ERROR="控制面同步失败后配置恢复失败，请手动检查备份目录: ${configBackupDir}"
-            return 1
+            restoreFailed=true
+            if [[ -n "${restoreError}" ]]; then
+                restoreError="${restoreError}；配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+            else
+                restoreError="控制面同步失败后配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+            fi
         fi
     fi
     if [[ -n "${outputBackupDir}" ]]; then
         if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
-            SUBSCRIPTION_CONTROL_RESTORE_ERROR="控制面同步失败后订阅输出恢复失败，请手动检查备份目录: ${outputBackupDir}"
-            return 1
+            restoreFailed=true
+            if [[ -n "${restoreError}" ]]; then
+                restoreError="${restoreError}；订阅输出恢复失败，请手动检查备份目录: ${outputBackupDir}"
+            else
+                restoreError="控制面同步失败后订阅输出恢复失败，请手动检查备份目录: ${outputBackupDir}"
+            fi
         fi
+    fi
+    if [[ "${restoreFailed}" == "true" ]]; then
+        SUBSCRIPTION_CONTROL_RESTORE_ERROR="${restoreError}"
+        return 1
     fi
 }
 

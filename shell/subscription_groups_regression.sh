@@ -3546,6 +3546,7 @@ runReloadCorePropagationRegression() (
     local successMarker="${root}/success"
     local refreshMarker="${root}/refresh"
     local subscribeMarker="${root}/subscribe"
+    local reloadLog="${root}/reloads"
     local originalContent rc
 
     mkdir -p "${root}/nginx"
@@ -3576,7 +3577,10 @@ JSON
         local targetFile=$2
         mv "${tmpFile}" "${targetFile}"
     }
-    reloadCore() { return 1; }
+    reloadCore() {
+        printf 'reload\n' >>"${reloadLog}"
+        return 1
+    }
 
     originalContent=$(<"${alpnConfig}")
     rm -f "${successMarker}"
@@ -3587,6 +3591,7 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
     [[ ! -e "${successMarker}" ]]
+    [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
 
     printf '%s\n' "${originalContent}" >"${alpnConfig}"
     rm -f "${successMarker}" "${alpnConfig}.alpn.bak"
@@ -3641,7 +3646,7 @@ JSON
     }
     subscribe() { return 0; }
 
-    rm -f "${refreshMarker}" "${vlessState}"
+    rm -f "${refreshMarker}" "${vlessState}" "${reloadLog}"
     set +e
     setVlessRealityEncryption enable >/dev/null 2>&1
     rc=$?
@@ -3650,6 +3655,7 @@ JSON
     [[ "$(<"${vlessConfig}")" == "${originalContent}" ]]
     [[ ! -e "${vlessState}" ]]
     [[ ! -e "${refreshMarker}" ]]
+    [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
 
     printf '%s\n' "${originalContent}" >"${vlessConfig}"
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
@@ -3716,7 +3722,6 @@ JSON
     printf '%s\n' "${originalContent}" >"${vlessConfig}"
     rm -f "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
 
-    local reloadLog="${root}/reloads"
     reloadCore() { printf 'reload\n' >>"${reloadLog}"; return 0; }
     subscribe() {
         printf 'subscribe\n' >"${subscribeMarker}"
@@ -3932,6 +3937,29 @@ JSON
         return 1
     fi
     grep -qx 'showAccounts' "${refreshFailureLog}"
+
+    (
+        cleanDirectoryContent() {
+            printf 'cleanDirectoryContent\n' >>"${refreshFailureLog}"
+            return 1
+        }
+        showAccounts() {
+            printf 'showAccounts\n' >>"${refreshFailureLog}"
+            return 0
+        }
+        readNginxSubscribe() {
+            subscribePort=
+            nginxConfigPath="${TMP_DIR}/nginx-refresh/"
+        }
+        rm -f "${refreshFailureLog}"
+        set +e
+        refreshVlessEncryptionSubscriptions >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'cleanDirectoryContent' "${refreshFailureLog}"
+        ! grep -q '^showAccounts$' "${refreshFailureLog}"
+    ) || return 1
 
     mkdir -p "${TMP_DIR}/fake-bin" "${checkPortNginxDir}"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
@@ -4499,6 +4527,41 @@ JSON
     jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityXhttpFile}" >/dev/null
 
     (
+        local errorLog="${TMP_DIR}/entry-helper-check-log-write-error.log"
+        local readCalls=0 rc
+        : >"${errorLog}"
+        coreInstallType=1
+        configPath="${entryConfigPath}"
+        realityStatus=7
+        writeXrayLogConfig "${entryConfigPath}00_log.json" "${entryLogBase}" false
+        cat >"${realityVisionFile}" <<'JSON'
+{"inbounds":[{"streamSettings":{"realitySettings":{"show":false}}}]}
+JSON
+        autoRead() {
+            readCalls=$((readCalls + 1))
+            printf -v "$3" '1'
+        }
+        updateRealityShowConfig() {
+            return 1
+        }
+        errorCard() {
+            printf '%s\n' "$*" >>"${errorLog}"
+        }
+        set +e
+        checkLog >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "${readCalls}" == "1" ]]
+        grep -q 'Reality 日志联动配置写入失败' "${errorLog}"
+        jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
+        jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
+        if find "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+            return 1
+        fi
+    )
+
+    (
         local errorLog="${TMP_DIR}/entry-helper-check-log-error.log"
         local reloadCalls=0 readCalls=0 rc
         : >"${errorLog}"
@@ -4506,6 +4569,9 @@ JSON
         configPath="${entryConfigPath}"
         realityStatus=7
         writeXrayLogConfig "${entryConfigPath}00_log.json" "${entryLogBase}" false
+        cat >"${realityVisionFile}" <<'JSON'
+{"inbounds":[{"streamSettings":{"realitySettings":{"show":false}}}]}
+JSON
         autoRead() {
             readCalls=$((readCalls + 1))
             printf -v "$3" '1'
@@ -4523,10 +4589,14 @@ JSON
         set -e
         [[ "${rc}" == "1" ]]
         [[ "${readCalls}" == "1" ]]
-        [[ "${reloadCalls}" == "1" ]]
-        grep -q '核心重载失败' "${errorLog}"
-        jq -e '.log.access == "'"${entryLogBase}"'access.log"' "${entryConfigPath}00_log.json" >/dev/null
-        jq -e '.inbounds[0].streamSettings.realitySettings.show == true' "${realityVisionFile}" >/dev/null
+        [[ "${reloadCalls}" == "2" ]]
+        grep -q '已回滚日志配置修改' "${errorLog}"
+        grep -q '恢复旧配置后核心重载仍失败' "${errorLog}"
+        jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
+        jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
+        if find "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+            return 1
+        fi
     )
 
     (
@@ -5453,6 +5523,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     local callLog="${root}/calls.log"
     local successLog="${root}/success.log"
     local errorLog="${root}/error.log"
+    local backupDir="${root}/backup"
     local mode rc
 
     mkdir -p "${root}"
@@ -5463,6 +5534,17 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     autoRead() {
         printf -v "$3" 'yes'
     }
+    subscriptionGroupsFile() {
+        printf '%s\n' "${root}/groups.json"
+    }
+    subscriptionGroupsStateRead() {
+        printf '{"version":2,"active_group":"default","groups":[{"id":"default","user_groups":[{"id":"team-a","enabled":true}]}]}\n'
+    }
+    subscriptionSyncCreateConfigBackups() {
+        printf 'backup-create\n' >>"${callLog}"
+        mkdir -p "${backupDir}"
+        printf '%s\n' "${backupDir}"
+    }
     subscriptionSyncAccountName() {
         printf 'sub_%s\n' "$1"
     }
@@ -5472,7 +5554,21 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     }
     subscriptionSyncRemoveAccount() {
         printf 'account:%s\n' "$1" >>"${callLog}"
-        [[ "${mode}" != "account-fail" ]]
+        [[ "${mode}" != "account-fail" && "${mode}" != "state-restore-fail" && "${mode}" != "account-restore-fail" ]]
+    }
+    subscriptionGroupsStateWrite() {
+        printf 'state-restore\n' >>"${callLog}"
+        [[ "${mode}" != "state-restore-fail" ]]
+    }
+    subscriptionSyncRestoreConfigBackups() {
+        printf 'account-restore:%s\n' "$1" >>"${callLog}"
+        [[ "${mode}" != "account-restore-fail" ]]
+    }
+    padmRemoveCleanupPath() {
+        printf 'cleanup:%s\n' "$1" >>"${callLog}"
+    }
+    padmForgetCleanupPath() {
+        printf 'keep-backup:%s\n' "$1" >>"${callLog}"
     }
     reloadCore() {
         printf 'reload\n' >>"${callLog}"
@@ -5499,28 +5595,60 @@ runRemoveUserSubscriptionMenuFailureRegression() (
 
     runRemoveCase state-fail
     [[ "${rc}" == "1" ]]
+    grep -qx 'backup-create' "${callLog}"
     grep -qx 'state:team-a' "${callLog}"
     ! grep -q '^account:' "${callLog}"
     ! grep -qx 'reload' "${callLog}"
+    grep -qx "cleanup:${backupDir}" "${callLog}"
     [[ ! -s "${successLog}" ]]
 
     runRemoveCase account-fail
     [[ "${rc}" == "1" ]]
+    grep -qx 'backup-create' "${callLog}"
     grep -qx 'state:team-a' "${callLog}"
     grep -qx 'account:sub_team-a' "${callLog}"
     ! grep -qx 'reload' "${callLog}"
+    grep -qx 'state-restore' "${callLog}"
+    grep -qx "account-restore:${backupDir}" "${callLog}"
+    grep -qx "cleanup:${backupDir}" "${callLog}"
+    grep -q '托管账号配置移除失败，已恢复旧配置' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
     runRemoveCase reload-fail
     [[ "${rc}" == "1" ]]
+    grep -qx 'backup-create' "${callLog}"
     grep -qx 'state:team-a' "${callLog}"
     grep -qx 'account:sub_team-a' "${callLog}"
-    grep -qx 'reload' "${callLog}"
-    grep -q '核心重载失败' "${errorLog}"
+    [[ "$(grep -c '^reload$' "${callLog}")" == "2" ]]
+    grep -qx 'state-restore' "${callLog}"
+    grep -qx "account-restore:${backupDir}" "${callLog}"
+    grep -qx "cleanup:${backupDir}" "${callLog}"
+    grep -q '恢复旧配置后核心重载仍失败' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase state-restore-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'state:team-a' "${callLog}"
+    grep -qx 'account:sub_team-a' "${callLog}"
+    grep -qx 'state-restore' "${callLog}"
+    grep -qx "account-restore:${backupDir}" "${callLog}"
+    grep -qx "cleanup:${backupDir}" "${callLog}"
+    grep -q '订阅状态恢复失败' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase account-restore-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'state:team-a' "${callLog}"
+    grep -qx 'account:sub_team-a' "${callLog}"
+    grep -qx 'state-restore' "${callLog}"
+    grep -qx "account-restore:${backupDir}" "${callLog}"
+    grep -qx "keep-backup:${backupDir}" "${callLog}"
+    grep -q '托管账号配置恢复失败' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
     runRemoveCase success
     [[ "${rc}" == "0" ]]
+    grep -qx "cleanup:${backupDir}" "${callLog}"
     grep -qx 'reload' "${callLog}"
     grep -q '用户订阅已删除' "${successLog}"
 )
@@ -7406,6 +7534,45 @@ JSON
         return 1
     fi
 
+    (
+        local reloadRoot="${TMP_DIR}/subscription-sync-reload-rollback"
+        local reloadTargetFile="${reloadRoot}/xray/02_VLESS_TCP_inbounds.json"
+        local reloadLog="${reloadRoot}/reload.log"
+        local reloadOriginalContent
+        local reloadStatus
+
+        mkdir -p "${reloadRoot}/xray" "${reloadRoot}/tmp"
+        configPath="${reloadRoot}/xray/"
+        singBoxConfigPath="${reloadRoot}/xray/"
+        TMPDIR="${reloadRoot}/tmp"
+        coreInstallType=1
+        cat >"${reloadTargetFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
+JSON
+        reloadOriginalContent=$(<"${reloadTargetFile}")
+
+        subscriptionSyncApplyAccountPlan() {
+            originalSubscriptionSyncApplyAccountPlan "$@"
+        }
+        reloadCore() {
+            printf 'reload\n' >>"${reloadLog}"
+            return 1
+        }
+
+        set +e
+        applySubscriptionQuotaPlanAccounts '[{"id":"team-a","action":"disable-and-remove-local-account"}]'
+        reloadStatus=$?
+        set -e
+        [[ "${reloadStatus}" == "1" ]]
+        [[ "$(<"${reloadTargetFile}")" == "${reloadOriginalContent}" ]]
+        [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
+        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"核心重载失败"* ]]
+        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"恢复旧配置后核心重载仍失败"* ]]
+        if find "${reloadRoot}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' | grep -q .; then
+            return 1
+        fi
+    )
+
     configPath="${oldConfigPath}"
     singBoxConfigPath="${oldSingBoxConfigPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -7744,6 +7911,99 @@ runRemoteControlServerRefreshRegression() (
     set -e
     [[ "${applyStatus}" -ne 0 ]]
     jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}" >/dev/null
+
+    (
+        local restoreFailureStateWriteCalls=0
+        local restoreFailureRoot="${TMP_DIR}/remote-control-apply-restore-failure"
+        local restoreFailureResponse="${TMP_DIR}/remote-control-apply-restore-failure.json"
+        mkdir -p "${restoreFailureRoot}/xray"
+        configPath="${restoreFailureRoot}/xray/"
+        singBoxConfigPath="${restoreFailureRoot}/xray/"
+        cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":false,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"00000000-0000-0000-0000-000000000000"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+        eval "$(declare -f subscriptionGroupsStateWrite | sed '1s/^subscriptionGroupsStateWrite/originalSubscriptionGroupsStateWrite/')"
+        subscriptionSyncPlanFromAccounts() {
+            printf '{"create":["sub_team_a"],"remove":[]}'
+        }
+        subscriptionSyncApplyAccountPlanTransaction() {
+            return 1
+        }
+        subscriptionGroupsStateWrite() {
+            restoreFailureStateWriteCalls=$((restoreFailureStateWriteCalls + 1))
+            if [[ "${restoreFailureStateWriteCalls}" == "2" ]]; then
+                return 1
+            fi
+            originalSubscriptionGroupsStateWrite "$@"
+        }
+        set +e
+        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${restoreFailureResponse}"
+        local restoreFailureStatus=$?
+        set -e
+        [[ "${restoreFailureStatus}" -ne 0 ]]
+        jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed" and (.error_detail.message | contains("订阅状态恢复失败"))' "${restoreFailureResponse}" >/dev/null
+        jq -e '.groups[0].user_groups[0].enabled == true and .groups[0].user_groups[0].uuid == "11111111-1111-1111-1111-111111111111"' "$(subscriptionGroupsFile)" >/dev/null
+    )
+
+    (
+        local restoreOrderLog="${TMP_DIR}/remote-control-restore-order.log"
+        local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config"
+        local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output"
+        mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
+        subscriptionGroupsStateWrite() {
+            printf 'state\n' >>"${restoreOrderLog}"
+            return 0
+        }
+        subscriptionSyncRestoreConfigBackups() {
+            printf 'config\n' >>"${restoreOrderLog}"
+            return 1
+        }
+        subscriptionSyncRestoreSubscribeOutputBackups() {
+            printf 'output\n' >>"${restoreOrderLog}"
+            return 0
+        }
+        SUBSCRIPTION_CONTROL_RESTORE_ERROR=
+        rm -f "${restoreOrderLog}"
+        set +e
+        subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
+        local restoreOrderStatus=$?
+        set -e
+        [[ "${restoreOrderStatus}" -eq 1 ]]
+        grep -qx 'state' "${restoreOrderLog}"
+        grep -qx 'config' "${restoreOrderLog}"
+        grep -qx 'output' "${restoreOrderLog}"
+        [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == *"配置恢复失败"* ]]
+    )
+
+    (
+        local restoreOrderLog="${TMP_DIR}/remote-control-restore-order-state.log"
+        local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config-state"
+        local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output-state"
+        mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
+        subscriptionGroupsStateWrite() {
+            printf 'state\n' >>"${restoreOrderLog}"
+            return 1
+        }
+        subscriptionSyncRestoreConfigBackups() {
+            printf 'config\n' >>"${restoreOrderLog}"
+            return 0
+        }
+        subscriptionSyncRestoreSubscribeOutputBackups() {
+            printf 'output\n' >>"${restoreOrderLog}"
+            return 0
+        }
+        SUBSCRIPTION_CONTROL_RESTORE_ERROR=
+        rm -f "${restoreOrderLog}"
+        set +e
+        subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
+        local restoreOrderStatus=$?
+        set -e
+        [[ "${restoreOrderStatus}" -eq 1 ]]
+        grep -qx 'state' "${restoreOrderLog}"
+        grep -qx 'config' "${restoreOrderLog}"
+        grep -qx 'output' "${restoreOrderLog}"
+        [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == *"状态恢复失败"* ]]
+    )
 
     mkdir -p "${rollbackRoot}/xray"
     configPath="${rollbackRoot}/xray/"

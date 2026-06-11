@@ -363,6 +363,7 @@ subscriptionSyncRestoreSubscribeOutputBackups() {
 
 subscriptionSyncApplyAccountPlanTransaction() {
     local syncPlan=$1
+    local reloadFn=${2:-}
     local backupDir
     local applyStatus=0
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
@@ -379,6 +380,22 @@ subscriptionSyncApplyAccountPlanTransaction() {
         fi
         padmRemoveCleanupPath "${backupDir}"
         return 1
+    fi
+    if [[ -n "${reloadFn}" ]]; then
+        if ! "${reloadFn}"; then
+            if ! subscriptionSyncRestoreConfigBackups "${backupDir}" >/dev/null 2>&1; then
+                SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用后核心重载失败，且配置恢复失败，请手动检查备份目录: ${backupDir}"
+                padmForgetCleanupPath "${backupDir}"
+                return 1
+            fi
+            if "${reloadFn}"; then
+                SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用后核心重载失败，已恢复旧配置"
+            else
+                SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用后核心重载失败，已恢复旧配置；恢复旧配置后核心重载仍失败，请检查核心服务日志"
+            fi
+            padmRemoveCleanupPath "${backupDir}"
+            return 1
+        fi
     fi
     padmRemoveCleanupPath "${backupDir}"
 }
@@ -473,10 +490,7 @@ applySubscriptionQuotaPlanAccounts() {
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
     accountPlan=$(jq '[.[].id | "sub_" + gsub("-"; "_")] | {create: [], remove: .}' <<<"${quotaPlan}") || return 1
     if [[ "$(jq '.remove | length' <<<"${accountPlan}")" != "0" ]]; then
-        if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}"; then
-            rc=1
-        fi
-        if ! reloadCore; then
+        if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
             rc=1
         fi
     fi
