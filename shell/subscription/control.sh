@@ -824,6 +824,13 @@ subscriptionControlRefreshPublishedSubscriptions() {
     subscribe false false >/dev/null 2>&1
 }
 
+subscriptionControlPrepareSyncFailure() {
+    local plan=$1
+    local message=$2
+    jq -n --argjson plan "${plan}" --arg message "${message}" '{ok:false, changed:false, dry_run:false, error:"prepare_failed", error_detail:{type:"prepare_failed", message:$message}, plan:$plan}'
+    return 1
+}
+
 subscriptionControlApplySync() {
     local payload=$1
     local dryRun
@@ -861,9 +868,19 @@ subscriptionControlApplySync() {
         jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
         return 0
     fi
-    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
-    configBackupDir=$(subscriptionSyncCreateConfigBackups) || return 1
-    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || { padmRemoveCleanupPath "${configBackupDir}"; return 1; }
+    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
+        subscriptionControlPrepareSyncFailure "${plan}" "同步前订阅状态读取失败"
+        return 1
+    }
+    configBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+        subscriptionControlPrepareSyncFailure "${plan}" "同步前配置备份失败"
+        return 1
+    }
+    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
+        padmRemoveCleanupPath "${configBackupDir}"
+        subscriptionControlPrepareSyncFailure "${plan}" "同步前订阅输出备份失败"
+        return 1
+    }
     SUBSCRIPTION_CONTROL_RESTORE_ERROR=
     if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
         padmRemoveCleanupPath "${configBackupDir}"
