@@ -9007,6 +9007,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local addSourceShouldFail= setCredentialShouldFail= restoreStateWriteShouldFail= restoreGroupsWriteShouldFail=
     local disableStateWriteShouldFail=
     local stopShouldFail=
+    local stopAllowMissingBackend=
     local actions=
 
     # Restore the real subscription functions because earlier UI smoke tests
@@ -9105,8 +9106,11 @@ runSubscriptionWireGuardMenuFlowRegression() (
         return 0
     }
     stopSubscriptionWireGuardControlService() {
-        recordMenuAction stopSubscriptionWireGuardControlService
-        [[ "${stopShouldFail}" == "true" ]] && return 1
+        recordMenuAction "stopSubscriptionWireGuardControlService:${1:-}"
+        if [[ "${stopShouldFail}" == "true" ]]; then
+            [[ "${1:-}" == "true" && "${stopAllowMissingBackend}" == "true" ]] && return 0
+            return 1
+        fi
         return 0
     }
     eval "$(declare -f addSubscriptionSourceState | sed '1s/^addSubscriptionSourceState/originalAddSubscriptionSourceState/')"
@@ -9336,6 +9340,20 @@ edge-a
     fi
     stopShouldFail=
     grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
+
+    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+    stopShouldFail=true
+    stopAllowMissingBackend=true
+    resetMenuActions
+    subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1 || {
+        stopShouldFail=
+        stopAllowMissingBackend=
+        return 1
+    }
+    stopShouldFail=
+    stopAllowMissingBackend=
+    assertMenuAction 'stopSubscriptionWireGuardControlService:true'
+    [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
 
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
     currentHost="${oldCurrentHost}"

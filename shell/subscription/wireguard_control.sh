@@ -198,7 +198,7 @@ subscriptionWireGuardRestoreStateAndConfig() {
     if [[ -n "${previousAddress}" ]]; then
         applySubscriptionWireGuardService >/dev/null 2>&1 || return 1
     else
-        stopSubscriptionWireGuardControlService >/dev/null 2>&1 || return 1
+        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || return 1
         rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || return 1
     fi
 }
@@ -361,12 +361,13 @@ refreshSubscriptionWireGuardNginxControl() {
 }
 
 stopSubscriptionWireGuardControlService() {
+    local allowMissingBackend=${1:-false}
     if command -v systemctl >/dev/null 2>&1; then
         systemctl disable --now "wg-quick@$(subscriptionWireGuardInterface)" >/dev/null 2>&1
     elif command -v wg-quick >/dev/null 2>&1; then
         wg-quick down "$(subscriptionWireGuardInterface)" >/dev/null 2>&1
     else
-        return 1
+        [[ "${allowMissingBackend}" == "true" ]]
     fi
 }
 
