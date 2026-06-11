@@ -5579,6 +5579,107 @@ runSubscribeReturnFailureRegression() (
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
 )
 
+runSubscribeLocalRollbackRegression() (
+    local root="${TMP_DIR}/subscribe-local-rollback"
+    local localDir="${root}/subscribe_local"
+    local errorLog="${root}/error.log"
+    local callLog="${root}/calls.log"
+    local beforeSnapshot="${root}/before.txt"
+    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local oldSubscribeSalt="${subscribeSalt:-}"
+    local renderCalls=0
+    local showAccountsCalls=0
+    local rc
+
+    captureSubscribeLocalSnapshot() {
+        find "${localDir}" -type f -printf '%P\t' -exec cat {} \; | sort
+    }
+
+    source "${PROJECT_ROOT}/shell/core/manage.sh"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    TMPDIR="${root}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+    printf 'existing-salt\n' >"${localDir}/subscribeSalt"
+    printf 'old default\n' >"${localDir}/default/existing"
+    printf 'old clash\n' >"${localDir}/clashMeta/existing"
+    printf '[{"tag":"old-local"}]\n' >"${localDir}/sing-box/existing"
+    subscribeSalt=existing-salt
+    captureSubscribeLocalSnapshot >"${beforeSnapshot}"
+
+    readInstallProtocolType() { return 0; }
+    readNginxSubscribe() { return 0; }
+    installSubscribe() { return 0; }
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        printf 'render\n' >>"${callLog}"
+        return 0
+    }
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    showAccountsCalls=0
+    resolveSubscribeSalt() {
+        writeSubscribeSalt "$1" "new-salt"
+        subscribeSalt="new-salt"
+        return 1
+    }
+    showAccounts() {
+        showAccountsCalls=$((showAccountsCalls + 1))
+        printf 'showAccounts\n' >>"${callLog}"
+        return 0
+    }
+    coreInstallType=1
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "0" ]]
+    [[ "${renderCalls}" == "0" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    grep -q '订阅 Salt 初始化失败，已恢复旧本地订阅' "${errorLog}"
+    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    renderCalls=0
+    showAccountsCalls=0
+    resolveSubscribeSalt() {
+        writeSubscribeSalt "$1" "new-salt"
+        subscribeSalt="new-salt"
+        return 0
+    }
+    showAccounts() {
+        showAccountsCalls=$((showAccountsCalls + 1))
+        printf 'showAccounts\n' >>"${callLog}"
+        printf 'new default\n' >"${localDir}/default/existing"
+        printf 'new clash\n' >"${localDir}/clashMeta/existing"
+        printf '[{"tag":"new-local"}]\n' >"${localDir}/sing-box/existing"
+        return 1
+    }
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "0" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    grep -q '订阅生成失败：重建本地订阅失败，已恢复旧本地订阅' "${errorLog}"
+    grep -qx 'showAccounts' "${callLog}"
+    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+
+    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    if [[ -n "${oldSubscribeSalt}" ]]; then subscribeSalt="${oldSubscribeSalt}"; else unset subscribeSalt; fi
+)
+
 runRefreshLocalSubscriptionsRollbackRegression() (
     local root="${TMP_DIR}/refresh-local-subscriptions-rollback"
     local localDir="${root}/subscribe_local"
@@ -11754,6 +11855,7 @@ runRegressionSubscriptionWriteTransaction() {
     runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
     runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
     runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
+    runRegressionStep subscribe-local-rollback runSubscribeLocalRollbackRegression
     runRegressionStep refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
     runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
     runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression

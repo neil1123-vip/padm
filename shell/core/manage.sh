@@ -84,10 +84,15 @@ refreshVlessEncryptionSubscriptions() {
     fi
 }
 
-refreshLocalSubscriptionsRollback() {
+restoreLocalSubscribeOutputs() {
     local localBase=$1
     local backupDir=$2
     local reason=$3
+    local previousSubscribeSalt=
+
+    if [[ $# -ge 4 ]]; then
+        previousSubscribeSalt=$4
+    fi
 
     if ! subscriptionSyncRestoreBackupPath "${localBase}" "${backupDir}" local; then
         padmForgetCleanupPath "${backupDir}"
@@ -95,6 +100,9 @@ refreshLocalSubscriptionsRollback() {
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
+    if [[ $# -ge 4 ]]; then
+        subscribeSalt=${previousSubscribeSalt}
+    fi
     errorCard "${reason}，已恢复旧本地订阅"
     return 1
 }
@@ -119,11 +127,11 @@ refreshLocalSubscriptions() {
     if ! cleanDirectoryContent "${localBase}/default" ||
         ! cleanDirectoryContent "${localBase}/clashMeta" ||
         ! cleanDirectoryContent "${localBase}/sing-box"; then
-        refreshLocalSubscriptionsRollback "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：清理本地订阅目录失败"
+        restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：清理本地订阅目录失败"
         return 1
     fi
     if ! showAccounts >/dev/null; then
-        refreshLocalSubscriptionsRollback "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：重建本地订阅失败"
+        restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "刷新 ${featureName} 本地订阅失败：重建本地订阅失败"
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
@@ -1954,19 +1962,36 @@ subscribe() {
         menuLine "不影响已添加的远程订阅内容"
         menuClose
 
-        local localBase subscribeSaltFile
+        local localBase subscribeSaltFile backupDir previousSubscribeSalt
+        local tmpBase="${TMPDIR:-/tmp}"
         localBase=$(subscribeLocalBaseDir)
         subscribeSaltFile="${localBase}/subscribeSalt"
+        previousSubscribeSalt=${subscribeSalt:-}
+        padmCreateTempPath backupDir -d "${tmpBase%/}/padm-subscribe-local-backup.XXXXXX" || {
+            errorCard "订阅生成失败：创建本地订阅备份目录失败"
+            return 1
+        }
+        if ! subscriptionSyncBackupPath "${localBase}" "${backupDir}" local; then
+            padmRemoveCleanupPath "${backupDir}"
+            errorCard "订阅生成失败：备份旧本地订阅失败"
+            return 1
+        fi
         if ! resolveSubscribeSalt "${subscribeSaltFile}" "${renewSalt}"; then
-            errorCard "订阅 Salt 初始化失败"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅 Salt 初始化失败" "${previousSubscribeSalt}"
             return 1
         fi
         statusCard "订阅 Salt" "${subscribeSalt}"
-
-        cleanDirectoryContent "${localBase}/default"
-        cleanDirectoryContent "${localBase}/clashMeta"
-        cleanDirectoryContent "${localBase}/sing-box"
-        showAccounts >/dev/null
+        if ! cleanDirectoryContent "${localBase}/default" ||
+            ! cleanDirectoryContent "${localBase}/clashMeta" ||
+            ! cleanDirectoryContent "${localBase}/sing-box"; then
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：清理本地订阅目录失败" "${previousSubscribeSalt}"
+            return 1
+        fi
+        if ! showAccounts >/dev/null; then
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}"
+            return 1
+        fi
+        padmRemoveCleanupPath "${backupDir}"
         renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" || return 1
     else
         errorCard "未安装传统 TLS fallback 静态站点，无法使用订阅服务"
