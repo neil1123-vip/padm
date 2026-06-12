@@ -1966,7 +1966,7 @@ subscribe() {
         local tmpBase="${TMPDIR:-/tmp}"
         localBase=$(subscribeLocalBaseDir)
         subscribeSaltFile="${localBase}/subscribeSalt"
-        previousSubscribeSalt=${subscribeSalt:-}
+        previousSubscribeSalt=$(readSubscribeSalt "${subscribeSaltFile}")
         padmCreateTempPath backupDir -d "${tmpBase%/}/padm-subscribe-local-backup.XXXXXX" || {
             errorCard "订阅生成失败：创建本地订阅备份目录失败"
             return 1
@@ -1991,8 +1991,11 @@ subscribe() {
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}"
             return 1
         fi
+        if ! renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}"; then
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：生成订阅输出失败" "${previousSubscribeSalt}"
+            return 1
+        fi
         padmRemoveCleanupPath "${backupDir}"
-        renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" || return 1
     else
         errorCard "未安装传统 TLS fallback 静态站点，无法使用订阅服务"
         return 1

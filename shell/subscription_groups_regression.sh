@@ -5675,6 +5675,43 @@ runSubscribeLocalRollbackRegression() (
     grep -qx 'showAccounts' "${callLog}"
     ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
 
+    : >"${errorLog}"
+    : >"${callLog}"
+    renderCalls=0
+    showAccountsCalls=0
+    resolveSubscribeSalt() {
+        writeSubscribeSalt "$1" "new-salt"
+        subscribeSalt="new-salt"
+        return 0
+    }
+    showAccounts() {
+        showAccountsCalls=$((showAccountsCalls + 1))
+        printf 'showAccounts\n' >>"${callLog}"
+        printf 'new default\n' >"${localDir}/default/existing"
+        printf 'new clash\n' >"${localDir}/clashMeta/existing"
+        printf '[{"tag":"new-local"}]\n' >"${localDir}/sing-box/existing"
+        return 0
+    }
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        printf 'render\n' >>"${callLog}"
+        return 1
+    }
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    grep -q '订阅生成失败：生成订阅输出失败，已恢复旧本地订阅' "${errorLog}"
+    grep -qx 'showAccounts' "${callLog}"
+    grep -qx 'render' "${callLog}"
+    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     if [[ -n "${oldSubscribeSalt}" ]]; then subscribeSalt="${oldSubscribeSalt}"; else unset subscribeSalt; fi
@@ -5719,6 +5756,51 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionGroupsRestoreFailureRegression() (
+    local root="${TMP_DIR}/subscription-groups-restore-failure"
+    local groupsDir="${root}/groups"
+    local currentBackup="${root}/current-backup.json"
+    local targetBackup="${root}/target-backup.json"
+    local stateFile="${groupsDir}/groups.json"
+    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local beforeSnapshot
+    local rc
+
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
+    TMPDIR="${root}"
+    mkdir -p "${groupsDir}"
+    cat >"${stateFile}" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    beforeSnapshot=$(<"${stateFile}")
+    cp "${stateFile}" "${currentBackup}"
+    cat >"${targetBackup}" <<'JSON'
+{"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
+JSON
+
+    createSubscriptionGroupsBackup() {
+        printf '%s\n' "${currentBackup}"
+    }
+    migrateSubscriptionGroupsState() {
+        return 1
+    }
+
+    set +e
+    restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
+    rc=$?
+    set -e
+    unset -f createSubscriptionGroupsBackup
+    unset -f migrateSubscriptionGroupsState
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
+    [[ ! -e "${currentBackup}" ]]
+
+    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runSubscriptionGroupsBackupFailureRegression() (
     local root="${TMP_DIR}/subscription-groups-backup-failure"
     local groupsDir="${root}/subscribe_groups"
@@ -5727,7 +5809,7 @@ runSubscriptionGroupsBackupFailureRegression() (
     local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
     local oldTmpDir="${TMPDIR:-}"
     local beforeSnapshot
-    local backupFile=()
+    local backupFile
     local rc
 
     source "${PROJECT_ROOT}/shell/subscription/groups.sh"
@@ -5735,7 +5817,7 @@ runSubscriptionGroupsBackupFailureRegression() (
     TMPDIR="${root}"
     mkdir -p "${groupsDir}"
     cat >"${stateFile}" <<'JSON'
-{"version":1,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"本机","role":"main","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     beforeSnapshot=$(<"${stateFile}")
 
@@ -11921,6 +12003,7 @@ runRegressionSubscriptionState() {
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
     runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
     runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
+    runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
 }
 
 runRegressionSubscriptionRemoteFetch() {

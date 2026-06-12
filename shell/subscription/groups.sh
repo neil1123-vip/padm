@@ -252,11 +252,22 @@ listSubscriptionGroupsBackups() {
 restoreSubscriptionGroupsBackup() {
     local backupFile=$1
     local stateFile
+    local restoreBackupFile
     stateFile=$(subscriptionGroupsFile)
+    restoreBackupFile=$(createSubscriptionGroupsBackup) || return 1
     if ! subscriptionGroupsStateReplace "${backupFile}" "${stateFile}"; then
+        padmRemoveCleanupPath "${restoreBackupFile}"
         return 1
     fi
-    migrateSubscriptionGroupsState || return 1
+    if ! migrateSubscriptionGroupsState; then
+        if ! subscriptionGroupsStateReplace "${restoreBackupFile}" "${stateFile}"; then
+            padmForgetCleanupPath "${restoreBackupFile}"
+            return 1
+        fi
+        padmRemoveCleanupPath "${restoreBackupFile}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${restoreBackupFile}"
 }
 
 activeSubscriptionGroupId() {
