@@ -312,22 +312,64 @@ subscriptionSyncRestoreBackupPath() {
     local targetBackup="${backupDir}/${label}"
     local marker="${backupDir}/${label}.exists"
     local state
+    local restoreStage
+    local targetParent
+    local rollbackDir
+    local rollbackPath
 
     [[ -n "${targetPath}" && "${targetPath}" != "." && "${targetPath}" != "/" ]] || return 1
     [[ -f "${marker}" ]] || return 1
     state=$(<"${marker}")
-    rm -rf -- "${targetPath}" || return 1
     case "${state}" in
     dir)
-        mkdir -p "$(dirname "${targetPath}")" || return 1
-        mkdir -p "${targetPath}" || return 1
-        cp -a "${targetBackup}/." "${targetPath}/" || return 1
+        targetParent=$(dirname "${targetPath}")
+        mkdir -p "${targetParent}" || return 1
+        padmCreateTempPath restoreStage -d "${targetParent%/}/.restore-${label}.XXXXXX" || return 1
+        if ! cp -a "${targetBackup}/." "${restoreStage}/"; then
+            padmRemoveCleanupPath "${restoreStage}"
+            return 1
+        fi
+        if [[ -e "${targetPath}" ]]; then
+            padmCreateTempPath rollbackDir -d "${targetParent%/}/.restore-old-${label}.XXXXXX" || {
+                padmRemoveCleanupPath "${restoreStage}"
+                return 1
+            }
+            rollbackPath="${rollbackDir}/$(basename "${targetPath}")"
+            if ! mv "${targetPath}" "${rollbackPath}"; then
+                padmRemoveCleanupPath "${restoreStage}"
+                padmRemoveCleanupPath "${rollbackDir}"
+                return 1
+            fi
+            if mv "${restoreStage}" "${targetPath}"; then
+                padmForgetCleanupPath "${restoreStage}"
+                padmRemoveCleanupPath "${rollbackDir}"
+                return 0
+            fi
+            if ! mv "${rollbackPath}" "${targetPath}" >/dev/null 2>&1; then
+                padmRemoveCleanupPath "${restoreStage}"
+                padmForgetCleanupPath "${rollbackDir}"
+                return 1
+            fi
+            padmRemoveCleanupPath "${restoreStage}"
+            padmRemoveCleanupPath "${rollbackDir}"
+            return 1
+        fi
+        mv "${restoreStage}" "${targetPath}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
+        padmForgetCleanupPath "${restoreStage}"
+        return 0
         ;;
     file)
-        mkdir -p "$(dirname "${targetPath}")" || return 1
-        cp -p "${targetBackup}" "${targetPath}" || return 1
+        targetParent=$(dirname "${targetPath}")
+        mkdir -p "${targetParent}" || return 1
+        padmCreateTempFileForTarget restoreStage "${targetPath}" restore || return 1
+        if ! cp -p "${targetBackup}" "${restoreStage}"; then
+            padmRemoveCleanupPath "${restoreStage}"
+            return 1
+        fi
+        commitGeneratedFile "${restoreStage}" "${targetPath}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
         ;;
     missing)
+        rm -rf -- "${targetPath}" || return 1
         return 0
         ;;
     *)

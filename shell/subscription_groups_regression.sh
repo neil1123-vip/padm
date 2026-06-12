@@ -8053,6 +8053,36 @@ JSON
     fi
 
     (
+        local restoreDirRoot="${TMP_DIR}/subscription-sync-restore-dir-failure"
+        local restoreDirTarget="${restoreDirRoot}/subscribe_local"
+        local restoreDirBackup="${restoreDirRoot}/backup"
+        local restoreStatus
+        mkdir -p "${restoreDirTarget}/default" "${restoreDirTarget}/clashMeta" "${restoreDirBackup}/local/default" "${restoreDirBackup}/local/clashMeta"
+        printf 'current default\n' >"${restoreDirTarget}/default/existing"
+        printf 'current clash\n' >"${restoreDirTarget}/clashMeta/existing"
+        printf 'backup default\n' >"${restoreDirBackup}/local/default/existing"
+        printf 'backup clash\n' >"${restoreDirBackup}/local/clashMeta/existing"
+        printf 'dir\n' >"${restoreDirBackup}/local.exists"
+        cp() {
+            if [[ "$1" == "-a" && "$2" == "${restoreDirBackup}/local/." && "$3" == "${restoreDirRoot}"/.restore-local.*"/" ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        set +e
+        subscriptionSyncRestoreBackupPath "${restoreDirTarget}" "${restoreDirBackup}" local
+        restoreStatus=$?
+        set -e
+        unset -f cp
+        [[ "${restoreStatus}" == "1" ]]
+        [[ "$(<"${restoreDirTarget}/default/existing")" == "current default" ]]
+        [[ "$(<"${restoreDirTarget}/clashMeta/existing")" == "current clash" ]]
+        if find "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \) | grep -q .; then
+            return 1
+        fi
+    )
+
+    (
         local reloadRoot="${TMP_DIR}/subscription-sync-reload-rollback"
         local reloadTargetFile="${reloadRoot}/xray/02_VLESS_TCP_inbounds.json"
         local reloadLog="${reloadRoot}/reload.log"
