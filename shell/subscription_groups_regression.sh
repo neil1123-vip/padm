@@ -7644,6 +7644,68 @@ JSON
         [[ "${summaryOutput}" == *"服务器源：2 个，启用远端 1 个"* ]]
     )
 
+    (
+        local resetRoot="${TMP_DIR}/subscription-groups-reset-failure"
+        local resetGroupsDir="${resetRoot}/groups"
+        local resetStateFile="${resetGroupsDir}/groups.json"
+        local resetErrorLog="${resetRoot}/error.log"
+        local resetCurrentBackup
+        local resetBeforeSnapshot
+        local resetStatus
+        local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+        local oldTmpDir="${TMPDIR:-}"
+
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/subscription/state_maintenance.sh"
+        export PADM_SUBSCRIPTION_GROUPS_DIR="${resetGroupsDir}"
+        TMPDIR="${resetRoot}"
+        REGRESSION_ERROR_CARD_LOG="${resetErrorLog}"
+        mkdir -p "${resetGroupsDir}"
+        cat >"${resetStateFile}" <<'JSON'
+{"version":2,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+        resetBeforeSnapshot=$(<"${resetStateFile}")
+        resetCurrentBackup="${resetGroupsDir}/backups/groups-current.json"
+
+        showSubscriptionGroupsStateSummary() { return 0; }
+        statusCard() { return 0; }
+        successCard() { return 0; }
+        autoRead() {
+            local targetVar=$3
+            printf -v "${targetVar}" '%s' "yes"
+        }
+        createSubscriptionGroupsBackup() {
+            mkdir -p "${resetGroupsDir}/backups" || return 1
+            cp "${resetStateFile}" "${resetCurrentBackup}" || return 1
+            printf '%s\n' "${resetCurrentBackup}"
+        }
+        migrateSubscriptionGroupsState() {
+            return 1
+        }
+
+        : >"${resetErrorLog}"
+        set +e
+        resetSubscriptionGroupsStateMenu >/dev/null 2>&1
+        resetStatus=$?
+        set -e
+        unset -f showSubscriptionGroupsStateSummary
+        unset -f statusCard
+        unset -f successCard
+        unset -f autoRead
+        unset -f createSubscriptionGroupsBackup
+        unset -f migrateSubscriptionGroupsState
+        [[ "${resetStatus}" == "1" ]]
+        [[ "$(<"${resetStateFile}")" == "${resetBeforeSnapshot}" ]]
+        grep -q '订阅状态重建失败，已恢复旧状态' "${resetErrorLog}"
+        [[ -f "${resetCurrentBackup}" ]]
+        if find "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*' | grep -q .; then
+            return 1
+        fi
+
+        if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+        if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    )
+
     if normalizeSubscriptionSourceInput 'remote.example.com:443:edge' >/dev/null 2>&1; then
         return 1
     fi
