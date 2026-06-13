@@ -10316,6 +10316,26 @@ runMenuSmokeRegression() {
     subscriptionWireGuardReadState() {
         jq -n '{enabled:false, role:"uninitialized", address:"", peers:[]}'
     }
+    setMenuSmokeRole() {
+        local role=$1
+        case "${role}" in
+        main)
+            subscriptionWireGuardReadState() {
+                jq -n '{enabled:true, role:"main", address:"10.77.0.1/24", peers:[{id:"edge-a"}]}'
+            }
+            ;;
+        controlled)
+            subscriptionWireGuardReadState() {
+                jq -n '{enabled:true, role:"controlled", address:"10.77.0.2/24", peers:[{id:"main"}]}'
+            }
+            ;;
+        *)
+            subscriptionWireGuardReadState() {
+                jq -n '{enabled:false, role:"uninitialized", address:"", peers:[]}'
+            }
+            ;;
+        esac
+    }
     subscriptionWireGuardConfigFile() { echo "${TMP_DIR}/menu-smoke-wireguard/wg-padm.conf"; }
     showAccounts() { recordMenuAction showAccounts; }
     showUserSubscriptions() { recordMenuAction showUserSubscriptions; }
@@ -10406,7 +10426,9 @@ r"
     configPath="${TMP_DIR}/menu-smoke-xray/"
     coreInstallType=1
     ensureSubscriptionGroupsState
+    setMenuSmokeRole uninitialized
     resetMenuActions
+    output=
     manageSubscription <<<"7"
     assertMenuAction menu
     grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
@@ -10415,42 +10437,50 @@ r"
     grep -q "运行与维护" <<<"${output}"
     grep -q "被控不需要安装公网订阅服务" <<<"${output}"
     resetMenuActions
+    output=
     manageSubscription <<<"1
 5
 7"
     assertMenuAction menu
     resetMenuActions
+    output=
     manageSubscription <<<"2
 6
 7"
     assertMenuAction menu
     resetMenuActions
+    output=
     manageSubscription <<<"3
 7
 7"
     assertMenuAction menu
     resetMenuActions
+    output=
     manageSubscription <<<"4
-10
+5
 7"
     assertMenuAction menu
     resetMenuActions
+    output=
     manageSubscription <<<"5
 7
 7"
     assertMenuAction manageSubscriptionOperations
     assertMenuAction menu
     resetMenuActions
+    output=
     manageSubscription <<<"6
-9
+5
 7"
     assertMenuAction menu
     resetMenuActions
+    output=
     manageSubscriptionQuickStart <<<"1
 5"
     assertMenuAction installSubscribe
     assertMenuAction subscribe
     resetMenuActions
+    output=
     manageSubscriptionQuickStart <<<"3
 5"
     assertMenuAction collectSubscriptionTraffic
@@ -10458,12 +10488,80 @@ r"
     assertMenuAction showSubscriptionQuotaPlan
     assertMenuAction subscriptionQuotaDryRunPlan
     resetMenuActions
+    output=
     manageSubscriptionMultiServerQuickStart <<<"3
-5"
+3"
     if assertMenuAction initSubscriptionWireGuardMain; then
         printf 'menu-smoke failed: multi-server quick-start return initialized main\n' >&2
         return 1
     fi
+    setMenuSmokeRole main
+    resetMenuActions
+    output=
+    manageSubscriptionMultiServerQuickStart <<<"2"
+    assertMenuAction menu
+    if grep -q "这台作为被控" <<<"${output}"; then
+        printf 'menu-smoke failed: main quick-start still shows controlled entry\n' >&2
+        return 1
+    fi
+    resetMenuActions
+    output=
+    manageSubscriptionMultiServer <<<"6"
+    if grep -q "被控加入向导" <<<"${output}"; then
+        printf 'menu-smoke failed: main multi-server menu still shows controlled actions\n' >&2
+        return 1
+    fi
+    grep -q "添加/移除被控服务器" <<<"${output}"
+    assertMenuAction menu
+    resetMenuActions
+    output=
+    manageSubscriptionWireGuardControlMenu <<<"7"
+    if grep -q "导入主控接入凭据" <<<"${output}"; then
+        printf 'menu-smoke failed: main wireguard compatibility menu still shows controlled actions\n' >&2
+        return 1
+    fi
+    grep -q "查看本机主控接入凭据" <<<"${output}"
+    assertMenuAction menu
+    setMenuSmokeRole controlled
+    resetMenuActions
+    output=
+    manageSubscription <<<"4"
+    grep -q "快速开始" <<<"${output}"
+    grep -q "多服务器协同" <<<"${output}"
+    grep -q "高级诊断" <<<"${output}"
+    if grep -q "我自己用" <<<"${output}" || grep -q "给别人用" <<<"${output}" || grep -q "运行与维护" <<<"${output}"; then
+        printf 'menu-smoke failed: controlled top-level still shows main-only entries\n' >&2
+        return 1
+    fi
+    assertMenuAction menu
+    resetMenuActions
+    output=
+    manageSubscriptionQuickStart <<<"4"
+    if grep -q "我自己用" <<<"${output}" || grep -q "给别人用" <<<"${output}"; then
+        printf 'menu-smoke failed: controlled quick-start still shows main-only entries\n' >&2
+        return 1
+    fi
+    grep -q "查看协同状态" <<<"${output}"
+    assertMenuAction menu
+    resetMenuActions
+    output=
+    manageSubscriptionMultiServer <<<"4"
+    if grep -q "添加/移除被控服务器" <<<"${output}" || grep -q "更新被控服务器凭据" <<<"${output}"; then
+        printf 'menu-smoke failed: controlled multi-server menu still shows main-only actions\n' >&2
+        return 1
+    fi
+    grep -q "被控加入向导" <<<"${output}"
+    assertMenuAction menu
+    resetMenuActions
+    output=
+    manageSubscriptionWireGuardControlMenu <<<"7"
+    if grep -q "查看本机主控接入凭据" <<<"${output}" || grep -q "初始化本机为主控" <<<"${output}"; then
+        printf 'menu-smoke failed: controlled wireguard compatibility menu still shows main-only actions\n' >&2
+        return 1
+    fi
+    grep -q "查看本机被控接入凭据" <<<"${output}"
+    assertMenuAction menu
+    setMenuSmokeRole uninitialized
     resetMenuActions
     manageLocalSubscription <<<"1
 6"
@@ -10534,40 +10632,49 @@ y
     assertMenuAction subscriptionSyncPlan
     assertMenuAction menu
     resetMenuActions
+    setMenuSmokeRole main
     manageSubscriptionMultiServer <<<"1
 main.example.com
-10"
+6"
     assertMenuAction initSubscriptionWireGuardMain
     resetMenuActions
-    manageSubscriptionMultiServer <<<"2
-main-credential
-10"
-    assertMenuAction initSubscriptionWireGuardControlled
-    assertMenuAction importSubscriptionWireGuardMainCredential
-    resetMenuActions
     manageSubscriptionMultiServer <<<"3
-3
-10"
-    assertMenuAction addSubscribeMenu
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"4
-7"
+6"
     assertMenuAction setSubscriptionSourceControlTokenMenu
     resetMenuActions
-    manageSubscriptionMultiServer <<<"5
-7"
-    assertMenuAction 'statusCard:当前还没有可显示的接入凭据'
+    manageSubscriptionMultiServer <<<"4
+6"
+    assertMenuAction showSubscriptionWireGuardMainCredential
     assertMenuAction showSubscriptionSources
     assertMenuAction showSubscriptionRemoteHealthPlan
     assertMenuAction subscriptionRemoteControlHealthAll
     assertMenuAction showSubscriptionSourceSyncResults
     resetMenuActions
-    manageSubscriptionMultiServer <<<"6
-5
-7"
+    manageSubscriptionMultiServer <<<"5
+4
+6"
+    assertMenuAction addSubscribeMenu
+    assertMenuAction menu
+    resetMenuActions
+    setMenuSmokeRole controlled
+    manageSubscriptionMultiServer <<<"1
+main-credential
+4"
+    assertMenuAction initSubscriptionWireGuardControlled
+    assertMenuAction importSubscriptionWireGuardMainCredential
+    resetMenuActions
+    manageSubscriptionMultiServer <<<"2
+4"
+    assertMenuAction showSubscriptionWireGuardControlledCredential
+    assertMenuAction showSubscriptionWireGuardStatus
+    assertMenuAction showSubscriptionSourceSyncResults
+    resetMenuActions
+    manageSubscriptionMultiServer <<<"3
+4
+4"
     assertMenuAction manageSubscriptionWireGuardControlMenu
     assertMenuAction menu
+    setMenuSmokeRole uninitialized
     resetMenuActions
     manageSubscriptionOperations <<<"1
 5"
@@ -10685,6 +10792,24 @@ main-credential
     assertMenuAction subscriptionRemoteControlHealthAll
     assertMenuAction showSubscriptionSourceSyncResults
     resetMenuActions
+    setMenuSmokeRole controlled
+    output=
+    manageSubscriptionDiagnostics <<<"3"
+    grep -q "查看诊断状态 连续查看 WireGuard、本机接入凭据和最近同步结果" <<<"${output}"
+    resetMenuActions
+    addSubscribeMenu <<<"3"
+    assertMenuAction 'errorCard:当前机器已初始化为被控'
+    resetMenuActions
+    setSubscriptionSourceControlTokenMenu <<<""
+    assertMenuAction 'errorCard:当前机器已初始化为被控'
+    resetMenuActions
+    toggleSubscriptionSourceMenu <<<""
+    assertMenuAction 'errorCard:当前机器已初始化为被控'
+    resetMenuActions
+    clearSubscriptionSourceSyncErrorMenu <<<""
+    assertMenuAction 'errorCard:当前机器已初始化为被控'
+    resetMenuActions
+    setMenuSmokeRole uninitialized
     manageAdminSubscription <<<"6
 7"
     assertMenuAction menu
