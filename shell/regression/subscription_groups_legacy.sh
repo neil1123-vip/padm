@@ -6080,9 +6080,9 @@ runUserSubscriptionMenuMutationFailureRegression() (
         user_subscription_item_menu)
             menuStep=$((menuStep + 1))
             if [[ "${menuStep}" == "1" ]]; then
-                printf -v "${targetVar}" '5'
+                printf -v "${targetVar}" '6'
             else
-                printf -v "${targetVar}" '8'
+                printf -v "${targetVar}" '9'
             fi
             ;;
         *) printf -v "${targetVar}" '' ;;
@@ -10321,8 +10321,11 @@ runMenuSmokeRegression() {
     showUserSubscriptions() { recordMenuAction showUserSubscriptions; }
     createAndSyncUserSubscriptionWizard() { recordMenuAction createAndSyncUserSubscriptionWizard; }
     manageUserSubscriptionItem() { recordMenuAction manageUserSubscriptionItem; }
+    showUserSubscriptionLinksMenu() { recordMenuAction showUserSubscriptionLinksMenu; }
     installSubscribe() { recordMenuAction installSubscribe; }
     manageSubscriptionSyncSettings() { recordMenuAction manageSubscriptionSyncSettings; }
+    manageSubscriptionOperations() { recordMenuAction manageSubscriptionOperations; }
+    manageSubscriptionOperationsAdvanced() { recordMenuAction manageSubscriptionOperationsAdvanced; }
     runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
     subscriptionSyncPlan() { recordMenuAction subscriptionSyncPlan; jq -n '{create:[], remove:[]}'; }
     subscriptionRemoteControlHealthAll() { recordMenuAction subscriptionRemoteControlHealthAll; jq -n '[{id:"edge-a", ok:true}]'; }
@@ -10404,52 +10407,43 @@ r"
     coreInstallType=1
     ensureSubscriptionGroupsState
     resetMenuActions
-    manageSubscription <<<"9"
+    manageSubscription <<<"7"
     assertMenuAction menu
     grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
     grep -q "快速开始" <<<"${output}"
-    grep -q "多服务器：主控" <<<"${output}"
-    grep -q "多服务器：被控" <<<"${output}"
+    grep -q "多服务器协同" <<<"${output}"
+    grep -q "运行与维护" <<<"${output}"
     grep -q "被控不需要安装公网订阅服务" <<<"${output}"
     resetMenuActions
     manageSubscription <<<"1
 5
-9"
+7"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"2
 6
-9"
+7"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"3
-6
-9"
+7
+7"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"4
-8
-9"
+10
+7"
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"5
-8
-9"
+7
+7"
+    assertMenuAction manageSubscriptionOperations
     assertMenuAction menu
     resetMenuActions
     manageSubscription <<<"6
-11
-9"
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscription <<<"7
-8
-9"
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscription <<<"8
 9
-9"
+7"
     assertMenuAction menu
     resetMenuActions
     manageSubscriptionQuickStart <<<"1
@@ -10493,9 +10487,10 @@ r"
     assertMenuAction showAdminSubscriptionTraffic
     resetMenuActions
     manageSharedSubscriptions <<<"2
-6
-7"
+9
+5"
     assertMenuAction showUserSubscriptions
+    assertMenuAction showUserSubscriptionTraffic
     assertMenuAction menu
     resetMenuActions
     manageSharedSubscriptions <<<"1
@@ -10505,7 +10500,6 @@ Team A
 0
 n
 y
-6
 7"
     assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
     assertMenuAction subscribe
@@ -10521,35 +10515,88 @@ main
 0
 
 y
-6
 7"
     assertMenuAction refreshSubscriptionGroupSyncCron
     assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
     assertMenuAction subscribe
     subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
     resetMenuActions
-    manageSharedSubscriptions <<<"4
-6
-7"
+    manageSharedSubscriptions <<<"3
+5
+5"
     assertMenuAction runSubscriptionGroupSync
     assertMenuAction menu
     resetMenuActions
-    manageSharedSubscriptions <<<"5
-6
-7"
+    manageSharedSubscriptions <<<"4
+5
+5"
     assertMenuAction showSubscriptionLocalSyncPlan
     assertMenuAction subscriptionSyncPlan
     assertMenuAction menu
     resetMenuActions
-    manageMainControllerSubscriptions <<<"2
-7
-11"
-    assertMenuAction showSubscriptionWireGuardStatus
+    manageSubscriptionMultiServer <<<"1
+main.example.com
+10"
+    assertMenuAction initSubscriptionWireGuardMain
     resetMenuActions
-    manageSubscriptionMainControlMenu <<<"2
+    manageSubscriptionMultiServer <<<"2
+main-credential
+10"
+    assertMenuAction initSubscriptionWireGuardControlled
+    assertMenuAction importSubscriptionWireGuardMainCredential
+    resetMenuActions
+    manageSubscriptionMultiServer <<<"3
+3
+10"
+    assertMenuAction addSubscribeMenu
+    assertMenuAction menu
+    resetMenuActions
+    manageSubscriptionMultiServer <<<"4
+7"
+    assertMenuAction setSubscriptionSourceControlTokenMenu
+    resetMenuActions
+    manageSubscriptionMultiServer <<<"5
+7"
+    assertMenuAction 'statusCard:当前还没有可显示的接入凭据'
+    assertMenuAction showSubscriptionSources
+    assertMenuAction showSubscriptionRemoteHealthPlan
+    assertMenuAction subscriptionRemoteControlHealthAll
+    assertMenuAction showSubscriptionSourceSyncResults
+    resetMenuActions
+    manageSubscriptionMultiServer <<<"6
+5
+7"
+    assertMenuAction manageSubscriptionWireGuardControlMenu
+    assertMenuAction menu
+    resetMenuActions
+    manageSubscriptionOperations <<<"1
+5"
+    assertMenuAction collectSubscriptionTraffic
+    assertMenuAction showSubscriptionTrafficOverview
+    resetMenuActions
+    manageSubscriptionOperations <<<"2
+5"
+    assertMenuAction runSubscriptionGroupSync
+    resetMenuActions
+    manageSubscriptionOperations <<<"3
+5"
+    assertMenuAction showSubscriptionGroupsStateSummary
+    assertMenuAction showSubscriptionLocalSyncPlan
+    assertMenuAction subscriptionSyncPlan
+    assertMenuAction showSubscriptionRemoteSyncPlan
+    assertMenuAction subscriptionRemoteSyncPlan
+    assertMenuAction showSubscriptionSourceSyncResults
+    resetMenuActions
+    manageSubscriptionOperations <<<"4
+4
+5"
+    assertMenuAction manageSubscriptionOperationsAdvanced
+    assertMenuAction menu
+    resetMenuActions
+    manageSubscriptionMainControlMenu <<<"1
 7"
     assertMenuAction showSubscriptionWireGuardMainCredential
-    for wgAction in "1:initSubscriptionWireGuardMain" "2:showSubscriptionWireGuardMainCredential" "3:showSubscriptionWireGuardPeers" "4:testSubscriptionWireGuardControl" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
+    for wgAction in "1:showSubscriptionWireGuardMainCredential" "2:showSubscriptionWireGuardPeers" "3:testSubscriptionWireGuardControl" "4:initSubscriptionWireGuardMain" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
         wgChoice=${wgAction%%:*}
         resetMenuActions
         manageSubscriptionMainControlMenu <<<"${wgChoice}
@@ -10571,20 +10618,20 @@ y
         assertMenuAction "${wgAction#*:}"
     done
     resetMenuActions
-    manageMainControllerSubscriptions <<<"4
+    manageMainControllerSubscriptions <<<"5
 11"
     assertMenuAction setSubscriptionSourceControlTokenMenu
     resetMenuActions
-    manageMainControllerSubscriptions <<<"5
+    manageMainControllerSubscriptions <<<"3
 11"
     assertMenuAction showSubscriptionRemoteHealthPlan
     assertMenuAction subscriptionRemoteControlHealthAll
     resetMenuActions
-    manageMainControllerSubscriptions <<<"7
+    manageMainControllerSubscriptions <<<"8
 11"
     assertMenuAction showSubscriptionSourceControlUrls
     resetMenuActions
-    manageMainControllerSubscriptions <<<"8
+    manageMainControllerSubscriptions <<<"4
 11"
     assertMenuAction showSubscriptionSourceSyncResults
     resetMenuActions
@@ -10602,19 +10649,12 @@ y
 8"
     assertMenuAction executeSubscriptionQuotaPlanMenu
     resetMenuActions
-    manageSubscriptionAutomation <<<"4
-8"
+    manageSubscriptionOperationsAdvanced <<<"3
+4"
     assertMenuAction manageSubscriptionSyncSettings
     resetMenuActions
-    manageSubscriptionAutomation <<<"1
-8"
-    assertMenuAction runSubscriptionGroupSync
-    resetMenuActions
-    manageSubscriptionAutomation <<<"5
-1
-6
-8"
-    assertMenuAction showSubscriptionGroupsStateSummary
+    manageSubscriptionOperationsAdvanced <<<"2
+6"
     resetMenuActions
     manageSubscriptionStateBackups <<<"1
 6"
@@ -10637,10 +10677,12 @@ y
     assertMenuAction resetSubscriptionGroupsStateMenu
     resetMenuActions
     manageSubscriptionDiagnostics <<<"1
-9"
+5"
     assertMenuAction showSubscriptionServiceStatus
     assertMenuAction showSubscriptionWireGuardStatus
     assertMenuAction showSubscriptionGroupsStateSummary
+    assertMenuAction showSubscriptionRemoteHealthPlan
+    assertMenuAction subscriptionRemoteControlHealthAll
     assertMenuAction showSubscriptionSourceSyncResults
     resetMenuActions
     manageAdminSubscription <<<"6
