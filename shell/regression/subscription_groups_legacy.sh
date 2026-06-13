@@ -11914,6 +11914,53 @@ runRegressionPlatformIo() {
         runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression
 }
 
+runTlsDnsApiDomainSelectionRegression() (
+    local root="${TMP_DIR}/tls-dns-api-domain-selection"
+    local homeDir="${root}/home"
+    local commandLog="${root}/commands.log"
+
+    mkdir -p "${homeDir}/.acme.sh"
+    HOME="${homeDir}"
+    export PADM_TEST_ACME_LOG="${commandLog}"
+    cat <<'EOF' >"${homeDir}/.acme.sh/acme.sh"
+#!/usr/bin/env sh
+printf '%s\n' "$*" >>"${PADM_TEST_ACME_LOG}"
+EOF
+    chmod +x "${homeDir}/.acme.sh/acme.sh"
+
+    tee() {
+        cat >/dev/null
+    }
+
+    tlsDomain=sub.example.com
+    dnsTLSDomain=example.com
+    sslType=letsencrypt
+    sslIPv6=
+
+    : >"${commandLog}"
+    dnsAPIType=cloudflare
+    dnsAPIStatus=n
+    cfAPIToken=token
+    cfZoneID=
+    acmeInstallSSL
+    grep -F -q -- '--issue -d sub.example.com --dns dns_cf' "${commandLog}"
+    ! grep -F -q -- '-d example.com' "${commandLog}"
+
+    : >"${commandLog}"
+    dnsAPIStatus=y
+    acmeInstallSSL
+    grep -F -q -- '--issue -d *.example.com -d example.com --dns dns_cf' "${commandLog}"
+
+    : >"${commandLog}"
+    dnsAPIType=aliyun
+    dnsAPIStatus=n
+    aliKey=key
+    aliSecret=secret
+    acmeInstallSSL
+    grep -F -q -- '--issue -d sub.example.com --dns dns_ali' "${commandLog}"
+    ! grep -F -q -- '-d example.com' "${commandLog}"
+)
+
 runTlsRenewalExistingCertificateRegression() {
     local oldHome="${HOME}"
     local oldTlsDir="${PADM_TLS_DIR:-}"
@@ -12130,7 +12177,8 @@ runTlsRenewalFailurePropagationRegression() (
 )
 
 runRegressionTls() {
-    runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
+    runRegressionStep tls-dns-api-domain-selection runTlsDnsApiDomainSelectionRegression &&
+        runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 }
 

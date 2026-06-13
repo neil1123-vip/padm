@@ -134,20 +134,22 @@ selectAcmeInstallSSL() {
 # 安装 TLS 证书
 acmeInstallSSL() {
     local dnsAPIDomain="${tlsDomain}"
+    local dnsAPIExtraDomain=
     if [[ "${dnsAPIStatus:-}" == "y" ]]; then
         dnsAPIDomain="*.${dnsTLSDomain}"
+        dnsAPIExtraDomain="-d ${dnsTLSDomain}"
     fi
 
     if [[ "${dnsAPIType:-}" == "cloudflare" ]]; then
         successCard "DNS API 生成证书中"
         if [[ -n "${cfZoneID:-}" ]]; then
-            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
         else
-            CF_Token="${cfAPIToken}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+            CF_Token="${cfAPIToken}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
         fi
     elif [[ "${dnsAPIType:-}" == "aliyun" ]]; then
         successCard "DNS API 生成证书中"
-        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" -d "${dnsTLSDomain}" --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
     else
         successCard "生成证书中"
         sudo "$HOME/.acme.sh/acme.sh" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
