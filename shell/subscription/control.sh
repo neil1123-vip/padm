@@ -355,7 +355,7 @@ SCRIPT_PATH = "${scriptPath}"
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
 try:
-    SCRIPT_TIMEOUT = max(1, int(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "180") or "180"))
+    SCRIPT_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "180") or "180"))
 except ValueError:
     SCRIPT_TIMEOUT = 180
 
@@ -479,9 +479,10 @@ EOF
 subscriptionControlHealthCheck() {
     local token=$1
     local port
+    local timeout=${PADM_CONTROL_HEALTH_TIMEOUT:-1}
     port=$(subscriptionControlPort)
     [[ -n "${token}" && -n "${port}" ]] || return 1
-    PADM_CONTROL_HEALTH_TOKEN="${token}" PADM_CONTROL_HEALTH_PORT="${port}" python3 <<'PY'
+    PADM_CONTROL_HEALTH_TOKEN="${token}" PADM_CONTROL_HEALTH_PORT="${port}" PADM_CONTROL_HEALTH_TIMEOUT="${timeout}" python3 <<'PY'
 import json
 import os
 import sys
@@ -489,6 +490,12 @@ import urllib.request
 
 token = os.environ.get("PADM_CONTROL_HEALTH_TOKEN", "")
 port = os.environ.get("PADM_CONTROL_HEALTH_PORT", "")
+try:
+    timeout = float(os.environ.get("PADM_CONTROL_HEALTH_TIMEOUT", "1") or "1")
+    if timeout <= 0:
+        raise ValueError
+except ValueError:
+    timeout = 1.0
 if not token or not port:
     sys.exit(1)
 request = urllib.request.Request(
@@ -496,12 +503,20 @@ request = urllib.request.Request(
     headers={"Authorization": f"Bearer {token}"},
 )
 try:
-    with urllib.request.urlopen(request, timeout=1) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode() or "{}")
 except Exception:
     sys.exit(1)
 sys.exit(0 if payload.get("ok") is True else 1)
 PY
+}
+
+subscriptionControlHealthRetryCount() {
+    printf '%s\n' "${PADM_CONTROL_HEALTH_RETRIES:-20}"
+}
+
+subscriptionControlHealthRetryDelay() {
+    printf '%s\n' "${PADM_CONTROL_HEALTH_RETRY_DELAY:-0.25}"
 }
 
 subscriptionControlRestoreServiceInstall() {
@@ -563,6 +578,8 @@ installSubscriptionControlService() {
     local tmpFile
     local token
     local i
+    local retryCount
+    local retryDelay
     local serviceBackupDir=
     local serviceWasActive=false
     local serviceWasEnabled=false
@@ -630,12 +647,14 @@ EOF
             return 1
         fi
     fi
-    for ((i = 0; i < 20; i++)); do
+    retryCount=$(subscriptionControlHealthRetryCount)
+    retryDelay=$(subscriptionControlHealthRetryDelay)
+    for ((i = 0; i < retryCount; i++)); do
         if subscriptionControlHealthCheck "${token}" >/dev/null 2>&1; then
             padmRemoveCleanupPath "${serviceBackupDir}"
             return 0
         fi
-        sleep 0.25
+        sleep "${retryDelay}"
     done
     subscriptionControlFailInstall "${serviceBackupDir}" "订阅控制服务健康检查失败" "${serviceWasActive}" "${serviceWasEnabled}"
     return 1
