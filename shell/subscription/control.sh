@@ -339,9 +339,13 @@ subscriptionControlServiceFile() {
 writeSubscriptionControlServer() {
     local serverScript
     local scriptPath
+    local scriptVersion
+    local tokenFile
     local tmpFile
     serverScript=$(subscriptionControlServerScript)
     scriptPath=$(subscriptionGroupSyncInstallScript)
+    scriptVersion=$(getScriptVersion)
+    tokenFile=$(subscriptionControlTokenFile)
     padmCreateTempFileForTarget tmpFile "${serverScript}" control-server || return 1
     cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/usr/bin/env python3
@@ -352,6 +356,9 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 SCRIPT_PATH = "${scriptPath}"
+TOKEN_FILE = "${tokenFile}"
+VERSION = "${scriptVersion}"
+CAPABILITIES = ["health", "sync"]
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
 try:
@@ -369,13 +376,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def token(self):
         auth = self.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
             return auth[7:]
         return ""
+
+    def expected_token(self):
+        try:
+            with open(TOKEN_FILE, encoding="utf-8") as handle:
+                return handle.read().strip()
+        except OSError:
+            return ""
 
     def endpoint(self):
         prefix = "/s/control/"
@@ -455,8 +472,11 @@ class Handler(BaseHTTPRequestHandler):
         if endpoint != "health":
             self.respond(404, {"ok": False, "error": "not_found"})
             return
-        body = self.call_script(endpoint)
-        self.respond(self.response_status(endpoint, body), body)
+        expected_token = self.expected_token()
+        if not expected_token or self.token() != expected_token:
+            self.respond(401, {"ok": False, "error": "unauthorized", "error_detail": {"type": "unauthorized", "message": "控制 token 验证失败"}})
+            return
+        self.respond(200, {"ok": True, "version": VERSION, "capabilities": CAPABILITIES})
 
     def do_POST(self):
         endpoint = self.endpoint()

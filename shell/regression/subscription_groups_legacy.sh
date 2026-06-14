@@ -6836,6 +6836,73 @@ runRuntimeAndRealityRegression() {
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "FAIL" ]]
 }
 
+runAutoInstallRealityRouteRegression() (
+    local actions=
+    local output=
+    local oldCoreInstallType="${coreInstallType:-}"
+
+    recordMenuAction() {
+        actions+="$1"$'\n'
+    }
+    assertMenuAction() {
+        grep -qxF "$1" <<<"${actions}"
+    }
+
+    parseInstallArgs --install-type reality --core xray --reality-target www.microsoft.com:443 --reality-server-name www.microsoft.com --reuse-last no
+    AUTO_INSTALL_SUMMARY_SHOWN=
+    selectInstallType=
+    coreInstallType=
+
+    echoContent() { :; }
+    uiStyle() { printf '%s' "$2"; }
+    menuLine() { output+="$*"$'\n'; }
+    menuMutedLine() { output+="$*"$'\n'; }
+    menuSection() { :; }
+    menuItem() { output+="$2 $3"$'\n'; }
+    menuRecommendedItem() { output+="$2 $3"$'\n'; }
+    menuDangerItem() { output+="$2 $3"$'\n'; }
+    menuReturnItem() { output+="$2 $3"$'\n'; }
+    menuClose() { return 0; }
+    progressCard() { return 0; }
+    statusCard() { recordMenuAction "statusCard:$1"; }
+    successCard() { recordMenuAction "successCard:$1"; }
+    errorCard() { recordMenuAction "errorCard:$1"; }
+    showInstallStatus() { recordMenuAction showInstallStatus; }
+    checkWgetShowProgress() { return 0; }
+    mkdirTools() { recordMenuAction mkdirTools; return 0; }
+    aliasInstall() { recordMenuAction aliasInstall; return 0; }
+    getScriptVersion() { printf 'test\n'; }
+    installXrayReality() { recordMenuAction installXrayReality; }
+    installSingBoxReality() { recordMenuAction installSingBoxReality; }
+    xrayCoreInstall() { recordMenuAction xrayCoreInstall; }
+    singBoxInstall() { recordMenuAction singBoxInstall; }
+    customXrayInstall() { recordMenuAction "customXrayInstall:$*"; }
+    customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
+    manageSubscription() { recordMenuAction manageSubscription; }
+    protocolEntryMenu() { recordMenuAction protocolEntryMenu; }
+    siteCertificateMenu() { recordMenuAction siteCertificateMenu; }
+    routingAccessMenu() { recordMenuAction routingAccessMenu; }
+    coreVersionManageMenu() { recordMenuAction coreVersionManageMenu; }
+    systemScriptMenu() { recordMenuAction systemScriptMenu; }
+    advancedDangerMenu() { recordMenuAction advancedDangerMenu; }
+
+    menu
+
+    assertMenuAction showInstallStatus
+    assertMenuAction mkdirTools
+    assertMenuAction aliasInstall
+    assertMenuAction installXrayReality
+    [[ "$(autoValueForKey main_menu)" == "1" ]]
+    [[ "$(autoValueForKey install_type)" == "3" ]]
+    [[ "$(autoValueForKey core)" == "1" ]]
+    [[ "${selectInstallType}" == "3" ]]
+    ! grep -qxF 'installSingBoxReality' <<<"${actions}"
+    ! grep -qxF 'xrayCoreInstall' <<<"${actions}"
+    ! grep -qxF 'singBoxInstall' <<<"${actions}"
+    ! grep -q '^errorCard:' <<<"${actions}"
+    coreInstallType="${oldCoreInstallType}"
+)
+
 resolveReleaseWorkflowVersionForRegression() {
     local isReleaseCommit=$1
     local currentVersion=$2
@@ -9456,6 +9523,9 @@ with socket.socket() as sock:
     print(sock.getsockname()[1])
 PY
 )
+    getScriptVersion() {
+        printf 'test\n'
+    }
     cat >"${fakeInstall}" <<'SH'
 #!/usr/bin/env bash
 endpoint=${2:-}
@@ -9478,8 +9548,8 @@ if [[ "${endpoint}" == "sync" ]]; then
 fi
 case "${endpoint}:${mode}" in
 health:*)
-    printf 'ui noise before health\n'
-    printf '{"ok":true,"version":"test"}\n'
+    printf '{"ok":false,"error":"health_should_not_execute"}\n'
+    exit 9
     ;;
 sync:noise)
     printf 'ui noise before sync\n'
@@ -11993,6 +12063,7 @@ runInstallModulePathsRegression() {
         [[ "${moduleListBefore}" == "0" && "${moduleListAfter}" == "0" ]]
     ) | sort >"${outputList}"
     grep -q '^shell/core/bootstrap\.sh$' "${outputList}"
+    grep -q '^shell/validate_install\.sh$' "${outputList}"
     grep -q '^shell/core/menu\.sh$' "${outputList}"
     grep -q '^shell/subscription/wireguard_control\.sh$' "${outputList}"
     ! grep -q '^REQUIRED_MODULE_PATHS' "${PROJECT_ROOT}/install.sh"
@@ -12384,6 +12455,7 @@ runRegressionRealityStream() {
 
 runRegressionRuntime() {
     runRegressionStep runtime-core runRuntimeAndRealityRegression &&
+        runRegressionStep runtime-auto-install-reality-route runAutoInstallRealityRouteRegression &&
         runRegressionStep runtime-tempdir runRuntimeTempDirRegression &&
         runRegressionStep reality-config runRealityConfigRegression
 }
@@ -12502,6 +12574,9 @@ runtime)
     ;;
 runtime-core)
     regressionRunner=runRuntimeAndRealityRegression
+    ;;
+runtime-auto-install-reality-route)
+    regressionRunner=runAutoInstallRealityRouteRegression
     ;;
 reality-candidates)
     regressionRunner=runRegressionRealityCandidates

@@ -206,6 +206,7 @@ modulePaths() {
     [[ -f "${bootstrapPath}" ]] || return 1
     printf 'install.sh\n'
     printf 'shell/core/bootstrap.sh\n'
+    printf 'shell/validate_install.sh\n'
     while IFS= read -r sourcePath; do
         case "${sourcePath}" in
         \$\{CORE_DIR\}/*)

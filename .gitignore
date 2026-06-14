@@ -2,7 +2,11 @@
 .vscode/
 .DS_Store
 
-# Local Claude/project status notes
+# Local agent context and project notes
+AgentState.md
+AgentState.archive.md
+ProjectLog.md
+ProjectLog.archive.md
 Status.md
 
 # Local test and runtime artifacts

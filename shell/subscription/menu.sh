@@ -905,7 +905,7 @@ remoteSubscribeFile() {
 }
 
 listRemoteSubscribeSources() {
-    listSubscriptionSources | awk -F ':' '$3 != "main" {print $5":"$6":"$2":"$4}'
+    listSubscriptionSources | awk -F ':' '$3 != "main" && $4 != "wireguard" {print $5":"$6":"$2":"$4}'
 }
 
 # 添加服务器源

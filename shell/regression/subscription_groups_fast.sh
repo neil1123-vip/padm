@@ -754,6 +754,7 @@ EOF
     ) | sort >"${outputList}"
     grep -q '^install\.sh$' "${outputList}"
     grep -q '^shell/core/bootstrap\.sh$' "${outputList}"
+    grep -q '^shell/validate_install\.sh$' "${outputList}"
     grep -q '^shell/core/menu\.sh$' "${outputList}"
     grep -q '^shell/subscription/wireguard_control\.sh$' "${outputList}"
     ! grep -q '^REQUIRED_MODULE_PATHS' "${PROJECT_ROOT}/install.sh"

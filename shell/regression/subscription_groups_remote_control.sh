@@ -1217,6 +1217,9 @@ with socket.socket() as sock:
     print(sock.getsockname()[1])
 PY
 )
+    getScriptVersion() {
+        printf 'test\n'
+    }
     cat >"${fakeInstall}" <<'SH'
 #!/usr/bin/env bash
 endpoint=${2:-}
@@ -1242,8 +1245,8 @@ if [[ "${endpoint}" == "sync" ]]; then
 fi
 case "${endpoint}:${mode}" in
 health:*)
-    printf 'ui noise before health\n'
-    printf '{"ok":true,"version":"test"}\n'
+    printf '{"ok":false,"error":"health_should_not_execute"}\n'
+    exit 9
     ;;
 sync:noise)
     printf 'ui noise before sync\n'

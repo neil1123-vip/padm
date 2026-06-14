@@ -210,6 +210,17 @@ subscriptionSyncAccountId() {
     echo "${accountName//_/-}"
 }
 
+subscriptionSyncFindUserByAccountName() {
+    local accountName=$1
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" --arg accountName "${accountName}" '
+      .groups[] | select(.id == $groupId) |
+      .user_groups[]? |
+      select(("sub_" + (.id | gsub("-"; "_"))) == $accountName) |
+      .id // empty' | head -n 1
+}
+
 subscriptionSyncAppendLocalAccount() {
     local accountName=$1
     subscriptionSyncAppendLocalUser "$(subscriptionSyncAccountId "${accountName}")"
