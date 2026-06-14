@@ -284,10 +284,10 @@ showInstallArgsHelp() {
 ├─ 新人三步走
 │ 1. 推荐直连: bash install.sh --install-type custom --core xray --protocols 7 --entry-host node.example.com --reality-target www.ibm.com:443
 │ 2. 推荐 CDN: bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443
-│ 3. 安装后: 运行 padm -> 订阅与用户 -> 快速开始，按“我自己用”或“给别人用”完成闭环
+│ 3. 安装后: 运行 padm -> 订阅与用户；未初始化先选主控或被控，主控走 发布订阅 / 多服务器协同，被控走 接入主控 / 查看本机状态
 ├─ 交互菜单路径
 │ 安装与重装: 含新手选择指引，推荐直连/CDN/无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装
-│ 订阅与用户: 主控/未初始化时显示完整入口；被控角色会自动隐藏主控侧入口
+│ 订阅与用户: 按角色切成三态；未初始化先选主控/被控，主控和被控分别进入独立首页
 │ 协议与入口: REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口
 │ 站点与证书: 传统 TLS fallback 站点、302、ALPN 和证书
 │ 路由与访问控制: 分流、BT、域名/IP 阻断、直连例外和区域阻断

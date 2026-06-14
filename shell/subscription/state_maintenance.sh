@@ -167,6 +167,7 @@ resetSubscriptionGroupsStateMenu() {
 }
 
 manageSubscriptionStateBackups() {
+    subscriptionRequireMainRole || return 1
     while true; do
         echoContent title "\n┌─ 状态备份与恢复 ───────────────────────────────────"
         menuLine "这里只管理 groups.json 状态；恢复和重建都会先自动备份当前状态"
@@ -175,7 +176,7 @@ manageSubscriptionStateBackups() {
         menuItem 3 "查看已有备份" "列出可恢复的备份文件"
         menuItem 4 "恢复状态备份" "先备份当前状态，再用选定备份覆盖"
         menuDangerItem 5 "重建订阅状态" "先备份当前状态，再重置为空的默认订阅组"
-        menuReturnItem 6 "返回同步与备份" "回到上级菜单"
+        menuReturnItem 6 "返回主控维护与排障" "回到上级菜单"
         menuClose
         autoRead subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus
         case "${subscriptionStateBackupStatus}" in
