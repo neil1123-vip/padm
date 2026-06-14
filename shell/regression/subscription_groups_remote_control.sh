@@ -1232,18 +1232,26 @@ if [[ "${PADM_CONTROL_TOKEN:-}" != "${PADM_FAKE_SERVER_TOKEN:-}" ]]; then
     printf '{"ok":false,"error":"unauthorized","error_detail":{"type":"unauthorized","message":"控制 token 验证失败"}}\n'
     exit 1
 fi
-if [[ "${endpoint}" == "sync" ]]; then
-    payload=$(cat)
-    if [[ -z "${payload}" ]]; then
-        printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
-        exit 1
+    if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
+        payload=$(cat)
+        if [[ -z "${payload}" ]]; then
+            if [[ "${endpoint}" == "sync" ]]; then
+                printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
+            else
+                printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"订阅请求体为空"}}\n'
+            fi
+            exit 1
+        fi
+        if [[ "${payload}" == "not-json" ]]; then
+            if [[ "${endpoint}" == "sync" ]]; then
+                printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
+            else
+                printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"订阅请求体格式不正确"}}\n'
+            fi
+            exit 1
+        fi
     fi
-    if [[ "${payload}" == "not-json" ]]; then
-        printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
-        exit 1
-    fi
-fi
-case "${endpoint}:${mode}" in
+    case "${endpoint}:${mode}" in
 health:*)
     printf '{"ok":false,"error":"health_should_not_execute"}\n'
     exit 9
@@ -1263,15 +1271,23 @@ sync:timeout)
     /bin/sleep 2
     printf '{"ok":true}\n'
     ;;
-sync:invalid)
-    printf 'ui noise only\n'
-    exit 0
-    ;;
-*)
-    printf '{"ok":false,"error":"unexpected"}\n'
-    exit 1
-    ;;
-esac
+    sync:invalid)
+        printf 'ui noise only\n'
+        exit 0
+        ;;
+    subscribe:noise)
+        printf 'ui noise before subscribe\n'
+        printf '{"ok":false,"error":"first_json"}\n'
+        printf 'ui noise between json\n'
+        cat <<'JSON'
+{"ok":true,"default":"dmxlc3M6Ly91dWlkQGV4YW1wbGUuY29tOjQ0MyN0ZWFtLWE=","clash_meta":"proxies:\n- name: team-a\n","sing_box":[{"tag":"team-a"}]}
+JSON
+        ;;
+    *)
+        printf '{"ok":false,"error":"unexpected"}\n'
+        exit 1
+        ;;
+    esac
 SH
     chmod +x "${fakeInstall}"
 
@@ -1349,9 +1365,12 @@ for _ in range(20):
 
 set_mode("noise")
 results["sync_success"] = request("POST", "sync", '{"desired_users":[]}')
+results["subscribe_success"] = request("POST", "subscribe", '{"account":"team_a"}')
 results["health_unauthorized"] = request("GET", "health", token_override="wrong-token")
 results["sync_empty_payload"] = request("POST", "sync", "")
 results["sync_invalid_payload"] = request("POST", "sync", "not-json")
+results["subscribe_empty_payload"] = request("POST", "subscribe", "")
+results["subscribe_invalid_payload"] = request("POST", "subscribe", "not-json")
 
 set_mode("failed")
 results["sync_failed"] = request("POST", "sync", '{"desired_users":[]}')
@@ -1363,11 +1382,14 @@ results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[]}
 print(json.dumps(results, ensure_ascii=False))
 PY
 
-    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test"' "${responseFile}" >/dev/null
+    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync","subscribe"]' "${responseFile}" >/dev/null
     jq -e '.sync_success.status == 200 and .sync_success.body.ok == true and .sync_success.body.changed == true and (.sync_success.body.plan.create | length) == 0' "${responseFile}" >/dev/null
+    jq -e '.subscribe_success.status == 200 and .subscribe_success.body.ok == true and (.subscribe_success.body.default | @base64d) == "vless://uuid@example.com:443#team-a" and (.subscribe_success.body.clash_meta | contains("team-a")) and .subscribe_success.body.sing_box[0].tag == "team-a"' "${responseFile}" >/dev/null
     jq -e '.health_unauthorized.status == 401' "${responseFile}" >/dev/null
     jq -e '.sync_empty_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_payload.status == 400' "${responseFile}" >/dev/null
+    jq -e '.subscribe_empty_payload.status == 400' "${responseFile}" >/dev/null
+    jq -e '.subscribe_invalid_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_failed.status == 503 and .sync_failed.body.error == "script_failed" and .sync_failed.body.error_detail.type == "script_failed" and .sync_failed.body.exit_code == 7' "${responseFile}" >/dev/null
     jq -e '.sync_timeout.status == 503 and .sync_timeout.body.error == "script_timeout" and .sync_timeout.body.error_detail.type == "script_timeout"' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_response.status == 503 and .sync_invalid_response.body.error == "invalid_response" and .sync_invalid_response.body.error_detail.type == "invalid_response"' "${responseFile}" >/dev/null

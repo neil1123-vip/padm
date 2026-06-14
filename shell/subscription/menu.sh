@@ -721,7 +721,7 @@ showUserSubscriptionLinks() {
     if ! ensureSubscriptionServiceForSharedLinks; then
         return 1
     fi
-    if ! subscribe false; then
+    if ! subscribe false "" "${accountName}" true; then
         errorCard "订阅输出刷新失败，请检查订阅配置"
         return 1
     fi
@@ -939,8 +939,11 @@ addSubscribeMenu() {
                 errorCard "被控服务器源 ID 无效"
                 continue
             fi
-            removeSubscriptionSourceState "${sourceId}"
-            successCard "被控服务器删除成功" "如需应用订阅变更，请到 主控维护与排障 -> 立即执行同步"
+            if ! subscriptionWireGuardRemovePeerAndSource "${sourceId}"; then
+                errorCard "被控服务器删除失败"
+                continue
+            fi
+            successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除" "如需应用订阅变更，请到 主控维护与排障 -> 立即执行同步"
             ;;
         3) return ;;
         *) errorCard "选择错误，请重新选择" ;;
@@ -1057,6 +1060,8 @@ setSubscriptionSourceControlTokenMenu() {
     local credentialJson=
     local host=
     local port=
+    local previousState=
+    local previousGroupsState=
     local sourceId=
     local token=
     local matches=
@@ -1095,11 +1100,28 @@ setSubscriptionSourceControlTokenMenu() {
         errorCard "被控服务器别名无效"
         return 1
     fi
+    previousState=$(subscriptionWireGuardReadState) || {
+        errorCard "WireGuard 状态读取失败"
+        return 1
+    }
+    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
+        errorCard "订阅组状态读取失败"
+        return 1
+    }
+    subscriptionWireGuardUpdatePeerFromCredential "${sourceId}" "${credentialJson}" || {
+        errorCard "被控服务器 Peer 更新失败"
+        return 1
+    }
+    if ! applySubscriptionWireGuardService; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器 Peer 应用失败" || return 1
+        return 1
+    fi
     setSubscriptionSourceCredential "${sourceId}" "${host}" "${port}" "${token}" || {
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器凭据更新失败" || return 1
         errorCard "被控服务器凭据更新失败"
         return 1
     }
-    successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Token 已保存，可继续测试被控连接"
+    successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Peer 公钥和 Token 已保存，可继续测试被控连接"
 }
 
 toggleSubscriptionSourceMenu() {

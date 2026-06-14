@@ -1781,24 +1781,32 @@ renderAllSubscribeUserOutputs() {
     local localBase=$1
     local renewSalt=$2
     local showStatus=$3
+    local publishAccountsOverride=${4:-}
+    local skipCleanup=${5:-}
     local subscribePortLocal="${subscribePort}"
     local email emailMd5 currentDomain defaultFile
+    local publishAccounts=
+    local existingMd5s='[]'
 
-    if [[ ! -d "${localBase}/default" || -z $(ls "${localBase}/default"/) ]]; then
-        return 0
-    fi
-
-    if [[ -n "$(listRemoteSubscribeSources)" ]]; then
+    publishAccounts=${publishAccountsOverride:-$(subscriptionPublishAccounts "${localBase}" 2>/dev/null)} || return 1
+    if subscriptionPublishHasRemoteSources "${publishAccounts}"; then
         if [[ -z "${renewSalt}" ]]; then
             autoRead subscribe_update_remote "读取到其他订阅，是否更新？[y/n]" updateOtherSubscribeStatus
         else
             updateOtherSubscribeStatus=y
         fi
     fi
+    if [[ -z "${publishAccounts}" ]]; then
+        if [[ "${skipCleanup}" != "true" ]]; then
+            cleanupStaleSubscribeOutputs "${localBase}" "${existingMd5s}" || return 1
+        fi
+        return 0
+    fi
 
-    while IFS= read -r defaultFile; do
-        email=${defaultFile##*/}
+    while IFS= read -r email; do
+        [[ -n "${email}" ]] || continue
         emailMd5=$(printf '%s\n' "${email}${subscribeSalt}" | md5sum | awk '{print $1}')
+        existingMd5s=$(jq --arg md5 "${emailMd5}" '. + [$md5]' <<<"${existingMd5s}") || return 1
         echoContent title "\n┌─ 订阅输出 ─────────────────────────────────────────"
         currentDomain=$(resolveSubscribePublicDomain)
         if [[ -z "${currentDomain}" ]]; then
@@ -1832,7 +1840,61 @@ renderAllSubscribeUserOutputs() {
         else
             successCard "email:${email}，订阅已更新，请使用客户端重新拉取"
         fi
-    done < <(find "${localBase}/default" -mindepth 1 -maxdepth 1 -type f | sort)
+    done <<<"${publishAccounts}"
+
+    if [[ "${skipCleanup}" != "true" ]]; then
+        cleanupStaleSubscribeOutputs "${localBase}" "${existingMd5s}" || return 1
+    fi
+}
+
+subscriptionPublishAccounts() {
+    local localBase=$1
+    local localAccounts=
+    local stagedAccounts=
+    local publishAccounts=
+    local account=
+
+    localBase=${localBase:-$(subscribeLocalBaseDir)}
+    if [[ -d "${localBase}/default" ]]; then
+        while IFS= read -r defaultFile; do
+            [[ -n "${defaultFile}" ]] || continue
+            localAccounts+="${defaultFile##*/}"$'\n'
+        done < <(find "${localBase}/default" -mindepth 1 -maxdepth 1 -type f | sort)
+    fi
+    while IFS= read -r account; do
+        [[ -n "${account}" ]] || continue
+        if subscriptionAccountHasPublishSource "${account}"; then
+            stagedAccounts+="${account}"$'\n'
+        fi
+    done < <(listUserSubscriptions | awk -F ':' '$3 == "true" {print "sub_" $1}' | tr '-' '_')
+    publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++')
+    printf '%s\n' "${publishAccounts}" | sed '/^$/d'
+}
+
+cleanupStaleSubscribeOutputs() {
+    local localBase=$1
+    local existingMd5s=$2
+    local publicBase
+    local defaultFile
+    local staleMd5
+    local currentMd5s='[]'
+
+    publicBase=$(subscribePublicBaseDir)
+    [[ -d "${publicBase}/default" ]] || return 0
+    while IFS= read -r defaultFile; do
+        [[ -n "${defaultFile}" ]] || continue
+        currentMd5s=$(jq --arg md5 "${defaultFile##*/}" '. + [$md5]' <<<"${currentMd5s}") || return 1
+    done < <(find "${publicBase}/default" -mindepth 1 -maxdepth 1 -type f | sort)
+
+    while IFS= read -r staleMd5; do
+        [[ -n "${staleMd5}" ]] || continue
+        rm -f \
+            "${publicBase}/default/${staleMd5}" \
+            "${publicBase}/clashMeta/${staleMd5}" \
+            "${publicBase}/clashMetaProfiles/${staleMd5}" \
+            "${publicBase}/sing-box/${staleMd5}" \
+            "${publicBase}/sing-box_profiles/${staleMd5}" || return 1
+    done < <(jq -r --argjson existing "${existingMd5s}" --argjson current "${currentMd5s}" '$current - $existing | .[]' <<<"null")
 }
 
 renderSubscribeUserOutputs() {
@@ -1841,7 +1903,7 @@ renderSubscribeUserOutputs() {
     local currentDomain=$3
     local updateRemoteStatus=$4
     local showStatus=$5
-    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath subscribeBackupDir
+    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath subscribeBackupDir clashSourcePath clashContentPath
     local commitFailed=false
     local tmpBase="${TMPDIR:-/tmp}"
 
@@ -1857,7 +1919,14 @@ renderSubscribeUserOutputs() {
     singBoxProfilePath="${stageDir}/sing-box_profiles/${emailMd5}"
     singBoxPath="${stageDir}/sing-box/${emailMd5}"
 
-    if ! cp "${localBase}/default/${email}" "${defaultPath}"; then
+    if [[ -f "${localBase}/default/${email}" ]]; then
+        if ! cp "${localBase}/default/${email}" "${defaultPath}"; then
+            padmRemoveCleanupPath "${stageDir}"
+            return 1
+        fi
+    elif [[ "${updateRemoteStatus}" == "y" ]]; then
+        : >"${defaultPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    else
         padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
@@ -1867,17 +1936,31 @@ renderSubscribeUserOutputs() {
             return 1
         fi
     fi
+    if [[ ! -s "${defaultPath}" ]]; then
+        padmRemoveCleanupPath "${stageDir}"
+        return 1
+    fi
     if ! base64Result=$(base64 -w 0 "${defaultPath}"); then
         padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
     printf '%s\n' "${base64Result}" >"${defaultPath}"
 
-    if [[ -f "${localBase}/clashMeta/${email}" ]]; then
+    clashSourcePath="${localBase}/clashMeta/${email}"
+    if [[ ! -f "${clashSourcePath}" && -s "${clashPath}" ]]; then
+        clashSourcePath="${clashPath}"
+    fi
+    if [[ -f "${clashSourcePath}" ]]; then
+        clashContentPath="${clashSourcePath}"
+        if [[ "${clashSourcePath}" == "${clashPath}" ]]; then
+            padmCreateTempFileForTarget clashContentPath "${clashPath}" clash || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+            cp "${clashPath}" "${clashContentPath}" || { padmRemoveCleanupPath "${clashContentPath}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+        fi
         {
             printf 'proxies:\n'
-            cat "${localBase}/clashMeta/${email}"
+            cat "${clashContentPath}"
         } >"${clashPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+        [[ "${clashContentPath}" != "${clashSourcePath}" ]] && padmRemoveCleanupPath "${clashContentPath}"
         clashProxyUrl="${subscribeType}://${currentDomain}/s/clashMeta/${emailMd5}"
         if ! clashMetaConfig "${clashProxyUrl}" "${emailMd5}" "${clashProfilePath}"; then
             padmRemoveCleanupPath "${stageDir}"
@@ -1954,6 +2037,8 @@ subscribe() {
     readNginxSubscribe
     local renewSalt=$1
     local showStatus=$2
+    local publishAccountsOverride=${3:-}
+    local skipCleanup=${4:-}
     if [[ "${coreInstallType}" == "1" || "${coreInstallType}" == "2" ]]; then
 
         echoContent title "\n┌─ 订阅生成说明 ─────────────────────────────────────"
@@ -1991,7 +2076,7 @@ subscribe() {
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}"
             return 1
         fi
-        if ! renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}"; then
+        if ! renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" "${publishAccountsOverride}" "${skipCleanup}"; then
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：生成订阅输出失败" "${previousSubscribeSalt}"
             return 1
         fi

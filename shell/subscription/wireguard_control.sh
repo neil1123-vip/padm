@@ -360,6 +360,23 @@ refreshSubscriptionWireGuardNginxControl() {
     ensureSubscriptionWireGuardNginx && ensureSubscriptionWireGuardNginxConfig && serviceQueueRestart nginx
 }
 
+subscriptionWireGuardWaitForAddress() {
+    local address=$1
+    local host
+    local attempts=${2:-20}
+    local delay=${3:-0.2}
+    local tryIndex
+    host=$(subscriptionWireGuardAddressHost "${address}")
+    [[ -n "${host}" ]] || return 1
+    for ((tryIndex = 0; tryIndex < attempts; tryIndex++)); do
+        if ip -4 addr show 2>/dev/null | grep -qE "[[:space:]]${host}/"; then
+            return 0
+        fi
+        sleep "${delay}"
+    done
+    return 1
+}
+
 stopSubscriptionWireGuardControlService() {
     local allowMissingBackend=${1:-false}
     if command -v systemctl >/dev/null 2>&1; then
@@ -559,6 +576,11 @@ initSubscriptionWireGuardControlled() {
         errorCard "WireGuard 被控服务启动失败"
         return 1
     }
+    subscriptionWireGuardWaitForAddress "${address}" || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控地址就绪失败" || return 1
+        errorCard "WireGuard 被控地址就绪失败"
+        return 1
+    }
     installSubscriptionControlService || {
         subscriptionWireGuardRestoreStateOrReport "${previousState}" "被控控制服务安装失败" || return 1
         errorCard "被控控制服务安装失败"
@@ -729,6 +751,54 @@ subscriptionWireGuardAddPeerFromCredential() {
     fi
     if ! setSubscriptionSourceCredential "${alias}" "${host}" "${controlPort}" "${token}"; then
         subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源凭据写入失败" || return 1
+        return 1
+    fi
+}
+
+subscriptionWireGuardUpdatePeerFromCredential() {
+    local id=$1
+    local credentialJson=$2
+    local address
+    local publicKey
+    [[ -n "${id}" ]] || return 1
+    [[ "$(jq -r '.kind' <<<"${credentialJson}")" == "controlled" ]] || return 1
+    subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || return 1
+    address=$(jq -r '.address' <<<"${credentialJson}")
+    publicKey=$(jq -r '.public_key' <<<"${credentialJson}")
+    subscriptionWireGuardWriteState \
+      --arg id "${id}" \
+      --arg address "${address}" \
+      --arg publicKey "${publicKey}" \
+      'if any(.peers[]?; .id == $id) then
+         .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end)
+       else
+         .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, enabled:true}]
+       end'
+}
+
+subscriptionWireGuardRemovePeerAndSource() {
+    local id=$1
+    local previousState
+    local previousGroupsState
+    [[ -n "${id}" ]] || return 1
+    if [[ "$(subscriptionWireGuardRole)" != "main" ]]; then
+        errorCard "只有主控可以移除被控服务器" "第一版只支持一台主控管理多台被控"
+        return 1
+    fi
+    previousState=$(subscriptionWireGuardReadState) || return 1
+    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
+        errorCard "订阅组状态读取失败"
+        return 1
+    }
+    subscriptionWireGuardWriteState \
+      --arg id "${id}" \
+      '.peers = ([.peers[]? | select(.id != $id)])' || return 1
+    if ! applySubscriptionWireGuardService; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "WireGuard 被控服务器移除失败" || return 1
+        return 1
+    fi
+    if ! removeSubscriptionSourceState "${id}"; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器状态移除失败" || return 1
         return 1
     fi
 }

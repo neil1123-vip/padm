@@ -8,6 +8,66 @@ subscribePublicBaseDir() {
     printf '%s' "${PADM_SUBSCRIBE_DIR:-/etc/padm/subscribe}"
 }
 
+subscriptionRemoteSubscribeSourcesForAccount() {
+    local email=$1
+    local groupId
+    local userJson
+    local allowedSources
+    groupId=$(activeSubscriptionGroupId)
+    userJson=$(subscriptionSyncFindUserByAccountName "${email}" "${groupId}" 2>/dev/null) || return 0
+    [[ -n "${userJson}" ]] || return 0
+    if ! jq -e '.enabled == true' <<<"${userJson}" >/dev/null 2>&1; then
+        return 0
+    fi
+    allowedSources=$(jq -c '.allowed_sources // []' <<<"${userJson}") || return 1
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" --argjson allowed "${allowedSources}" '
+      .groups[] | select(.id == $groupId) as $group |
+      if ($allowed | length) == 0 then
+        empty
+      elif ($allowed | index("*")) then
+        $group.sources[]? | select(.role != "main" and .enabled == true) | "\(.host):\(.port):\(.id):\(.scheme)"
+      else
+        $group.sources[]? | select(.role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid))) | "\(.host):\(.port):\(.id):\(.scheme)"
+      end'
+}
+
+subscriptionPublishHasRemoteSources() {
+    local accounts=$1
+    local account
+    while IFS= read -r account; do
+        [[ -n "${account}" ]] || continue
+        if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
+            return 0
+        fi
+    done <<<"${accounts}"
+    [[ -n "$(listRemoteSubscribeSources 2>/dev/null)" ]]
+}
+
+subscriptionMainPublishSourceAvailable() {
+    local groupId
+    groupId=$(activeSubscriptionGroupId)
+    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '
+      .groups[] | select(.id == $groupId) |
+      any(.sources[]?; .id == "main" and ((.enabled // true) == true))
+    ' >/dev/null 2>&1
+}
+
+subscriptionAccountHasPublishSource() {
+    local accountName=$1
+    local groupId
+    local userJson
+    groupId=$(activeSubscriptionGroupId)
+    userJson=$(subscriptionSyncFindUserByAccountName "${accountName}" "${groupId}" 2>/dev/null) || return 1
+    [[ -n "${userJson}" ]] || return 1
+    jq -e '.enabled == true' <<<"${userJson}" >/dev/null 2>&1 || return 1
+    if jq -e '((.allowed_sources // []) | index("*") or index("main"))' <<<"${userJson}" >/dev/null 2>&1; then
+        if subscriptionMainPublishSourceAvailable; then
+            return 0
+        fi
+    fi
+    [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${accountName}" 2>/dev/null)" ]]
+}
+
 ensureSubscriptionControlNginxLocation() {
     return 1
 }
@@ -199,6 +259,22 @@ fetchRemoteSubscribeContent() {
     curl -fsSL --connect-timeout 5 --max-time 15 "${url}" 2>/dev/null
 }
 
+fetchRemoteControlledSubscribePayload() {
+    local source=$1
+    local account=$2
+    local token
+    local url
+    local payload
+    token=$(subscriptionRemoteControlToken "${source}") || return 1
+    [[ -n "${token}" ]] || return 1
+    url=$(subscriptionRemoteControlUrl "${source}" subscribe) || return 1
+    payload=$(jq -nc --arg account "${account}" '{account:$account}') || return 1
+    curl -sS --connect-timeout 5 --max-time 30 \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${token}" \
+        -X POST --data "${payload}" "${url}" 2>/dev/null
+}
+
 appendUniqueLines() {
     local content=$1
     local targetPath=$2
@@ -244,6 +320,8 @@ updateRemoteSubscribe() {
     local emailMD5=$1
     local email=$2
     local line=
+    local source=
+    local sourceLines=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget
     local tmpBase="${TMPDIR:-/tmp}"
 
@@ -259,6 +337,11 @@ updateRemoteSubscribe() {
     [[ -f "${publicBase}/clashMeta/${emailMD5}" ]] && cp "${publicBase}/clashMeta/${emailMD5}" "${clashTarget}" || : >"${clashTarget}"
     [[ -f "${localBase}/sing-box/${email}" ]] && cp "${localBase}/sing-box/${email}" "${singBoxTarget}" || printf '[]\n' >"${singBoxTarget}"
 
+    sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount "${email}" 2>/dev/null) || sourceLines=
+    if [[ -z "${sourceLines}" ]]; then
+        sourceLines=$(listRemoteSubscribeSources)
+    fi
+
     while IFS= read -r line; do
         if [[ -z "${line}" ]]; then
             continue
@@ -269,6 +352,7 @@ updateRemoteSubscribe() {
         local clashMetaProxies=
         local default=
         local singBoxSubscribe=
+        local controlledResponse=
         local clashFile="${tmpDir}/clash"
         local defaultFile="${tmpDir}/default"
         local singBoxFile="${tmpDir}/sing-box"
@@ -276,13 +360,26 @@ updateRemoteSubscribe() {
 
         IFS=':' read -r remoteHost remotePort serverAlias subscribeType <<<"${line}"
         remoteUrl="${remoteHost}:${remotePort}"
-
-        fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/clashMeta/${emailMD5}" >"${clashFile}" & clashPid=$!
-        fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/default/${emailMD5}" >"${defaultFile}" & defaultPid=$!
-        fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/sing-box_profiles/${emailMD5}" >"${singBoxFile}" & singBoxPid=$!
-        wait "${clashPid}" 2>/dev/null || true
-        wait "${defaultPid}" 2>/dev/null || true
-        wait "${singBoxPid}" 2>/dev/null || true
+        source=$(subscriptionGroupsStateRead -c --arg groupId "$(activeSubscriptionGroupId)" --arg id "${serverAlias}" '.groups[] | select(.id == $groupId) | .sources[]? | select(.id == $id)' 2>/dev/null) || source=
+        if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
+            controlledResponse=$(fetchRemoteControlledSubscribePayload "${source}" "${email}" 2>/dev/null || true)
+            if [[ -n "${controlledResponse}" ]] && jq -e '.ok == true' <<<"${controlledResponse}" >/dev/null 2>&1; then
+                jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}"
+                jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}"
+                jq -c '.sing_box // []' <<<"${controlledResponse}" >"${singBoxFile}"
+            else
+                : >"${clashFile}"
+                : >"${defaultFile}"
+                printf '[]\n' >"${singBoxFile}"
+            fi
+        else
+            fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/clashMeta/${emailMD5}" >"${clashFile}" & clashPid=$!
+            fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/default/${emailMD5}" >"${defaultFile}" & defaultPid=$!
+            fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/sing-box_profiles/${emailMD5}" >"${singBoxFile}" & singBoxPid=$!
+            wait "${clashPid}" 2>/dev/null || true
+            wait "${defaultPid}" 2>/dev/null || true
+            wait "${singBoxPid}" 2>/dev/null || true
+        fi
 
         clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed "s/\"${email}/\"${email}_${serverAlias}/g")
         if [[ -n "${clashMetaProxies}" && "${clashMetaProxies}" != *nginx* ]]; then
@@ -330,7 +427,7 @@ updateRemoteSubscribe() {
             errorCard "sing-box订阅 ${remoteUrl}:${email} 拉取失败或不存在"
         fi
         rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
-    done < <(listRemoteSubscribeSources)
+    done <<<"${sourceLines}"
 
     mkdir -p "${publicBase}/default" "${publicBase}/clashMeta" "${localBase}/sing-box" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     commitGeneratedFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" 644 || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }

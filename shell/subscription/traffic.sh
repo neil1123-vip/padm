@@ -255,12 +255,17 @@ collectLocalTrafficSnapshot() {
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local groupId
+    local userMap
     if ! jq -e '.ok == true' <<<"${snapshot}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
     groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson snapshot "${snapshot}" '
+    userMap=$(subscriptionGroupsStateRead -c --arg groupId "${groupId}" '
+      .groups[] | select(.id == $groupId) |
+      reduce (.user_groups[]?) as $user ({}; .[("sub_" + ($user.id | gsub("-"; "_")))] = $user.id)
+    ') || return 1
+    subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson snapshot "${snapshot}" --argjson userMap "${userMap}" '
       def addTraffic($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
@@ -275,7 +280,7 @@ writeSubscriptionTrafficSnapshot() {
         {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
       .groups |= map(if .id == $groupId then
         . as $group |
-        ($snapshot.items | map(. + {id: ((.account | sub("^sub_"; "") | gsub("_"; "-")))})) as $items |
+        ($snapshot.items | map(. + {id: ($userMap[.account] // (.account | sub("^sub_"; "")))})) as $items |
         ($items | map(select(.account | startswith("sub_")))) as $userItems |
         ($items | map(select((.account | startswith("sub_")) | not))) as $adminItems |
         (sourceTotal($group.traffic.sources.main; $items)) as $mainTraffic |

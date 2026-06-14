@@ -7,6 +7,28 @@ subscriptionSyncAccountName() {
     echo "sub_${id}"
 }
 
+subscriptionSyncFindUserByAccountName() {
+    local accountName=$1
+    local groupId=${2:-$(activeSubscriptionGroupId)}
+    subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg accountName "${accountName}" '
+      .groups[] | select(.id == $groupId) |
+      .user_groups[]? |
+      select((("sub_" + (.id | gsub("-"; "_")))) == $accountName)
+    '
+}
+
+subscriptionSyncAccountId() {
+    local accountName=$1
+    local userJson
+    userJson=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 1
+    if [[ -n "${userJson}" ]]; then
+        jq -r '.id' <<<"${userJson}"
+        return 0
+    fi
+    accountName=${accountName#sub_}
+    echo "${accountName//_/-}"
+}
+
 subscriptionSyncGenerateUUID() {
     if [[ "${coreInstallType}" == "1" && -x "${ctlPath}" ]]; then
         ${ctlPath} uuid
@@ -204,26 +226,13 @@ subscriptionSyncAppendLocalUser() {
     return "${rc}"
 }
 
-subscriptionSyncAccountId() {
-    local accountName=$1
-    accountName=${accountName#sub_}
-    echo "${accountName//_/-}"
-}
-
-subscriptionSyncFindUserByAccountName() {
-    local accountName=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" --arg accountName "${accountName}" '
-      .groups[] | select(.id == $groupId) |
-      .user_groups[]? |
-      select(("sub_" + (.id | gsub("-"; "_"))) == $accountName) |
-      .id // empty' | head -n 1
-}
-
 subscriptionSyncAppendLocalAccount() {
     local accountName=$1
-    subscriptionSyncAppendLocalUser "$(subscriptionSyncAccountId "${accountName}")"
+    local accountId
+    if ! accountId=$(subscriptionSyncAccountId "${accountName}"); then
+        return 1
+    fi
+    subscriptionSyncAppendLocalUser "${accountId}"
 }
 
 subscriptionSyncValidateAccountPlan() {

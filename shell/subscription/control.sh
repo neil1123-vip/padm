@@ -42,7 +42,105 @@ subscriptionRemoteSourceSelfReference() {
     [[ -n "${selfHost}" && "${sourceHost}" == "${selfHost}" ]]
 }
 
-subscriptionRemoteControlRequest() {
+subscriptionRemoteSourceUsesWireGuard() {
+    local source=$1
+    jq -e '(.transport // .scheme // "") == "wireguard"' <<<"${source}" >/dev/null 2>&1
+}
+
+subscriptionRemoteControlWarmup() {
+    local source=$1
+    local attempts=${2:-${PADM_REMOTE_CONTROL_WARMUP_RETRIES:-12}}
+    local delay=${3:-${PADM_REMOTE_CONTROL_WARMUP_DELAY:-5}}
+    local result
+    local tryIndex
+    subscriptionRemoteSourceUsesWireGuard "${source}" || return 0
+    for ((tryIndex = 0; tryIndex < attempts; tryIndex++)); do
+        result=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null || true)
+        if [[ -n "${result}" ]] && jq -e '.ok == true' <<<"${result}" >/dev/null 2>&1; then
+            return 0
+        fi
+        if ((tryIndex + 1 < attempts)); then
+            sleep "${delay}"
+        fi
+    done
+    return 1
+}
+
+subscriptionRemoteWireGuardPeerPublicKeyFromSource() {
+    local source=$1
+    local sourceId
+    sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
+    [[ -n "${sourceId}" ]] || return 1
+    subscriptionWireGuardReadState | jq -r --arg id "${sourceId}" '.peers[]? | select(.id == $id) | .public_key // empty' | head -n 1
+}
+
+subscriptionRemoteWireGuardPeerEndpoint() {
+    local publicKey=$1
+    local interface
+    [[ -n "${publicKey}" ]] || return 1
+    command -v wg >/dev/null 2>&1 || return 1
+    interface=$(subscriptionWireGuardInterface 2>/dev/null) || return 1
+    [[ -n "${interface}" ]] || return 1
+    wg show "${interface}" endpoints 2>/dev/null | awk -v publicKey="${publicKey}" '$1 == publicKey { print $2; exit }'
+}
+
+subscriptionRemoteWireGuardPeerLatestHandshake() {
+    local publicKey=$1
+    local interface
+    [[ -n "${publicKey}" ]] || return 1
+    command -v wg >/dev/null 2>&1 || return 1
+    interface=$(subscriptionWireGuardInterface 2>/dev/null) || return 1
+    [[ -n "${interface}" ]] || return 1
+    wg show "${interface}" latest-handshakes 2>/dev/null | awk -v publicKey="${publicKey}" '$1 == publicKey { print $2; exit }'
+}
+
+subscriptionRemoteWireGuardPeerReadyState() {
+    local endpoint=$1
+    local baselineEndpoint=$2
+    local handshake=$3
+    local baselineHandshake=$4
+    [[ -n "${endpoint}" && "${endpoint}" != "(none)" ]] || return 1
+    if [[ -z "${baselineEndpoint}" || "${baselineEndpoint}" == "(none)" ]]; then
+        return 0
+    fi
+    if [[ "${endpoint}" != "${baselineEndpoint}" ]]; then
+        return 0
+    fi
+    [[ "${handshake}" =~ ^[0-9]+$ ]] || return 1
+    [[ "${baselineHandshake}" =~ ^[0-9]+$ ]] || baselineHandshake=0
+    ((handshake > baselineHandshake))
+}
+
+subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
+    local source=$1
+    local attempts=${2:-${PADM_REMOTE_WG_ENDPOINT_RETRIES:-120}}
+    local delay=${3:-${PADM_REMOTE_WG_ENDPOINT_DELAY:-0.25}}
+    local baselineEndpoint=${4:-}
+    local baselineHandshake=${5:-0}
+    local publicKey
+    local endpoint=
+    local handshake=0
+    local tryIndex
+    subscriptionRemoteSourceUsesWireGuard "${source}" || return 0
+    publicKey=$(subscriptionRemoteWireGuardPeerPublicKeyFromSource "${source}" 2>/dev/null || true)
+    [[ -n "${publicKey}" ]] || return 0
+    endpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
+    handshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
+    if subscriptionRemoteWireGuardPeerReadyState "${endpoint}" "${baselineEndpoint}" "${handshake}" "${baselineHandshake}"; then
+        return 0
+    fi
+    for ((tryIndex = 0; tryIndex < attempts; tryIndex++)); do
+        endpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
+        handshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
+        if subscriptionRemoteWireGuardPeerReadyState "${endpoint}" "${baselineEndpoint}" "${handshake}" "${baselineHandshake}"; then
+            return 0
+        fi
+        sleep "${delay}"
+    done
+    return 1
+}
+
+subscriptionRemoteControlCurlOnce() {
     local source=$1
     local endpoint=$2
     local payload=$3
@@ -50,14 +148,10 @@ subscriptionRemoteControlRequest() {
     local url
     local maxTime
     local response
-    local statusCode
-    local body
     token=$(subscriptionRemoteControlToken "${source}")
-    if [[ -z "${token}" ]]; then
-        return 2
-    fi
+    [[ -n "${token}" ]] || return 2
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}")
-    if [[ "${endpoint}" == "sync" ]]; then
+    if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
         maxTime=180
     else
         maxTime=15
@@ -66,6 +160,34 @@ subscriptionRemoteControlRequest() {
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer ${token}" \
         -X POST --data "${payload}" -w '\n%{http_code}' "${url}") || return 1
+    printf '%s\n' "${response}"
+}
+
+subscriptionRemoteControlRequest() {
+    local source=$1
+    local endpoint=$2
+    local payload=$3
+    local publicKey=
+    local baselineEndpoint=
+    local baselineHandshake=0
+    local response
+    local statusCode
+    local body
+    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
+        publicKey=$(subscriptionRemoteWireGuardPeerPublicKeyFromSource "${source}" 2>/dev/null || true)
+        if [[ -n "${publicKey}" ]]; then
+            baselineEndpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
+            baselineHandshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
+        fi
+    fi
+    if ! response=$(subscriptionRemoteControlCurlOnce "${source}" "${endpoint}" "${payload}" 2>/dev/null); then
+        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
+            subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+            response=$(subscriptionRemoteControlCurlOnce "${source}" "${endpoint}" "${payload}" 2>/dev/null) || return 1
+        else
+            return 1
+        fi
+    fi
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
     if ! body=$(jq -c . <<<"${body}" 2>/dev/null); then
@@ -110,6 +232,9 @@ subscriptionRemoteControlHealth() {
     local source=$1
     local token
     local url
+    local publicKey=
+    local baselineEndpoint=
+    local baselineHandshake=0
     local response
     local statusCode
     local body
@@ -119,10 +244,25 @@ subscriptionRemoteControlHealth() {
         jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
         return 0
     fi
+    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
+        publicKey=$(subscriptionRemoteWireGuardPeerPublicKeyFromSource "${source}" 2>/dev/null || true)
+        if [[ -n "${publicKey}" ]]; then
+            baselineEndpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
+            baselineHandshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
+        fi
+    fi
     url=$(subscriptionRemoteControlUrl "${source}" health)
     response=$(curl -sS --connect-timeout 5 --max-time 15 -H "Authorization: Bearer ${token}" -w '\n%{http_code}' "${url}" 2>/dev/null) || {
-        jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
-        return 0
+        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
+            subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+            response=$(curl -sS --connect-timeout 5 --max-time 15 -H "Authorization: Bearer ${token}" -w '\n%{http_code}' "${url}" 2>/dev/null) || {
+                jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
+                return 0
+            }
+        else
+            jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
+            return 0
+        fi
     }
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
@@ -298,6 +438,9 @@ runSubscriptionRemoteSync() {
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 未配置控制 token"]' <<<"${failures}")
             continue
         fi
+        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
+            subscriptionRemoteControlWarmup "${source}" >/dev/null 2>&1 || true
+        fi
         payload=$(subscriptionRemoteControlPayload "${source}" false)
         if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
             if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
@@ -346,6 +489,10 @@ writeSubscriptionControlServer() {
     scriptPath=$(subscriptionGroupSyncInstallScript)
     scriptVersion=$(getScriptVersion)
     tokenFile=$(subscriptionControlTokenFile)
+    if command -v cygpath >/dev/null 2>&1; then
+        scriptPath=$(cygpath -m "${scriptPath}")
+        tokenFile=$(cygpath -m "${tokenFile}")
+    fi
     padmCreateTempFileForTarget tmpFile "${serverScript}" control-server || return 1
     cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/usr/bin/env python3
@@ -358,7 +505,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 SCRIPT_PATH = "${scriptPath}"
 TOKEN_FILE = "${tokenFile}"
 VERSION = "${scriptVersion}"
-CAPABILITIES = ["health", "sync"]
+CAPABILITIES = ["health", "sync", "subscribe"]
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
 try:
@@ -378,8 +525,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(data)
-        except (BrokenPipeError, ConnectionResetError):
-            return
+        except BrokenPipeError:
+            pass
 
     def token(self):
         auth = self.headers.get("Authorization", "")
@@ -393,6 +540,10 @@ class Handler(BaseHTTPRequestHandler):
                 return handle.read().strip()
         except OSError:
             return ""
+
+    def authorized(self):
+        expected = self.expected_token()
+        return bool(expected) and self.token() == expected
 
     def endpoint(self):
         prefix = "/s/control/"
@@ -442,13 +593,13 @@ class Handler(BaseHTTPRequestHandler):
         error = body.get("error", "")
         if error == "unauthorized":
             return 401
-        if endpoint == "sync" and error in ("invalid_payload", "empty_payload"):
+        if endpoint in ("sync", "subscribe") and error in ("invalid_payload", "empty_payload"):
             return 400
         if endpoint == "health":
             return 503
         if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):
             return 503
-        if endpoint == "sync":
+        if endpoint in ("sync", "subscribe"):
             return 503
         return 500
 
@@ -472,16 +623,18 @@ class Handler(BaseHTTPRequestHandler):
         if endpoint != "health":
             self.respond(404, {"ok": False, "error": "not_found"})
             return
-        expected_token = self.expected_token()
-        if not expected_token or self.token() != expected_token:
+        if not self.authorized():
             self.respond(401, {"ok": False, "error": "unauthorized", "error_detail": {"type": "unauthorized", "message": "控制 token 验证失败"}})
             return
         self.respond(200, {"ok": True, "version": VERSION, "capabilities": CAPABILITIES})
 
     def do_POST(self):
         endpoint = self.endpoint()
-        if endpoint != "sync":
+        if endpoint not in ("sync", "subscribe"):
             self.respond(404, {"ok": False, "error": "not_found"})
+            return
+        if not self.authorized():
+            self.respond(401, {"ok": False, "error": "unauthorized", "error_detail": {"type": "unauthorized", "message": "控制 token 验证失败"}})
             return
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length > MAX_BODY_SIZE:
@@ -860,6 +1013,15 @@ subscriptionControlRestoreAppliedPlan() {
 }
 
 subscriptionControlRefreshPublishedSubscriptions() {
+    local role
+    subscribePort=
+    subscribeType=
+    subscribeDomain=
+    readNginxSubscribe
+    role=$(subscriptionWireGuardRole 2>/dev/null || printf 'uninitialized')
+    if [[ "${role}" == "controlled" && -z "${subscribePort:-}" ]]; then
+        return 0
+    fi
     subscribe false false >/dev/null 2>&1
 }
 
@@ -972,7 +1134,7 @@ handleSubscriptionControl() {
         return 1
     fi
     if [[ "${endpoint}" == "health" ]]; then
-        jq -n --arg version "$(getScriptVersion)" '{ok:true, version:$version, capabilities:["health","sync"]}'
+        jq -n --arg version "$(getScriptVersion)" '{ok:true, version:$version, capabilities:["health","sync","subscribe"]}'
     elif [[ "${endpoint}" == "sync" ]]; then
         if [[ -z "${payload}" ]]; then
             payload=$(cat)
@@ -982,8 +1144,112 @@ handleSubscriptionControl() {
             return 1
         fi
         subscriptionControlApplySync "${payload}"
+    elif [[ "${endpoint}" == "subscribe" ]]; then
+        if [[ -z "${payload}" ]]; then
+            payload=$(cat)
+        fi
+        if [[ -z "${payload}" ]]; then
+            jq -n '{ok:false, error:"empty_payload", error_detail:{type:"empty_payload", message:"订阅请求体为空"}}'
+            return 1
+        fi
+        subscriptionControlRenderSubscribe "${payload}"
     else
         jq -n '{ok:false, error:"unknown_endpoint", error_detail:{type:"unknown_endpoint", message:"未知控制端点"}}'
         return 1
     fi
+}
+
+subscriptionControlValidateSubscribePayload() {
+    local payload=$1
+    jq -e '
+      def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
+      type == "object" and (.account? | valid_id)
+    ' <<<"${payload}" >/dev/null 2>&1
+}
+
+subscriptionControlRenderSubscribeAccount() {
+    local account=$1
+    local oldLocalDir=${PADM_SUBSCRIBE_LOCAL_DIR:-}
+    local oldPublicDir=${PADM_SUBSCRIBE_DIR:-}
+    local subscribeRoot=
+    local localBase=
+    local defaultFile=
+    local clashFile=
+    local singBoxFile=
+    local defaultContent=
+    local clashContent=
+    local singBoxContent='[]'
+    local tmpBase="${TMPDIR:-/tmp}"
+
+    [[ -n "${account}" ]] || return 1
+    padmCreateTempPath subscribeRoot -d "${tmpBase%/}/padm-control-subscribe.XXXXXX" || return 1
+    export PADM_SUBSCRIBE_LOCAL_DIR="${subscribeRoot}/subscribe_local"
+    export PADM_SUBSCRIBE_DIR="${subscribeRoot}/subscribe"
+    mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box" || {
+        padmRemoveCleanupPath "${subscribeRoot}"
+        return 1
+    }
+    if ! showAccounts >/dev/null 2>&1; then
+        padmRemoveCleanupPath "${subscribeRoot}"
+        if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+        if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+        return 1
+    fi
+
+    localBase=$(subscribeLocalBaseDir)
+    defaultFile="${localBase}/default/${account}"
+    clashFile="${localBase}/clashMeta/${account}"
+    singBoxFile="${localBase}/sing-box/${account}"
+
+    if [[ ! -f "${defaultFile}" && ! -f "${clashFile}" && ! -f "${singBoxFile}" ]]; then
+        padmRemoveCleanupPath "${subscribeRoot}"
+        if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+        if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+        jq -n --arg account "${account}" '{ok:false, error:"not_found", error_detail:{type:"not_found", message:"远端账号订阅输出不存在"}, account:$account}'
+        return 1
+    fi
+
+    if [[ -f "${defaultFile}" ]]; then
+        defaultContent=$(base64 <"${defaultFile}" | tr -d '\n') || {
+            padmRemoveCleanupPath "${subscribeRoot}"
+            if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+            if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+            jq -n --arg account "${account}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端默认订阅输出编码失败"}, account:$account}'
+            return 1
+        }
+    fi
+    [[ -f "${clashFile}" ]] && clashContent=$(<"${clashFile}")
+    if [[ -f "${singBoxFile}" ]]; then
+        singBoxContent=$(jq -c . "${singBoxFile}" 2>/dev/null) || {
+            padmRemoveCleanupPath "${subscribeRoot}"
+            if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+            if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+            jq -n --arg account "${account}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端 sing-box 订阅输出损坏"}, account:$account}'
+            return 1
+        }
+    fi
+
+    padmRemoveCleanupPath "${subscribeRoot}"
+    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+    jq -n \
+        --arg account "${account}" \
+        --arg default "${defaultContent}" \
+        --arg clashMeta "${clashContent}" \
+        --argjson singBox "${singBoxContent}" \
+        '{ok:true, account:$account, default:$default, clash_meta:$clashMeta, sing_box:$singBox}'
+}
+
+subscriptionControlRenderSubscribe() {
+    local payload=$1
+    local account=
+    if ! subscriptionControlValidateSubscribePayload "${payload}"; then
+        jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
+        return 1
+    fi
+    account=$(jq -r '.account' <<<"${payload}") || {
+        jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
+        return 1
+    }
+    subscriptionControlRenderSubscribeAccount "${account}"
 }

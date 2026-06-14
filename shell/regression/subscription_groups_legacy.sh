@@ -5435,6 +5435,23 @@ runSubscribeUserOutputTransactionRegression() {
     [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
 
     writeOldSubscribeOutputs
+    rm -f "${localDir}/default/${email}" "${localDir}/clashMeta/${email}" "${localDir}/sing-box/${email}"
+    (
+        updateRemoteSubscribe() {
+            mkdir -p "${PADM_SUBSCRIBE_DIR}/default" "${PADM_SUBSCRIBE_DIR}/clashMeta" "${localDir}/sing-box"
+            printf 'vless://remote-node#atomic-user_remote\n' >"${PADM_SUBSCRIBE_DIR}/default/${emailMd5}"
+            printf '  - name: atomic-user_remote\n    type: vless\n' >"${PADM_SUBSCRIBE_DIR}/clashMeta/${emailMd5}"
+            printf '[{"tag":"atomic-user_remote","type":"direct"}]\n' >"${localDir}/sing-box/${email}"
+            return 0
+        }
+        renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" y true
+    )
+    [[ "$(base64 -d <"${publicDir}/default/${emailMd5}")" == "vless://remote-node#atomic-user_remote" ]]
+    grep -q 'atomic-user_remote' "${publicDir}/clashMeta/${emailMd5}"
+    jq -e '.outbounds[] | select(.tag == "atomic-user_remote")' "${publicDir}/sing-box/${emailMd5}" >/dev/null
+    jq -e '.[0].tag == "atomic-user_remote"' "${publicDir}/sing-box_profiles/${emailMd5}" >/dev/null
+
+    writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
     (
         commitSubscribeUserOutputFile() {
@@ -9535,19 +9552,27 @@ if [[ "${PADM_CONTROL_TOKEN:-}" != "${PADM_FAKE_SERVER_TOKEN:-}" ]]; then
     printf '{"ok":false,"error":"unauthorized","error_detail":{"type":"unauthorized","message":"控制 token 验证失败"}}\n'
     exit 1
 fi
-if [[ "${endpoint}" == "sync" ]]; then
-    payload=$(cat)
-    if [[ -z "${payload}" ]]; then
-        printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
-        exit 1
-    fi
-    if ! jq -e . >/dev/null 2>&1 <<<"${payload}"; then
-        printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
-        exit 1
-    fi
-fi
-case "${endpoint}:${mode}" in
-health:*)
+        if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
+            payload=$(cat)
+            if [[ -z "${payload}" ]]; then
+                if [[ "${endpoint}" == "sync" ]]; then
+                    printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
+                else
+                    printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"订阅请求体为空"}}\n'
+                fi
+                exit 1
+            fi
+            if ! jq -e . >/dev/null 2>&1 <<<"${payload}"; then
+                if [[ "${endpoint}" == "sync" ]]; then
+                    printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
+                else
+                    printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"订阅请求体格式不正确"}}\n'
+                fi
+                exit 1
+            fi
+        fi
+        case "${endpoint}:${mode}" in
+        health:*)
     printf '{"ok":false,"error":"health_should_not_execute"}\n'
     exit 9
     ;;
@@ -9566,15 +9591,23 @@ sync:timeout)
     /bin/sleep 2
     printf '{"ok":true}\n'
     ;;
-sync:invalid)
-    printf 'ui noise only\n'
-    exit 0
-    ;;
-*)
-    printf '{"ok":false,"error":"unexpected"}\n'
-    exit 1
-    ;;
-esac
+        sync:invalid)
+            printf 'ui noise only\n'
+            exit 0
+            ;;
+        subscribe:noise)
+            printf 'ui noise before subscribe\n'
+            printf '{"ok":false,"error":"first_json"}\n'
+            printf 'ui noise between json\n'
+            cat <<'JSON'
+{"ok":true,"default":"dmxlc3M6Ly91dWlkQGV4YW1wbGUuY29tOjQ0MyN0ZWFtLWE=","clash_meta":"proxies:\n- name: team-a\n","sing_box":[{"tag":"team-a"}]}
+JSON
+            ;;
+        *)
+            printf '{"ok":false,"error":"unexpected"}\n'
+            exit 1
+            ;;
+        esac
 SH
     chmod +x "${fakeInstall}"
 
@@ -9646,7 +9679,7 @@ PY
     status=$(sed -n '1p' "${responseFile}")
     body=$(sed '1d' "${responseFile}")
     [[ "${status}" == "200" ]]
-    jq -e '.ok == true and .version == "test"' <<<"${body}" >/dev/null
+    jq -e '.ok == true and .version == "test" and .capabilities == ["health","sync","subscribe"]' <<<"${body}" >/dev/null
 
     printf 'noise\n' >"${modeFile}"
     controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
@@ -9654,6 +9687,12 @@ PY
     body=$(sed '1d' "${responseFile}")
     [[ "${status}" == "200" ]]
     jq -e '.ok == true and .changed == true and (.plan.create | length) == 0' <<<"${body}" >/dev/null
+
+    controlServerRequest POST subscribe '{"account":"team_a"}' >"${responseFile}"
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "200" ]]
+    jq -e '.ok == true and (.default | @base64d) == "vless://uuid@example.com:443#team-a" and (.clash_meta | contains("team-a")) and .sing_box[0].tag == "team-a"' <<<"${body}" >/dev/null
 
     controlServerRequest GET health '' wrong-token >"${responseFile}" || true
     status=$(sed -n '1p' "${responseFile}")
@@ -9668,6 +9707,18 @@ PY
     jq -e '.ok == false and .error == "empty_payload" and .error_detail.type == "empty_payload"' <<<"${body}" >/dev/null
 
     controlServerRequest POST sync 'not-json' >"${responseFile}" || true
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "400" ]]
+    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' <<<"${body}" >/dev/null
+
+    controlServerRequest POST subscribe '' >"${responseFile}" || true
+    status=$(sed -n '1p' "${responseFile}")
+    body=$(sed '1d' "${responseFile}")
+    [[ "${status}" == "400" ]]
+    jq -e '.ok == false and .error == "empty_payload" and .error_detail.type == "empty_payload"' <<<"${body}" >/dev/null
+
+    controlServerRequest POST subscribe 'not-json' >"${responseFile}" || true
     status=$(sed -n '1p' "${responseFile}")
     body=$(sed '1d' "${responseFile}")
     [[ "${status}" == "400" ]]
