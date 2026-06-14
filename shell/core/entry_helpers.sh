@@ -505,7 +505,7 @@ updatePadm() {
         errorCard "新版入口执行失败，旧入口备份不存在"
     fi
     menuLine "$(uiStyle warn "请手动执行下面命令重新更新")"
-    menuLine "$(uiStyle value "wget -P /root -N https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh && chmod 700 /root/install.sh && /root/install.sh")"
+    menuLine "$(uiStyle value "wget -O /root/install.sh https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh && chmod 700 /root/install.sh && /root/install.sh")"
     echo
     return 1
 }
@@ -1035,6 +1035,14 @@ sameInstallPath() {
     [[ "${leftDir}/${leftBase}" == "${rightDir}/${rightBase}" ]]
 }
 
+syncInstallMetadataFile() {
+    local sourcePath=$1
+    local targetPath=$2
+    if [[ -f "${sourcePath}" ]] && ! sameInstallPath "${sourcePath}" "${targetPath}"; then
+        cp "${sourcePath}" "${targetPath}"
+    fi
+}
+
 # 脚本快捷方式
 aliasInstall() {
     local sourceInstall="${SCRIPT_DIR}/install.sh"
@@ -1060,6 +1068,9 @@ aliasInstall() {
             rm -rf "${targetDir}/assets"
             cp -R "${SCRIPT_DIR}/assets" "${targetDir}/"
         fi
+        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-module-manifest" "${targetDir}/.padm-module-manifest"
+        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref"
+        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref"
         rm -f "${targetDir}/xray/README.md"
         local shortcutCreated=
         if [[ -d "/usr/bin/" ]]; then

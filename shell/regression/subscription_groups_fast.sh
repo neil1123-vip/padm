@@ -6,7 +6,7 @@ REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 
 regressionModuleManifestReady() {
-    [[ "${PADM_FAKE_MODULE_MANIFEST_READY:-1}" == "1" ]]
+    [[ "${PADM_FAKE_MODULE_MANIFEST_READY:-0}" == "1" ]]
 }
 
 regressionScriptModulesReady() {
@@ -643,6 +643,12 @@ runInstallEnsureModulesRegression() {
     touch "${fixtureDir}/shell/core/bootstrap.sh"
     fetchRemoteRef() { printf 'new-ref\n'; }
     regressionEnsureScriptModules
+    [[ "$(<"${marker}")" == "new-ref" ]]
+
+    printf 'manifest-ok\n' >"${fixtureDir}/.padm-module-manifest"
+    PADM_FAKE_MODULE_MANIFEST_READY=1
+    rm -f "${marker}"
+    regressionEnsureScriptModules
     [[ ! -e "${marker}" ]]
 
     printf 'expected-ref\n' >"${fixtureDir}/.padm-entry-ref"
@@ -658,6 +664,7 @@ runInstallEnsureModulesRegression() {
     [[ "$(<"${marker}")" == "expected-ref" ]]
 
     unset PADM_FAKE_MODULE_MANIFEST_READY
+    rm -f "${fixtureDir}/.padm-module-manifest"
 
     rm -f "${marker}" "${fixtureDir}/.padm-entry-ref"
     rm -f "${fixtureDir}/shell/core/bootstrap.sh"
@@ -716,11 +723,18 @@ EOF
 }
 
 runInstallModulePathsRegression() {
-    local outputList moduleTmpRoot oldTmpDir moduleListBefore moduleListAfter
+    local outputList moduleTmpRoot fixtureDir oldTmpDir moduleListBefore moduleListAfter
     outputList="${TMP_DIR}/install-module-paths.txt"
     moduleTmpRoot="${TMP_DIR}/install-module-paths-tmp"
+    fixtureDir="${TMP_DIR}/install-entry-manifest"
     oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${moduleTmpRoot}"
+    mkdir -p "${moduleTmpRoot}" "${fixtureDir}/shell/core"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
+    cat >"${fixtureDir}/shell/core/bootstrap.sh" <<'EOF'
+#!/usr/bin/env bash
+source "${CORE_DIR}/version.sh"
+EOF
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
     (
         TMPDIR="${moduleTmpRoot}"
         eval "$(awk '
@@ -738,11 +752,101 @@ runInstallModulePathsRegression() {
         moduleListAfter=$(find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' | wc -l | tr -d ' ')
         [[ "${moduleListBefore}" == "0" && "${moduleListAfter}" == "0" ]]
     ) | sort >"${outputList}"
+    grep -q '^install\.sh$' "${outputList}"
     grep -q '^shell/core/bootstrap\.sh$' "${outputList}"
     grep -q '^shell/core/menu\.sh$' "${outputList}"
     grep -q '^shell/subscription/wireguard_control\.sh$' "${outputList}"
     ! grep -q '^REQUIRED_MODULE_PATHS' "${PROJECT_ROOT}/install.sh"
+    (
+        TMPDIR="${moduleTmpRoot}"
+        eval "$(awk '
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="${fixtureDir}"
+        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
+        scriptModulesReady >/dev/null
+        printf '# changed\n' >>"${fixtureDir}/install.sh"
+        ! scriptModulesReady >/dev/null
+    )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
+runAliasInstallMetadataCopyRegression() {
+    local sourceDir targetDir oldScriptDir oldPadmInstallDir oldHome
+    sourceDir="${TMP_DIR}/alias-install-source"
+    targetDir="${TMP_DIR}/alias-install-target"
+    mkdir -p "${sourceDir}/shell" "${sourceDir}/documents" "${sourceDir}/assets" "${targetDir}"
+    cat >"${sourceDir}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+EOF
+    printf 'shell\n' >"${sourceDir}/shell/marker"
+    printf 'docs\n' >"${sourceDir}/documents/marker"
+    printf 'assets\n' >"${sourceDir}/assets/marker"
+    printf 'manifest\n' >"${sourceDir}/.padm-module-manifest"
+    printf 'local-ref\n' >"${sourceDir}/.padm-ref"
+    printf 'expected-ref\n' >"${sourceDir}/.padm-entry-ref"
+
+    oldScriptDir="${SCRIPT_DIR:-}"
+    oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
+    oldHome="${HOME}"
+    SCRIPT_DIR="${sourceDir}"
+    PADM_INSTALL_DIR="${targetDir}"
+    HOME="${TMP_DIR}/alias-install-home"
+    mkdir -p "${HOME}"
+
+    (
+        chmod() { :; }
+        ln() { :; }
+        aliasInstall
+    )
+
+    cmp -s "${sourceDir}/.padm-module-manifest" "${targetDir}/.padm-module-manifest"
+    cmp -s "${sourceDir}/.padm-ref" "${targetDir}/.padm-ref"
+    cmp -s "${sourceDir}/.padm-entry-ref" "${targetDir}/.padm-entry-ref"
+
+    SCRIPT_DIR="${oldScriptDir}"
+    HOME="${oldHome}"
+    if [[ -n "${oldPadmInstallDir}" ]]; then
+        PADM_INSTALL_DIR="${oldPadmInstallDir}"
+    else
+        unset PADM_INSTALL_DIR
+    fi
+}
+
+runInstallEntrySymlinkPathRegression() {
+    local fixtureDir realDir linkDir
+    fixtureDir="${TMP_DIR}/install-entry-real"
+    realDir="${fixtureDir}/real"
+    linkDir="${fixtureDir}/link"
+    mkdir -p "${realDir}" "${linkDir}"
+    printf '#!/usr/bin/env bash\n' >"${realDir}/install.sh"
+    (
+        eval "$(awk '
+            /^resolveScriptPath\(\)/ { capture = 1 }
+            /^SCRIPT_PATH=\$\(resolveScriptPath / { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        readlink() {
+            if [[ "$1" == "${linkDir}/padm-rel" ]]; then
+                printf '../real/install.sh\n'
+                return 0
+            fi
+            if [[ "$1" == "${linkDir}/padm-abs" ]]; then
+                printf '%s/install.sh\n' "${realDir}"
+                return 0
+            fi
+            return 1
+        }
+        [[ "$(resolveScriptPath "${realDir}/install.sh")" == "${realDir}/install.sh" ]]
+        [[ "$(resolveScriptPath "${linkDir}/padm-rel")" == "${realDir}/install.sh" ]]
+        [[ "$(resolveScriptPath "${linkDir}/padm-abs")" == "${realDir}/install.sh" ]]
+    )
 }
 
 runRegressionPlatform() {
@@ -753,6 +857,8 @@ runRegressionPlatform() {
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
+        runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
+        runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression &&
         runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&
         runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression &&
         runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression &&

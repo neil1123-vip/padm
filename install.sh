@@ -1,5 +1,26 @@
 #!/usr/bin/env bash
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
+resolveScriptPath() {
+    local sourcePath=${1:-${BASH_SOURCE[0]}}
+    while true; do
+        local sourceDir targetPath
+        sourceDir=$(cd -- "$(dirname -- "${sourcePath}")" && pwd -P) || return 1
+        targetPath=$(readlink "${sourcePath}" 2>/dev/null) || break
+        [[ -n "${targetPath}" ]] || break
+        if [[ "${targetPath}" != /* ]]; then
+            sourcePath="${sourceDir}/${targetPath}"
+        else
+            sourcePath="${targetPath}"
+        fi
+    done
+    printf '%s\n' "${sourcePath}"
+}
+
+SCRIPT_PATH=$(resolveScriptPath "${BASH_SOURCE[0]}") || {
+    printf '无法解析安装入口实际路径\n' >&2
+    exit 1
+}
+SCRIPT_DIR=$(cd -- "$(dirname -- "${SCRIPT_PATH}")" && pwd -P)
 REPO_REF_URL="https://api.github.com/repos/neil1123-vip/padm/commits/main"
 REPO_ZIP_URL="https://github.com/neil1123-vip/padm/archive/refs/heads/main.tar.gz"
 REPO_ARCHIVE_DIR="padm-main"
@@ -183,6 +204,7 @@ modulePaths() {
     local bootstrapPath="${SCRIPT_DIR}/shell/core/bootstrap.sh"
     local sourcePath relativePath
     [[ -f "${bootstrapPath}" ]] || return 1
+    printf 'install.sh\n'
     printf 'shell/core/bootstrap.sh\n'
     while IFS= read -r sourcePath; do
         case "${sourcePath}" in
@@ -223,7 +245,7 @@ moduleManifestReady() {
     local manifestPath=$1
     local line expectedHash relativePath actualHash
     command -v sha256sum >/dev/null 2>&1 || return 0
-    [[ -f "${manifestPath}" ]] || return 0
+    [[ -f "${manifestPath}" ]] || return 1
     while IFS='  ' read -r expectedHash relativePath; do
         [[ -n "${expectedHash}" && -n "${relativePath}" ]] || continue
         [[ -f "${SCRIPT_DIR}/${relativePath}" ]] || return 1

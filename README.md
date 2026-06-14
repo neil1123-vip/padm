@@ -52,10 +52,16 @@ padm 主菜单按任务对象分组，一个功能只放在一个入口里：
 ### 交互式安装
 
 ```bash
-wget -P /root -N "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh" && chmod 700 /root/install.sh && /root/install.sh
+wget -O /root/install.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh" && chmod 700 /root/install.sh && /root/install.sh
 ```
 
 该命令会先下载入口脚本；首次运行时如果本地缺少 `shell/` 模块，入口脚本会自动拉取完整安装包并补齐依赖文件。
+
+如果版本没有更新，或怀疑本地还复用了旧模块，可改用强制刷新版：
+
+```bash
+wget -O /root/install.sh "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh" && chmod 700 /root/install.sh && PADM_FORCE_SCRIPT_MODULE_REFRESH=1 /root/install.sh
+```
 
 安装后，运行以下命令可再次打开管理菜单：
 
