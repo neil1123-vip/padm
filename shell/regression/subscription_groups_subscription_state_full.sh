@@ -1055,6 +1055,106 @@ JSON
     fi
 )
 
+runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
+    local syncRoot="${TMP_DIR}/subscription-group-sync-remote-before-publish-refresh"
+    local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
+    local callLog="${syncRoot}/calls.log"
+    local resultStatus="${syncRoot}/mark-status.log"
+    local resultFailures="${syncRoot}/mark-failures.log"
+    local statusLog="${syncRoot}/status.log"
+    local syncStatus
+
+    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
+    configPath="${syncRoot}/xray/"
+    singBoxConfigPath="${syncRoot}/xray/"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
+    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
+    TMPDIR="${syncRoot}/tmp"
+    : >"${callLog}"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"real-sync-6","name":"Real Sync 6","enabled":true,"allowed_sources":["edge-b"],"traffic_limit_gb":0,"uuid":"3004d897-c06d-45a1-aa64-3d3266ca63d5"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    cat >"${syncConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+
+    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+    subscriptionGroupRemoteSyncEnabled() { return 0; }
+    collectSubscriptionTraffic() { return 0; }
+    readInstallType() { return 0; }
+    readInstallProtocolType() { return 0; }
+    readConfigHostPathUUID() { return 0; }
+    reloadCore() {
+        printf 'reload\n' >>"${callLog}"
+        return 0
+    }
+    readNginxSubscribe() {
+        printf 'read-subscribe\n' >>"${callLog}"
+        subscribePort=39778
+        subscribeType=https
+        subscribeDomain=self.example.com
+    }
+    installSubscriptionControlService() {
+        printf 'install-control\n' >>"${callLog}"
+        return 0
+    }
+    ensureSubscriptionControlNginxLocation() {
+        printf 'ensure-nginx-location\n' >>"${callLog}"
+        return 1
+    }
+    serviceQueueRestart() {
+        printf 'restart:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    serviceQueueApply() {
+        printf 'apply-services\n' >>"${callLog}"
+        return 0
+    }
+    subscriptionSyncPlan() {
+        printf '{"create":["sub_real_sync_6"],"remove":[]}'
+    }
+    subscriptionSyncApplyAccountPlanTransaction() {
+        printf 'apply-account-plan\n' >>"${callLog}"
+        return 0
+    }
+    runSubscriptionRemoteSync() {
+        printf 'remote-sync\n' >>"${callLog}"
+        printf '[]'
+    }
+    subscribe() {
+        printf 'refresh-publish:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    subscriptionSyncMarkResult() {
+        printf '%s\n' "$1" >"${resultStatus}"
+        printf '%s\n' "$2" >"${resultFailures}"
+        return 0
+    }
+    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
+    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
+
+    set +e
+    runSubscriptionGroupSync
+    syncStatus=$?
+    set -e
+    [[ "${syncStatus}" == "0" ]]
+    grep -q '^apply-account-plan$' "${callLog}"
+    grep -q '^remote-sync$' "${callLog}"
+    grep -q '^refresh-publish:false false$' "${callLog}"
+    python - <<'PY' "${callLog}"
+import sys
+lines = [line.strip() for line in open(sys.argv[1], encoding='utf-8') if line.strip()]
+assert lines.index('remote-sync') < lines.index('refresh-publish:false false')
+PY
+    [[ "$(<"${resultFailures}")" == "[]" ]]
+    grep -qx 'success' "${resultStatus}"
+    grep -q '自动同步完成' "${statusLog}"
+    if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+        return 1
+    fi
+)
+
 runSubscriptionGroupSyncRollbackRegression() {
     runSubscriptionGroupSyncRollbackSerialRegression
 }
@@ -1062,7 +1162,8 @@ runSubscriptionGroupSyncRollbackRegression() {
 runSubscriptionGroupSyncRollbackSerialRegression() {
     runRegressionStep subscription-group-sync-apply-failure runSubscriptionGroupSyncApplyFailureRegression &&
         runRegressionStep subscription-group-sync-reconcile-rollback runSubscriptionGroupSyncReconcileRollbackRegression &&
-        runRegressionStep subscription-group-sync-remote-failure runSubscriptionGroupSyncRemoteFailureRegression
+        runRegressionStep subscription-group-sync-remote-failure runSubscriptionGroupSyncRemoteFailureRegression &&
+        runRegressionStep subscription-group-sync-remote-before-publish-refresh runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression
 }
 
 runSubscriptionSyncRollbackFailureRegression() {
