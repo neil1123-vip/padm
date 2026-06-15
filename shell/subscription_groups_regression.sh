@@ -17,6 +17,9 @@ remote-control-smoke | remote-control-contract | remote-control-light | remote-c
 subscription-state | subscription-state-* | subscription-sync-tempdir | subscription-sync-rollback-failure | subscription-sync-reconcile-early-exit | subscription-groups-restore-failure)
     exec bash "${SCRIPT_DIR}/regression/subscription_groups_subscription_state.sh" "$@"
     ;;
+menu-smoke | menu-smoke-full)
+    exec bash "${SCRIPT_DIR}/regression/subscription_groups_legacy.sh" "$@"
+    ;;
 *)
     exec bash "${SCRIPT_DIR}/regression/subscription_groups_legacy.sh" "$@"
     ;;

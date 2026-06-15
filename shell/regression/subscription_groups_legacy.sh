@@ -12447,11 +12447,16 @@ runRegressionFastReality() {
 }
 
 runRegressionUi() {
+    runRegressionStep ui-smoke-light runMenuSmokeLightRegression
     runRegressionStep ui-smoke runMenuSmokeRegression
     runRegressionStep wireguard-menu-flow runSubscriptionWireGuardMenuFlowRegression
 }
 
 runRegressionMenuSmoke() {
+    runRegressionStep ui-smoke-light runMenuSmokeLightRegression
+}
+
+runRegressionMenuSmokeFull() {
     runRegressionStep ui-smoke runMenuSmokeRegression
 }
 
@@ -12616,6 +12621,9 @@ ui)
 menu-smoke)
     regressionRunner=runRegressionMenuSmoke
     ;;
+menu-smoke-full)
+    regressionRunner=runRegressionMenuSmokeFull
+    ;;
 routing)
     regressionRunner=runRegressionRouting
     ;;
@@ -12677,7 +12685,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|routing|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
