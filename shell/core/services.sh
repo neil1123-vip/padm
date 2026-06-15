@@ -201,12 +201,13 @@ singBoxRunning() {
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
         cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
-        [[ "${exe}" == "/etc/padm/sing-box/sing-box" || "${cmdline}" == *"/etc/padm/sing-box/sing-box run"* ]] || continue
-        if [[ -n "${mergedConfig}" && "${cmdline}" != *" -c ${mergedConfig}"* ]]; then
+        [[ "${cmdline}" == *"/etc/padm/sing-box/sing-box run -c "* ]] || continue
+        if [[ -z "${mergedConfig}" || "${cmdline}" != *" -c ${mergedConfig}"* ]]; then
             continue
         fi
+        [[ "${exe}" == "/etc/padm/sing-box/sing-box" || "${exe}" == "/etc/padm/sing-box/sing-box (deleted)" ]] || continue
         if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] || [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]]; then
-            [[ "${cmdline}" == *"/etc/padm/sing-box/sing-box run -c "* ]] || continue
+            [[ "${cmdline}" == *"/etc/padm/sing-box/sing-box run -c ${mergedConfig}"* ]] || continue
         fi
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
