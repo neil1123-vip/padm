@@ -352,8 +352,8 @@ emitVlessRealitySubscribeOutput() {
     entryHost=$(realityEntryHost)
 
     local realitySNI=${xrayVLESSRealitySNI}
-    local publicKey=${currentRealityPublicKey}
-    local realityMldsa65Verify=${currentRealityMldsa65Verify}
+    local publicKey=${currentRealityPublicKey:-}
+    local realityMldsa65Verify=${currentRealityMldsa65Verify:-}
     local vlessEncryption=none
     local vlessEncryptionStateFile=${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}
     if [[ "${coreInstallType}" == "1" && -f "${vlessEncryptionStateFile}" ]]; then
@@ -407,11 +407,13 @@ emitVlessRealityGrpcSubscribeOutput() {
     local entryHost
     entryHost=$(realityEntryHost)
     local realitySNI=${xrayVLESSRealitySNI}
-    local publicKey=${currentRealityPublicKey}
-    local realityMldsa65Verify=${currentRealityMldsa65Verify}
+    local publicKey=${currentRealityPublicKey:-}
+    local realityMldsa65Verify=${currentRealityMldsa65Verify:-}
 
-    if [[ "${coreInstallType}" == "2" ]]; then
+    if [[ -n "${singBoxVLESSRealityGRPCSNI:-}" ]]; then
         realitySNI=${singBoxVLESSRealityGRPCSNI}
+    fi
+    if [[ -n "${singBoxVLESSRealityPublicKey:-}" ]]; then
         publicKey=${singBoxVLESSRealityPublicKey}
     fi
 

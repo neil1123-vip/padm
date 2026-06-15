@@ -156,7 +156,7 @@ showVlessGrpcAccounts() {
 
 showHysteriaAccounts() {
     # hysteria2
-    if currentProtocolHas 6 || [[ -n "${hysteriaPort}" ]]; then
+    if currentProtocolHas 6 || [[ -n "${hysteriaPort:-}" ]]; then
         readPortHopping "hysteria2" "${singBoxHysteria2Port}"
         subscribeSectionTitle "Hysteria2 TLS" "UDP/移动网络可选"
         local path="${configPath}"
@@ -207,7 +207,11 @@ showVlessRealityGrpcAccounts() {
     # VLESS Reality gRPC
     if currentProtocolHas 8; then
         subscribeSectionTitle "VLESS reality_gRPC" "推荐"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}08_VLESS_vision_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        local path="${configPath}"
+        if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
+            path="${singBoxConfigPath}"
+        fi
+        jq .inbounds[0].settings.clients//.inbounds[0].users "${path}08_VLESS_vision_gRPC_inbounds.json" | jq -c '.[]' | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -221,7 +225,7 @@ showVlessRealityGrpcAccounts() {
 
 showTuicAccounts() {
     # TUIC
-    if currentProtocolHas 9 || [[ -n "${tuicPort}" ]]; then
+    if currentProtocolHas 9 || [[ -n "${tuicPort:-}" ]]; then
         subscribeSectionTitle "Tuic TLS" "UDP/移动网络可选"
         local path="${configPath}"
         if [[ "${coreInstallType}" == "1" ]]; then
@@ -240,10 +244,13 @@ showTuicAccounts() {
 
 showNaiveAccounts() {
     # Naive
-    if currentProtocolHas 10 || [[ -n "${singBoxNaivePort}" ]]; then
+    if currentProtocolHas 10 || [[ -n "${singBoxNaivePort:-}" ]]; then
         subscribeSectionTitle "naive TLS" "推荐，不支持ClashMeta"
-
-        jq -r -c '.inbounds[]|.users[]' "${configPath}10_naive_inbounds.json" | while read -r user; do
+        local path="${configPath}"
+        if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
+            path="${singBoxConfigPath}"
+        fi
+        jq -r -c '.inbounds[]|.users[]' "${path}10_naive_inbounds.json" | while read -r user; do
             local username password
             IFS=$'\037' read -r _ _ password username _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${username}"
@@ -261,15 +268,22 @@ showVmessHTTPUpgradeAccounts() {
         local path="${currentPath}vws"
         if [[ ${coreInstallType} == "1" ]]; then
             path="/${currentPath}vws"
+            if [[ -n "${singBoxVMessHTTPUpgradePath}" ]]; then
+                path="${singBoxVMessHTTPUpgradePath}"
+            fi
         elif [[ "${coreInstallType}" == "2" ]]; then
             path="${singBoxVMessHTTPUpgradePath}"
         fi
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}11_VMess_HTTPUpgrade_inbounds.json | jq -c '.[]' | while read -r user; do
+        local configRoot="${configPath}"
+        if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
+            configRoot="${singBoxConfigPath}"
+        fi
+        jq .inbounds[0].settings.clients//.inbounds[0].users "${configRoot}11_VMess_HTTPUpgrade_inbounds.json" | jq -c '.[]' | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             local vmessHTTPUpgradePort=${currentDefaultPort}
-            if [[ "${coreInstallType}" == "2" ]]; then
+            if [[ -n "${singBoxVMessHTTPUpgradePort:-}" ]]; then
                 vmessHTTPUpgradePort="${singBoxVMessHTTPUpgradePort}"
             fi
 
@@ -324,8 +338,11 @@ showAnyTlsAccounts() {
     # AnyTLS
     if currentProtocolHas 13; then
         subscribeSectionTitle "AnyTLS" "TLS 兼容协议"
-
-        jq -r -c '.inbounds[]|.users[]' "${configPath}13_anytls_inbounds.json" | while read -r user; do
+        local path="${configPath}"
+        if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then
+            path="${singBoxConfigPath}"
+        fi
+        jq -r -c '.inbounds[]|.users[]' "${path}13_anytls_inbounds.json" | while read -r user; do
             local name password
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"

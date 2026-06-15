@@ -2,6 +2,8 @@
 
 # 初始化 sing-box订阅配置
 initSubscribeLocalConfig() {
+    cleanDirectoryContent "$(subscribeLocalBaseDir)/default"
+    cleanDirectoryContent "$(subscribeLocalBaseDir)/clashMeta"
     cleanDirectoryContent "$(subscribeLocalBaseDir)/sing-box"
 }
 
@@ -120,8 +122,8 @@ defaultBase64Code() {
     local port=$2
     local email=$3
     local id=$4
-    local add=$5
-    local path=$6
+    local add=${5:-}
+    local path=${6:-}
     local user=
     user=${email%%-*}
     mkdir -p "$(subscribeLocalBaseDir)/default" "$(subscribeLocalBaseDir)/clashMeta" "$(subscribeLocalBaseDir)/sing-box"
