@@ -79,6 +79,7 @@ dnsRoutingBackupDir() {
 
 dnsRoutingBackupCreate() {
     local backupDir
+    local singBoxFile
     backupDir=$(dnsRoutingBackupDir)
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
@@ -86,12 +87,9 @@ dnsRoutingBackupCreate() {
         cp "${configPath}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
     fi
     if [[ -n "${singBoxConfigPath:-}" ]]; then
-        if [[ -f "${singBoxConfigPath}dns.json" ]]; then
-            cp "${singBoxConfigPath}dns.json" "${backupDir}/sing-box/dns.json" || return 1
-        fi
-        if [[ -f "${singBoxConfigPath}01_direct_outbound.json" ]]; then
-            cp "${singBoxConfigPath}01_direct_outbound.json" "${backupDir}/sing-box/01_direct_outbound.json" || return 1
-        fi
+        while IFS= read -r singBoxFile; do
+            cp "${singBoxFile}" "${backupDir}/sing-box/$(basename -- "${singBoxFile}")" || return 1
+        done < <(find "${singBoxConfigPath}" -maxdepth 1 -type f -name '*.json' | sort)
     fi
     return 0
 }
@@ -108,13 +106,9 @@ dnsRoutingBackupRestore() {
         fi
     fi
     if [[ -n "${singBoxConfigPath:-}" ]]; then
-        rm -f "${singBoxConfigPath}dns.json" >/dev/null 2>&1 || status=1
-        if [[ -f "${backupDir}/sing-box/dns.json" ]]; then
-            cp "${backupDir}/sing-box/dns.json" "${singBoxConfigPath}dns.json" || status=1
-        fi
-        rm -f "${singBoxConfigPath}01_direct_outbound.json" >/dev/null 2>&1 || status=1
-        if [[ -f "${backupDir}/sing-box/01_direct_outbound.json" ]]; then
-            cp "${backupDir}/sing-box/01_direct_outbound.json" "${singBoxConfigPath}01_direct_outbound.json" || status=1
+        find "${singBoxConfigPath}" -maxdepth 1 -type f -name '*.json' -delete >/dev/null 2>&1 || status=1
+        if compgen -G "${backupDir}/sing-box/*.json" >/dev/null; then
+            cp "${backupDir}/sing-box/"*.json "${singBoxConfigPath}" || status=1
         fi
     fi
     return "${status}"
@@ -153,6 +147,18 @@ dnsRoutingReloadOrRollback() {
         errorCard "${title}核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
     fi
     return 1
+}
+
+singBoxDnsResolverTag() {
+    printf '%s\n' "padm-local"
+}
+
+singBoxDnsHostsTag() {
+    printf '%s\n' "padm-hosts"
+}
+
+singBoxDnsRoutingTag() {
+    printf '%s\n' "padm-dnsRouting"
 }
 
 # DNS/hosts 配置写入
@@ -248,6 +254,10 @@ addSingBoxDNSConfig() {
     local domainRules suffixRules ruleSet ruleSetTag
     splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
     if [[ -n "${singBoxConfigPath}" ]]; then
+        local localTag hostsTag routingTag
+        localTag=$(singBoxDnsResolverTag)
+        hostsTag=$(singBoxDnsHostsTag)
+        routingTag=$(singBoxDnsRoutingTag)
         if [[ "${actionType}" == "predefined" ]]; then
             local predefined={}
             while read -r line; do
@@ -258,23 +268,36 @@ addSingBoxDNSConfig() {
 {
   "dns": {
     "servers": [
-        {
-            "tag": "local",
-            "type": "local"
-        },
-        {
-            "tag": "hosts",
-            "type": "hosts",
-            "predefined": ${predefined}
-        }
+      {
+        "tag": "${localTag}",
+        "type": "local"
+      },
+      {
+        "tag": "${hostsTag}",
+        "type": "hosts",
+        "predefined": ${predefined}
+      }
     ],
     "rules": [
-        {
-            "domain":${domainRules},
-            "domain_suffix":${suffixRules},
-            "server":"hosts"
-        }
+      {
+        "domain":${domainRules},
+        "domain_suffix":${suffixRules},
+        "server":"${hostsTag}"
+      }
     ]
+  },
+  "route": {
+    "rule_set": ${ruleSet},
+    "rules": [
+      {
+        "rule_set": ${ruleSetTag},
+        "domain": ${domainRules},
+        "domain_suffix": ${suffixRules},
+        "action": "resolve",
+        "server": "${hostsTag}"
+      }
+    ],
+    "default_domain_resolver": "${localTag}"
   }
 }
 EOF
@@ -282,7 +305,11 @@ EOF
                 errorCard "sing-box DNS/hosts 覆盖配置写入失败，已保留旧配置"
                 return 1
             fi
-            if ! updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '(.dns.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))'; then
+            if ! updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '
+                if .route.rule_set == [] then del(.route.rule_set) else . end |
+                (.dns.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end)))) |
+                (.route.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))
+            '; then
                 errorCard "sing-box DNS/hosts 覆盖配置整理失败，已保留旧配置"
                 return 1
             fi
@@ -292,11 +319,11 @@ EOF
   "dns": {
     "servers": [
       {
-        "tag": "local",
+        "tag": "${localTag}",
         "type": "local"
       },
       {
-        "tag": "dnsRouting",
+        "tag": "${routingTag}",
         "type": "udp",
         "server": "${ip}"
       }
@@ -306,12 +333,22 @@ EOF
         "rule_set": ${ruleSetTag},
         "domain": ${domainRules},
         "domain_suffix": ${suffixRules},
-        "server":"dnsRouting"
+        "server":"${routingTag}"
       }
     ]
   },
   "route":{
-    "rule_set":${ruleSet}
+    "rule_set":${ruleSet},
+    "rules": [
+      {
+        "rule_set": ${ruleSetTag},
+        "domain": ${domainRules},
+        "domain_suffix": ${suffixRules},
+        "action": "resolve",
+        "server": "${routingTag}"
+      }
+    ],
+    "default_domain_resolver": "${localTag}"
   }
 }
 EOF
@@ -319,7 +356,11 @@ EOF
                 errorCard "sing-box DNS 分流配置写入失败，已保留旧配置"
                 return 1
             fi
-            if ! updateRoutingJsonConfig "${singBoxConfigPath}dns.json" 'if .route.rule_set == [] then del(.route.rule_set) else . end | (.dns.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))'; then
+            if ! updateRoutingJsonConfig "${singBoxConfigPath}dns.json" '
+                if .route.rule_set == [] then del(.route.rule_set) else . end |
+                (.dns.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end)))) |
+                (.route.rules[] |= with_entries(select((.value | if type == "array" then length > 0 else true end))))
+            '; then
                 errorCard "sing-box DNS 分流配置整理失败，已保留旧配置"
                 return 1
             fi
@@ -382,7 +423,7 @@ EOF
         fi
     fi
 
-    if [[ "${coreInstallType}" == "2" && -f "${singBoxConfigPath}dns.json" ]]; then
+    if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
         if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
 {
     "dns": {
@@ -428,7 +469,7 @@ EOF
         fi
     fi
 
-    if [[ "${coreInstallType}" == "2" && -f "${singBoxConfigPath}dns.json" ]]; then
+    if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
         if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
 {
     "dns": {

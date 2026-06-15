@@ -284,18 +284,32 @@ JSON
     jq -e '.outbounds[0].tag == "old"' "${singBoxConfigPath}socks5_outbound.json" >/dev/null
     [[ ! -e "${singBoxConfigPath}socks5_outbound.json.tmp" ]]
     ! compgen -G "${singBoxConfigPath}.socks5_outbound.json.*" >/dev/null
+    cat >"${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
+{"inbounds":[{"tls":{"reality":{"handshake":{"server":"nodejs.org"}}}}]}
+JSON
+    cat >"${singBoxConfigPath}socks5_outbound.json" <<'JSON'
+{"outbounds":[{"type":"socks","tag":"socks5_outbound","server":"example.net","server_port":1080}]}
+JSON
     addSingBoxDNSConfig "1.1.1.1" "openai,example.com"
     jq -e '
       .dns.rules[0].rule_set == ["geosite_openai_dns"] and
       .dns.rules[0].domain_suffix == ["example.com"] and
+      (.dns.servers[] | select(.tag == "padm-local" and .type == "local")) and
+      (.dns.servers[] | select(.tag == "padm-dnsRouting" and .type == "udp" and .server == "1.1.1.1")) and
+      .route.default_domain_resolver == "padm-local" and
+      (.route.rules[]? | select(.action == "resolve" and .server == "padm-dnsRouting")) and
       (.dns.rules[0].domain_regex | not) and
       .route.rule_set[0].format == "binary"
     ' "${singBoxConfigPath}dns.json" >/dev/null
+    jq -e '.inbounds[0].tls.reality.handshake.domain_resolver? | not' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" >/dev/null
+    jq -e '.outbounds[0].domain_resolver? | not' "${singBoxConfigPath}socks5_outbound.json" >/dev/null
     addSingBoxDNSConfig "203.0.113.10" "example.org" "predefined"
     jq -e '
       .dns.rules[0].domain_suffix == ["example.org"] and
+      .route.default_domain_resolver == "padm-local" and
+      (.route.rules[]? | select(.action == "resolve" and .server == "padm-hosts")) and
       (.dns.rules[0].domain_regex | not) and
-      (.dns.servers[] | select(.tag == "hosts") | .predefined["example.org"] == "203.0.113.10")
+      (.dns.servers[] | select(.tag == "padm-hosts") | .predefined["example.org"] == "203.0.113.10")
     ' "${singBoxConfigPath}dns.json" >/dev/null
     printf '{"dns":{"servers":["old-xray"]}}\n' >"${configPath}11_dns.json"
     if writeRoutingJsonConfig "${configPath}11_dns.json" <<'JSON' 2>/dev/null
@@ -1398,6 +1412,58 @@ JSON
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
+        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ ! -e "${successMarker}" ]]
+    )
+
+    (
+        mkdir -p "${root}/remove-dns-xray-sing-box-assist/xray" "${root}/remove-dns-xray-sing-box-assist/sing-box"
+        configPath="${root}/remove-dns-xray-sing-box-assist/xray/"
+        singBoxConfigPath="${root}/remove-dns-xray-sing-box-assist/sing-box/"
+        coreInstallType=1
+        cat >"${configPath}11_dns.json" <<'JSON'
+{"dns":{"servers":["8.8.8.8"]}}
+JSON
+        cat >"${singBoxConfigPath}dns.json" <<'JSON'
+{"dns":{"servers":[{"tag":"hosts","type":"hosts","predefined":{"example.com":"203.0.113.10"}}]}}
+JSON
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        set +e
+        removeUnlockDNS >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
+        jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
+        jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
+        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ ! -e "${successMarker}" ]]
+    )
+
+    (
+        mkdir -p "${root}/remove-sni-xray-sing-box-assist/xray" "${root}/remove-sni-xray-sing-box-assist/sing-box"
+        configPath="${root}/remove-sni-xray-sing-box-assist/xray/"
+        singBoxConfigPath="${root}/remove-sni-xray-sing-box-assist/sing-box/"
+        coreInstallType=1
+        cat >"${configPath}11_dns.json" <<'JSON'
+{"dns":{"hosts":{"domain:example.com":"203.0.113.10"},"servers":["8.8.8.8"]}}
+JSON
+        cat >"${singBoxConfigPath}dns.json" <<'JSON'
+{"dns":{"servers":[{"tag":"hosts","type":"hosts","predefined":{"example.com":"203.0.113.10"}}],"rules":[{"domain_suffix":["example.com"],"server":"hosts"}]}}
+JSON
+        rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        set +e
+        removeUnlockSNI >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ -e "${reloadMarker}" ]]
+        [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
+        jq -e '.dns.hosts["domain:example.com"] == "203.0.113.10"' "${configPath}11_dns.json" >/dev/null
+        jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ ! -e "${successMarker}" ]]
     )

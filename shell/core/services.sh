@@ -12,6 +12,29 @@ xrayStartTestLog() {
     fi
 }
 
+waitForServiceState() {
+    local checkFunc=$1
+    local expectState=$2
+    local maxAttempts=${3:-20}
+    local sleepSeconds=${4:-0.1}
+    local attempt=0
+
+    while (( attempt < maxAttempts )); do
+        if [[ "${expectState}" == "running" ]]; then
+            if "${checkFunc}"; then
+                return 0
+            fi
+        else
+            if ! "${checkFunc}"; then
+                return 0
+            fi
+        fi
+        sleep "${sleepSeconds}"
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
 padmReadProcExe() {
     local path=$1
     readlink -f "${path}" 2>/dev/null || true
@@ -217,10 +240,8 @@ handleSingBox() {
             rc-service sing-box stop
         fi
     fi
-    sleep 1
-
     if [[ "$1" == "start" ]]; then
-        if singBoxRunning; then
+        if waitForServiceState singBoxRunning running 20 0.1; then
             successCard "sing-box启动成功"
         else
             errorCard "sing-box启动失败"
@@ -233,7 +254,7 @@ handleSingBox() {
             exit 0
         fi
     elif [[ "$1" == "stop" ]]; then
-        if ! singBoxRunning; then
+        if waitForServiceState singBoxRunning stopped 20 0.1; then
             successCard "sing-box关闭成功"
         else
             errorCard "sing-box关闭失败"
@@ -289,11 +310,8 @@ handleXray() {
             rc-service xray stop
         fi
     fi
-
-    sleep 0.8
-
     if [[ "$1" == "start" ]]; then
-        if xrayRunning; then
+        if waitForServiceState xrayRunning running 25 0.1; then
             successCard "Xray启动成功"
         else
             errorCard "Xray启动失败"
@@ -303,7 +321,7 @@ handleXray() {
             exit 0
         fi
     elif [[ "$1" == "stop" ]]; then
-        if ! xrayRunning; then
+        if waitForServiceState xrayRunning stopped 20 0.1; then
             successCard "Xray关闭成功"
         else
             errorCard "xray关闭失败"

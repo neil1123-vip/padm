@@ -1166,6 +1166,24 @@ runServicesProcRaceRegression() {
     )
 }
 
+runServiceWaitForStateRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local root="${TMP_DIR}/service-wait-state"
+        mkdir -p "${root}"
+        serviceRunning() { [[ -f "${root}/running" ]]; }
+        (
+            sleep 1.4
+            : >"${root}/running"
+        ) &
+        waitForServiceState serviceRunning running 25 0.1
+        rm -f "${root}/running"
+        waitForServiceState serviceRunning stopped 2 0.1
+    )
+}
+
 runSingBoxCompatibilityAuditRegression() {
     (
         set -euo pipefail
@@ -1249,6 +1267,7 @@ runRegressionFast() {
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
+        runRegressionStep service-wait-state runServiceWaitForStateRegression &&
         runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression &&
         runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression &&
         runRegressionStep services-proc-race runServicesProcRaceRegression &&
