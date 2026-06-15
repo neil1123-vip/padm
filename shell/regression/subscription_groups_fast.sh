@@ -850,6 +850,46 @@ runInstallEntrySymlinkPathRegression() {
     )
 }
 
+runLocaleEchoContentUnsetPrintNRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/locale.sh"
+        output=$(echoContent text "locale-smoke")
+        [[ "${output}" == *"locale-smoke"* ]]
+    )
+}
+
+runShowAccountsOptionalStepRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        readInstallType() { return 0; }
+        readInstallProtocolType() { currentInstallProtocolType=; return 0; }
+        readConfigHostPathUUID() { return 0; }
+        readSingBoxConfig() { return 0; }
+        initSubscribeLocalConfig() { return 0; }
+        showVlessTcpAccounts() { return 0; }
+        showVlessWsAccounts() { return 0; }
+        showTrojanGrpcAccounts() { return 0; }
+        showVmessWsAccounts() { return 0; }
+        showTrojanAccounts() { return 0; }
+        showVlessGrpcAccounts() { return 0; }
+        showHysteriaAccounts() { return 0; }
+        showVlessRealityAccounts() { return 0; }
+        showVlessRealityGrpcAccounts() { return 0; }
+        showTuicAccounts() { return 0; }
+        showNaiveAccounts() { return 0; }
+        showVmessHTTPUpgradeAccounts() { return 0; }
+        showVlessRealityXHTTPAccounts() { return 0; }
+        showAnyTlsAccounts() { return 0; }
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
+        showAccounts >/dev/null
+    )
+}
+
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
@@ -871,6 +911,8 @@ runRegressionPlatform() {
 
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
+        runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
+        runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }

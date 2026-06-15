@@ -14,13 +14,14 @@ subscribeAccountTitle() {
 
 # 订阅账号展示
 showAccounts() {
+    local step=${1:-}
     readInstallType
     readInstallProtocolType
     readConfigHostPathUUID
     readSingBoxConfig
 
     echo
-    progressCard "$1" "账号"
+    progressCard "${step}" "账号"
 
     initSubscribeLocalConfig
     showVlessTcpAccounts

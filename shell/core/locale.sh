@@ -18,10 +18,10 @@ echoContent() {
     local code
     code=$(uiColorCode "${color}")
     if [[ -z "${code}" || -n "${PADM_NO_COLOR:-}" || -n "${NO_COLOR:-}" ]]; then
-        ${echoType:-echo -e} "${printN}${text} "
+        ${echoType:-echo -e} "${printN:-}${text} "
         return
     fi
-    ${echoType:-echo -e} "\033[${code}m${printN}${text} \033[0m"
+    ${echoType:-echo -e} "\033[${code}m${printN:-}${text} \033[0m"
 }
 
 uiColorCode() {
