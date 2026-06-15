@@ -820,7 +820,6 @@ EOF
         rm -rf "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" >/dev/null 2>&1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         singBoxNginxConfig "$1" "${result[-1]}"
-        bootStartup nginx
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json padm-sing-box-vmess-httpupgrade <<EOF || { errorCard "sing-box VMess HTTPUpgrade 入站模板提交失败"; return 1; }
 {
     "inbounds":[
@@ -838,6 +837,11 @@ EOF
     ]
 }
 EOF
+        bootStartup nginx
+        if [[ -n "$3" ]] && ! runCoreServiceActionAllowFailure handleNginx start; then
+            errorCard "Nginx 服务启动失败，VMess HTTPUpgrade 配置已写入"
+            return 1
+        fi
     elif [[ -z "$3" ]]; then
         rm /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json >/dev/null 2>&1
     fi

@@ -686,10 +686,12 @@ readConfigHostPathUUID() {
                 if [[ "${dest}" == "31302" || "${dest}" == "31304" ]]; then
                     # checkBTPanel
                     # check1Panel
-                    if grep -q "trojangrpc {" <${nginxConfigPath}alone.conf; then
-                        currentPath=$(grep "trojangrpc {" <${nginxConfigPath}alone.conf | awk -F "[/]" '{print $2}' | awk -F "[t][r][o][j][a][n]" '{print $1}')
-                    elif grep -q "grpc {" <${nginxConfigPath}alone.conf; then
-                        currentPath=$(grep "grpc {" <${nginxConfigPath}alone.conf | head -1 | awk -F "[/]" '{print $2}' | awk -F "[g][r][p][c]" '{print $1}')
+                    if [[ -f "${nginxConfigPath}alone.conf" ]]; then
+                        if grep -q "trojangrpc {" <${nginxConfigPath}alone.conf; then
+                            currentPath=$(grep "trojangrpc {" <${nginxConfigPath}alone.conf | awk -F "[/]" '{print $2}' | awk -F "[t][r][o][j][a][n]" '{print $1}')
+                        elif grep -q "grpc {" <${nginxConfigPath}alone.conf; then
+                            currentPath=$(grep "grpc {" <${nginxConfigPath}alone.conf | head -1 | awk -F "[/]" '{print $2}' | awk -F "[g][r][p][c]" '{print $1}')
+                        fi
                     fi
                 fi
             fi

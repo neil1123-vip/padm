@@ -929,9 +929,19 @@ JSON
         cat >"${singBoxRoot}/13_anytls_inbounds.json" <<'JSON'
 {"inbounds":[{"type":"anytls","listen_port":40251,"users":[{"name":"sub_anytls-anytls","password":"anytls-pass"}]}]}
 JSON
-        cat >"${singBoxRoot}/reality_key" <<'EOF'
-publicKey:grpc-public-key
+        local fakeXray="${root}/etc/padm/xray/xray"
+        mkdir -p "$(dirname "${fakeXray}")"
+        cat >"${fakeXray}" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "x25519" && "${2:-}" == "-i" ]]; then
+    printf 'PrivateKey: %s\n' "${3:-}"
+    printf 'Password (PublicKey): grpc-public-key\n'
+    exit 0
+fi
+exit 1
 EOF
+        chmod +x "${fakeXray}"
+        export PADM_XRAY_BINARY="${fakeXray}"
         cat >"${nginxRoot}/sing_box_VMess_HTTPUpgrade.conf" <<'EOF'
 server {
     listen 24443 ssl;
@@ -943,7 +953,7 @@ EOF
             coreInstallType=1
             configPath="${xrayRoot}/"
             singBoxConfigPath="${singBoxRoot}/"
-            ctlPath="${root}/etc/padm/xray/xray"
+            ctlPath="${fakeXray}"
             nginxConfigPath="${nginxRoot}/"
         }
         readConfigHostPathUUID() {
@@ -986,6 +996,73 @@ EOF
         httpupgradeJson=$(printf '%s' "${httpupgradeLink#default:sub_httpupgrade:vmess://}" | base64 -d)
         printf '%s\n' "${httpupgradeJson}" | grep -q '"port":24443'
         printf '%s\n' "${httpupgradeJson}" | grep -q '"path":"/padmhttp"'
+    )
+}
+
+runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/httpupgrade-incremental-starts-nginx"
+        local singBoxRoot="${root}/etc/padm/sing-box/conf/config"
+        local nginxRoot="${root}/etc/nginx/conf.d"
+        local actionLog="${root}/actions.log"
+        mkdir -p "${singBoxRoot}" "${nginxRoot}"
+        : >"${actionLog}"
+
+        selectCustomInstallType=",11,"
+        currentUUID="11111111-1111-4111-8111-111111111111"
+        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_TCP/TLS_Vision"}]'
+        lastInstallationConfig=true
+        currentHost=example.com
+        domain=example.com
+        singBoxVMessHTTPUpgradePort=
+        singBoxConfigPath="${singBoxRoot}/"
+        nginxConfigPath="${nginxRoot}/"
+
+        collectTLSProfile() { tlsCertDomain=example.com; }
+        readSingBoxPortResult() {
+            local -n resultRef=$1
+            resultRef=(24443)
+        }
+        initSingBoxClients() { printf '[]'; }
+        checkDNSIP() { return 0; }
+        removeNginxDefaultConf() { return 0; }
+        stopSingBoxBeforeTemplateWrite() { return 0; }
+        randomPathFunction() { currentPath=httpup; }
+        checkPortOpen() { return 0; }
+        singBoxNginxConfig() {
+            printf 'server {}\n' >"${nginxRoot}/sing_box_VMess_HTTPUpgrade.conf"
+        }
+        bootStartup() {
+            printf 'boot:%s\n' "$1" >>"${actionLog}"
+        }
+        handleNginx() {
+            printf 'nginx:%s\n' "$1" >>"${actionLog}"
+            return 0
+        }
+        runCoreServiceActionAllowFailure() {
+            "$@"
+        }
+        writeGeneratedJsonFile() {
+            local targetPath=$1
+            if [[ "${targetPath}" == /etc/padm/* ]]; then
+                targetPath="${root}${targetPath}"
+            fi
+            local targetDir
+            targetDir=$(dirname -- "${targetPath}")
+            mkdir -p "${targetDir}"
+            shift 2
+            cat >"${targetPath}"
+        }
+
+        initSingBoxConfig custom 1 true >/dev/null
+
+        grep -q 'boot:nginx' "${actionLog}"
+        grep -q 'nginx:start' "${actionLog}"
+        [[ -f "${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" ]]
     )
 }
 
@@ -1086,6 +1163,7 @@ runRegressionFast() {
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
+        runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression &&
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
