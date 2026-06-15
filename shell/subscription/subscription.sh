@@ -8,6 +8,59 @@ subscribePublicBaseDir() {
     printf '%s' "${PADM_SUBSCRIBE_DIR:-/etc/padm/subscribe}"
 }
 
+resolveSubscribeNginxAccessLogFile() {
+    local subscribeConfig="${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf"
+    local logPath=
+
+    if [[ -f "${subscribeConfig}" ]]; then
+        logPath=$(awk '
+            /^[[:space:]]*access_log[[:space:]]+/ {
+                if ($2 !~ /^(off|syslog:)/) {
+                    gsub(/;$/, "", $2)
+                    print $2
+                    exit
+                }
+            }
+        ' "${subscribeConfig}" 2>/dev/null || true)
+    fi
+    if [[ -n "${logPath}" ]]; then
+        printf '%s\n' "${logPath}"
+        return 0
+    fi
+
+    if [[ -d /www/server/panel/vhost/nginx ]]; then
+        if [[ -n "${domain:-}" && -e "/www/wwwlogs/${domain}.log" ]]; then
+            printf '/www/wwwlogs/%s.log\n' "${domain}"
+            return 0
+        fi
+        if [[ -n "${currentHost:-}" && -e "/www/wwwlogs/${currentHost}.log" ]]; then
+            printf '/www/wwwlogs/%s.log\n' "${currentHost}"
+            return 0
+        fi
+        if [[ -e /www/wwwlogs/access.log ]]; then
+            printf '/www/wwwlogs/access.log\n'
+            return 0
+        fi
+    fi
+
+    if [[ -d /opt/1panel/apps/openresty/openresty/www/sites ]]; then
+        if [[ -n "${domain:-}" && -e "/opt/1panel/apps/openresty/openresty/www/sites/${domain}/log/access.log" ]]; then
+            printf '/opt/1panel/apps/openresty/openresty/www/sites/%s/log/access.log\n' "${domain}"
+            return 0
+        fi
+        if [[ -n "${currentHost:-}" && -e "/opt/1panel/apps/openresty/openresty/www/sites/${currentHost}/log/access.log" ]]; then
+            printf '/opt/1panel/apps/openresty/openresty/www/sites/%s/log/access.log\n' "${currentHost}"
+            return 0
+        fi
+        if [[ -e /opt/1panel/apps/openresty/openresty/logs/access.log ]]; then
+            printf '/opt/1panel/apps/openresty/openresty/logs/access.log\n'
+            return 0
+        fi
+    fi
+
+    printf '/var/log/nginx/access.log\n'
+}
+
 subscriptionRemoteSubscribeSourcesForAccount() {
     local email=$1
     local groupId

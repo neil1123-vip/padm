@@ -1344,33 +1344,144 @@ runFail2banProfileRegression() {
         mkdir -p "${root}/fail2ban/jail.d" "${root}/fail2ban/filter.d" "${root}/nginx"
         export PADM_FAIL2BAN_JAIL_FILE="${root}/fail2ban/jail.d/padm.local"
         export PADM_FAIL2BAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-control.conf"
+        export PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-nginx-scan-basic.conf"
         export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/nginx/padm-control-access.log"
+        export PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE="${root}/nginx/access.log"
+        export PADM_FAIL2BAN_VALIDATE_LOG="${root}/fail2ban/validate.log"
 
         subscriptionWireGuardReadState() {
             jq -n '{enabled:true, role:"main", address:"10.77.0.1/24", control_port:39778, peers:[{id:"edge-a"}]}'
         }
         subscriptionWireGuardControlEnabled() { return 0; }
+        fail2banServiceActive() { return 1; }
+        fail2banServiceEnabled() { return 1; }
         fail2banInstalled() { return 0; }
+        fail2banValidateManagedConfig() { return 0; }
+        fail2banStartOrReloadService() { return 0; }
+        refreshSubscriptionWireGuardNginxControl() { return 0; }
+        serviceQueueApply() { return 0; }
+        errorCard() { return 1; }
+        successCard() { return 0; }
 
         [[ "$(fail2banRecommendedProfileName)" == "sshd+control" ]]
         [[ "$(fail2banProfileLabel "$(fail2banRecommendedProfileName)")" == "SSH + 控制面防护" ]]
         fail2banWriteManagedFilter
-        fail2banWriteManagedJail sshd+control
+        fail2banWriteNginxScanFilter
+        fail2banWriteManagedJail sshd+control false
         grep -q '^\[sshd\]' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '^enabled = true' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '^\[padm-control\]' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q '^\[nginx-scan-basic\]' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q '^enabled = false$' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q "logpath = ${root//\\/\\\\}/nginx/padm-control-access.log" "${PADM_FAIL2BAN_JAIL_FILE}" || grep -q 'logpath = .*/nginx/padm-control-access.log' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q "logpath = ${root//\\/\\\\}/nginx/access.log" "${PADM_FAIL2BAN_JAIL_FILE}" || grep -q 'logpath = .*/nginx/access.log' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '/s/control/' "${PADM_FAIL2BAN_FILTER_FILE}"
+        grep -Eq 'wp-login\.php|\.env|phpmyadmin|actuator' "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
         [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd,padm-control" ]]
         [[ "$(fail2banCurrentProfileName)" == "sshd+control" ]]
+        ! fail2banCurrentNginxScanEnabled
+        [[ "$(fail2banNginxScanStatusText)" == "默认关闭" ]]
 
-        fail2banWriteManagedJail sshd
+        fail2banWriteManagedJail sshd false
         [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd" ]]
         [[ "$(fail2banCurrentProfileName)" == "sshd" ]]
+        ! fail2banCurrentNginxScanEnabled
+        cat >"${PADM_FAIL2BAN_JAIL_FILE}" <<'EOF'
+[sshd]
+enabled = true
+[padm-control]
+enabled = true
+EOF
+        ! fail2banManagedJailHasSection nginx-scan-basic
+        ! fail2banCurrentNginxScanEnabled
+        [[ "$(fail2banNginxScanStatusText)" == "默认关闭" ]]
+
+        fail2banWriteManagedJail sshd+control true
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd,padm-control,nginx-scan-basic" ]]
+        fail2banCurrentNginxScanEnabled
+        [[ "$(fail2banNginxScanStatusText)" == "已启用" ]]
 
         subscriptionWireGuardControlEnabled() { return 1; }
         [[ "$(fail2banRecommendedProfileName)" == "sshd" ]]
         ! fail2banApplyProfile sshd+control
+
+        subscriptionWireGuardControlEnabled() { return 0; }
+        fail2banApplyProfile sshd+control true
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd,padm-control,nginx-scan-basic" ]]
+        fail2banApplyProfile sshd false
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd" ]]
+        ! fail2banCurrentNginxScanEnabled
+        fail2banApplyNginxScanExtension enable
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd,nginx-scan-basic" ]]
+        fail2banCurrentNginxScanEnabled
+        fail2banApplyNginxScanExtension disable
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd" ]]
+        ! fail2banCurrentNginxScanEnabled
+
+        cat >"${PADM_FAIL2BAN_JAIL_FILE}" <<'EOF'
+[sshd]
+enabled = false
+[padm-control]
+enabled = false
+[nginx-scan-basic]
+enabled = true
+EOF
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "nginx-scan-basic" ]]
+        [[ "$(fail2banCurrentProfileName)" == "disabled" ]]
+        fail2banApplyNginxScanExtension disable
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd" ]]
+        ! fail2banCurrentNginxScanEnabled
+    )
+}
+
+runFail2banMenuRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/fail2ban.sh"
+
+        local actions=
+        local output=
+        recordMenuAction() {
+            actions+="$1"$'\n'
+        }
+        assertMenuAction() {
+            grep -qxF "$1" <<<"${actions}"
+        }
+        menuLine() { output+="$*"$'\n'; }
+        menuItem() { output+="$2 $3"$'\n'; }
+        menuDangerItem() { output+="$2 $3"$'\n'; }
+        menuReturnItem() { output+="$2 $3"$'\n'; }
+        menuClose() { return 0; }
+        echoContent() { return 0; }
+        uiStyle() { shift; printf '%s' "$*"; }
+        autoRead() {
+            local targetVar=$3
+            local input=
+            IFS= read -r input || input=
+            printf -v "${targetVar}" '%s' "${input}"
+        }
+        fail2banRoleText() { printf '主控'; }
+        fail2banControlSurfaceText() { printf '已检测到 /s/control/'; }
+        fail2banCurrentProfileLabel() { printf 'SSH + 控制面防护'; }
+        fail2banNginxScanStatusText() { printf '默认关闭'; }
+        showFail2banRuntimeStatus() { recordMenuAction showFail2banRuntimeStatus; }
+        fail2banRecommendedProfileName() { printf 'sshd+control\n'; }
+        fail2banApplyProfile() { recordMenuAction "fail2banApplyProfile:$1:${2:-}"; }
+        fail2banApplyNginxScanExtension() { recordMenuAction "fail2banApplyNginxScanExtension:$1"; }
+        showFail2banBans() { recordMenuAction showFail2banBans; }
+        systemScriptMenu() { recordMenuAction systemScriptMenu; }
+        errorCard() { recordMenuAction "errorCard:$1"; }
+
+        manageFail2ban <<<"5"
+        grep -q "启用站点扫描扩展防护" <<<"${output}"
+        grep -q "关闭站点扫描扩展防护" <<<"${output}"
+        assertMenuAction "fail2banApplyNginxScanExtension:enable"
+
+        actions=
+        output=
+        manageFail2ban <<<"6"
+        assertMenuAction "fail2banApplyNginxScanExtension:disable"
     )
 }
 
@@ -1555,6 +1666,7 @@ runRegressionFast() {
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
         runRegressionStep service-wait-state runServiceWaitForStateRegression &&
         runRegressionStep fail2ban-profile runFail2banProfileRegression &&
+        runRegressionStep fail2ban-menu runFail2banMenuRegression &&
         runRegressionStep xray-strict-validation runXrayStrictValidationRegression &&
         runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression &&
         runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression &&

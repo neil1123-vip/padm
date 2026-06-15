@@ -8,8 +8,25 @@ fail2banManagedFilterFile() {
     echo "${PADM_FAIL2BAN_FILTER_FILE:-/etc/fail2ban/filter.d/padm-control.conf}"
 }
 
+fail2banManagedNginxScanFilterFile() {
+    echo "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE:-/etc/fail2ban/filter.d/padm-nginx-scan-basic.conf}"
+}
+
 fail2banPadmControlLogFile() {
     echo "${PADM_FAIL2BAN_CONTROL_LOG_FILE:-/var/log/nginx/padm-control-access.log}"
+}
+
+fail2banNginxAccessLogFile() {
+    local override=${PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE:-}
+    if [[ -n "${override}" ]]; then
+        printf '%s\n' "${override}"
+        return 0
+    fi
+    if declare -F resolveSubscribeNginxAccessLogFile >/dev/null 2>&1; then
+        resolveSubscribeNginxAccessLogFile
+        return $?
+    fi
+    fail2banGuessNginxAccessLogFile
 }
 
 fail2banValidateLog() {
@@ -143,6 +160,64 @@ fail2banPadmControlPort() {
     printf '%s\n' "${port}"
 }
 
+fail2banGuessNginxAccessLogFile() {
+    local candidate
+    for candidate in \
+        /var/log/nginx/access.log \
+        /www/wwwlogs/access.log \
+        /www/wwwlogs/*.log \
+        /opt/1panel/apps/openresty/openresty/logs/access.log \
+        /var/log/openresty/access.log; do
+        if [[ "${candidate}" == *'*'* ]]; then
+            for candidate in ${candidate}; do
+                [[ -e "${candidate}" ]] || continue
+                printf '%s\n' "${candidate}"
+                return 0
+            done
+        elif [[ -e "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return 0
+        fi
+    done
+    printf '/var/log/nginx/access.log\n'
+}
+
+fail2banManagedJailHasSection() {
+    local jailName=$1
+    local jailFile
+    jailFile=$(fail2banManagedJailFile)
+    [[ -f "${jailFile}" ]] || return 1
+    grep -Eq "^\\[${jailName//./\\.}\\]$" "${jailFile}"
+}
+
+fail2banCurrentJailEnabled() {
+    local jailName=$1
+    local jailFile
+    jailFile=$(fail2banManagedJailFile)
+    [[ -f "${jailFile}" ]] || return 1
+    awk -v target="${jailName}" '
+        function trim(value) {
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+            return value
+        }
+        /^\[/ {
+            section=$0
+            gsub(/^\[/, "", section)
+            gsub(/\]$/, "", section)
+            next
+        }
+        /^[[:space:]]*enabled[[:space:]]*=/ {
+            split($0, parts, "=")
+            value=tolower(trim(parts[2]))
+            if (section == target && value == "true") {
+                found=1
+            }
+        }
+        END { exit found ? 0 : 1 }
+    ' "${jailFile}"
+}
+
 fail2banCurrentEnabledJailsCsv() {
     local jailFile
     jailFile=$(fail2banManagedJailFile)
@@ -174,22 +249,32 @@ fail2banCurrentEnabledJailsCsv() {
             }
             if (enabled["padm-control"]) {
                 printf "%spadm-control", sep
+                sep=","
+            }
+            if (enabled["nginx-scan-basic"]) {
+                printf "%snginx-scan-basic", sep
             }
         }
     ' "${jailFile}"
 }
 
 fail2banCurrentProfileName() {
-    local enabledCsv
-    enabledCsv=$(fail2banCurrentEnabledJailsCsv)
-    case "${enabledCsv}" in
-    '')
+    local sshdEnabled=false
+    local controlEnabled=false
+    if fail2banCurrentJailEnabled sshd; then
+        sshdEnabled=true
+    fi
+    if fail2banCurrentJailEnabled padm-control; then
+        controlEnabled=true
+    fi
+    case "${sshdEnabled}:${controlEnabled}" in
+    false:false)
         printf 'disabled\n'
         ;;
-    sshd)
+    true:false)
         printf 'sshd\n'
         ;;
-    sshd,padm-control)
+    true:true)
         printf 'sshd+control\n'
         ;;
     *)
@@ -200,6 +285,19 @@ fail2banCurrentProfileName() {
 
 fail2banCurrentProfileLabel() {
     fail2banProfileLabel "$(fail2banCurrentProfileName)"
+}
+
+fail2banCurrentNginxScanEnabled() {
+    fail2banManagedJailHasSection nginx-scan-basic || return 1
+    fail2banCurrentJailEnabled nginx-scan-basic
+}
+
+fail2banNginxScanStatusText() {
+    if fail2banCurrentNginxScanEnabled; then
+        printf '已启用'
+    else
+        printf '默认关闭'
+    fi
 }
 
 fail2banServiceStateText() {
@@ -221,6 +319,15 @@ fail2banEnsurePadmControlLogPath() {
     chmod 644 "${logFile}" 2>/dev/null || true
 }
 
+fail2banEnsureNginxAccessLogPath() {
+    local logFile logDir
+    logFile=$(fail2banNginxAccessLogFile)
+    logDir=$(dirname -- "${logFile}")
+    mkdir -p "${logDir}" || return 1
+    touch "${logFile}" || return 1
+    chmod 644 "${logFile}" 2>/dev/null || true
+}
+
 fail2banWriteManagedFilter() {
     local filterFile tmpFile
     filterFile=$(fail2banManagedFilterFile)
@@ -233,11 +340,38 @@ EOF
     commitGeneratedFile "${tmpFile}" "${filterFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
+fail2banWriteNginxScanFilter() {
+    local filterFile tmpFile
+    filterFile=$(fail2banManagedNginxScanFilterFile)
+    padmCreateTempFileForTarget tmpFile "${filterFile}" fail2ban || return 1
+    cat >"${tmpFile}" <<'EOF' || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+[Definition]
+failregex = ^<HOST> - .* "(GET|POST|HEAD) /(\.env(?:\.[^ ?"]*)?|\.git(?:/[^"]*|[^"]*)?|wp-login\.php(?:[? ][^"]*)?|wp-admin(?:/[^"]*|[^"]*)?|phpmyadmin(?:/[^"]*|[^"]*)?|cgi-bin(?:/[^"]*|[^"]*)?|manager/html(?:[? ][^"]*)?|actuator(?:/[^"]*|[^"]*)?|boaform(?:/[^"]*|[^"]*)?) HTTP/[^"]*" (40[34]|444)\b
+ignoreregex =
+EOF
+    commitGeneratedFile "${tmpFile}" "${filterFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+}
+
 fail2banWriteManagedJail() {
     local profile=$1
-    local jailFile tmpFile controlLog controlPort
+    local nginxScanEnabled=${2:-}
+    local jailFile tmpFile controlLog controlPort nginxAccessLog
     local sshdEnabled=false
     local controlEnabled=false
+
+    if [[ -z "${nginxScanEnabled}" ]]; then
+        if fail2banCurrentNginxScanEnabled; then
+            nginxScanEnabled=true
+        else
+            nginxScanEnabled=false
+        fi
+    fi
+    case "${nginxScanEnabled}" in
+    true | false) ;;
+    *)
+        return 1
+        ;;
+    esac
     case "${profile}" in
     sshd)
         sshdEnabled=true
@@ -252,9 +386,11 @@ fail2banWriteManagedJail() {
         return 1
         ;;
     esac
+
     jailFile=$(fail2banManagedJailFile)
     controlLog=$(fail2banPadmControlLogFile)
     controlPort=$(fail2banPadmControlPort)
+    nginxAccessLog=$(fail2banNginxAccessLogFile)
     padmCreateTempFileForTarget tmpFile "${jailFile}" fail2ban || return 1
     cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 # Managed by padm. Edit via 系统与脚本 -> Fail2ban 防护.
@@ -277,6 +413,15 @@ logpath = ${controlLog}
 maxretry = 6
 findtime = 10m
 bantime = 1h
+
+[nginx-scan-basic]
+enabled = ${nginxScanEnabled}
+backend = auto
+filter = padm-nginx-scan-basic
+logpath = ${nginxAccessLog}
+maxretry = 6
+findtime = 10m
+bantime = 1h
 EOF
     commitGeneratedFile "${tmpFile}" "${jailFile}" 644 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
@@ -290,7 +435,7 @@ fail2banValidateManagedConfig() {
 
 fail2banRemoveManagedFiles() {
     local status=0
-    rm -f "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banPadmControlLogFile)" >/dev/null 2>&1 || status=1
+    rm -f "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)" "$(fail2banPadmControlLogFile)" >/dev/null 2>&1 || status=1
     return "${status}"
 }
 
@@ -373,6 +518,7 @@ fail2banEnsurePadmControlNginxLogging() {
 
 fail2banApplyProfile() {
     local profile=$1
+    local nginxScanEnabled=${2:-}
     local backupDir=
     local serviceWasActive=false
     local serviceWasEnabled=false
@@ -382,6 +528,20 @@ fail2banApplyProfile() {
     sshd | sshd+control | disabled) ;;
     *)
         errorCard "Fail2ban 防护配置无效"
+        return 1
+        ;;
+    esac
+    if [[ -z "${nginxScanEnabled}" ]]; then
+        if fail2banCurrentNginxScanEnabled; then
+            nginxScanEnabled=true
+        else
+            nginxScanEnabled=false
+        fi
+    fi
+    case "${nginxScanEnabled}" in
+    true | false) ;;
+    *)
+        errorCard "Fail2ban 站点扫描扩展开关无效"
         return 1
         ;;
     esac
@@ -395,7 +555,7 @@ fail2banApplyProfile() {
 
     if [[ "${profile}" == "disabled" ]]; then
         local disabledBackupDir=
-        if ! checkLogBackupCreate disabledBackupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)"; then
+        if ! checkLogBackupCreate disabledBackupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)"; then
             errorCard "Fail2ban 防护停用前备份失败"
             return 1
         fi
@@ -439,8 +599,14 @@ fail2banApplyProfile() {
             return 1
         fi
     fi
+    if [[ "${nginxScanEnabled}" == "true" ]]; then
+        if ! fail2banEnsureNginxAccessLogPath; then
+            errorCard "站点扫描扩展日志接入失败" "未能准备 Nginx 访问日志：$(fail2banNginxAccessLogFile)"
+            return 1
+        fi
+    fi
 
-    checkLogBackupCreate backupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" || {
+    checkLogBackupCreate backupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)" || {
         errorCard "Fail2ban 配置备份失败"
         return 1
     }
@@ -454,7 +620,16 @@ fail2banApplyProfile() {
         errorCard "Fail2ban 过滤器写入失败"
         return 1
     }
-    fail2banWriteManagedJail "${profile}" || {
+    fail2banWriteNginxScanFilter || {
+        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+            padmRemoveCleanupPath "${backupDir}"
+        else
+            padmForgetCleanupPath "${backupDir}"
+        fi
+        errorCard "Fail2ban 站点扫描过滤器写入失败"
+        return 1
+    }
+    fail2banWriteManagedJail "${profile}" "${nginxScanEnabled}" || {
         if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
             padmRemoveCleanupPath "${backupDir}"
         else
@@ -485,7 +660,54 @@ fail2banApplyProfile() {
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
-    successCard "Fail2ban 防护已更新" "当前策略：$(fail2banProfileLabel "${profile}")"
+    successCard "Fail2ban 防护已更新" "当前策略：$(fail2banProfileLabel "${profile}")；站点扫描扩展：$(fail2banNginxScanStatusText)"
+}
+
+fail2banApplyNginxScanExtension() {
+    local action=$1
+    local currentProfile
+    local targetProfile
+    local profileBefore
+    local scanWasEnabled=false
+    case "${action}" in
+    enable | disable) ;;
+    *)
+        errorCard "Fail2ban 站点扫描扩展操作无效"
+        return 1
+        ;;
+    esac
+
+    profileBefore=$(fail2banCurrentProfileName)
+    if fail2banCurrentNginxScanEnabled; then
+        scanWasEnabled=true
+    fi
+    currentProfile="${profileBefore}"
+    case "${currentProfile}" in
+    sshd | sshd+control)
+        targetProfile="${currentProfile}"
+        ;;
+    disabled)
+        if [[ "${action}" == "disable" ]]; then
+            if ! fail2banManagedJailHasSection nginx-scan-basic && ! ${scanWasEnabled}; then
+                successCard "站点扫描扩展已关闭" "当前未接入站点扫描扩展"
+                return 0
+            fi
+            targetProfile=$(fail2banRecommendedProfileName)
+        else
+            targetProfile=$(fail2banRecommendedProfileName)
+        fi
+        ;;
+    *)
+        errorCard "当前 Fail2ban 基线策略异常" "请先重新应用 padm 管理的防护策略，再调整站点扫描扩展"
+        return 1
+        ;;
+    esac
+
+    if [[ "${action}" == "enable" ]]; then
+        fail2banApplyProfile "${targetProfile}" true
+    else
+        fail2banApplyProfile "${targetProfile}" false
+    fi
 }
 
 showFail2banStatusSummary() {
@@ -494,6 +716,7 @@ showFail2banStatusSummary() {
         "控制面：$(fail2banControlSurfaceText)" \
         "推荐策略：$(fail2banProfileLabel "$(fail2banRecommendedProfileName)")" \
         "当前策略：$(fail2banCurrentProfileLabel)" \
+        "站点扫描扩展：$(fail2banNginxScanStatusText)" \
         "服务状态：$(fail2banServiceStateText)"
 }
 
@@ -512,6 +735,11 @@ showFail2banRuntimeStatus() {
     fi
     if fail2banControlSurfaceEnabled; then
         menuLine "控制面日志：$(fail2banPadmControlLogFile)"
+    fi
+    if fail2banCurrentNginxScanEnabled; then
+        menuLine "站点扫描日志：$(fail2banNginxAccessLogFile)"
+    else
+        menuLine "站点扫描扩展默认关闭；仅在站点探测较多时建议开启。"
     fi
     if fail2banServiceActive && command -v fail2ban-client >/dev/null 2>&1; then
         menuLine "fail2ban-client status："
@@ -537,7 +765,7 @@ showFail2banBans() {
         [[ -n "${jailName}" ]] || continue
         menuLine "${jailName}"
     done < <(fail2ban-client status 2>/dev/null)
-    for jailName in sshd padm-control; do
+    for jailName in sshd padm-control nginx-scan-basic; do
         if grep -Eq "(^|,)${jailName}(,|$)" <<<"$(fail2banCurrentEnabledJailsCsv)"; then
             menuLine ""
             menuLine "Jail ${jailName}："
@@ -551,16 +779,18 @@ showFail2banBans() {
 
 manageFail2ban() {
     echoContent title "\n┌─ Fail2ban 防护 ────────────────────────────────────"
-    menuLine "这里只管理 padm 当前用到的 SSH 和 /s/control/ 防护，不扩展成通用安全平台。"
-    menuLine "推荐策略会按本机角色和控制面启用状态自动判断。"
-    menuLine "当前角色：$(uiStyle value "$(fail2banRoleText)")；控制面：$(uiStyle value "$(fail2banControlSurfaceText)")；当前策略：$(uiStyle value "$(fail2banCurrentProfileLabel)")"
+    menuLine "这里只管理 padm 当前用到的 SSH、/s/control/ 与站点扫描扩展防护，不扩展成通用安全平台。"
+    menuLine "推荐策略会按本机角色和控制面启用状态自动判断。站点扫描扩展默认关闭，只在站点探测较多时建议开启。"
+    menuLine "当前角色：$(uiStyle value "$(fail2banRoleText)")；控制面：$(uiStyle value "$(fail2banControlSurfaceText)")；当前策略：$(uiStyle value "$(fail2banCurrentProfileLabel)")；站点扫描扩展：$(uiStyle value "$(fail2banNginxScanStatusText)")"
     menuItem 1 "查看当前防护状态" "查看角色、推荐策略、当前 jail 和服务状态"
     menuItem 2 "启用推荐防护" "自动选择 仅 SSH 或 SSH + 控制面 防护"
     menuItem 3 "只启用 SSH 防护" "适合未启用主控/被控控制面，或先做最小接入"
     menuItem 4 "启用 SSH + 控制面防护" "同时保护 SSH 和 WireGuard 内网 /s/control/ 端点"
-    menuItem 5 "查看当前封禁" "查看 fail2ban 当前 jail 与被封禁 IP"
-    menuDangerItem 6 "停用 padm 管理的防护" "保留 fail2ban 软件包，只关闭 padm 管理的 jail"
-    menuReturnItem 7 "返回系统与脚本" "回到上级菜单"
+    menuItem 5 "启用站点扫描扩展防护" "默认关闭；仅在公开站点遭遇明显探测时再开启"
+    menuItem 6 "关闭站点扫描扩展防护" "恢复为纯基线防护，不影响 SSH / 控制面基线策略"
+    menuItem 7 "查看当前封禁" "查看 fail2ban 当前 jail 与被封禁 IP"
+    menuDangerItem 8 "停用 padm 管理的防护" "保留 fail2ban 软件包，只关闭 padm 管理的 jail"
+    menuReturnItem 9 "返回系统与脚本" "回到上级菜单"
     menuClose
     autoRead fail2ban_menu "请选择:" selectFail2banMenuType
     case "${selectFail2banMenuType}" in
@@ -577,12 +807,18 @@ manageFail2ban() {
         fail2banApplyProfile sshd+control
         ;;
     5)
-        showFail2banBans
+        fail2banApplyNginxScanExtension enable
         ;;
     6)
-        fail2banApplyProfile disabled
+        fail2banApplyNginxScanExtension disable
         ;;
     7)
+        showFail2banBans
+        ;;
+    8)
+        fail2banApplyProfile disabled
+        ;;
+    9)
         systemScriptMenu
         ;;
     *)
