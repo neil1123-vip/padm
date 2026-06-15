@@ -890,6 +890,63 @@ runShowAccountsOptionalStepRegression() {
     )
 }
 
+runAllowPortOptionalProtocolRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        ufw() { return 1; }
+        systemctl() { return 1; }
+        rc-update() { return 1; }
+        dpkg-query() { return 1; }
+        iptables() { return 1; }
+        netfilter-persistent() { return 1; }
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/network.sh"
+        allowPort 24443
+    )
+}
+
+runCoreClientOptionalArgsRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        currentClients='[{"id":"u1","email":"acct-one"},{"uuid":"u2","name":"acct-two"}]'
+        protocolSelectionIncludes() { return 1; }
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/cores.sh"
+        initXrayClients 7 >/dev/null
+        initSingBoxClients 7 >/dev/null
+    )
+}
+
+runSingBoxServiceMainPidTemplateRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        release=debian
+        find() {
+            if [[ "$*" == "/bin /usr/bin -name systemctl" ]]; then
+                printf '/usr/bin/systemctl\n'
+                return 0
+            fi
+            command find "$@"
+        }
+        bootStartup() { return 0; }
+        commitGeneratedFile() { cp "$1" "${TMP_DIR}/sing-box.service" && return 0; }
+        progressCard() { return 0; }
+        errorCard() { return 1; }
+        coreSingBoxServiceTemplate() { printf '%s\n' "${TMP_DIR}/sing-box.service.XXXXXX"; }
+        padmCreateTempPath() { printf -v "$1" '%s' "$(mktemp "$2")"; }
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/cores.sh"
+        installSingBoxService 1 >/dev/null 2>&1 || true
+        grep -q 'ExecReload=/bin/kill -HUP \$MAINPID' "${TMP_DIR}/sing-box.service"
+    )
+}
+
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
@@ -913,6 +970,9 @@ runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
+        runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
+        runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
+        runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
         runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }

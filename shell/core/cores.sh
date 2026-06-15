@@ -109,7 +109,7 @@ installSingBox() {
 installXray() {
     readInstallType
     local prereleaseStatus=false
-    if [[ "$2" == "true" ]]; then
+    if [[ "${2:-}" == "true" ]]; then
         prereleaseStatus=true
     fi
 
@@ -744,7 +744,7 @@ WorkingDirectory=/root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
 ExecStart=${execStart}
-ExecReload=/bin/kill -HUP $MAINPID
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=on-failure
 RestartSec=10
 LimitNPROC=infinity
@@ -824,8 +824,8 @@ EOF
 # 读取 Xray 用户数据并初始化
 initXrayClients() {
     local type=",$1,"
-    local newUUID=$2
-    local newEmail=$3
+    local newUUID=${2:-}
+    local newEmail=${3:-}
     if [[ -n "${newUUID}" ]]; then
         local newUser=
         newUser="{\"id\":\"${uuid}\",\"flow\":\"xtls-rprx-vision\",\"email\":\"${newEmail}-VLESS_TCP/TLS_Vision\"}"
@@ -912,8 +912,8 @@ initXrayClients() {
 # 读取 sing-box 用户数据并初始化
 initSingBoxClients() {
     local type=",$1,"
-    local newUUID=$2
-    local newName=$3
+    local newUUID=${2:-}
+    local newName=${3:-}
 
     if [[ -n "${newUUID}" ]]; then
         local newUser=

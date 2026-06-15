@@ -2,7 +2,7 @@
 
 # 开放防火墙端口
 allowPort() {
-    local type=$2
+    local type=${2:-}
     local firewallPort=$1
     if [[ -z "${type}" ]]; then
         type=tcp

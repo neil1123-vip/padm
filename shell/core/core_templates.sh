@@ -2,6 +2,7 @@
 
 # 初始化 Xray 配置文件
 initXrayConfig() {
+    set -- "${1:-}" "${2:-}" "${3:-}"
     progressCard "$2" "初始化 Xray 配置"
     echo
     local uuid=
@@ -416,6 +417,7 @@ stopSingBoxBeforeTemplateWrite() {
 }
 
 initSingBoxConfig() {
+    set -- "${1:-}" "${2:-}" "${3:-}"
     progressCard "$2" "初始化 sing-box 配置"
 
     echo
