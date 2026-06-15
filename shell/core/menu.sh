@@ -111,7 +111,7 @@ siteCertificateMenu() {
         manageTraditionalTlsFallback 1
         ;;
     2)
-        renewalTLS 1
+        manageTLSCertificates
         ;;
     3)
         menu
@@ -158,8 +158,9 @@ systemScriptMenu() {
     menuLine "这里维护 padm 脚本自身和宿主机网络辅助项"
     menuLine "核心版本、服务、日志和配置校验请去 核心与服务"
     menuItem 1 "更新 padm 脚本" "更新脚本文件"
-    menuItem 2 "网络优化" "查看或启用官方 BBR + fq"
-    menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+    menuItem 2 "查看脚本安装状态" "显示入口校验、版本、ref 和 manifest"
+    menuItem 3 "网络优化" "查看或启用官方 BBR + fq"
+    menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
     menuClose
     autoRead system_script_menu "请选择:" selectSystemMenuType
     case ${selectSystemMenuType} in
@@ -167,9 +168,12 @@ systemScriptMenu() {
         updatePadm 1
         ;;
     2)
-        bbrInstall
+        showPadmScriptInstallStatus
         ;;
     3)
+        bbrInstall
+        ;;
+    4)
         menu
         ;;
     *)

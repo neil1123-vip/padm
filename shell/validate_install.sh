@@ -366,6 +366,56 @@ check_subscription_files() {
     check_first_nonempty_dir "sing-box 订阅输出存在" /etc/padm/subscribe/sing-box /etc/padm/subscribe_local/sing-box
 }
 
+check_maintenance_summary() {
+    if [[ -s /etc/padm/xray/geosite.dat && -s /etc/padm/xray/geoip.dat ]]; then
+        pass "Xray Geo 文件齐全"
+        if [[ -s /etc/padm/xray/geo.version ]]; then
+            pass "Xray Geo 版本：$(tr -d '\r\n' </etc/padm/xray/geo.version)"
+        else
+            warn "Xray Geo 版本文件缺失：/etc/padm/xray/geo.version"
+        fi
+    else
+        fail "Xray Geo 文件缺失"
+    fi
+
+    if find /etc/padm/tls -maxdepth 1 -type f -name '*.crt' -size +0c -print -quit 2>/dev/null | grep -q . &&
+        find /etc/padm/tls -maxdepth 1 -type f -name '*.key' -size +0c -print -quit 2>/dev/null | grep -q .; then
+        pass "TLS 证书文件存在"
+    fi
+
+    if [[ -f /etc/padm/tls/ssl_type ]]; then
+        pass "TLS 类型记录存在"
+    fi
+
+    if [[ -f /etc/padm/install.sh ]]; then
+        pass "padm 入口文件存在"
+        if bash -n /etc/padm/install.sh >/dev/null 2>&1; then
+            pass "padm 入口语法校验通过"
+        else
+            fail "padm 入口语法校验失败"
+        fi
+        if grep -q "ensureScriptModules" /etc/padm/install.sh; then
+            pass "padm 入口包含 ensureScriptModules"
+        else
+            fail "padm 入口缺少 ensureScriptModules"
+        fi
+    else
+        fail "padm 入口文件缺失"
+    fi
+
+    if crontab -l 2>/dev/null | grep -q "RenewTLS"; then
+        pass "TLS 定时续签已配置"
+    else
+        warn "TLS 定时续签未配置"
+    fi
+
+    if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
+        pass "Geo 自动更新已配置"
+    else
+        warn "Geo 自动更新未配置"
+    fi
+}
+
 check_tcp_listen() {
     local port=$1
 
@@ -453,6 +503,7 @@ main() {
     check_sing_box_compatibility_audit
 
     check_subscription_files
+    check_maintenance_summary
     check_no_pattern /etc/padm 'sshpass' '仓库不应包含临时辅助工具'
     if [[ -n "${domain}" ]]; then
         if [[ "${online}" == "true" ]]; then

@@ -6,6 +6,31 @@ cleanXrayGeoFiles() {
     rm -f "${targetDir}/geosite.dat" "${targetDir}/geoip.dat" "${targetDir}/geo.version" >/dev/null 2>&1
 }
 
+downloadXrayGeoFilesToStage() {
+    local stageDir=$1
+    local geoVersion=$2
+
+    mkdir -p "${stageDir}" || return 1
+    if ! downloadGitHubReleaseAsset -P "${stageDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geosite.dat; then
+        return 1
+    fi
+    if ! downloadGitHubReleaseAsset -P "${stageDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geoip.dat; then
+        return 1
+    fi
+    [[ -s "${stageDir}/geosite.dat" && -s "${stageDir}/geoip.dat" ]]
+}
+
+commitXrayGeoFilesFromStage() {
+    local stageDir=$1
+    local targetDir=$2
+    local geoVersion=$3
+
+    mkdir -p "${targetDir}" || return 1
+    cp "${stageDir}/geosite.dat" "${targetDir}/geosite.dat" || return 1
+    cp "${stageDir}/geoip.dat" "${targetDir}/geoip.dat" || return 1
+    printf '%s\n' "${geoVersion}" >"${targetDir}/geo.version" || return 1
+}
+
 ensureXrayGeoFiles() {
     local targetDir=$1
     local force=${2:-}
@@ -20,13 +45,19 @@ ensureXrayGeoFiles() {
     echoContent title "\n┌─ Geo 数据版本 ─────────────────────────────────────"
     menuLine "version:${geoVersion}"
     menuClose
-    cleanXrayGeoFiles "${targetDir}"
-
-    if ! downloadGitHubReleaseAsset -P "${targetDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geosite.dat || ! downloadGitHubReleaseAsset -P "${targetDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geoip.dat; then
+    local stageDir
+    padmCreateTempPath stageDir -d /etc/padm/tmp.geo.XXXXXX || return 1
+    if ! downloadXrayGeoFilesToStage "${stageDir}" "${geoVersion}"; then
+        padmRemoveCleanupPath "${stageDir}"
         errorCard "geo文件下载失败"
         return 1
     fi
-    printf '%s\n' "${geoVersion}" >"${targetDir}/geo.version"
+    if ! commitXrayGeoFilesFromStage "${stageDir}" "${targetDir}" "${geoVersion}"; then
+        padmRemoveCleanupPath "${stageDir}"
+        errorCard "geo文件写入失败"
+        return 1
+    fi
+    padmRemoveCleanupPath "${stageDir}"
 }
 
 xrayGeoDisplayVersion() {
@@ -49,6 +80,19 @@ xrayGeoDisplayVersion() {
         fi
     fi
     printf '版本未知'
+}
+
+showXrayGeoStatus() {
+    local targetDir="${1:-/etc/padm/xray}"
+    local geoipStatus="缺失"
+    local geositeStatus="缺失"
+    local cronStatus="未设置"
+    [[ -s "${targetDir}/geoip.dat" ]] && geoipStatus="已安装"
+    [[ -s "${targetDir}/geosite.dat" ]] && geositeStatus="已安装"
+    if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
+        cronStatus="已设置"
+    fi
+    statusCard "Xray Geo 状态" "geoip.dat：${geoipStatus}" "geosite.dat：${geositeStatus}" "版本：$(xrayGeoDisplayVersion "${targetDir}")" "自动更新：${cronStatus}"
 }
 
 # 安装 sing-box
@@ -1214,10 +1258,11 @@ xrayVersionManageMenu() {
     menuItem 6 "严格模式校验" "执行 XRAY_JSON_STRICT=true xray -test"
     menuItem 7 "兼容体检" "扫描 users schema / ECH / legacy reverse 风险"
     menuItem 8 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 9 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
-    menuItem 10 "服务控制" "启动、停止、重启 Xray"
-    menuItem 11 "日志管理" "查看或调整 Xray 日志"
-    menuReturnItem 12 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 9 "查看 Geo 状态" "查看文件、版本和自动更新状态"
+    menuItem 10 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
+    menuItem 11 "服务控制" "启动、停止、重启 Xray"
+    menuItem 12 "日志管理" "查看或调整 Xray 日志"
+    menuReturnItem 13 "返回核心与服务" "回到核心生命周期管理"
     menuClose
     autoRead xray_lifecycle_menu "请选择:" selectXrayType
     case "${selectXrayType}" in
@@ -1240,24 +1285,31 @@ xrayVersionManageMenu() {
     6) showXrayStrictValidation ;;
     7) showXrayCompatibilityAudit ;;
     8) updateGeoSite ;;
-    9) installCronUpdateGeo ;;
-    10) coreServiceControlMenu xray ;;
-    11) checkLog 1 ;;
-    12) coreVersionManageMenu ;;
+    9) showXrayGeoStatus ;;
+    10) installCronUpdateGeo ;;
+    11) coreServiceControlMenu xray ;;
+    12) checkLog 1 ;;
+    13) coreVersionManageMenu ;;
     *) errorCard "输入有误，请重新输入"; xrayVersionManageMenu ;;
     esac
 }
 
 updateGeoSite() {
-    if ! ensureXrayGeoFiles "/etc/padm/xray" force; then
+    local targetDir="/etc/padm/xray"
+    local oldVersion newVersion
+    oldVersion=$(xrayGeoDisplayVersion "${targetDir}")
+    if ! ensureXrayGeoFiles "${targetDir}" force; then
         exit 1
     fi
 
-    if ! reloadCore; then
-        statusCard "Geo 数据" "Geo 数据已更新，但核心重载失败，请检查核心服务日志"
-        return 1
+    newVersion=$(xrayGeoDisplayVersion "${targetDir}")
+    if [[ "${oldVersion}" != "${newVersion}" ]]; then
+        if ! reloadCore; then
+            statusCard "Geo 数据" "Geo 数据已更新，但核心重载失败，请检查核心服务日志"
+            return 1
+        fi
     fi
-    statusCard "Geo 数据" "更新完毕"
+    statusCard "Geo 数据" "更新完毕" "当前版本：${newVersion}"
 }
 
 updateXray() {
@@ -2035,8 +2087,9 @@ coreConfigMaintenanceMenu() {
     menuItem 6 "sing-box 兼容体检" "扫描 1.13/1.14 迁移风险并输出提示"
     menuItem 7 "检查 sing-box 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
     menuItem 8 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 9 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
-    menuReturnItem 10 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 9 "查看 Xray Geo 状态" "查看文件、版本和自动更新状态"
+    menuItem 10 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
+    menuReturnItem 11 "返回核心与服务" "回到核心生命周期管理"
     menuClose
     autoRead core_config_maintenance "请选择:" selectMaintenance
     case "${selectMaintenance}" in
@@ -2064,8 +2117,9 @@ coreConfigMaintenanceMenu() {
     6) showSingBoxCompatibilityAudit ;;
     7) checkSingBoxPrereleaseCompatibility ;;
     8) updateGeoSite ;;
-    9) installCronUpdateGeo ;;
-    10) coreVersionManageMenu ;;
+    9) showXrayGeoStatus ;;
+    10) installCronUpdateGeo ;;
+    11) coreVersionManageMenu ;;
     *) errorCard "输入有误，请重新输入"; coreConfigMaintenanceMenu ;;
     esac
 }

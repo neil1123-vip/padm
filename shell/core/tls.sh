@@ -289,6 +289,113 @@ resolveInstalledTLSDomain() {
     done
 }
 
+tlsRenewCronState() {
+    if crontab -l 2>/dev/null | grep -q "RenewTLS"; then
+        printf '已设置'
+    else
+        printf '未设置'
+    fi
+}
+
+tlsCertificateStatusJson() {
+    readAcmeTLS
+    local domain=${currentHost}
+    if [[ -z "${domain}" && -n "${tlsDomain}" ]]; then
+        domain=${tlsDomain}
+    fi
+    local tlsDir="${PADM_TLS_DIR:-/etc/padm/tls}"
+    if [[ -z "${domain}" || ! -s "${tlsDir}/${domain}.crt" || ! -s "${tlsDir}/${domain}.key" ]]; then
+        domain=$(resolveInstalledTLSDomain)
+    fi
+
+    local sslDays=90
+    if [[ -f "/etc/padm/tls/ssl_type" ]] && grep -q "buypass" <"/etc/padm/tls/ssl_type"; then
+        sslDays=180
+    fi
+
+    if [[ -n "${domain}" && -s "${tlsDir}/${domain}.crt" && -s "${tlsDir}/${domain}.key" ]]; then
+        if [[ -d "$HOME/.acme.sh/${domain}_ecc" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+            local modifyTime currentTime stampDiff days remainingDays sourceType
+            if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+                modifyTime=$(stat --format=%z "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
+                sourceType="acme-dns-api"
+            else
+                modifyTime=$(stat --format=%z "$HOME/.acme.sh/${domain}_ecc/${domain}.cer")
+                sourceType="acme-standalone"
+            fi
+            modifyTime=$(date +%s -d "${modifyTime}")
+            currentTime=$(date +%s)
+            ((stampDiff = currentTime - modifyTime))
+            ((days = stampDiff / 86400))
+            ((remainingDays = sslDays - days))
+            jq -n \
+                --arg status "installed" \
+                --arg source "${sourceType}" \
+                --arg domain "${domain}" \
+                --arg cron "$(tlsRenewCronState)" \
+                --arg issued_at "$(date -d @"${modifyTime}" +"%F %H:%M:%S")" \
+                --argjson remaining_days "${remainingDays}" \
+                '{status:$status, source:$source, domain:$domain, cron:$cron, issued_at:$issued_at, remaining_days:$remaining_days}'
+            return 0
+        fi
+
+        jq -n \
+            --arg status "installed" \
+            --arg source "custom" \
+            --arg domain "${domain}" \
+            --arg cron "$(tlsRenewCronState)" \
+            '{status:$status, source:$source, domain:$domain, cron:$cron}'
+        return 0
+    fi
+
+    jq -n --arg status "missing" --arg cron "$(tlsRenewCronState)" '{status:$status, cron:$cron}'
+}
+
+showTLSCertificateStatus() {
+    local statusJson
+    statusJson=$(tlsCertificateStatusJson) || {
+        errorCard "TLS 证书状态读取失败"
+        return 1
+    }
+    local status source domain cron issuedAt remainingDays
+    status=$(jq -r '.status' <<<"${statusJson}")
+    source=$(jq -r '.source // "unknown"' <<<"${statusJson}")
+    domain=$(jq -r '.domain // "未检测到"' <<<"${statusJson}")
+    cron=$(jq -r '.cron // "未设置"' <<<"${statusJson}")
+    issuedAt=$(jq -r '.issued_at // ""' <<<"${statusJson}")
+    remainingDays=$(jq -r '.remaining_days // ""' <<<"${statusJson}")
+
+    if [[ "${status}" == "missing" ]]; then
+        statusCard "TLS 证书状态" "未检测到本机 TLS 证书" "定时续签：${cron}" "无域名 Reality 不需要这里；域名 Reality 或传统 TLS 请检查证书"
+        return 0
+    fi
+    if [[ "${source}" == "custom" ]]; then
+        statusCard "TLS 证书状态" "域名：${domain}" "来源：自定义证书" "定时续签：${cron}" "说明：自定义证书可读，但不支持 renew 自动续签"
+        return 0
+    fi
+    statusCard "TLS 证书状态" "域名：${domain}" "来源：${source}" "签发时间：${issuedAt}" "剩余天数：${remainingDays}" "定时续签：${cron}"
+}
+
+manageTLSCertificates() {
+    while true; do
+        echoContent title "\n┌─ 本机 TLS 证书管理 ───────────────────────────────"
+        menuLine "这里查看本机 TLS 证书状态，并按需执行续签检查"
+        menuItem 1 "查看证书状态" "显示来源、剩余天数和定时续签状态"
+        menuItem 2 "立即执行续签检查" "沿用现有 renew 逻辑，按状态决定是否真正续签"
+        menuItem 3 "查看续签定时任务" "显示是否已配置 RenewTLS cron"
+        menuReturnItem 4 "返回站点与证书" "回到上级菜单"
+        menuClose
+        autoRead tls_certificate_menu "请选择:" tlsCertificateMenuStatus
+        case "${tlsCertificateMenuStatus}" in
+        1) showTLSCertificateStatus ;;
+        2) renewalTLS 1 ;;
+        3) statusCard "TLS 定时续签" "状态：$(tlsRenewCronState)" ;;
+        4) return ;;
+        *) errorCard "选择错误，请重新选择" ;;
+        esac
+    done
+}
+
 restoreServicesAfterTLSRenewal() {
     local status=0
     reloadCore || status=1
