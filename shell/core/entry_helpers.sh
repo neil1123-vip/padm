@@ -422,6 +422,29 @@ padmEntryScriptReady() {
     [[ -s "${entryPath}" ]] && bash -n "${entryPath}" && grep -q "ensureScriptModules" "${entryPath}"
 }
 
+showPadmScriptInstallStatus() {
+    local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
+    local installPath="${installDir}/install.sh"
+    local refFile="${installDir}/.padm-ref"
+    local manifestFile="${installDir}/.padm-module-manifest"
+    local entryStatus="未就绪"
+    local refStatus="缺失"
+    local manifestStatus="缺失"
+
+    if padmEntryScriptReady "${installPath}"; then
+        entryStatus="已就绪"
+    fi
+    [[ -s "${refFile}" ]] && refStatus="$(tr -d '\r\n' <"${refFile}")"
+    [[ -s "${manifestFile}" ]] && manifestStatus="存在"
+
+    statusCard "padm 脚本安装状态" \
+        "入口：${installPath}" \
+        "入口校验：${entryStatus}" \
+        "版本：$(getScriptVersion)" \
+        ".padm-ref：${refStatus}" \
+        ".padm-module-manifest：${manifestStatus}"
+}
+
 restorePadmEntryBackup() {
     local backupPath=$1
     local installPath=$2
@@ -540,8 +563,12 @@ handleFirewall() {
 }
 
 # 网络优化
-readonly PADM_BBR_SYSCTL_CONF="/etc/sysctl.d/99-padm-bbr.conf"
-readonly PADM_BBR_STATE_FILE="/etc/padm/padm-bbr.state"
+if ! declare -p PADM_BBR_SYSCTL_CONF >/dev/null 2>&1; then
+    readonly PADM_BBR_SYSCTL_CONF="/etc/sysctl.d/99-padm-bbr.conf"
+fi
+if ! declare -p PADM_BBR_STATE_FILE >/dev/null 2>&1; then
+    readonly PADM_BBR_STATE_FILE="/etc/padm/padm-bbr.state"
+fi
 
 bbrTmpPath() {
     local template=$1
