@@ -11008,6 +11008,12 @@ main-credential
     fi
     resetMenuActions
     coreConfigMaintenanceMenu <<<"3"
+    assertMenuAction 'statusCard:Xray 兼容体检'
+    resetMenuActions
+    coreConfigMaintenanceMenu <<<"4"
+    assertMenuAction 'statusCard:Xray 预发布兼容检查'
+    resetMenuActions
+    coreConfigMaintenanceMenu <<<"6"
     assertMenuAction 'statusCard:sing-box 兼容体检'
     if assertMenuAction unexpected-network-version-fetch; then
         printf 'menu-smoke failed: core maintenance fetched release versions while rendering compatibility entries\n' >&2

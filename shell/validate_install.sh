@@ -222,6 +222,55 @@ check_sing_box_compatibility_audit() {
     fi
 }
 
+check_xray_compatibility_audit() {
+    local statusFile warnFile summary strictLog
+
+    if [[ ! -x /etc/padm/xray/xray ]]; then
+        warn "未安装 Xray，跳过兼容体检摘要"
+        return
+    fi
+    if [[ ! -f /etc/padm/shell/core/bootstrap.sh ]]; then
+        warn "缺少核心 bootstrap，跳过 Xray 兼容体检摘要"
+        return
+    fi
+
+    (
+        # shellcheck source=/dev/null
+        source /etc/padm/shell/core/bootstrap.sh
+        statusFile=$(xrayCompatibilityAuditStatusFile)
+        warnFile=$(xrayCompatibilityAuditWarnFile)
+        collectXrayCompatibilityFindings "${statusFile}" "$(xrayCompatibilityAuditLog)" "${warnFile}"
+        summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
+        strictLog=$(coreXrayStrictConfigTestLog)
+        if ! validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}"; then
+            printf 'WARN:STRICT_FAIL %s\n' "${strictLog}"
+        fi
+        if xrayCompatibilityAuditHasFailures "${statusFile}"; then
+            printf 'WARN:%s\n' "${summary}"
+            printf 'LOG:%s\n' "$(xrayCompatibilityAuditLog)"
+        elif [[ -s "${warnFile}" ]]; then
+            printf 'WARN:%s\n' "${summary}"
+        else
+            printf 'PASS:%s\n' "${summary}"
+        fi
+    ) >/tmp/padm-validate-xray-compat.log 2>&1 || true
+
+    if grep -q '^PASS:' /tmp/padm-validate-xray-compat.log; then
+        pass "Xray 兼容体检通过"
+    elif grep -q '^WARN:' /tmp/padm-validate-xray-compat.log; then
+        warn "Xray 兼容体检发现需关注项：$(sed -n 's/^WARN://p' /tmp/padm-validate-xray-compat.log | head -n 1)"
+        if grep -q '^LOG:' /tmp/padm-validate-xray-compat.log; then
+            warn "Xray 兼容体检日志：$(sed -n 's/^LOG://p' /tmp/padm-validate-xray-compat.log | head -n 1)"
+        fi
+        if grep -q '^WARN:STRICT_FAIL ' /tmp/padm-validate-xray-compat.log; then
+            warn "Xray 严格模式校验失败：$(sed -n 's/^WARN:STRICT_FAIL //p' /tmp/padm-validate-xray-compat.log | head -n 1)"
+        fi
+    else
+        warn "Xray 兼容体检摘要执行失败，已跳过"
+        cat /tmp/padm-validate-xray-compat.log 2>/dev/null || true
+    fi
+}
+
 detect_package_family() {
     if [[ -f /etc/debian_version ]]; then
         printf 'apt'
@@ -400,6 +449,7 @@ main() {
     fi
     check_xray
     check_sing_box
+    check_xray_compatibility_audit
     check_sing_box_compatibility_audit
 
     check_subscription_files
