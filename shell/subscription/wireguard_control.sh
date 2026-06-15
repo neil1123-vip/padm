@@ -408,6 +408,7 @@ server {
     root ${nginxStaticPath};
 
     location /s/control/ {
+        access_log $(fail2banPadmControlLogFile);
         client_max_body_size 256k;
         proxy_pass http://127.0.0.1:$(subscriptionControlPort);
         proxy_set_header Authorization \$http_authorization;
