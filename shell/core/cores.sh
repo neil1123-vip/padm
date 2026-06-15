@@ -187,8 +187,26 @@ coreXrayBinaryPath() {
     printf '%s\n' "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
 }
 
+coreXrayConfigDir() {
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        printf '%s\n' "${PADM_XRAY_CONF_DIR%/}"
+        return
+    fi
+    printf '%s\n' "${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
+}
+
 coreSingBoxBinaryPath() {
     printf '%s\n' "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
+}
+
+xrayConfigInstalled() {
+    local configDir file
+    configDir=$(coreXrayConfigDir)
+    [[ -d "${configDir}" ]] || return 1
+    for file in "${configDir}"/*.json; do
+        [[ -f "${file}" ]] && return 0
+    done
+    return 1
 }
 
 getXrayCurrentVersion() {
@@ -222,9 +240,21 @@ coreServiceState() {
 validateXrayConfigWithBinary() {
     local binary=${1:-/etc/padm/xray/xray}
     local logFile=${2:-$(coreXrayConfigTestLog)}
+    local configDir
+    configDir=$(coreXrayConfigDir)
     [[ -x "${binary}" ]] || return 1
-    [[ -d /etc/padm/xray/conf ]] || return 1
-    "${binary}" -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1
+    [[ -d "${configDir}" ]] || return 1
+    "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1
+}
+
+validateXrayConfigStrictWithBinary() {
+    local binary=${1:-/etc/padm/xray/xray}
+    local logFile=${2:-$(coreXrayStrictConfigTestLog)}
+    local configDir
+    configDir=$(coreXrayConfigDir)
+    [[ -x "${binary}" ]] || return 1
+    [[ -d "${configDir}" ]] || return 1
+    XRAY_JSON_STRICT=true "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1
 }
 
 coreTmpFilePath() {
@@ -241,8 +271,16 @@ coreXrayConfigTestLog() {
     coreTmpFilePath padm-core-xray-test.log
 }
 
+coreXrayStrictConfigTestLog() {
+    coreTmpFilePath padm-core-xray-strict-test.log
+}
+
 coreXrayUpgradeTestLog() {
     coreTmpFilePath padm-core-xray-upgrade-test.log
+}
+
+coreXrayPrereleaseAuditLog() {
+    coreTmpFilePath padm-core-xray-prerelease-audit.log
 }
 
 coreSingBoxConfigTestLog() {
@@ -524,6 +562,300 @@ checkSingBoxPrereleaseCompatibility() {
     return 1
 }
 
+appendXrayCompatibilityHints() {
+    local logFile=$1
+    [[ -f "${logFile}" ]] || return 0
+    if grep -Eqi 'echForceQuery|trustedXForwardedFor|settings\.clients|settings\.accounts|legacy reverse|unknown field.*users|unknown field.*clients|unknown field.*accounts|reverse' "${logFile}"; then
+        {
+            printf '\n[padm 兼容性提示]\n'
+            printf -- '- Xray 26.5.9+ 预发布已开始把 inbounds 的 clients/accounts 收敛到 users，请优先关注旧 settings.clients/settings.accounts。\n'
+            printf -- '- XHTTP / WS / HTTPUpgrade 如前置 CDN 或反代，建议显式复核 sockopt.trustedXForwardedFor。\n'
+            printf -- '- ECH 相关旧字段 echForceQuery 已移除；legacy reverse 也已不再建议继续使用。\n'
+        } >>"${logFile}"
+    fi
+}
+
+xrayCompatibilityAuditLog() {
+    coreTmpFilePath padm-xray-compat-audit.log
+}
+
+xrayCompatibilityAuditStatusFile() {
+    coreTmpFilePath padm-xray-compat-audit.status
+}
+
+xrayCompatibilityAuditWarnFile() {
+    coreTmpFilePath padm-xray-compat-audit.warn
+}
+
+coreXrayCompatTempDirTemplate() {
+    coreTmpFilePath padm-xray-compat-download.XXXXXX
+}
+
+xrayCompatibilityConfigFiles() {
+    local configDir
+    configDir=$(coreXrayConfigDir)
+    find "${configDir}" -maxdepth 1 -type f -name '*.json' | sort
+}
+
+xrayCompatibilityAuditReset() {
+    : >"${1}"
+}
+
+xrayCompatibilityAuditStatusAdd() {
+    local file=$1
+    local level=$2
+    local message=$3
+    printf '%s:%s\n' "${level}" "${message}" >>"${file}"
+}
+
+xrayCompatibilityAuditWarn() {
+    local warnFile=$1
+    local logFile=$2
+    local message=$3
+    printf '%s\n' "${message}" >>"${warnFile}"
+    printf '[WARN] %s\n' "${message}" >>"${logFile}"
+}
+
+xrayCompatibilityAuditFail() {
+    local statusFile=$1
+    local logFile=$2
+    local message=$3
+    xrayCompatibilityAuditStatusAdd "${statusFile}" fail "${message}"
+    printf '[FAIL] %s\n' "${message}" >>"${logFile}"
+}
+
+xrayCompatibilityAuditPass() {
+    local statusFile=$1
+    local logFile=$2
+    local message=$3
+    xrayCompatibilityAuditStatusAdd "${statusFile}" pass "${message}"
+    printf '[PASS] %s\n' "${message}" >>"${logFile}"
+}
+
+xrayCompatibilityAuditScanJsonFile() {
+    local file=$1
+    local statusFile=$2
+    local logFile=$3
+    local warnFile=$4
+
+    if ! jq empty "${file}" >/dev/null 2>&1; then
+        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}"
+        return 0
+    fi
+
+    if jq -e '
+        .. | objects |
+        select(has("settings") and (.settings | type == "object") and (.settings | has("clients") or has("accounts")))
+    ' "${file}" >/dev/null 2>&1; then
+        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 users schema（settings.clients/accounts），升级预发布前请专项复核：${file}"
+    fi
+    if jq -e '.. | objects | select(has("echForceQuery"))' "${file}" >/dev/null 2>&1; then
+        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到已移除的 echForceQuery：${file}"
+    fi
+    if jq -e 'type == "object" and has("reverse")' "${file}" >/dev/null 2>&1; then
+        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy reverse 配置，请在升级前确认迁移方案：${file}"
+    fi
+    if jq -e '
+        .inbounds[]? |
+        select(
+            (.streamSettings.network? == "ws") or
+            (.streamSettings.network? == "httpupgrade") or
+            (.streamSettings.network? == "xhttp") or
+            (.streamSettings.wsSettings? != null) or
+            (.streamSettings.httpupgradeSettings? != null) or
+            (.streamSettings.xhttpSettings? != null)
+        ) |
+        select(((.sockopt.trustedXForwardedFor? // "") | tostring | length) == 0)
+    ' "${file}" >/dev/null 2>&1; then
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 XHTTP/WS/HTTPUpgrade 入站未设置 trustedXForwardedFor；如前置 CDN/反代请专项复核：${file}"
+    fi
+    if jq -e '.inbounds[]? | select(.protocol? == "tunnel")' "${file}" >/dev/null 2>&1; then
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 tunnel inbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}"
+    fi
+    if jq -e '.outbounds[]? | select(.protocol? == "dns")' "${file}" >/dev/null 2>&1; then
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 DNS outbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}"
+    fi
+}
+
+collectXrayCompatibilityFindings() {
+    local statusFile=$1
+    local logFile=$2
+    local warnFile=$3
+    local file foundJson=false
+
+    xrayCompatibilityAuditReset "${statusFile}"
+    xrayCompatibilityAuditReset "${warnFile}"
+    : >"${logFile}"
+    printf 'Xray 兼容体检\n' >>"${logFile}"
+
+    if ! xrayInstalled; then
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 Xray 二进制，跳过兼容体检"
+        return 0
+    fi
+    if ! xrayConfigInstalled; then
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 Xray 配置，跳过兼容体检"
+        return 0
+    fi
+
+    while IFS= read -r file; do
+        [[ -f "${file}" ]] || continue
+        foundJson=true
+        xrayCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" "${warnFile}"
+    done < <(xrayCompatibilityConfigFiles)
+
+    if [[ "${foundJson}" != "true" ]]; then
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 Xray JSON 配置文件"
+        return 0
+    fi
+
+    if [[ ! -s "${statusFile}" ]] && [[ ! -s "${warnFile}" ]]; then
+        xrayCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到当前预发布已知兼容风险"
+    fi
+}
+
+xrayCompatibilityAuditHasFailures() {
+    local statusFile=$1
+    grep -q '^fail:' "${statusFile}" 2>/dev/null
+}
+
+summarizeXrayCompatibilityAudit() {
+    local statusFile=$1
+    local warnFile=$2
+    local failCount=0 passCount=0 warnCount=0
+
+    [[ -f "${statusFile}" ]] && failCount=$(grep -c '^fail:' "${statusFile}" 2>/dev/null || printf '0')
+    [[ -f "${statusFile}" ]] && passCount=$(grep -c '^pass:' "${statusFile}" 2>/dev/null || printf '0')
+    [[ -f "${warnFile}" ]] && warnCount=$(grep -c '.' "${warnFile}" 2>/dev/null || printf '0')
+    printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
+}
+
+xrayCompatibilityAuditOverviewSummary() {
+    local statusFile warnFile logFile
+    statusFile=$(xrayCompatibilityAuditStatusFile)
+    warnFile=$(xrayCompatibilityAuditWarnFile)
+    logFile=$(xrayCompatibilityAuditLog)
+    collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+    summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}"
+}
+
+showXrayCompatibilityAudit() {
+    local logFile=${1:-$(xrayCompatibilityAuditLog)}
+    local statusFile=${2:-$(xrayCompatibilityAuditStatusFile)}
+    local warnFile=${3:-$(xrayCompatibilityAuditWarnFile)}
+
+    collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+    if xrayCompatibilityAuditHasFailures "${statusFile}"; then
+        statusCard "Xray 兼容体检" "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 users schema / echForceQuery / legacy reverse"
+    elif [[ -s "${warnFile}" ]]; then
+        statusCard "Xray 兼容体检" "发现需关注项" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
+    else
+        statusCard "Xray 兼容体检" "通过" "未检测到当前预发布已知兼容风险"
+    fi
+}
+
+downloadXrayReleaseBinaryToTemp() {
+    local version=$1
+    local outVar=$2
+    local tmpDirVar=${3:-}
+    local tmpDir binary
+
+    padmCreateTempPath tmpDir -d "$(coreXrayCompatTempDirTemplate)" || return 1
+    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        return 1
+    fi
+    if ! unzip -o "${tmpDir}/${xrayCoreCPUVendor}.zip" -d "${tmpDir}" >/dev/null 2>&1; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "Xray 预发布包解压失败"
+        return 1
+    fi
+    binary="${tmpDir}/xray"
+    if [[ ! -x "${binary}" ]]; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "Xray 预发布包中未找到二进制"
+        return 1
+    fi
+    printf -v "${outVar}" '%s' "${binary}"
+    if [[ -n "${tmpDirVar}" ]]; then
+        printf -v "${tmpDirVar}" '%s' "${tmpDir}"
+    fi
+}
+
+showXrayStrictValidation() {
+    local logFile=${1:-$(coreXrayStrictConfigTestLog)}
+
+    if ! xrayInstalled; then
+        statusCard "Xray 严格模式校验" "跳过" "未检测到 Xray 二进制"
+        return 0
+    fi
+    if ! xrayConfigInstalled; then
+        statusCard "Xray 严格模式校验" "跳过" "未检测到 Xray 配置"
+        return 0
+    fi
+    if validateXrayConfigStrictWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
+        statusCard "Xray 严格模式校验" "通过"
+        return 0
+    fi
+    appendXrayCompatibilityHints "${logFile}"
+    statusCard "Xray 严格模式校验" "失败" "排查日志: ${logFile}"
+    return 1
+}
+
+checkXrayPrereleaseCompatibility() {
+    local version=${1:-}
+    local logFile=${2:-$(coreXrayPrereleaseAuditLog)}
+    local downloadedBinary=
+    local downloadTmpDir=
+    local resolvedVersion=
+    local validateLog strictLog
+
+    resolvedVersion=${version:-$(coreLatestReleaseTag XTLS/Xray-core true)}
+    checkVersionNotEmpty "${resolvedVersion}"
+    if ! xrayInstalled; then
+        statusCard "Xray 预发布兼容检查" "跳过" "未检测到 Xray 二进制"
+        return 0
+    fi
+    if ! xrayConfigInstalled; then
+        statusCard "Xray 预发布兼容检查" "跳过" "未检测到 Xray 配置"
+        return 0
+    fi
+    if ! downloadXrayReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
+        statusCard "Xray 预发布兼容检查" "失败" "预发布二进制下载失败"
+        return 1
+    fi
+
+    validateLog="${logFile}.validate"
+    strictLog="${logFile}.strict"
+    if ! validateXrayConfigWithBinary "${downloadedBinary}" "${validateLog}"; then
+        cat "${validateLog}" >"${logFile}"
+        appendXrayCompatibilityHints "${logFile}"
+        statusCard "Xray 预发布兼容检查" "失败" "目标版本: ${resolvedVersion}" "普通校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        return 1
+    fi
+    if ! validateXrayConfigStrictWithBinary "${downloadedBinary}" "${strictLog}"; then
+        {
+            printf '[普通模式校验]\n'
+            cat "${validateLog}"
+            printf '\n[严格模式校验]\n'
+            cat "${strictLog}"
+        } >"${logFile}"
+        appendXrayCompatibilityHints "${logFile}"
+        statusCard "Xray 预发布兼容检查" "失败" "目标版本: ${resolvedVersion}" "严格模式校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        return 1
+    fi
+    {
+        printf '[普通模式校验]\n'
+        cat "${validateLog}"
+        printf '\n[严格模式校验]\n'
+        cat "${strictLog}"
+    } >"${logFile}"
+    statusCard "Xray 预发布兼容检查" "通过" "目标版本: ${resolvedVersion}" "已通过普通校验和严格模式校验" "仅执行 dry-run，未替换本机二进制"
+    [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+    return 0
+}
+
 appendSingBoxCompatibilityHints() {
     local logFile=$1
     [[ -f "${logFile}" ]] || return 0
@@ -558,7 +890,7 @@ coreValidationState() {
     local logFile
     if [[ "${core}" == "xray" ]]; then
         logFile=$(coreXrayConfigTestLog)
-        if validateXrayConfigWithBinary /etc/padm/xray/xray "${logFile}"; then
+        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
             echo "通过"
         else
             echo "失败，查看 ${logFile}"
@@ -583,14 +915,18 @@ coreDisplayState() {
 }
 
 showCoreStatusOverview() {
-    local xrayDir=${PADM_XRAY_DIR:-/etc/padm/xray}
-    local xrayBinary="${xrayDir}/xray"
-    local xrayConfigDir="${xrayDir}/conf"
+    local xrayConfigDir
+    local xrayDir
+    local xrayBinary
     local xrayVersion="未安装"
     local singBoxVersion="未安装"
     local geoStatus="未安装"
     local geoVersion=""
     local geoCron="未设置"
+
+    xrayConfigDir=$(coreXrayConfigDir)
+    xrayDir=$(dirname "${xrayConfigDir}")
+    xrayBinary=$(coreXrayBinaryPath)
 
     if [[ -x "${xrayBinary}" ]]; then
         xrayVersion=$("${xrayBinary}" --version 2>/dev/null | awk 'NR==1 {print "v"$2}')
@@ -612,6 +948,9 @@ showCoreStatusOverview() {
     menuLine "Xray 服务: $(coreDisplayState "$(coreServiceState xray xrayRunning)")"
     if [[ -x "${xrayBinary}" ]]; then
         menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" "$(coreXrayConfigTestLog)")")"
+        if xrayConfigInstalled; then
+            menuLine "Xray 兼容: $(coreDisplayState "$(xrayCompatibilityAuditOverviewSummary)")"
+        fi
         if [[ -n "${geoVersion}" ]]; then
             menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / $(coreDisplayState "${geoVersion}") / 自动更新 $(coreDisplayState "${geoCron}")"
         else
@@ -708,7 +1047,7 @@ installDownloadedXrayBinary() {
         errorCard "Xray-core 资产中未找到 xray 二进制"
         return 1
     fi
-    if [[ -d /etc/padm/xray/conf ]] && ! validateXrayConfigWithBinary "${newBinary}" "${logFile}"; then
+    if xrayConfigInstalled && ! validateXrayConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "Xray 配置校验失败" "已取消升级" "排查日志: ${logFile}"
         return 1
@@ -823,9 +1162,14 @@ upgradeXrayCore() {
     local prerelease=${1:-false}
     local version=${2:-}
     local channel="稳定版"
-    [[ "${prerelease}" == "true" ]] && channel="预览版"
+    [[ "${prerelease}" == "true" ]] && channel="预发布版"
     version=${version:-$(coreLatestReleaseTag XTLS/Xray-core "${prerelease}")}
     checkVersionNotEmpty "${version}"
+    if [[ "${prerelease}" == "true" ]]; then
+        if ! checkXrayPrereleaseCompatibility "${version}" "$(coreXrayPrereleaseAuditLog)"; then
+            return 1
+        fi
+    fi
     confirmCoreUpgrade "Xray-core" "${version}" "${channel}" || { statusCard "已取消" "未更新 Xray-core"; return 0; }
     installDownloadedXrayBinary "${version}"
 }
@@ -863,37 +1207,43 @@ selectRollbackVersion() {
 xrayVersionManageMenu() {
     echoContent title "\n┌─ Xray-core 生命周期 ────────────────────────────────"
     menuItem 1 "升级稳定版" "下载最新稳定版，校验后替换"
-    menuItem 2 "升级预览版" "下载 prerelease，适合验证新能力"
-    menuItem 3 "回退稳定版" "选择最近稳定版本回退"
-    menuItem 4 "校验配置" "执行 xray -test -confdir"
-    menuItem 5 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 6 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
-    menuItem 7 "服务控制" "启动、停止、重启 Xray"
-    menuItem 8 "日志管理" "查看或调整 Xray 日志"
-    menuReturnItem 9 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 2 "检查预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
+    menuItem 3 "升级预发布版" "下载 prerelease，适合验证新能力"
+    menuItem 4 "回退稳定版" "选择最近稳定版本回退"
+    menuItem 5 "校验配置" "执行 xray -test -confdir"
+    menuItem 6 "严格模式校验" "执行 XRAY_JSON_STRICT=true xray -test"
+    menuItem 7 "兼容体检" "扫描 users schema / ECH / legacy reverse 风险"
+    menuItem 8 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
+    menuItem 9 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
+    menuItem 10 "服务控制" "启动、停止、重启 Xray"
+    menuItem 11 "日志管理" "查看或调整 Xray 日志"
+    menuReturnItem 12 "返回核心与服务" "回到核心生命周期管理"
     menuClose
     autoRead xray_lifecycle_menu "请选择:" selectXrayType
     case "${selectXrayType}" in
     1) upgradeXrayCore false ;;
-    2) upgradeXrayCore true ;;
-    3)
+    2) checkXrayPrereleaseCompatibility ;;
+    3) upgradeXrayCore true ;;
+    4)
         version=$(selectRollbackVersion XTLS/Xray-core "Xray-core") || { errorCard "输入有误，请重新输入"; xrayVersionManageMenu; return; }
         upgradeXrayCore false "${version}"
         ;;
-    4)
+    5)
         local logFile
         logFile=$(coreXrayConfigTestLog)
-        if validateXrayConfigWithBinary /etc/padm/xray/xray "${logFile}"; then
+        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
             statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
         fi
         ;;
-    5) updateGeoSite ;;
-    6) installCronUpdateGeo ;;
-    7) coreServiceControlMenu xray ;;
-    8) checkLog 1 ;;
-    9) coreVersionManageMenu ;;
+    6) showXrayStrictValidation ;;
+    7) showXrayCompatibilityAudit ;;
+    8) updateGeoSite ;;
+    9) installCronUpdateGeo ;;
+    10) coreServiceControlMenu xray ;;
+    11) checkLog 1 ;;
+    12) coreVersionManageMenu ;;
     *) errorCard "输入有误，请重新输入"; xrayVersionManageMenu ;;
     esac
 }
@@ -1649,25 +1999,31 @@ coreServiceControlAction() {
 coreConfigMaintenanceMenu() {
     echoContent title "\n┌─ 配置校验与数据维护 ───────────────────────────────"
     menuItem 1 "校验 Xray 配置" "执行 xray -test -confdir"
-    menuItem 2 "校验 sing-box 配置" "执行 merge + check"
-    menuItem 3 "sing-box 兼容体检" "扫描 1.13/1.14 迁移风险并输出提示"
-    menuItem 4 "检查 sing-box 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
-    menuItem 5 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 6 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
-    menuReturnItem 7 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 2 "严格模式校验 Xray" "执行 XRAY_JSON_STRICT=true xray -test"
+    menuItem 3 "Xray 兼容体检" "扫描 users schema / ECH / legacy reverse 风险"
+    menuItem 4 "检查 Xray 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
+    menuItem 5 "校验 sing-box 配置" "执行 merge + check"
+    menuItem 6 "sing-box 兼容体检" "扫描 1.13/1.14 迁移风险并输出提示"
+    menuItem 7 "检查 sing-box 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
+    menuItem 8 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
+    menuItem 9 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
+    menuReturnItem 10 "返回核心与服务" "回到核心生命周期管理"
     menuClose
     autoRead core_config_maintenance "请选择:" selectMaintenance
     case "${selectMaintenance}" in
     1)
         local logFile
         logFile=$(coreXrayConfigTestLog)
-        if validateXrayConfigWithBinary /etc/padm/xray/xray "${logFile}"; then
+        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
             statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
         fi
         ;;
-    2)
+    2) showXrayStrictValidation ;;
+    3) showXrayCompatibilityAudit ;;
+    4) checkXrayPrereleaseCompatibility ;;
+    5)
         local logFile
         logFile=$(coreSingBoxConfigTestLog)
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
@@ -1676,11 +2032,11 @@ coreConfigMaintenanceMenu() {
             statusCard "sing-box 配置校验" "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
-    3) showSingBoxCompatibilityAudit ;;
-    4) checkSingBoxPrereleaseCompatibility ;;
-    5) updateGeoSite ;;
-    6) installCronUpdateGeo ;;
-    7) coreVersionManageMenu ;;
+    6) showSingBoxCompatibilityAudit ;;
+    7) checkSingBoxPrereleaseCompatibility ;;
+    8) updateGeoSite ;;
+    9) installCronUpdateGeo ;;
+    10) coreVersionManageMenu ;;
     *) errorCard "输入有误，请重新输入"; coreConfigMaintenanceMenu ;;
     esac
 }

@@ -1292,6 +1292,97 @@ runSingBoxPrereleaseDryRunRegression() {
     )
 }
 
+runXrayStrictValidationRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/xray-strict-validation"
+        local xrayRoot="${root}/etc/padm/xray"
+        export PADM_XRAY_BINARY="${xrayRoot}/xray"
+        export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        cat >"${PADM_XRAY_BINARY}" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${XRAY_JSON_STRICT:-}" == "true" ]]; then
+    printf 'strict-ok\n'
+else
+    printf 'normal-ok\n'
+fi
+exit 0
+EOF
+        chmod +x "${PADM_XRAY_BINARY}"
+        printf '{"log":{}}\n' >"${PADM_XRAY_CONF_DIR}/00_log.json"
+        showXrayStrictValidation "${TMP_DIR}/xray-strict.log"
+        grep -q 'strict-ok' "${TMP_DIR}/xray-strict.log"
+    )
+}
+
+runXrayCompatibilityAuditRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/xray-compat-audit"
+        local xrayRoot="${root}/etc/padm/xray"
+        export PADM_XRAY_BINARY="${xrayRoot}/xray"
+        export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${PADM_XRAY_BINARY}"
+        chmod +x "${PADM_XRAY_BINARY}"
+        cat >"${PADM_XRAY_CONF_DIR}/07_VLESS_vision_reality_inbounds.json" <<'JSON'
+{"inbounds":[{"streamSettings":{"network":"xhttp"},"settings":{"clients":[{"email":"sub-x"}]}}],"echForceQuery":true}
+JSON
+        cat >"${PADM_XRAY_CONF_DIR}/00_reverse.json" <<'JSON'
+{"reverse":{"bridges":[]}}
+JSON
+        local statusFile warnFile logFile
+        statusFile=$(xrayCompatibilityAuditStatusFile)
+        warnFile=$(xrayCompatibilityAuditWarnFile)
+        logFile=$(xrayCompatibilityAuditLog)
+        collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+        grep -q '^fail:' "${statusFile}"
+        grep -q '旧 users schema' "${logFile}"
+        grep -q 'echForceQuery' "${logFile}"
+        grep -q 'legacy reverse' "${logFile}"
+        grep -q 'trustedXForwardedFor' "${logFile}"
+    )
+}
+
+runXrayPrereleaseDryRunRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/xray-prerelease"
+        local xrayRoot="${root}/etc/padm/xray"
+        export PADM_XRAY_BINARY="${xrayRoot}/xray"
+        export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        printf '{"log":{}}\n' >"${PADM_XRAY_CONF_DIR}/00_log.json"
+        printf '#!/usr/bin/env bash\nif [[ \"$1\" == \"--version\" ]]; then printf \"Xray 26.0.0 test\\n\"; exit 0; fi\nprintf \"checked:%s:%s\\n\" \"${XRAY_JSON_STRICT:-false}\" \"$*\"\nexit 0\n' >"${PADM_XRAY_BINARY}"
+        chmod +x "${PADM_XRAY_BINARY}"
+        downloadXrayReleaseBinaryToTemp() {
+            local _version=$1
+            local _outVar=$2
+            local _tmpVar=${3:-}
+            printf -v "${_outVar}" '%s' "${PADM_XRAY_BINARY}"
+            [[ -n "${_tmpVar}" ]] && printf -v "${_tmpVar}" '%s' "${TMP_DIR}/fake-xray-download"
+        }
+        validateXrayConfigWithBinary() {
+            local binary=$1
+            local logFile=$2
+            printf 'checked:normal:%s\n' "${binary}" >"${logFile}"
+            [[ "${binary}" == "${PADM_XRAY_BINARY}" ]]
+        }
+        validateXrayConfigStrictWithBinary() {
+            local binary=$1
+            local logFile=$2
+            printf 'checked:strict:%s\n' "${binary}" >"${logFile}"
+            [[ "${binary}" == "${PADM_XRAY_BINARY}" ]]
+        }
+        checkXrayPrereleaseCompatibility "v26.6.1" "${TMP_DIR}/xray-prerelease.log"
+        grep -q '\[普通模式校验\]' "${TMP_DIR}/xray-prerelease.log"
+        grep -q '\[严格模式校验\]' "${TMP_DIR}/xray-prerelease.log"
+        grep -q 'checked:normal:' "${TMP_DIR}/xray-prerelease.log"
+        grep -q 'checked:strict:' "${TMP_DIR}/xray-prerelease.log"
+    )
+}
+
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
@@ -1323,6 +1414,9 @@ runRegressionFast() {
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
         runRegressionStep service-wait-state runServiceWaitForStateRegression &&
+        runRegressionStep xray-strict-validation runXrayStrictValidationRegression &&
+        runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression &&
+        runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression &&
         runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression &&
         runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression &&
         runRegressionStep services-proc-race runServicesProcRaceRegression &&
