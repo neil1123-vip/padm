@@ -15,7 +15,7 @@ ensureXrayGeoFiles() {
     fi
 
     local geoVersion
-    geoVersion=$(curl -s https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/releases?per_page=1 | jq -r '.[]|.tag_name')
+    geoVersion=$(fetchUrlToStdout "https://api.github.com/repos/Loyalsoldier/v2ray-rules-dat/releases?per_page=1" 3 | jq -r '.[]|.tag_name')
     checkVersionNotEmpty "${geoVersion}"
     echoContent title "\n┌─ Geo 数据版本 ─────────────────────────────────────"
     menuLine "version:${geoVersion}"
@@ -58,7 +58,7 @@ installSingBox() {
 
     if [[ ! -f "/etc/padm/sing-box/sing-box" ]]; then
 
-        version=$(curl -s "https://api.github.com/repos/SagerNet/sing-box/releases?per_page=20" | jq -r ".[]|select (.prerelease==${prereleaseStatus})|.tag_name" | head -1)
+        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
         checkVersionNotEmpty "${version}"
 
         successCard "最新版本:${version}"
@@ -90,7 +90,7 @@ installSingBox() {
     else
         successCard "当前版本:v$(/etc/padm/sing-box/sing-box version | grep "sing-box version" | awk '{print $3}')"
 
-        version=$(curl -s "https://api.github.com/repos/SagerNet/sing-box/releases?per_page=20" | jq -r ".[]|select (.prerelease==${prereleaseStatus})|.tag_name" | head -1)
+        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
         successCard "最新版本:${version}"
 
         if [[ -z "${lastInstallationConfig}" ]]; then
@@ -117,7 +117,7 @@ installXray() {
 
     if [[ ! -f "/etc/padm/xray/xray" ]]; then
 
-        version=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=100" | jq -r ".[]|select (.prerelease==${prereleaseStatus})|.tag_name" | head -1)
+        version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
         checkVersionNotEmpty "${version}"
         successCard "Xray-core版本:${version}"
         if ! downloadGitHubReleaseAsset -P /etc/padm/xray/ XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
@@ -164,7 +164,9 @@ coreReleaseTags() {
     local repo=$1
     local prerelease=${2:-false}
     local limit=${3:-20}
-    curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/${repo}/releases?per_page=100" | jq -r ".[] | select(.prerelease==${prerelease}) | .tag_name" | head -n "${limit}"
+    local tags=
+    tags=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases?per_page=100" 3 | jq -r ".[] | select(.prerelease==${prerelease}) | .tag_name" | head -n "${limit}" || true)
+    printf '%s\n' "${tags}"
 }
 
 coreLatestReleaseTag() {

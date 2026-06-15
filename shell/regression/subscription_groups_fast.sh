@@ -73,6 +73,36 @@ runCleanupTrapRegression() {
     rm -rf "${tmpDir}"
 }
 
+runGitHubReleaseAssetDirectFallbackRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local root="${TMP_DIR}/github-release-direct-fallback"
+        local outputDir="${root}/out"
+        mkdir -p "${outputDir}"
+        curl() { return 22; }
+        wget() {
+            if [[ "${1:-}" == "-qO-" ]]; then
+                if [[ "${2:-}" == "https://api.github.com/repos/example/repo/releases/tags/v1.2.3" ]]; then
+                    return 1
+                fi
+                if [[ "${2:-}" == "https://github.com/example/repo/releases/download/v1.2.3/asset.tar.gz" ]]; then
+                    printf 'asset-content\n'
+                    return 0
+                fi
+            elif [[ "${1:-}" == "-c" && "${2:-}" == "-q" && "${3:-}" == "-P" ]]; then
+                mkdir -p "${4}"
+                printf 'asset-content\n' >"${4}/asset.tar.gz"
+                return 0
+            fi
+            return 1
+        }
+        downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.3 asset.tar.gz
+        [[ "$(<"${outputDir}/asset.tar.gz")" == "asset-content" ]]
+    )
+}
+
 resolveReleaseWorkflowVersionForRegression() {
     local isReleaseCommit=$1
     local currentVersion=$2
@@ -1283,6 +1313,7 @@ runRegressionPlatform() {
 
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
+        runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
         runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&

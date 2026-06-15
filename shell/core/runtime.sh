@@ -600,7 +600,7 @@ downloadFile() {
         esac
     done
 
-    if [[ -n "${wgetShowProgressStatus}" ]]; then
+    if [[ -n "${wgetShowProgressStatus:-}" ]]; then
         args+=("${wgetShowProgressStatus}")
     fi
     if [[ -n "${outputDir}" ]]; then
@@ -621,8 +621,39 @@ downloadFile() {
     fi
 }
 
+fetchUrlToStdout() {
+    local url=$1
+    local maxAttempts=${2:-3}
+    local attempt=1
+
+    while [[ ${attempt} -le ${maxAttempts} ]]; do
+        if command -v curl >/dev/null 2>&1; then
+            if curl -fsSL --connect-timeout 10 --max-time 30 "${url}"; then
+                return 0
+            fi
+        fi
+        if command -v wget >/dev/null 2>&1; then
+            if wget -qO- "${url}"; then
+                return 0
+            fi
+        fi
+        if [[ ${attempt} -lt ${maxAttempts} ]]; then
+            sleep 1
+        fi
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
 validateGitHubReleaseTag() {
     [[ "$1" =~ ^[A-Za-z0-9._+-]{1,128}$ ]]
+}
+
+githubReleaseAssetDirectUrl() {
+    local repo=$1
+    local version=$2
+    local assetName=$3
+    printf 'https://github.com/%s/releases/download/%s/%s\n' "${repo}" "${version}" "${assetName}"
 }
 
 downloadGitHubReleaseAsset() {
@@ -636,6 +667,7 @@ downloadGitHubReleaseAsset() {
     local outputPath=
     local expectedSha256=
     local actualSha256=
+    local usedMetadata=true
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -676,14 +708,17 @@ downloadGitHubReleaseAsset() {
     fi
 
     mkdir -p "${outputDir}"
-    metadata=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/${repo}/releases/tags/${version}" | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // "")}' | head -1) || return 1
-    downloadUrl=$(jq -r '.url // empty' <<<"${metadata}" 2>/dev/null)
-    digest=$(jq -r '.digest // empty' <<<"${metadata}" 2>/dev/null)
+    metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/tags/${version}" 3 | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // "")}' | head -1) || metadata=
+    if [[ -n "${metadata}" ]]; then
+        downloadUrl=$(jq -r '.url // empty' <<<"${metadata}" 2>/dev/null)
+        digest=$(jq -r '.digest // empty' <<<"${metadata}" 2>/dev/null)
+    fi
     if [[ -z "${downloadUrl}" ]]; then
+        usedMetadata=false
+        downloadUrl=$(githubReleaseAssetDirectUrl "${repo}" "${version}" "${assetName}")
         echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
-        menuLine "未找到 Release 资产: ${repo} ${version} ${assetName}"
+        menuLine "Release 元数据暂不可用，已回退直链下载: ${assetName}"
         menuClose
-        return 1
     fi
     outputPath="${outputDir%/}/${assetName}"
     if ! downloadFile -P "${outputDir}" "${downloadUrl}"; then
@@ -708,7 +743,7 @@ downloadGitHubReleaseAsset() {
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
         menuLine "sha256 校验通过: ${assetName}"
         menuClose
-    else
+    elif [[ "${usedMetadata}" == "true" ]]; then
         echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
         menuLine "GitHub 未提供 sha256 digest，已完成精确资产匹配下载: ${assetName}"
         menuClose
