@@ -410,8 +410,10 @@ emitVlessRealityGrpcSubscribeOutput() {
     local publicKey=${currentRealityPublicKey:-}
     local realityMldsa65Verify=${currentRealityMldsa65Verify:-}
 
-    if [[ "${coreInstallType}" == "2" ]]; then
+    if [[ -n "${singBoxVLESSRealityGRPCSNI:-}" ]]; then
         realitySNI=${singBoxVLESSRealityGRPCSNI}
+    fi
+    if [[ -n "${singBoxVLESSRealityPublicKey:-}" ]]; then
         publicKey=${singBoxVLESSRealityPublicKey}
     fi
 

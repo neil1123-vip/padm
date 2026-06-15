@@ -283,7 +283,7 @@ showVmessHTTPUpgradeAccounts() {
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             local vmessHTTPUpgradePort=${currentDefaultPort}
-            if [[ "${coreInstallType}" == "2" ]]; then
+            if [[ -n "${singBoxVMessHTTPUpgradePort:-}" ]]; then
                 vmessHTTPUpgradePort="${singBoxVMessHTTPUpgradePort}"
             fi
 

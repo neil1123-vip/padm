@@ -976,8 +976,16 @@ EOF
 
         grep -q 'default:sub_grpc:' "${captureLog}"
         grep -q 'default:sub_naive:' "${captureLog}"
-        grep -q 'default:sub_httpupgrade0:' "${captureLog}"
+        grep -q 'default:sub_httpupgrade:' "${captureLog}"
         grep -q 'default:sub_anytls:' "${captureLog}"
+        grep -q 'default:sub_grpc:.*sni=nodejs.org' "${captureLog}"
+        grep -q 'default:sub_grpc:.*pbk=grpc-public-key' "${captureLog}"
+
+        local httpupgradeLink httpupgradeJson
+        httpupgradeLink=$(grep '^default:sub_httpupgrade:vmess://' "${captureLog}" | head -n 1)
+        httpupgradeJson=$(printf '%s' "${httpupgradeLink#default:sub_httpupgrade:vmess://}" | base64 -d)
+        printf '%s\n' "${httpupgradeJson}" | grep -q '"port":24443'
+        printf '%s\n' "${httpupgradeJson}" | grep -q '"path":"/padmhttp"'
     )
 }
 
