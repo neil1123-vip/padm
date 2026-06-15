@@ -265,7 +265,10 @@ coreXrayServiceTemplate() {
 }
 
 singBoxConfigInstalled() {
-    [[ -s /etc/padm/sing-box/conf/config.json ]] || compgen -G "/etc/padm/sing-box/conf/config/*.json" >/dev/null
+    local mergedFile shardDir
+    mergedFile=$(singBoxMergedConfigFile)
+    shardDir=$(singBoxConfigShardDir)
+    [[ -s "${mergedFile}" ]] || compgen -G "${shardDir}*.json" >/dev/null
 }
 
 validateSingBoxConfigWithBinary() {
@@ -274,6 +277,249 @@ validateSingBoxConfigWithBinary() {
     [[ -x "${binary}" ]] || return 1
     singBoxConfigInstalled || return 2
     singBoxMergeConfigForValidation "${binary}" "${logFile}" check || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
+}
+
+singBoxCompatibilityAuditLog() {
+    coreTmpFilePath padm-sing-box-compat-audit.log
+}
+
+coreSingBoxPrereleaseAuditLog() {
+    coreTmpFilePath padm-core-sing-box-prerelease-audit.log
+}
+
+singBoxCompatibilityAuditStatusFile() {
+    coreTmpFilePath padm-sing-box-compat-audit.status
+}
+
+singBoxCompatibilityAuditWarnFile() {
+    coreTmpFilePath padm-sing-box-compat-audit.warn
+}
+
+coreSingBoxCompatTempDirTemplate() {
+    coreTmpFilePath padm-sing-box-compat-download.XXXXXX
+}
+
+singBoxCompatibilityConfigFiles() {
+    local mergedFile shardDir file
+    mergedFile=$(singBoxMergedConfigFile)
+    shardDir=$(singBoxConfigShardDir)
+    [[ -f "${mergedFile}" ]] && printf '%s\n' "${mergedFile}"
+    for file in "${shardDir}"*.json; do
+        [[ -f "${file}" ]] || continue
+        printf '%s\n' "${file}"
+    done
+}
+
+singBoxCompatibilityAuditReset() {
+    : >"${1}"
+}
+
+singBoxCompatibilityAuditStatusAdd() {
+    local file=$1
+    local level=$2
+    local message=$3
+    printf '%s:%s\n' "${level}" "${message}" >>"${file}"
+}
+
+singBoxCompatibilityAuditWarn() {
+    local warnFile=$1
+    local logFile=$2
+    local message=$3
+    printf '%s\n' "${message}" >>"${warnFile}"
+    printf '[WARN] %s\n' "${message}" >>"${logFile}"
+}
+
+singBoxCompatibilityAuditFail() {
+    local statusFile=$1
+    local logFile=$2
+    local message=$3
+    singBoxCompatibilityAuditStatusAdd "${statusFile}" fail "${message}"
+    printf '[FAIL] %s\n' "${message}" >>"${logFile}"
+}
+
+singBoxCompatibilityAuditPass() {
+    local statusFile=$1
+    local logFile=$2
+    local message=$3
+    singBoxCompatibilityAuditStatusAdd "${statusFile}" pass "${message}"
+    printf '[PASS] %s\n' "${message}" >>"${logFile}"
+}
+
+singBoxCompatibilityAuditScanJsonFile() {
+    local file=$1
+    local statusFile=$2
+    local logFile=$3
+
+    if ! jq empty "${file}" >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}"
+        return 0
+    fi
+
+    if jq -e '.outbounds[]? | select(.type? == "wireguard")' "${file}" >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 WireGuard outbound，请改用 endpoints[type=wireguard]：${file}"
+    fi
+    if jq -e '.outbounds[]? | select(.type? == "block" or .type? == "dns")' "${file}" >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy special outbound，请改用 route action：${file}"
+    fi
+    if jq -e '.. | objects | select(has("domain_strategy"))' "${file}" >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 domain_strategy，请迁移到 domain_resolver/default_domain_resolver：${file}"
+    fi
+    if jq -e '.. | objects | select(.dns? and ((.dns.rules? // []) | type == "array")) | .dns.rules[]? | select(has("outbound"))' "${file}" >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}"
+    fi
+    if jq -e '
+        .. | objects | select(.dns? and ((.dns.servers? // []) | type == "array")) | .dns.servers[]? |
+        select(type == "string" or (type == "object" and (has("address") or has("detour") or has("strategy")) and (has("type") | not)))
+    ' "${file}" >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}"
+    fi
+    if jq -e '
+        .. | objects | select(.dns? and ((.dns.rules? // []) | type == "array")) |
+        .dns.rules[]? |
+        select(
+            ((has("ip_version") or has("query_type")) and (has("rule_set_ip_cidr_accept_empty") or has("ip_is_private"))) or
+            ((has("ip_version") or has("query_type")) and ((.rule_set // []) | tostring | test("query_type")))
+        )
+    ' "${file}" >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}"
+    fi
+}
+
+collectSingBoxCompatibilityFindings() {
+    local statusFile=$1
+    local logFile=$2
+    local warnFile=$3
+    local file foundJson=false
+
+    singBoxCompatibilityAuditReset "${statusFile}"
+    singBoxCompatibilityAuditReset "${warnFile}"
+    : >"${logFile}"
+    printf 'sing-box 兼容体检\n' >>"${logFile}"
+
+    if ! singBoxInstalled; then
+        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 二进制，跳过兼容体检"
+        return 0
+    fi
+    if ! singBoxConfigInstalled; then
+        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 配置，跳过兼容体检"
+        return 0
+    fi
+
+    while IFS= read -r file; do
+        [[ -f "${file}" ]] || continue
+        foundJson=true
+        singBoxCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}"
+    done < <(singBoxCompatibilityConfigFiles)
+
+    if [[ "${foundJson}" != "true" ]]; then
+        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件"
+        return 0
+    fi
+
+    if [[ ! -s "${statusFile}" ]]; then
+        singBoxCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到 1.13/1.14 已知兼容风险"
+    fi
+}
+
+singBoxCompatibilityAuditHasFailures() {
+    local statusFile=$1
+    grep -q '^fail:' "${statusFile}" 2>/dev/null
+}
+
+summarizeSingBoxCompatibilityAudit() {
+    local statusFile=$1
+    local warnFile=$2
+    local failCount=0 passCount=0 warnCount=0
+
+    [[ -f "${statusFile}" ]] && failCount=$(grep -c '^fail:' "${statusFile}" 2>/dev/null || printf '0')
+    [[ -f "${statusFile}" ]] && passCount=$(grep -c '^pass:' "${statusFile}" 2>/dev/null || printf '0')
+    [[ -f "${warnFile}" ]] && warnCount=$(grep -c '.' "${warnFile}" 2>/dev/null || printf '0')
+    printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
+}
+
+singBoxCompatibilityAuditOverviewSummary() {
+    local statusFile warnFile logFile
+    statusFile=$(singBoxCompatibilityAuditStatusFile)
+    warnFile=$(singBoxCompatibilityAuditWarnFile)
+    logFile=$(singBoxCompatibilityAuditLog)
+    collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+    summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}"
+}
+
+showSingBoxCompatibilityAudit() {
+    local logFile=${1:-$(singBoxCompatibilityAuditLog)}
+    local statusFile=${2:-$(singBoxCompatibilityAuditStatusFile)}
+    local warnFile=${3:-$(singBoxCompatibilityAuditWarnFile)}
+
+    collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+    if singBoxCompatibilityAuditHasFailures "${statusFile}"; then
+        statusCard "sing-box 兼容体检" "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 legacy DNS / WireGuard / special outbounds / domain_strategy"
+    elif [[ -s "${warnFile}" ]]; then
+        statusCard "sing-box 兼容体检" "未发现明确风险" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
+    else
+        statusCard "sing-box 兼容体检" "通过" "未发现 1.13/1.14 已知兼容风险"
+    fi
+}
+
+downloadSingBoxReleaseBinaryToTemp() {
+    local version=$1
+    local outVar=$2
+    local tmpDirVar=${3:-}
+    local tmpDir asset extractedDir binary
+
+    padmCreateTempPath tmpDir -d "$(coreSingBoxCompatTempDirTemplate)" || return 1
+    asset="sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
+    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        return 1
+    fi
+    if ! tar zxf "${tmpDir}/${asset}" -C "${tmpDir}" >/dev/null 2>&1; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "sing-box 预发布包解压失败"
+        return 1
+    fi
+    extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
+    binary="${extractedDir}/sing-box"
+    if [[ ! -x "${binary}" ]]; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "sing-box 预发布包中未找到二进制"
+        return 1
+    fi
+    printf -v "${outVar}" '%s' "${binary}"
+    if [[ -n "${tmpDirVar}" ]]; then
+        printf -v "${tmpDirVar}" '%s' "${tmpDir}"
+    fi
+}
+
+checkSingBoxPrereleaseCompatibility() {
+    local version=${1:-}
+    local logFile=${2:-$(coreSingBoxPrereleaseAuditLog)}
+    local downloadedBinary=
+    local downloadTmpDir=
+    local resolvedVersion=
+
+    resolvedVersion=${version:-$(coreLatestReleaseTag SagerNet/sing-box true)}
+    checkVersionNotEmpty "${resolvedVersion}"
+    if ! singBoxInstalled; then
+        statusCard "sing-box 预发布兼容检查" "跳过" "未检测到 sing-box 二进制"
+        return 0
+    fi
+    if ! singBoxConfigInstalled; then
+        statusCard "sing-box 预发布兼容检查" "跳过" "未检测到 sing-box 配置"
+        return 0
+    fi
+    if ! downloadSingBoxReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
+        statusCard "sing-box 预发布兼容检查" "失败" "预发布二进制下载失败"
+        return 1
+    fi
+    if validateSingBoxConfigWithBinary "${downloadedBinary}" "${logFile}"; then
+        statusCard "sing-box 预发布兼容检查" "通过" "目标版本: ${resolvedVersion}" "仅执行 dry-run，未替换本机二进制"
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        return 0
+    fi
+    statusCard "sing-box 预发布兼容检查" "失败" "目标版本: ${resolvedVersion}" "排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
+    [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+    return 1
 }
 
 appendSingBoxCompatibilityHints() {
@@ -374,6 +620,7 @@ showCoreStatusOverview() {
     menuLine "sing-box 服务: $(coreDisplayState "$(coreServiceState sing-box singBoxRunning)")"
     if singBoxConfigInstalled; then
         menuLine "sing-box 配置: $(coreDisplayState "$(coreValidationState sing-box)")"
+        menuLine "sing-box 兼容: $(coreDisplayState "$(singBoxCompatibilityAuditOverviewSummary)")"
     elif singBoxInstalled; then
         menuLine "sing-box 配置: $(coreDisplayState "未安装配置")"
     fi
@@ -588,6 +835,11 @@ upgradeSingBoxCore() {
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
     version=${version:-$(coreLatestReleaseTag SagerNet/sing-box "${prerelease}")}
     checkVersionNotEmpty "${version}"
+    if [[ "${prerelease}" == "true" ]]; then
+        if ! checkSingBoxPrereleaseCompatibility "${version}" "$(coreSingBoxPrereleaseAuditLog)"; then
+            return 1
+        fi
+    fi
     confirmCoreUpgrade "sing-box" "${version}" "${channel}" || { statusCard "已取消" "未更新 sing-box"; return 0; }
     installDownloadedSingBoxBinary "${version}"
 }
@@ -1396,9 +1648,11 @@ coreConfigMaintenanceMenu() {
     echoContent title "\n┌─ 配置校验与数据维护 ───────────────────────────────"
     menuItem 1 "校验 Xray 配置" "执行 xray -test -confdir"
     menuItem 2 "校验 sing-box 配置" "执行 merge + check"
-    menuItem 3 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 4 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
-    menuReturnItem 5 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 3 "sing-box 兼容体检" "扫描 1.13/1.14 迁移风险并输出提示"
+    menuItem 4 "检查 sing-box 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
+    menuItem 5 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
+    menuItem 6 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
+    menuReturnItem 7 "返回核心与服务" "回到核心生命周期管理"
     menuClose
     autoRead core_config_maintenance "请选择:" selectMaintenance
     case "${selectMaintenance}" in
@@ -1420,9 +1674,11 @@ coreConfigMaintenanceMenu() {
             statusCard "sing-box 配置校验" "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
-    3) updateGeoSite ;;
-    4) installCronUpdateGeo ;;
-    5) coreVersionManageMenu ;;
+    3) showSingBoxCompatibilityAudit ;;
+    4) checkSingBoxPrereleaseCompatibility ;;
+    5) updateGeoSite ;;
+    6) installCronUpdateGeo ;;
+    7) coreVersionManageMenu ;;
     *) errorCard "输入有误，请重新输入"; coreConfigMaintenanceMenu ;;
     esac
 }
@@ -1494,30 +1750,32 @@ coreVersionManageMenu() {
 singBoxVersionManageMenu() {
     echoContent title "\n┌─ sing-box 生命周期 ─────────────────────────────────"
     menuItem 1 "升级稳定版" "下载最新稳定版，校验后替换"
-    menuItem 2 "升级预发布版" "下载 prerelease，适合验证新能力"
-    menuItem 3 "回退稳定版" "选择最近稳定版本回退"
-    menuItem 4 "校验配置" "执行 sing-box merge + check"
-    menuItem 5 "服务控制" "启动、停止、重启 sing-box"
+    menuItem 2 "检查预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
+    menuItem 3 "升级预发布版" "下载 prerelease，适合验证新能力"
+    menuItem 4 "回退稳定版" "选择最近稳定版本回退"
+    menuItem 5 "校验配置" "执行 sing-box merge + check"
+    menuItem 6 "兼容体检" "扫描 1.13/1.14 已知迁移风险"
     local logStatus=
     if [[ -f "$(singBoxLogConfigFile)" && "$(jq -r .log.disabled "$(singBoxLogConfigFile)")" == "false" ]]; then
-        menuItem 6 "关闭 debug 日志" "停止写入 sing-box debug 日志"
+        menuItem 7 "关闭 debug 日志" "停止写入 sing-box debug 日志"
         logStatus=true
     else
-        menuItem 6 "启用 debug 日志" "开启 sing-box debug 日志"
+        menuItem 7 "启用 debug 日志" "开启 sing-box debug 日志"
         logStatus=false
     fi
-    menuItem 7 "查看日志" "tail -f 查看 sing-box 日志"
-    menuReturnItem 8 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 8 "查看日志" "tail -f 查看 sing-box 日志"
+    menuReturnItem 9 "返回核心与服务" "回到核心生命周期管理"
     menuClose
     autoRead singbox_lifecycle_menu "请选择:" selectSingBoxType
     case "${selectSingBoxType}" in
     1) upgradeSingBoxCore false ;;
-    2) upgradeSingBoxCore true ;;
-    3)
+    2) checkSingBoxPrereleaseCompatibility ;;
+    3) upgradeSingBoxCore true ;;
+    4)
         version=$(selectRollbackVersion SagerNet/sing-box "sing-box") || { errorCard "输入有误，请重新输入"; singBoxVersionManageMenu; return; }
         upgradeSingBoxCore false "${version}"
         ;;
-    4)
+    5)
         local logFile
         logFile=$(coreSingBoxConfigTestLog)
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
@@ -1526,17 +1784,17 @@ singBoxVersionManageMenu() {
             statusCard "sing-box 配置校验" "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
-    5) coreServiceControlMenu sing-box ;;
-    6)
+    6) showSingBoxCompatibilityAudit ;;
+    7)
         singBoxLog ${logStatus}
         [[ "${logStatus}" == "false" ]] && tail -f /etc/padm/sing-box/conf/box.log
         ;;
-    7)
+    8)
         mkdir -p /etc/padm/sing-box/conf
         touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
         tail -f /etc/padm/sing-box/conf/box.log
         ;;
-    8) coreVersionManageMenu ;;
+    9) coreVersionManageMenu ;;
     *) errorCard "输入有误，请重新输入"; singBoxVersionManageMenu ;;
     esac
 }

@@ -970,6 +970,60 @@ runServicesProcRaceRegression() {
     )
 }
 
+runSingBoxCompatibilityAuditRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/singbox-compat-audit"
+        export PADM_SINGBOX_BINARY="${TMP_DIR}/fake-sing-box-bin"
+        mkdir -p "${root}/conf/config"
+        singBoxConfigPath="${root}/conf/config/"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${PADM_SINGBOX_BINARY}"
+        chmod +x "${PADM_SINGBOX_BINARY}"
+        cat >"${root}/conf/config.json" <<'JSON'
+{"dns":{"servers":[{"address":"local","strategy":"ipv4_only"}],"rules":[{"outbound":"legacy-out"}]},"outbounds":[{"type":"wireguard","tag":"legacy-wg"},{"type":"block","tag":"legacy-block"}],"endpoints":[{"type":"wireguard","tag":"new-endpoint"}]}
+JSON
+        local statusFile warnFile logFile
+        statusFile=$(singBoxCompatibilityAuditStatusFile)
+        warnFile=$(singBoxCompatibilityAuditWarnFile)
+        logFile=$(singBoxCompatibilityAuditLog)
+        collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+        grep -q '^fail:' "${statusFile}"
+        grep -q 'old WireGuard outbound' "${logFile}"
+        grep -q 'legacy special outbound' "${logFile}"
+        grep -q '旧 DNS server 格式' "${logFile}"
+    )
+}
+
+runSingBoxPrereleaseDryRunRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/singbox-prerelease"
+        export PADM_SINGBOX_BINARY="${TMP_DIR}/fake-sing-box-bin"
+        singBoxConfigPath="${root}/conf/config/"
+        mkdir -p "${root}/conf/config"
+        printf '#!/usr/bin/env bash\nif [[ \"$1\" == \"version\" ]]; then echo \"sing-box version 1.13.13\"; fi\n' >"${PADM_SINGBOX_BINARY}"
+        chmod +x "${PADM_SINGBOX_BINARY}"
+        printf '{"inbounds":[]}\n' >"${root}/conf/config.json"
+        downloadSingBoxReleaseBinaryToTemp() {
+            local _version=$1
+            local _outVar=$2
+            local _tmpVar=${3:-}
+            printf -v "${_outVar}" '%s' "${PADM_SINGBOX_BINARY}"
+            [[ -n "${_tmpVar}" ]] && printf -v "${_tmpVar}" '%s' "${TMP_DIR}/fake-download"
+        }
+        validateSingBoxConfigWithBinary() {
+            local binary=$1
+            local logFile=$2
+            printf 'checked %s\n' "${binary}" >"${logFile}"
+            [[ "${binary}" == "${PADM_SINGBOX_BINARY}" ]]
+        }
+        : >"${REGRESSION_STATUS_CARD_LOG:-/dev/null}"
+        checkSingBoxPrereleaseCompatibility "v1.14.0-alpha.test" "${TMP_DIR}/prerelease.log"
+        grep -q '目标版本: v1.14.0-alpha.test' "${REGRESSION_STATUS_CARD_LOG:-/dev/null}"
+        grep -q 'checked' "${TMP_DIR}/prerelease.log"
+    )
+}
+
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
@@ -996,6 +1050,8 @@ runRegressionFast() {
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
+        runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression &&
+        runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression &&
         runRegressionStep services-proc-race runServicesProcRaceRegression &&
         runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression

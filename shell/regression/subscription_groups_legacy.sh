@@ -10941,6 +10941,13 @@ main-credential
         return 1
     fi
     resetMenuActions
+    coreConfigMaintenanceMenu <<<"3"
+    assertMenuAction 'statusCard:sing-box 兼容体检'
+    if assertMenuAction unexpected-network-version-fetch; then
+        printf 'menu-smoke failed: core maintenance fetched release versions while rendering compatibility entries\n' >&2
+        return 1
+    fi
+    resetMenuActions
     coreServiceControlMenu xray <<<"3"
     assertMenuAction 'serviceQueueRestart:xray'
     assertMenuAction serviceQueueApply

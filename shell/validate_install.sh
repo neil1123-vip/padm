@@ -179,6 +179,49 @@ check_sing_box() {
     fi
 }
 
+check_sing_box_compatibility_audit() {
+    local statusFile warnFile summary
+
+    if [[ ! -x /etc/padm/sing-box/sing-box ]]; then
+        warn "未安装 sing-box，跳过兼容体检摘要"
+        return
+    fi
+    if [[ ! -f /etc/padm/shell/core/bootstrap.sh ]]; then
+        warn "缺少核心 bootstrap，跳过兼容体检摘要"
+        return
+    fi
+
+    # 只读验收只输出摘要，不把历史兼容风险直接升级成 FAIL。
+    (
+        # shellcheck source=/dev/null
+        source /etc/padm/shell/core/bootstrap.sh
+        statusFile=$(singBoxCompatibilityAuditStatusFile)
+        warnFile=$(singBoxCompatibilityAuditWarnFile)
+        collectSingBoxCompatibilityFindings "${statusFile}" "$(singBoxCompatibilityAuditLog)" "${warnFile}"
+        summary=$(summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}")
+        if singBoxCompatibilityAuditHasFailures "${statusFile}"; then
+            printf 'WARN:%s\n' "${summary}"
+            printf 'LOG:%s\n' "$(singBoxCompatibilityAuditLog)"
+        elif [[ -s "${warnFile}" ]]; then
+            printf 'WARN:%s\n' "${summary}"
+        else
+            printf 'PASS:%s\n' "${summary}"
+        fi
+    ) >/tmp/padm-validate-sing-box-compat.log 2>&1 || true
+
+    if grep -q '^PASS:' /tmp/padm-validate-sing-box-compat.log; then
+        pass "sing-box 兼容体检通过"
+    elif grep -q '^WARN:' /tmp/padm-validate-sing-box-compat.log; then
+        warn "sing-box 兼容体检发现需关注项：$(sed -n 's/^WARN://p' /tmp/padm-validate-sing-box-compat.log | head -n 1)"
+        if grep -q '^LOG:' /tmp/padm-validate-sing-box-compat.log; then
+            warn "sing-box 兼容体检日志：$(sed -n 's/^LOG://p' /tmp/padm-validate-sing-box-compat.log | head -n 1)"
+        fi
+    else
+        warn "sing-box 兼容体检摘要执行失败，已跳过"
+        cat /tmp/padm-validate-sing-box-compat.log 2>/dev/null || true
+    fi
+}
+
 detect_package_family() {
     if [[ -f /etc/debian_version ]]; then
         printf 'apt'
@@ -357,6 +400,7 @@ main() {
     fi
     check_xray
     check_sing_box
+    check_sing_box_compatibility_audit
 
     check_subscription_files
     check_no_pattern /etc/padm 'sshpass' '仓库不应包含临时辅助工具'
