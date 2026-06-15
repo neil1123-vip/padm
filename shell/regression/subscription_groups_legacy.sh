@@ -1503,7 +1503,7 @@ JSON
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ ! -e "${successMarker}" ]]
-        jq -e '.dns.servers[0].tag == "padm-local" and .dns.servers[0].type == "local"' "${singBoxConfigPath}dns.json" >/dev/null
+        [[ ! -e "${root}/remove-dns/dns.json" ]]
     )
 
     (
@@ -1556,7 +1556,6 @@ JSON
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ ! -e "${successMarker}" ]]
-        jq -e '.dns.servers[0].tag == "padm-local" and .dns.servers[0].type == "local"' "${singBoxConfigPath}dns.json" >/dev/null
     )
 
     (
