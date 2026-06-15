@@ -2,6 +2,8 @@
 
 # 初始化 sing-box订阅配置
 initSubscribeLocalConfig() {
+    cleanDirectoryContent "$(subscribeLocalBaseDir)/default"
+    cleanDirectoryContent "$(subscribeLocalBaseDir)/clashMeta"
     cleanDirectoryContent "$(subscribeLocalBaseDir)/sing-box"
 }
 

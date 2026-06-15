@@ -897,6 +897,33 @@ runShowAccountsOptionalStepRegression() {
     )
 }
 
+runInitSubscribeLocalConfigCleansAllFormatsRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/subscribe-local-cleanup"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe_local"
+        mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box"
+        printf '%s\n' old-default >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/main"
+        printf '%s\n' old-clash >"${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/main"
+        printf '[]\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/main"
+        cleanDirectoryContent() {
+            local targetPath=$1
+            mkdir -p "${targetPath}"
+            find "${targetPath}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+        }
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/subscription/subscription.sh"
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/subscription/output.sh"
+        initSubscribeLocalConfig
+        [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/default/main" ]]
+        [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/main" ]]
+        [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/main" ]]
+    )
+}
+
 runShowAccountsXrayWithSingBoxAssistRegression() {
     (
         set -euo pipefail
@@ -1160,6 +1187,7 @@ runRegressionPlatform() {
 
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
+        runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
