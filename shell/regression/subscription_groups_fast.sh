@@ -17,6 +17,10 @@ regressionScriptModulesReady() {
     [[ "$(<"${SCRIPT_EXPECTED_REF_FILE}")" == "$(<"${SCRIPT_REF_FILE}")" ]]
 }
 
+regressionScriptModuleFilesPresent() {
+    [[ -f "${SCRIPT_DIR}/shell/core/bootstrap.sh" ]]
+}
+
 regressionEnsureScriptModules() {
     local remoteRef= expectedRef=
     if [[ "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" == "1" ]]; then
@@ -32,6 +36,9 @@ regressionEnsureScriptModules() {
         expectedRef=$(<"${SCRIPT_EXPECTED_REF_FILE}")
     fi
     if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
+        if regressionScriptModuleFilesPresent; then
+            return 0
+        fi
         refreshScriptModules "${expectedRef}"
         return 0
     fi
@@ -661,7 +668,7 @@ runInstallEnsureModulesRegression() {
     printf 'expected-ref\n' >"${fixtureDir}/.padm-ref"
     rm -f "${marker}"
     PADM_FAKE_MODULE_MANIFEST_READY=0 regressionEnsureScriptModules
-    [[ "$(<"${marker}")" == "expected-ref" ]]
+    [[ ! -e "${marker}" ]]
 
     unset PADM_FAKE_MODULE_MANIFEST_READY
     rm -f "${fixtureDir}/.padm-module-manifest"

@@ -223,8 +223,8 @@ modulePaths() {
     done < <(grep '^source ' "${bootstrapPath}" | sed 's/^source "//; s/"$//')
 }
 
-scriptModulesReady() {
-    local moduleList requiredPath localRef expectedRef
+scriptModuleFilesPresent() {
+    local moduleList requiredPath
     moduleList=$(scriptCreateTempPath padm-modules.XXXXXX) || return 1
     if ! modulePaths >"${moduleList}"; then
         rm -f "${moduleList}"
@@ -234,6 +234,11 @@ scriptModulesReady() {
         [[ -f "${SCRIPT_DIR}/${requiredPath}" ]] || { rm -f "${moduleList}"; return 1; }
     done <"${moduleList}"
     rm -f "${moduleList}"
+}
+
+scriptModulesReady() {
+    local localRef expectedRef
+    scriptModuleFilesPresent || return 1
     moduleManifestReady "${SCRIPT_MANIFEST_FILE}" || return 1
     [[ -f "${SCRIPT_EXPECTED_REF_FILE}" ]] || return 0
     [[ -f "${SCRIPT_REF_FILE}" ]] || return 1
@@ -287,6 +292,9 @@ ensureScriptModules() {
         expectedRef=$(cat "${SCRIPT_EXPECTED_REF_FILE}")
     fi
     if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
+        if scriptModuleFilesPresent; then
+            return 0
+        fi
         refreshScriptModules "${expectedRef}"
         return 0
     fi
