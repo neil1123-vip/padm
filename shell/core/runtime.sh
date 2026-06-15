@@ -438,6 +438,15 @@ autoValueForKey() {
     dns_api_wildcard)
         normalizeYesNo "${AUTO_DNS_API_WILDCARD}"
         ;;
+    singbox_reinstall | xray_reinstall)
+        printf 'y'
+        ;;
+    core_download_retry)
+        printf 'y'
+        ;;
+    nginx_grpc_reinstall)
+        printf 'y'
+        ;;
     cloudflare_api_token)
         printf '%s' "${AUTO_CLOUDFLARE_API_TOKEN:-${PADM_CLOUDFLARE_API_TOKEN:-}}"
         ;;
