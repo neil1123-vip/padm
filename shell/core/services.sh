@@ -12,6 +12,17 @@ xrayStartTestLog() {
     fi
 }
 
+padmReadProcExe() {
+    local path=$1
+    readlink -f "${path}" 2>/dev/null || true
+}
+
+padmReadProcCmdline() {
+    local path=$1
+    [[ -r "${path}" ]] || return 0
+    tr '\0' ' ' <"${path}" 2>/dev/null || true
+}
+
 serviceQueueAdd() {
     local serviceName=$1
     local action=$2
@@ -87,8 +98,8 @@ nginxRunning() {
     local cmdline
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
-        exe=$(readlink -f "/proc/${pid}/exe" 2>/dev/null)
-        cmdline=$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null)
+        exe=$(padmReadProcExe "/proc/${pid}/exe")
+        cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
         [[ "${exe}" == *"/nginx" || "${cmdline}" == *"nginx: master process"* ]] || continue
         return 0
     done < <(pgrep -x nginx 2>/dev/null)
@@ -159,8 +170,8 @@ singBoxRunning() {
     local cmdline
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
-        exe=$(readlink -f "/proc/${pid}/exe" 2>/dev/null)
-        cmdline=$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null)
+        exe=$(padmReadProcExe "/proc/${pid}/exe")
+        cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
         [[ "${exe}" == "/etc/padm/sing-box/sing-box" || "${cmdline}" == *"/etc/padm/sing-box/sing-box run"* ]] || continue
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
@@ -241,8 +252,8 @@ xrayRunning() {
     local cmdline
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
-        exe=$(readlink -f "/proc/${pid}/exe" 2>/dev/null)
-        cmdline=$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null)
+        exe=$(padmReadProcExe "/proc/${pid}/exe")
+        cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
         [[ "${exe}" == "/etc/padm/xray/xray" || "${cmdline}" == *"/etc/padm/xray/xray"* ]] || continue
         [[ "${cmdline}" == *" api statsquery "* ]] && continue
         return 0

@@ -947,6 +947,22 @@ runSingBoxServiceMainPidTemplateRegression() {
     )
 }
 
+runServicesProcRaceRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        readlink() { return 1; }
+        tr() { return 1; }
+        pgrep() { printf '1234\n'; }
+        padmReadProcExe "/proc/1234/exe" >/dev/null
+        [[ -z "$(padmReadProcCmdline "/proc/1234/cmdline")" ]]
+        ! nginxRunning
+        ! singBoxRunning
+        ! xrayRunning
+    )
+}
+
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
@@ -973,6 +989,7 @@ runRegressionFast() {
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
+        runRegressionStep services-proc-race runServicesProcRaceRegression &&
         runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }
