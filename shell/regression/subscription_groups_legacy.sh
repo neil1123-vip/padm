@@ -1242,6 +1242,95 @@ runSocks5RoutingFailureReturnRegression() (
     [[ ! -e "${successMarker}" ]]
 )
 
+runSocks5UdpAssociateRegression() (
+    local root="${TMP_DIR}/socks5-udp-associate"
+    local allowAllMode=true
+
+    mkdir -p "${root}/xray" "${root}/sing-box"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    coreInstallType=2
+    singBoxSocks5Port=
+
+    cat >"${singBoxConfigPath}dlc.dat_plain.yml" <<'YAML'
+- name: openai
+YAML
+
+    readSingBoxPortResult() {
+        local -n resultRef=$1
+        resultRef=(10891)
+        return 0
+    }
+    autoRead() {
+        case "$1" in
+        socks5_inbound_uuid) printf -v "$3" 'udp-associate-user' ;;
+        socks5_inbound_ip_type) printf -v "$3" '1' ;;
+        socks5_inbound_source_ips) printf -v "$3" '10.0.0.1,10.0.0.2' ;;
+        socks5_inbound_allow_all)
+            if [[ "${allowAllMode}" == "true" ]]; then
+                printf -v "$3" 'y'
+            else
+                printf -v "$3" 'n'
+            fi
+            ;;
+        socks5_inbound_domains) printf -v "$3" 'openai,example.com' ;;
+        singbox_route_history) printf -v "$3" 'n' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+
+    setSocks5Inbound
+    jq -e '
+      .inbounds[0].type == "socks" and
+      .inbounds[0].listen == "::" and
+      .inbounds[0].listen_port == 10891 and
+      .inbounds[0].tag == "socks5_inbound" and
+      .inbounds[0].users[0].username == "udp-associate-user" and
+      .inbounds[0].users[0].password == "udp-associate-user" and
+      (.inbounds[0].network? | not) and
+      (.inbounds[0].udp? | not)
+    ' "${singBoxConfigPath}20_socks5_inbounds.json" >/dev/null
+    jq -e '
+      .route.rules[0].inbound == "socks5_inbound" and
+      .route.rules[0].action == "resolve" and
+      .route.rules[0].strategy == "ipv4_only" and
+      (.route.rules[0].network? | not) and
+      (.route.rules[0].protocol? | not)
+    ' "${singBoxConfigPath}strategy_ipv4_only_socks5_inbound.json" >/dev/null
+
+    setSocks5InboundRouting
+    jq -e '
+      .route.rules[0].inbound == ["socks5_inbound"] and
+      (.route.rules[0].source_ip_cidr | sort) == (["10.0.0.1", "10.0.0.2"] | sort) and
+      .route.rules[0].outbound == "01_direct_outbound" and
+      (.route.rules[0].action? | not) and
+      (.route.rules[0].protocol? | not) and
+      (.route.rules[0].network? | not) and
+      (.route.rules[0].domain? | not) and
+      (.route.rules[0].domain_suffix? | not) and
+      (.route.rules[0].rule_set? | not)
+    ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null
+    jq -e '
+      .outbounds[0].type == "direct" and
+      .outbounds[0].tag == "01_direct_outbound" and
+      (.outbounds[0].network? | not)
+    ' "${singBoxConfigPath}01_direct_outbound.json" >/dev/null
+
+    allowAllMode=false
+    setSocks5InboundRouting addRules
+    jq -e '
+      .route.rules[0].inbound == ["socks5_inbound"] and
+      (.route.rules[0].source_ip_cidr | sort) == (["10.0.0.1", "10.0.0.2"] | sort) and
+      .route.rules[0].outbound == "01_direct_outbound" and
+      .route.rules[0].domain_suffix == ["example.com"] and
+      .route.rules[0].rule_set == ["geosite_openai_socks5_02_inbound_route"] and
+      (.route.rules[0].action? | not) and
+      (.route.rules[0].protocol? | not) and
+      (.route.rules[0].network? | not) and
+      (.route.rules[0].domain? | not)
+    ' "${singBoxConfigPath}socks5_02_inbound_route.json" >/dev/null
+)
+
 runDNSRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/dns-routing-failure"
     local reloadMarker="${root}/reload"
@@ -12534,6 +12623,7 @@ runRegressionMenuSmokeFull() {
 
 runRegressionRouting() {
     runRegressionStep routing-core runRoutingRegression
+    runRegressionStep routing-socks5-udp-associate runSocks5UdpAssociateRegression
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-access-control-config-transaction runAccessControlConfigTransactionRegression
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
@@ -12699,6 +12789,9 @@ menu-smoke-full)
 routing)
     regressionRunner=runRegressionRouting
     ;;
+routing-socks5-udp-associate)
+    regressionRunner=runSocks5UdpAssociateRegression
+    ;;
 subscription)
     regressionRunner=runRegressionSubscription
     ;;
@@ -12757,7 +12850,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
