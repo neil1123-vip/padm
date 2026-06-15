@@ -111,6 +111,8 @@ source "${PROJECT_ROOT}/shell/core/nginx.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/network.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/fail2ban.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/users.sh"

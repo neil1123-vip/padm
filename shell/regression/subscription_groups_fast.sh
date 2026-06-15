@@ -412,6 +412,10 @@ runMenuSmokeLightRegression() {
     manageTuic() { recordMenuAction manageTuic; }
     addCorePort() { recordMenuAction addCorePort; }
     manageCDN() { recordMenuAction manageCDN; }
+    manageFail2ban() { recordMenuAction manageFail2ban; }
+    updatePadm() { recordMenuAction "updatePadm:$*"; }
+    showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
+    bbrInstall() { recordMenuAction bbrInstall; }
 
     installMenu <<<"6"
     assertMenuAction selectCoreInstall
@@ -437,6 +441,20 @@ runMenuSmokeLightRegression() {
     assertMenuAction 'handleNginx:stop'
     assertMenuAction refreshSubscriptionWireGuardNginxControl
     assertMenuAction serviceQueueApply
+    resetMenuActions
+    output=
+    systemScriptMenu <<<"3"
+    assertMenuAction manageFail2ban
+    grep -q "Fail2ban 防护" <<<"${output}"
+    resetMenuActions
+    systemScriptMenu <<<"1"
+    assertMenuAction 'updatePadm:1'
+    resetMenuActions
+    systemScriptMenu <<<"2"
+    assertMenuAction showPadmScriptInstallStatus
+    resetMenuActions
+    systemScriptMenu <<<"4"
+    assertMenuAction bbrInstall
     [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
     [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
@@ -866,6 +884,7 @@ EOF
     ) | sort >"${outputList}"
     grep -q '^install\.sh$' "${outputList}"
     grep -q '^shell/core/bootstrap\.sh$' "${outputList}"
+    grep -q '^shell/core/fail2ban\.sh$' "${outputList}"
     grep -q '^shell/validate_install\.sh$' "${outputList}"
     grep -q '^shell/core/menu\.sh$' "${outputList}"
     grep -q '^shell/subscription/wireguard_control\.sh$' "${outputList}"
@@ -1313,6 +1332,48 @@ runServiceWaitForStateRegression() {
     )
 }
 
+runFail2banProfileRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/fail2ban.sh"
+
+        local root="${TMP_DIR}/fail2ban-profile"
+        mkdir -p "${root}/fail2ban/jail.d" "${root}/fail2ban/filter.d" "${root}/nginx"
+        export PADM_FAIL2BAN_JAIL_FILE="${root}/fail2ban/jail.d/padm.local"
+        export PADM_FAIL2BAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-control.conf"
+        export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/nginx/padm-control-access.log"
+
+        subscriptionWireGuardReadState() {
+            jq -n '{enabled:true, role:"main", address:"10.77.0.1/24", control_port:39778, peers:[{id:"edge-a"}]}'
+        }
+        subscriptionWireGuardControlEnabled() { return 0; }
+        fail2banInstalled() { return 0; }
+
+        [[ "$(fail2banRecommendedProfileName)" == "sshd+control" ]]
+        [[ "$(fail2banProfileLabel "$(fail2banRecommendedProfileName)")" == "SSH + 控制面防护" ]]
+        fail2banWriteManagedFilter
+        fail2banWriteManagedJail sshd+control
+        grep -q '^\[sshd\]' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q '^enabled = true' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q '^\[padm-control\]' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q "logpath = ${root//\\/\\\\}/nginx/padm-control-access.log" "${PADM_FAIL2BAN_JAIL_FILE}" || grep -q 'logpath = .*/nginx/padm-control-access.log' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q '/s/control/' "${PADM_FAIL2BAN_FILTER_FILE}"
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd,padm-control" ]]
+        [[ "$(fail2banCurrentProfileName)" == "sshd+control" ]]
+
+        fail2banWriteManagedJail sshd
+        [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd" ]]
+        [[ "$(fail2banCurrentProfileName)" == "sshd" ]]
+
+        subscriptionWireGuardControlEnabled() { return 1; }
+        [[ "$(fail2banRecommendedProfileName)" == "sshd" ]]
+        ! fail2banApplyProfile sshd+control
+    )
+}
+
 runSingBoxCompatibilityAuditRegression() {
     (
         set -euo pipefail
@@ -1493,6 +1554,7 @@ runRegressionFast() {
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
         runRegressionStep service-wait-state runServiceWaitForStateRegression &&
+        runRegressionStep fail2ban-profile runFail2banProfileRegression &&
         runRegressionStep xray-strict-validation runXrayStrictValidationRegression &&
         runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression &&
         runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression &&

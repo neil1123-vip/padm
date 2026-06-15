@@ -159,8 +159,9 @@ systemScriptMenu() {
     menuLine "核心版本、服务、日志和配置校验请去 核心与服务"
     menuItem 1 "更新 padm 脚本" "更新脚本文件"
     menuItem 2 "查看脚本安装状态" "显示入口校验、版本、ref 和 manifest"
-    menuItem 3 "网络优化" "查看或启用官方 BBR + fq"
-    menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
+    menuItem 3 "Fail2ban 防护" "SSH 和 /s/control/ 的最小防护入口"
+    menuItem 4 "网络优化" "查看或启用官方 BBR + fq"
+    menuReturnItem 5 "返回主菜单" "回到 padm 管理面板"
     menuClose
     autoRead system_script_menu "请选择:" selectSystemMenuType
     case ${selectSystemMenuType} in
@@ -171,9 +172,12 @@ systemScriptMenu() {
         showPadmScriptInstallStatus
         ;;
     3)
-        bbrInstall
+        manageFail2ban
         ;;
     4)
+        bbrInstall
+        ;;
+    5)
         menu
         ;;
     *)

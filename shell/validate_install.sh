@@ -366,6 +366,65 @@ check_subscription_files() {
     check_first_nonempty_dir "sing-box 订阅输出存在" /etc/padm/subscribe/sing-box /etc/padm/subscribe_local/sing-box
 }
 
+check_fail2ban() {
+    local jailFile=/etc/fail2ban/jail.d/padm.local
+    local filterFile=/etc/fail2ban/filter.d/padm-control.conf
+    local controlLog=/var/log/nginx/padm-control-access.log
+    local enabledCount=0
+    local controlEnabled=false
+
+    if command -v fail2ban-client >/dev/null 2>&1; then
+        pass "fail2ban 命令存在"
+        if fail2ban-client -t >/tmp/padm-validate-fail2ban.log 2>&1; then
+            pass "fail2ban 配置校验通过"
+        else
+            warn "fail2ban 配置校验未通过"
+            cat /tmp/padm-validate-fail2ban.log
+        fi
+        check_service_active_optional fail2ban
+        check_service_enabled fail2ban
+    else
+        warn "fail2ban 未安装，跳过防护校验"
+        return
+    fi
+
+    if [[ -f "${jailFile}" ]]; then
+        check_contains "${jailFile}" '^\[sshd\]' 'fail2ban jail 包含 sshd'
+        check_contains "${jailFile}" '^\[padm-control\]' 'fail2ban jail 包含 padm-control'
+        enabledCount=$(grep -Ec '^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true[[:space:]]*$' "${jailFile}" 2>/dev/null || true)
+        if [[ "${enabledCount}" =~ ^[0-9]+$ ]] && (( enabledCount > 0 )); then
+            pass "fail2ban 已启用 ${enabledCount} 个 padm jail"
+        else
+            warn "fail2ban 当前未启用 padm jail"
+        fi
+        if awk '
+            /^\[padm-control\]/ { in_section=1; next }
+            /^\[/ { in_section=0 }
+            in_section && /^[[:space:]]*enabled[[:space:]]*=[[:space:]]*true[[:space:]]*$/ { found=1 }
+            END { exit found ? 0 : 1 }
+        ' "${jailFile}" >/dev/null 2>&1; then
+            controlEnabled=true
+        fi
+    else
+        warn "fail2ban jail 文件缺失，可能当前处于 padm 防护停用状态"
+    fi
+
+    if [[ "${controlEnabled}" == "true" ]]; then
+        if [[ -f "${filterFile}" ]]; then
+            check_contains "${filterFile}" 's/control/' 'padm-control filter 匹配控制面路径'
+        else
+            warn "padm-control 已启用，但 filter 文件缺失"
+        fi
+        if [[ -e "${controlLog}" ]]; then
+            pass "控制面专用访问日志存在：${controlLog}"
+        else
+            warn "padm-control 已启用，但控制面专用访问日志缺失：${controlLog}"
+        fi
+    elif [[ -f "${filterFile}" || -e "${controlLog}" ]]; then
+        pass "padm-control 处于未启用状态，相关文件保留属可接受"
+    fi
+}
+
 check_maintenance_summary() {
     if [[ -s /etc/padm/xray/geosite.dat && -s /etc/padm/xray/geoip.dat ]]; then
         pass "Xray Geo 文件齐全"
@@ -501,6 +560,7 @@ main() {
     check_sing_box
     check_xray_compatibility_audit
     check_sing_box_compatibility_audit
+    check_fail2ban
 
     check_subscription_files
     check_maintenance_summary

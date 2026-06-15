@@ -10485,6 +10485,10 @@ runMenuSmokeLightRegression() {
     manageTuic() { recordMenuAction manageTuic; }
     addCorePort() { recordMenuAction addCorePort; }
     manageCDN() { recordMenuAction manageCDN; }
+    manageFail2ban() { recordMenuAction manageFail2ban; }
+    updatePadm() { recordMenuAction "updatePadm:$*"; }
+    showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
+    bbrInstall() { recordMenuAction bbrInstall; }
 
     installMenu <<<"6"
     assertMenuAction selectCoreInstall
@@ -10510,6 +10514,20 @@ runMenuSmokeLightRegression() {
     assertMenuAction 'handleNginx:stop'
     assertMenuAction refreshSubscriptionWireGuardNginxControl
     assertMenuAction serviceQueueApply
+    resetMenuActions
+    output=
+    systemScriptMenu <<<"3"
+    assertMenuAction manageFail2ban
+    grep -q "Fail2ban 防护" <<<"${output}"
+    resetMenuActions
+    systemScriptMenu <<<"1"
+    assertMenuAction 'updatePadm:1'
+    resetMenuActions
+    systemScriptMenu <<<"2"
+    assertMenuAction showPadmScriptInstallStatus
+    resetMenuActions
+    systemScriptMenu <<<"4"
+    assertMenuAction bbrInstall
     [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
     [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
@@ -12290,6 +12308,7 @@ runInstallModulePathsRegression() {
         [[ "${moduleListBefore}" == "0" && "${moduleListAfter}" == "0" ]]
     ) | sort >"${outputList}"
     grep -q '^shell/core/bootstrap\.sh$' "${outputList}"
+    grep -q '^shell/core/fail2ban\.sh$' "${outputList}"
     grep -q '^shell/validate_install\.sh$' "${outputList}"
     grep -q '^shell/core/menu\.sh$' "${outputList}"
     grep -q '^shell/subscription/wireguard_control\.sh$' "${outputList}"

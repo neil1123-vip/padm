@@ -1135,6 +1135,17 @@ cleanupSubscriptionWireGuardControlOnUninstall() {
     removeInstallPath "$(subscriptionControlServiceFile)" "订阅控制面systemd服务" || return 1
 }
 
+cleanupFail2banManagedFilesOnUninstall() {
+    local failed=false
+    removeInstallPath "$(fail2banManagedJailFile)" "Fail2ban jail 配置" || failed=true
+    removeInstallPath "$(fail2banManagedFilterFile)" "Fail2ban filter 配置" || failed=true
+    removeInstallPath "$(fail2banPadmControlLogFile)" "Fail2ban 控制面日志" || failed=true
+    if declare -F fail2banReloadServiceIfRunning >/dev/null 2>&1; then
+        fail2banReloadServiceIfRunning || failed=true
+    fi
+    [[ "${failed}" != "true" ]]
+}
+
 unInstall() {
     autoRead uninstall_confirm "是否确认卸载安装内容？[y/n]:" unInstallStatus
     if [[ "${unInstallStatus}" != "y" ]]; then
@@ -1192,6 +1203,7 @@ unInstall() {
     fi
 
     cleanupSubscriptionWireGuardControlOnUninstall || uninstallFailed=true
+    cleanupFail2banManagedFilesOnUninstall || uninstallFailed=true
 
     if ! removePadmNginxConfigFragments; then
         uninstallFailed=true

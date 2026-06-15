@@ -27,6 +27,8 @@ source "${CORE_DIR}/adapters.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/network.sh"
 # shellcheck source=/dev/null
+source "${CORE_DIR}/fail2ban.sh"
+# shellcheck source=/dev/null
 source "${CORE_DIR}/nginx.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/tls.sh"
