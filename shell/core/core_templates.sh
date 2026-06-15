@@ -30,7 +30,7 @@ initXrayConfig() {
         echoContent yellow "\n请输入自定义用户名[需合法]，[回车]随机用户名"
         autoRead core_init_username "用户名:" customEmail
         if [[ -z ${customEmail} ]]; then
-            customEmail="$(echo "${uuid}" | cut -d "-" -f 1)-VLESS_TCP/TLS_Vision"
+            customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
         fi
     fi
 
@@ -449,7 +449,7 @@ initSingBoxConfig() {
         echoContent yellow "\n请输入自定义用户名[需合法]，[回车]随机用户名"
         autoRead core_init_username "用户名:" customEmail
         if [[ -z ${customEmail} ]]; then
-            customEmail="$(echo "${uuid}" | cut -d "-" -f 1)-VLESS_TCP/TLS_Vision"
+            customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
         fi
     fi
 

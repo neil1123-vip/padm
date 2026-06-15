@@ -103,6 +103,70 @@ runGitHubReleaseAssetDirectFallbackRegression() {
     )
 }
 
+runAutoInstallGeneratedIdentityRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        AUTO_INSTALL=true
+        AUTO_UUID=
+        AUTO_USER=
+        uuidgen() { printf 'ABCDEF12-3456-7890-ABCD-EF1234567890\n'; }
+        local generatedUUID generatedUser
+        generatedUUID=$(autoValueForKey core_init_uuid)
+        generatedUser=$(autoValueForKey core_init_username)
+        [[ "${generatedUUID}" == "abcdef12-3456-7890-abcd-ef1234567890" ]]
+        [[ "${generatedUser}" == "padm-abcdef12" ]]
+    )
+}
+
+runDefaultRandomUserNameRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local uuid name
+        uuid='ABCDEF12-3456-7890-ABCD-EF1234567890'
+        name=$(defaultRandomUserNameFromUuid "${uuid}")
+        [[ "${name}" == "padm-abcdef12" ]]
+    )
+}
+
+runAutoInstallAllowsEmptyDefaultRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        AUTO_INSTALL=true
+        AUTO_PORT=
+        AUTO_REALITY_SERVER_NAME=
+        local value=
+        autoRead reality_port "端口:" value
+        [[ -z "${value:-}" ]]
+        autoRead reality_server_name "请输入SNI[回车默认等于目标 host]:" value
+        [[ -z "${value:-}" ]]
+    )
+}
+
+runClientNameSuffixPreservesRandomPrefixRegression() {
+    (
+        set -euo pipefail
+        currentClients='[{"id":"11111111-1111-1111-1111-111111111111","email":"padm-abcdef12-VLESS_TCP/TLS_Vision"},{"uuid":"22222222-2222-2222-2222-222222222222","name":"padm-abcdef12-VLESS_Reality_Vision"}]'
+        protocolSelectionIncludes() {
+            local type=$1
+            local target=$2
+            [[ ",${type}," == *",${target},"* ]]
+        }
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/cores.sh"
+        local xrayUsers singboxUsers
+        xrayUsers=$(initXrayClients 0)
+        singboxUsers=$(initSingBoxClients 7)
+        jq -e '.[0].email == "padm-abcdef12-VLESS_TCP/TLS_Vision"' <<<"${xrayUsers}" >/dev/null
+        jq -e '.[0].name == "padm-abcdef12-VLESS_Reality_Vision"' <<<"${singboxUsers}" >/dev/null
+    )
+}
+
 resolveReleaseWorkflowVersionForRegression() {
     local isReleaseCommit=$1
     local currentVersion=$2
@@ -224,6 +288,17 @@ JSON
     [[ -e "${reloadMarker}" ]]
     [[ "$(<"${xrayConfig}13_stats_api.json")" == "${originalStats}" ]]
     [[ "$(<"${xrayConfig}12_policy.json")" == "${originalPolicy}" ]]
+)
+
+runSubscriptionOutputRandomUserRegression() (
+    local subscribeCaptureDir="${TMP_DIR}/subscribe-output-random-user"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${subscribeCaptureDir}"
+    rm -rf "${subscribeCaptureDir}"
+    currentHost="tls.example.com"
+    defaultBase64Code vlesstcp 443 "padm-abcdef12-VLESS_TCP/TLS_Vision" uuid-tls "" ""
+    [[ -f "${subscribeCaptureDir}/default/padm-abcdef12" ]]
+    [[ ! -e "${subscribeCaptureDir}/default/padm" ]]
+    [[ -f "${subscribeCaptureDir}/sing-box/padm-abcdef12" ]]
 )
 
 runCheckLogBackupMissingRestoreRegression() (
@@ -1405,7 +1480,11 @@ runRegressionPlatform() {
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
         runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
+        runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
+        runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
+        runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
         runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&
+        runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression &&
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&

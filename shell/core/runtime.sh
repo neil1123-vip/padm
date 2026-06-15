@@ -398,9 +398,16 @@ autoValueForKey() {
         printf '%s' "${AUTO_PROTOCOLS}"
         ;;
     core_init_uuid)
+        if [[ -z "${AUTO_UUID:-}" ]]; then
+            AUTO_UUID=$(generateRandomUuidValue)
+        fi
         printf '%s' "${AUTO_UUID}"
         ;;
     core_init_username)
+        if [[ -z "${AUTO_USER:-}" ]]; then
+            [[ -n "${AUTO_UUID:-}" ]] || AUTO_UUID=$(generateRandomUuidValue)
+            AUTO_USER=$(defaultRandomUserNameFromUuid "${AUTO_UUID}")
+        fi
         printf '%s' "${AUTO_USER}"
         ;;
     domain)
@@ -508,6 +515,38 @@ autoValueForKey() {
     esac
 }
 
+generateRandomUuidValue() {
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen | tr 'A-Z' 'a-z'
+    elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+        cat /proc/sys/kernel/random/uuid
+    else
+        printf '%04x%04x-%04x-%04x-%04x-%04x%04x%04x\n' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
+    fi
+}
+
+defaultRandomUserNameFromUuid() {
+    local uuid=${1:-}
+    local prefix
+    if [[ -z "${uuid}" ]]; then
+        uuid=$(generateRandomUuidValue)
+    fi
+    prefix=${uuid%%-*}
+    prefix=${prefix,,}
+    printf 'padm-%s\n' "${prefix}"
+}
+
+autoReadAllowsEmptyValue() {
+    case "$1" in
+    port | singbox_custom_port | reality_port | xhttp_port | hysteria_port | tuic_port | reality_target | reality_server_name | entry_host | subscribe_port | cloudflare_zone_id | reality_stream_website_port | reality_stream_vision_port | reality_stream_xhttp_port | hysteria_download_speed | hysteria_upload_speed)
+        return 0
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
 autoInstallSummaryValue() {
     case "$1" in
     cloudflare_api_token | cloudflare_zone_id | aliyun_api_key | aliyun_api_secret)
@@ -567,6 +606,9 @@ autoRead() {
         if [[ -n "${value}" ]]; then
             showAutoInstallSummary
             printf -v "${resultVar}" '%s' "${value}"
+            return
+        elif autoReadAllowsEmptyValue "${key}"; then
+            printf -v "${resultVar}" '%s' ""
             return
         fi
     fi

@@ -75,7 +75,7 @@ subscriptionSyncCurrentManagedUsers() {
     [[ "${#validFiles[@]}" -gt 0 ]] || return 0
     jq -r -s '
       [.[] | [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
-       | ((.email // .name // .username // "") | split("-")[0])
+       | ((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))
        | select(startswith("sub_"))]
       | unique[]' "${validFiles[@]}"
 }
@@ -124,13 +124,13 @@ subscriptionSyncRemoveAccountFromFile() {
     [[ -f "${file}" ]] || return 0
     if ! jq -e --arg accountName "${accountName}" '
       [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
-      | select(((.email // .name // .username // "") | split("-")[0]) == $accountName)' "${file}" >/dev/null 2>&1; then
+      | select(((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; "")) == $accountName)' "${file}" >/dev/null 2>&1; then
         return
     fi
     padmCreateTempFileForTarget tmpFile "${file}" sync || return 1
     if ! jq --arg accountName "${accountName}" '
-      (.inbounds[]?.settings.clients? // empty) |= map(select(((.email // .name // .username // "") | split("-")[0]) != $accountName)) |
-      (.inbounds[]?.users? // empty) |= map(select(((.email // .name // .username // "") | split("-")[0]) != $accountName))' "${file}" >"${tmpFile}"; then
+      (.inbounds[]?.settings.clients? // empty) |= map(select(((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; "")) != $accountName)) |
+      (.inbounds[]?.users? // empty) |= map(select(((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; "")) != $accountName))' "${file}" >"${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
@@ -187,7 +187,7 @@ subscriptionSyncAppendProtocolUser() {
     local userPath=
     [[ -f "${file}" ]] || return 0
     userPath=$(subscriptionSyncUserPath "${file}" "${preferredPath}")
-    if jq -e --arg accountName "${accountName}" "${userPath}[]? | select(((.email // .name // .username // \"\") | split(\"-\")[0]) == \$accountName)" "${file}" >/dev/null 2>&1; then
+    if jq -e --arg accountName "${accountName}" "${userPath}[]? | select(((.email // .name // .username // \"\") | sub(\"-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$\"; \"\")) == \$accountName)" "${file}" >/dev/null 2>&1; then
         return
     fi
     currentClients=$(jq -r "${userPath} // []" "${file}")

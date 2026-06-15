@@ -34,7 +34,7 @@ customUserEmail() {
     autoRead custom_email "请输入合法的email，[回车]随机email:" currentCustomEmail
     echo
     if [[ -z "${currentCustomEmail}" ]]; then
-        currentCustomEmail="${currentCustomUUID}"
+        currentCustomEmail="$(defaultRandomUserNameFromUuid "${currentCustomUUID}")"
         echoContent yellow "email: ${currentCustomEmail}\n"
     else
         local checkEmail=
@@ -74,7 +74,7 @@ writeUserConfigJq() {
 
 removeUserAccountName() {
     local label=$1
-    echo "${label%%-*}"
+    stripClientNameSuffix "${label}"
 }
 
 removeUserFromConfigFile() {
@@ -84,7 +84,7 @@ removeUserFromConfigFile() {
     local targetAccount=$4
     local jqFilter=
     [[ -f "${targetPath}" ]] || return 0
-    jqFilter="${userPath} = ((${userPath} // []) | map(select(((\$targetId == \"\") or ((.id // .uuid // .password // \"\") != \$targetId)) and ((\$targetAccount == \"\") or (((.email // .name // .username // \"\") | split(\"-\")[0]) != \$targetAccount)))))"
+    jqFilter="${userPath} = ((${userPath} // []) | map(select(((\$targetId == \"\") or ((.id // .uuid // .password // \"\") != \$targetId)) and ((\$targetAccount == \"\") or (((.email // .name // .username // \"\") | sub(\"-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$\"; \"\")) != \$targetAccount)))))"
     writeUserConfigJq "${targetPath}" "${jqFilter}" --arg targetId "${targetId}" --arg targetAccount "${targetAccount}"
 }
 

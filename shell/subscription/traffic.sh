@@ -166,7 +166,7 @@ collectLocalTrafficAccounts() {
     [[ "${#files[@]}" -gt 0 ]] || return 0
     jq -r -s '
       [.[] | [.inbounds[]?.settings.clients[]?, .inbounds[]?.users[]?][]?
-       | (.email // .name // .username // empty | split("-")[0])
+       | (.email // .name // .username // empty | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))
        | select(length > 0)]
       | unique[]' "${files[@]}" 2>/dev/null
 }
@@ -186,7 +186,7 @@ collectXrayTrafficStatsSnapshot() {
     fi
     if jq empty <<<"${stats}" >/dev/null 2>&1; then
         jq --argjson accounts "${accounts}" '
-          def accountName($name): (($name | split(">>>"))[1] // "" | split("-")[0]);
+          def accountName($name): (($name | split(">>>"))[1] // "" | sub("-(uplink|downlink)$"; ""));
           def direction($name): if ($name | contains("downlink")) then "download" else "upload" end;
           def emptyTotals: reduce $accounts[] as $account ({}; .[$account] = {account:$account, upload:0, download:0});
           (reduce .stat[]? as $stat (emptyTotals;
@@ -207,7 +207,7 @@ collectXrayTrafficStatsSnapshot() {
           /name:/ {
             name = $0
             sub(/^.*user>>>/, "", name)
-            sub(/-.*/, "", name)
+            sub(/-(uplink|downlink)$/, "", name)
             account = name
             direction = ($0 ~ /downlink/) ? "download" : "upload"
           }

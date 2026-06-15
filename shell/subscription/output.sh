@@ -125,7 +125,7 @@ defaultBase64Code() {
     local add=${5:-}
     local path=${6:-}
     local user=
-    user=${email%%-*}
+    user=$(stripClientNameSuffix "${email}")
     mkdir -p "$(subscribeLocalBaseDir)/default" "$(subscribeLocalBaseDir)/clashMeta" "$(subscribeLocalBaseDir)/sing-box"
     if [[ ! -f "$(subscribeLocalBaseDir)/sing-box/${user}" ]]; then
         echo [] >"$(subscribeLocalBaseDir)/sing-box/${user}"

@@ -160,7 +160,7 @@ JSON
     addSingBoxOutbound "01_direct_outbound"
     jq -e '.outbounds[0].tag == "01_direct_outbound"' "${singBoxConfigPath}01_direct_outbound.json" >/dev/null
     addSingBoxOutbound "IPv6_out"
-    jq -e '.outbounds[0].domain_resolver.server == "dns-local" and .outbounds[0].domain_resolver.strategy == "ipv6_only" and (.outbounds[0].domain_strategy | not)' "${singBoxConfigPath}IPv6_out.json" >/dev/null
+    jq -e '.outbounds[0].domain_resolver.server == "padm-local" and .outbounds[0].domain_resolver.strategy == "ipv6_only" and (.outbounds[0].domain_strategy | not)' "${singBoxConfigPath}IPv6_out.json" >/dev/null
     addSingBoxOutbound "block_domain_outbound"
     [[ ! -e "${singBoxConfigPath}block_domain_outbound.json" ]]
     addXrayOutbound "IPv4_outbound"
@@ -1503,6 +1503,7 @@ JSON
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ ! -e "${successMarker}" ]]
+        jq -e '.dns.servers[0].tag == "padm-local" and .dns.servers[0].type == "local"' "${singBoxConfigPath}dns.json" >/dev/null
     )
 
     (
@@ -1555,6 +1556,7 @@ JSON
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
         [[ ! -e "${successMarker}" ]]
+        jq -e '.dns.servers[0].tag == "padm-local" and .dns.servers[0].type == "local"' "${singBoxConfigPath}dns.json" >/dev/null
     )
 
     (

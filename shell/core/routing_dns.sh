@@ -424,11 +424,14 @@ EOF
     fi
 
     if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
+        local localTag
+        localTag=$(singBoxDnsResolverTag)
         if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
 {
     "dns": {
         "servers":[
             {
+                "tag":"${localTag}",
                 "type":"local"
             }
         ]
@@ -470,11 +473,14 @@ EOF
     fi
 
     if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
+        local localTag
+        localTag=$(singBoxDnsResolverTag)
         if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
 {
     "dns": {
         "servers":[
             {
+                "tag":"${localTag}",
                 "type":"local"
             }
         ]

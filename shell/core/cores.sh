@@ -1426,6 +1426,35 @@ EOF
 
 
 # 读取 Xray 用户数据并初始化
+stripClientNameSuffix() {
+    local label=$1
+    local suffix
+    for suffix in \
+        '-VLESS_TCP/TLS_Vision' \
+        '-VLESS_WS' \
+        '-VLESS_Reality_XHTTP' \
+        '-Trojan_gRPC' \
+        '-VMess_WS' \
+        '-trojan_tcp' \
+        '-Trojan_TCP' \
+        '-vless_grpc' \
+        '-singbox_hysteria2' \
+        '-vless_reality_vision' \
+        '-vless_reality_grpc' \
+        '-VLESS_Reality_Vision' \
+        '-VLESS_Reality_gPRC' \
+        '-singbox_tuic' \
+        '-singbox_naive' \
+        '-VMess_HTTPUpgrade' \
+        '-anytls'; do
+        if [[ "${label}" == *"${suffix}" ]]; then
+            printf '%s' "${label%"${suffix}"}"
+            return 0
+        fi
+    done
+    printf '%s' "${label}"
+}
+
 initXrayClients() {
     local type=",$1,"
     local newUUID=${2:-}
@@ -1439,7 +1468,7 @@ initXrayClients() {
     users=[]
     while read -r user; do
         uuid=$(echo "${user}" | jq -r .id//.uuid)
-        email=$(echo "${user}" | jq -r .email//.name | awk -F "[-]" '{print $1}')
+        email=$(stripClientNameSuffix "$(echo "${user}" | jq -r .email//.name//.username)")
         currentUser=
         if protocolSelectionIncludes "${type}" 0; then
             currentUser="{\"id\":\"${uuid}\",\"flow\":\"xtls-rprx-vision\",\"email\":\"${email}-VLESS_TCP/TLS_Vision\"}"
@@ -1528,7 +1557,7 @@ initSingBoxClients() {
     users=[]
     while read -r user; do
         uuid=$(echo "${user}" | jq -r .uuid//.id//.password)
-        name=$(echo "${user}" | jq -r .name//.email//.username | awk -F "[-]" '{print $1}')
+        name=$(stripClientNameSuffix "$(echo "${user}" | jq -r .name//.email//.username)")
         currentUser=
         # VLESS Vision
         if protocolSelectionIncludes "${type}" 0; then

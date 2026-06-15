@@ -66,6 +66,7 @@ addSingBoxOutbound() {
     local tag=$1
     local type="ipv4"
     local detour=${2:-}
+    local resolverTag="padm-local"
     if [[ "${tag}" == *IPv6* ]]; then
         type=ipv6
     fi
@@ -78,7 +79,7 @@ addSingBoxOutbound() {
              "tag": "${tag}",
              "detour": "${detour}",
              "domain_resolver": {
-                 "server": "dns-local",
+                 "server": "${resolverTag}",
                  "strategy": "${type}_only"
              }
         }
@@ -107,7 +108,7 @@ EOF
              "type": "direct",
              "tag": "${tag}",
              "domain_resolver": {
-                 "server": "dns-local",
+                 "server": "${resolverTag}",
                  "strategy": "${type}_only"
              }
         }
