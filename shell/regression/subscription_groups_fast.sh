@@ -1166,6 +1166,30 @@ runServicesProcRaceRegression() {
     )
 }
 
+runSingBoxRunningIgnoresClientProcessRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        singBoxMergedConfigFile() { printf '%s\n' "/etc/padm/sing-box/conf/config.json"; }
+        singBoxSystemdServiceFile() { printf '%s\n' "${TMP_DIR}/sing-box.service"; }
+        singBoxOpenRcServiceFile() { printf '%s\n' "${TMP_DIR}/sing-box.openrc"; }
+        : >"${TMP_DIR}/sing-box.service"
+        pgrep() { printf '2001\n2002\n'; }
+        padmReadProcExe() { printf '/etc/padm/sing-box/sing-box\n'; }
+        padmReadProcCmdline() {
+            if [[ "$1" == "/proc/2001/cmdline" ]]; then
+                printf '/etc/padm/sing-box/sing-box run -c /tmp/padm-client.json'
+            else
+                printf '/etc/padm/sing-box/sing-box run -c /etc/padm/sing-box/conf/config.json'
+            fi
+        }
+        singBoxRunning
+        pgrep() { printf '2001\n'; }
+        ! singBoxRunning
+    )
+}
+
 runServiceWaitForStateRegression() {
     (
         set -euo pipefail
@@ -1271,6 +1295,7 @@ runRegressionFast() {
         runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression &&
         runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression &&
         runRegressionStep services-proc-race runServicesProcRaceRegression &&
+        runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression &&
         runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }

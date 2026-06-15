@@ -191,11 +191,23 @@ singBoxRunning() {
     local pid
     local exe
     local cmdline
+    local mergedConfig
+    local systemdServiceFile
+    local openRcServiceFile
+    mergedConfig=$(singBoxMergedConfigFile 2>/dev/null || true)
+    systemdServiceFile=$(singBoxSystemdServiceFile 2>/dev/null || true)
+    openRcServiceFile=$(singBoxOpenRcServiceFile 2>/dev/null || true)
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
         cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
         [[ "${exe}" == "/etc/padm/sing-box/sing-box" || "${cmdline}" == *"/etc/padm/sing-box/sing-box run"* ]] || continue
+        if [[ -n "${mergedConfig}" && "${cmdline}" != *" -c ${mergedConfig}"* ]]; then
+            continue
+        fi
+        if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] || [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]]; then
+            [[ "${cmdline}" == *"/etc/padm/sing-box/sing-box run -c "* ]] || continue
+        fi
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
     return 1
