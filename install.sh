@@ -314,6 +314,9 @@ loadScriptModules() {
 initScriptRuntime() {
     parseInstallArgs "$@"
     initVar "$1"
+    if [[ "${cronName}" == "RefreshScriptModules" ]]; then
+        return 0
+    fi
     checkSystem
     checkCPUVendor
 
@@ -325,7 +328,9 @@ initScriptRuntime() {
 }
 
 handleScriptCommand() {
-    if [[ "${cronName}" == "RenewTLS" ]]; then
+    if [[ "${cronName}" == "RefreshScriptModules" ]]; then
+        exit 0
+    elif [[ "${cronName}" == "RenewTLS" ]]; then
         renewalTLS
         exit 0
     elif [[ "${cronName}" == "UpdateGeo" ]]; then

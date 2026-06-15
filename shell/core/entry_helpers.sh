@@ -490,7 +490,7 @@ updatePadm() {
     padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
 
     successCard "更新入口已下载，正在重新打开新版脚本"
-    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 "${installPath}"; then
+    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 "${installPath}" RefreshScriptModules; then
         rm -f "${backupPath}"
         exit 0
     fi
