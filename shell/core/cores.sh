@@ -124,6 +124,16 @@ installSingBox() {
                 exit 1
             fi
 
+            if [[ ! -f "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}/libcronet.so" ]]; then
+                errorCard "sing-box安装包缺少libcronet.so"
+                exit 1
+            fi
+
+            cp "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}/libcronet.so" /etc/padm/sing-box/libcronet.so || {
+                errorCard "sing-box cronet依赖安装失败"
+                exit 1
+            }
+
             if ! mv "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}/sing-box" /etc/padm/sing-box/sing-box; then
                 errorCard "sing-box安装失败"
                 exit 1
@@ -1148,6 +1158,11 @@ installDownloadedSingBoxBinary() {
     fi
     extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
     newBinary="${extractedDir}/sing-box"
+    if [[ ! -f "${extractedDir}/libcronet.so" ]]; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "sing-box 资产中缺少 libcronet.so"
+        return 1
+    fi
     if [[ ! -x "${newBinary}" ]]; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "sing-box 资产中未找到 sing-box 二进制"
@@ -1178,6 +1193,11 @@ installDownloadedSingBoxBinary() {
         return 1
     fi
     if ! cp "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
+        return 1
+    fi
+    if ! cp "${extractedDir}/libcronet.so" "/etc/padm/sing-box/libcronet.so"; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
         return 1
