@@ -367,7 +367,9 @@ check_subscription_files() {
 }
 
 check_maintenance_summary() {
-    if [[ -s /etc/padm/xray/geosite.dat && -s /etc/padm/xray/geoip.dat ]]; then
+    if [[ ! -x /etc/padm/xray/xray ]]; then
+        warn "未安装 Xray，跳过 Xray Geo 文件检查"
+    elif [[ -s /etc/padm/xray/geosite.dat && -s /etc/padm/xray/geoip.dat ]]; then
         pass "Xray Geo 文件齐全"
         if [[ -s /etc/padm/xray/geo.version ]]; then
             pass "Xray Geo 版本：$(tr -d '\r\n' </etc/padm/xray/geo.version)"
