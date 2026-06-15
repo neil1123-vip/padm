@@ -148,6 +148,14 @@ readInstallProtocolType() {
     singBoxVMessWSPort=
     singBoxSocks5Port=
 
+    local xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+    local derivePublicKeyFromPrivateKey
+    derivePublicKeyFromPrivateKey() {
+        local privateKey=$1
+        [[ -n "${privateKey}" && -x "${xrayBinary}" ]] || return 1
+        "${xrayBinary}" x25519 -i "${privateKey}" 2>/dev/null | awk '/Password \(PublicKey\):/ { print $3; exit }'
+    }
+
     while read -r row; do
         local protocolId=
         protocolId=$(xrayProtocolIdByFilename "${row}.json")
@@ -277,6 +285,7 @@ readInstallProtocolType() {
             protocolStateAdd 8
             singBoxVLESSRealityGRPCPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             singBoxVLESSRealityGRPCSNI=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
+            currentRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             if [[ -z "${realityTargetHost:-}" || "${realityTargetHost}" == "null" ]]; then
                 realityTargetHost=$(jq -r '.inbounds[0].tls.reality.handshake.server // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             fi
@@ -285,6 +294,12 @@ readInstallProtocolType() {
             fi
             if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -f "${singBoxConfigPath}reality_key" ]]; then
                 singBoxVLESSRealityPublicKey=$(grep "publicKey" <"${singBoxConfigPath}reality_key" | awk -F "[:]" '{print $2}')
+            fi
+            if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -n "${currentRealityPrivateKey:-}" ]]; then
+                singBoxVLESSRealityPublicKey=$(derivePublicKeyFromPrivateKey "${currentRealityPrivateKey}" || true)
+            fi
+            if [[ -z "${currentRealityPublicKey:-}" && -n "${singBoxVLESSRealityPublicKey:-}" ]]; then
+                currentRealityPublicKey=${singBoxVLESSRealityPublicKey}
             fi
         fi
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
