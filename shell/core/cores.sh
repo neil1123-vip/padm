@@ -1192,7 +1192,7 @@ installDownloadedSingBoxBinary() {
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
-    if ! cp "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
+    if ! mv -f "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
         return 1
