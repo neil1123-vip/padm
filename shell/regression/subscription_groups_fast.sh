@@ -897,6 +897,90 @@ runShowAccountsOptionalStepRegression() {
     )
 }
 
+runShowAccountsXrayWithSingBoxAssistRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/show-accounts-xray-singbox-assist"
+        local xrayRoot="${root}/etc/padm/xray/conf"
+        local singBoxRoot="${root}/etc/padm/sing-box/conf/config"
+        local nginxRoot="${root}/etc/nginx/conf.d"
+        local captureLog="${root}/capture.log"
+
+        mkdir -p "${xrayRoot}" "${singBoxRoot}" "${nginxRoot}"
+        : >"${captureLog}"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe_local"
+        mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box"
+
+        cat >"${xrayRoot}/07_VLESS_vision_reality_inbounds.json" <<'JSON'
+{"inbounds":[{"port":443},{"settings":{"clients":[{"email":"sub_base-vless_reality_vision","id":"11111111-1111-1111-1111-111111111111"}]},"streamSettings":{"realitySettings":{"serverNames":["www.ibm.com"],"publicKey":"pub","privateKey":"priv","target":"www.ibm.com:443","mldsa65Seed":"","mldsa65Verify":""}}}]}
+JSON
+        cat >"${singBoxRoot}/08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"vless","listen_port":20888,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"nodejs.org","reality":{"handshake":{"server":"nodejs.org","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
+JSON
+        cat >"${singBoxRoot}/10_naive_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"naive","listen_port":33577,"users":[{"username":"sub_naive-singbox_naive","password":"naive-pass"}]}]}
+JSON
+        cat >"${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"vmess","listen_port":31306,"users":[{"uuid":"33333333-3333-3333-3333-333333333333","name":"sub_httpupgrade-VMess_HTTPUpgrade","alterId":0}],"transport":{"type":"httpupgrade","path":"/padmhttp"}}]}
+JSON
+        cat >"${singBoxRoot}/13_anytls_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"anytls","listen_port":40251,"users":[{"name":"sub_anytls-anytls","password":"anytls-pass"}]}]}
+JSON
+        cat >"${singBoxRoot}/reality_key" <<'EOF'
+publicKey:grpc-public-key
+EOF
+        cat >"${nginxRoot}/sing_box_VMess_HTTPUpgrade.conf" <<'EOF'
+server {
+    listen 24443 ssl;
+    server_name upgrade.example.com;
+}
+EOF
+
+        readInstallType() {
+            coreInstallType=1
+            configPath="${xrayRoot}/"
+            singBoxConfigPath="${singBoxRoot}/"
+            ctlPath="${root}/etc/padm/xray/xray"
+            nginxConfigPath="${nginxRoot}/"
+        }
+        readConfigHostPathUUID() {
+            currentHost=example.com
+            currentPath=padm
+            currentCDNAddress=cdn.example.com
+            currentDefaultPort=443
+            singBoxVMessHTTPUpgradePath=/padmhttp
+            return 0
+        }
+        readSingBoxConfig() { return 0; }
+        subscribeSectionTitle() { return 0; }
+        subscribeAccountTitle() { return 0; }
+        subscribeOutputTitle() { return 0; }
+        echoContent() { return 0; }
+        menuClose() { return 0; }
+        realityEntryHost() { printf 'entry.example.com'; }
+        appendDefaultSubscribeLine() {
+            printf 'default:%s:%s\n' "$1" "$2" >>"${captureLog}"
+        }
+        appendClashMetaSubscribeBlock() {
+            printf 'clash:%s\n' "$1" >>"${captureLog}"
+        }
+        appendSingBoxSubscribeLocalConfig() {
+            printf 'singbox:%s\n' "$1" >>"${captureLog}"
+        }
+        initSubscribeLocalConfig() { return 0; }
+
+        showAccounts >/dev/null
+
+        grep -q 'default:sub_grpc:' "${captureLog}"
+        grep -q 'default:sub_naive:' "${captureLog}"
+        grep -q 'default:sub_httpupgrade0:' "${captureLog}"
+        grep -q 'default:sub_anytls:' "${captureLog}"
+    )
+}
+
 runAllowPortOptionalProtocolRegression() {
     (
         set -euo pipefail
@@ -993,6 +1077,7 @@ runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
+        runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&

@@ -98,7 +98,7 @@ readInstallType() {
                 if [[ -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
                     realityStatus=12
                 fi
-                if [[ -f "/etc/padm/sing-box/sing-box" ]] && [[ -f "/etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json" || -f "/etc/padm/sing-box/conf/config/09_tuic_inbounds.json" || -f "/etc/padm/sing-box/conf/config/20_socks5_inbounds.json" ]]; then
+                if [[ -f "/etc/padm/sing-box/sing-box" ]] && compgen -G "/etc/padm/sing-box/conf/config/*inbounds.json" >/dev/null; then
                     singBoxConfigPath=/etc/padm/sing-box/conf/config/
                 fi
             fi
@@ -141,6 +141,7 @@ readInstallProtocolType() {
     singBoxVLESSRealityVisionSNI=
     singBoxVLESSRealityGRPCPort=
     singBoxVLESSRealityGRPCSNI=
+    singBoxVLESSRealityPublicKey=
     singBoxAnyTLSPort=
     singBoxTuicPort=
     singBoxNaivePort=
@@ -272,9 +273,49 @@ readInstallProtocolType() {
             protocolStateAdd 6
             singBoxHysteria2Port=$(jq .inbounds[0].listen_port "${singBoxConfigPath}06_hysteria2_inbounds.json")
         fi
+        if [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
+            protocolStateAdd 8
+            singBoxVLESSRealityGRPCPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
+            singBoxVLESSRealityGRPCSNI=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
+            if [[ -z "${realityTargetHost:-}" || "${realityTargetHost}" == "null" ]]; then
+                realityTargetHost=$(jq -r '.inbounds[0].tls.reality.handshake.server // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
+            fi
+            if [[ -z "${realityTargetPort:-}" || "${realityTargetPort}" == "null" ]]; then
+                realityTargetPort=$(jq -r '.inbounds[0].tls.reality.handshake.server_port // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
+            fi
+            if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -f "${singBoxConfigPath}reality_key" ]]; then
+                singBoxVLESSRealityPublicKey=$(grep "publicKey" <"${singBoxConfigPath}reality_key" | awk -F "[:]" '{print $2}')
+            fi
+        fi
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
             protocolStateAdd 9
             singBoxTuicPort=$(jq .inbounds[0].listen_port "${singBoxConfigPath}09_tuic_inbounds.json")
+        fi
+        if [[ -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
+            protocolStateAdd 10
+            singBoxNaivePort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}10_naive_inbounds.json")
+        fi
+        if [[ -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
+            protocolStateAdd 11
+            singBoxVMessHTTPUpgradePort=$(awk '
+              /listen/ {
+                for (i = 1; i <= NF; i++) {
+                  value = $i
+                  gsub(/;/, "", value)
+                  if (value ~ /^[0-9]+$/) {
+                    print value
+                    exit
+                  }
+                }
+              }
+            ' "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" 2>/dev/null | head -n 1)
+            if [[ -z "${singBoxVMessHTTPUpgradePort}" || "${singBoxVMessHTTPUpgradePort}" == "null" ]]; then
+                singBoxVMessHTTPUpgradePort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json")
+            fi
+        fi
+        if [[ -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then
+            protocolStateAdd 13
+            singBoxAnyTLSPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}13_anytls_inbounds.json")
         fi
     fi
     if [[ "${currentInstallProtocolType:0:1}" != "," ]]; then
@@ -649,9 +690,11 @@ readConfigHostPathUUID() {
             currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}03_VLESS_WS_inbounds.json" | awk -F "[/]" '{print $2}')
             currentPath=${currentPath::-2}
         fi
-        if [[ "${coreInstallType}" == "2" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
+        if [[ -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
             singBoxVMessHTTPUpgradePath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json")
-            currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" | awk -F "[/]" '{print $2}')
+            if [[ -z "${currentPath}" || "${coreInstallType}" == "2" ]]; then
+                currentPath=$(jq -r .inbounds[0].transport.path "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" | awk -F "[/]" '{print $2}')
+            fi
         fi
     fi
     if declare -F realityEntryHostFile >/dev/null 2>&1; then
