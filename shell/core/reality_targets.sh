@@ -42,10 +42,6 @@ realityTargetTmpPath() {
     fi
 }
 
-realityScannerDir() {
-    realityTargetTmpPath RealiTLScanner
-}
-
 realityScannerOutputPath() {
     local stamp=$1
     local suffix=${2:-}
@@ -54,10 +50,6 @@ realityScannerOutputPath() {
     else
         realityTargetTmpPath "padm-realitlscanner-${stamp}.csv"
     fi
-}
-
-realityTargetBackupTemplate() {
-    realityTargetTmpPath 'padm-reality-target.XXXXXX'
 }
 
 realityTargetScoreStyle() {
@@ -1557,7 +1549,7 @@ runRealityScannerRange() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "扫描范围为空"
         return 1
     }
-    scannerDir=$(realityScannerDir)
+    scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     outputFile=$(realityScannerOutputPath "$(date +%s)")
@@ -1592,7 +1584,7 @@ runRealityScannerTargetFile() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "目标列表为空"
         return 1
     }
-    scannerDir=$(realityScannerDir)
+    scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     total=$(wc -l <"${targetFile}" | tr -d ' ')
@@ -1654,7 +1646,7 @@ runRealityScannerPrefixFile() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "prefix 列表为空"
         return 1
     }
-    scannerDir=$(realityScannerDir)
+    scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     total=$(wc -l <"${prefixFile}" | tr -d ' ')
@@ -2364,7 +2356,7 @@ changeInstalledRealityTarget() {
     local previousXrayVLESSRealityXHTTPSNI="${xrayVLESSRealityXHTTPSNI:-}"
     local previousSingBoxVLESSRealityVisionSNI="${singBoxVLESSRealityVisionSNI:-}"
     local previousSingBoxVLESSRealityGRPCSNI="${singBoxVLESSRealityGRPCSNI:-}"
-    padmCreateTempPath backupDir -d "$(realityTargetBackupTemplate)" || return 1
+    padmCreateTempPath backupDir -d "$(realityTargetTmpPath 'padm-reality-target.XXXXXX')" || return 1
     if ! backupRealityTargetConfigs "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
         realityTargetStatusBlock red "REALITY 目标站" "配置备份失败，已取消切换"
