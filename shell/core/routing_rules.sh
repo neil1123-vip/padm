@@ -335,17 +335,6 @@ unInstallRouting() {
     fi
 }
 
-# 卸载嗅探配置
-unInstallSniffing() {
-    local inbound
-    while IFS= read -r inbound; do
-        if grep -q "destOverride" <"${inbound}"; then
-            updateRoutingJsonConfig "${inbound}" 'del(.inbounds[0].sniffing)' || return 1
-        fi
-    done < <(find "${configPath}" -name "*inbounds.json")
-
-}
-
 # 安装嗅探配置
 installSniffing() {
     local inbound

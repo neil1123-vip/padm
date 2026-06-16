@@ -358,7 +358,8 @@ JSON
       .inbounds[0].sniffing.enabled == true and
       (.inbounds[0].sniffing.destOverride | sort) == ["http", "quic", "tls"]
     ' "${configPath}03_sniffing_inbounds.json" >/dev/null
-    unInstallSniffing
+    updateRoutingJsonConfig "${configPath}02_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
+    updateRoutingJsonConfig "${configPath}03_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
     jq -e '.inbounds[0].sniffing | not' "${configPath}02_sniffing_inbounds.json" >/dev/null
     jq -e '.inbounds[0].sniffing | not' "${configPath}03_sniffing_inbounds.json" >/dev/null
     coreInstallType=
