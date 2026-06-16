@@ -20,10 +20,6 @@ subscriptionWireGuardDefaultNetwork() {
     echo "10.77.0.0/24"
 }
 
-subscriptionWireGuardDefaultMainAddress() {
-    echo "10.77.0.1/24"
-}
-
 subscriptionWireGuardDefaultListenPort() {
     echo 51820
 }
@@ -497,7 +493,7 @@ initSubscriptionWireGuardMain() {
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     listenPort=$(subscriptionWireGuardDefaultListenPort)
     controlPort=$(subscriptionWireGuardDefaultControlPort)
-    address=$(subscriptionWireGuardDefaultMainAddress)
+    address="10.77.0.1/24"
     autoRead wg_main_endpoint_host "请输入主控公网地址或域名[用于被控连接 WireGuard]:" endpointHost
     [[ -n "${endpointHost}" ]] || endpointHost=${currentHost:-}
     if ! subscriptionWireGuardValidEndpointHost "${endpointHost}"; then
