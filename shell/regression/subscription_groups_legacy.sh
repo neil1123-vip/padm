@@ -6898,7 +6898,8 @@ runRealityAsnScanPlanRegression() {
 172.16.0.0/28
 EOF
     while IFS= read -r _prefix; do
-        prefixMask=$(realityAsnPrefixMask "${_prefix}")
+        [[ "${_prefix}" =~ /([0-9]+)$ ]]
+        prefixMask=${BASH_REMATCH[1]}
         [[ "${prefixMask}" -ge 28 && "${prefixMask}" -le 32 ]] && mask28Count=$((mask28Count + 1))
         [[ "${prefixMask}" -ge 27 && "${prefixMask}" -le 32 ]] && mask27Count=$((mask27Count + 1))
         [[ "${prefixMask}" -ge 26 && "${prefixMask}" -le 32 ]] && mask26Count=$((mask26Count + 1))
@@ -6912,7 +6913,7 @@ EOF
     [[ "${mask26Count}" == "3" ]]
     [[ "${mask25Count}" == "4" ]]
     [[ "${mask24Count}" == "5" ]]
-    [[ "$((1 << (32 - $(realityAsnPrefixMask "172.16.0.0/28"))))" == "16" ]]
+    [[ "$((1 << (32 - 28)))" == "16" ]]
     [[ "${totalAddressCount}" == "496" ]]
     [[ "$(realityAsnPrefixTotalUsableAddressCount <"${asnPrefixFile}")" == "486" ]]
     generateRealityAsnSampleIps "${asnPrefixFile}" 12 "${sampleFile}"

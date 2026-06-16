@@ -693,12 +693,6 @@ normalizeRealityAsn() {
     printf 'AS%s\n' "${asn}"
 }
 
-realityAsnPrefixMask() {
-    local prefix=$1
-    [[ "${prefix}" =~ /([0-9]+)$ ]] || return 1
-    printf '%s\n' "${BASH_REMATCH[1]}"
-}
-
 fetchRealityAsnPrefixes() {
     local asn=$1
     local response

@@ -1178,6 +1178,7 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(realityTargetBlockedCandidateCount|realityTargetBlockedCandidateLineByIndex|realityTargetScanFile|realityTargetRecentlyFailed|realityTargetScanResultCount|realityTargetScanLineByIndex|realityTargetScanField|showRealityTargetCandidates)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(realityTargetImportScannerCandidates|writeRealityTargetScanLine|realityAsnPrefixTotalAddressCount|filterRealityAsnPrefixesByMask|realityTargetCachedLine)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(realityTargetCandidateExists|writeRealityTargetCandidateLine|realityTargetCacheFile|realityTargetResultLineByIndex|realityTargetResultLineByTargetIp|realityAsnPrefixAddressCount)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
+            awk '/^(realityAsnPrefixMask)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(setScriptVersion)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(commitRequiresMajorBump|commitRequiresMinorBump|commitRequiresPatchBump|nextScriptVersionFromCommits)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
