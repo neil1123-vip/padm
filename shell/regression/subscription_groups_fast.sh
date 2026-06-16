@@ -1118,6 +1118,8 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(setSubscriptionSources|setSubscriptionSourceControlToken)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/groups.sh"
             awk '/^(testSubscriptionWireGuardControl)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
             awk '/^(protocolSelectionNeedsNginx|protocolSelectionNeedsReality|protocolSelectionNeedsUdp|protocolSelectionTransportHas|protocolSelectionSecurityHas|xrayProtocolFilename|xrayProtocolMenuLine)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/protocols.sh"
+            awk '/^(getDLCNameByRuleLine)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_rules.sh"
+            awk '/^(cleanXrayGeoFiles)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
             awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
         } | awk '{ sum += $1 } END { print sum + 0 }'
     )

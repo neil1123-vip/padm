@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# 清理 Xray geo 数据文件
-cleanXrayGeoFiles() {
-    local targetDir=$1
-    rm -f "${targetDir}/geosite.dat" "${targetDir}/geoip.dat" "${targetDir}/geo.version" >/dev/null 2>&1
-}
-
 downloadXrayGeoFilesToStage() {
     local stageDir=$1
     local geoVersion=$2

@@ -33,22 +33,6 @@ escapeDLCRegexPattern() {
     echo "$1" | sed -e 's/[.[\*^$()+?{|]/\\&/g'
 }
 
-# 根据规则行号向上回溯对应 name
-getDLCNameByRuleLine() {
-    local ruleLine=$1
-    local dlcFilePath=$2
-    awk -v targetLine="${ruleLine}" '
-    /^[[:space:]]*-[[:space:]]*name:[[:space:]]*/ {
-        line = $0
-        sub(/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/, "", line)
-        currentName = line
-    }
-    NR == targetLine {
-        print currentName
-        exit
-    }' "${dlcFilePath}"
-}
-
 isDomainFormat() {
     local target=$1
     [[ "${target}" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9-]{2,63}$ ]]
