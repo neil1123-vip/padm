@@ -10948,7 +10948,11 @@ main
     resetMenuActions
     manageSubscriptionMainMaintenance <<<"2
 9"
-    assertMenuAction 'runSubscriptionGroupSync:'
+    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+    if assertMenuAction 'runSubscriptionGroupSync:'; then
+        printf 'menu-smoke failed: main maintenance sync still triggers publish refresh path\n' >&2
+        return 1
+    fi
     resetMenuActions
     manageSubscriptionMainMaintenance <<<"3
 9"
@@ -10979,6 +10983,14 @@ main
 9"
     grep -q "开启/关闭自动同步" <<<"${output}"
     grep -q "查看定时任务" <<<"${output}"
+    resetMenuActions
+    manageSubscriptionSyncSettings <<<"5
+11"
+    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+    if assertMenuAction 'runSubscriptionGroupSync:'; then
+        printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
+        return 1
+    fi
     resetMenuActions
     output=
     manageSubscriptionMainMaintenance <<<"6

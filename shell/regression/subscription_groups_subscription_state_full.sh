@@ -482,6 +482,7 @@ JSON
     singBoxConfigPath="${oldSingBoxConfigPath}"
     (
         runSubscriptionGroupSync() {
+            printf '%s\n' "$*" >"${TMP_DIR}/subscription-group-sync-cron-args.log"
             return 23
         }
         set +e
@@ -489,6 +490,7 @@ JSON
         local cronStatus=$?
         set -e
         [[ "${cronStatus}" -eq 23 ]]
+        grep -qx 'skip-subscribe-refresh' "${TMP_DIR}/subscription-group-sync-cron-args.log"
     )
 }
 

@@ -411,7 +411,7 @@ handleScriptCommand() {
         printf 'geo更新日期:%s\n' "$(date "+%F %H:%M:%S")" >>/etc/padm/crontab_updateGeoSite.log
         exit 0
     elif [[ "${cronName}" == "SyncSubscriptionGroups" ]]; then
-        runSubscriptionGroupSyncCron
+        runSubscriptionGroupSyncCron skip-subscribe-refresh
         exit $?
     elif [[ "${cronName}" == "SubscriptionControl" ]]; then
         shift

@@ -802,5 +802,9 @@ runSubscriptionGroupSync() {
 }
 
 runSubscriptionGroupSyncCron() {
-    runSubscriptionGroupSync "$@"
+    if [[ $# -eq 0 ]]; then
+        runSubscriptionGroupSync skip-subscribe-refresh
+    else
+        runSubscriptionGroupSync "$@"
+    fi
 }

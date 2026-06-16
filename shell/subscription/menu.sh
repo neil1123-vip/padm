@@ -368,7 +368,7 @@ manageSubscriptionMainMaintenance() {
         autoRead subscription_main_maintenance_menu "请选择:" mainMaintenanceStatus
         case "${mainMaintenanceStatus}" in
         1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
-        2) runSubscriptionGroupSync || true ;;
+        2) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
         3) showSubscriptionOperationsStatus ;;
         4) manageTrafficAndQuota ;;
         5) manageSubscriptionSyncSettings ;;
@@ -1250,7 +1250,7 @@ manageSubscriptionSyncSettings() {
             ;;
         3) showSubscriptionLocalSyncPlan ;;
         4) showSubscriptionRemoteSyncPlan ;;
-        5) runSubscriptionGroupSync || true ;;
+        5) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
         6) showSubscriptionQuotaPlan ;;
         7) executeSubscriptionQuotaPlanMenu ;;
         8)
