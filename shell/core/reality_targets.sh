@@ -359,24 +359,6 @@ realityTargetCandidates() {
     done < <(realityTargetCandidatePool)
 }
 
-realityTargetCandidateExists() {
-    local host=$1
-    realityTargetCandidatePool | awk -F'|' -v host="${host}" '$1 == host {found=1} END{exit !found}'
-}
-
-writeRealityTargetCandidateLine() {
-    local host=$1
-    local sni=$2
-    local name=$3
-    local region=$4
-    local category=$5
-    local cdn=$6
-    local rank=$7
-    local recommended=$8
-    local note=$9
-    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "${host}" "${sni}" "${name}" "${region}" "${category}" "${cdn}" "${rank}" "${recommended}" "${note}"
-}
-
 realityTargetScannerRecordAllowed() {
     local domain=$1
     local lowerDomain
@@ -416,10 +398,6 @@ realityTargetResultsFile() {
     printf '%s\n' "${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
 }
 
-realityTargetCacheFile() {
-    realityTargetResultsFile
-}
-
 realityTargetResultCount() {
     local resultsFile
     resultsFile=$(realityTargetResultsFile)
@@ -428,24 +406,6 @@ realityTargetResultCount() {
         return 0
     }
     awk -F'\t' '$10 == "A" || $10 == "B" {count++} END{print count + 0}' "${resultsFile}"
-}
-
-realityTargetResultLineByIndex() {
-    local wanted=$1
-    local resultsFile
-    resultsFile=$(realityTargetResultsFile)
-    [[ -f "${resultsFile}" ]] || return 1
-    sortedRealityTargetResults | awk -F'\t' -v wanted="${wanted}" '
-      $10 == "A" || $10 == "B" {
-        itemIndex++
-        if (itemIndex == wanted) {
-          print $0
-          found=1
-          exit
-        }
-      }
-      END{if (!found) exit 1}
-    '
 }
 
 realityTargetResultField() {
@@ -472,15 +432,6 @@ realityTargetResultField() {
     *) value= ;;
     esac
     printf '%s\n' "${value}"
-}
-
-realityTargetResultLineByTargetIp() {
-    local target=$1
-    local ip=$2
-    local resultsFile
-    resultsFile=$(realityTargetResultsFile)
-    [[ -f "${resultsFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" -v ip="${ip}" '$1 == target && $6 == ip {print; found=1; exit} END{if (!found) exit 1}' "${resultsFile}"
 }
 
 removeRealityTargetResultLine() {
@@ -746,14 +697,6 @@ realityAsnPrefixMask() {
     local prefix=$1
     [[ "${prefix}" =~ /([0-9]+)$ ]] || return 1
     printf '%s\n' "${BASH_REMATCH[1]}"
-}
-
-realityAsnPrefixAddressCount() {
-    local prefix=$1
-    local mask
-    mask=$(realityAsnPrefixMask "${prefix}") || return 1
-    [[ "${mask}" =~ ^[0-9]+$ && "${mask}" -le 32 ]] || return 1
-    printf '%s\n' "$((1 << (32 - mask)))"
 }
 
 fetchRealityAsnPrefixes() {

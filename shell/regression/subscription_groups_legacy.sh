@@ -6904,7 +6904,7 @@ EOF
         [[ "${prefixMask}" -ge 26 && "${prefixMask}" -le 32 ]] && mask26Count=$((mask26Count + 1))
         [[ "${prefixMask}" -ge 25 && "${prefixMask}" -le 32 ]] && mask25Count=$((mask25Count + 1))
         [[ "${prefixMask}" -ge 24 && "${prefixMask}" -le 32 ]] && mask24Count=$((mask24Count + 1))
-        prefixAddressCount=$(realityAsnPrefixAddressCount "${_prefix}" || printf 0)
+        prefixAddressCount=$((1 << (32 - prefixMask)))
         totalAddressCount=$((totalAddressCount + prefixAddressCount))
     done <"${asnPrefixFile}"
     [[ "${mask28Count}" == "1" ]]
@@ -6912,7 +6912,7 @@ EOF
     [[ "${mask26Count}" == "3" ]]
     [[ "${mask25Count}" == "4" ]]
     [[ "${mask24Count}" == "5" ]]
-    [[ "$(realityAsnPrefixAddressCount "172.16.0.0/28")" == "16" ]]
+    [[ "$((1 << (32 - $(realityAsnPrefixMask "172.16.0.0/28"))))" == "16" ]]
     [[ "${totalAddressCount}" == "496" ]]
     [[ "$(realityAsnPrefixTotalUsableAddressCount <"${asnPrefixFile}")" == "486" ]]
     generateRealityAsnSampleIps "${asnPrefixFile}" 12 "${sampleFile}"
@@ -7324,7 +7324,7 @@ CSV
         [[ "${ip}" == "IP" ]] && continue
         domain=${domain#\"}
         domain=${domain%\"}
-        if ! realityTargetScannerRecordAllowed "${domain}" || realityTargetCandidateExists "${domain}"; then
+        if ! realityTargetScannerRecordAllowed "${domain}" || realityTargetCandidatePool | awk -F'|' -v host="${domain}" '$1 == host {found=1} END{exit !found}'; then
             continue
         fi
         scannerImport=$((scannerImport + 1))
@@ -7347,7 +7347,7 @@ CSV
     [[ "$(realityTargetResultField "${batchLine}" 10)" == "A" ]]
     grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
     printf '%s\n' "batch-old.example.com:443" >"${failedTargetsFile}"
-    writeRealityTargetCandidateLine "batch-old.example.com" "batch-old.example.com" "Batch Old" "global" "large_site" "unknown" "9" "yes" "batch candidate" >>"${scannerCandidatesFile}"
+    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "batch-old.example.com" "batch-old.example.com" "Batch Old" "global" "large_site" "unknown" "9" "yes" "batch candidate" >>"${scannerCandidatesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
     ! grep -qF $'batch-old.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     ! grep -qF 'batch-old.example.com|' "${scannerCandidatesFile}"
@@ -7358,7 +7358,7 @@ CSV
     writeRealityTargetResultLine "local.example.com:443" "sni.local.example.com" "Local Example" "test" "no" "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "same ASN test target"
     writeRealityTargetResultLine "remote.example.com:443" "sni.remote.example.com" "Remote Example" "test" "no" "198.51.100.1" "AS64501" "RemoteNet" "different_network" "A" "yes" "8192" "yes" "1234567899" "longer cert but different network"
     [[ "$(realityTargetResultCount)" == "2" ]]
-    scanLine=$(realityTargetResultLineByIndex 1)
+    scanLine=$(sortedRealityTargetResults | awk -F'\t' '$10 == "A" || $10 == "B" {print; exit}')
     [[ "$(realityTargetResultField "${scanLine}" 1)" == "local.example.com:443" ]]
     selectDefaultRealityTarget
     [[ "${realityTargetHost}" == "local.example.com" ]]
