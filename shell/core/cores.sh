@@ -556,18 +556,6 @@ appendXrayCompatibilityHints() {
     fi
 }
 
-xrayCompatibilityAuditLog() {
-    coreTmpFilePath padm-xray-compat-audit.log
-}
-
-xrayCompatibilityAuditStatusFile() {
-    coreTmpFilePath padm-xray-compat-audit.status
-}
-
-xrayCompatibilityAuditWarnFile() {
-    coreTmpFilePath padm-xray-compat-audit.warn
-}
-
 xrayCompatibilityAuditReset() {
     : >"${1}"
 }
@@ -704,17 +692,17 @@ summarizeXrayCompatibilityAudit() {
 
 xrayCompatibilityAuditOverviewSummary() {
     local statusFile warnFile logFile
-    statusFile=$(xrayCompatibilityAuditStatusFile)
-    warnFile=$(xrayCompatibilityAuditWarnFile)
-    logFile=$(xrayCompatibilityAuditLog)
+    statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
+    warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
+    logFile=$(coreTmpFilePath padm-xray-compat-audit.log)
     collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
     summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}"
 }
 
 showXrayCompatibilityAudit() {
-    local logFile=${1:-$(xrayCompatibilityAuditLog)}
-    local statusFile=${2:-$(xrayCompatibilityAuditStatusFile)}
-    local warnFile=${3:-$(xrayCompatibilityAuditWarnFile)}
+    local logFile=${1:-$(coreTmpFilePath padm-xray-compat-audit.log)}
+    local statusFile=${2:-$(coreTmpFilePath padm-xray-compat-audit.status)}
+    local warnFile=${3:-$(coreTmpFilePath padm-xray-compat-audit.warn)}
 
     collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
     if xrayCompatibilityAuditHasFailures "${statusFile}"; then

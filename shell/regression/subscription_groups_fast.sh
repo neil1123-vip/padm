@@ -2096,9 +2096,9 @@ JSON
 {"reverse":{"bridges":[]}}
 JSON
         local statusFile warnFile logFile
-        statusFile=$(xrayCompatibilityAuditStatusFile)
-        warnFile=$(xrayCompatibilityAuditWarnFile)
-        logFile=$(xrayCompatibilityAuditLog)
+        statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
+        logFile=$(coreTmpFilePath padm-xray-compat-audit.log)
         collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
         grep -q '^fail:' "${statusFile}"
         grep -q '旧 users schema' "${logFile}"

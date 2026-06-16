@@ -238,9 +238,9 @@ check_xray_compatibility_audit() {
     (
         # shellcheck source=/dev/null
         source /etc/padm/shell/core/bootstrap.sh
-        statusFile=$(xrayCompatibilityAuditStatusFile)
-        warnFile=$(xrayCompatibilityAuditWarnFile)
-        collectXrayCompatibilityFindings "${statusFile}" "$(xrayCompatibilityAuditLog)" "${warnFile}"
+        statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
+        collectXrayCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-xray-compat-audit.log)" "${warnFile}"
         summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
         strictLog=$(coreTmpFilePath padm-core-xray-strict-test.log)
         if ! validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}"; then
@@ -248,7 +248,7 @@ check_xray_compatibility_audit() {
         fi
         if xrayCompatibilityAuditHasFailures "${statusFile}"; then
             printf 'WARN:%s\n' "${summary}"
-            printf 'LOG:%s\n' "$(xrayCompatibilityAuditLog)"
+            printf 'LOG:%s\n' "$(coreTmpFilePath padm-xray-compat-audit.log)"
         elif [[ -s "${warnFile}" ]]; then
             printf 'WARN:%s\n' "${summary}"
         else
