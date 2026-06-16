@@ -656,6 +656,38 @@ JSON
     grep -q '核心重载失败，且回滚失败' "${statusLog}"
 )
 
+runAccessControlRejectsUnsafeBackupDirRegression() (
+    local root="${TMP_DIR}/access-control-unsafe-backup"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${rmLog}"
+    PADM_ACCESS_CONTROL_BACKUP_DIR=relative-backup
+    configPath="${root}/xray/"
+    singBoxConfigPath=
+    mkdir -p "${configPath}"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    accessControlBackupCreate >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+
+    set +e
+    accessControlBackupCleanup >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+)
+
 runBTRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/bt-routing-failure"
     local installMarker="${root}/install"
@@ -1591,6 +1623,38 @@ JSON
         [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" ]]
         grep -q 'DNS 分流核心重载失败，且旧配置恢复失败' "${errorLog}"
     )
+)
+
+runDNSRoutingRejectsUnsafeBackupDirRegression() (
+    local root="${TMP_DIR}/dns-routing-unsafe-backup"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${rmLog}"
+    PADM_DNS_ROUTING_BACKUP_DIR=relative-backup
+    configPath="${root}/xray/"
+    singBoxConfigPath=
+    mkdir -p "${configPath}"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    dnsRoutingBackupCreate >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+
+    set +e
+    dnsRoutingBackupCleanup >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
 )
 
 runVMessRoutingFailureReturnRegression() (
@@ -12795,11 +12859,13 @@ runRegressionRouting() {
     runRegressionStep routing-socks5-udp-associate runSocks5UdpAssociateRegression
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-access-control-config-transaction runAccessControlConfigTransactionRegression
+    runRegressionStep routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
     runRegressionStep routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
     runRegressionStep routing-warp-failure-return runWARPRoutingFailureReturnRegression
     runRegressionStep routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
     runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
+    runRegressionStep routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
     runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }

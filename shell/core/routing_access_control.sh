@@ -356,6 +356,13 @@ accessControlBackupDir() {
     printf '%s\n' "${tmpBase%/}/padm-access-control-backup"
 }
 
+accessControlSafeBackupDir() {
+    local backupDir
+    backupDir=$(accessControlBackupDir)
+    padmIsSafeAbsolutePath "${backupDir%/}" || return 1
+    printf '%s\n' "${backupDir%/}"
+}
+
 accessControlXrayTestLog() {
     if declare -F padmTmpFilePath >/dev/null 2>&1; then
         padmTmpFilePath padm-access-xray-test.log
@@ -376,7 +383,7 @@ accessControlSingBoxTestLog() {
 
 accessControlBackupCreate() {
     local backupDir
-    backupDir=$(accessControlBackupDir)
+    backupDir=$(accessControlSafeBackupDir) || return 1
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
     if [[ -n "${configPath}" ]]; then
@@ -421,7 +428,9 @@ accessControlBackupRestore() {
 }
 
 accessControlBackupCleanup() {
-    rm -rf "$(accessControlBackupDir)" >/dev/null 2>&1 || return 1
+    local backupDir
+    backupDir=$(accessControlSafeBackupDir) || return 1
+    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
 }
 
 reportAccessControlApplyFailure() {

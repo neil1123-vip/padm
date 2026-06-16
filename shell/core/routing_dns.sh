@@ -77,10 +77,17 @@ dnsRoutingBackupDir() {
     printf '%s\n' "${tmpBase%/}/padm-dns-routing-backup"
 }
 
+dnsRoutingSafeBackupDir() {
+    local backupDir
+    backupDir=$(dnsRoutingBackupDir)
+    padmIsSafeAbsolutePath "${backupDir%/}" || return 1
+    printf '%s\n' "${backupDir%/}"
+}
+
 dnsRoutingBackupCreate() {
     local backupDir
     local singBoxFile
-    backupDir=$(dnsRoutingBackupDir)
+    backupDir=$(dnsRoutingSafeBackupDir) || return 1
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
     if [[ -n "${configPath:-}" && -f "${configPath}11_dns.json" ]]; then
@@ -115,7 +122,9 @@ dnsRoutingBackupRestore() {
 }
 
 dnsRoutingBackupCleanup() {
-    rm -rf "$(dnsRoutingBackupDir)" >/dev/null 2>&1 || return 1
+    local backupDir
+    backupDir=$(dnsRoutingSafeBackupDir) || return 1
+    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
 }
 
 dnsRoutingAbortChange() {
