@@ -1180,6 +1180,35 @@ finalizeFailedCoreBinaryInstall() {
     return 1
 }
 
+restoreCoreOptionalFileBackup() {
+    local backupFile=$1
+    local targetFile=$2
+    local mode=${3:-644}
+    if [[ ! -e "${backupFile}" ]]; then
+        rm -f -- "${targetFile}" >/dev/null 2>&1 || return 1
+        return 0
+    fi
+    cp "${backupFile}" "${targetFile}" || return 1
+    chmod "${mode}" "${targetFile}" >/dev/null 2>&1 || return 1
+}
+
+finalizeFailedSingBoxBinaryInstall() {
+    local backupBinary=$1
+    local targetBinary=$2
+    local cronetBackup=$3
+    local cronetPath=$4
+    local logFile=$5
+    local restoreStatus=0
+
+    finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" || restoreStatus=$?
+    if ! restoreCoreOptionalFileBackup "${cronetBackup}" "${cronetPath}" 644; then
+        statusCard "sing-box 更新失败" "libcronet.so 恢复失败，请手动检查 ${cronetPath}" "排查日志: ${logFile}"
+        return 1
+    fi
+    [[ -e "${cronetBackup}" ]] && rm -f "${cronetBackup}" >/dev/null 2>&1 || true
+    return "${restoreStatus}"
+}
+
 installDownloadedXrayBinary() {
     local version=$1
     local tmpDir oldBinary backupBinary newBinary logFile
@@ -1240,7 +1269,7 @@ installDownloadedXrayBinary() {
 
 installDownloadedSingBoxBinary() {
     local version=$1
-    local tmpDir oldBinary backupBinary extractedDir newBinary logFile cronetPath
+    local tmpDir oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup
     local rc
     logFile=$(coreSingBoxUpgradeTestLog)
     padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
@@ -1266,6 +1295,9 @@ installDownloadedSingBoxBinary() {
     oldBinary=$(coreSingBoxBinaryPath)
     validateCoreInstallTargetPath "${oldBinary}" "sing-box" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     backupBinary="${oldBinary}.bak.$(date +%s)"
+    cronetPath=$(coreSingBoxCronetPath)
+    validateCoreInstallTargetPath "${cronetPath}" "sing-box cronet依赖" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    cronetBackup="${cronetPath}.bak.$(date +%s)"
     if ! mkdir -p "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "sing-box 安装目录创建失败"
@@ -1276,22 +1308,27 @@ installDownloadedSingBoxBinary() {
         errorCard "sing-box 旧二进制备份失败"
         return 1
     fi
+    if [[ -f "${cronetPath}" ]] && ! cp "${cronetPath}" "${cronetBackup}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}" >/dev/null 2>&1 || true
+        errorCard "sing-box 旧 cronet 依赖备份失败"
+        return 1
+    fi
     if ! runCoreServiceActionAllowFailure handleSingBox stop; then
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}" >/dev/null 2>&1 || true
+        [[ -f "${cronetBackup}" ]] && rm -f "${cronetBackup}" >/dev/null 2>&1 || true
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
     if ! mv -f "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
         padmRemoveCleanupPath "${tmpDir}"
-        finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
+        finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
         return 1
     fi
-    cronetPath=$(coreSingBoxCronetPath)
-    validateCoreInstallTargetPath "${cronetPath}" "sing-box cronet依赖" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     if ! cp "${extractedDir}/libcronet.so" "${cronetPath}"; then
         padmRemoveCleanupPath "${tmpDir}"
-        finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
+        finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
         return 1
     fi
     runCoreServiceActionAllowFailure handleSingBox start || true
@@ -1299,10 +1336,11 @@ installDownloadedSingBoxBinary() {
         successCard "sing-box更新成功"
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}"
+        [[ -f "${cronetBackup}" ]] && rm -f "${cronetBackup}"
         return 0
     fi
     padmRemoveCleanupPath "${tmpDir}"
-    finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
+    finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
 }
 
 confirmCoreUpgrade() {

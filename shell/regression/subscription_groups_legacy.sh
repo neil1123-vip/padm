@@ -2673,6 +2673,7 @@ runCoreBinaryInstallCopyFailureRegression() (
     local root="${TMP_DIR}/core-binary-copy-failure"
     local xrayBinary="${root}/xray/xray"
     local singBoxBinary="${root}/sing-box/sing-box"
+    local singBoxCronet="${root}/sing-box/libcronet.so"
     local statusLog="${root}/status.log"
     local successLog="${root}/success.log"
     local serviceLog="${root}/service.log"
@@ -2683,6 +2684,7 @@ runCoreBinaryInstallCopyFailureRegression() (
     mkdir -p "$(dirname "${xrayBinary}")" "$(dirname "${singBoxBinary}")" "${root}/tmp"
     printf 'old-xray\n' >"${xrayBinary}"
     printf 'old-sing-box\n' >"${singBoxBinary}"
+    printf 'old-cronet\n' >"${singBoxCronet}"
     chmod 755 "${xrayBinary}" "${singBoxBinary}"
 
     PADM_XRAY_BINARY="${xrayBinary}"
@@ -2852,6 +2854,175 @@ runCoreBinaryInstallCopyFailureRegression() (
     grep -q '旧二进制恢复失败' "${statusLog}"
     grep -q '旧二进制未恢复，已跳过服务启动' "${statusLog}"
     ! grep -q 'xray:start:true' "${serviceLog}"
+)
+
+runSingBoxCronetRollbackRegression() (
+    local root="${TMP_DIR}/sing-box-cronet-rollback"
+    local singBoxBinary="${root}/sing-box/sing-box"
+    local singBoxCronet="${root}/sing-box/libcronet.so"
+    local statusLog="${root}/status.log"
+    local successLog="${root}/success.log"
+    local serviceLog="${root}/service.log"
+    local copyFailureLog="${root}/copy-failure.log"
+    local singBoxRc
+    local singBoxStartShouldFail=
+
+    mkdir -p "$(dirname "${singBoxBinary}")" "${root}/tmp"
+    printf 'old-sing-box\n' >"${singBoxBinary}"
+    printf 'old-cronet\n' >"${singBoxCronet}"
+    chmod 755 "${singBoxBinary}"
+
+    PADM_SINGBOX_BINARY="${singBoxBinary}"
+    singBoxCoreCPUVendor=-linux-amd64
+    REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    REGRESSION_SUCCESS_CARD_LOG="${successLog}"
+    : >"${statusLog}"
+    : >"${successLog}"
+    : >"${serviceLog}"
+    : >"${copyFailureLog}"
+
+    padmCreateTempPath() {
+        local resultVar=$1
+        local path
+        shift
+        if [[ "${1:-}" == "-d" ]]; then
+            path=$(mktemp -d "${root}/tmp/core.XXXXXX") || return 1
+        else
+            path=$(mktemp "${root}/tmp/core.XXXXXX") || return 1
+        fi
+        printf -v "${resultVar}" '%s' "${path}"
+    }
+    padmRemoveCleanupPath() { rm -rf "$1"; }
+    padmForgetCleanupPath() { return 0; }
+    downloadGitHubReleaseAsset() {
+        local outputDir= assetName=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -P)
+                outputDir=$2
+                shift 2
+                ;;
+            *)
+                assetName=$1
+                shift
+                ;;
+            esac
+        done
+        mkdir -p "${outputDir}"
+        : >"${outputDir}/${assetName}"
+    }
+    tar() {
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -C)
+                dest=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+            esac
+        done
+        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
+        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        return 0
+    }
+    cp() {
+        local sourcePath=$1
+        local targetPath=$2
+        if [[ "${targetPath}" == "${singBoxCronet}" && "${sourcePath}" != ${singBoxCronet}.bak.* ]]; then
+            printf 'cronet-copy-fail\n' >>"${copyFailureLog}"
+            return 1
+        fi
+        command cp "$@"
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
+        return 0
+    }
+    singBoxRunning() { return 1; }
+    validateSingBoxConfigWithBinary() { return 0; }
+
+    SERVICE_QUEUE_ALLOW_FAILURE=
+    set +e
+    installDownloadedSingBoxBinary v1.2.3 >/dev/null 2>&1
+    singBoxRc=$?
+    set -e
+
+    [[ "${singBoxRc}" == "1" ]]
+    [[ "$(<"${singBoxBinary}")" == "old-sing-box" ]]
+    [[ "$(<"${singBoxCronet}")" == "old-cronet" ]]
+    grep -qx 'cronet-copy-fail' "${copyFailureLog}"
+    grep -q 'sing-box 更新失败' "${statusLog}"
+    grep -q '旧服务已尝试恢复启动' "${statusLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:start:true' "${serviceLog}"
+    [[ -z "${SERVICE_QUEUE_ALLOW_FAILURE}" ]]
+
+    : >"${statusLog}"
+    : >"${serviceLog}"
+    printf 'new-sing-box\n' >"${singBoxBinary}"
+    printf 'old-sing-box\n' >"${singBoxBinary}.bak.service-fail"
+    printf 'new-cronet\n' >"${singBoxCronet}"
+    printf 'old-cronet\n' >"${singBoxCronet}.bak.service-fail"
+    singBoxStartShouldFail=true
+    set +e
+    finalizeFailedSingBoxBinaryInstall "${singBoxBinary}.bak.service-fail" "${singBoxBinary}" "${singBoxCronet}.bak.service-fail" "${singBoxCronet}" "/tmp/sing-box.log" >/dev/null 2>&1
+    singBoxRc=$?
+    set -e
+    singBoxStartShouldFail=
+    [[ "${singBoxRc}" == "1" ]]
+    [[ "$(<"${singBoxBinary}")" == "old-sing-box" ]]
+    [[ "$(<"${singBoxCronet}")" == "old-cronet" ]]
+    [[ ! -e "${singBoxBinary}.bak.service-fail" ]]
+    [[ ! -e "${singBoxCronet}.bak.service-fail" ]]
+    grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
+    grep -qx 'sing-box:start:true' "${serviceLog}"
+)
+
+runFinalizeSingBoxBinaryInstallRollbackRegression() (
+    local root="${TMP_DIR}/finalize-sing-box-rollback"
+    local singBoxBinary="${root}/sing-box/sing-box"
+    local singBoxCronet="${root}/sing-box/libcronet.so"
+    local statusLog="${root}/status.log"
+    local serviceLog="${root}/service.log"
+    local singBoxRc
+    local singBoxStartShouldFail=
+
+    mkdir -p "$(dirname "${singBoxBinary}")"
+    : >"${statusLog}"
+    : >"${serviceLog}"
+    printf 'new-sing-box\n' >"${singBoxBinary}"
+    printf 'old-sing-box\n' >"${singBoxBinary}.bak"
+    printf 'new-cronet\n' >"${singBoxCronet}"
+    printf 'old-cronet\n' >"${singBoxCronet}.bak"
+    chmod 755 "${singBoxBinary}" "${singBoxBinary}.bak"
+
+    REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
+        return 0
+    }
+
+    singBoxStartShouldFail=true
+    set +e
+    finalizeFailedSingBoxBinaryInstall "${singBoxBinary}.bak" "${singBoxBinary}" "${singBoxCronet}.bak" "${singBoxCronet}" "/tmp/sing-box.log" >/dev/null 2>&1
+    singBoxRc=$?
+    set -e
+    singBoxStartShouldFail=
+
+    [[ "${singBoxRc}" == "1" ]]
+    [[ "$(<"${singBoxBinary}")" == "old-sing-box" ]]
+    [[ "$(<"${singBoxCronet}")" == "old-cronet" ]]
+    [[ ! -e "${singBoxBinary}.bak" ]]
+    [[ ! -e "${singBoxCronet}.bak" ]]
+    grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
+    grep -qx 'sing-box:start:true' "${serviceLog}"
 )
 
 runLegacyCoreUpgradeKeepsExistingBinaryRegression() (
@@ -13722,6 +13893,8 @@ runRegressionTransactionCore() {
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
         runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
+        runRegressionStep sing-box-cronet-rollback runSingBoxCronetRollbackRegression &&
+        runRegressionStep finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression &&
         runRegressionStep legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression &&
         runRegressionStep core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression &&
         runRegressionStep core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression &&
