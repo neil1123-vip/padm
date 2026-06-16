@@ -152,44 +152,6 @@ xrayProtocolName() {
     xray_protocol_registry | awk -F'|' -v id="$protocolId" '$1 == id { print $3 }'
 }
 
-xrayProtocolEnabled() {
-    local protocolId=$1
-    [[ " ${currentInstallProtocolType} " == *",${protocolId},"* ]]
-}
-
-xrayProtocolDisplayName() {
-    local protocolId=$1
-    case "${protocolId}" in
-    0) echo "VLESS+TCP/TLS_Vision" ;;
-    1) echo "VLESS+WS/TLS" ;;
-    2) echo "Trojan+gRPC/TLS" ;;
-    3) echo "VMess+WS/TLS" ;;
-    4) echo "Trojan+TCP/TLS" ;;
-    5) echo "VLESS+gRPC/TLS" ;;
-    6) echo "Hysteria2" ;;
-    7) echo "VLESS+Reality+Vision" ;;
-    8) echo "VLESS+Reality+gRPC" ;;
-    9) echo "Tuic" ;;
-    10) echo "Naive" ;;
-    11) echo "VMess+HTTPUpgrade" ;;
-    12) echo "VLESS+Reality+XHTTP" ;;
-    13) echo "AnyTLS" ;;
-    20) echo "Socks5" ;;
-    *) xrayProtocolName "${protocolId}" ;;
-    esac
-}
-
-xrayEnabledProtocolDisplayList() {
-    local protocolId name protocolList=
-    while IFS='|' read -r protocolId _ _ _; do
-        if xrayProtocolEnabled "${protocolId}"; then
-            name=$(xrayProtocolDisplayName "${protocolId}")
-            protocolList="${protocolList} ${name}"
-        fi
-    done < <(xray_protocol_registry)
-    echo "${protocolList}"
-}
-
 protocolMenuDescription() {
     local protocolId=$1
     local core transport security desc
