@@ -1730,6 +1730,8 @@ ensureRealityScannerBinary() {
     local scannerBin=$2
     local version=
     local assetName="RealiTLScanner-linux-64"
+    local stageDir=
+    local stageBin=
 
     padmIsSafeAbsolutePath "${scannerDir%/}" || return 1
     padmIsSafeAbsolutePath "${scannerBin}" || return 1
@@ -1739,24 +1741,32 @@ ensureRealityScannerBinary() {
         return 0
     fi
 
-    rm -rf "${scannerDir}"
-    mkdir -p "${scannerDir}"
+    mkdir -p "${scannerDir}" || return 1
+    padmCreateTempPath stageDir -d "${scannerDir%/}/.scanner-download.XXXXXX" || return 1
+    stageBin="${stageDir}/${assetName}"
     realityTargetStatusBlock yellow "RealiTLScanner 下载" "正在下载官方 Release 二进制"
-    version=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" | jq -r '.[0].tag_name // empty') || return 1
+    version=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" | jq -r '.[0].tag_name // empty') || {
+        padmRemoveCleanupPath "${stageDir}"
+        return 1
+    }
     if [[ -z "${version}" ]]; then
         realityTargetStatusBlock red "RealiTLScanner 下载" "未获取到最新 Release 版本"
+        padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
-    if ! downloadGitHubReleaseAsset -P "${scannerDir}" "XTLS/RealiTLScanner" "${version}" "${assetName}"; then
+    if ! downloadGitHubReleaseAsset -P "${stageDir}" "XTLS/RealiTLScanner" "${version}" "${assetName}"; then
         realityTargetStatusBlock red "RealiTLScanner 下载" "下载 Release 资产失败: ${assetName}"
+        padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
-    if [[ ! -f "${scannerDir}/${assetName}" ]]; then
+    if [[ ! -f "${stageBin}" ]]; then
         realityTargetStatusBlock red "RealiTLScanner 下载" "Release 资产不存在: ${assetName}"
+        padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
-    mv "${scannerDir}/${assetName}" "${scannerBin}"
-    chmod 755 "${scannerBin}"
+    mv "${stageBin}" "${scannerBin}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    chmod 755 "${scannerBin}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    padmRemoveCleanupPath "${stageDir}"
 }
 
 runRealityScannerRange() {

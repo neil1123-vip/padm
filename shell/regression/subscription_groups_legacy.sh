@@ -12185,6 +12185,37 @@ runRealityScannerBinaryRegression() {
     unset -f rm mkdir downloadGitHubReleaseAsset curl jq
 }
 
+runRealityScannerDownloadFailureKeepsExistingDirRegression() {
+    local root="${TMP_DIR}/scanner-download-failure"
+    local scannerDir="${root}/scanner"
+    local scannerBin="${scannerDir}/RealiTLScanner"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    padmIsSafeAbsolutePath() { return 0; }
+    mkdir -p "${scannerDir}"
+    printf 'keep\n' >"${scannerDir}/sentinel"
+    : >"${rmLog}"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+    downloadGitHubReleaseAsset() { return 1; }
+    curl() { printf 'v0.2.0\n'; }
+    jq() { printf 'v0.2.0\n'; }
+
+    set +e
+    ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" >/dev/null 2>&1
+    rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${scannerDir}/sentinel")" == "keep" ]]
+    ! grep -qxF "rm:-rf ${scannerDir}" "${rmLog}"
+    unset -f rm downloadGitHubReleaseAsset curl jq
+}
+
 runRealityScannerRejectsUnsafeDirRegression() (
     local rootRel="${TMP_DIR}/scanner-unsafe-dir"
     local root rmLog
@@ -12799,7 +12830,8 @@ runRegressionPlatformIo() {
         runRegressionStep package-rollback-failure runPackageRollbackFailureRegression &&
         runRegressionStep package-command-stdin runPackageCommandStdinRegression &&
         runRegressionStep reality-scanner-unsafe-dir runRealityScannerRejectsUnsafeDirRegression &&
-        runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression
+        runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression &&
+        runRegressionStep reality-scanner-download-failure runRealityScannerDownloadFailureKeepsExistingDirRegression
 }
 
 runTlsDnsApiDomainSelectionRegression() (
