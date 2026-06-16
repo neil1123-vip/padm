@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+acmeHomeDir() {
+    local homeDir="${HOME:-/root}"
+    printf '%s\n' "${homeDir%/}/.acme.sh"
+}
+
 # 读取 TLS 证书详情
 readAcmeTLS() {
     local readAcmeDomain=
@@ -527,12 +532,18 @@ cleanLastInstallationConfig() {
         done <<<"${oldPorts}"
     fi
 
-    if [[ -d "/root/.acme.sh" ]]; then
+    local acmeDir
+    acmeDir=$(acmeHomeDir)
+    if [[ -d "${acmeDir}" ]]; then
         echo
         autoRead clean_acme "是否清理acme证书和账号配置？[y/n]:" cleanAcmeStatus
         if [[ "${cleanAcmeStatus}" == "y" ]]; then
-            rm -rf /root/.acme.sh >/dev/null 2>&1
-            successCard "acme证书和账号配置已清理"
+            if rm -rf -- "${acmeDir}" >/dev/null 2>&1; then
+                successCard "acme证书和账号配置已清理"
+            else
+                errorCard "acme证书和账号配置清理失败"
+                return 1
+            fi
         fi
     fi
 

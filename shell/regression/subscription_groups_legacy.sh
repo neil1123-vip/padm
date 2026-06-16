@@ -3118,6 +3118,33 @@ runTlsFailureReturnRegression() (
     HOME="${oldHome}"
 )
 
+runTlsCustomSSLEmailUsesHomeAccountFileRegression() (
+    local root="${TMP_DIR}/tls-custom-email-home"
+    local homeDir="${root}/home"
+    local accountFile="${homeDir}/.acme.sh/account.conf"
+    local oldHome="${HOME}"
+
+    mkdir -p "$(dirname -- "${accountFile}")"
+    printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
+    HOME="${homeDir}"
+    sslType=zerossl
+    successCard() { return 0; }
+    echoContent() { return 0; }
+    autoRead() {
+        case "$3" in
+        sslEmailStatus) printf -v "$3" 'y' ;;
+        sslEmail) printf -v "$3" 'new@example.com' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+
+    customSSLEmail "validate email"
+
+    grep -q "ACCOUNT_EMAIL='new@example.com'" "${accountFile}"
+    ! grep -q "old@example.com" "${accountFile}"
+    HOME="${oldHome}"
+)
+
 runServiceQueueApplyPropagationRegression() (
     local root="${TMP_DIR}/service-queue-propagation"
     local rcFile="${root}/install.rc"
@@ -4824,6 +4851,75 @@ runCleanLastInstallationConfigFailureRegression() (
     grep -qx 'xray:stop:true' "${serviceLog}"
     [[ ! -s "${installLog}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+)
+
+runCleanLastInstallationConfigAcmeHomeFailureRegression() (
+    local root="${TMP_DIR}/clean-last-installation-acme-home"
+    local homeDir="${root}/home"
+    local acmeDir="${homeDir}/.acme.sh"
+    local cleanupLog="${root}/cleanup.log"
+    local errorLog="${root}/error.log"
+    local rc
+
+    mkdir -p "${root}/nginx" "${root}/static" "${acmeDir}"
+    : >"${cleanupLog}"
+    : >"${errorLog}"
+
+    HOME="${homeDir}"
+    currentDefaultPort=443
+    currentPort=
+    customPort=
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=
+    singBoxVLESSVisionPort=
+    singBoxVLESSRealityVisionPort=
+    singBoxVLESSRealityGRPCPort=
+    singBoxHysteria2Port=
+    singBoxTuicPort=
+    singBoxSocks5Port=
+    hysteriaPort=
+    tuicPort=
+    nginxConfigPath="${root}/nginx/"
+    nginxStaticPath="${root}/static"
+    configPath="${root}/xray-conf/"
+
+    handleXray() { return 0; }
+    handleSingBox() { return 0; }
+    handleNginx() { return 0; }
+    cleanAgentNginxConf() { return 0; }
+    cleanDirectoryContent() { return 0; }
+    readInstallType() { return 0; }
+    mkdirTools() { return 0; }
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    showLastInstallationConfig() { return 0; }
+    autoRead() {
+        if [[ "$1" == "clean_acme" ]]; then
+            printf -v "$3" 'y'
+        else
+            printf -v "$3" 'n'
+        fi
+    }
+    lsof() { return 1; }
+    systemctl() { return 0; }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${cleanupLog}"
+        if [[ "$*" == "-rf -- ${acmeDir}" ]]; then
+            return 1
+        fi
+        return 0
+    }
+
+    set +e
+    cleanLastInstallationConfig >/dev/null 2>&1
+    rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    grep -qxF "rm:-rf -- ${acmeDir}" "${cleanupLog}"
+    ! grep -q "/root/.acme.sh" "${cleanupLog}"
+    grep -q "acme证书和账号配置清理失败" "${errorLog}"
 )
 
 runEntryHelperConfigRegression() {
@@ -12942,6 +13038,7 @@ runTlsRenewalFailurePropagationRegression() (
 
 runRegressionTls() {
     runRegressionStep tls-dns-api-domain-selection runTlsDnsApiDomainSelectionRegression &&
+        runRegressionStep tls-custom-email-home-account runTlsCustomSSLEmailUsesHomeAccountFileRegression &&
         runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 }
@@ -13088,6 +13185,7 @@ runRegressionTransactionSystem() {
         runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&
         runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
         runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
+        runRegressionStep clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression &&
         runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
 }
 

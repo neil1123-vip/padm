@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
 
+acmeHomeDir() {
+    local homeDir="${HOME:-/root}"
+    printf '%s\n' "${homeDir%/}/.acme.sh"
+}
+
+acmeAccountFile() {
+    printf '%s\n' "$(acmeHomeDir)/account.conf"
+}
+
 # 自定义 Email
 customSSLEmail() {
+    local accountFile accountTmp
+    accountFile=$(acmeAccountFile)
+    accountTmp="${accountFile}_tmp"
     if echo "${1:-}" | grep -q "validate email"; then
         autoRead tls_email_retry "是否重新输入邮箱地址[y/n]:" sslEmailStatus
         if [[ "${sslEmailStatus}" == "y" ]]; then
-            sed '/ACCOUNT_EMAIL/d' /root/.acme.sh/account.conf >/root/.acme.sh/account.conf_tmp && mv /root/.acme.sh/account.conf_tmp /root/.acme.sh/account.conf || return 1
+            sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountTmp}" && mv "${accountTmp}" "${accountFile}" || return 1
         else
             return 1
         fi
     fi
 
-    if [[ -d "/root/.acme.sh" && -f "/root/.acme.sh/account.conf" ]]; then
-        if ! grep -q "ACCOUNT_EMAIL" <"/root/.acme.sh/account.conf" && ! echo "${sslType}" | grep -q "letsencrypt"; then
+    if [[ -d "$(acmeHomeDir)" && -f "${accountFile}" ]]; then
+        if ! grep -q "ACCOUNT_EMAIL" <"${accountFile}" && ! echo "${sslType}" | grep -q "letsencrypt"; then
             autoRead tls_account_email "请输入邮箱地址:" sslEmail
             if echo "${sslEmail}" | grep -q "@"; then
-                echo "ACCOUNT_EMAIL='${sslEmail}'" >>/root/.acme.sh/account.conf || return 1
+                echo "ACCOUNT_EMAIL='${sslEmail}'" >>"${accountFile}" || return 1
                 successCard "添加完毕"
             else
                 echoContent yellow "请重新输入正确的邮箱格式[例: username@example.com]"

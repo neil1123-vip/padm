@@ -1197,7 +1197,7 @@ unInstall() {
         exit 0
     fi
     # checkBTPanel
-    statusCard "卸载提示" "脚本不会删除 acme 相关配置" "如需删除请手动执行：rm -rf /root/.acme.sh"
+    statusCard "卸载提示" "脚本不会删除 acme 相关配置" "如需删除请手动执行：rm -rf ${HOME:-/root}/.acme.sh"
     local uninstallFailed=false
     if ! runCoreServiceActionAllowFailure handleNginx stop; then
         uninstallFailed=true
