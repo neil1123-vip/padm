@@ -216,12 +216,6 @@ refreshScriptModules() {
         exit 1
     fi
 
-    if [[ ! -d "${archiveDir}/shell" ]]; then
-        printf '缺少 curl 或 wget，无法下载完整安装包\n'
-        rm -rf "${tmpDir}"
-        exit 1
-    fi
-
     if [[ -e "${backupDir}" ]]; then
         printf '存在未处理模块备份目录，请手动检查后重试: %s\n' "${backupDir}"
         rm -rf "${tmpDir}"

@@ -984,6 +984,26 @@ runInstallRefreshRestoresBackupRegression() {
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
+runInstallRefreshSingleArchiveGuardRegression() {
+    local archiveGuardCount
+    archiveGuardCount=$(awk '
+        /^refreshScriptModules\(\)/ { capture = 1 }
+        /^ensureScriptModules\(\)/ { capture = 0 }
+        capture && /\[\[ ! -d "\$\{archiveDir\}\/shell" \]\]/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/install.sh")
+    [[ "${archiveGuardCount}" == "1" ]]
+}
+
+runRegressionDispatcherSingleLegacyFallbackRegression() {
+    local legacyDispatchCount
+    legacyDispatchCount=$(awk '
+        /exec bash "\$\{SCRIPT_DIR\}\/regression\/subscription_groups_legacy\.sh" "\$@"/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/subscription_groups_regression.sh")
+    [[ "${legacyDispatchCount}" == "1" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -1937,6 +1957,8 @@ runRegressionPlatform() {
         runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
         runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
+        runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression &&
+        runRegressionStep regression-dispatcher-single-legacy-fallback runRegressionDispatcherSingleLegacyFallbackRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
