@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-vlessEncryptionStateFile() {
-    echo "${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
-}
-
 vlessEncryptionConfigFile() {
     local xhttpConfig
     xhttpConfig="${PADM_VLESS_XHTTP_CONFIG_FILE:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}/12_VLESS_XHTTP_inbounds.json}"
@@ -17,12 +13,7 @@ vlessEncryptionConfigFile() {
 validateVlessEncryptionConfig() {
     local xrayBinary
     xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
-    "${xrayBinary}" -test -confdir "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}" >"$(vlessEncryptionXrayTestLog)" 2>&1
-}
-
-vlessEncryptionXrayTestLog() {
-    local tmpBase="${TMPDIR:-/tmp}"
-    printf '%s\n' "${tmpBase%/}/padm-xray-test.log"
+    "${xrayBinary}" -test -confdir "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}" >"${TMPDIR:-/tmp}/padm-xray-test.log" 2>&1
 }
 
 xrayVersionAtLeast() {
@@ -42,7 +33,7 @@ vlessEncryptionStateSummary() {
     local stateFile
     local xrayVersion="未安装"
     local encryptionPrefix="none"
-    stateFile=$(vlessEncryptionStateFile)
+    stateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
     if [[ -x /etc/padm/xray/xray ]]; then
         xrayVersion=$(/etc/padm/xray/xray --version | awk 'NR==1 {print $2}')
     fi
@@ -167,7 +158,7 @@ setVlessRealityEncryption() {
     local decryption
     local hadStateBackup=false
     configFile=$(vlessEncryptionConfigFile)
-    stateFile=$(vlessEncryptionStateFile)
+    stateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
     xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
 
     if [[ "${coreInstallType}" != "1" ]]; then
@@ -308,7 +299,7 @@ setVlessRealityEncryption() {
         rm -f "${stateTmpFile}"
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
         menuLine "已回滚本次 VLESS Encryption 修改"
-        menuLine "排查日志：$(vlessEncryptionXrayTestLog)"
+        menuLine "排查日志：${TMPDIR:-/tmp}/padm-xray-test.log"
         menuClose
         return 1
     fi
