@@ -149,10 +149,6 @@ dnsRoutingReloadOrRollback() {
     return 1
 }
 
-singBoxDnsResolverTag() {
-    printf '%s\n' "padm-local"
-}
-
 # DNS/hosts 配置写入
 setUnlockSNI() {
     autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP
@@ -247,7 +243,7 @@ addSingBoxDNSConfig() {
     splitSingBoxRules "${rules}" domainRules suffixRules ruleSet ruleSetTag || { errorCard "sing-box DNS 规则拆分失败，已保留旧配置"; return 1; }
     if [[ -n "${singBoxConfigPath}" ]]; then
         local localTag hostsTag routingTag
-        localTag=$(singBoxDnsResolverTag)
+        localTag="padm-local"
         hostsTag="padm-hosts"
         routingTag="padm-dnsRouting"
         if [[ "${actionType}" == "predefined" ]]; then
@@ -417,7 +413,7 @@ EOF
 
     if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
         local localTag
-        localTag=$(singBoxDnsResolverTag)
+        localTag="padm-local"
         if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
 {
     "dns": {
@@ -466,7 +462,7 @@ EOF
 
     if [[ -n "${singBoxConfigPath:-}" && -f "${singBoxConfigPath}dns.json" ]]; then
         local localTag
-        localTag=$(singBoxDnsResolverTag)
+        localTag="padm-local"
         if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
 {
     "dns": {

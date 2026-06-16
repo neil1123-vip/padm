@@ -1177,7 +1177,7 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(updateXray)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
             awk '/^(disableRunningService|handleFirewall)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
             awk '/^(switchAlpn|handleHysteria|vlessEncryptionVisionConfigFile|vlessEncryptionXHTTPConfigFile)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/manage.sh"
-            awk '/^(singBoxDnsHostsTag|singBoxDnsRoutingTag)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_dns.sh"
+            awk '/^(singBoxDnsHostsTag|singBoxDnsRoutingTag|singBoxDnsResolverTag)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_dns.sh"
             awk '/^(checkRealityDest|installRealityScanner|realityScanner|initTCPBrutal)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
             awk '/^(realityTargetBlockedCandidateCount|realityTargetBlockedCandidateLineByIndex|realityTargetScanFile|realityTargetRecentlyFailed|realityTargetScanResultCount|realityTargetScanLineByIndex|realityTargetScanField|showRealityTargetCandidates|selectRealityTargetFromCandidates|realityScannerDir)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(realityTargetImportScannerCandidates|writeRealityTargetScanLine|realityAsnPrefixTotalAddressCount|filterRealityAsnPrefixesByMask|realityTargetCachedLine|selectRealityAsnPrefixSet|realityTargetXrayTestLog|realityTargetSingBoxTestLog)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
