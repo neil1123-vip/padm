@@ -16,10 +16,6 @@ subscriptionWireGuardConfigFile() {
     echo "/etc/wireguard/$(subscriptionWireGuardInterface).conf"
 }
 
-subscriptionWireGuardDefaultNetwork() {
-    echo "10.77.0.0/24"
-}
-
 subscriptionWireGuardDefaultListenPort() {
     echo 51820
 }
@@ -141,7 +137,7 @@ subscriptionWireGuardReadState() {
     if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
         jq -n \
           --arg interface "$(subscriptionWireGuardInterface)" \
-          --arg network "$(subscriptionWireGuardDefaultNetwork)" \
+          --arg network "10.77.0.0/24" \
           --argjson listenPort "$(subscriptionWireGuardDefaultListenPort)" \
           --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
           '{enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, address:"", endpoint_host:"", public_key:"", peers:[]}'
@@ -149,7 +145,7 @@ subscriptionWireGuardReadState() {
     fi
     jq -c \
       --arg interface "$(subscriptionWireGuardInterface)" \
-      --arg network "$(subscriptionWireGuardDefaultNetwork)" \
+      --arg network "10.77.0.0/24" \
       --argjson listenPort "$(subscriptionWireGuardDefaultListenPort)" \
       --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
       '({enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, address:"", endpoint_host:"", public_key:"", peers:[]} + .) |
