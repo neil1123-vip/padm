@@ -10,22 +10,6 @@ adapterTmpPath() {
     fi
 }
 
-adapterPackagesTempTemplate() {
-    adapterTmpPath padm-packages.XXXXXX
-}
-
-adapterAcmeTmpDir() {
-    adapterTmpPath padm-tls
-}
-
-adapterAcmeInstallScriptPath() {
-    printf '%s\n' "$(adapterAcmeTmpDir)/acme.sh"
-}
-
-adapterAcmeDownloadTemplate() {
-    printf '%s\n' "$(adapterAcmeTmpDir)/acme.sh.download.XXXXXX"
-}
-
 adapterNginxRepoTemplate() {
     adapterTmpPath padm-nginx-repo.XXXXXX
 }
@@ -340,7 +324,7 @@ installPackageTracked() {
 
     local packageTimeout=300
 
-    padmCreateTempPath missingPackagesFile "$(adapterPackagesTempTemplate)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
+    padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
@@ -364,7 +348,7 @@ installOptionalPackageTracked() {
 
     local packageTimeout=300
 
-    padmCreateTempPath missingPackagesFile "$(adapterPackagesTempTemplate)" || return 1
+    padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || return 1
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
@@ -519,9 +503,9 @@ installTools() {
             successCard "安装acme.sh"
             local acmeInstallScript
             local acmeDownloadScript
-            acmeInstallScript=$(adapterAcmeInstallScriptPath)
-            mkdir -p "$(adapterAcmeTmpDir)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
-            padmCreateTempPath acmeDownloadScript "$(adapterAcmeDownloadTemplate)" || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
+            acmeInstallScript="$(adapterTmpPath padm-tls)/acme.sh"
+            mkdir -p "$(adapterTmpPath padm-tls)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
+            padmCreateTempPath acmeDownloadScript "$(adapterTmpPath padm-tls/acme.sh.download.XXXXXX)" || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
             if curl -fsSL -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
                 if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then
                     padmRemoveCleanupPath "${acmeDownloadScript}"
