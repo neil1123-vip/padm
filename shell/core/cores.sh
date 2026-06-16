@@ -331,19 +331,6 @@ coreSingBoxUpgradeTestLog() {
     coreTmpFilePath padm-core-sing-box-upgrade-test.log
 }
 
-coreAlpineInitTemplate() {
-    local serviceName=$1
-    coreTmpFilePath "padm-${serviceName}.init.XXXXXX"
-}
-
-coreSingBoxServiceTemplate() {
-    coreTmpFilePath padm-sing-box.service.XXXXXX
-}
-
-coreXrayServiceTemplate() {
-    coreTmpFilePath padm-xray.service.XXXXXX
-}
-
 singBoxConfigInstalled() {
     local mergedFile shardDir
     mergedFile=$(singBoxMergedConfigFile)
@@ -1323,7 +1310,7 @@ checkGFWStatue() {
 installAlpineStartup() {
     local serviceName=$1
     local tmpFile
-    padmCreateTempPath tmpFile "$(coreAlpineInitTemplate "${serviceName}")" || return 1
+    padmCreateTempPath tmpFile "$(coreTmpFilePath "padm-${serviceName}.init.XXXXXX")" || return 1
 
     if [[ "${serviceName}" == "sing-box" ]]; then
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
@@ -1367,7 +1354,7 @@ installSingBoxService() {
     if [[ -n $(find /bin /usr/bin -name "systemctl") && "${release}" != "alpine" ]]; then
         local serviceFile=/etc/systemd/system/sing-box.service
         local tmpFile
-        padmCreateTempPath tmpFile "$(coreSingBoxServiceTemplate)" || exit 1
+        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-sing-box.service.XXXXXX)" || exit 1
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
 [Unit]
 Description=Sing-Box Service
@@ -1419,7 +1406,7 @@ installXrayService() {
     if [[ -n $(find /bin /usr/bin -name "systemctl") ]]; then
         local serviceFile=/etc/systemd/system/xray.service
         local tmpFile
-        padmCreateTempPath tmpFile "$(coreXrayServiceTemplate)" || exit 1
+        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-xray.service.XXXXXX)" || exit 1
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
 [Unit]
 Description=Xray Service
