@@ -703,53 +703,6 @@ initXrayXHTTPort() {
 }
 
 
-# 安装reality scanner
-installRealityScanner() {
-    if [[ ! -f "/etc/padm/xray/reality_scan/RealiTLScanner-linux-64" ]]; then
-        version=$(curl -s https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1 | jq -r '.[]|.tag_name')
-        downloadFile -P /etc/padm/xray/reality_scan/ "https://github.com/XTLS/RealiTLScanner/releases/download/${version}/RealiTLScanner-linux-64"
-        chmod 655 /etc/padm/xray/reality_scan/RealiTLScanner-linux-64
-    fi
-}
-
-# reality scanner
-realityScanner() {
-    echoContent title "\n┌─ Reality 域名扫描 ─────────────────────────────────"
-    menuLine "扫描完成后，请自行检查扫描网站结果内容是否合规，需个人承担风险"
-    menuLine "某些 IDC 不允许扫描操作，比如搬瓦工，请确认风险后使用"
-    menuItem 1 "扫描 IPv4" "使用本机 IPv4 扫描"
-    menuItem 2 "扫描 IPv6" "使用本机 IPv6 扫描"
-    menuClose
-    autoRead reality_scanner_menu "请选择:" realityScannerStatus
-    local type=
-    if [[ "${realityScannerStatus}" == "1" ]]; then
-        type=4
-    elif [[ "${realityScannerStatus}" == "2" ]]; then
-        type=6
-    fi
-
-    autoRead reality_scanner_risk_confirm "某些IDC不允许扫描操作，比如搬瓦工，其中风险请自行承担，是否继续？[y/n]:" scanStatus
-
-    if [[ "${scanStatus}" != "y" ]]; then
-        exit 0
-    fi
-
-    publicIP=$(getPublicIP "${type}")
-    statusCard "Reality 域名扫描" "IP:${publicIP}"
-    if [[ -z "${publicIP}" ]]; then
-        statusCard "Reality 域名扫描" "无法获取 IP"
-        exit 0
-    fi
-
-    autoRead reality_scanner_ip_confirm "IP是否正确？[y/n]:" ipStatus
-    if [[ "${ipStatus}" == "y" ]]; then
-        statusCard "Reality 域名扫描" "结果存储在 /etc/padm/xray/reality_scan/result.log"
-        /etc/padm/xray/reality_scan/RealiTLScanner-linux-64 -addr "${publicIP}" | tee /etc/padm/xray/reality_scan/result.log
-    else
-        statusCard "Reality 域名扫描" "无法读取正确 IP"
-    fi
-}
-
 # 初始化TCP Brutal
 initTCPBrutal() {
     echoContent title "\n┌─ 初始化 TCP Brutal ────────────────────────────────"
