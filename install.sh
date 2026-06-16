@@ -264,8 +264,6 @@ refreshScriptModules() {
 
     if [[ -n "${resolvedRef}" ]]; then
         printf '%s\n' "${resolvedRef}" >"${SCRIPT_REF_FILE}"
-    else
-        rm -f "${SCRIPT_REF_FILE}" >/dev/null 2>&1 || true
     fi
     rm -rf "${backupDir}" "${tmpDir}"
     trap - EXIT INT TERM
@@ -355,8 +353,6 @@ ensureScriptModules() {
         refreshScriptModules "${remoteRef}"
         if [[ -s "${SCRIPT_REF_FILE}" ]]; then
             cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}"
-        else
-            rm -f "${SCRIPT_EXPECTED_REF_FILE}" >/dev/null 2>&1 || true
         fi
         return 0
     fi
@@ -379,8 +375,6 @@ ensureScriptModules() {
     refreshScriptModules "${remoteRef}"
     if [[ -s "${SCRIPT_REF_FILE}" ]]; then
         cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}"
-    else
-        rm -f "${SCRIPT_EXPECTED_REF_FILE}" >/dev/null 2>&1 || true
     fi
 }
 
