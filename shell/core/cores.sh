@@ -375,10 +375,6 @@ singBoxCompatibilityAuditWarnFile() {
     coreTmpFilePath padm-sing-box-compat-audit.warn
 }
 
-coreSingBoxCompatTempDirTemplate() {
-    coreTmpFilePath padm-sing-box-compat-download.XXXXXX
-}
-
 singBoxCompatibilityConfigFiles() {
     local mergedFile shardDir file
     mergedFile=$(singBoxMergedConfigFile)
@@ -547,7 +543,7 @@ downloadSingBoxReleaseBinaryToTemp() {
     local tmpDirVar=${3:-}
     local tmpDir asset extractedDir binary
 
-    padmCreateTempPath tmpDir -d "$(coreSingBoxCompatTempDirTemplate)" || return 1
+    padmCreateTempPath tmpDir -d "$(coreTmpFilePath padm-sing-box-compat-download.XXXXXX)" || return 1
     asset="sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
         padmRemoveCleanupPath "${tmpDir}"
@@ -625,10 +621,6 @@ xrayCompatibilityAuditStatusFile() {
 
 xrayCompatibilityAuditWarnFile() {
     coreTmpFilePath padm-xray-compat-audit.warn
-}
-
-coreXrayCompatTempDirTemplate() {
-    coreTmpFilePath padm-xray-compat-download.XXXXXX
 }
 
 xrayCompatibilityConfigFiles() {
@@ -799,7 +791,7 @@ downloadXrayReleaseBinaryToTemp() {
     local tmpDirVar=${3:-}
     local tmpDir binary
 
-    padmCreateTempPath tmpDir -d "$(coreXrayCompatTempDirTemplate)" || return 1
+    padmCreateTempPath tmpDir -d "$(coreTmpFilePath padm-xray-compat-download.XXXXXX)" || return 1
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
         padmRemoveCleanupPath "${tmpDir}"
         return 1
