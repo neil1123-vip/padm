@@ -110,13 +110,84 @@ subscriptionSyncCurrentManagedUsers() {
       | unique[]' "${validFiles[@]}"
 }
 
+subscriptionSyncResolveManagedConfigDir() {
+    local rawPath=${1%/}
+    local resolvedPath=
+
+    [[ -n "${rawPath}" ]] || return 1
+    if [[ "${rawPath}" == /* ]]; then
+        padmIsSafeAbsolutePath "${rawPath}" || return 1
+        resolvedPath="${rawPath}"
+    else
+        if [[ "${rawPath}" == "." || "${rawPath}" == ".." ||
+            "${rawPath}" == */./* || "${rawPath}" == */. ||
+            "${rawPath}" == */../* || "${rawPath}" == */.. ]]; then
+            return 1
+        fi
+        resolvedPath=$(padmResolveCleanupPath "${rawPath}" 2>/dev/null || true)
+        [[ -n "${resolvedPath}" ]] || return 1
+        padmIsSafeAbsolutePath "${resolvedPath}" || return 1
+    fi
+    printf '%s/\n' "${resolvedPath%/}"
+}
+
+subscriptionSyncSafeConfigDir() {
+    [[ -n "${configPath:-}" ]] || return 1
+    subscriptionSyncResolveManagedConfigDir "${configPath}"
+}
+
+subscriptionSyncSafeSingBoxConfigDir() {
+    [[ -n "${singBoxConfigPath:-}" ]] || return 1
+    subscriptionSyncResolveManagedConfigDir "${singBoxConfigPath}"
+}
+
+subscriptionSyncRequireSafeConfigDirs() {
+    subscriptionSyncSafeConfigDir >/dev/null || return 1
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        subscriptionSyncSafeSingBoxConfigDir >/dev/null || return 1
+    fi
+}
+
+subscriptionSyncManagedConfigTargetFile() {
+    local targetFile=$1
+    local targetDir
+    local targetName
+    local xrayConfigDir
+    local singBoxConfigDir=
+
+    padmIsSafeAbsolutePath "${targetFile}" || return 1
+    targetDir="$(dirname -- "${targetFile}")/"
+    targetName=$(basename -- "${targetFile}")
+    [[ "${targetName}" == *inbounds.json ]] || return 1
+
+    xrayConfigDir=$(subscriptionSyncSafeConfigDir) || return 1
+    if [[ "${targetDir}" == "${xrayConfigDir}" ]]; then
+        return 0
+    fi
+
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        singBoxConfigDir=$(subscriptionSyncSafeSingBoxConfigDir) || return 1
+        [[ "${targetDir}" == "${singBoxConfigDir}" ]]
+        return
+    fi
+    return 1
+}
+
 subscriptionSyncConfigFiles() {
     local file
-    for file in "${configPath}"*inbounds.json; do
+    local xrayConfigDir
+    local singBoxConfigDir=
+
+    xrayConfigDir=$(subscriptionSyncSafeConfigDir) || return 1
+    for file in "${xrayConfigDir}"*inbounds.json; do
         [[ -f "${file}" ]] && echo "${file}"
     done
-    if [[ -n "${singBoxConfigPath}" && "${singBoxConfigPath}" != "${configPath}" ]]; then
-        for file in "${singBoxConfigPath}"*inbounds.json; do
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        singBoxConfigDir=$(subscriptionSyncSafeSingBoxConfigDir) || return 1
+        if [[ "${singBoxConfigDir}" == "${xrayConfigDir}" ]]; then
+            return 0
+        fi
+        for file in "${singBoxConfigDir}"*inbounds.json; do
             [[ -f "${file}" ]] && echo "${file}"
         done
     fi
@@ -125,6 +196,7 @@ subscriptionSyncConfigFiles() {
 subscriptionSyncConfiguredManagedUsers() {
     local file
     local files=()
+    subscriptionSyncRequireSafeConfigDirs || return 1
     while IFS= read -r file; do
         files+=("${file}")
     done < <(subscriptionSyncConfigFiles)
@@ -171,6 +243,7 @@ subscriptionSyncRemoveAccount() {
     local accountName=$1
     local file
     local rc=0
+    subscriptionSyncRequireSafeConfigDirs || return 1
     while IFS= read -r file; do
         if ! subscriptionSyncRemoveAccountFromFile "${file}" "${accountName}"; then
             rc=1
@@ -233,25 +306,32 @@ subscriptionSyncAppendLocalUser() {
     local id=$1
     local accountName
     local uuid
+    local xrayConfigDir
+    local singBoxConfigDir=
     local rc=0
     accountName=$(subscriptionSyncAccountName "${id}")
     uuid=$(ensureUserSubscriptionUUID "${id}") || return 1
 
-    subscriptionSyncAppendProtocolUser 0 "${configPath}02_VLESS_TCP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 1 "${configPath}03_VLESS_WS_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 2 "${configPath}04_trojan_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 3 "${configPath}05_VMess_WS_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 4 "${configPath}04_trojan_TCP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 5 "${configPath}06_VLESS_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 7 "${configPath}07_VLESS_vision_reality_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 8 "${configPath}08_VLESS_vision_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 11 "${configPath}11_VMess_HTTPUpgrade_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 12 "${configPath}12_VLESS_XHTTP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 13 "${configPath}13_anytls_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    if [[ "${singBoxConfigPath}" != "${configPath}" ]]; then
-        subscriptionSyncAppendProtocolUser 6 "${singBoxConfigPath}06_hysteria2_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-        subscriptionSyncAppendProtocolUser 9 "${singBoxConfigPath}09_tuic_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-        subscriptionSyncAppendProtocolUser 10 "${singBoxConfigPath}10_naive_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    xrayConfigDir=$(subscriptionSyncSafeConfigDir) || return 1
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        singBoxConfigDir=$(subscriptionSyncSafeSingBoxConfigDir) || return 1
+    fi
+
+    subscriptionSyncAppendProtocolUser 0 "${xrayConfigDir}02_VLESS_TCP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 1 "${xrayConfigDir}03_VLESS_WS_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 2 "${xrayConfigDir}04_trojan_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 3 "${xrayConfigDir}05_VMess_WS_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 4 "${xrayConfigDir}04_trojan_TCP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 5 "${xrayConfigDir}06_VLESS_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 7 "${xrayConfigDir}07_VLESS_vision_reality_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 8 "${xrayConfigDir}08_VLESS_vision_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 11 "${xrayConfigDir}11_VMess_HTTPUpgrade_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 12 "${xrayConfigDir}12_VLESS_XHTTP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolUser 13 "${xrayConfigDir}13_anytls_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    if [[ -n "${singBoxConfigDir}" && "${singBoxConfigDir}" != "${xrayConfigDir}" ]]; then
+        subscriptionSyncAppendProtocolUser 6 "${singBoxConfigDir}06_hysteria2_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+        subscriptionSyncAppendProtocolUser 9 "${singBoxConfigDir}09_tuic_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+        subscriptionSyncAppendProtocolUser 10 "${singBoxConfigDir}10_naive_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
     fi
     return "${rc}"
 }
@@ -306,9 +386,11 @@ subscriptionSyncRestoreConfigBackups() {
     local manifest="${backupDir}/manifest"
     local backupFile
     local targetFile
+    subscriptionSyncRequireSafeConfigDirs || return 1
     [[ -f "${manifest}" ]] || return 1
     while IFS=$'\t' read -r backupFile targetFile; do
         [[ -n "${backupFile}" && -n "${targetFile}" ]] || continue
+        subscriptionSyncManagedConfigTargetFile "${targetFile}" || return 1
         mkdir -p "$(dirname "${targetFile}")" || return 1
         cp -p "${backupFile}" "${targetFile}" || return 1
     done <"${manifest}"
@@ -322,6 +404,7 @@ subscriptionSyncCreateConfigBackups() {
     local backupIndex=0
     local tmpBase="${TMPDIR:-/tmp}"
 
+    subscriptionSyncRequireSafeConfigDirs || return 1
     padmCreateTempPath backupDir -d "${tmpBase%/}/padm-subscription-sync-backup.XXXXXX" || return 1
     manifest="${backupDir}/manifest"
     : >"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }

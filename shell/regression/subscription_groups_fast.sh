@@ -2054,17 +2054,40 @@ runSubscriptionSyncPathSafetyRegression() {
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
-        local root="${TMP_DIR}/subscription-sync-path-safety"
-        local safeSource="${root}/safe-source"
-        local safeLocal="${root}/safe-local"
-        local safePublic="${root}/safe-public"
+        local rootRel="${TMP_DIR}/subscription-sync-path-safety"
+        local root
+        local safeSourceRel
+        local safeLocalRel
+        local safePublicRel
+        local safeConfigRel
+        local relativeConfigRel
+        local safeLocal
+        local safePublic
+        local safeConfig
         local backupDir
+        local configBackupDir
+        local restoreConfigBackupDir
+        local originalRelativeConfig
         local status
+        local tmpRootAbs
 
-        mkdir -p "${safeSource}" "${safeLocal}/default" "${safeLocal}/clashMeta" "${safeLocal}/sing-box" "${safePublic}/default"
-        printf 'safe\n' >"${safeSource}/file"
-        printf 'local\n' >"${safeLocal}/default/user"
-        printf 'public\n' >"${safePublic}/default/user"
+        mkdir -p "${rootRel}"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        tmpRootAbs=$(cd -- "${TMP_DIR}" && pwd -P)
+        safeSourceRel="${rootRel}/safe-source"
+        safeLocalRel="${rootRel}/safe-local"
+        safePublicRel="${rootRel}/safe-public"
+        safeConfigRel="${rootRel}/safe-config"
+        relativeConfigRel="${rootRel}/relative-config"
+        safeLocal="${root}/safe-local"
+        safePublic="${root}/safe-public"
+        safeConfig="${root}/safe-config"
+        mkdir -p "${safeSourceRel}" "${safeLocalRel}/default" "${safeLocalRel}/clashMeta" "${safeLocalRel}/sing-box" "${safePublicRel}/default" "${safeConfigRel}" "${relativeConfigRel}"
+        printf 'safe\n' >"${safeSourceRel}/file"
+        printf 'local\n' >"${safeLocalRel}/default/user"
+        printf 'public\n' >"${safePublicRel}/default/user"
+        printf '{"inbounds":[{"settings":{"clients":[{"email":"sub_safe-main"}]}}]}\n' >"${safeConfigRel}/02_VLESS_TCP_inbounds.json"
+        printf '{"inbounds":[{"settings":{"clients":[{"email":"sub_relative-main"}]}}]}\n' >"${relativeConfigRel}/02_VLESS_TCP_inbounds.json"
 
         set +e
         subscriptionSyncBackupPath "relative-source" "${root}/backup" local
@@ -2082,6 +2105,28 @@ runSubscriptionSyncPathSafetyRegression() {
         status=$?
         set -e
         [[ "${status}" -ne 0 ]]
+
+        (
+            cd -- "${root}"
+            TMPDIR="${tmpRootAbs}"
+            configPath="relative-config/"
+            singBoxConfigPath=
+            originalRelativeConfig=$(<"${root}/relative-config/02_VLESS_TCP_inbounds.json")
+            configBackupDir=$(subscriptionSyncCreateConfigBackups)
+            [[ -f "${configBackupDir}/manifest" ]]
+            grep -q $'\t'"${root}/relative-config/02_VLESS_TCP_inbounds.json" "${configBackupDir}/manifest"
+            padmCreateTempPath restoreConfigBackupDir -d "${tmpRootAbs}/subscription-sync-config-restore-backup.XXXXXX"
+            printf '{"inbounds":[]}\n' >"${restoreConfigBackupDir}/000000.json"
+            printf '%s\t%s\n' "${restoreConfigBackupDir}/000000.json" "relative-config/02_VLESS_TCP_inbounds.json" >"${restoreConfigBackupDir}/manifest"
+            set +e
+            subscriptionSyncRestoreConfigBackups "${restoreConfigBackupDir}"
+            status=$?
+            set -e
+            [[ "${status}" -ne 0 ]]
+            [[ "$(<"${root}/relative-config/02_VLESS_TCP_inbounds.json")" == "${originalRelativeConfig}" ]]
+            padmRemoveCleanupPath "${restoreConfigBackupDir}"
+            padmRemoveCleanupPath "${configBackupDir}"
+        )
 
         PADM_SUBSCRIBE_LOCAL_DIR="${safeLocal}"
         PADM_SUBSCRIBE_DIR="${safePublic}"
