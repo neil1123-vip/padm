@@ -48,17 +48,13 @@ runSubscriptionControlledWizard() {
     showSubscriptionWireGuardStatus
 }
 
-subscriptionServiceConfigured() {
+ensureSubscriptionServiceForSharedLinks() {
+    local confirm=
     subscribePort=
     subscribeDomain=
     subscribeType=
     readNginxSubscribe
-    [[ -n "${subscribePort:-}" ]]
-}
-
-ensureSubscriptionServiceForSharedLinks() {
-    local confirm=
-    if subscriptionServiceConfigured; then
+    if [[ -n "${subscribePort:-}" ]]; then
         return 0
     fi
 
@@ -76,12 +72,6 @@ ensureSubscriptionServiceForSharedLinks() {
 
     statusCard "已跳过订阅服务安装" "本次仍可保存订阅对象和执行同步" "等之后安装好订阅服务，再来刷新并查看链接"
     return 1
-}
-
-syncAndShowUserSubscriptionLinks() {
-    local userSubscriptionId=$1
-    runSubscriptionGroupSync skip-subscribe-refresh || return 1
-    showUserSubscriptionLinks "${userSubscriptionId}"
 }
 
 showSubscriptionCurrentRoleCredential() {
@@ -751,7 +741,10 @@ manageUserSubscriptionItem() {
         menuClose
         autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus
         case "${userSubscriptionItemStatus}" in
-        1) syncAndShowUserSubscriptionLinks "${userSubscriptionId}" ;;
+        1)
+            runSubscriptionGroupSync skip-subscribe-refresh || return 1
+            showUserSubscriptionLinks "${userSubscriptionId}"
+            ;;
         2) showUserSubscriptionLinks "${userSubscriptionId}" ;;
         3) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
         4) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
