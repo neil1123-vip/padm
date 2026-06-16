@@ -51,12 +51,6 @@ protocolMeta() {
     return 1
 }
 
-xrayProtocolCapability() {
-    local protocolId=$1
-    local key=$2
-    [[ "$(protocolMeta "${protocolId}" "${key}" 2>/dev/null)" == "1" ]]
-}
-
 protocolSelectionIncludes() {
     local selection=$1
     local protocolId=$2
@@ -71,7 +65,7 @@ protocolSelectionHasCapability() {
     selection=",${selection// /},"
     selection=${selection//,,/,}
     while IFS='|' read -r protocolId _ _ _; do
-        if [[ "${selection}" == *",${protocolId},"* ]] && xrayProtocolCapability "${protocolId}" "${key}"; then
+        if [[ "${selection}" == *",${protocolId},"* ]] && [[ "$(protocolMeta "${protocolId}" "${key}" 2>/dev/null)" == "1" ]]; then
             return 0
         fi
     done < <(xray_protocol_registry)
@@ -96,18 +90,6 @@ protocolSelectionHasAny() {
         [[ "${normalized}" == *",${protocolId},"* ]] && return 0
     done
     return 1
-}
-
-protocolSelectionHasAll() {
-    local selection=$1
-    shift
-    local normalized protocolId
-    normalized=",${selection// /},"
-    normalized=${normalized//,,/,}
-    for protocolId in "$@"; do
-        [[ "${normalized}" == *",${protocolId},"* ]] || return 1
-    done
-    return 0
 }
 
 currentProtocolHas() {
