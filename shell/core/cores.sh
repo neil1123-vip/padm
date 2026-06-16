@@ -6,6 +6,18 @@ cleanXrayGeoFiles() {
     rm -f "${targetDir}/geosite.dat" "${targetDir}/geoip.dat" "${targetDir}/geo.version" >/dev/null 2>&1
 }
 
+cleanSingBoxDownloadArtifacts() {
+    local installDir=$1
+    local version=$2
+    local assetPath="${installDir%/}/sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
+    local extractedDir="${installDir%/}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
+
+    padmIsSafeAbsolutePath "${assetPath}" || return 1
+    padmIsSafeAbsolutePath "${extractedDir}" || return 1
+    rm -f -- "${assetPath}" >/dev/null 2>&1 || return 1
+    rm -rf -- "${extractedDir}" >/dev/null 2>&1 || return 1
+}
+
 downloadXrayGeoFilesToStage() {
     local stageDir=$1
     local geoVersion=$2
@@ -138,7 +150,10 @@ installSingBox() {
                 errorCard "sing-box安装失败"
                 exit 1
             fi
-            rm -rf /etc/padm/sing-box/sing-box-*
+            cleanSingBoxDownloadArtifacts /etc/padm/sing-box "${version}" || {
+                errorCard "sing-box安装残留清理失败"
+                exit 1
+            }
             chmod 655 /etc/padm/sing-box/sing-box
         fi
     else
@@ -189,7 +204,7 @@ installXray() {
                 errorCard "Xray-core解压失败"
                 exit 1
             fi
-            rm -rf "/etc/padm/xray/${xrayCoreCPUVendor}.zip"
+            rm -f -- "/etc/padm/xray/${xrayCoreCPUVendor}.zip"
 
             if ! ensureXrayGeoFiles /etc/padm/xray force; then
                 exit 1

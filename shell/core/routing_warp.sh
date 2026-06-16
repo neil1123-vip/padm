@@ -12,6 +12,13 @@ warpRegConfigPath() {
     printf '%s\n' "$(warpConfigDir)/config"
 }
 
+warpConfigSafeDir() {
+    local warpDir
+    warpDir=$(warpConfigDir)
+    padmIsSafeAbsolutePath "${warpDir%/}" || return 1
+    printf '%s\n' "${warpDir%/}"
+}
+
 warpRegConfigLooksValid() {
     local targetPath=$1
     [[ -s "${targetPath}" ]] || return 1
@@ -24,15 +31,17 @@ warpRegConfigLooksValid() {
 # 读取第三方 WARP 配置
 readConfigWarpReg() {
     local configFile warpBinary tmpFile
+    local warpDir
+    warpDir=$(warpConfigSafeDir) || return 1
     configFile=$(warpRegConfigPath)
     warpBinary=$(warpRegBinaryPath)
 
     if ! warpRegConfigLooksValid "${configFile}"; then
-        mkdir -p "$(warpConfigDir)" || return 1
+        mkdir -p "${warpDir}" || return 1
         if [[ ! -x "${warpBinary}" ]]; then
             installWarpReg || return 1
         fi
-        tmpFile=$(mktemp "$(warpConfigDir)/.config.XXXXXX") || return 1
+        tmpFile=$(mktemp "${warpDir}/.config.XXXXXX") || return 1
         if ! "${warpBinary}" >"${tmpFile}" 2>&1; then
             rm -f "${tmpFile}" "${configFile}" >/dev/null 2>&1 || true
             return 1
@@ -59,7 +68,7 @@ readConfigWarpReg() {
 # 安装 warp-reg 工具
 installWarpReg() {
     local warpDir warpBinary
-    warpDir=$(warpConfigDir)
+    warpDir=$(warpConfigSafeDir) || return 1
     warpBinary=$(warpRegBinaryPath)
     if [[ ! -f "${warpBinary}" ]]; then
         echo

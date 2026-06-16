@@ -470,7 +470,7 @@ cleanLastInstallationConfig() {
         errorCard "Xray 配置目录清理失败，已取消清空上次安装配置"
         return 1
     fi
-    if ! rm -rf /etc/padm/sing-box/conf/config.json >/dev/null 2>&1; then
+    if ! rm -f -- /etc/padm/sing-box/conf/config.json >/dev/null 2>&1; then
         errorCard "sing-box 主配置清理失败，已取消清空上次安装配置"
         return 1
     fi
@@ -494,7 +494,7 @@ cleanLastInstallationConfig() {
         errorCard "远程订阅目录清理失败，已取消清空上次安装配置"
         return 1
     fi
-    if ! rm -rf /etc/padm/warp/config >/dev/null 2>&1; then
+    if ! rm -f -- /etc/padm/warp/config >/dev/null 2>&1; then
         errorCard "WARP 配置清理失败，已取消清空上次安装配置"
         return 1
     fi

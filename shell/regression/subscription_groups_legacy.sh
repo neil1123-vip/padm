@@ -2685,6 +2685,40 @@ runCoreBinaryInstallCopyFailureRegression() (
     ! grep -q 'xray:start:true' "${serviceLog}"
 )
 
+runSingBoxDownloadArtifactsCleanupRegression() (
+    local root="${TMP_DIR}/sing-box-artifacts-cleanup"
+    local installDir="${root}/install"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${installDir}/sing-box-1.2.3-linux-amd64" "${installDir}/sing-box-keep"
+    printf 'archive\n' >"${installDir}/sing-box-1.2.3-linux-amd64.tar.gz"
+    printf 'current\n' >"${installDir}/sing-box"
+    printf 'keep\n' >"${installDir}/sing-box-keep/sentinel"
+    : >"${rmLog}"
+
+    singBoxCoreCPUVendor=-linux-amd64
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    cleanSingBoxDownloadArtifacts "${installDir}" v1.2.3
+    [[ ! -e "${installDir}/sing-box-1.2.3-linux-amd64.tar.gz" ]]
+    [[ ! -e "${installDir}/sing-box-1.2.3-linux-amd64" ]]
+    [[ -f "${installDir}/sing-box" ]]
+    [[ -f "${installDir}/sing-box-keep/sentinel" ]]
+    grep -qxF "rm:-f -- ${installDir}/sing-box-1.2.3-linux-amd64.tar.gz" "${rmLog}"
+    grep -qxF "rm:-rf -- ${installDir}/sing-box-1.2.3-linux-amd64" "${rmLog}"
+    ! grep -qF 'sing-box-keep' "${rmLog}"
+
+    set +e
+    cleanSingBoxDownloadArtifacts relative-install v1.2.3 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+)
+
 runNetworkCheckReturnFailureRegression() (
     local root="${TMP_DIR}/network-check-return"
     local dnsRcFile="${root}/dns.rc"
@@ -4351,6 +4385,41 @@ runUninstallWireGuardCleanupRegression() (
     [[ ! -e "$(subscriptionControlServiceFile)" ]]
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
 )
+
+runWarpConfigSafeDirRegression() (
+    local root="${TMP_DIR}/warp-config-safe-dir"
+    local rmLog="${root}/rm.log"
+    local errorLog="${root}/error.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${rmLog}"
+    : >"${errorLog}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    PADM_WARP_DIR=relative-warp
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    readConfigWarpReg >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -s "${errorLog}" ]]
+
+    set +e
+    installWarpReg >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -s "${errorLog}" ]]
+)
+
 runUninstallNginxCleanupRegression() {
     local primaryDir="${TMP_DIR}/uninstall-nginx-primary/"
     local actualDir="${TMP_DIR}/uninstall-nginx-actual/"
@@ -4542,7 +4611,7 @@ runCleanLastInstallationConfigFailureRegression() (
     }
     rm() {
         printf 'rm:%s\n' "$*" >>"${cleanupLog}"
-        [[ "${mode}" == "rm-warp-fail" && "$*" == "-rf /etc/padm/warp/config" ]] && return 1
+        [[ "${mode}" == "rm-warp-fail" && "$*" == "-f -- /etc/padm/warp/config" ]] && return 1
         return 0
     }
     unInstallSubscribe() { printf 'uninstall-subscribe\n' >>"${installLog}"; return 0; }
@@ -4643,7 +4712,7 @@ runCleanLastInstallationConfigFailureRegression() (
 
     runCleanupStepFailureCase rm-warp-fail \
         'WARP 配置清理失败，已取消清空上次安装配置' \
-        'rm:-rf /etc/padm/warp/config' \
+        'rm:-f -- /etc/padm/warp/config' \
         'rm:-f /etc/padm/cdn'
 
     runCleanupStepFailureCase daemon-reload-fail \
@@ -12785,6 +12854,7 @@ runRegressionTransactionCore() {
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
         runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
+        runRegressionStep sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression &&
@@ -12818,6 +12888,7 @@ runRegressionTransactionSystem() {
     runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
         runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
+        runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&
         runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
         runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
         runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
