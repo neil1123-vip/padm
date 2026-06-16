@@ -242,7 +242,7 @@ check_xray_compatibility_audit() {
         warnFile=$(xrayCompatibilityAuditWarnFile)
         collectXrayCompatibilityFindings "${statusFile}" "$(xrayCompatibilityAuditLog)" "${warnFile}"
         summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
-        strictLog=$(coreXrayStrictConfigTestLog)
+        strictLog=$(coreTmpFilePath padm-core-xray-strict-test.log)
         if ! validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}"; then
             printf 'WARN:STRICT_FAIL %s\n' "${strictLog}"
         fi
