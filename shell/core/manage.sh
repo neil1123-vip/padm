@@ -1094,14 +1094,20 @@ addCorePort() {
 removeInstallPath() {
     local targetPath=$1
     local description=$2
+    local attempt
 
     if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
         return 0
     fi
 
-    if rm -rf "${targetPath}"; then
-        return 0
-    fi
+    for attempt in 1 2 3; do
+        if rm -rf "${targetPath}"; then
+            if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
+                return 0
+            fi
+        fi
+        sleep 0.2
+    done
 
     errorCard "${description}删除失败: ${targetPath}"
     return 1

@@ -851,6 +851,39 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
     )
 }
 
+runRemoveInstallPathRetryRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/remove-install-path-retry"
+        local target="${root}/target"
+        local attemptsFile="${root}/attempts.log"
+        mkdir -p "${target}/child"
+        printf 'data\n' >"${target}/child/file"
+        : >"${attemptsFile}"
+
+        rm() {
+            printf '%s\n' "$*" >>"${attemptsFile}"
+            if [[ "$1" == "-rf" && "$2" == "${target}" ]]; then
+                local count
+                count=$(wc -l <"${attemptsFile}")
+                if [[ "${count}" == "1" ]]; then
+                    return 1
+                fi
+                command rm -rf -- "${target}"
+                return 0
+            fi
+            command rm "$@"
+        }
+
+        removeInstallPath "${target}" "目标目录"
+        [[ ! -e "${target}" ]]
+        [[ "$(wc -l <"${attemptsFile}")" == "2" ]]
+    )
+}
+
 runInstallRefreshRestoresBackupRegression() {
     local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
     fixtureDir="${TMP_DIR}/install-refresh-restore"
@@ -1921,6 +1954,7 @@ runRegressionPlatform() {
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
         runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
+        runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
         runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
