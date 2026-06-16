@@ -1064,6 +1064,18 @@ runTlsCaSingleDefaultBranchRegression() {
     [[ "${explicitLetsEncryptCount}" == "1" ]]
 }
 
+runRealityTargetSingleDefaultBranchRegression() {
+    local explicitDefaultTargetCount
+    explicitDefaultTargetCount=$(awk '
+        /collectRealityProfile\(\) \{/ { capture = 1 }
+        capture && /case "\$\{selectRealityTargetMode\}" in/ { in_case = 1 }
+        in_case && /^[[:space:]]*selectDefaultRealityTarget$/ { count++ }
+        in_case && /^    esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh")
+    [[ "${explicitDefaultTargetCount}" == "3" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -2024,6 +2036,7 @@ runRegressionPlatform() {
         runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
         runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression &&
         runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression &&
+        runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&

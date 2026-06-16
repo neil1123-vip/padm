@@ -564,9 +564,6 @@ collectRealityProfile() {
     selectRealityTargetMode=${selectRealityTargetMode:-1}
 
     case "${selectRealityTargetMode}" in
-    1)
-        selectDefaultRealityTarget
-        ;;
     2)
         if ! selectRealityTargetFromCandidates; then
             statusCard "Reality 目标站" "候选编号无效，改用默认目标 www.ibm.com:443"
