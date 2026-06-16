@@ -119,10 +119,6 @@ currentProtocolHasAny() {
     protocolSelectionHasAny "${currentInstallProtocolType}" "$@"
 }
 
-currentProtocolHasAll() {
-    protocolSelectionHasAll "${currentInstallProtocolType}" "$@"
-}
-
 protocolSelectionSkipsNginx() {
     local selection=$1
     protocolSelectionOnlyRealityNoDomain "${selection}" && [[ -z "${realityOnlyWithDomain}" ]]
