@@ -366,13 +366,6 @@ subscriptionGroupQuotaAutoApplyEnabled() {
     subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
 }
 
-setSubscriptionSources() {
-    local sources=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson sources "${sources}" '.groups |= map(if .id == $groupId then .sources = $sources else . end)'
-}
-
 addSubscriptionSourceState() {
     local id=$1
     local name=$2

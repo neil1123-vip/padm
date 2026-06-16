@@ -156,22 +156,6 @@ check_fail2ban_jail_has_section() {
     grep -Eq "^\\[${jailName//./\\.}\\]$" "${jailFile}" 2>/dev/null
 }
 
-check_nginx() {
-    if command -v nginx >/dev/null 2>&1; then
-        pass "nginx 存在：$(nginx -v 2>&1)"
-        if nginx -t >/tmp/padm-validate-nginx.log 2>&1; then
-            pass "nginx 配置测试通过"
-        else
-            fail "nginx 配置测试失败"
-            cat /tmp/padm-validate-nginx.log
-        fi
-        check_service_active nginx
-        check_service_enabled nginx
-    else
-        warn "nginx 缺失，跳过 nginx 检查"
-    fi
-}
-
 check_xray() {
     if [[ -x /etc/padm/xray/xray ]]; then
         pass "xray 二进制可执行"

@@ -33,10 +33,6 @@ subscriptionCurrentRoleNormalized() {
     esac
 }
 
-subscriptionMainFeaturesAvailable() {
-    [[ "$(subscriptionCurrentRoleNormalized)" != "controlled" ]]
-}
-
 runSubscriptionMainControllerWizard() {
     initSubscriptionWireGuardMain || return 1
     showSubscriptionWireGuardMainCredential
@@ -834,10 +830,6 @@ setUserSubscriptionTrafficLimitMenu() {
 # 服务器源管理
 normalizeSubscriptionSourceInput() {
     return 1
-}
-
-remoteSubscribeFile() {
-    subscriptionGroupsFile
 }
 
 listRemoteSubscribeSources() {
