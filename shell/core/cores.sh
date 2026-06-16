@@ -1880,7 +1880,7 @@ customSingBoxInstall() {
         totalProgress=9
         installTools 1
         # 申请tls
-        if protocolSelectionNeedsTLS "${selectCustomInstallType}"; then
+        if protocolSelectionHasCapability "${selectCustomInstallType}" "needs_tls"; then
             initTLSNginxConfig 2 || return 1
             installTLS 3 || return 1
             coreInstallServiceAction "Nginx 服务停止失败，已取消 sing-box 安装" handleNginx stop || return 1

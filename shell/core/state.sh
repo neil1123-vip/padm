@@ -158,7 +158,7 @@ readInstallProtocolType() {
 
     while read -r row; do
         local protocolId=
-        protocolId=$(xrayProtocolIdByFilename "${row}.json")
+        protocolId=$(xray_protocol_registry | awk -F'|' -v file="${row##*/}.json" '$2 == file { print $1 }')
         protocolStateAdd "${protocolId}"
         if [[ "${row}" == *VLESS_TCP_inbounds* ]]; then
             frontingType=02_VLESS_TCP_inbounds

@@ -124,11 +124,6 @@ protocolSelectionSkipsNginx() {
     protocolSelectionOnlyRealityNoDomain "${selection}" && [[ -z "${realityOnlyWithDomain}" ]]
 }
 
-protocolSelectionNeedsTLS() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_tls"
-}
-
 protocolSelectionNeedsPath() {
     local selection=$1
     protocolSelectionHasCapability "${selection}" "needs_path"
@@ -142,14 +137,6 @@ protocolSelectionNeedsCertificate() {
 protocolSelectionNeedsLocalCertificate() {
     local selection=$1
     protocolSelectionNeedsCertificate "${selection}" || [[ -n "${realityOnlyWithDomain:-}" ]]
-}
-
-xrayProtocolIdByFilename() {
-    local filename=$1
-    filename=${filename##*/}
-    filename=${filename%.json}
-    filename="${filename}.json"
-    xray_protocol_registry | awk -F'|' -v file="$filename" '$2 == file { print $1 }'
 }
 
 protocolStateAdd() {
