@@ -257,14 +257,6 @@ xrayConfigInstalled() {
     return 1
 }
 
-getXrayCurrentVersion() {
-    if xrayInstalled; then
-        "$(coreXrayBinaryPath)" --version 2>/dev/null | awk 'NR==1 {print "v"$2}'
-    else
-        echo "未安装"
-    fi
-}
-
 getSingBoxCurrentVersion() {
     if singBoxInstalled; then
         "$(coreSingBoxBinaryPath)" version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}'

@@ -1121,6 +1121,8 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(getDLCNameByRuleLine)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_rules.sh"
             awk '/^(unInstallSniffing)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_rules.sh"
             awk '/^(cleanXrayGeoFiles)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
+            awk '/^(getXrayCurrentVersion)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
+            awk '/^(setScriptVersion)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
         } | awk '{ sum += $1 } END { print sum + 0 }'
     )
