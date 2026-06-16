@@ -156,10 +156,6 @@ check_fail2ban_jail_has_section() {
     grep -Eq "^\\[${jailName//./\\.}\\]$" "${jailFile}" 2>/dev/null
 }
 
-check_apt_update() {
-    warn "校验阶段跳过 apt update；只读验证不刷新在线状态"
-}
-
 check_nginx() {
     if command -v nginx >/dev/null 2>&1; then
         pass "nginx 存在：$(nginx -v 2>&1)"

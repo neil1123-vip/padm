@@ -37,14 +37,6 @@ subscriptionMainFeaturesAvailable() {
     [[ "$(subscriptionCurrentRoleNormalized)" != "controlled" ]]
 }
 
-subscriptionRequireMainFeatures() {
-    if subscriptionMainFeaturesAvailable; then
-        return 0
-    fi
-    errorCard "当前机器已初始化为被控" "分享订阅、同步执行和用量治理请在主控服务器处理"
-    return 1
-}
-
 runSubscriptionMainControllerWizard() {
     initSubscriptionWireGuardMain || return 1
     showSubscriptionWireGuardMainCredential

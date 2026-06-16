@@ -1097,6 +1097,19 @@ runSubscriptionMenuWrapperCountRegression() {
     [[ "${wrapperCount}" == "0" ]]
 }
 
+runUnusedHelperFunctionCountRegression() {
+    local helperCount
+    helperCount=$(
+        {
+            awk '/^(check_apt_update)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/validate_install.sh"
+            awk '/^(subscriptionRequireMainFeatures)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
+            awk '/^(showUserSubscriptionQuota)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/traffic.sh"
+            awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
+        } | awk '{ sum += $1 } END { print sum + 0 }'
+    )
+    [[ "${helperCount}" == "0" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -2060,6 +2073,7 @@ runRegressionPlatform() {
         runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
         runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression &&
         runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression &&
+        runRegressionStep unused-helper-function-count runUnusedHelperFunctionCountRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
