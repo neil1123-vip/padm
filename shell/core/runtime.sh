@@ -895,25 +895,35 @@ waitAptProcess() {
     done
 }
 
-# 安全清理目录内容
-cleanDirectoryContent() {
+padmIsSafeAbsolutePath() {
     local targetPath=$1
-    local resolvedPath
     if [[ -z "${targetPath}" || "${targetPath}" != /* || "${targetPath}" == "/" ||
         "${targetPath}" == "/." || "${targetPath}" == "/.." ||
         "${targetPath}" == */./* || "${targetPath}" == */. ||
         "${targetPath}" == */../* || "${targetPath}" == */.. ]]; then
-        echoContent title "\n┌─ 清理目录 ─────────────────────────────────────────"
-        menuLine "清理目录路径异常，已终止"
-        menuClose
+        return 1
+    fi
+}
+
+padmShowUnsafePathError() {
+    local title=$1
+    echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
+    menuLine "目标路径异常，已终止"
+    menuClose
+}
+
+# 安全清理目录内容
+cleanDirectoryContent() {
+    local targetPath=$1
+    local resolvedPath
+    if ! padmIsSafeAbsolutePath "${targetPath}"; then
+        padmShowUnsafePathError "清理目录"
         return 1
     fi
     mkdir -p "${targetPath}" || return 1
     resolvedPath=$(cd -- "${targetPath}" && pwd -P) || return 1
     if [[ -z "${resolvedPath}" || "${resolvedPath}" == "/" ]]; then
-        echoContent title "\n┌─ 清理目录 ─────────────────────────────────────────"
-        menuLine "清理目录路径异常，已终止"
-        menuClose
+        padmShowUnsafePathError "清理目录"
         return 1
     fi
     find "${resolvedPath}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || return 1

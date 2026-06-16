@@ -1114,6 +1114,11 @@ removeInstallPath() {
     local description=$2
     local attempt
 
+    if ! padmIsSafeAbsolutePath "${targetPath}"; then
+        errorCard "${description}路径异常，已终止: ${targetPath}"
+        return 1
+    fi
+
     if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
         return 0
     fi

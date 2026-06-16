@@ -963,6 +963,47 @@ runRemoveInstallPathRetryRegression() {
     )
 }
 
+runRemoveInstallPathSafetyRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/remove-install-path-safety"
+        local safeTarget="${root}/safe-target"
+        local errorLog="${root}/errors.log"
+        local status
+        mkdir -p "${safeTarget}" "${root}/cwd"
+        printf 'safe\n' >"${safeTarget}/file"
+        printf 'keep\n' >"${root}/cwd/sentinel"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        (
+            cd "${root}/cwd"
+            set +e
+            removeInstallPath "." "当前目录"
+            status=$?
+            set -e
+            [[ "${status}" -ne 0 ]]
+            [[ -f sentinel ]]
+            set +e
+            removeInstallPath ".." "父目录"
+            status=$?
+            set -e
+            [[ "${status}" -ne 0 ]]
+            [[ -f sentinel ]]
+            set +e
+            removeInstallPath "relative" "相对目录"
+            status=$?
+            set -e
+            [[ "${status}" -ne 0 ]]
+            [[ -f sentinel ]]
+        )
+        removeInstallPath "${safeTarget}" "安全目标"
+        [[ ! -e "${safeTarget}" ]]
+        grep -q '路径异常' "${errorLog}"
+    )
+}
+
 runInstallRefreshRestoresBackupRegression() {
     local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
     fixtureDir="${TMP_DIR}/install-refresh-restore"
@@ -2037,6 +2078,7 @@ runRegressionFast() {
         runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
+        runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
