@@ -288,6 +288,62 @@ runCheckPortOpenNginxPathSafetyRegression() {
     )
 }
 
+runWriteSubscribeNginxPathSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/write-subscribe-nginx-path-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+
+        nginx() { return 0; }
+
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath=
+            ! writeSubscribeNginxConfig <<'EOF'
+server {}
+EOF
+            [[ ! -e subscribe.conf ]]
+            [[ ! -e subscribe.conf.tmp ]]
+        )
+
+        nginxConfigPath="${nginxRoot}/"
+        writeSubscribeNginxConfig <<'EOF'
+server {}
+EOF
+        grep -q 'server {}' "${nginxRoot}/subscribe.conf"
+    )
+}
+
+runWriteAloneNginxPathSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/write-alone-nginx-path-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+
+        nginx() { return 0; }
+
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath=
+            ! writeAloneNginxConfig <<'EOF'
+server {}
+EOF
+            [[ ! -e alone.conf ]]
+            [[ ! -e alone.conf.tmp ]]
+        )
+
+        nginxConfigPath="${nginxRoot}/"
+        writeAloneNginxConfig <<'EOF'
+server {}
+EOF
+        grep -q 'server {}' "${nginxRoot}/alone.conf"
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -2297,6 +2353,8 @@ runRegressionFast() {
         runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression &&
         runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression &&
         runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression &&
+        runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression &&
+        runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&

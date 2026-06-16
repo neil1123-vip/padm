@@ -728,7 +728,11 @@ aloneNginxConfigWriteError() {
 }
 
 writeAloneNginxConfig() {
-    local targetPath="${nginxConfigPath}alone.conf"
+    local targetPath
+    if ! targetPath=$(nginxConfigFilePath alone.conf); then
+        aloneNginxConfigWriteError "Nginx 配置路径异常"
+        return 1
+    fi
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
     local logFile

@@ -131,7 +131,11 @@ subscribeNginxConfigWriteError() {
 }
 
 writeSubscribeNginxConfig() {
-    local targetPath="${nginxConfigPath}subscribe.conf"
+    local targetPath
+    if ! targetPath=$(nginxConfigFilePath subscribe.conf); then
+        subscribeNginxConfigWriteError "订阅 Nginx 配置路径异常"
+        return 1
+    fi
     local tmpPath
     local backupPath=
     local tmpBase="${TMPDIR:-/tmp}"
