@@ -585,6 +585,14 @@ autoRead() {
     read -r -p "${prompt}" "${resultVar}"
 }
 
+argumentHasValue() {
+    [[ $# -ge 2 && -n "${2}" && "${2}" != -* ]]
+}
+
+downloadFileOptionHasValue() {
+    [[ $# -ge 3 && -n "${2}" && "${2}" != -* ]]
+}
+
 downloadFile() {
     local outputDir=
     local outputFile=
@@ -597,12 +605,20 @@ downloadFile() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
         -P)
-            outputDir=$2
-            shift 2
+            if downloadFileOptionHasValue "$@"; then
+                outputDir=$2
+                shift 2
+            else
+                shift
+            fi
             ;;
         -O)
-            outputFile=$2
-            shift 2
+            if downloadFileOptionHasValue "$@"; then
+                outputFile=$2
+                shift 2
+            else
+                shift
+            fi
             ;;
         *)
             url=$1
@@ -683,8 +699,12 @@ downloadGitHubReleaseAsset() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
         -P)
-            outputDir=$2
-            shift 2
+            if argumentHasValue "$@"; then
+                outputDir=$2
+                shift 2
+            else
+                shift
+            fi
             ;;
         *)
             if [[ -z "${repo}" ]]; then

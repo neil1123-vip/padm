@@ -103,6 +103,45 @@ runGitHubReleaseAssetDirectFallbackRegression() {
     )
 }
 
+runDownloadArgumentMissingValueRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local root="${TMP_DIR}/download-arg-missing-value"
+        local calls="${root}/wget.calls"
+        mkdir -p "${root}"
+        wget() {
+            printf '%s\n' "$*" >>"${calls}"
+            return 0
+        }
+        downloadFile -O https://example.invalid/file.tar.gz
+        grep -qx -- '-c -q https://example.invalid/file.tar.gz' "${calls}"
+        [[ ! -e "${root}/https:" ]]
+    )
+}
+
+runGitHubReleaseArgumentMissingValueRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local root="${TMP_DIR}/github-release-arg-missing-value"
+        mkdir -p "${root}"
+        cd "${root}"
+        fetchUrlToStdout() {
+            printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://example.invalid/asset.tar.gz"}]}\n'
+        }
+        downloadFile() {
+            printf 'download:%s\n' "$*" >download.calls
+            return 0
+        }
+        ! downloadGitHubReleaseAsset -P --bad-dir example/repo v1.2.3 asset.tar.gz
+        [[ ! -e "${root}/--bad-dir" ]]
+        [[ ! -e "${root}/download.calls" ]]
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -1967,6 +2006,8 @@ runRegressionPlatform() {
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
         runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
+        runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
+        runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
