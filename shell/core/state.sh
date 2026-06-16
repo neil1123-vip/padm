@@ -5,6 +5,27 @@ acmeHomeDir() {
     printf '%s\n' "${homeDir%/}/.acme.sh"
 }
 
+acmeSafeHomeDir() {
+    local acmeDir
+    local resolvedPath=
+    acmeDir=$(acmeHomeDir)
+    [[ -n "${acmeDir}" ]] || return 1
+    if [[ "${acmeDir}" == /* ]]; then
+        padmIsSafeAbsolutePath "${acmeDir%/}" || return 1
+        printf '%s\n' "${acmeDir%/}"
+        return 0
+    fi
+    if [[ "${acmeDir}" == "." || "${acmeDir}" == ".." ||
+        "${acmeDir}" == */./* || "${acmeDir}" == */. ||
+        "${acmeDir}" == */../* || "${acmeDir}" == */.. ]]; then
+        return 1
+    fi
+    resolvedPath=$(padmResolveCleanupPath "${acmeDir}" 2>/dev/null || true)
+    [[ -n "${resolvedPath}" ]] || return 1
+    padmIsSafeAbsolutePath "${resolvedPath%/}" || return 1
+    printf '%s\n' "${resolvedPath%/}"
+}
+
 # 读取 TLS 证书详情
 readAcmeTLS() {
     local readAcmeDomain=
@@ -538,6 +559,10 @@ cleanLastInstallationConfig() {
         echo
         autoRead clean_acme "是否清理acme证书和账号配置？[y/n]:" cleanAcmeStatus
         if [[ "${cleanAcmeStatus}" == "y" ]]; then
+            if ! acmeDir=$(acmeSafeHomeDir); then
+                errorCard "acme证书和账号配置目录异常"
+                return 1
+            fi
             if rm -rf -- "${acmeDir}" >/dev/null 2>&1; then
                 successCard "acme证书和账号配置已清理"
             else

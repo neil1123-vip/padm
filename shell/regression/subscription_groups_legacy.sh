@@ -4992,11 +4992,13 @@ runCleanLastInstallationConfigAcmeHomeFailureRegression() (
     local root="${TMP_DIR}/clean-last-installation-acme-home"
     local homeDir="${root}/home"
     local acmeDir="${homeDir}/.acme.sh"
+    local resolvedAcmeDir
     local cleanupLog="${root}/cleanup.log"
     local errorLog="${root}/error.log"
     local rc
 
     mkdir -p "${root}/nginx" "${root}/static" "${acmeDir}"
+    resolvedAcmeDir=$(cd -- "${homeDir}" && pwd -P)/.acme.sh
     : >"${cleanupLog}"
     : >"${errorLog}"
 
@@ -5040,7 +5042,7 @@ runCleanLastInstallationConfigAcmeHomeFailureRegression() (
     systemctl() { return 0; }
     rm() {
         printf 'rm:%s\n' "$*" >>"${cleanupLog}"
-        if [[ "$*" == "-rf -- ${acmeDir}" ]]; then
+        if [[ "$*" == "-rf -- ${resolvedAcmeDir}" ]]; then
             return 1
         fi
         return 0
@@ -5052,9 +5054,85 @@ runCleanLastInstallationConfigAcmeHomeFailureRegression() (
     set -e
 
     [[ "${rc}" == "1" ]]
-    grep -qxF "rm:-rf -- ${acmeDir}" "${cleanupLog}"
+    grep -qxF "rm:-rf -- ${resolvedAcmeDir}" "${cleanupLog}"
     ! grep -q "/root/.acme.sh" "${cleanupLog}"
     grep -q "acme证书和账号配置清理失败" "${errorLog}"
+)
+
+runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
+    local rootRel="${TMP_DIR}/clean-last-installation-acme-relative-home"
+    local root
+    local rootWorkRel
+    local cleanupLog
+    local errorLog
+    local resolvedAcmeDir
+    local rc
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    rootWorkRel="${rootRel}/work"
+    cleanupLog="${root}/cleanup.log"
+    errorLog="${root}/error.log"
+    mkdir -p "${rootWorkRel}/nginx" "${rootWorkRel}/static" "${rootWorkRel}/relative-home/.acme.sh"
+    resolvedAcmeDir="${root}/work/relative-home/.acme.sh"
+    : >"${cleanupLog}"
+    : >"${errorLog}"
+
+    HOME="relative-home"
+    currentDefaultPort=443
+    currentPort=
+    customPort=
+    xrayVLESSRealityPort=
+    xrayVLESSRealityXHTTPort=
+    singBoxVLESSVisionPort=
+    singBoxVLESSRealityVisionPort=
+    singBoxVLESSRealityGRPCPort=
+    singBoxHysteria2Port=
+    singBoxTuicPort=
+    singBoxSocks5Port=
+    hysteriaPort=
+    tuicPort=
+    nginxConfigPath="${root}/work/nginx/"
+    nginxStaticPath="${root}/work/static"
+    configPath="${root}/work/xray-conf/"
+
+    handleXray() { return 0; }
+    handleSingBox() { return 0; }
+    handleNginx() { return 0; }
+    cleanAgentNginxConf() { return 0; }
+    cleanDirectoryContent() { return 0; }
+    readInstallType() { return 0; }
+    mkdirTools() { return 0; }
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    showLastInstallationConfig() { return 0; }
+    autoRead() {
+        if [[ "$1" == "clean_acme" ]]; then
+            printf -v "$3" 'y'
+        else
+            printf -v "$3" 'n'
+        fi
+    }
+    lsof() { return 1; }
+    systemctl() { return 0; }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${cleanupLog}"
+        command rm "$@"
+    }
+
+    (
+        cd "${rootWorkRel}"
+        set +e
+        cleanLastInstallationConfig >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "0" ]]
+        [[ ! -d "${resolvedAcmeDir}" ]]
+        grep -qxF "rm:-rf -- ${resolvedAcmeDir}" "${cleanupLog}"
+        ! grep -q 'rm:-rf -- relative-home/.acme.sh' "${cleanupLog}"
+        [[ ! -s "${errorLog}" ]]
+    )
 )
 
 runEntryHelperConfigRegression() {
@@ -13357,6 +13435,7 @@ runRegressionTransactionSystem() {
         runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
         runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
         runRegressionStep clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression &&
+        runRegressionStep clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression &&
         runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
 }
 
