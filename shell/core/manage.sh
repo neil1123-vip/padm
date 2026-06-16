@@ -2150,11 +2150,6 @@ initRandomSalt() {
     echo "${initCustomPath}"
 }
 
-switchAlpn() {
-    manageTraditionalTlsFallback "$@"
-}
-
-
 manageRealityTarget() {
     local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary
     while true; do

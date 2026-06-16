@@ -1318,18 +1318,6 @@ updateGeoSite() {
     statusCard "Geo 数据" "更新完毕" "当前版本：${newVersion}"
 }
 
-updateXray() {
-    readInstallType
-    local targetVersion=$1
-    local targetPrerelease=${prereleaseStatus:-false}
-    if xrayInstalled; then
-        upgradeXrayCore "${targetPrerelease}" "${targetVersion}"
-    else
-        installXray 1 "${targetPrerelease}"
-    fi
-}
-
-
 # 验证整个服务是否可用
 checkGFWStatue() {
     readInstallType
