@@ -1028,6 +1028,42 @@ runRemoteControlFunctionStubDefaultStopDisableRegression() {
     [[ "${explicitStopDisableCount}" == "0" ]]
 }
 
+runTuicProtocolSingleDefaultBranchRegression() {
+    local explicitCubicCount
+    explicitCubicCount=$(awk '
+        /initTuicProtocol\(\) \{/ { capture = 1 }
+        capture && /case \$\{selectTuicAlgorithm\} in/ { in_case = 1 }
+        in_case && /tuicAlgorithm="cubic"/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh")
+    [[ "${explicitCubicCount}" == "1" ]]
+}
+
+runTlsDnsApiSingleDefaultBranchRegression() {
+    local explicitCloudflareCount
+    explicitCloudflareCount=$(awk '
+        /switchDNSAPI\(\) \{/ { capture = 1 }
+        capture && /case \$\{selectDNSAPIType\} in/ { in_case = 1 }
+        in_case && /dnsAPIType="cloudflare"/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/tls.sh")
+    [[ "${explicitCloudflareCount}" == "1" ]]
+}
+
+runTlsCaSingleDefaultBranchRegression() {
+    local explicitLetsEncryptCount
+    explicitLetsEncryptCount=$(awk '
+        /switchSSLType\(\) \{/ { capture = 1 }
+        capture && /case \$\{selectSSLType\} in/ { in_case = 1 }
+        in_case && /sslType="letsencrypt"/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/tls.sh")
+    [[ "${explicitLetsEncryptCount}" == "1" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -1985,6 +2021,9 @@ runRegressionPlatform() {
         runRegressionStep regression-dispatcher-single-legacy-fallback runRegressionDispatcherSingleLegacyFallbackRegression &&
         runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
         runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
+        runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
+        runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression &&
+        runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&

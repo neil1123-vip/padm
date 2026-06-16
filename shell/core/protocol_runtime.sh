@@ -373,9 +373,6 @@ initTuicProtocol() {
         menuClose
         autoRead tuic_algorithm_menu "请选择:" selectTuicAlgorithm
         case ${selectTuicAlgorithm} in
-        1)
-            tuicAlgorithm="cubic"
-            ;;
         2)
             tuicAlgorithm="bbr"
             ;;
