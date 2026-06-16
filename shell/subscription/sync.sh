@@ -1,32 +1,62 @@
 #!/usr/bin/env bash
 
 # 订阅组本机账号同步
+subscriptionSyncAccountPrefix() {
+    echo "sub_"
+}
+
+subscriptionSyncAccountEscapeId() {
+    local id=$1
+    local escaped=${id//_/$'\001'}
+    escaped=${escaped//-/_}
+    escaped=${escaped//$'\001'/-}
+    printf '%s\n' "${escaped}"
+}
+
+subscriptionSyncAccountUnescapeId() {
+    local escaped=$1
+    local id=${escaped//-/$'\001'}
+    id=${id//_/-}
+    id=${id//$'\001'/_}
+    printf '%s\n' "${id}"
+}
+
 subscriptionSyncAccountName() {
     local id=$1
-    id=${id//-/_}
-    echo "sub_${id}"
+    echo "$(subscriptionSyncAccountPrefix)$(subscriptionSyncAccountEscapeId "${id}")"
 }
 
 subscriptionSyncFindUserByAccountName() {
     local accountName=$1
     local groupId=${2:-$(activeSubscriptionGroupId)}
-    subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg accountName "${accountName}" '
-      .groups[] | select(.id == $groupId) |
-      .user_groups[]? |
-      select((("sub_" + (.id | gsub("-"; "_")))) == $accountName)
-    '
+    local id
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        if [[ "$(subscriptionSyncAccountName "${id}")" == "${accountName}" ]]; then
+            subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg id "${id}" '
+              .groups[] | select(.id == $groupId) |
+              .user_groups[]? |
+              select(.id == $id)
+            '
+            return 0
+        fi
+    done < <(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .user_groups[]?.id')
+    return 1
 }
 
 subscriptionSyncAccountId() {
     local accountName=$1
     local userJson
-    userJson=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 1
+    local prefix escapedId
+    userJson=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null || true)
     if [[ -n "${userJson}" ]]; then
         jq -r '.id' <<<"${userJson}"
         return 0
     fi
-    accountName=${accountName#sub_}
-    echo "${accountName//_/-}"
+    prefix=$(subscriptionSyncAccountPrefix)
+    [[ "${accountName}" == "${prefix}"* ]] || return 1
+    escapedId=${accountName#"${prefix}"}
+    subscriptionSyncAccountUnescapeId "${escapedId}"
 }
 
 subscriptionSyncGenerateUUID() {
@@ -578,9 +608,15 @@ applySubscriptionQuotaPlan() {
 applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
+    local removeAccounts='[]'
+    local id
     local rc=0
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
-    accountPlan=$(jq '[.[].id | "sub_" + gsub("-"; "_")] | {create: [], remove: .}' <<<"${quotaPlan}") || return 1
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        removeAccounts=$(jq --arg accountName "$(subscriptionSyncAccountName "${id}")" '. + [$accountName]' <<<"${removeAccounts}") || return 1
+    done < <(jq -r '.[].id' <<<"${quotaPlan}")
+    accountPlan=$(jq -n --argjson remove "${removeAccounts}" '{create: [], remove: $remove}') || return 1
     if [[ "$(jq '.remove | length' <<<"${accountPlan}")" != "0" ]]; then
         if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
             rc=1
@@ -642,7 +678,7 @@ executeSubscriptionQuotaPlanMenu() {
         rc=1
     fi
     if [[ "${rc}" -eq 0 ]]; then
-        successCard "超限处理已执行" "已停用超额分享订阅，并移除本机 sub_<ID> 托管账号" "如需同步被控服务器，请再执行同步"
+        successCard "超限处理已执行" "已停用超额分享订阅，并移除本机托管账号" "如需同步被控服务器，请再执行同步"
     else
         errorCard "超限处理执行失败" "已尽力执行可完成的部分，请检查本机配置后重试"
     fi

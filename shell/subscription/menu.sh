@@ -768,7 +768,7 @@ removeUserSubscriptionMenu() {
     local previousGroupsState
     local configBackupDir
     local accountName
-    autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应 sub_ 托管账号。确认请输入 yes：" confirm
+    autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应托管账号。确认请输入 yes：" confirm
     if [[ "${confirm}" != "yes" ]]; then
         statusCard "已取消" "操作未执行"
         return 1
@@ -823,7 +823,7 @@ manageUserSubscriptionItem() {
         menuItem 4 "设置节点范围" "选择 main、被控服务器 ID 或 *"
         menuItem 5 "设置订阅额度" "0 表示不限；这里只设置额度，不执行超限处理"
         menuItem 6 "启用/停用当前订阅" "停用后同步会移除对应托管账号"
-        menuItem 7 "预览同步变更" "查看将创建/删除哪些 sub_ 托管账号"
+        menuItem 7 "预览同步变更" "查看将创建/删除哪些托管账号"
         menuDangerItem 8 "删除订阅" "删除记录；同步后移除对应托管账号"
         menuReturnItem 9 "返回发布订阅" "回到上级菜单"
         menuClose

@@ -11,13 +11,23 @@ subscriptionRemoteControlSources() {
 subscriptionRemoteDesiredUsers() {
     local sourceId=$1
     local groupId
+    local users
+    local id
     groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead --arg groupId "${groupId}" --arg sourceId "${sourceId}" '
+    users=$(subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg sourceId "${sourceId}" '
       .groups[] | select(.id == $groupId) |
       [.user_groups[]?
         | select(.enabled == true)
         | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
-        | {id, name, account: ("sub_" + (.id | gsub("-"; "_"))), uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0)}]'
+        | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0)}]'
+    ) || return 1
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        users=$(jq --arg id "${id}" --arg account "$(subscriptionSyncAccountName "${id}")" '
+          map(if .id == $id then . + {account: $account} else . end)
+        ' <<<"${users}") || return 1
+    done < <(jq -r '.[].id' <<<"${users}")
+    printf '%s\n' "${users}"
 }
 
 subscriptionRemoteControlUrl() {

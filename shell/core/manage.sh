@@ -1902,7 +1902,7 @@ subscriptionPublishAccounts() {
         if subscriptionAccountHasPublishSource "${account}"; then
             stagedAccounts+="${account}"$'\n'
         fi
-    done < <(listUserSubscriptions | awk -F ':' '$3 == "true" {print "sub_" $1}' | tr '-' '_')
+    done < <(listUserSubscriptions | awk -F ':' '$3 == "true" {print $1}' | while IFS= read -r id; do [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"; done)
     publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++')
     printf '%s\n' "${publishAccounts}" | sed '/^$/d'
 }

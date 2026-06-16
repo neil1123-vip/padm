@@ -106,12 +106,24 @@ runSubscriptionGroupStateStructureFoundationCredentialRegression() {
 }
 
 runSubscriptionGroupStateStructureFoundationNormalizeRegression() {
+    local accountDashUnderscore
+    local accountUnderscoreDash
+    local accountDashDash
     if normalizeSubscriptionSourceInput 'remote.example.com:443:edge' >/dev/null 2>&1; then
         return 1
     fi
     if normalizeSubscriptionSourceInput '203.0.113.10:39778:vps1' >/dev/null 2>&1; then
         return 1
     fi
+    accountDashUnderscore=$(subscriptionSyncAccountName 'team-a_b')
+    accountUnderscoreDash=$(subscriptionSyncAccountName 'team_a-b')
+    accountDashDash=$(subscriptionSyncAccountName 'team-a-b')
+    [[ "${accountDashUnderscore}" != "${accountUnderscoreDash}" ]]
+    [[ "${accountDashUnderscore}" != "${accountDashDash}" ]]
+    [[ "${accountUnderscoreDash}" != "${accountDashDash}" ]]
+    [[ "$(subscriptionSyncAccountId "${accountDashUnderscore}")" == "team-a_b" ]]
+    [[ "$(subscriptionSyncAccountId "${accountUnderscoreDash}")" == "team_a-b" ]]
+    [[ "$(subscriptionSyncAccountId "${accountDashDash}")" == "team-a-b" ]]
 }
 
 runSubscriptionGroupStateStructureFoundationSerialRegression() {
