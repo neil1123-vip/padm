@@ -397,26 +397,6 @@ realityTargetScannerRecordAllowed() {
     return 0
 }
 
-realityTargetImportScannerCandidates() {
-    local sourceFile=$1
-    local added=0 skipped=0 ip origin domain issuer geo
-    [[ -f "${sourceFile}" ]] || return 1
-    while IFS=, read -r ip origin domain issuer geo; do
-        [[ "${ip}" == "IP" ]] && continue
-        domain=${domain#\"}
-        domain=${domain%\"}
-        issuer=${issuer#\"}
-        issuer=${issuer%\"}
-        if ! realityTargetScannerRecordAllowed "${domain}" || realityTargetCandidateExists "${domain}"; then
-            skipped=$((skipped + 1))
-            continue
-        fi
-        writeRealityTargetCandidateLine "${domain}" "${domain}" "${domain}" "global" "scanner" "unknown" "39" "no" "imported from RealiTLScanner: ${issuer} ${geo}" >/dev/null
-        added=$((added + 1))
-    done < "${sourceFile}"
-    printf '%s\n' "${added}"
-}
-
 showRealityTargetBlockedCandidates() {
     local line index=1 host name reason note
     echoContent title "\n┌─ REALITY 目标站黑名单 ─────────────────────────────"
@@ -656,22 +636,6 @@ sortedRealityTargetResults() {
     ' "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr -k4,4nr -k5,5nr | cut -f6-
 }
 
-writeRealityTargetScanLine() {
-    local target=$1
-    local sni=$2
-    local ip=$3
-    local asn=$4
-    local asOrg=$5
-    local networkMatch=$6
-    local score=$7
-    local pqc=$8
-    local certLength=$9
-    local tls13=${10}
-    local checkedAt=${11}
-    local note=${12}
-    writeRealityTargetResultLine "${target}" "${sni}" "${target%%:*}" "unknown" "unknown" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
-}
-
 bestScannedRealityTargetLine() {
     sortedRealityTargetResults | awk -F'\t' '$10 == "A" || $10 == "B" {print; found=1; exit} END{if (!found) exit 1}'
 }
@@ -800,26 +764,6 @@ fetchRealityAsnPrefixes() {
     command -v jq >/dev/null 2>&1 || return 1
     response=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://stat.ripe.net/data/announced-prefixes/data.json?resource=${asn}" 2>/dev/null) || return 1
     printf '%s\n' "${response}" | jq -r '.data.prefixes[]?.prefix | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$"))' 2>/dev/null
-}
-
-realityAsnPrefixTotalAddressCount() {
-    local prefix count total=0
-    while IFS= read -r prefix; do
-        count=$(realityAsnPrefixAddressCount "${prefix}" || printf 0)
-        [[ "${count}" =~ ^[0-9]+$ ]] || count=0
-        total=$((total + count))
-    done
-    printf '%s\n' "${total}"
-}
-
-filterRealityAsnPrefixesByMask() {
-    local minMask=$1
-    local maxMask=${2:-32}
-    local prefix mask
-    while IFS= read -r prefix; do
-        mask=$(realityAsnPrefixMask "${prefix}") || continue
-        [[ "${mask}" -ge "${minMask}" && "${mask}" -le "${maxMask}" ]] && printf '%s\n' "${prefix}"
-    done
 }
 
 realityIpv4ToInt() {
@@ -1412,14 +1356,6 @@ parseRealityTargetInput() {
     realityTargetHost=${targetHost}
     realityTargetPort=${targetPort}
     realitySNI=${AUTO_REALITY_SERVER_NAME:-${realityTargetHost}}
-}
-
-realityTargetCachedLine() {
-    local target=$1
-    local cacheFile
-    cacheFile=$(realityTargetCacheFile)
-    [[ -f "${cacheFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" '$1 == target {printf "%s\t%s\t%s\t%s\t%s\t%s\n", $10, $11, $12, $13, $14, $15; found=1} END{if (!found) exit 1}' "${cacheFile}"
 }
 
 writeRealityTargetCacheLine() {

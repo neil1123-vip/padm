@@ -6887,7 +6887,8 @@ runRealityAsnScanPlanRegression() {
     local sampleFile="${TMP_DIR}/asn-sample-ips.txt"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local sampleCount=0
-    local _sampleIp
+    local _sampleIp _prefix prefixMask prefixAddressCount totalAddressCount=0
+    local mask28Count=0 mask27Count=0 mask26Count=0 mask25Count=0 mask24Count=0
     AUTO_INSTALL=
     cat >"${asnPrefixFile}" <<'EOF'
 192.0.2.0/24
@@ -6896,13 +6897,23 @@ runRealityAsnScanPlanRegression() {
 10.0.0.0/27
 172.16.0.0/28
 EOF
-    [[ "$(filterRealityAsnPrefixesByMask 28 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "1" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 27 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "2" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 26 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "3" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 25 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "4" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 24 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "5" ]]
+    while IFS= read -r _prefix; do
+        prefixMask=$(realityAsnPrefixMask "${_prefix}")
+        [[ "${prefixMask}" -ge 28 && "${prefixMask}" -le 32 ]] && mask28Count=$((mask28Count + 1))
+        [[ "${prefixMask}" -ge 27 && "${prefixMask}" -le 32 ]] && mask27Count=$((mask27Count + 1))
+        [[ "${prefixMask}" -ge 26 && "${prefixMask}" -le 32 ]] && mask26Count=$((mask26Count + 1))
+        [[ "${prefixMask}" -ge 25 && "${prefixMask}" -le 32 ]] && mask25Count=$((mask25Count + 1))
+        [[ "${prefixMask}" -ge 24 && "${prefixMask}" -le 32 ]] && mask24Count=$((mask24Count + 1))
+        prefixAddressCount=$(realityAsnPrefixAddressCount "${_prefix}" || printf 0)
+        totalAddressCount=$((totalAddressCount + prefixAddressCount))
+    done <"${asnPrefixFile}"
+    [[ "${mask28Count}" == "1" ]]
+    [[ "${mask27Count}" == "2" ]]
+    [[ "${mask26Count}" == "3" ]]
+    [[ "${mask25Count}" == "4" ]]
+    [[ "${mask24Count}" == "5" ]]
     [[ "$(realityAsnPrefixAddressCount "172.16.0.0/28")" == "16" ]]
-    [[ "$(realityAsnPrefixTotalAddressCount <"${asnPrefixFile}")" == "496" ]]
+    [[ "${totalAddressCount}" == "496" ]]
     [[ "$(realityAsnPrefixTotalUsableAddressCount <"${asnPrefixFile}")" == "486" ]]
     generateRealityAsnSampleIps "${asnPrefixFile}" 12 "${sampleFile}"
     while IFS= read -r _sampleIp; do
@@ -7021,7 +7032,7 @@ runRuntimeAndRealityRegression() {
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "A" ]]
     showRealityTargetQuality "www.microsoft.com:443"
     [[ "$(realityTargetResultCount)" -ge "1" ]]
-    cachedLine=$(realityTargetCachedLine "www.microsoft.com:443")
+    cachedLine=$(awk -F'\t' '$1 == "www.microsoft.com:443" {printf "%s\t%s\t%s\t%s\t%s\t%s\n", $10, $11, $12, $13, $14, $15; exit}' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $1}')" == "A" ]]
     grep -q "tls ping www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 2048')
@@ -7308,7 +7319,16 @@ IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
 192.0.2.16,192.0.2.0/24,invalid.invalid,"Invalid",N/A
 192.0.2.17,192.0.2.0/24,192.0.2.17,"Self",N/A
 CSV
-    scannerImport=$(realityTargetImportScannerCandidates "${TMP_DIR}/realitlscanner.csv")
+    scannerImport=0
+    while IFS=, read -r ip origin domain issuer geo; do
+        [[ "${ip}" == "IP" ]] && continue
+        domain=${domain#\"}
+        domain=${domain%\"}
+        if ! realityTargetScannerRecordAllowed "${domain}" || realityTargetCandidateExists "${domain}"; then
+            continue
+        fi
+        scannerImport=$((scannerImport + 1))
+    done < "${TMP_DIR}/realitlscanner.csv"
     [[ "${scannerImport}" == "1" ]]
     importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet"
     scannerLine=$(grep -F $'scanner.example.com:443\tscanner.example.com\tscanner.example.com\tscanner' "${PADM_REALITY_TARGET_SCAN_FILE}")
