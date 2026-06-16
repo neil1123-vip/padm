@@ -193,7 +193,13 @@ manageSubscriptionControlledHome() {
         autoRead subscription_controlled_home_menu "请选择:" controlledHomeStatus
         case "${controlledHomeStatus}" in
         1) runSubscriptionControlledWizard ;;
-        2) showSubscriptionControlledStatusOverview ;;
+        2)
+            echoContent title "\n┌─ 本机状态 ─────────────────────────────────────────"
+            showSubscriptionServerRoleSummary
+            showSubscriptionCurrentRoleCredential || true
+            showSubscriptionWireGuardStatus
+            showSubscriptionSourceSyncResults
+            ;;
         3) manageSubscriptionControlledMaintenance ;;
         4) menu; return ;;
         *) errorCard "选择错误，请重新选择" ;;
@@ -229,26 +235,6 @@ manageSubscriptionPublishSubscriptions() {
     done
 }
 
-showSubscriptionMultiServerStatus() {
-    showSubscriptionCurrentRoleCredential || true
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main)
-        showSubscriptionSources
-        showSubscriptionRemoteHealthPlan
-        showSubscriptionSourceSyncResults
-        ;;
-    controlled)
-        showSubscriptionWireGuardStatus
-        showSubscriptionSourceSyncResults
-        ;;
-    *)
-        showSubscriptionSources
-        showSubscriptionRemoteHealthPlan
-        showSubscriptionSourceSyncResults
-        ;;
-    esac
-}
-
 manageSubscriptionMultiServer() {
     subscriptionRequireMainRole || return 1
     while true; do
@@ -267,18 +253,29 @@ manageSubscriptionMultiServer() {
         1) runSubscriptionMainControllerWizard ;;
         2) addSubscribeMenu ;;
         3) setSubscriptionSourceControlTokenMenu ;;
-        4) showSubscriptionMultiServerStatus ;;
+        4)
+            showSubscriptionCurrentRoleCredential || true
+            case "$(subscriptionCurrentRoleNormalized)" in
+            main)
+                showSubscriptionSources
+                showSubscriptionRemoteHealthPlan
+                showSubscriptionSourceSyncResults
+                ;;
+            controlled)
+                showSubscriptionWireGuardStatus
+                showSubscriptionSourceSyncResults
+                ;;
+            *)
+                showSubscriptionSources
+                showSubscriptionRemoteHealthPlan
+                showSubscriptionSourceSyncResults
+                ;;
+            esac
+            ;;
         5) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
-}
-
-showSubscriptionOperationsStatus() {
-    showSubscriptionGroupsStateSummary
-    showSubscriptionLocalSyncPlan
-    showSubscriptionRemoteSyncPlan
-    showSubscriptionSourceSyncResults
 }
 
 manageSubscriptionMainControlDetails() {
@@ -330,7 +327,12 @@ manageSubscriptionMainMaintenance() {
         case "${mainMaintenanceStatus}" in
         1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
         2) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
-        3) showSubscriptionOperationsStatus ;;
+        3)
+            showSubscriptionGroupsStateSummary
+            showSubscriptionLocalSyncPlan
+            showSubscriptionRemoteSyncPlan
+            showSubscriptionSourceSyncResults
+            ;;
         4) manageTrafficAndQuota ;;
         5) manageSubscriptionSyncSettings ;;
         6) manageSubscriptionStateBackups ;;
@@ -340,22 +342,6 @@ manageSubscriptionMainMaintenance() {
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
-}
-
-showSubscriptionControlledStatusOverview() {
-    subscriptionRequireControlledRole || return 1
-    echoContent title "\n┌─ 本机状态 ─────────────────────────────────────────"
-    showSubscriptionServerRoleSummary
-    showSubscriptionCurrentRoleCredential || true
-    showSubscriptionWireGuardStatus
-    showSubscriptionSourceSyncResults
-}
-
-showSubscriptionControlledControlDetails() {
-    subscriptionRequireControlledRole || return 1
-    echoContent title "\n┌─ 控制面与 Peer 细节 ───────────────────────────────"
-    showSubscriptionWireGuardStatus
-    showSubscriptionWireGuardPeers
 }
 
 manageSubscriptionControlledMaintenance() {
@@ -373,7 +359,11 @@ manageSubscriptionControlledMaintenance() {
         autoRead subscription_controlled_maintenance_menu "请选择:" controlledMaintenanceStatus
         case "${controlledMaintenanceStatus}" in
         1) importSubscriptionWireGuardMainCredential ;;
-        2) showSubscriptionControlledControlDetails ;;
+        2)
+            echoContent title "\n┌─ 控制面与 Peer 细节 ───────────────────────────────"
+            showSubscriptionWireGuardStatus
+            showSubscriptionWireGuardPeers
+            ;;
         3) restartSubscriptionWireGuardControl ;;
         4) disableSubscriptionWireGuardControl ;;
         5) return ;;
