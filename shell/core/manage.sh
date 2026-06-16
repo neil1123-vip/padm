@@ -3049,36 +3049,3 @@ manageTuic() {
         manageTuic
     fi
 }
-
-# 操作 Hysteria
-handleHysteria() {
-    # shellcheck disable=SC2010
-    if find /bin /usr/bin | grep -q systemctl && ls /etc/systemd/system/ | grep -q hysteria.service; then
-        if [[ -z $(pgrep -f "hysteria/hysteria") ]] && [[ "$1" == "start" ]]; then
-            systemctl start hysteria.service
-        elif [[ -n $(pgrep -f "hysteria/hysteria") ]] && [[ "$1" == "stop" ]]; then
-            systemctl stop hysteria.service
-        fi
-    fi
-    sleep 0.8
-
-    if [[ "$1" == "start" ]]; then
-        if [[ -n $(pgrep -f "hysteria/hysteria") ]]; then
-            successCard "Hysteria启动成功"
-        else
-            errorCard "Hysteria启动失败"
-            menuLine "$(uiStyle warn "请手动执行以下命令查看错误日志：")"
-            menuLine "$(uiStyle value "/etc/padm/hysteria/hysteria --log-level debug -c /etc/padm/hysteria/conf/config.json server")"
-            exit 0
-        fi
-    elif [[ "$1" == "stop" ]]; then
-        if [[ -z $(pgrep -f "hysteria/hysteria") ]]; then
-            successCard "Hysteria关闭成功"
-        else
-            errorCard "Hysteria关闭失败"
-            menuLine "$(uiStyle warn "请手动执行以下命令清理残留进程：")"
-            menuLine "$(uiStyle value "ps -ef|grep -v grep|grep hysteria|awk '{print \$2}'|xargs kill -9")"
-            exit 0
-        fi
-    fi
-}
