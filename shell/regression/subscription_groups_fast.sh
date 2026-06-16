@@ -148,6 +148,19 @@ runAutoInstallAllowsEmptyDefaultRegression() {
     )
 }
 
+runParseInstallArgsMissingValueRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        parseInstallArgs --domain --port 443 --core sing-box --unknown-option ignored --user alice
+        [[ -z "${AUTO_DOMAIN}" ]]
+        [[ "${AUTO_PORT}" == "443" ]]
+        [[ "${AUTO_CORE}" == "sing-box" ]]
+        [[ "${AUTO_USER}" == "alice" ]]
+    )
+}
+
 runClientNameSuffixPreservesRandomPrefixRegression() {
     (
         set -euo pipefail
@@ -1957,6 +1970,7 @@ runRegressionFast() {
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
+        runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
         runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
         runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&
         runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression &&

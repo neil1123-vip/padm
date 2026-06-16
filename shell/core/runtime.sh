@@ -124,6 +124,9 @@ installUserCrontabContent() {
 }
 
 parseInstallArgs() {
+    local value
+    local valueVar
+
     AUTO_INSTALL=
     AUTO_INSTALL_TYPE=
     AUTO_CORE=
@@ -152,119 +155,73 @@ parseInstallArgs() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
         --install-type)
-            AUTO_INSTALL=true
-            AUTO_INSTALL_TYPE=$2
-            shift 2
+            valueVar=AUTO_INSTALL_TYPE
             ;;
         --core)
-            AUTO_INSTALL=true
-            AUTO_CORE=$2
-            shift 2
+            valueVar=AUTO_CORE
             ;;
         --protocols)
-            AUTO_INSTALL=true
-            AUTO_PROTOCOLS=$2
-            shift 2
+            valueVar=AUTO_PROTOCOLS
             ;;
         --domain)
-            AUTO_INSTALL=true
-            AUTO_DOMAIN=$2
-            shift 2
+            valueVar=AUTO_DOMAIN
             ;;
         --port)
-            AUTO_INSTALL=true
-            AUTO_PORT=$2
-            shift 2
+            valueVar=AUTO_PORT
             ;;
         --tls-ca)
-            AUTO_INSTALL=true
-            AUTO_TLS_CA=$2
-            shift 2
+            valueVar=AUTO_TLS_CA
             ;;
         --dns-api)
-            AUTO_INSTALL=true
-            AUTO_DNS_API=$2
-            shift 2
+            valueVar=AUTO_DNS_API
             ;;
         --dns-api-type)
-            AUTO_INSTALL=true
-            AUTO_DNS_API_TYPE=$2
-            shift 2
+            valueVar=AUTO_DNS_API_TYPE
             ;;
         --dns-api-wildcard)
-            AUTO_INSTALL=true
-            AUTO_DNS_API_WILDCARD=$2
-            shift 2
+            valueVar=AUTO_DNS_API_WILDCARD
             ;;
         --cloudflare-api-token)
-            AUTO_INSTALL=true
-            AUTO_CLOUDFLARE_API_TOKEN=$2
-            shift 2
+            valueVar=AUTO_CLOUDFLARE_API_TOKEN
             ;;
         --cloudflare-zone-id)
-            AUTO_INSTALL=true
-            AUTO_CLOUDFLARE_ZONE_ID=$2
-            shift 2
+            valueVar=AUTO_CLOUDFLARE_ZONE_ID
             ;;
         --aliyun-api-key)
-            AUTO_INSTALL=true
-            AUTO_ALIYUN_API_KEY=$2
-            shift 2
+            valueVar=AUTO_ALIYUN_API_KEY
             ;;
         --aliyun-api-secret)
-            AUTO_INSTALL=true
-            AUTO_ALIYUN_API_SECRET=$2
-            shift 2
+            valueVar=AUTO_ALIYUN_API_SECRET
             ;;
         --reuse-last)
-            AUTO_INSTALL=true
-            AUTO_REUSE_LAST=$2
-            shift 2
+            valueVar=AUTO_REUSE_LAST
             ;;
         --clean-acme)
-            AUTO_INSTALL=true
-            AUTO_CLEAN_ACME=$2
-            shift 2
+            valueVar=AUTO_CLEAN_ACME
             ;;
         --reality-domain)
-            AUTO_INSTALL=true
-            AUTO_REALITY_DOMAIN=$2
-            shift 2
+            valueVar=AUTO_REALITY_DOMAIN
             ;;
         --reality-target)
-            AUTO_INSTALL=true
-            AUTO_REALITY_TARGET=$2
-            shift 2
+            valueVar=AUTO_REALITY_TARGET
             ;;
         --reality-server-name)
-            AUTO_INSTALL=true
-            AUTO_REALITY_SERVER_NAME=$2
-            shift 2
+            valueVar=AUTO_REALITY_SERVER_NAME
             ;;
         --entry-host)
-            AUTO_INSTALL=true
-            AUTO_ENTRY_HOST=$2
-            shift 2
+            valueVar=AUTO_ENTRY_HOST
             ;;
         --subscribe-port)
-            AUTO_INSTALL=true
-            AUTO_SUBSCRIBE_PORT=$2
-            shift 2
+            valueVar=AUTO_SUBSCRIBE_PORT
             ;;
         --install-nginx)
-            AUTO_INSTALL=true
-            AUTO_INSTALL_NGINX=$2
-            shift 2
+            valueVar=AUTO_INSTALL_NGINX
             ;;
         --uuid)
-            AUTO_INSTALL=true
-            AUTO_UUID=$2
-            shift 2
+            valueVar=AUTO_UUID
             ;;
         --user)
-            AUTO_INSTALL=true
-            AUTO_USER=$2
-            shift 2
+            valueVar=AUTO_USER
             ;;
         --help)
             showInstallArgsHelp
@@ -272,8 +229,20 @@ parseInstallArgs() {
             ;;
         *)
             shift
+            continue
             ;;
         esac
+
+        AUTO_INSTALL=true
+        if [[ $# -ge 2 && "${2}" != --* ]]; then
+            value=$2
+            shift 2
+        else
+            value=
+            shift
+        fi
+        printf -v "${valueVar}" '%s' "${value}"
+        valueVar=
     done
 }
 
