@@ -550,7 +550,7 @@ collectRealityProfile() {
 
     case "${selectRealityTargetMode}" in
     2)
-        if ! selectRealityTargetFromCandidates; then
+        if ! selectRealityTargetCandidateInteractive recommended; then
             statusCard "Reality 目标站" "候选编号无效，改用默认目标 www.ibm.com:443"
             selectDefaultRealityTarget
         fi
@@ -680,4 +680,3 @@ initXrayXHTTPort() {
         statusCard "Reality XHTTP 端口" "${xHTTPort}"
     fi
 }
-

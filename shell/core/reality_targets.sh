@@ -1193,10 +1193,6 @@ selectRealityTargetCandidateInteractive() {
     done
 }
 
-selectRealityTargetFromCandidates() {
-    selectRealityTargetCandidateInteractive recommended
-}
-
 selectAutoRecommendedRealityTarget() {
     local detector line host sni name category cdn target tlsPingResult result score pqc certLength tls13 note checkedAt
     local probeLimit probed=0 bestRank=0 bestCert=0 bestHost= bestPort=443 bestSni= bestTarget= bestScore= bestPqc= bestCertLength=
