@@ -12,21 +12,13 @@ vlessEncryptionXrayConfDir() {
     echo "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}"
 }
 
-vlessEncryptionVisionConfigFile() {
-    echo "${PADM_VLESS_REALITY_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/07_VLESS_vision_reality_inbounds.json}"
-}
-
-vlessEncryptionXHTTPConfigFile() {
-    echo "${PADM_VLESS_XHTTP_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/12_VLESS_XHTTP_inbounds.json}"
-}
-
 vlessEncryptionConfigFile() {
     local xhttpConfig
-    xhttpConfig=$(vlessEncryptionXHTTPConfigFile)
+    xhttpConfig="${PADM_VLESS_XHTTP_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/12_VLESS_XHTTP_inbounds.json}"
     if [[ -f "${xhttpConfig}" ]]; then
         echo "${xhttpConfig}"
     else
-        vlessEncryptionVisionConfigFile
+        echo "${PADM_VLESS_REALITY_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/07_VLESS_vision_reality_inbounds.json}"
     fi
 }
 
