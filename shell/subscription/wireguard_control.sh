@@ -239,12 +239,8 @@ subscriptionWireGuardRole() {
     subscriptionWireGuardReadState | jq -r '.role'
 }
 
-subscriptionWireGuardInstalled() {
-    command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1
-}
-
 installSubscriptionWireGuardTools() {
-    subscriptionWireGuardInstalled && return 0
+    command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1 && return 0
     if [[ "${packageManager:-}" == "apt" ]]; then
         installOptionalPackageTracked "WireGuard" wireguard-tools || return 1
     elif [[ "${packageManager:-}" == "yum" ]]; then
@@ -254,7 +250,7 @@ installSubscriptionWireGuardTools() {
     else
         return 1
     fi
-    subscriptionWireGuardInstalled
+    command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1
 }
 
 subscriptionWireGuardEnsureKeys() {
