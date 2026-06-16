@@ -1182,6 +1182,7 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(realityTargetCandidateExists|writeRealityTargetCandidateLine|realityTargetCacheFile|realityTargetResultLineByIndex|realityTargetResultLineByTargetIp|realityAsnPrefixAddressCount)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(realityAsnPrefixMask)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(adapterWarpRepoTemplate|adapterWarpYumRepoTemplate|warpEnableAlwaysOn|warpRollbackProxy|enableWarpProxy|checkWarpProxyTrace|installWarp|warpCliHelpContains|warpRegister|warpSetProxyMode|warpSetProxyPort)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/adapters.sh"
+            awk '/^(warpRegConfigPath)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_warp.sh"
             awk '/^(setSubscriptionSourceEnabled)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/groups.sh"
             awk '/^(normalizeSubscriptionSourceInput)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
             awk '/^(initSingBoxHysteria2Config)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/singbox.sh"

@@ -8,10 +8,6 @@ warpRegBinaryPath() {
     printf '%s\n' "$(warpConfigDir)/warp-reg"
 }
 
-warpRegConfigPath() {
-    printf '%s\n' "$(warpConfigDir)/config"
-}
-
 warpRegConfigLooksValid() {
     local targetPath=$1
     [[ -s "${targetPath}" ]] || return 1
@@ -24,7 +20,7 @@ warpRegConfigLooksValid() {
 # 读取第三方 WARP 配置
 readConfigWarpReg() {
     local configFile warpBinary tmpFile
-    configFile=$(warpRegConfigPath)
+    configFile="$(warpConfigDir)/config"
     warpBinary=$(warpRegBinaryPath)
 
     if ! warpRegConfigLooksValid "${configFile}"; then
