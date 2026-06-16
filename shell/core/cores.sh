@@ -322,18 +322,6 @@ validateSingBoxConfigWithBinary() {
     singBoxMergeConfigForValidation "${binary}" "${logFile}" check || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
 }
 
-singBoxCompatibilityAuditLog() {
-    coreTmpFilePath padm-sing-box-compat-audit.log
-}
-
-singBoxCompatibilityAuditStatusFile() {
-    coreTmpFilePath padm-sing-box-compat-audit.status
-}
-
-singBoxCompatibilityAuditWarnFile() {
-    coreTmpFilePath padm-sing-box-compat-audit.warn
-}
-
 singBoxCompatibilityAuditReset() {
     : >"${1}"
 }
@@ -472,17 +460,17 @@ summarizeSingBoxCompatibilityAudit() {
 
 singBoxCompatibilityAuditOverviewSummary() {
     local statusFile warnFile logFile
-    statusFile=$(singBoxCompatibilityAuditStatusFile)
-    warnFile=$(singBoxCompatibilityAuditWarnFile)
-    logFile=$(singBoxCompatibilityAuditLog)
+    statusFile=$(coreTmpFilePath padm-sing-box-compat-audit.status)
+    warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
+    logFile=$(coreTmpFilePath padm-sing-box-compat-audit.log)
     collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
     summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}"
 }
 
 showSingBoxCompatibilityAudit() {
-    local logFile=${1:-$(singBoxCompatibilityAuditLog)}
-    local statusFile=${2:-$(singBoxCompatibilityAuditStatusFile)}
-    local warnFile=${3:-$(singBoxCompatibilityAuditWarnFile)}
+    local logFile=${1:-$(coreTmpFilePath padm-sing-box-compat-audit.log)}
+    local statusFile=${2:-$(coreTmpFilePath padm-sing-box-compat-audit.status)}
+    local warnFile=${3:-$(coreTmpFilePath padm-sing-box-compat-audit.warn)}
 
     collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
     if singBoxCompatibilityAuditHasFailures "${statusFile}"; then

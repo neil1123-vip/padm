@@ -2014,9 +2014,9 @@ runSingBoxCompatibilityAuditRegression() {
 {"dns":{"servers":[{"address":"local","strategy":"ipv4_only"}],"rules":[{"outbound":"legacy-out"}]},"outbounds":[{"type":"wireguard","tag":"legacy-wg"},{"type":"block","tag":"legacy-block"}],"endpoints":[{"type":"wireguard","tag":"new-endpoint"}]}
 JSON
         local statusFile warnFile logFile
-        statusFile=$(singBoxCompatibilityAuditStatusFile)
-        warnFile=$(singBoxCompatibilityAuditWarnFile)
-        logFile=$(singBoxCompatibilityAuditLog)
+        statusFile=$(coreTmpFilePath padm-sing-box-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
+        logFile=$(coreTmpFilePath padm-sing-box-compat-audit.log)
         collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
         grep -q '^fail:' "${statusFile}"
         grep -q 'old WireGuard outbound' "${logFile}"

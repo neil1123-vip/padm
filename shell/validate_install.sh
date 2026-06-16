@@ -196,13 +196,13 @@ check_sing_box_compatibility_audit() {
     (
         # shellcheck source=/dev/null
         source /etc/padm/shell/core/bootstrap.sh
-        statusFile=$(singBoxCompatibilityAuditStatusFile)
-        warnFile=$(singBoxCompatibilityAuditWarnFile)
-        collectSingBoxCompatibilityFindings "${statusFile}" "$(singBoxCompatibilityAuditLog)" "${warnFile}"
+        statusFile=$(coreTmpFilePath padm-sing-box-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
+        collectSingBoxCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-sing-box-compat-audit.log)" "${warnFile}"
         summary=$(summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}")
         if singBoxCompatibilityAuditHasFailures "${statusFile}"; then
             printf 'WARN:%s\n' "${summary}"
-            printf 'LOG:%s\n' "$(singBoxCompatibilityAuditLog)"
+            printf 'LOG:%s\n' "$(coreTmpFilePath padm-sing-box-compat-audit.log)"
         elif [[ -s "${warnFile}" ]]; then
             printf 'WARN:%s\n' "${summary}"
         else
