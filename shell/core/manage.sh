@@ -544,32 +544,36 @@ manageTraditionalTlsFallback() {
     echoContent title "\n┌─ 传统 TLS fallback 维护 ───────────────────────────"
     menuLine "仅用于传统 TLS fallback / WS / gRPC / Trojan 兼容维护"
     menuLine "Reality Vision / Reality XHTTP 不依赖此处 ALPN 或静态站点"
-    menuItem 1 "更换静态站点" "更换本机 Nginx fallback 页面"
-    menuItem 2 "302 重定向管理" "添加或移除 fallback 根路由重定向"
-    menuItem 3 "ALPN 诊断" "检查 h2 fallback 与 TLS ALPN 是否匹配"
-    menuRecommendedItem 4 "修复为推荐 ALPN" "存在 h2 fallback 时设置 h2,http/1.1"
-    menuItem 5 "手动设置 ALPN" "兼容排障时手动调整 ALPN 顺序"
-    menuReturnItem 6 "返回站点与证书" "回到上级菜单"
+    menuRecommendedItem 1 "重建 fallback 配置" "alone.conf 缺失或不完整时重建 Nginx 承接层"
+    menuItem 2 "更换静态站点" "更换本机 Nginx fallback 页面"
+    menuItem 3 "302 重定向管理" "添加或移除 fallback 根路由重定向"
+    menuItem 4 "ALPN 诊断" "检查 h2 fallback、ALPN 与 Nginx 承接层是否匹配"
+    menuRecommendedItem 5 "修复为推荐 ALPN" "存在 h2 fallback 时设置 h2,http/1.1"
+    menuItem 6 "手动设置 ALPN" "兼容排障时手动调整 ALPN 顺序"
+    menuReturnItem 7 "返回站点与证书" "回到上级菜单"
     menuClose
     autoRead traditional_tls_menu "请选择:" selectTraditionalTlsMenu
 
     case "${selectTraditionalTlsMenu}" in
     1)
-        manageTraditionalTlsStaticSite
+        ensureTraditionalTlsFallbackNginxConfig
         ;;
     2)
-        manageTraditionalTlsRedirect
+        manageTraditionalTlsStaticSite
         ;;
     3)
-        diagnoseTraditionalTlsAlpn
+        manageTraditionalTlsRedirect
         ;;
     4)
-        repairTraditionalTlsAlpn
+        diagnoseTraditionalTlsAlpn
         ;;
     5)
-        setTraditionalTlsAlpnManual
+        repairTraditionalTlsAlpn
         ;;
     6)
+        setTraditionalTlsAlpnManual
+        ;;
+    7)
         siteCertificateMenu
         ;;
     *)
@@ -663,6 +667,9 @@ manageTraditionalTlsRedirect() {
     autoRead nginx_redirect_menu "请选择:" redirectStatus
 
     if [[ "${redirectStatus}" == "1" ]]; then
+        if ! ensureTraditionalTlsFallbackNginxConfig; then
+            return 1
+        fi
         backupNginxConfig backup
         autoRead redirect_domain "请输入要重定向的域名,例如 https://www.baidu.com:" redirectDomain
         if ! removeNginx302 || ! addNginx302 "${redirectDomain}"; then
@@ -685,7 +692,10 @@ manageTraditionalTlsRedirect() {
         fi
         exit 0
     elif [[ "${redirectStatus}" == "2" ]]; then
-        removeNginx302
+        if ! ensureTraditionalTlsFallbackNginxConfig; then
+            return 1
+        fi
+        removeNginx302 || return 1
         successCard "移除302重定向成功"
         exit 0
     elif [[ "${redirectStatus}" == "3" ]]; then
@@ -697,7 +707,7 @@ manageTraditionalTlsRedirect() {
 }
 
 diagnoseTraditionalTlsAlpn() {
-    local configFile currentAlpn hasH2Fallback nginxH2Status
+    local configFile currentAlpn hasH2Fallback nginxH2Status nginxFallbackStatus
     configFile=$(traditionalTlsFallbackConfigFile)
     if [[ ! -f "${configFile}" ]]; then
         statusCard "ALPN 诊断" "未检测到传统 TLS fallback 入站配置"
@@ -715,13 +725,21 @@ diagnoseTraditionalTlsAlpn() {
     else
         nginxH2Status="未检测到"
     fi
+    if [[ -f "${nginxConfigPath}alone.conf" ]]; then
+        nginxFallbackStatus="已检测到"
+    else
+        nginxFallbackStatus="缺失"
+    fi
 
     echoContent title "\n┌─ 传统 TLS ALPN 诊断 ───────────────────────────────"
     menuLine "配置文件：${configFile}"
     menuLine "当前 ALPN：${currentAlpn:-未设置}"
     menuLine "h2 fallback：${hasH2Fallback}"
+    menuLine "Nginx fallback：${nginxFallbackStatus}"
     menuLine "Nginx h2 fallback：${nginxH2Status}"
-    if [[ "${hasH2Fallback}" == "是" && "${currentAlpn}" != "h2,http/1.1" ]]; then
+    if [[ "${nginxFallbackStatus}" == "缺失" ]]; then
+        menuLine "建议：先执行“重建 fallback 配置”恢复 alone.conf"
+    elif [[ "${hasH2Fallback}" == "是" && "${currentAlpn}" != "h2,http/1.1" ]]; then
         menuLine "建议：修复为 h2,http/1.1"
     elif [[ "${hasH2Fallback}" == "是" ]]; then
         menuLine "结论：当前 ALPN 已符合 h2 fallback 推荐顺序"

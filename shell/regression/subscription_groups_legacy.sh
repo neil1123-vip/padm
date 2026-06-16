@@ -5341,6 +5341,28 @@ SH
     [[ ! -e "${targetPath}.tmp" ]]
     [[ ! -e "${targetPath}.bak" ]]
 
+    rm -f "${targetPath}"
+    (
+        local errorLog="${TMP_DIR}/nginx-alone-missing-error.log"
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        if addNginx302 https://missing-alone.example >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ ! -e "${targetPath}" ]]
+        grep -q '请先重建 alone.conf' "${errorLog}"
+    ) || return 1
+
+    currentInstallProtocolType=",0,5,"
+    currentHost=example.com
+    currentPort=443
+    currentPath=padm
+    rm -f "${targetPath}"
+    ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1
+    grep -q 'server_name example.com;' "${targetPath}"
+    grep -q 'location /padmgrpc {' "${targetPath}"
+    grep -q 'listen 127.0.0.1:31300 proxy_protocol;' "${targetPath}"
+
     (
         local serviceLog="${TMP_DIR}/nginx-alone-service.log"
         local errorLog="${TMP_DIR}/nginx-alone-error.log"

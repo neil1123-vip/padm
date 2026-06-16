@@ -740,7 +740,7 @@ updateAloneNginxConfig() {
     local backupPath="${targetPath}.bak"
     local logFile
     ALONE_NGINX_CONFIG_ERROR=
-    [[ -f "${targetPath}" ]] || return 0
+    [[ -f "${targetPath}" ]] || { aloneNginxConfigWriteError "未检测到传统 TLS fallback 配置，请先重建 alone.conf"; return 1; }
     if ! cp "${targetPath}" "${tmpPath}"; then
         aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"
         return 1
@@ -770,6 +770,83 @@ updateAloneNginxConfig() {
     else
         mv "${tmpPath}" "${targetPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
     fi
+}
+
+traditionalTlsFallbackSelection() {
+    local selection=
+    if currentProtocolHas 2; then
+        selection="2"
+    fi
+    if currentProtocolHas 5; then
+        if [[ -n "${selection}" ]]; then
+            selection="${selection},5"
+        else
+            selection="5"
+        fi
+    fi
+    if [[ -z "${selection}" ]]; then
+        selection="0"
+    elif currentProtocolHas 0; then
+        selection="0,${selection}"
+    fi
+    printf '%s\n' "${selection}"
+}
+
+ensureTraditionalTlsFallbackNginxConfig() {
+    local targetPath="${nginxConfigPath}alone.conf"
+    local rebuildSelection=
+    if [[ -z "${coreInstallType:-}" ]]; then
+        readInstallType
+    fi
+    if [[ -z "${currentInstallProtocolType:-}" ]]; then
+        readInstallProtocolType
+    fi
+    if [[ -z "${currentHost:-}" || -z "${currentPath:-}" ]]; then
+        readConfigHostPathUUID
+    fi
+    if [[ -z "${currentPort:-}" ]]; then
+        readCustomPort
+    fi
+    if ! currentProtocolHas 0; then
+        errorCard "未检测到传统 TLS fallback 入站配置"
+        return 1
+    fi
+    rebuildSelection=$(traditionalTlsFallbackSelection)
+    if [[ -z "${domain:-}" ]]; then
+        if [[ -n "${currentHost:-}" ]]; then
+            domain="${currentHost}"
+        else
+            errorCard "未读取到本机 TLS 域名，无法重建 traditional TLS fallback 配置"
+            return 1
+        fi
+    fi
+    if [[ -z "${port:-}" ]]; then
+        if [[ -n "${currentPort:-}" ]]; then
+            port="${currentPort}"
+        else
+            port=443
+        fi
+    fi
+    if protocolSelectionNeedsPath "${rebuildSelection}" && [[ -z "${currentPath:-}" ]]; then
+        errorCard "未读取到传统 TLS 路径，无法重建 alone.conf"
+        return 1
+    fi
+    if [[ -z "${nginxStaticPath:-}" ]]; then
+        errorCard "未检测到传统 TLS fallback 站点目录，无法重建 alone.conf"
+        return 1
+    fi
+    local previousSelection="${selectCustomInstallType:-}"
+    selectCustomInstallType="${rebuildSelection}"
+    if ! updateRedirectNginxConf; then
+        selectCustomInstallType="${previousSelection}"
+        return 1
+    fi
+    selectCustomInstallType="${previousSelection}"
+    if ! runCoreServiceActionAllowFailure handleNginx start; then
+        errorCard "Nginx 启动失败，traditional TLS fallback 配置已写入但未生效"
+        return 1
+    fi
+    successCard "传统 TLS fallback 配置已重建"
 }
 
 removeNginx302FromFile() {
