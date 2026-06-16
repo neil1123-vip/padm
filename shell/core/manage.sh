@@ -1127,6 +1127,7 @@ removeInstallPath() {
     local targetPath=$1
     local description=$2
     local attempt
+    local -a removeArgs
 
     if ! padmIsSafeAbsolutePath "${targetPath}"; then
         errorCard "${description}路径异常，已终止: ${targetPath}"
@@ -1137,8 +1138,14 @@ removeInstallPath() {
         return 0
     fi
 
+    if [[ -d "${targetPath}" && ! -L "${targetPath}" ]]; then
+        removeArgs=(-rf "${targetPath}")
+    else
+        removeArgs=(-f -- "${targetPath}")
+    fi
+
     for attempt in 1 2 3; do
-        if rm -rf "${targetPath}"; then
+        if rm "${removeArgs[@]}"; then
             if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
                 return 0
             fi

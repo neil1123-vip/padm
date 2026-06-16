@@ -1340,10 +1340,14 @@ runRemoveInstallPathRetryRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
 
-        local root="${TMP_DIR}/remove-install-path-retry"
-        local target="${root}/target"
-        local attemptsFile="${root}/attempts.log"
-        mkdir -p "${target}/child"
+        local rootRel="${TMP_DIR}/remove-install-path-retry"
+        local root
+        local target
+        local attemptsFile
+        mkdir -p "${rootRel}/target/child"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        target="${root}/target"
+        attemptsFile="${root}/attempts.log"
         printf 'data\n' >"${target}/child/file"
         : >"${attemptsFile}"
 
@@ -1367,16 +1371,49 @@ runRemoveInstallPathRetryRegression() {
     )
 }
 
+runRemoveInstallPathFileModeRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local rootRel="${TMP_DIR}/remove-install-path-file-mode"
+        local root
+        local target
+        local rmLog
+        mkdir -p "${rootRel}"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        target="${root}/target.service"
+        rmLog="${root}/rm.log"
+        printf 'unit\n' >"${target}"
+        : >"${rmLog}"
+
+        rm() {
+            printf '%s\n' "$*" >>"${rmLog}"
+            command rm "$@"
+        }
+
+        removeInstallPath "${target}" "服务文件"
+        [[ ! -e "${target}" ]]
+        grep -qxF -- "-f -- ${target}" "${rmLog}"
+        ! grep -q -- "-rf ${target}" "${rmLog}"
+    )
+}
+
 runRemoveInstallPathSafetyRegression() {
     (
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
-        local root="${TMP_DIR}/remove-install-path-safety"
-        local safeTarget="${root}/safe-target"
-        local errorLog="${root}/errors.log"
+        local rootRel="${TMP_DIR}/remove-install-path-safety"
+        local root
+        local safeTarget
+        local errorLog
         local status
-        mkdir -p "${safeTarget}" "${root}/cwd"
+        mkdir -p "${rootRel}/safe-target" "${rootRel}/cwd"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        safeTarget="${root}/safe-target"
+        errorLog="${root}/errors.log"
         printf 'safe\n' >"${safeTarget}/file"
         printf 'keep\n' >"${root}/cwd/sentinel"
         : >"${errorLog}"
@@ -2732,6 +2769,7 @@ runRegressionFast() {
         runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
+        runRegressionStep remove-install-path-file-mode runRemoveInstallPathFileModeRegression &&
         runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression &&
         runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression &&
         runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression &&
