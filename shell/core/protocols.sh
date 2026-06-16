@@ -133,19 +133,9 @@ protocolSelectionNeedsTLS() {
     protocolSelectionHasCapability "${selection}" "needs_tls"
 }
 
-protocolSelectionNeedsNginx() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_nginx"
-}
-
 protocolSelectionNeedsPath() {
     local selection=$1
     protocolSelectionHasCapability "${selection}" "needs_path"
-}
-
-protocolSelectionNeedsReality() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_reality"
 }
 
 protocolSelectionNeedsCertificate() {
@@ -156,39 +146,6 @@ protocolSelectionNeedsCertificate() {
 protocolSelectionNeedsLocalCertificate() {
     local selection=$1
     protocolSelectionNeedsCertificate "${selection}" || [[ -n "${realityOnlyWithDomain:-}" ]]
-}
-
-protocolSelectionNeedsUdp() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_udp"
-}
-
-protocolSelectionTransportHas() {
-    local selection=$1
-    local transport=$2
-    local protocolId
-    selection=",${selection// /},"
-    selection=${selection//,,/,}
-    while IFS='|' read -r protocolId _ _ _; do
-        if [[ "${selection}" == *",${protocolId},"* && "$(protocolMeta "${protocolId}" transport 2>/dev/null)" == "${transport}" ]]; then
-            return 0
-        fi
-    done < <(xray_protocol_registry)
-    return 1
-}
-
-protocolSelectionSecurityHas() {
-    local selection=$1
-    local security=$2
-    local protocolId
-    selection=",${selection// /},"
-    selection=${selection//,,/,}
-    while IFS='|' read -r protocolId _ _ _; do
-        if [[ "${selection}" == *",${protocolId},"* && "$(protocolMeta "${protocolId}" security 2>/dev/null)" == "${security}" ]]; then
-            return 0
-        fi
-    done < <(xray_protocol_registry)
-    return 1
 }
 
 xrayProtocolIdByFilename() {
@@ -205,11 +162,6 @@ protocolStateAdd() {
     if [[ ",${currentInstallProtocolType}" != *",${protocolId},"* ]]; then
         currentInstallProtocolType="${currentInstallProtocolType}${protocolId},"
     fi
-}
-
-xrayProtocolFilename() {
-    local protocolId=$1
-    xray_protocol_registry | awk -F'|' -v id="$protocolId" '$1 == id { print $2 }'
 }
 
 xrayProtocolName() {
@@ -253,16 +205,6 @@ xrayEnabledProtocolDisplayList() {
         fi
     done < <(xray_protocol_registry)
     echo "${protocolList}"
-}
-
-xrayProtocolMenuLine() {
-    local protocolId=$1
-    local entry
-    entry=$(xray_protocol_registry | awk -F'|' -v id="$protocolId" '$1 == id { print }')
-    [[ -n "$entry" ]] || return 1
-    local name
-    name=$(printf '%s' "$entry" | awk -F'|' '{print $3}')
-    echo "${protocolId}|${name}"
 }
 
 protocolMenuDescription() {

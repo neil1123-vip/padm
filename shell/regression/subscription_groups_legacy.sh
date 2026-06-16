@@ -6977,11 +6977,11 @@ runRuntimeAndRealityRegression() {
     [[ "${tlsSNI}" == "tls.example.com" ]]
     protocolMeta 7 security | grep -qx reality
     protocolMeta 7 transport | grep -qx tcp
-    protocolSelectionNeedsReality 7
+    protocolSelectionHasCapability 7 needs_reality
     protocolSelectionNeedsCertificate 0
-    protocolSelectionNeedsUdp 6
-    protocolSelectionTransportHas 7 tcp
-    protocolSelectionSecurityHas 7 reality
+    protocolSelectionHasCapability 6 needs_udp
+    [[ "$(protocolMeta 7 transport)" == "tcp" ]]
+    [[ "$(protocolMeta 7 security)" == "reality" ]]
 
     parseInstallArgs --install-type custom --core xray --protocols 7 --domain node.example.com --reality-target www.microsoft.com:443 --reality-server-name www.microsoft.com --entry-host node.example.com --reuse-last no
     [[ "${AUTO_REALITY_TARGET}" == "www.microsoft.com:443" ]]
