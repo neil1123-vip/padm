@@ -375,17 +375,6 @@ singBoxCompatibilityAuditWarnFile() {
     coreTmpFilePath padm-sing-box-compat-audit.warn
 }
 
-singBoxCompatibilityConfigFiles() {
-    local mergedFile shardDir file
-    mergedFile=$(singBoxMergedConfigFile)
-    shardDir=$(singBoxConfigShardDir)
-    [[ -f "${mergedFile}" ]] && printf '%s\n' "${mergedFile}"
-    for file in "${shardDir}"*.json; do
-        [[ -f "${file}" ]] || continue
-        printf '%s\n' "${file}"
-    done
-}
-
 singBoxCompatibilityAuditReset() {
     : >"${1}"
 }
@@ -466,6 +455,7 @@ collectSingBoxCompatibilityFindings() {
     local logFile=$2
     local warnFile=$3
     local file foundJson=false
+    local mergedFile shardDir
 
     singBoxCompatibilityAuditReset "${statusFile}"
     singBoxCompatibilityAuditReset "${warnFile}"
@@ -481,11 +471,19 @@ collectSingBoxCompatibilityFindings() {
         return 0
     fi
 
+    mergedFile=$(singBoxMergedConfigFile)
+    shardDir=$(singBoxConfigShardDir)
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
         foundJson=true
         singBoxCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}"
-    done < <(singBoxCompatibilityConfigFiles)
+    done < <(
+        [[ -f "${mergedFile}" ]] && printf '%s\n' "${mergedFile}"
+        for file in "${shardDir}"*.json; do
+            [[ -f "${file}" ]] || continue
+            printf '%s\n' "${file}"
+        done
+    )
 
     if [[ "${foundJson}" != "true" ]]; then
         singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件"
@@ -623,12 +621,6 @@ xrayCompatibilityAuditWarnFile() {
     coreTmpFilePath padm-xray-compat-audit.warn
 }
 
-xrayCompatibilityConfigFiles() {
-    local configDir
-    configDir=$(coreXrayConfigDir)
-    find "${configDir}" -maxdepth 1 -type f -name '*.json' | sort
-}
-
 xrayCompatibilityAuditReset() {
     : >"${1}"
 }
@@ -714,6 +706,7 @@ collectXrayCompatibilityFindings() {
     local logFile=$2
     local warnFile=$3
     local file foundJson=false
+    local configDir
 
     xrayCompatibilityAuditReset "${statusFile}"
     xrayCompatibilityAuditReset "${warnFile}"
@@ -729,11 +722,12 @@ collectXrayCompatibilityFindings() {
         return 0
     fi
 
+    configDir=$(coreXrayConfigDir)
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
         foundJson=true
         xrayCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" "${warnFile}"
-    done < <(xrayCompatibilityConfigFiles)
+    done < <(find "${configDir}" -maxdepth 1 -type f -name '*.json' | sort)
 
     if [[ "${foundJson}" != "true" ]]; then
         xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 Xray JSON 配置文件"
