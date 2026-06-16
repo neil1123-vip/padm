@@ -68,19 +68,14 @@ sniRouting() {
     esac
 }
 
-dnsRoutingBackupDir() {
-    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
-        printf '%s\n' "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        return 0
-    fi
-    local tmpBase="${TMPDIR:-/tmp}"
-    printf '%s\n' "${tmpBase%/}/padm-dns-routing-backup"
-}
-
 dnsRoutingBackupCreate() {
     local backupDir
     local singBoxFile
-    backupDir=$(dnsRoutingBackupDir)
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
+    else
+        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+    fi
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
     if [[ -n "${configPath:-}" && -f "${configPath}11_dns.json" ]]; then
@@ -97,7 +92,11 @@ dnsRoutingBackupCreate() {
 dnsRoutingBackupRestore() {
     local backupDir
     local status=0
-    backupDir=$(dnsRoutingBackupDir)
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
+    else
+        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+    fi
     [[ -d "${backupDir}" ]] || return 1
     if [[ -n "${configPath:-}" ]]; then
         rm -f "${configPath}11_dns.json" >/dev/null 2>&1 || status=1
@@ -115,15 +114,27 @@ dnsRoutingBackupRestore() {
 }
 
 dnsRoutingBackupCleanup() {
-    rm -rf "$(dnsRoutingBackupDir)" >/dev/null 2>&1 || return 1
+    local backupDir
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
+    else
+        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+    fi
+    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
 }
 
 dnsRoutingAbortChange() {
     local reason=$1
-    if dnsRoutingBackupRestore; then
-        dnsRoutingBackupCleanup || errorCard "${reason}，旧配置已恢复，但备份目录清理失败: $(dnsRoutingBackupDir)"
+    local backupDir
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
     else
-        errorCard "${reason}，且旧配置恢复失败，请手动检查备份目录: $(dnsRoutingBackupDir)"
+        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+    fi
+    if dnsRoutingBackupRestore; then
+        dnsRoutingBackupCleanup || errorCard "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}"
+    else
+        errorCard "${reason}，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
     fi
     return 1
 }
@@ -131,7 +142,11 @@ dnsRoutingAbortChange() {
 dnsRoutingReloadOrRollback() {
     local title=$1
     local backupDir
-    backupDir=$(dnsRoutingBackupDir)
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
+    else
+        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+    fi
     if reloadCore; then
         dnsRoutingBackupCleanup || errorCard "${title}已应用，但备份目录清理失败: ${backupDir}"
         return 0
