@@ -1412,6 +1412,48 @@ runInitSubscribeLocalConfigCleansAllFormatsRegression() {
     )
 }
 
+runSubscriptionSyncPathSafetyRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/subscription-sync-path-safety"
+        local safeSource="${root}/safe-source"
+        local safeLocal="${root}/safe-local"
+        local safePublic="${root}/safe-public"
+        local backupDir
+        local status
+
+        mkdir -p "${safeSource}" "${safeLocal}/default" "${safeLocal}/clashMeta" "${safeLocal}/sing-box" "${safePublic}/default"
+        printf 'safe\n' >"${safeSource}/file"
+        printf 'local\n' >"${safeLocal}/default/user"
+        printf 'public\n' >"${safePublic}/default/user"
+
+        set +e
+        subscriptionSyncBackupPath "relative-source" "${root}/backup" local
+        status=$?
+        set -e
+        [[ "${status}" -ne 0 ]]
+
+        padmCreateTempPath backupDir -d "${TMP_DIR}/subscription-sync-path-safety-backup.XXXXXX"
+        printf 'dir\n' >"${backupDir}/local.exists"
+        mkdir -p "${backupDir}/local/default"
+        printf 'backup\n' >"${backupDir}/local/default/user"
+
+        set +e
+        subscriptionSyncRestoreBackupPath "relative-target" "${backupDir}" local
+        status=$?
+        set -e
+        [[ "${status}" -ne 0 ]]
+
+        PADM_SUBSCRIBE_LOCAL_DIR="${safeLocal}"
+        PADM_SUBSCRIBE_DIR="${safePublic}"
+        backupDir=$(subscriptionSyncCreateSubscribeOutputBackups)
+        [[ -d "${backupDir}" ]]
+        padmRemoveCleanupPath "${backupDir}"
+    )
+}
+
 runShowAccountsXrayWithSingBoxAssistRegression() {
     (
         set -euo pipefail
@@ -2079,6 +2121,7 @@ runRegressionFast() {
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression &&
+        runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&

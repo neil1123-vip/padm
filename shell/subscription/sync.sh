@@ -342,7 +342,7 @@ subscriptionSyncBackupPath() {
     local targetBackup="${backupDir}/${label}"
     local marker="${backupDir}/${label}.exists"
 
-    [[ -n "${sourcePath}" && "${sourcePath}" != "." && "${sourcePath}" != "/" ]] || return 1
+    padmIsSafeAbsolutePath "${sourcePath}" || return 1
     if [[ -d "${sourcePath}" ]]; then
         printf 'dir\n' >"${marker}" || return 1
         mkdir -p "${targetBackup}" || return 1
@@ -367,7 +367,7 @@ subscriptionSyncRestoreBackupPath() {
     local rollbackDir
     local rollbackPath
 
-    [[ -n "${targetPath}" && "${targetPath}" != "." && "${targetPath}" != "/" ]] || return 1
+    padmIsSafeAbsolutePath "${targetPath}" || return 1
     [[ -f "${marker}" ]] || return 1
     state=$(<"${marker}")
     case "${state}" in
