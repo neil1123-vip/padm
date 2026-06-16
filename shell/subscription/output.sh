@@ -42,15 +42,11 @@ serializeVlessRealityGrpcLink() {
     printf 'vless://%s@%s:%s?encryption=none&security=reality&pqv=%s&type=grpc&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#%s' "${id}" "${entryHost}" "${port}" "${pqv}" "${sni}" "${publicKey}" "${email}"
 }
 
-xrayRealityXHTTPConfigFile() {
-    printf '%s12_VLESS_XHTTP_inbounds.json' "${configPath:-/etc/padm/xray/conf/}"
-}
-
 xrayRealityXHTTPSetting() {
     local key=$1
     local fallback=$2
     local configFile value
-    configFile=$(xrayRealityXHTTPConfigFile)
+    configFile="${configPath:-/etc/padm/xray/conf/}12_VLESS_XHTTP_inbounds.json"
     if [[ -f "${configFile}" ]]; then
         value=$(jq -r ".inbounds[0].streamSettings.xhttpSettings.${key} // empty" "${configFile}" 2>/dev/null)
     fi
