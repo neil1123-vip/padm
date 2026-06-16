@@ -1023,21 +1023,17 @@ clearSubscriptionSourceSyncErrorMenu() {
     successCard "同步错误已清除"
 }
 
-removeSubscriptionGroupSyncCron() {
-    local cronFile
-    local currentCron
-    cronFile=$(subscriptionGroupSyncCronFile)
-    mkdir -p "$(dirname "${cronFile}")"
-    currentCron=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
-    installUserCrontabContent "${currentCron}"
-}
-
 refreshSubscriptionGroupSyncCron() {
     ensureSubscriptionGroupsState
     if subscriptionGroupSyncEnabled; then
         installSubscriptionGroupSyncCron
     else
-        removeSubscriptionGroupSyncCron
+        local cronFile
+        local currentCron
+        cronFile=$(subscriptionGroupSyncCronFile)
+        mkdir -p "$(dirname "${cronFile}")"
+        currentCron=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
+        installUserCrontabContent "${currentCron}"
     fi
 }
 
