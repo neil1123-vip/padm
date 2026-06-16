@@ -1032,29 +1032,6 @@ setSubscriptionSourceControlTokenMenu() {
     successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Peer 公钥和 Token 已保存，可继续测试被控连接"
 }
 
-toggleSubscriptionSourceMenu() {
-    subscriptionRequireMainRole || return 1
-    local sourceId=
-    local sourceAction=
-    listSubscriptionSources | awk -F ':' '$3 != "main" {print $1":"$2":启用="$7}'
-    autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
-    if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
-        errorCard "服务器源 ID 无效"
-        return 1
-    fi
-    autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
-    if [[ "${sourceAction}" == "enable" ]]; then
-        setSubscriptionSourceEnabled "${sourceId}" true
-        successCard "被控服务器已启用"
-    elif [[ "${sourceAction}" == "disable" ]]; then
-        setSubscriptionSourceEnabled "${sourceId}" false
-        successCard "被控服务器已停用"
-    else
-        errorCard "操作无效"
-        return 1
-    fi
-}
-
 clearSubscriptionSourceSyncErrorMenu() {
     subscriptionRequireMainRole || return 1
     local sourceId=

@@ -396,17 +396,6 @@ removeSubscriptionSourceState() {
       else . end)'
 }
 
-setSubscriptionSourceControlToken() {
-    local id=$1
-    local token=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg token "${token}" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)
-      else . end)'
-}
-
 setSubscriptionSourceCredential() {
     local id=$1
     local host=$2

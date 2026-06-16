@@ -820,10 +820,6 @@ showSubscriptionWireGuardPeers() {
     subscriptionWireGuardReadState | jq -r '.peers[]? | "ID:\(.id)\n名称:\(.name)\n内网地址:\(.address)\n启用:\(.enabled)\n---"'
 }
 
-testSubscriptionWireGuardControl() {
-    showSubscriptionRemoteHealthPlan
-}
-
 restartSubscriptionWireGuardControl() {
     installSubscriptionControlService || {
         errorCard "订阅控制服务安装失败"

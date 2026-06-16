@@ -1113,9 +1113,10 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(check_apt_update)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/validate_install.sh"
             awk '/^(check_nginx)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/validate_install.sh"
             awk '/^(subscriptionRequireMainFeatures)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
-            awk '/^(subscriptionMainFeaturesAvailable|remoteSubscribeFile)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
+            awk '/^(subscriptionMainFeaturesAvailable|remoteSubscribeFile|toggleSubscriptionSourceMenu)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
             awk '/^(showUserSubscriptionQuota)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/traffic.sh"
-            awk '/^(setSubscriptionSources)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/groups.sh"
+            awk '/^(setSubscriptionSources|setSubscriptionSourceControlToken)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/groups.sh"
+            awk '/^(testSubscriptionWireGuardControl)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
             awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
         } | awk '{ sum += $1 } END { print sum + 0 }'
     )

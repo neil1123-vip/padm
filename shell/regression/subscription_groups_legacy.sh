@@ -7976,7 +7976,7 @@ JSON
     fi
 
     addSubscriptionSourceState remote-edge remote-edge "10.77.0.2" 39778
-    setSubscriptionSourceControlToken remote-edge "token-abc"
+    setSubscriptionSourceCredential remote-edge "10.77.0.2" 39778 "token-abc"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
@@ -10338,9 +10338,8 @@ edge-a
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
 
     resetMenuActions
-    toggleSubscriptionSourceMenu() {
+    applySubscriptionSourceToggleFixture() {
         subscriptionRequireMainRole || return 1
-        recordMenuAction toggleSubscriptionSourceMenu
         local sourceId=
         local sourceAction=
         autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
@@ -10354,11 +10353,11 @@ edge-a
         fi
     }
     resetMenuActions
-    toggleSubscriptionSourceMenu <<<"edge-a
+    applySubscriptionSourceToggleFixture <<<"edge-a
 disable"
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
     resetMenuActions
-    toggleSubscriptionSourceMenu <<<"edge-a
+    applySubscriptionSourceToggleFixture <<<"edge-a
 enable"
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
     setSubscriptionSourceSyncFailure edge-a remote_error old-error
@@ -10557,17 +10556,6 @@ runMenuSmokeRegression() {
     local serviceQueueShouldFail=
     local wgChoice
     local wgAction
-    local wgActions=(
-        "1:initSubscriptionWireGuardMain"
-        "2:initSubscriptionWireGuardControlled"
-        "3:showSubscriptionWireGuardMainCredential"
-        "4:importSubscriptionWireGuardMainCredential"
-        "5:showSubscriptionWireGuardControlledCredential"
-        "6:showSubscriptionWireGuardPeers"
-        "7:testSubscriptionWireGuardControl"
-        "8:restartSubscriptionWireGuardControl"
-        "9:disableSubscriptionWireGuardControl"
-    )
     coreInstallType=${coreInstallType:-}
 
     recordMenuAction() {
@@ -10651,7 +10639,6 @@ runMenuSmokeRegression() {
         }
     }
     showSubscriptionWireGuardPeers() { recordMenuAction showSubscriptionWireGuardPeers; }
-    testSubscriptionWireGuardControl() { recordMenuAction testSubscriptionWireGuardControl; }
     restartSubscriptionWireGuardControl() { recordMenuAction restartSubscriptionWireGuardControl; }
     disableSubscriptionWireGuardControl() { recordMenuAction disableSubscriptionWireGuardControl; }
     showSubscriptionWireGuardStatus() { recordMenuAction showSubscriptionWireGuardStatus; }
@@ -10697,9 +10684,8 @@ runMenuSmokeRegression() {
         subscriptionRequireMainRole || return 1
         recordMenuAction setSubscriptionSourceControlTokenMenu
     }
-    toggleSubscriptionSourceMenu() {
+    assertToggleSubscriptionSourceMenuRequiresMainRole() {
         subscriptionRequireMainRole || return 1
-        recordMenuAction toggleSubscriptionSourceMenu
     }
     clearSubscriptionSourceSyncErrorMenu() {
         subscriptionRequireMainRole || return 1
@@ -11091,7 +11077,7 @@ main-credential
     setSubscriptionSourceControlTokenMenu <<<"" || true
     assertMenuAction 'errorCard:当前机器已初始化为被控'
     resetMenuActions
-    toggleSubscriptionSourceMenu <<<"" || true
+    assertToggleSubscriptionSourceMenuRequiresMainRole <<<"" || true
     assertMenuAction 'errorCard:当前机器已初始化为被控'
     resetMenuActions
     clearSubscriptionSourceSyncErrorMenu <<<"" || true

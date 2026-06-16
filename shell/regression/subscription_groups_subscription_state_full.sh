@@ -228,7 +228,7 @@ JSON
 runSubscriptionGroupStateStructureSourceCredentialRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceCredentialFixture
-    setSubscriptionSourceControlToken remote-edge "token-abc"
+    setSubscriptionSourceCredential remote-edge "10.77.0.2" 39778 "token-abc"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
