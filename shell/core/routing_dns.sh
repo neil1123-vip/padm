@@ -84,19 +84,41 @@ dnsRoutingSafeBackupDir() {
     printf '%s\n' "${backupDir%/}"
 }
 
+dnsRoutingSafeXrayConfigDir() {
+    [[ -n "${configPath:-}" ]] || return 1
+    padmIsSafeAbsolutePath "${configPath%/}" || return 1
+    printf '%s\n' "${configPath%/}/"
+}
+
+dnsRoutingSafeSingBoxConfigDir() {
+    [[ -n "${singBoxConfigPath:-}" ]] || return 1
+    padmIsSafeAbsolutePath "${singBoxConfigPath%/}" || return 1
+    printf '%s\n' "${singBoxConfigPath%/}/"
+}
+
 dnsRoutingBackupCreate() {
     local backupDir
     local singBoxFile
+    local xrayConfigDir=
+    local singBoxConfigDir=
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
+    [[ -n "${configPath:-}" ]] && xrayConfigDir=$(dnsRoutingSafeXrayConfigDir) || true
+    [[ -n "${singBoxConfigPath:-}" ]] && singBoxConfigDir=$(dnsRoutingSafeSingBoxConfigDir) || true
+    if [[ -n "${configPath:-}" && -z "${xrayConfigDir}" ]]; then
+        return 1
+    fi
+    if [[ -n "${singBoxConfigPath:-}" && -z "${singBoxConfigDir}" ]]; then
+        return 1
+    fi
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
-    if [[ -n "${configPath:-}" && -f "${configPath}11_dns.json" ]]; then
-        cp "${configPath}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
+    if [[ -n "${xrayConfigDir}" && -f "${xrayConfigDir}11_dns.json" ]]; then
+        cp "${xrayConfigDir}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
     fi
-    if [[ -n "${singBoxConfigPath:-}" ]]; then
+    if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r singBoxFile; do
             cp "${singBoxFile}" "${backupDir}/sing-box/$(basename -- "${singBoxFile}")" || return 1
-        done < <(find "${singBoxConfigPath}" -maxdepth 1 -type f -name '*.json' | sort)
+        done < <(find "${singBoxConfigDir}" -maxdepth 1 -type f -name '*.json' | sort)
     fi
     return 0
 }
@@ -104,18 +126,28 @@ dnsRoutingBackupCreate() {
 dnsRoutingBackupRestore() {
     local backupDir
     local status=0
+    local xrayConfigDir=
+    local singBoxConfigDir=
     backupDir=$(dnsRoutingBackupDir)
     [[ -d "${backupDir}" ]] || return 1
-    if [[ -n "${configPath:-}" ]]; then
-        rm -f "${configPath}11_dns.json" >/dev/null 2>&1 || status=1
+    [[ -n "${configPath:-}" ]] && xrayConfigDir=$(dnsRoutingSafeXrayConfigDir) || true
+    [[ -n "${singBoxConfigPath:-}" ]] && singBoxConfigDir=$(dnsRoutingSafeSingBoxConfigDir) || true
+    if [[ -n "${configPath:-}" && -z "${xrayConfigDir}" ]]; then
+        return 1
+    fi
+    if [[ -n "${singBoxConfigPath:-}" && -z "${singBoxConfigDir}" ]]; then
+        return 1
+    fi
+    if [[ -n "${xrayConfigDir}" ]]; then
+        rm -f "${xrayConfigDir}11_dns.json" >/dev/null 2>&1 || status=1
         if [[ -f "${backupDir}/xray/11_dns.json" ]]; then
-            cp "${backupDir}/xray/11_dns.json" "${configPath}11_dns.json" || status=1
+            cp "${backupDir}/xray/11_dns.json" "${xrayConfigDir}11_dns.json" || status=1
         fi
     fi
-    if [[ -n "${singBoxConfigPath:-}" ]]; then
-        find "${singBoxConfigPath}" -maxdepth 1 -type f -name '*.json' -delete >/dev/null 2>&1 || status=1
+    if [[ -n "${singBoxConfigDir}" ]]; then
+        find "${singBoxConfigDir}" -maxdepth 1 -type f -name '*.json' -delete >/dev/null 2>&1 || status=1
         if compgen -G "${backupDir}/sing-box/*.json" >/dev/null; then
-            cp "${backupDir}/sing-box/"*.json "${singBoxConfigPath}" || status=1
+            cp "${backupDir}/sing-box/"*.json "${singBoxConfigDir}" || status=1
         fi
     fi
     return "${status}"

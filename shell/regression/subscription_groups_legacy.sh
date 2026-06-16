@@ -688,6 +688,40 @@ runAccessControlRejectsUnsafeBackupDirRegression() (
     [[ ! -s "${rmLog}" ]]
 )
 
+runAccessControlRejectsUnsafeConfigDirRegression() (
+    local root="${TMP_DIR}/access-control-unsafe-config"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}/unsafe-config"
+    : >"${rmLog}"
+    configPath="relative-config/"
+    singBoxConfigPath=
+    PADM_ACCESS_CONTROL_BACKUP_DIR="${root}/backup"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    accessControlBackupCreate >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -e "${PADM_ACCESS_CONTROL_BACKUP_DIR}" ]]
+
+    mkdir -p "${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray"
+    printf 'old\n' >"${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray/09_routing.json"
+    set +e
+    accessControlBackupRestore >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+)
+
 runBTRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/bt-routing-failure"
     local installMarker="${root}/install"
@@ -1651,6 +1685,40 @@ runDNSRoutingRejectsUnsafeBackupDirRegression() (
 
     set +e
     dnsRoutingBackupCleanup >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+)
+
+runDNSRoutingRejectsUnsafeConfigDirRegression() (
+    local root="${TMP_DIR}/dns-routing-unsafe-config"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${rmLog}"
+    configPath="relative-config/"
+    singBoxConfigPath=
+    PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    dnsRoutingBackupCreate >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+
+    mkdir -p "${PADM_DNS_ROUTING_BACKUP_DIR}/xray"
+    printf 'old\n' >"${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json"
+    set +e
+    dnsRoutingBackupRestore >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
@@ -13138,12 +13206,14 @@ runRegressionRouting() {
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-access-control-config-transaction runAccessControlConfigTransactionRegression
     runRegressionStep routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
+    runRegressionStep routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
     runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
     runRegressionStep routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
     runRegressionStep routing-warp-failure-return runWARPRoutingFailureReturnRegression
     runRegressionStep routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
     runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
     runRegressionStep routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
+    runRegressionStep routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
     runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }

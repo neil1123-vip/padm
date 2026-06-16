@@ -363,6 +363,18 @@ accessControlSafeBackupDir() {
     printf '%s\n' "${backupDir%/}"
 }
 
+accessControlSafeXrayConfigDir() {
+    [[ -n "${configPath:-}" ]] || return 1
+    padmIsSafeAbsolutePath "${configPath%/}" || return 1
+    printf '%s\n' "${configPath%/}/"
+}
+
+accessControlSafeSingBoxConfigDir() {
+    [[ -n "${singBoxConfigPath:-}" ]] || return 1
+    padmIsSafeAbsolutePath "${singBoxConfigPath%/}" || return 1
+    printf '%s\n' "${singBoxConfigPath%/}/"
+}
+
 accessControlXrayTestLog() {
     if declare -F padmTmpFilePath >/dev/null 2>&1; then
         padmTmpFilePath padm-access-xray-test.log
@@ -383,20 +395,30 @@ accessControlSingBoxTestLog() {
 
 accessControlBackupCreate() {
     local backupDir
+    local xrayConfigDir=
+    local singBoxConfigDir=
     backupDir=$(accessControlSafeBackupDir) || return 1
+    [[ -n "${configPath:-}" ]] && xrayConfigDir=$(accessControlSafeXrayConfigDir) || true
+    [[ -n "${singBoxConfigPath:-}" ]] && singBoxConfigDir=$(accessControlSafeSingBoxConfigDir) || true
+    if [[ -n "${configPath:-}" && -z "${xrayConfigDir}" ]]; then
+        return 1
+    fi
+    if [[ -n "${singBoxConfigPath:-}" && -z "${singBoxConfigDir}" ]]; then
+        return 1
+    fi
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
-    if [[ -n "${configPath}" ]]; then
+    if [[ -n "${xrayConfigDir}" ]]; then
         for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
-            if [[ -f "${configPath}${file}" ]]; then
-                cp "${configPath}${file}" "${backupDir}/xray/${file}" || return 1
+            if [[ -f "${xrayConfigDir}${file}" ]]; then
+                cp "${xrayConfigDir}${file}" "${backupDir}/xray/${file}" || return 1
             fi
         done
     fi
-    if [[ -n "${singBoxConfigPath}" ]]; then
+    if [[ -n "${singBoxConfigDir}" ]]; then
         for file in block_domain_route.json block_domain_outbound.json block_ip_route.json block_ip_outbound.json cn_block_route.json cn_block_outbound.json cn_block_ip_route.json 00_allow_domain_route.json 01_direct_outbound.json; do
-            if [[ -f "${singBoxConfigPath}${file}" ]]; then
-                cp "${singBoxConfigPath}${file}" "${backupDir}/sing-box/${file}" || return 1
+            if [[ -f "${singBoxConfigDir}${file}" ]]; then
+                cp "${singBoxConfigDir}${file}" "${backupDir}/sing-box/${file}" || return 1
             fi
         done
     fi
@@ -406,21 +428,31 @@ accessControlBackupCreate() {
 accessControlBackupRestore() {
     local backupDir
     local status=0
+    local xrayConfigDir=
+    local singBoxConfigDir=
     backupDir=$(accessControlBackupDir)
     [[ -d "${backupDir}" ]] || return 1
-    if [[ -n "${configPath}" ]]; then
+    [[ -n "${configPath:-}" ]] && xrayConfigDir=$(accessControlSafeXrayConfigDir) || true
+    [[ -n "${singBoxConfigPath:-}" ]] && singBoxConfigDir=$(accessControlSafeSingBoxConfigDir) || true
+    if [[ -n "${configPath:-}" && -z "${xrayConfigDir}" ]]; then
+        return 1
+    fi
+    if [[ -n "${singBoxConfigPath:-}" && -z "${singBoxConfigDir}" ]]; then
+        return 1
+    fi
+    if [[ -n "${xrayConfigDir}" ]]; then
         for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
-            rm -f "${configPath}${file}" >/dev/null 2>&1 || status=1
+            rm -f "${xrayConfigDir}${file}" >/dev/null 2>&1 || status=1
             if [[ -f "${backupDir}/xray/${file}" ]]; then
-                cp "${backupDir}/xray/${file}" "${configPath}${file}" || status=1
+                cp "${backupDir}/xray/${file}" "${xrayConfigDir}${file}" || status=1
             fi
         done
     fi
-    if [[ -n "${singBoxConfigPath}" ]]; then
+    if [[ -n "${singBoxConfigDir}" ]]; then
         for file in block_domain_route.json block_domain_outbound.json block_ip_route.json block_ip_outbound.json cn_block_route.json cn_block_outbound.json cn_block_ip_route.json 00_allow_domain_route.json 01_direct_outbound.json; do
-            rm -f "${singBoxConfigPath}${file}" >/dev/null 2>&1 || status=1
+            rm -f "${singBoxConfigDir}${file}" >/dev/null 2>&1 || status=1
             if [[ -f "${backupDir}/sing-box/${file}" ]]; then
-                cp "${backupDir}/sing-box/${file}" "${singBoxConfigPath}${file}" || status=1
+                cp "${backupDir}/sing-box/${file}" "${singBoxConfigDir}${file}" || status=1
             fi
         done
     fi
