@@ -481,10 +481,24 @@ check1Panel() {
 
 
 
+cleanCoreInstallDirectory() {
+    local targetDir=$1
+    local description=$2
+    if ! padmIsSafeAbsolutePath "${targetDir}"; then
+        errorCard "${description}路径异常，已取消清理"
+        return 1
+    fi
+    cleanDirectoryContent "${targetDir}" || { errorCard "${description}文件清理失败"; return 1; }
+}
+
 # 卸载 sing-box
 unInstallSingBox() {
     local type=${1:-}
     if [[ -n "${singBoxConfigPath}" ]]; then
+        if ! padmIsSafeAbsolutePath "${singBoxConfigPath%/}"; then
+            errorCard "sing-box 配置路径异常，已取消卸载"
+            return 1
+        fi
         if grep -q 'tuic' </etc/padm/sing-box/conf/config.json && [[ "${type}" == "tuic" ]]; then
             rm "${singBoxConfigPath}09_tuic_inbounds.json"
             successCard "删除sing-box tuic配置成功"
@@ -509,7 +523,7 @@ unInstallSingBox() {
             return 1
         fi
         rm -f /etc/systemd/system/sing-box.service || { errorCard "sing-box systemd 服务文件删除失败"; return 1; }
-        rm -rf /etc/padm/sing-box/* || { errorCard "sing-box 文件清理失败"; return 1; }
+        cleanCoreInstallDirectory /etc/padm/sing-box "sing-box" || return 1
         successCard "sing-box 卸载完成"
     fi
 }
@@ -519,10 +533,10 @@ unInstallSingBox() {
 cleanUp() {
     if [[ "$1" == "xrayDel" ]]; then
         runCoreServiceActionAllowFailure handleXray stop || { errorCard "Xray 服务停止失败，已取消清理旧核心"; return 1; }
-        rm -rf /etc/padm/xray/* || { errorCard "Xray 文件清理失败"; return 1; }
+        cleanCoreInstallDirectory /etc/padm/xray "Xray" || return 1
     elif [[ "$1" == "singBoxDel" ]]; then
         runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消清理旧核心"; return 1; }
-        rm -rf /etc/padm/sing-box/conf/config.json >/dev/null 2>&1 || { errorCard "sing-box 主配置清理失败"; return 1; }
+        rm -f /etc/padm/sing-box/conf/config.json >/dev/null 2>&1 || { errorCard "sing-box 主配置清理失败"; return 1; }
         cleanDirectoryContent /etc/padm/sing-box/conf/config || { errorCard "sing-box 分片配置清理失败"; return 1; }
     fi
 }

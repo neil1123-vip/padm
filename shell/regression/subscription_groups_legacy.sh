@@ -3475,6 +3475,38 @@ runSingBoxUninstallFailurePropagationRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
+runSingBoxUninstallRejectsUnsafeConfigPathRegression() (
+    local root="${TMP_DIR}/sing-box-uninstall-unsafe-config"
+    local configDir="${root}/unsafe-config/"
+    local errorLog="${root}/error.log"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}/unsafe-config"
+    printf '{}\n' >"${configDir}config.json"
+    printf 'keep\n' >"${root}/unsafe-config/sentinel"
+    : >"${errorLog}"
+    : >"${rmLog}"
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    singBoxConfigPath="relative-config/"
+    readInstallType() { return 0; }
+    handleSingBox() { return 0; }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    unInstallSingBox >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -f "${root}/unsafe-config/sentinel" ]]
+    [[ ! -s "${rmLog}" ]]
+    grep -q '路径异常' "${errorLog}"
+)
+
 runSingBoxLogTransactionRegression() (
     local root="${TMP_DIR}/sing-box-log-transaction"
     local targetPath="${root}/conf/config/log.json"
@@ -12761,6 +12793,7 @@ runRegressionTransactionCore() {
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
+        runRegressionStep sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression &&
         runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
         runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
         runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
