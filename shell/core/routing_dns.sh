@@ -96,6 +96,10 @@ dnsRoutingSafeSingBoxConfigDir() {
     printf '%s\n' "${singBoxConfigPath%/}/"
 }
 
+dnsRoutingManagedSingBoxFiles() {
+    printf '%s\n' "dns.json" "01_direct_outbound.json"
+}
+
 dnsRoutingBackupCreate() {
     local backupDir
     local singBoxFile
@@ -117,8 +121,9 @@ dnsRoutingBackupCreate() {
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r singBoxFile; do
-            cp "${singBoxFile}" "${backupDir}/sing-box/$(basename -- "${singBoxFile}")" || return 1
-        done < <(find "${singBoxConfigDir}" -maxdepth 1 -type f -name '*.json' | sort)
+            [[ -f "${singBoxConfigDir}${singBoxFile}" ]] || continue
+            cp "${singBoxConfigDir}${singBoxFile}" "${backupDir}/sing-box/${singBoxFile}" || return 1
+        done < <(dnsRoutingManagedSingBoxFiles)
     fi
     return 0
 }
@@ -145,10 +150,12 @@ dnsRoutingBackupRestore() {
         fi
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
-        find "${singBoxConfigDir}" -maxdepth 1 -type f -name '*.json' -delete >/dev/null 2>&1 || status=1
-        if compgen -G "${backupDir}/sing-box/*.json" >/dev/null; then
-            cp "${backupDir}/sing-box/"*.json "${singBoxConfigDir}" || status=1
-        fi
+        while IFS= read -r singBoxFile; do
+            rm -f "${singBoxConfigDir}${singBoxFile}" >/dev/null 2>&1 || status=1
+            if [[ -f "${backupDir}/sing-box/${singBoxFile}" ]]; then
+                cp "${backupDir}/sing-box/${singBoxFile}" "${singBoxConfigDir}${singBoxFile}" || status=1
+            fi
+        done < <(dnsRoutingManagedSingBoxFiles)
     fi
     return "${status}"
 }

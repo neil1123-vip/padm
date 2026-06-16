@@ -1725,6 +1725,41 @@ runDNSRoutingRejectsUnsafeConfigDirRegression() (
     [[ ! -s "${rmLog}" ]]
 )
 
+runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() (
+    local root="${TMP_DIR}/dns-routing-restore-scope"
+    local backupDir
+    local customFile
+
+    mkdir -p "${root}/xray" "${root}/sing-box"
+    backupDir="${root}/backup"
+    customFile="${root}/sing-box/custom.json"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    PADM_DNS_ROUTING_BACKUP_DIR="${backupDir}"
+    dnsRoutingSafeBackupDir() { printf '%s\n' "${root}/backup"; }
+    dnsRoutingSafeXrayConfigDir() { printf '%s\n' "${root}/xray/"; }
+    dnsRoutingSafeSingBoxConfigDir() { printf '%s\n' "${root}/sing-box/"; }
+
+    printf '{"dns":{"servers":["old"]}}\n' >"${configPath}11_dns.json"
+    printf '{"dns":{"servers":["old-sing"]}}\n' >"${singBoxConfigPath}dns.json"
+    printf '{"outbounds":[{"tag":"old-direct"}]}\n' >"${singBoxConfigPath}01_direct_outbound.json"
+    printf '{"custom":"keep-before"}\n' >"${customFile}"
+
+    dnsRoutingBackupCreate
+
+    printf '{"dns":{"servers":["new"]}}\n' >"${configPath}11_dns.json"
+    printf '{"dns":{"servers":["new-sing"]}}\n' >"${singBoxConfigPath}dns.json"
+    printf '{"outbounds":[{"tag":"new-direct"}]}\n' >"${singBoxConfigPath}01_direct_outbound.json"
+    printf '{"custom":"keep-after"}\n' >"${customFile}"
+
+    dnsRoutingBackupRestore
+
+    jq -e '.dns.servers == ["old"]' "${configPath}11_dns.json" >/dev/null
+    jq -e '.dns.servers == ["old-sing"]' "${singBoxConfigPath}dns.json" >/dev/null
+    jq -e '.outbounds[0].tag == "old-direct"' "${singBoxConfigPath}01_direct_outbound.json" >/dev/null
+    jq -e '.custom == "keep-after"' "${customFile}" >/dev/null
+)
+
 runVMessRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/vmess-routing-failure"
     local removeMarker="${root}/remove"
@@ -13214,6 +13249,7 @@ runRegressionRouting() {
     runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
     runRegressionStep routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
     runRegressionStep routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
+    runRegressionStep routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
     runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }
