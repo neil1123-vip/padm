@@ -1076,6 +1076,18 @@ runRealityTargetSingleDefaultBranchRegression() {
     [[ "${explicitDefaultTargetCount}" == "3" ]]
 }
 
+runAutoInstallTypeSingleCustomBranchRegression() {
+    local explicitCustomMenuCount
+    explicitCustomMenuCount=$(awk '
+        /autoValueForKey\(\) \{/ { capture = 1 }
+        capture && /case "\$\{AUTO_INSTALL_TYPE\}" in/ { in_case = 1 }
+        in_case && /printf '\''5'\''/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/runtime.sh")
+    [[ "${explicitCustomMenuCount}" == "1" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -2037,6 +2049,7 @@ runRegressionPlatform() {
         runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression &&
         runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression &&
         runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
+        runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&

@@ -370,14 +370,11 @@ autoValueForKey() {
         ;;
     install_type)
         case "${AUTO_INSTALL_TYPE}" in
-        custom | any | 任意组合 | 2)
+        custom | any | 任意组合 | 2 | install | full | traditional | 1)
             printf '5'
             ;;
         reality | reality-only | no-domain-reality | 3)
             printf '3'
-            ;;
-        install | full | traditional | 1)
-            printf '5'
             ;;
         *)
             printf '4'
