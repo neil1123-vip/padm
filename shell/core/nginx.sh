@@ -673,11 +673,23 @@ disableRealityStreamSplit() {
 
 # 删除 Nginx 默认配置
 removeNginxDefaultConf() {
-    if [[ -f ${nginxConfigPath}default.conf ]]; then
-        if [[ "$(grep -c "server_name" <${nginxConfigPath}default.conf)" == "1" ]] && [[ "$(grep -c "server_name  localhost;" <${nginxConfigPath}default.conf)" == "1" ]]; then
-            successCard "删除Nginx默认配置"
-            rm -rf ${nginxConfigPath}default.conf >/dev/null 2>&1
-        fi
+    local configDir="${nginxConfigPath:-}"
+    local defaultConf
+    if [[ -z "${configDir}" ]]; then
+        padmShowUnsafePathError "删除 Nginx 默认配置"
+        return 1
+    fi
+    defaultConf="${configDir%/}/default.conf"
+    if ! padmIsSafeAbsolutePath "${defaultConf}"; then
+        padmShowUnsafePathError "删除 Nginx 默认配置"
+        return 1
+    fi
+
+    if [[ -f "${defaultConf}" ]] &&
+        [[ "$(grep -c "server_name" <"${defaultConf}")" == "1" ]] &&
+        [[ "$(grep -c "server_name  localhost;" <"${defaultConf}")" == "1" ]]; then
+        successCard "删除Nginx默认配置"
+        rm -f -- "${defaultConf}" >/dev/null 2>&1
     fi
 }
 

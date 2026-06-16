@@ -169,6 +169,36 @@ runCleanDirectoryContentSafetyRegression() {
     )
 }
 
+runRemoveNginxDefaultConfSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/remove-nginx-default-conf-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        local successLog="${root}/success.log"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+
+        writeDefaultNginxConf() {
+            printf 'server {\n    listen 80 default_server;\n    server_name  localhost;\n}\n' >"$1"
+        }
+
+        writeDefaultNginxConf "${unsafeRoot}/default.conf"
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath=
+            ! removeNginxDefaultConf
+            [[ -f default.conf ]]
+        )
+
+        REGRESSION_SUCCESS_CARD_LOG="${successLog}"
+        writeDefaultNginxConf "${nginxRoot}/default.conf"
+        nginxConfigPath="${nginxRoot}/"
+        removeNginxDefaultConf
+        [[ ! -e "${nginxRoot}/default.conf" ]]
+        grep -qx '删除Nginx默认配置' "${successLog}"
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -2121,6 +2151,7 @@ runRegressionFast() {
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression &&
+        runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
