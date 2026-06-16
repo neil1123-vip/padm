@@ -153,14 +153,6 @@ singBoxDnsResolverTag() {
     printf '%s\n' "padm-local"
 }
 
-singBoxDnsHostsTag() {
-    printf '%s\n' "padm-hosts"
-}
-
-singBoxDnsRoutingTag() {
-    printf '%s\n' "padm-dnsRouting"
-}
-
 # DNS/hosts 配置写入
 setUnlockSNI() {
     autoRead sni_routing_ip "请输入要覆盖到的 IP:" setSNIP
@@ -256,8 +248,8 @@ addSingBoxDNSConfig() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         local localTag hostsTag routingTag
         localTag=$(singBoxDnsResolverTag)
-        hostsTag=$(singBoxDnsHostsTag)
-        routingTag=$(singBoxDnsRoutingTag)
+        hostsTag="padm-hosts"
+        routingTag="padm-dnsRouting"
         if [[ "${actionType}" == "predefined" ]]; then
             local predefined={}
             while read -r line; do
