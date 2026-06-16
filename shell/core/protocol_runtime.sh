@@ -464,21 +464,6 @@ initRealityMldsa65() {
     fi
 }
 
-# 检查reality域名是否符合
-checkRealityDest() {
-    local traceResult=
-    traceResult=$(curl -s "https://$(echo "${realityDestDomain}" | cut -d ':' -f 1)/cdn-cgi/trace" | grep "visit_scheme=https")
-    if [[ -n "${traceResult}" ]]; then
-        statusCard "Reality 目标站风险" "检测到目标域名托管在 Cloudflare 且已开启代理" "使用此类型域名可能导致 VPS 流量被其他人使用" "不建议继续使用该目标站"
-        autoRead reality_cloudflare_target_confirm "是否继续？[y/n]" setRealityDestStatus
-        if [[ "${setRealityDestStatus}" != 'y' ]]; then
-            exit 0
-        fi
-        statusCard "Reality 目标站风险确认" "已忽略风险，继续使用"
-    fi
-}
-
-
 parseHostPort() {
     local input=$1
     local defaultPort=${2:-443}
@@ -696,69 +681,3 @@ initXrayXHTTPort() {
     fi
 }
 
-
-# 安装reality scanner
-installRealityScanner() {
-    if [[ ! -f "/etc/padm/xray/reality_scan/RealiTLScanner-linux-64" ]]; then
-        version=$(curl -s https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1 | jq -r '.[]|.tag_name')
-        downloadFile -P /etc/padm/xray/reality_scan/ "https://github.com/XTLS/RealiTLScanner/releases/download/${version}/RealiTLScanner-linux-64"
-        chmod 655 /etc/padm/xray/reality_scan/RealiTLScanner-linux-64
-    fi
-}
-
-# reality scanner
-realityScanner() {
-    echoContent title "\n┌─ Reality 域名扫描 ─────────────────────────────────"
-    menuLine "扫描完成后，请自行检查扫描网站结果内容是否合规，需个人承担风险"
-    menuLine "某些 IDC 不允许扫描操作，比如搬瓦工，请确认风险后使用"
-    menuItem 1 "扫描 IPv4" "使用本机 IPv4 扫描"
-    menuItem 2 "扫描 IPv6" "使用本机 IPv6 扫描"
-    menuClose
-    autoRead reality_scanner_menu "请选择:" realityScannerStatus
-    local type=
-    if [[ "${realityScannerStatus}" == "1" ]]; then
-        type=4
-    elif [[ "${realityScannerStatus}" == "2" ]]; then
-        type=6
-    fi
-
-    autoRead reality_scanner_risk_confirm "某些IDC不允许扫描操作，比如搬瓦工，其中风险请自行承担，是否继续？[y/n]:" scanStatus
-
-    if [[ "${scanStatus}" != "y" ]]; then
-        exit 0
-    fi
-
-    publicIP=$(getPublicIP "${type}")
-    statusCard "Reality 域名扫描" "IP:${publicIP}"
-    if [[ -z "${publicIP}" ]]; then
-        statusCard "Reality 域名扫描" "无法获取 IP"
-        exit 0
-    fi
-
-    autoRead reality_scanner_ip_confirm "IP是否正确？[y/n]:" ipStatus
-    if [[ "${ipStatus}" == "y" ]]; then
-        statusCard "Reality 域名扫描" "结果存储在 /etc/padm/xray/reality_scan/result.log"
-        /etc/padm/xray/reality_scan/RealiTLScanner-linux-64 -addr "${publicIP}" | tee /etc/padm/xray/reality_scan/result.log
-    else
-        statusCard "Reality 域名扫描" "无法读取正确 IP"
-    fi
-}
-
-# 初始化TCP Brutal
-initTCPBrutal() {
-    echoContent title "\n┌─ 初始化 TCP Brutal ────────────────────────────────"
-    menuLine "进度 $2/${totalProgress}"
-    menuClose
-    autoRead tcp_brutal_enable "是否使用TCP_Brutal？[y/n]:" tcpBrutalStatus
-    if [[ "${tcpBrutalStatus}" == "y" ]]; then
-        autoRead tcp_brutal_download_speed "请输入本地带宽峰值的下行速度（默认：100，单位：Mbps）:" tcpBrutalClientDownloadSpeed
-        if [[ -z "${tcpBrutalClientDownloadSpeed}" ]]; then
-            tcpBrutalClientDownloadSpeed=100
-        fi
-
-        autoRead tcp_brutal_upload_speed "请输入本地带宽峰值的上行速度（默认：50，单位：Mbps）:" tcpBrutalClientUploadSpeed
-        if [[ -z "${tcpBrutalClientUploadSpeed}" ]]; then
-            tcpBrutalClientUploadSpeed=50
-        fi
-    fi
-}

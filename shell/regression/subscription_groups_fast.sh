@@ -1174,6 +1174,7 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(updateXray)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
             awk '/^(disableRunningService|handleFirewall)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
             awk '/^(switchAlpn)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/manage.sh"
+            awk '/^(checkRealityDest|installRealityScanner|realityScanner|initTCPBrutal)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
             awk '/^(setScriptVersion)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(commitRequiresMajorBump|commitRequiresMinorBump|commitRequiresPatchBump|nextScriptVersionFromCommits)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
