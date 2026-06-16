@@ -142,6 +142,33 @@ runGitHubReleaseArgumentMissingValueRegression() {
     )
 }
 
+runCleanDirectoryContentSafetyRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local root="${TMP_DIR}/clean-directory-safety"
+        local safeDir="${root}/safe"
+        local unsafeDir="${root}/unsafe"
+        mkdir -p "${safeDir}" "${unsafeDir}"
+        printf 'keep\n' >"${unsafeDir}/sentinel"
+        printf 'remove\n' >"${safeDir}/child"
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        (
+            cd "${unsafeDir}"
+            ! cleanDirectoryContent "."
+            ! cleanDirectoryContent ".."
+            ! cleanDirectoryContent "relative"
+            [[ -f sentinel ]]
+        )
+        cleanDirectoryContent "${safeDir}"
+        [[ -d "${safeDir}" ]]
+        [[ ! -e "${safeDir}/child" ]]
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -1984,6 +2011,7 @@ runXrayPrereleaseDryRunRegression() {
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
+        runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&

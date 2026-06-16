@@ -898,14 +898,25 @@ waitAptProcess() {
 # 安全清理目录内容
 cleanDirectoryContent() {
     local targetPath=$1
-    if [[ -z "${targetPath}" || "${targetPath}" == "/" ]]; then
+    local resolvedPath
+    if [[ -z "${targetPath}" || "${targetPath}" != /* || "${targetPath}" == "/" ||
+        "${targetPath}" == "/." || "${targetPath}" == "/.." ||
+        "${targetPath}" == */./* || "${targetPath}" == */. ||
+        "${targetPath}" == */../* || "${targetPath}" == */.. ]]; then
         echoContent title "\n┌─ 清理目录 ─────────────────────────────────────────"
         menuLine "清理目录路径异常，已终止"
         menuClose
-        exit 1
+        return 1
     fi
     mkdir -p "${targetPath}" || return 1
-    find "${targetPath}" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || return 1
+    resolvedPath=$(cd -- "${targetPath}" && pwd -P) || return 1
+    if [[ -z "${resolvedPath}" || "${resolvedPath}" == "/" ]]; then
+        echoContent title "\n┌─ 清理目录 ─────────────────────────────────────────"
+        menuLine "清理目录路径异常，已终止"
+        menuClose
+        return 1
+    fi
+    find "${resolvedPath}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || return 1
 }
 
 
