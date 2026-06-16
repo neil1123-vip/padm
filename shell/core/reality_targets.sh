@@ -954,12 +954,6 @@ realityTargetDetector() {
     fi
 }
 
-formatRealityTarget() {
-    local host=$1
-    local port=${2:-443}
-    printf '%s:%s\n' "${host}" "${port}"
-}
-
 realityTargetCandidateLineByIndex() {
     local wanted=$1
     local line index=1
@@ -1176,7 +1170,7 @@ selectAutoRecommendedRealityTarget() {
 
     while IFS= read -r line; do
         IFS='|' read -r host sni name _region category cdn _rank _recommended _note <<<"${line}"
-        target=$(formatRealityTarget "${host}" 443)
+        printf -v target '%s:%s' "${host}" "443"
         probed=$((probed + 1))
         realityTargetStatusBlock yellow "REALITY 自动推荐" "正在实测: ${target}" "SNI: ${sni}" "进度: ${probed}/${probeLimit}"
         checkedAt=$(date +%s)
@@ -1377,7 +1371,7 @@ importRealityScannerResults() {
             skipped=$((skipped + 1))
             continue
         fi
-        target=$(formatRealityTarget "${domain}" 443)
+        printf -v target '%s:%s' "${domain}" "443"
         checkedAt=$(date +%s)
         profile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}")
         IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${profile}"
@@ -2073,7 +2067,7 @@ scanLocalAsnRealityTargets() {
 
     while IFS= read -r line; do
         IFS='|' read -r host sni name _region category cdnRisk _rank _recommended _note <<<"${line}"
-        target=$(formatRealityTarget "${host}" 443)
+        printf -v target '%s:%s' "${host}" "443"
         scanned=$((scanned + 1))
         now=$(date +%s)
         if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || scanned == totalCandidates )); then
@@ -2138,7 +2132,7 @@ showRealityTargetPqcStatus() {
         realityTargetStatusBlock yellow "REALITY PQC/ML-DSA-65" "当前未读取到 Reality 目标站"
         return 1
     fi
-    target=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
+    printf -v target '%s:%s' "${realityTargetHost}" "${realityTargetPort:-443}"
     echoContent title "\n┌─ REALITY PQC/ML-DSA-65 状态 ──────────────────────"
     menuLine "目标站: ${target}"
     menuLine "SNI: ${realitySNI:-未知}"
