@@ -64,10 +64,6 @@ realityTargetSingBoxTestLog() {
     realityTargetTmpPath padm-reality-target-sing-box-test.log
 }
 
-realityTargetApplyLog() {
-    realityTargetTmpPath padm-reality-target-apply.log
-}
-
 realityTargetBackupTemplate() {
     realityTargetTmpPath 'padm-reality-target.XXXXXX'
 }
@@ -2204,7 +2200,7 @@ applyRealityTargetToInstalledConfigs() {
     xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
     singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
     singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
-    applyLog=$(realityTargetApplyLog)
+    applyLog=$(realityTargetTmpPath padm-reality-target-apply.log)
     rm -f "${applyLog}" >/dev/null 2>&1 || true
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
