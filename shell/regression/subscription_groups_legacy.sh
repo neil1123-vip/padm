@@ -9590,12 +9590,6 @@ enable)
     [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && exit 1
     exit 0
     ;;
-stop)
-    exit 0
-    ;;
-disable)
-    exit 0
-    ;;
 *)
     exit 0
     ;;

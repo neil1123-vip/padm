@@ -1103,9 +1103,6 @@ runSubscriptionControlServiceInstallRegression() (
             [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && return 1
             return 0
             ;;
-        stop | disable)
-            return 0
-            ;;
         *)
             return 0
             ;;

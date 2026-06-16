@@ -1004,6 +1004,30 @@ runRegressionDispatcherSingleLegacyFallbackRegression() {
     [[ "${legacyDispatchCount}" == "1" ]]
 }
 
+runRemoteControlSystemctlStubDefaultStopDisableRegression() {
+    local explicitStopDisableCount
+    explicitStopDisableCount=$(awk '
+        /runSubscriptionControlServiceInstallRegression\(\) \(/ { capture = 1 }
+        capture && /cat >"\$\{fakeBin\}\/systemctl" <<\x27SH\x27/ { in_stub = 1 }
+        in_stub && /^stop\)$/ { count++ }
+        in_stub && /^disable\)$/ { count++ }
+        in_stub && /^SH$/ { in_stub = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh")
+    [[ "${explicitStopDisableCount}" == "0" ]]
+}
+
+runRemoteControlFunctionStubDefaultStopDisableRegression() {
+    local explicitStopDisableCount
+    explicitStopDisableCount=$(awk '
+        /systemctl\(\) \{/ { capture = 1 }
+        capture && /stop \| disable\)/ { count++ }
+        capture && /^    }$/ { capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh")
+    [[ "${explicitStopDisableCount}" == "0" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -1959,6 +1983,8 @@ runRegressionPlatform() {
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression &&
         runRegressionStep regression-dispatcher-single-legacy-fallback runRegressionDispatcherSingleLegacyFallbackRegression &&
+        runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
+        runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
