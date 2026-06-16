@@ -56,14 +56,6 @@ realityScannerOutputPath() {
     fi
 }
 
-realityTargetXrayTestLog() {
-    realityTargetTmpPath padm-reality-target-xray-test.log
-}
-
-realityTargetSingBoxTestLog() {
-    realityTargetTmpPath padm-reality-target-sing-box-test.log
-}
-
 realityTargetBackupTemplate() {
     realityTargetTmpPath 'padm-reality-target.XXXXXX'
 }
@@ -2293,13 +2285,13 @@ validateRealityTargetConfigAfterChange() {
     local logFile
     if [[ -f "$(realityXrayVisionConfigPath)" || -f "$(realityXrayXhttpConfigPath)" ]]; then
         if [[ -x "/etc/padm/xray/xray" ]]; then
-            logFile=$(realityTargetXrayTestLog)
+            logFile=$(realityTargetTmpPath padm-reality-target-xray-test.log)
             /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1 || return 1
         fi
     fi
     if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
         if [[ -x "/etc/padm/sing-box/sing-box" ]]; then
-            logFile=$(realityTargetSingBoxTestLog)
+            logFile=$(realityTargetTmpPath padm-reality-target-sing-box-test.log)
             singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "${logFile}" || return 1
         fi
     fi
@@ -2404,7 +2396,7 @@ changeInstalledRealityTarget() {
         fi
         restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
         padmRemoveCleanupPath "${backupDir}"
-        realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetXrayTestLog)" "sing-box 日志: $(realityTargetSingBoxTestLog)"
+        realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetTmpPath padm-reality-target-xray-test.log)" "sing-box 日志: $(realityTargetTmpPath padm-reality-target-sing-box-test.log)"
         return 1
     fi
     if ! reloadCore; then

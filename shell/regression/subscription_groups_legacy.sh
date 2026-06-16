@@ -1812,8 +1812,8 @@ runRuntimeTempDirRegression() (
     [[ "$(realityScannerDir)" == "${tmpRoot}/RealiTLScanner" ]]
     [[ "$(realityScannerOutputPath 123)" == "${tmpRoot}/padm-realitlscanner-123.csv" ]]
     [[ "$(realityScannerOutputPath 123 sample-2)" == "${tmpRoot}/padm-realitlscanner-123-sample-2.csv" ]]
-    [[ "$(realityTargetXrayTestLog)" == "${tmpRoot}/padm-reality-target-xray-test.log" ]]
-    [[ "$(realityTargetSingBoxTestLog)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target-xray-test.log)" == "${tmpRoot}/padm-reality-target-xray-test.log" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target-sing-box-test.log)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
     [[ "$(realityTargetBackupTemplate)" == "${tmpRoot}/padm-reality-target.XXXXXX" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
