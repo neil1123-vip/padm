@@ -1097,6 +1097,15 @@ runSubscriptionMenuWrapperCountRegression() {
     [[ "${wrapperCount}" == "0" ]]
 }
 
+runSubscriptionMenuDeadEntryCountRegression() {
+    local deadEntryCount
+    deadEntryCount=$(awk '
+        /^(manageAdminSubscription|manageUserSubscription|manageSubscriptionWireGuardControlMenu|showSubscriptionDiagnosticsOverview)\(\) \{/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/subscription/menu.sh")
+    [[ "${deadEntryCount}" == "0" ]]
+}
+
 runUnusedHelperFunctionCountRegression() {
     local helperCount
     helperCount=$(
@@ -2073,6 +2082,7 @@ runRegressionPlatform() {
         runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
         runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression &&
         runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression &&
+        runRegressionStep subscription-menu-dead-entry-count runSubscriptionMenuDeadEntryCountRegression &&
         runRegressionStep unused-helper-function-count runUnusedHelperFunctionCountRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&

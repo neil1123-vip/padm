@@ -420,14 +420,6 @@ showSubscriptionServiceStatus() {
     fi
 }
 
-manageAdminSubscription() {
-    manageSubscriptionPublishSubscriptions
-}
-
-manageUserSubscription() {
-    manageSubscriptionPublishSubscriptions
-}
-
 userResultCard() {
     local title=$1
     echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
@@ -978,14 +970,6 @@ showSubscriptionSourceSyncResults() {
       "\n---"'
 }
 
-manageSubscriptionWireGuardControlMenu() {
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main) manageSubscriptionMainControlDetails ;;
-    controlled) manageSubscriptionControlledMaintenance ;;
-    *) manageSubscriptionRoleSelection ;;
-    esac
-}
-
 setSubscriptionSourceControlTokenMenu() {
     subscriptionRequireMainRole || return 1
     local credential=
@@ -1090,22 +1074,6 @@ clearSubscriptionSourceSyncErrorMenu() {
     fi
     clearSubscriptionSourceSyncError "${sourceId}"
     successCard "同步错误已清除"
-}
-
-showSubscriptionDiagnosticsOverview() {
-    local role
-    role=$(subscriptionCurrentRoleNormalized)
-    if [[ "${role}" == "controlled" ]]; then
-        showSubscriptionWireGuardStatus
-        showSubscriptionCurrentRoleCredential || true
-        showSubscriptionSourceSyncResults
-        return
-    fi
-    showSubscriptionServiceStatus
-    showSubscriptionWireGuardStatus
-    showSubscriptionGroupsStateSummary
-    showSubscriptionRemoteHealthPlan
-    showSubscriptionSourceSyncResults
 }
 
 removeSubscriptionGroupSyncCron() {

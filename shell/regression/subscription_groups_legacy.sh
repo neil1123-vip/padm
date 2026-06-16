@@ -10215,7 +10215,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     subscribe() { recordMenuAction subscribe; }
 
     resetMenuActions
-    manageSubscriptionWireGuardControlMenu <<<"1
+    manageSubscriptionRoleSelection <<<"1
 main.example.com
 3"
     assertMenuAction initSubscriptionWireGuardMain
@@ -11105,11 +11105,11 @@ main-credential
     assertMenuAction 'errorCard:当前机器已初始化为主控'
     resetMenuActions
     output=
-    manageAdminSubscription <<<"7"
+    manageSubscriptionPublishSubscriptions <<<"7"
     grep -q "安装/更新订阅服务" <<<"${output}"
     resetMenuActions
     output=
-    manageUserSubscription <<<"7"
+    manageSubscriptionPublishSubscriptions <<<"7"
     grep -q "查看并处理已有订阅" <<<"${output}"
     resetMenuActions
     output=
