@@ -446,17 +446,6 @@ setSubscriptionSourceSyncFailure() {
       else . end)'
 }
 
-setSubscriptionSourceEnabled() {
-    local id=$1
-    local enabled=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --argjson enabled "${enabled}" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-      else . end)'
-}
-
 subscriptionSourceExists() {
     local id=$1
     local groupId

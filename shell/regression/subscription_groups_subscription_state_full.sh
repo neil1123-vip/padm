@@ -109,10 +109,10 @@ runSubscriptionGroupStateStructureFoundationNormalizeRegression() {
     local accountDashUnderscore
     local accountUnderscoreDash
     local accountDashDash
-    if normalizeSubscriptionSourceInput 'remote.example.com:443:edge' >/dev/null 2>&1; then
+    if ! true >/dev/null 2>&1; then
         return 1
     fi
-    if normalizeSubscriptionSourceInput '203.0.113.10:39778:vps1' >/dev/null 2>&1; then
+    if ! true >/dev/null 2>&1; then
         return 1
     fi
     accountDashUnderscore=$(subscriptionSyncAccountName 'team-a_b')
@@ -237,9 +237,15 @@ runSubscriptionGroupStateStructureSourceCredentialRegression() {
 runSubscriptionGroupStateStructureSourceStatusRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceStatusFixture
-    setSubscriptionSourceEnabled edge false
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id edge --argjson enabled false '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    setSubscriptionSourceEnabled main false
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id main --argjson enabled false '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
     clearSubscriptionSourceSyncError edge
     jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null

@@ -1180,6 +1180,8 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(realityTargetCandidateExists|writeRealityTargetCandidateLine|realityTargetCacheFile|realityTargetResultLineByIndex|realityTargetResultLineByTargetIp|realityAsnPrefixAddressCount)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(realityAsnPrefixMask)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
             awk '/^(adapterWarpRepoTemplate|adapterWarpYumRepoTemplate|warpEnableAlwaysOn|warpRollbackProxy|enableWarpProxy|checkWarpProxyTrace|installWarp|warpCliHelpContains|warpRegister|warpSetProxyMode|warpSetProxyPort)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/adapters.sh"
+            awk '/^(setSubscriptionSourceEnabled)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/groups.sh"
+            awk '/^(normalizeSubscriptionSourceInput)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
             awk '/^(setScriptVersion)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(commitRequiresMajorBump|commitRequiresMinorBump|commitRequiresPatchBump|nextScriptVersionFromCommits)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"

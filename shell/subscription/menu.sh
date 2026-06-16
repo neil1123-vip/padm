@@ -827,11 +827,6 @@ setUserSubscriptionTrafficLimitMenu() {
 
 
 
-# 服务器源管理
-normalizeSubscriptionSourceInput() {
-    return 1
-}
-
 listRemoteSubscribeSources() {
     listSubscriptionSources | awk -F ':' '$3 != "main" && $4 != "wireguard" {print $5":"$6":"$2":"$4}'
 }
