@@ -537,7 +537,12 @@ cleanLastInstallationConfig() {
     fi
 
     if [[ -d "${nginxStaticPath}" && -f "${nginxStaticPath}/check" ]]; then
-        rm -rf "${nginxStaticPath}" >/dev/null 2>&1
+        local staticPath
+        if ! staticPath=$(nginxStaticSafePath); then
+            errorCard "静态站点目录异常，已取消清空上次安装配置"
+            return 1
+        fi
+        rm -rf -- "${staticPath}" >/dev/null 2>&1
     fi
 
     currentPath=

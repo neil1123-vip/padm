@@ -448,6 +448,90 @@ runInstallNginxAlpineDefaultPathSafetyRegression() {
     )
 }
 
+runInstallNginxStaticRejectsUnsafePathRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/install-nginx-static-unsafe-path"
+        local scriptDir="${root}/script"
+        local staticDir="${root}/relative-static"
+        local unzipLog="${root}/unzip.log"
+        mkdir -p "${scriptDir}/assets/static-sites/templates" "${staticDir}"
+        printf 'zip\n' >"${scriptDir}/assets/static-sites/templates/html1.zip"
+        cd "${root}"
+
+        SCRIPT_DIR="${scriptDir}"
+        nginxStaticPath="relative-static/"
+        cleanDirectoryContent() { return 1; }
+        unzip() {
+            printf 'unzip\n' >"${unzipLog}"
+            return 0
+        }
+        renderNginxStaticTemplate() {
+            printf 'render\n' >"${root}/render.log"
+        }
+
+        ! installNginxStaticTemplate 1
+        [[ ! -e "${staticDir}/html1.zip" ]]
+        [[ ! -e "${unzipLog}" ]]
+    )
+}
+
+runCleanLastInstallationRejectsUnsafeStaticPathRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/clean-last-installation-static-safety"
+        local staticDir="${root}/relative-static"
+        local errorLog="${root}/errors.log"
+        local rc
+        mkdir -p "${staticDir}"
+        printf 'check\n' >"${staticDir}/check"
+        cd "${root}"
+
+        currentDefaultPort=
+        currentPort=
+        customPort=
+        xrayVLESSRealityPort=
+        xrayVLESSRealityXHTTPort=
+        singBoxVLESSVisionPort=
+        singBoxVLESSRealityVisionPort=
+        singBoxVLESSRealityGRPCPort=
+        singBoxHysteria2Port=
+        singBoxTuicPort=
+        singBoxSocks5Port=
+        hysteriaPort=
+        tuicPort=
+        nginxStaticPath="relative-static"
+
+        handleXray() { return 0; }
+        handleSingBox() { return 0; }
+        handleNginx() { return 0; }
+        runCoreServiceActionAllowFailure() {
+            "$@"
+        }
+        cleanAgentNginxConf() { return 0; }
+        cleanDirectoryContent() { return 0; }
+        systemctl() { return 0; }
+        lsof() { return 1; }
+        autoRead() { printf -v "$3" 'n'; }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        rm() {
+            if [[ "$*" == "-rf relative-static" ]]; then
+                command rm -rf relative-static
+                return 0
+            fi
+            return 0
+        }
+
+        set +e
+        cleanLastInstallationConfig >/dev/null
+        rc=$?
+        set -e
+        [[ "${rc}" != "0" ]]
+        [[ -f "${staticDir}/check" ]]
+        grep -q '静态站点目录' "${errorLog}"
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -2547,6 +2631,8 @@ runRegressionFast() {
         runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
         runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
         runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression &&
+        runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression &&
+        runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&

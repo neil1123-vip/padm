@@ -296,25 +296,38 @@ renderNginxStaticTemplate() {
     done < <(find "${nginxStaticPath}" -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" \))
 }
 
+nginxStaticSafePath() {
+    local staticPath="${nginxStaticPath:-}"
+    [[ -n "${staticPath}" ]] || return 1
+    staticPath="${staticPath%/}"
+    padmIsSafeAbsolutePath "${staticPath}" || return 1
+    printf '%s\n' "${staticPath}/"
+}
+
 installNginxStaticTemplate() {
     local templateIndex=$1
     local localTemplate="${SCRIPT_DIR:-/etc/padm}/assets/static-sites/templates/html${templateIndex}.zip"
-    local targetZip="${nginxStaticPath}html${templateIndex}.zip"
-    cleanDirectoryContent "${nginxStaticPath}"
+    local staticPath targetZip
+    if ! staticPath=$(nginxStaticSafePath); then
+        errorCard "静态站点目录异常"
+        return 1
+    fi
+    targetZip="${staticPath}html${templateIndex}.zip"
+    cleanDirectoryContent "${staticPath}" || return 1
     if [[ -f "${localTemplate}" ]]; then
         cp "${localTemplate}" "${targetZip}"
     else
-        downloadFile -P "${nginxStaticPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/assets/static-sites/templates/html${templateIndex}.zip"
+        downloadFile -P "${staticPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/assets/static-sites/templates/html${templateIndex}.zip"
     fi
     if [[ ! -f "${targetZip}" ]]; then
         errorCard "静态站点模板下载失败"
-        exit 1
+        return 1
     fi
-    if ! unzip -o "${targetZip}" -d "${nginxStaticPath}" >/dev/null; then
+    if ! unzip -o "${targetZip}" -d "${staticPath}" >/dev/null; then
         errorCard "静态站点模板解压失败"
-        exit 1
+        return 1
     fi
-    rm -f "${nginxStaticPath}html${templateIndex}.zip"*
+    rm -f -- "${staticPath}html${templateIndex}.zip"*
     renderNginxStaticTemplate
 }
 
@@ -341,12 +354,12 @@ nginxBlog() {
 
         if [[ "${nginxBlogInstallStatus}" == "y" ]]; then
             randomNum=$(randomNum 1 20)
-            installNginxStaticTemplate "${randomNum}"
+            installNginxStaticTemplate "${randomNum}" || return 1
             successCard "添加传统 TLS fallback 静态站点成功"
         fi
     else
         randomNum=$(randomNum 1 20)
-        installNginxStaticTemplate "${randomNum}"
+        installNginxStaticTemplate "${randomNum}" || return 1
         successCard "添加传统 TLS fallback 静态站点成功"
     fi
 
