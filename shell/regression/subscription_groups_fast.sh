@@ -73,6 +73,47 @@ runCleanupTrapRegression() {
     rm -rf "${tmpDir}"
 }
 
+runCleanupTrapRelativePathRegression() {
+    local rootRel="${TMP_DIR}/cleanup-trap-relative"
+    local root
+    local keepDir
+    local trapScript
+    local createdPath
+    local rc
+
+    mkdir -p "${rootRel}/base" "${rootRel}/other"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    keepDir="${root}/other"
+    trapScript="${root}/run.sh"
+    printf 'keep\n' >"${keepDir}/sentinel"
+
+    cat >"${trapScript}" <<'SH'
+#!/usr/bin/env bash
+set -e
+source "$1"
+mkdir -p base
+cd base
+padmCreateTempPath p ./relative-cleanup.XXXXXX
+printf '%s\n' "$(cd -- "$(dirname -- "$p")" && pwd -P)/$(basename -- "$p")" >created.path
+cd ../other
+exit 0
+SH
+    chmod +x "${trapScript}"
+
+    set +e
+    (
+        cd -- "${root}" &&
+            "${trapScript}" "${PROJECT_ROOT}/shell/core/runtime.sh"
+    ) >/dev/null 2>&1
+    rc=$?
+    set -e
+    createdPath=$(<"${root}/base/created.path")
+    [[ "${rc}" == "0" ]]
+    [[ -f "${keepDir}/sentinel" ]]
+    [[ "${createdPath}" == "${root}/base/relative-cleanup."* ]]
+    [[ ! -e "${createdPath}" ]]
+}
+
 runGitHubReleaseAssetDirectFallbackRegression() {
     (
         set -euo pipefail
@@ -2811,6 +2852,7 @@ runXrayPrereleaseDryRunRegression() {
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
+        runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression &&
         runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&

@@ -3,6 +3,20 @@
 PADM_CLEANUP_PATHS=()
 PADM_CLEANUP_TRAP_INSTALLED=
 
+padmResolveCleanupPath() {
+    local path=$1
+    local parent base
+    [[ -n "${path}" ]] || return 1
+    if [[ "${path}" != /* ]]; then
+        parent=$(dirname -- "${path}")
+        base=$(basename -- "${path}")
+        parent=$(cd -- "${parent}" 2>/dev/null && pwd -P) || return 1
+        printf '%s\n' "${parent}/${base}"
+        return 0
+    fi
+    printf '%s\n' "${path}"
+}
+
 padmInstallCleanupTrap() {
     if [[ -n "${PADM_CLEANUP_TRAP_INSTALLED}" ]]; then
         return 0
@@ -15,8 +29,10 @@ padmInstallCleanupTrap() {
 
 padmRegisterCleanupPath() {
     local path=$1
+    local resolvedPath=
     [[ -n "${path}" ]] || return 0
-    PADM_CLEANUP_PATHS+=("${path}")
+    resolvedPath=$(padmResolveCleanupPath "${path}" 2>/dev/null || true)
+    PADM_CLEANUP_PATHS+=("${resolvedPath:-${path}}")
 }
 
 padmUnregisterCleanupPath() {
@@ -58,13 +74,17 @@ padmTmpFilePath() {
 
 padmForgetCleanupPath() {
     local path=$1
-    padmUnregisterCleanupPath "${path}"
+    local resolvedPath=
+    resolvedPath=$(padmResolveCleanupPath "${path}" 2>/dev/null || true)
+    padmUnregisterCleanupPath "${resolvedPath:-${path}}"
 }
 
 padmRemoveCleanupPath() {
     local path=$1
-    rm -rf -- "${path}" >/dev/null 2>&1 || true
-    padmUnregisterCleanupPath "${path}"
+    local resolvedPath=
+    resolvedPath=$(padmResolveCleanupPath "${path}" 2>/dev/null || true)
+    rm -rf -- "${resolvedPath:-${path}}" >/dev/null 2>&1 || true
+    padmUnregisterCleanupPath "${resolvedPath:-${path}}"
 }
 
 commitGeneratedFile() {
