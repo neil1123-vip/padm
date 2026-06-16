@@ -2759,6 +2759,7 @@ runCoreBinaryInstallCopyFailureRegression() (
         done
         mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
         printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
         chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
     }
     cp() {
@@ -2772,7 +2773,7 @@ runCoreBinaryInstallCopyFailureRegression() (
             printf 'xray\n' >>"${copyFailureLog}"
             return 1
         fi
-        if [[ "${targetPath}" == "${singBoxBinary}" && "${sourcePath}" != ${singBoxBinary}.bak.* ]]; then
+        if [[ "${targetPath}" == "/etc/padm/sing-box/libcronet.so" ]]; then
             printf 'sing-box\n' >>"${copyFailureLog}"
             return 1
         fi
@@ -2850,6 +2851,66 @@ runCoreBinaryInstallCopyFailureRegression() (
     grep -q '旧二进制恢复失败' "${statusLog}"
     grep -q '旧二进制未恢复，已跳过服务启动' "${statusLog}"
     ! grep -q 'xray:start:true' "${serviceLog}"
+)
+
+runLegacyCoreUpgradeKeepsExistingBinaryRegression() (
+    local root="${TMP_DIR}/legacy-core-upgrade-keeps-existing"
+    local xrayBinary="${root}/xray/xray"
+    local singBoxBinary="${root}/sing-box/sing-box"
+    local callLog="${root}/calls.log"
+    local rmLog="${root}/rm.log"
+
+    mkdir -p "$(dirname "${xrayBinary}")" "$(dirname "${singBoxBinary}")"
+    cat >"${xrayBinary}" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    cat >"${singBoxBinary}" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+    chmod 755 "${xrayBinary}" "${singBoxBinary}"
+
+    PADM_XRAY_BINARY="${xrayBinary}"
+    PADM_SINGBOX_BINARY="${singBoxBinary}"
+    : >"${callLog}"
+    : >"${rmLog}"
+
+    readInstallType() { return 0; }
+    progressCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { return 0; }
+    getXrayCurrentVersion() { printf 'vold-xray\n'; }
+    getSingBoxCurrentVersion() { printf 'vold-sing-box\n'; }
+    coreLatestReleaseTag() { printf 'v1.2.3\n'; }
+    autoRead() { printf -v "$3" 'y'; }
+    ensureXrayGeoFiles() {
+        printf 'geo:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    installDownloadedXrayBinary() {
+        printf 'upgrade-xray:%s\n' "$1" >>"${callLog}"
+        return 0
+    }
+    installDownloadedSingBoxBinary() {
+        printf 'upgrade-sing-box:%s\n' "$1" >>"${callLog}"
+        return 0
+    }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    installXray 1 false >/dev/null 2>&1
+    installSingBox 1 >/dev/null 2>&1
+
+    [[ -x "${xrayBinary}" ]]
+    [[ -x "${singBoxBinary}" ]]
+    grep -qx 'geo:/etc/padm/xray' "${callLog}"
+    grep -qx 'upgrade-xray:v1.2.3' "${callLog}"
+    grep -qx 'upgrade-sing-box:v1.2.3' "${callLog}"
+    ! grep -q -- "${xrayBinary}" "${rmLog}"
+    ! grep -q -- "${singBoxBinary}" "${rmLog}"
 )
 
 runSingBoxDownloadArtifactsCleanupRegression() (
@@ -13396,6 +13457,7 @@ runRegressionTransactionCore() {
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
         runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
+        runRegressionStep legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression &&
         runRegressionStep sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&

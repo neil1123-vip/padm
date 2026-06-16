@@ -109,10 +109,12 @@ showXrayGeoStatus() {
 
 # 安装 sing-box
 installSingBox() {
+    local version
+    local prereleaseStatus=${prereleaseStatus:-false}
     readInstallType
     progressCard "$1" "安装 sing-box"
 
-    if [[ ! -f "/etc/padm/sing-box/sing-box" ]]; then
+    if ! singBoxInstalled; then
 
         version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
         checkVersionNotEmpty "${version}"
@@ -157,7 +159,7 @@ installSingBox() {
             chmod 655 /etc/padm/sing-box/sing-box
         fi
     else
-        successCard "当前版本:v$(/etc/padm/sing-box/sing-box version | grep "sing-box version" | awk '{print $3}')"
+        successCard "当前版本:$(getSingBoxCurrentVersion)"
 
         version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
         successCard "最新版本:${version}"
@@ -165,8 +167,7 @@ installSingBox() {
         if [[ -z "${lastInstallationConfig}" ]]; then
             autoRead singbox_reinstall "是否更新、升级？[y/n]:" reInstallSingBoxStatus
             if [[ "${reInstallSingBoxStatus}" == "y" ]]; then
-                rm -f /etc/padm/sing-box/sing-box
-                installSingBox "$1"
+                installDownloadedSingBoxBinary "${version}" || exit 1
             fi
         fi
     fi
@@ -177,6 +178,7 @@ installSingBox() {
 # 安装 Xray-core
 installXray() {
     readInstallType
+    local version
     local prereleaseStatus=false
     if [[ "${2:-}" == "true" ]]; then
         prereleaseStatus=true
@@ -184,7 +186,7 @@ installXray() {
 
     progressCard "$1" "安装 Xray"
 
-    if [[ ! -f "/etc/padm/xray/xray" ]]; then
+    if ! xrayInstalled; then
 
         version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
         checkVersionNotEmpty "${version}"
@@ -214,14 +216,15 @@ installXray() {
         fi
     else
         if [[ -z "${lastInstallationConfig}" ]]; then
-            successCard "Xray-core版本:$(/etc/padm/xray/xray --version | awk '{print $2}' | head -1)"
+            successCard "Xray-core版本:$(getXrayCurrentVersion)"
             if ! ensureXrayGeoFiles /etc/padm/xray; then
                 exit 1
             fi
             autoRead xray_reinstall "是否更新、升级？[y/n]:" reInstallXrayStatus
             if [[ "${reInstallXrayStatus}" == "y" ]]; then
-                rm -f /etc/padm/xray/xray
-                installXray "$1" "$2"
+                version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
+                checkVersionNotEmpty "${version}"
+                installDownloadedXrayBinary "${version}" || exit 1
             fi
         fi
     fi
