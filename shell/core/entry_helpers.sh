@@ -462,6 +462,7 @@ restorePadmEntryBackup() {
     local backupPath=$1
     local installPath=$2
     [[ -f "${backupPath}" ]] || return 2
+    [[ ! -d "${installPath}" ]] || return 1
     mv "${backupPath}" "${installPath}" || return 1
     sudo chmod 700 "${installPath}" || return 1
 }
@@ -479,6 +480,10 @@ updatePadm() {
     fi
     if ! mkdir -p "${installDir}"; then
         errorCard "更新入口目录创建失败"
+        return 1
+    fi
+    if [[ -d "${installPath}" ]]; then
+        errorCard "更新入口目标异常，请手动检查 ${installPath}"
         return 1
     fi
     progressCard "$1" "更新管理脚本"

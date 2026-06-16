@@ -1263,6 +1263,46 @@ EOF
         [[ ! -e "${unsafeRoot}/unsafe-target/install.sh.bak" ]]
         grep -q '更新入口目录异常' "${unsafeErrorLog}"
     )
+
+    (
+        local dirTargetRoot="${TMP_DIR}/update-padm-directory-target"
+        local dirTargetErrorLog="${TMP_DIR}/update-padm-directory-target-error.log"
+        local dirTargetDownloadLog="${TMP_DIR}/update-padm-directory-target-download.log"
+        mkdir -p "${dirTargetRoot}"
+        dirTargetRoot=$(cd -- "${dirTargetRoot}" && pwd -P)
+        dirTargetErrorLog="$(cd -- "$(dirname -- "${dirTargetErrorLog}")" && pwd -P)/$(basename -- "${dirTargetErrorLog}")"
+        : >"${dirTargetErrorLog}"
+        : >"${dirTargetDownloadLog}"
+        mkdir -p "${dirTargetRoot}/install.sh"
+        REGRESSION_ERROR_CARD_LOG="${dirTargetErrorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${dirTargetRoot}"
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    printf '%s\n' "$2" >>"${dirTargetDownloadLog}"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+printf 'new-entry-ok\n'
+exit 0
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+        ! updatePadm 1
+        [[ -d "${dirTargetRoot}/install.sh" ]]
+        [[ ! -e "${dirTargetRoot}/install.sh/install.sh" ]]
+        [[ ! -e "${dirTargetRoot}/install.sh.bak" ]]
+        [[ ! -s "${dirTargetDownloadLog}" ]]
+        grep -q "更新入口目标异常，请手动检查 ${dirTargetRoot}/install.sh" "${dirTargetErrorLog}"
+    )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
