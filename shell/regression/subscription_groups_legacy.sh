@@ -255,14 +255,14 @@ JSON
       .inbounds[0].listen_port == 23456 and
       .inbounds[0].users[0].password == "user-pass" and
       .inbounds[0].tls.server_name == "example.com"
-    ' "${singBoxConfigPath}hysteria2.json" >/dev/null
-    originalContent=$(<"${singBoxConfigPath}hysteria2.json")
+    ' "${singBoxConfigPath}06_hysteria2_inbounds.json" >/dev/null
+    originalContent=$(<"${singBoxConfigPath}06_hysteria2_inbounds.json")
     hysteriaPort=
     if initSingBoxHysteria2Config 2>/dev/null; then
         return 1
     fi
-    [[ "$(<"${singBoxConfigPath}hysteria2.json")" == "${originalContent}" ]]
-    [[ ! -e "${singBoxConfigPath}hysteria2.json.tmp" ]]
+    [[ "$(<"${singBoxConfigPath}06_hysteria2_inbounds.json")" == "${originalContent}" ]]
+    [[ ! -e "${singBoxConfigPath}06_hysteria2_inbounds.json.tmp" ]]
     unset -f readConfigWarpReg initHysteriaPort initHysteria2Network initXrayClients
     hysteriaPort=23456
     setSniffRouting
