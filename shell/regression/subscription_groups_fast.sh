@@ -1168,6 +1168,7 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(xrayRealityXHTTPConfigFile)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/output.sh"
             awk '/^(testSubscriptionWireGuardControl|subscriptionWireGuardDefaultMainAddress|subscriptionWireGuardDefaultNetwork|subscriptionWireGuardInstalled)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
             awk '/^(subscriptionControlHealthRetryCount|subscriptionControlHealthRetryDelay)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/control.sh"
+            awk '/^(subscriptionSyncAccountPrefix)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/sync.sh"
             awk '/^(protocolSelectionNeedsNginx|protocolSelectionNeedsReality|protocolSelectionNeedsUdp|protocolSelectionTransportHas|protocolSelectionSecurityHas|xrayProtocolFilename|xrayProtocolMenuLine|currentProtocolHasAll|protocolSelectionNeedsTLS|xrayProtocolIdByFilename|xrayProtocolEnabled|xrayProtocolDisplayName|xrayEnabledProtocolDisplayList|xrayProtocolCapability|protocolSelectionHasAll)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/protocols.sh"
             awk '/^(getDLCNameByRuleLine)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_rules.sh"
             awk '/^(unInstallSniffing)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_rules.sh"
