@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-warpConfigDir() {
-    printf '%s\n' "${PADM_WARP_DIR:-/etc/padm/warp}"
-}
-
 warpRegConfigLooksValid() {
     local targetPath=$1
     [[ -s "${targetPath}" ]] || return 1
@@ -16,15 +12,15 @@ warpRegConfigLooksValid() {
 # 读取第三方 WARP 配置
 readConfigWarpReg() {
     local configFile warpBinary tmpFile
-    configFile="$(warpConfigDir)/config"
-    warpBinary="$(warpConfigDir)/warp-reg"
+    configFile="${PADM_WARP_DIR:-/etc/padm/warp}/config"
+    warpBinary="${PADM_WARP_DIR:-/etc/padm/warp}/warp-reg"
 
     if ! warpRegConfigLooksValid "${configFile}"; then
-        mkdir -p "$(warpConfigDir)" || return 1
+        mkdir -p "${PADM_WARP_DIR:-/etc/padm/warp}" || return 1
         if [[ ! -x "${warpBinary}" ]]; then
             installWarpReg || return 1
         fi
-        tmpFile=$(mktemp "$(warpConfigDir)/.config.XXXXXX") || return 1
+        tmpFile=$(mktemp "${PADM_WARP_DIR:-/etc/padm/warp}/.config.XXXXXX") || return 1
         if ! "${warpBinary}" >"${tmpFile}" 2>&1; then
             rm -f "${tmpFile}" "${configFile}" >/dev/null 2>&1 || true
             return 1
@@ -51,7 +47,7 @@ readConfigWarpReg() {
 # 安装 warp-reg 工具
 installWarpReg() {
     local warpDir warpBinary
-    warpDir=$(warpConfigDir)
+    warpDir="${PADM_WARP_DIR:-/etc/padm/warp}"
     warpBinary="${warpDir}/warp-reg"
     if [[ ! -f "${warpBinary}" ]]; then
         echo
@@ -139,7 +135,7 @@ addWireGuardRoute() {
 unInstallWireGuard() {
     local type=$1
     local warpDir
-    warpDir=$(warpConfigDir)
+    warpDir="${PADM_WARP_DIR:-/etc/padm/warp}"
     if [[ "${coreInstallType}" == "1" ]]; then
 
         if [[ "${type}" == "IPv4" ]]; then
