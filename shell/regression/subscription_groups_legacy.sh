@@ -12554,6 +12554,9 @@ runUpdatePadmVersionPromptRegression() {
     chmodFailureDownloadLog="${TMP_DIR}/update-padm-chmod-restore-failure-download.log"
     oldTmpDir="${TMPDIR:-}"
     mkdir -p "${installDir}" "${updateTmpRoot}" "${replaceFailureDir}" "${chmodFailureDir}"
+    installDir=$(cd -- "${installDir}" && pwd -P)
+    replaceFailureDir=$(cd -- "${replaceFailureDir}" && pwd -P)
+    chmodFailureDir=$(cd -- "${chmodFailureDir}" && pwd -P)
     : >"${downloadDirLog}"
     : >"${successLog}"
     : >"${errorLog}"

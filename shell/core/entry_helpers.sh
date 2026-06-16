@@ -473,6 +473,10 @@ updatePadm() {
     local backupPath="${installDir}/install.sh.bak"
     local tmpDir newInstall
     local tmpBase="${TMPDIR:-/tmp}"
+    if ! padmIsSafeAbsolutePath "${installDir}"; then
+        errorCard "更新入口目录异常"
+        return 1
+    fi
     if ! mkdir -p "${installDir}"; then
         errorCard "更新入口目录创建失败"
         return 1

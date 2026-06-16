@@ -1065,6 +1065,10 @@ runUpdatePadmVersionPromptRegression() {
     updateTmpRoot="${TMP_DIR}/update-padm-tmp"
     oldTmpDir="${TMPDIR:-}"
     mkdir -p "${installDir}" "${restoreFailureDir}" "${replaceFailureDir}" "${chmodFailureDir}" "${updateTmpRoot}"
+    installDir=$(cd -- "${installDir}" && pwd -P)
+    restoreFailureDir=$(cd -- "${restoreFailureDir}" && pwd -P)
+    replaceFailureDir=$(cd -- "${replaceFailureDir}" && pwd -P)
+    chmodFailureDir=$(cd -- "${chmodFailureDir}" && pwd -P)
 
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
     chmod 700 "${installDir}/install.sh"
@@ -1220,6 +1224,23 @@ EOF
     grep -q '新版入口执行失败，旧入口恢复失败' "${chmodFailureErrorLog}"
     [[ ! -e "${chmodFailureDir}/install.sh.bak" ]]
     "${chmodFailureDir}/install.sh" | grep -q 'old-entry'
+
+    (
+        local unsafeRoot="${TMP_DIR}/update-padm-unsafe-target"
+        local unsafeErrorLog="${TMP_DIR}/update-padm-unsafe-error.log"
+        mkdir -p "${unsafeRoot}"
+        unsafeRoot=$(cd -- "${unsafeRoot}" && pwd -P)
+        unsafeErrorLog="$(cd -- "$(dirname -- "${unsafeErrorLog}")" && pwd -P)/$(basename -- "${unsafeErrorLog}")"
+        : >"${unsafeErrorLog}"
+        cd "${unsafeRoot}"
+        REGRESSION_ERROR_CARD_LOG="${unsafeErrorLog}"
+        release=debian
+        PADM_INSTALL_DIR="unsafe-target"
+        ! updatePadm 1
+        [[ ! -e "${unsafeRoot}/unsafe-target/install.sh" ]]
+        [[ ! -e "${unsafeRoot}/unsafe-target/install.sh.bak" ]]
+        grep -q '更新入口目录异常' "${unsafeErrorLog}"
+    )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
