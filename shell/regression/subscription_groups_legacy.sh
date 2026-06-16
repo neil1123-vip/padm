@@ -10097,7 +10097,6 @@ runSubscriptionWireGuardMenuFlowRegression() (
         originalSetSubscriptionSourceCredential "$@"
     }
     subscriptionRemoteControlHealthAll() { printf '[{"id":"edge-a","ok":true}]\n'; }
-    userJsonCard() { recordMenuAction "userJsonCard:$1"; }
     subscribe() { recordMenuAction subscribe; }
 
     resetMenuActions

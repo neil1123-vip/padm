@@ -401,14 +401,6 @@ userResultCard() {
     echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
 }
 
-userJsonCard() {
-    local title=$1
-    local json=$2
-    userResultCard "${title}"
-    printf '%s\n' "${json}" | jq .
-    menuClose
-}
-
 showSubscriptionJsonWithSummary() {
     local title=$1
     local json=$2
@@ -1047,7 +1039,9 @@ manageSubscriptionSyncSettings() {
         echoContent title "\n┌─ 自动同步 ─────────────────────────────────────────"
         menuLine "这里处理自动同步和超限策略。"
         menuLine "建议先查看同步计划，再决定是否开启自动同步、调整间隔或执行超限处理。"
-        userJsonCard "自动同步当前状态" "${syncStatus}"
+        userResultCard "自动同步当前状态"
+        printf '%s\n' "${syncStatus}" | jq .
+        menuClose
         echoContent title "\n┌─ 自动同步操作 ─────────────────────────────────────"
         menuItem 1 "开启/关闭自动同步" "切换定时同步状态"
         menuItem 2 "设置自动同步间隔" "设置 1-59 分钟间隔"
