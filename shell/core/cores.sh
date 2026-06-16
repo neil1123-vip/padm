@@ -231,17 +231,13 @@ singBoxInstalled() {
     [[ -x "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" ]]
 }
 
-coreXrayConfigDir() {
-    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
-        printf '%s\n' "${PADM_XRAY_CONF_DIR%/}"
-        return
-    fi
-    printf '%s\n' "${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
-}
-
 xrayConfigInstalled() {
     local configDir file
-    configDir=$(coreXrayConfigDir)
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        configDir="${PADM_XRAY_CONF_DIR%/}"
+    else
+        configDir="${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
+    fi
     [[ -d "${configDir}" ]] || return 1
     for file in "${configDir}"/*.json; do
         [[ -f "${file}" ]] && return 0
@@ -273,7 +269,11 @@ validateXrayConfigWithBinary() {
     local binary=${1:-/etc/padm/xray/xray}
     local logFile=${2:-$(coreTmpFilePath padm-core-xray-test.log)}
     local configDir
-    configDir=$(coreXrayConfigDir)
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        configDir="${PADM_XRAY_CONF_DIR%/}"
+    else
+        configDir="${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
+    fi
     [[ -x "${binary}" ]] || return 1
     [[ -d "${configDir}" ]] || return 1
     "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1
@@ -283,7 +283,11 @@ validateXrayConfigStrictWithBinary() {
     local binary=${1:-/etc/padm/xray/xray}
     local logFile=${2:-$(coreTmpFilePath padm-core-xray-strict-test.log)}
     local configDir
-    configDir=$(coreXrayConfigDir)
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        configDir="${PADM_XRAY_CONF_DIR%/}"
+    else
+        configDir="${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
+    fi
     [[ -x "${binary}" ]] || return 1
     [[ -d "${configDir}" ]] || return 1
     XRAY_JSON_STRICT=true "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1
@@ -649,7 +653,11 @@ collectXrayCompatibilityFindings() {
         return 0
     fi
 
-    configDir=$(coreXrayConfigDir)
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        configDir="${PADM_XRAY_CONF_DIR%/}"
+    else
+        configDir="${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
+    fi
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
         foundJson=true
@@ -877,7 +885,11 @@ showCoreStatusOverview() {
     local geoVersion=""
     local geoCron="未设置"
 
-    xrayConfigDir=$(coreXrayConfigDir)
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        xrayConfigDir="${PADM_XRAY_CONF_DIR%/}"
+    else
+        xrayConfigDir="${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
+    fi
     xrayDir=$(dirname "${xrayConfigDir}")
     xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
 
