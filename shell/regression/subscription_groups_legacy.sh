@@ -7105,12 +7105,61 @@ resolveReleaseWorkflowVersionForRegression() {
     local latestTag=$3
     local commits=$4
     local releaseVersion needsBump
+    local baseVersion major minor patch bump commitMessage
+
+    releaseWorkflowCommitRequiresMajorBump() {
+        local commitMessage=$1
+        echo "${commitMessage}" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:|BREAKING CHANGE:'
+    }
+
+    releaseWorkflowCommitRequiresMinorBump() {
+        local commitMessage=$1
+        echo "${commitMessage}" | grep -qE '^feat(\([^)]*\))?:'
+    }
+
+    releaseWorkflowCommitRequiresPatchBump() {
+        local commitMessage=$1
+        echo "${commitMessage}" | grep -qE '^(fix|perf|refactor|docs|test|build|ci|chore)(\([^)]*\))?:'
+    }
 
     if [[ "${isReleaseCommit}" == "true" ]]; then
         releaseVersion="${currentVersion}"
         needsBump=false
     else
-        releaseVersion="v$(nextScriptVersionFromCommits "${latestTag}" "${commits}")"
+        baseVersion=${latestTag#v}
+        major=${baseVersion%%.*}
+        minor=${baseVersion#*.}
+        minor=${minor%%.*}
+        patch=${baseVersion##*.}
+        bump=none
+
+        while IFS= read -r commitMessage; do
+            if releaseWorkflowCommitRequiresMajorBump "${commitMessage}"; then
+                bump=major
+                break
+            elif [[ "${bump}" != "minor" ]] && releaseWorkflowCommitRequiresMinorBump "${commitMessage}"; then
+                bump=minor
+            elif [[ "${bump}" == "none" ]] && releaseWorkflowCommitRequiresPatchBump "${commitMessage}"; then
+                bump=patch
+            fi
+        done <<<"${commits}"
+
+        case "${bump}" in
+        major)
+            major=$((major + 1))
+            minor=0
+            patch=0
+            ;;
+        minor)
+            minor=$((minor + 1))
+            patch=0
+            ;;
+        patch)
+            patch=$((patch + 1))
+            ;;
+        esac
+
+        releaseVersion="v${major}.${minor}.${patch}"
         if [[ "${releaseVersion}" != "${currentVersion}" ]]; then
             needsBump=true
         else
