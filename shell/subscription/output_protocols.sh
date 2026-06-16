@@ -471,6 +471,7 @@ emitTuicSubscribeOutput() {
     local defaultLink
     local clashMetaBlock
     local singBoxFilter
+    local singBoxServerPort=${singBoxTuicPort:-${port}}
     defaultLink="tuic://${tuicUUID}:${tuicPassword}@${currentHost}:${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
@@ -488,7 +489,7 @@ emitTuicSubscribeOutput() {
     sni: ${currentHost}
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\": \"tuic\",\"server\": \"${currentHost}\",\"server_port\": ${port},\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"congestion_control\": \"${tuicAlgorithm}\",\"udp_relay_mode\": \"native\",\"zero_rtt_handshake\": false,\"tls\": {\"enabled\": true,\"server_name\": \"${currentHost}\",\"alpn\": [\"h3\"]}}]"
+    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\": \"tuic\",\"server\": \"${currentHost}\",\"server_port\": ${singBoxServerPort},\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"congestion_control\": \"${tuicAlgorithm}\",\"udp_relay_mode\": \"native\",\"zero_rtt_handshake\": false,\"tls\": {\"enabled\": true,\"server_name\": \"${currentHost}\",\"alpn\": [\"h3\"]}}]"
 
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
     subscribeOutputTitle "v2rayN：Tuic TLS"

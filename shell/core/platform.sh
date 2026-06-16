@@ -153,6 +153,9 @@ initVar() {
     hysteria2PortHoppingStart=
     hysteria2PortHoppingEnd=
     hysteria2PortHopping=
+    tuicPortHoppingStart=
+    tuicPortHoppingEnd=
+    tuicPortHopping=
     tuicAlgorithm=
     tuicAuthTimeout=
     tuicHeartbeat=

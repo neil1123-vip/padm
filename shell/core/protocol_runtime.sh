@@ -78,12 +78,33 @@ addFirewalldPortHopping() {
     fi
 }
 
+portHoppingPersistIptablesRules() {
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        sudo netfilter-persistent save >/dev/null 2>&1
+        return $?
+    fi
+    return 2
+}
+
+portHoppingWarnIptablesNotPersistent() {
+    statusCard "端口跳跃持久化" "未检测到 netfilter-persistent，当前规则仅在本次运行期生效" "如需开机保留，请安装 netfilter-persistent 后重新配置"
+}
+
 
 # 端口跳跃
 addPortHopping() {
     local type=$1
     local targetPort=$2
-    if [[ -n "${portHoppingStart}" || -n "${portHoppingEnd}" ]]; then
+    local currentPortHoppingStart=
+    local currentPortHoppingEnd=
+    if [[ "${type}" == "hysteria2" ]]; then
+        currentPortHoppingStart=${hysteria2PortHoppingStart:-}
+        currentPortHoppingEnd=${hysteria2PortHoppingEnd:-}
+    elif [[ "${type}" == "tuic" ]]; then
+        currentPortHoppingStart=${tuicPortHoppingStart:-}
+        currentPortHoppingEnd=${tuicPortHoppingEnd:-}
+    fi
+    if [[ -n "${currentPortHoppingStart}" || -n "${currentPortHoppingEnd}" ]]; then
         statusCard "端口跳跃" "已添加不可重复添加，可删除后重新添加"
         exit 0
     fi
@@ -150,9 +171,20 @@ addPortHopping() {
                     exit 1
                 fi
             else
-                if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" || ! sudo netfilter-persistent save; then
+                if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}"; then
                     iptables -t nat -D PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" >/dev/null 2>&1 || true
-                    sudo netfilter-persistent save >/dev/null 2>&1 || true
+                    statusCard "端口跳跃" "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
+                    exit 1
+                fi
+                local persistStatus=0
+                if portHoppingPersistIptablesRules; then
+                    persistStatus=0
+                else
+                    persistStatus=$?
+                fi
+                if [[ "${persistStatus}" == "1" ]]; then
+                    iptables -t nat -D PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" >/dev/null 2>&1 || true
+                    portHoppingPersistIptablesRules >/dev/null 2>&1 || true
                     statusCard "端口跳跃" "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
                     exit 1
                 fi
@@ -161,6 +193,9 @@ addPortHopping() {
                     exit 0
                 fi
                 allowPort "${portStart}:${portEnd}" udp || return 1
+                if [[ "${persistStatus}" == "2" ]]; then
+                    portHoppingWarnIptablesNotPersistent
+                fi
             fi
             statusCard "端口跳跃" "端口跳跃添加成功"
         fi
@@ -174,26 +209,41 @@ readPortHopping() {
     local targetPort=$2
     local portHoppingStart=
     local portHoppingEnd=
+    local portHopping=
 
     if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
         portHoppingStart=$(sudo firewall-cmd --list-forward-ports | grep "toport=${targetPort}" | head -1 | cut -d ":" -f 1 | cut -d "=" -f 2)
         portHoppingEnd=$(sudo firewall-cmd --list-forward-ports | grep "toport=${targetPort}" | tail -n 1 | cut -d ":" -f 1 | cut -d "=" -f 2)
     else
         if iptables-save | grep -q "neil1123-vip_${type}_portHopping"; then
-            local portHopping=
-            portHopping=$(iptables-save | grep "neil1123-vip_${type}_portHopping" | cut -d " " -f 8)
+            portHopping=$(iptables-save | awk -v marker="neil1123-vip_${type}_portHopping" '
+                $0 ~ marker {
+                    for (i = 1; i <= NF; i++) {
+                        if ($i == "--dport" && (i + 1) <= NF) {
+                            print $(i + 1)
+                            exit
+                        }
+                    }
+                }
+            ')
 
             portHoppingStart=$(echo "${portHopping}" | cut -d ":" -f 1)
             portHoppingEnd=$(echo "${portHopping}" | cut -d ":" -f 2)
         fi
     fi
+    if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
+        portHopping="${portHoppingStart}-${portHoppingEnd}"
+    else
+        portHopping=
+    fi
     if [[ "${type}" == "hysteria2" ]]; then
         hysteria2PortHoppingStart="${portHoppingStart}"
         hysteria2PortHoppingEnd=${portHoppingEnd}
-        hysteria2PortHopping="${portHoppingStart}-${portHoppingEnd}"
+        hysteria2PortHopping="${portHopping}"
     elif [[ "${type}" == "tuic" ]]; then
         tuicPortHoppingStart="${portHoppingStart}"
         tuicPortHoppingEnd="${portHoppingEnd}"
+        tuicPortHopping="${portHopping}"
     fi
 }
 
@@ -210,10 +260,13 @@ deletePortHoppingRules() {
         done
         sudo firewall-cmd --reload
     else
-        iptables -t nat -L PREROUTING --line-numbers | grep "neil1123-vip_${type}_portHopping" | awk '{print $1}' | while read -r line; do
-            iptables -t nat -D PREROUTING 1
-            sudo netfilter-persistent save
+        local -a ruleLines=()
+        mapfile -t ruleLines < <(iptables -t nat -L PREROUTING --line-numbers | awk -v marker="neil1123-vip_${type}_portHopping" '$0 ~ marker { print $1 }' | sort -rn)
+        for line in "${ruleLines[@]}"; do
+            [[ -n "${line}" ]] || continue
+            iptables -t nat -D PREROUTING "${line}"
         done
+        portHoppingPersistIptablesRules >/dev/null 2>&1 || true
     fi
 }
 

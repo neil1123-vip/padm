@@ -226,17 +226,22 @@ showVlessRealityGrpcAccounts() {
 showTuicAccounts() {
     # TUIC
     if currentProtocolHas 9 || [[ -n "${tuicPort:-}" ]]; then
+        readPortHopping "tuic" "${singBoxTuicPort}"
         subscribeSectionTitle "Tuic TLS" "UDP/移动网络可选"
         local path="${configPath}"
         if [[ "${coreInstallType}" == "1" ]]; then
             path="${singBoxConfigPath}"
+        fi
+        local tuicDefaultPort=${singBoxTuicPort}
+        if [[ -n "${tuicPortHoppingStart:-}" && -n "${tuicPortHoppingEnd:-}" ]]; then
+            tuicDefaultPort="${tuicPortHopping}"
         fi
         jq -r -c '.inbounds[].users[]' "${path}09_tuic_inbounds.json" | while read -r user; do
             local name uuid password
             IFS=$'\037' read -r _ _ password _ name uuid <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code tuic "${singBoxTuicPort}" "${name}" "${uuid}_${password}"
+            defaultBase64Code tuic "${tuicDefaultPort}" "${name}" "${uuid}_${password}"
         done
 
     fi

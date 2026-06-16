@@ -220,6 +220,106 @@ runNginxBlogAutoInstallRegression() {
     AUTO_INSTALL="${oldAutoInstall}"
 }
 
+runPortHoppingWithoutPersistentRegression() (
+    set -euo pipefail
+    AUTO_INSTALL=
+    lastInstallationConfig=
+    source "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
+
+    local natStateFile="${TMP_DIR}/port-hopping-nat.state"
+    local allowCalls=0
+    local warnLog="${TMP_DIR}/port-hopping-warn.log"
+    : >"${warnLog}"
+    : >"${natStateFile}"
+
+    statusCard() {
+        printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"${warnLog}"
+    }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    autoRead() {
+        printf -v "$3" '%s' '33000-33005'
+    }
+    allowPort() { allowCalls=$((allowCalls + 1)); return 0; }
+    command() {
+        if [[ "${1:-}" == "-v" && "${2:-}" == "netfilter-persistent" ]]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+    sudo() { "$@"; }
+    iptables() {
+        if [[ "$*" == *"-A PREROUTING"* ]]; then
+            if [[ "$*" == *"neil1123-vip_tuic_portHopping"* ]]; then
+                cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp -m udp --dport 12000:12005 -m comment --comment keep-other-rule -j DNAT --to-destination :12095
+-A PREROUTING -p udp -m udp --dport 33000:33005 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26451
+EOF
+            else
+                cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp -m udp --dport 12000:12005 -m comment --comment keep-other-rule -j DNAT --to-destination :12095
+-A PREROUTING -p udp -m udp --dport 33000:33005 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+EOF
+            fi
+            return 0
+        fi
+        if [[ "$*" == *"-D PREROUTING"* ]]; then
+            local line=${*: -1}
+            if [[ "${line}" == "2" ]]; then
+                printf '%s\n' "-A PREROUTING -p udp -m udp --dport 12000:12005 -m comment --comment keep-other-rule -j DNAT --to-destination :12095" >"${natStateFile}"
+            elif [[ "${line}" == "1" ]]; then
+                : >"${natStateFile}"
+            fi
+            return 0
+        fi
+        if [[ "$*" == *"-L PREROUTING --line-numbers"* ]]; then
+            if [[ -s "${natStateFile}" ]]; then
+                printf '1   DNAT       udp  --  anywhere anywhere udp dpts:12000:12005 /* keep-other-rule */ to::12095\n'
+                if grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"; then
+                    printf '2   DNAT       udp  --  anywhere anywhere udp dpts:33000:33005 /* neil1123-vip_hysteria2_portHopping */ to::16295\n'
+                fi
+                if grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"; then
+                    printf '2   DNAT       udp  --  anywhere anywhere udp dpts:33000:33005 /* neil1123-vip_tuic_portHopping */ to::26451\n'
+                fi
+            fi
+            return 0
+        fi
+        return 0
+    }
+    iptables-save() {
+        [[ -s "${natStateFile}" ]] && cat "${natStateFile}"
+        return 0
+    }
+
+    rhelLike=false
+    portHoppingStart=
+    portHoppingEnd=
+    addPortHopping hysteria2 16295
+    [[ -s "${natStateFile}" ]]
+    [[ "${allowCalls}" == "1" ]]
+    grep -Eq '端口跳跃持久化|未检测到 netfilter-persistent' "${warnLog}"
+
+    readPortHopping hysteria2 16295
+    [[ "${hysteria2PortHoppingStart}" == "33000" ]]
+    [[ "${hysteria2PortHoppingEnd}" == "33005" ]]
+
+    deletePortHoppingRules hysteria2 33000 33005 16295
+    grep -q 'keep-other-rule' "${natStateFile}"
+    ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+
+    : >"${natStateFile}"
+    hysteria2PortHoppingStart=33000
+    hysteria2PortHoppingEnd=33005
+    tuicPortHoppingStart=
+    tuicPortHoppingEnd=
+    addPortHopping tuic 26451
+    grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"
+    readPortHopping tuic 26451
+    [[ "${tuicPortHoppingStart}" == "33000" ]]
+    [[ "${tuicPortHoppingEnd}" == "33005" ]]
+)
+
 runXrayTrafficStatsJqCompatibilityRegression() (
     local fakeBin="${TMP_DIR}/fake-xray-stats-bin"
     mkdir -p "${fakeBin}"
@@ -1332,6 +1432,61 @@ runServiceWaitForStateRegression() {
     )
 }
 
+runWarpConfigGenerationFailureRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/warp-config-generation-failure"
+        local warpDir="${root}/warp"
+        local singBoxRoot="${root}/sing-box/"
+        mkdir -p "${warpDir}" "${singBoxRoot}"
+
+        export PADM_WARP_DIR="${warpDir}"
+        singBoxConfigPath="${singBoxRoot}"
+        coreInstallType=2
+        warpRegCoreCPUVendor="main-linux-amd64"
+        address="172.16.0.2/32"
+
+        autoRead() {
+            if [[ "$1" == "warp_reg_install" ]]; then
+                printf -v "$3" '%s' 'n'
+            else
+                printf -v "$3" '%s' ''
+            fi
+        }
+        downloadGitHubReleaseAsset() { return 1; }
+        errorCard() { return 0; }
+        statusCard() { return 0; }
+        successCard() { return 0; }
+        progressCard() { return 0; }
+        echoContent() { return 0; }
+        menuLine() { return 0; }
+        menuItem() { return 0; }
+        menuDangerItem() { return 0; }
+        menuReturnItem() { return 0; }
+        menuClose() { return 0; }
+        reloadCore() { return 0; }
+
+        cat >"${warpDir}/warp-reg" <<'EOF'
+#!/usr/bin/env bash
+printf 'Post "https://api.cloudflareclient.com/v0a2158/reg": EOF\n'
+exit 1
+EOF
+        chmod +x "${warpDir}/warp-reg"
+
+        ! readConfigWarpReg
+        [[ ! -f "${warpDir}/config" ]]
+
+        if addSingBoxWireGuardEndpoints IPv4 >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ ! -f "${singBoxRoot}wireguard_endpoints_IPv4.json" ]]
+        [[ ! -f "${warpDir}/config" ]]
+    )
+}
+
 runFail2banProfileRegression() {
     (
         set -euo pipefail
@@ -1646,7 +1801,8 @@ runRegressionPlatform() {
         runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression &&
         runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression &&
         runRegressionStep rhel-like-detection runRhelLikeDetectionRegression &&
-        runRegressionStep fedora-detection runFedoraDetectionRegression
+        runRegressionStep fedora-detection runFedoraDetectionRegression &&
+        runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression
 }
 
 runRegressionFast() {
@@ -1665,6 +1821,7 @@ runRegressionFast() {
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
         runRegressionStep service-wait-state runServiceWaitForStateRegression &&
+        runRegressionStep warp-config-generation-failure runWarpConfigGenerationFailureRegression &&
         runRegressionStep fail2ban-profile runFail2banProfileRegression &&
         runRegressionStep fail2ban-menu runFail2banMenuRegression &&
         runRegressionStep xray-strict-validation runXrayStrictValidationRegression &&
