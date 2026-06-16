@@ -1083,6 +1083,67 @@ syncInstallMetadataFile() {
     fi
 }
 
+cleanupInstallSyncPath() {
+    local targetPath=$1
+    padmRemoveCleanupPath "${targetPath}" 2>/dev/null || rm -rf -- "${targetPath}"
+}
+
+syncInstallDirectoryTree() {
+    local sourceDir=$1
+    local targetDir=$2
+    local targetParent targetName stageRoot stageDir backupRoot= backupPath=
+
+    [[ -d "${sourceDir}" ]] || return 0
+    if sameInstallPath "${sourceDir}" "${targetDir}"; then
+        return 0
+    fi
+
+    targetParent=$(dirname -- "${targetDir}")
+    targetName=$(basename -- "${targetDir}")
+    mkdir -p "${targetParent}" || return 1
+
+    if declare -F padmCreateTempPath >/dev/null 2>&1; then
+        padmCreateTempPath stageRoot -d "${targetParent}/.${targetName}.padm-stage.XXXXXX" || return 1
+    else
+        stageRoot=$(mktemp -d "${targetParent}/.${targetName}.padm-stage.XXXXXX") || return 1
+    fi
+    stageDir="${stageRoot}/${targetName}"
+    if ! cp -R "${sourceDir}" "${stageDir}"; then
+        cleanupInstallSyncPath "${stageRoot}"
+        return 1
+    fi
+
+    if [[ -e "${targetDir}" || -L "${targetDir}" ]]; then
+        if declare -F padmCreateTempPath >/dev/null 2>&1; then
+            padmCreateTempPath backupRoot -d "${targetParent}/.${targetName}.padm-backup.XXXXXX" || {
+                cleanupInstallSyncPath "${stageRoot}"
+                return 1
+            }
+        else
+            backupRoot=$(mktemp -d "${targetParent}/.${targetName}.padm-backup.XXXXXX") || {
+                cleanupInstallSyncPath "${stageRoot}"
+                return 1
+            }
+        fi
+        backupPath="${backupRoot}/${targetName}"
+        if ! mv "${targetDir}" "${backupPath}"; then
+            cleanupInstallSyncPath "${stageRoot}"
+            cleanupInstallSyncPath "${backupRoot}"
+            return 1
+        fi
+    fi
+
+    if ! mv "${stageDir}" "${targetDir}"; then
+        [[ -n "${backupPath}" ]] && mv "${backupPath}" "${targetDir}" >/dev/null 2>&1 || true
+        cleanupInstallSyncPath "${stageRoot}"
+        cleanupInstallSyncPath "${backupRoot}"
+        return 1
+    fi
+
+    cleanupInstallSyncPath "${stageRoot}"
+    cleanupInstallSyncPath "${backupRoot}"
+}
+
 # 脚本快捷方式
 aliasInstall() {
     local sourceInstall="${SCRIPT_DIR}/install.sh"
@@ -1101,24 +1162,14 @@ aliasInstall() {
 
     if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
         if ! sameInstallPath "${sourceInstall}" "${targetDir}/install.sh"; then
-            cp "${sourceInstall}" "${targetDir}/install.sh"
-            chmod 700 "${targetDir}/install.sh"
+            cp "${sourceInstall}" "${targetDir}/install.sh" && chmod 700 "${targetDir}/install.sh" || return 1
         fi
-        if [[ -d "${SCRIPT_DIR}/shell" ]] && ! sameInstallPath "${SCRIPT_DIR}/shell" "${targetDir}/shell"; then
-            rm -rf "${targetDir}/shell"
-            cp -R "${SCRIPT_DIR}/shell" "${targetDir}/"
-        fi
-        if [[ -d "${SCRIPT_DIR}/documents" ]] && ! sameInstallPath "${SCRIPT_DIR}/documents" "${targetDir}/documents"; then
-            rm -rf "${targetDir}/documents"
-            cp -R "${SCRIPT_DIR}/documents" "${targetDir}/"
-        fi
-        if [[ -d "${SCRIPT_DIR}/assets" ]] && ! sameInstallPath "${SCRIPT_DIR}/assets" "${targetDir}/assets"; then
-            rm -rf "${targetDir}/assets"
-            cp -R "${SCRIPT_DIR}/assets" "${targetDir}/"
-        fi
-        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-module-manifest" "${targetDir}/.padm-module-manifest"
-        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref"
-        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref"
+        syncInstallDirectoryTree "${SCRIPT_DIR}/shell" "${targetDir}/shell" || return 1
+        syncInstallDirectoryTree "${SCRIPT_DIR}/documents" "${targetDir}/documents" || return 1
+        syncInstallDirectoryTree "${SCRIPT_DIR}/assets" "${targetDir}/assets" || return 1
+        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-module-manifest" "${targetDir}/.padm-module-manifest" || return 1
+        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref" || return 1
+        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref" || return 1
         rm -f "${targetDir}/xray/README.md"
         local shortcutCreated=
         if [[ -d "/usr/bin/" ]]; then

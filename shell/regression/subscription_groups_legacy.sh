@@ -12021,16 +12021,32 @@ SH
 }
 
 runRealityScannerBinaryRegression() {
-    local scannerDir="${TMP_DIR}/scanner-bin"
-    local scannerBin="${scannerDir}/RealiTLScanner"
+    local scannerDirRel="${TMP_DIR}/scanner-bin"
+    local scannerDir=
+    local scannerBin=
     local capturedRepo= capturedVersion= capturedAsset= capturedDir=
 
+    mkdir -p "${scannerDirRel}"
+    scannerDir="$(cd -- "${scannerDirRel}" && pwd -P)"
+    scannerBin="${scannerDir}/RealiTLScanner"
+
+    rm() {
+        if [[ "$#" -eq 2 && "$1" == "-rf" && "$2" == "${scannerDir}" ]]; then
+            return 0
+        fi
+        command rm "$@"
+    }
+    mkdir() {
+        if [[ "$#" -eq 2 && "$1" == "-p" && "$2" == "${scannerDir}" ]]; then
+            return 0
+        fi
+        command mkdir "$@"
+    }
     downloadGitHubReleaseAsset() {
         capturedDir=$2
         capturedRepo=$3
         capturedVersion=$4
         capturedAsset=$5
-        mkdir -p "${capturedDir}"
         printf '#!/usr/bin/env bash\n' >"${capturedDir}/${capturedAsset}"
         return 0
     }
@@ -12042,7 +12058,39 @@ runRealityScannerBinaryRegression() {
     [[ "${capturedRepo}" == "XTLS/RealiTLScanner" ]]
     [[ "${capturedVersion}" == "v0.2.0" ]]
     [[ "${capturedAsset}" == "RealiTLScanner-linux-64" ]]
+    unset -f rm mkdir downloadGitHubReleaseAsset curl jq
 }
+
+runRealityScannerRejectsUnsafeDirRegression() (
+    local rootRel="${TMP_DIR}/scanner-unsafe-dir"
+    local root rmLog
+    local rc
+
+    mkdir -p "${rootRel}/relative-scanner"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    rmLog="${root}/rm.log"
+    printf 'keep\n' >"${root}/relative-scanner/sentinel"
+    : >"${rmLog}"
+
+    cd "${root}"
+    realityScannerDir() { printf '%s\n' "relative-scanner"; }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+    curl() { return 1; }
+    jq() { return 1; }
+
+    set +e
+    runRealityScannerRange "198.51.100.0/24" >/dev/null 2>&1
+    rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ -d "${root}/relative-scanner" ]]
+    [[ "$(<"${root}/relative-scanner/sentinel")" == "keep" ]]
+)
 
 regressionModuleManifestReady() {
     [[ "${PADM_FAKE_MODULE_MANIFEST_READY:-1}" == "1" ]]
@@ -12497,6 +12545,73 @@ EOF
     fi
 }
 
+runAliasInstallModuleSyncFailureRegression() {
+    local fixtureDir fixtureAbs sourceDir targetDir outputLog cpLog rcFile oldScriptDir oldPadmInstallDir oldHome rc
+    fixtureDir="${TMP_DIR}/alias-install-sync-failure"
+    outputLog="${fixtureDir}/output.log"
+    cpLog="${fixtureDir}/cp.log"
+    rcFile="${fixtureDir}/alias.rc"
+
+    mkdir -p "${fixtureDir}/source/shell" "${fixtureDir}/source/documents" "${fixtureDir}/source/assets" \
+        "${fixtureDir}/target/shell" "${fixtureDir}/target/documents" "${fixtureDir}/target/assets" "${fixtureDir}/home"
+    fixtureAbs=$(cd -- "${fixtureDir}" && pwd -P)
+    sourceDir="${fixtureAbs}/source"
+    targetDir="${fixtureAbs}/target"
+    cat >"${sourceDir}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+EOF
+    printf 'new-shell\n' >"${sourceDir}/shell/marker"
+    printf 'new-doc\n' >"${sourceDir}/documents/marker"
+    printf 'new-asset\n' >"${sourceDir}/assets/marker"
+    printf 'old-shell\n' >"${targetDir}/shell/marker"
+    printf 'old-doc\n' >"${targetDir}/documents/marker"
+    printf 'old-asset\n' >"${targetDir}/assets/marker"
+
+    oldScriptDir="${SCRIPT_DIR:-}"
+    oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
+    oldHome="${HOME}"
+    SCRIPT_DIR="${sourceDir}"
+    PADM_INSTALL_DIR="${targetDir}"
+    HOME="${fixtureDir}/home"
+
+    (
+        cp() {
+            printf 'cp %s\n' "$*" >>"${cpLog}"
+            if [[ "$1" == "${sourceDir}/install.sh" && "$2" == "${targetDir}/install.sh" ]]; then
+                return 0
+            fi
+            if [[ "$1" == "-R" && "$2" == "${sourceDir}/shell" ]]; then
+                return 1
+            fi
+            return 0
+        }
+        rm() { printf 'rm %s\n' "$*" >>"${cpLog}"; return 0; }
+        chmod() { :; }
+        ln() { :; }
+        set +e
+        aliasInstall
+        printf '%s\n' "$?" >"${rcFile}"
+    ) >"${outputLog}" 2>&1
+    rc=$(<"${rcFile}")
+
+    [[ "${rc}" == "1" ]]
+    grep -q "cp -R ${sourceDir}/shell " "${cpLog}"
+    ! grep -q "cp -R ${sourceDir}/documents " "${cpLog}"
+    ! grep -q "cp -R ${sourceDir}/assets " "${cpLog}"
+    [[ "$(<"${targetDir}/shell/marker")" == "old-shell" ]]
+    [[ "$(<"${targetDir}/documents/marker")" == "old-doc" ]]
+    [[ "$(<"${targetDir}/assets/marker")" == "old-asset" ]]
+
+    SCRIPT_DIR="${oldScriptDir}"
+    HOME="${oldHome}"
+    if [[ -n "${oldPadmInstallDir}" ]]; then
+        PADM_INSTALL_DIR="${oldPadmInstallDir}"
+    else
+        unset PADM_INSTALL_DIR
+    fi
+}
+
 runInstallModulePathsRegression() {
     local outputList moduleTmpRoot oldTmpDir moduleListBefore moduleListAfter
     outputList="${TMP_DIR}/install-module-paths.txt"
@@ -12538,6 +12653,7 @@ runRegressionPlatform() {
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&
+        runRegressionStep alias-install-sync-failure runAliasInstallModuleSyncFailureRegression &&
         runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression &&
         runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression &&
         runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression &&
@@ -12558,6 +12674,7 @@ runRegressionPlatformIo() {
         runRegressionStep base-package-batch runBasePackageBatchRegression &&
         runRegressionStep package-rollback-failure runPackageRollbackFailureRegression &&
         runRegressionStep package-command-stdin runPackageCommandStdinRegression &&
+        runRegressionStep reality-scanner-unsafe-dir runRealityScannerRejectsUnsafeDirRegression &&
         runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression
 }
 

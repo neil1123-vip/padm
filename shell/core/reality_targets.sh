@@ -1731,6 +1731,10 @@ ensureRealityScannerBinary() {
     local version=
     local assetName="RealiTLScanner-linux-64"
 
+    padmIsSafeAbsolutePath "${scannerDir%/}" || return 1
+    padmIsSafeAbsolutePath "${scannerBin}" || return 1
+    [[ "${scannerBin}" == "${scannerDir%/}/"* ]] || return 1
+
     if [[ -x "${scannerBin}" ]]; then
         return 0
     fi
