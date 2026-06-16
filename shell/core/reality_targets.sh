@@ -2148,22 +2148,6 @@ showRealityTargetPqcStatus() {
     showRealityTargetCachedQuality "${target}" || true
 }
 
-realityXrayVisionConfigPath() {
-    printf '%s\n' "${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}"
-}
-
-realityXrayXhttpConfigPath() {
-    printf '%s\n' "${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}"
-}
-
-realitySingBoxVisionConfigPath() {
-    printf '%s\n' "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}"
-}
-
-realitySingBoxGrpcConfigPath() {
-    printf '%s\n' "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}"
-}
-
 applyRealityTargetToInstalledConfigs() {
     local target=$1
     local sni=$2
@@ -2172,10 +2156,10 @@ applyRealityTargetToInstalledConfigs() {
     local xrayRealityConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
     REALITY_TARGET_APPLY_FAILURE_LOG=
     REALITY_TARGET_APPLY_FAILURE_PATH=
-    xrayRealityConfigPath=$(realityXrayVisionConfigPath)
-    xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
-    singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
-    singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
+    xrayRealityConfigPath="${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}"
+    xrayXhttpConfigPath="${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}"
+    singBoxRealityConfigPath="${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}"
+    singBoxGrpcConfigPath="${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}"
     applyLog=$(realityTargetTmpPath padm-reality-target-apply.log)
     rm -f "${applyLog}" >/dev/null 2>&1 || true
     parsed=$(parseHostPort "${target}" 443)
@@ -2267,13 +2251,13 @@ restoreRealityTargetRuntimeState() {
 
 validateRealityTargetConfigAfterChange() {
     local logFile
-    if [[ -f "$(realityXrayVisionConfigPath)" || -f "$(realityXrayXhttpConfigPath)" ]]; then
+    if [[ -f "${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}" || -f "${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}" ]]; then
         if [[ -x "/etc/padm/xray/xray" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-xray-test.log)
             /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1 || return 1
         fi
     fi
-    if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
+    if [[ -f "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}" || -f "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}" ]]; then
         if [[ -x "/etc/padm/sing-box/sing-box" ]]; then
             logFile=$(realityTargetTmpPath padm-reality-target-sing-box-test.log)
             singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "${logFile}" || return 1
@@ -2285,10 +2269,10 @@ backupRealityTargetConfigs() {
     local backupDir=$1
     local xrayRealityConfigPath xrayXhttpConfigPath singBoxRealityConfigPath singBoxGrpcConfigPath
     local status=0
-    xrayRealityConfigPath=$(realityXrayVisionConfigPath)
-    xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
-    singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
-    singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
+    xrayRealityConfigPath="${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}"
+    xrayXhttpConfigPath="${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}"
+    singBoxRealityConfigPath="${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}"
+    singBoxGrpcConfigPath="${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}"
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" || return 1
     if [[ -f "${xrayRealityConfigPath}" ]]; then
         cp "${xrayRealityConfigPath}" "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" || status=1
@@ -2309,16 +2293,16 @@ restoreRealityTargetConfigs() {
     local backupDir=$1
     local status=0
     if [[ -f "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]; then
-        cp "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" "$(realityXrayVisionConfigPath)" || status=1
+        cp "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" "${PADM_REALITY_XRAY_VISION_CONFIG_FILE:-/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json}" || status=1
     fi
     if [[ -f "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" ]]; then
-        cp "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" "$(realityXrayXhttpConfigPath)" || status=1
+        cp "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" "${PADM_REALITY_XRAY_XHTTP_CONFIG_FILE:-/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json}" || status=1
     fi
     if [[ -f "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" ]]; then
-        cp "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" "$(realitySingBoxVisionConfigPath)" || status=1
+        cp "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" "${PADM_REALITY_SINGBOX_VISION_CONFIG_FILE:-/etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json}" || status=1
     fi
     if [[ -f "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" ]]; then
-        cp "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" "$(realitySingBoxGrpcConfigPath)" || status=1
+        cp "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" "${PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE:-/etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json}" || status=1
     fi
     return "${status}"
 }
