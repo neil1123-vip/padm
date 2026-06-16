@@ -641,32 +641,3 @@ EOF
     fi
     endPackageInstallTransaction "${packageTransactionOwner}"
 }
-
-
-warpCliHelpContains() {
-    warp-cli --help 2>/dev/null | grep -q -- "$1"
-}
-
-warpRegister() {
-    if warpCliHelpContains 'registration'; then
-        warp-cli --accept-tos registration new
-    else
-        warp-cli --accept-tos register
-    fi
-}
-
-warpSetProxyMode() {
-    if warp-cli mode --help 2>/dev/null | grep -q 'proxy'; then
-        warp-cli --accept-tos mode proxy
-    else
-        warp-cli --accept-tos set-mode proxy
-    fi
-}
-
-warpSetProxyPort() {
-    if warpCliHelpContains 'proxy'; then
-        warp-cli --accept-tos proxy port 31303
-    else
-        warp-cli --accept-tos set-proxy-port 31303
-    fi
-}
