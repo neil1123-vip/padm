@@ -347,6 +347,14 @@ validateCoreInstallTargetPath() {
         errorCard "${description}安装路径异常"
         return 1
     fi
+    if [[ -e "${targetDir}" && ! -d "${targetDir}" ]]; then
+        errorCard "${description}安装目录异常，请手动检查 ${targetDir}"
+        return 1
+    fi
+    if ! padmCommitTargetIsFileLike "${targetFile}"; then
+        errorCard "${description}安装目标异常，请手动检查 ${targetFile}"
+        return 1
+    fi
 }
 
 commitStagedCoreInstallFile() {
@@ -1144,8 +1152,7 @@ restoreCoreBinaryBackup() {
     local backupBinary=$1
     local targetBinary=$2
     [[ -f "${backupBinary}" ]] || return 0
-    cp "${backupBinary}" "${targetBinary}" || return 1
-    chmod 655 "${targetBinary}" >/dev/null 2>&1 || return 1
+    restoreManagedFileFromBackup "${backupBinary}" "${targetBinary}" 655
 }
 
 finalizeFailedCoreBinaryInstall() {
@@ -1185,11 +1192,11 @@ restoreCoreOptionalFileBackup() {
     local targetFile=$2
     local mode=${3:-644}
     if [[ ! -e "${backupFile}" ]]; then
+        padmCommitTargetIsFileLike "${targetFile}" || return 1
         rm -f -- "${targetFile}" >/dev/null 2>&1 || return 1
         return 0
     fi
-    cp "${backupFile}" "${targetFile}" || return 1
-    chmod "${mode}" "${targetFile}" >/dev/null 2>&1 || return 1
+    restoreManagedFileFromBackup "${backupFile}" "${targetFile}" "${mode}"
 }
 
 finalizeFailedSingBoxBinaryInstall() {
@@ -1251,7 +1258,7 @@ installDownloadedXrayBinary() {
         statusCard "Xray-core 更新失败" "Xray 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
-    if ! cp "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
+    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedCoreBinaryInstall "Xray-core" "${backupBinary}" "${oldBinary}" handleXray "${logFile}"
         return 1
@@ -1321,12 +1328,12 @@ installDownloadedSingBoxBinary() {
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
-    if ! mv -f "${newBinary}" "${oldBinary}" || ! chmod 655 "${oldBinary}"; then
+    if ! commitStagedCoreInstallFile "${newBinary}" "${oldBinary}" 655; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
         return 1
     fi
-    if ! cp "${extractedDir}/libcronet.so" "${cronetPath}"; then
+    if ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${cronetPath}" 644; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedSingBoxBinaryInstall "${backupBinary}" "${oldBinary}" "${cronetBackup}" "${cronetPath}" "${logFile}"
         return 1

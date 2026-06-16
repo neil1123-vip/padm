@@ -2708,6 +2708,7 @@ runCoreBinaryInstallCopyFailureRegression() (
     : >"${serviceLog}"
     : >"${copyFailureLog}"
 
+    padmIsSafeAbsolutePath() { return 0; }
     padmCreateTempPath() {
         local resultVar=$1
         local path
@@ -2776,17 +2777,20 @@ runCoreBinaryInstallCopyFailureRegression() (
         return 0
     }
     cp() {
-        local sourcePath=$1
-        local targetPath=$2
-        if [[ "${restoreCopyShouldFail}" == "true" && "${sourcePath}" == "${xrayBinary}.bak.restore-fail" && "${targetPath}" == "${xrayBinary}" ]]; then
+        local args=("$@")
+        local sourcePath="${args[$((${#args[@]} - 2))]}"
+        local targetPath="${args[$((${#args[@]} - 1))]}"
+        if [[ "${restoreCopyShouldFail}" == "true" && "${sourcePath}" == "${xrayBinary}.bak.restore-fail" &&
+            "${targetPath}" == "${root}"/tmp/core.* ]]; then
             printf 'restore-xray\n' >>"${copyFailureLog}"
             return 1
         fi
-        if [[ "${targetPath}" == "${xrayBinary}" && "${sourcePath}" != ${xrayBinary}.bak.* ]]; then
+        if [[ "${targetPath}" == "${root}"/tmp/core.* && "${sourcePath}" == "${root}"/tmp/core.*/xray ]]; then
             printf 'xray\n' >>"${copyFailureLog}"
             return 1
         fi
-        if [[ "${targetPath}" == "$(dirname "${singBoxBinary}")/libcronet.so" ]]; then
+        if [[ "${targetPath}" == "${root}"/tmp/core.* &&
+            "${sourcePath}" == "${root}"/tmp/core.*/sing-box-1.2.3-linux-amd64/libcronet.so ]]; then
             printf 'sing-box\n' >>"${copyFailureLog}"
             return 1
         fi
@@ -2891,6 +2895,7 @@ runSingBoxCronetRollbackRegression() (
     : >"${serviceLog}"
     : >"${copyFailureLog}"
 
+    padmIsSafeAbsolutePath() { return 0; }
     padmCreateTempPath() {
         local resultVar=$1
         local path
@@ -2941,9 +2946,11 @@ runSingBoxCronetRollbackRegression() (
         return 0
     }
     cp() {
-        local sourcePath=$1
-        local targetPath=$2
-        if [[ "${targetPath}" == "${singBoxCronet}" && "${sourcePath}" != ${singBoxCronet}.bak.* ]]; then
+        local args=("$@")
+        local sourcePath="${args[$((${#args[@]} - 2))]}"
+        local targetPath="${args[$((${#args[@]} - 1))]}"
+        if [[ "${targetPath}" == "${root}"/tmp/core.* &&
+            "${sourcePath}" == "${root}"/tmp/core.*/sing-box-1.2.3-linux-amd64/libcronet.so ]]; then
             printf 'cronet-copy-fail\n' >>"${copyFailureLog}"
             return 1
         fi
@@ -3013,6 +3020,7 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
     chmod 755 "${singBoxBinary}" "${singBoxBinary}.bak"
 
     REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    padmIsSafeAbsolutePath() { return 0; }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
@@ -3033,6 +3041,126 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
     [[ ! -e "${singBoxCronet}.bak" ]]
     grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
     grep -qx 'sing-box:start:true' "${serviceLog}"
+)
+
+runCoreUpgradeRejectsDirectoryTargetRegression() (
+    local root="${TMP_DIR}/core-upgrade-directory-target"
+    local xrayBinary="${root}/xray/xray"
+    local singBoxBinary="${root}/sing-box/sing-box"
+    local errorLog="${root}/error.log"
+    local serviceLog="${root}/service.log"
+    local xrayRc singBoxRc
+
+    mkdir -p "${xrayBinary}" "${singBoxBinary}" "${root}/tmp"
+
+    PADM_XRAY_BINARY="${xrayBinary}"
+    PADM_SINGBOX_BINARY="${singBoxBinary}"
+    xrayCoreCPUVendor=linux-64
+    singBoxCoreCPUVendor=-linux-amd64
+
+    : >"${errorLog}"
+    : >"${serviceLog}"
+
+    padmIsSafeAbsolutePath() { return 0; }
+    padmCreateTempPath() {
+        local resultVar=$1
+        local path
+        shift
+        if [[ "${1:-}" == "-d" ]]; then
+            path=$(mktemp -d "${root}/tmp/core.XXXXXX") || return 1
+        else
+            path=$(mktemp "${root}/tmp/core.XXXXXX") || return 1
+        fi
+        printf -v "${resultVar}" '%s' "${path}"
+    }
+    padmRemoveCleanupPath() { rm -rf "$1"; }
+    padmForgetCleanupPath() { return 0; }
+    downloadGitHubReleaseAsset() {
+        local outputDir= assetName=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -P)
+                outputDir=$2
+                shift 2
+                ;;
+            *)
+                assetName=$1
+                shift
+                ;;
+            esac
+        done
+        mkdir -p "${outputDir}"
+        : >"${outputDir}/${assetName}"
+    }
+    unzip() {
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -d)
+                dest=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+            esac
+        done
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
+        chmod 755 "${dest}/xray"
+    }
+    tar() {
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -C)
+                dest=$2
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+            esac
+        done
+        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
+        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+    xrayRunning() { return 1; }
+    singBoxRunning() { return 1; }
+    validateXrayConfigWithBinary() { return 0; }
+    validateSingBoxConfigWithBinary() { return 0; }
+
+    REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    set +e
+    installDownloadedXrayBinary v1.2.3 >/dev/null 2>&1
+    xrayRc=$?
+    set -e
+
+    set +e
+    installDownloadedSingBoxBinary v1.2.3 >/dev/null 2>&1
+    singBoxRc=$?
+    set -e
+
+    [[ "${xrayRc}" == "1" ]]
+    [[ "${singBoxRc}" == "1" ]]
+    [[ -d "${xrayBinary}" ]]
+    [[ -d "${singBoxBinary}" ]]
+    [[ ! -e "${xrayBinary}/xray" ]]
+    [[ ! -e "${singBoxBinary}/sing-box" ]]
+    [[ ! -e "${singBoxBinary}/libcronet.so" ]]
+    grep -q "Xray-core安装目标异常，请手动检查 ${xrayBinary}" "${errorLog}"
+    grep -q "sing-box安装目标异常，请手动检查 ${singBoxBinary}" "${errorLog}"
+    ! grep -q '^xray:' "${serviceLog}"
+    ! grep -q '^sing-box:' "${serviceLog}"
 )
 
 runLegacyCoreUpgradeKeepsExistingBinaryRegression() (
@@ -13905,6 +14033,7 @@ runRegressionTransactionCore() {
         runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
         runRegressionStep sing-box-cronet-rollback runSingBoxCronetRollbackRegression &&
         runRegressionStep finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression &&
+        runRegressionStep core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression &&
         runRegressionStep legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression &&
         runRegressionStep core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression &&
         runRegressionStep core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression &&
