@@ -1942,6 +1942,74 @@ runSubscriptionSyncPathSafetyRegression() {
     )
 }
 
+runSubscriptionSyncMissingRestoreScopeRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/subscription-sync-missing-restore-scope"
+        local backupDir
+        local rmLog
+
+        rmLog="${root}/rm.log"
+        padmIsSafeAbsolutePath() { return 0; }
+        mkdir -p "${root}"
+        : >"${rmLog}"
+
+        padmCreateTempPath backupDir -d "${TMP_DIR}/subscription-sync-missing-restore-scope-backup.XXXXXX"
+        subscriptionSyncBackupPath "${root}/subscribe_local" "${backupDir}" local
+        subscriptionSyncBackupPath "${root}/subscribe" "${backupDir}" public
+
+        mkdir -p \
+            "${root}/subscribe_local/default" \
+            "${root}/subscribe_local/clashMeta" \
+            "${root}/subscribe_local/sing-box" \
+            "${root}/subscribe_local/custom" \
+            "${root}/subscribe/default" \
+            "${root}/subscribe/clashMeta" \
+            "${root}/subscribe/clashMetaProfiles" \
+            "${root}/subscribe/sing-box" \
+            "${root}/subscribe/sing-box_profiles" \
+            "${root}/subscribe/custom"
+        printf 'managed\n' >"${root}/subscribe_local/default/generated"
+        printf 'managed\n' >"${root}/subscribe_local/clashMeta/generated"
+        printf '[]\n' >"${root}/subscribe_local/sing-box/generated"
+        printf 'salt\n' >"${root}/subscribe_local/subscribeSalt"
+        printf 'keep\n' >"${root}/subscribe_local/custom/keep"
+        printf 'managed\n' >"${root}/subscribe/default/generated"
+        printf 'managed\n' >"${root}/subscribe/clashMeta/generated"
+        printf 'managed\n' >"${root}/subscribe/clashMetaProfiles/generated"
+        printf 'managed\n' >"${root}/subscribe/sing-box/generated"
+        printf 'managed\n' >"${root}/subscribe/sing-box_profiles/generated"
+        printf 'keep\n' >"${root}/subscribe/custom/keep"
+
+        (
+            rm() {
+                printf 'rm:%s\n' "$*" >>"${rmLog}"
+                command rm "$@"
+            }
+            subscriptionSyncRestoreBackupPath "${root}/subscribe_local" "${backupDir}" local
+            subscriptionSyncRestoreBackupPath "${root}/subscribe" "${backupDir}" public
+        )
+
+        [[ -f "${root}/subscribe_local/custom/keep" ]]
+        [[ -f "${root}/subscribe/custom/keep" ]]
+        [[ ! -e "${root}/subscribe_local/default" ]]
+        [[ ! -e "${root}/subscribe_local/clashMeta" ]]
+        [[ ! -e "${root}/subscribe_local/sing-box" ]]
+        [[ ! -e "${root}/subscribe_local/subscribeSalt" ]]
+        [[ ! -e "${root}/subscribe/default" ]]
+        [[ ! -e "${root}/subscribe/clashMeta" ]]
+        [[ ! -e "${root}/subscribe/clashMetaProfiles" ]]
+        [[ ! -e "${root}/subscribe/sing-box" ]]
+        [[ ! -e "${root}/subscribe/sing-box_profiles" ]]
+        ! grep -qxF "rm:-rf -- ${root}/subscribe_local" "${rmLog}"
+        ! grep -qxF "rm:-rf -- ${root}/subscribe" "${rmLog}"
+
+        padmRemoveCleanupPath "${backupDir}"
+    )
+}
+
 runShowAccountsXrayWithSingBoxAssistRegression() {
     (
         set -euo pipefail
@@ -2676,6 +2744,7 @@ runRegressionFast() {
         runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression &&
         runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
+        runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&

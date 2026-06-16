@@ -355,6 +355,31 @@ subscriptionSyncBackupPath() {
     fi
 }
 
+subscriptionSyncRestoreMissingOutputPath() {
+    local targetPath=$1
+    local label=$2
+
+    case "${label}" in
+    local)
+        rm -rf -- "${targetPath}/default" "${targetPath}/clashMeta" "${targetPath}/sing-box" || return 1
+        rm -f -- "${targetPath}/subscribeSalt" || return 1
+        ;;
+    public)
+        rm -rf -- \
+            "${targetPath}/default" \
+            "${targetPath}/clashMeta" \
+            "${targetPath}/clashMetaProfiles" \
+            "${targetPath}/sing-box" \
+            "${targetPath}/sing-box_profiles" || return 1
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    rmdir -- "${targetPath}" >/dev/null 2>&1 || true
+}
+
 subscriptionSyncRestoreBackupPath() {
     local targetPath=$1
     local backupDir=$2
@@ -419,7 +444,7 @@ subscriptionSyncRestoreBackupPath() {
         commitGeneratedFile "${restoreStage}" "${targetPath}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
         ;;
     missing)
-        rm -rf -- "${targetPath}" || return 1
+        subscriptionSyncRestoreMissingOutputPath "${targetPath}" "${label}" || return 1
         return 0
         ;;
     *)
