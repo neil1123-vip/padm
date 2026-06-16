@@ -114,6 +114,28 @@ SH
     [[ ! -e "${createdPath}" ]]
 }
 
+runCommitGeneratedFileRejectsDirectoryTargetRegression() (
+    local root="${TMP_DIR}/commit-generated-file-directory-target"
+    local targetPath="${root}/target.conf"
+    local tmpFile
+    local status
+
+    mkdir -p "${targetPath}"
+    padmCreateTempPath tmpFile "${root}/.target.write.XXXXXX"
+    printf 'new\n' >"${tmpFile}"
+
+    set +e
+    commitGeneratedFile "${tmpFile}" "${targetPath}" 644
+    status=$?
+    set -e
+
+    [[ "${status}" -ne 0 ]]
+    [[ -f "${tmpFile}" ]]
+    [[ -d "${targetPath}" ]]
+    [[ ! -e "${targetPath}/$(basename -- "${tmpFile}")" ]]
+    padmRemoveCleanupPath "${tmpFile}"
+)
+
 runGitHubReleaseAssetDirectFallbackRegression() {
     (
         set -euo pipefail
@@ -2157,6 +2179,35 @@ runSubscriptionSyncPathSafetyRegression() {
     )
 }
 
+runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/subscription-sync-config-directory-target"
+        local backupDir
+        local targetFile="${root}/safe-config/02_VLESS_TCP_inbounds.json"
+        local status
+
+        mkdir -p "${root}/safe-config" "${targetFile}"
+        configPath="${root}/safe-config/"
+        singBoxConfigPath=
+        padmCreateTempPath backupDir -d "${TMP_DIR}/subscription-sync-config-directory-target-backup.XXXXXX"
+        printf '{"inbounds":[]}\n' >"${backupDir}/000000.json"
+        printf '%s\t%s\n' "${backupDir}/000000.json" "${targetFile}" >"${backupDir}/manifest"
+
+        set +e
+        subscriptionSyncRestoreConfigBackups "${backupDir}"
+        status=$?
+        set -e
+
+        [[ "${status}" -ne 0 ]]
+        [[ -d "${targetFile}" ]]
+        [[ ! -e "${targetFile}/000000.json" ]]
+        padmRemoveCleanupPath "${backupDir}"
+    )
+}
+
 runSubscriptionSyncMissingRestoreScopeRegression() {
     (
         set -euo pipefail
@@ -2944,6 +2995,7 @@ runRegressionPlatform() {
 
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
+        runRegressionStep commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression &&
         runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
         runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
@@ -2962,6 +3014,7 @@ runRegressionFast() {
         runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression &&
         runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
+        runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&
         runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&

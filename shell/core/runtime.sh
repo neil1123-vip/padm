@@ -62,7 +62,7 @@ padmCreateTempFileForTarget() {
     local targetDir targetName
     targetDir=$(dirname -- "${targetFile}")
     targetName=$(basename -- "${targetFile}")
-    mkdir -p "${targetDir}" || return 1
+    [[ -d "${targetDir}" ]] || mkdir -p "${targetDir}" || return 1
     padmCreateTempPath "${resultVar}" "${targetDir}/.${targetName}.${label}.XXXXXX"
 }
 
@@ -87,6 +87,12 @@ padmRemoveCleanupPath() {
     padmUnregisterCleanupPath "${resolvedPath:-${path}}"
 }
 
+padmCommitTargetIsFileLike() {
+    local targetFile=$1
+    [[ ! -d "${targetFile}" ]] || return 1
+    [[ ! -e "${targetFile}" || -f "${targetFile}" || -L "${targetFile}" ]]
+}
+
 commitGeneratedFile() {
     local tmpFile=$1
     local targetFile=$2
@@ -95,7 +101,8 @@ commitGeneratedFile() {
     if [[ -n "${mode}" ]]; then
         chmod "${mode}" "${tmpFile}" || return 1
     fi
-    mv "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
+    padmCommitTargetIsFileLike "${targetFile}" || return 1
+    mv -f -- "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
 }
 
 commitGeneratedJsonFile() {

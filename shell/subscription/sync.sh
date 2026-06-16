@@ -386,13 +386,18 @@ subscriptionSyncRestoreConfigBackups() {
     local manifest="${backupDir}/manifest"
     local backupFile
     local targetFile
+    local restoreStage
     subscriptionSyncRequireSafeConfigDirs || return 1
     [[ -f "${manifest}" ]] || return 1
     while IFS=$'\t' read -r backupFile targetFile; do
         [[ -n "${backupFile}" && -n "${targetFile}" ]] || continue
         subscriptionSyncManagedConfigTargetFile "${targetFile}" || return 1
-        mkdir -p "$(dirname "${targetFile}")" || return 1
-        cp -p "${backupFile}" "${targetFile}" || return 1
+        padmCreateTempFileForTarget restoreStage "${targetFile}" restore || return 1
+        if ! cp -p "${backupFile}" "${restoreStage}"; then
+            padmRemoveCleanupPath "${restoreStage}"
+            return 1
+        fi
+        commitGeneratedFile "${restoreStage}" "${targetFile}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
     done <"${manifest}"
 }
 

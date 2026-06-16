@@ -699,11 +699,14 @@ JSON
 )
 
 runSubscriptionSyncRollbackConfigRestoreFailureRegression() (
-    local root="${TMP_DIR}/subscription-sync-rollback-failure"
-    local targetFile="${root}/xray/02_VLESS_TCP_inbounds.json"
+    local rootRel="${TMP_DIR}/subscription-sync-rollback-failure"
+    local root
+    local targetFile
     local rc backupDirs=()
 
-    mkdir -p "${root}/xray" "${root}/tmp"
+    mkdir -p "${rootRel}/xray" "${rootRel}/tmp"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    targetFile="${root}/xray/02_VLESS_TCP_inbounds.json"
     configPath="${root}/xray/"
     singBoxConfigPath="${root}/xray/"
     TMPDIR="${root}/tmp"
@@ -725,7 +728,7 @@ JSON
         return 1
     }
     cp() {
-        if [[ "$1" == "-p" && "$2" == "${root}/tmp"/padm-subscription-sync-backup.*/*.json && "$3" == "${targetFile}" ]]; then
+        if [[ "$1" == "-p" && "$2" == "${root}/tmp"/padm-subscription-sync-backup.*/*.json && "$3" == "${root}/xray"/.02_VLESS_TCP_inbounds.json.restore.* ]]; then
             return 1
         fi
         command cp "$@"
