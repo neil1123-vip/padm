@@ -1,10 +1,33 @@
 #!/usr/bin/env bash
 
+nginxConfigFilePath() {
+    local fileName=$1
+    local configDir="${nginxConfigPath:-}"
+    local targetPath
+    [[ -n "${configDir}" && -n "${fileName}" && "${fileName}" != */* ]] || return 1
+    targetPath="${configDir%/}/${fileName}"
+    padmIsSafeAbsolutePath "${targetPath}" || return 1
+    printf '%s\n' "${targetPath}"
+}
+
 # 清理本脚本管理的 Nginx 配置
 cleanAgentNginxConf() {
     local status=0
-    rm -f "${nginxConfigPath}alone.conf" "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" "${nginxConfigPath}subscribe.conf" "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1 || status=1
-    rm -f "$(realityStreamSplitConfFile)" "$(realityStreamSplitStateFile)" >/dev/null 2>&1 || status=1
+    local file targetPath streamConf streamState
+    for file in alone.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf checkPortOpen.conf; do
+        if ! targetPath=$(nginxConfigFilePath "${file}"); then
+            padmShowUnsafePathError "清理 Nginx 配置"
+            return 1
+        fi
+        rm -f -- "${targetPath}" >/dev/null 2>&1 || status=1
+    done
+    streamConf=$(realityStreamSplitConfFile)
+    streamState=$(realityStreamSplitStateFile)
+    if ! padmIsSafeAbsolutePath "${streamConf}" || ! padmIsSafeAbsolutePath "${streamState}"; then
+        padmShowUnsafePathError "清理 Nginx 配置"
+        return 1
+    fi
+    rm -f -- "${streamConf}" "${streamState}" >/dev/null 2>&1 || status=1
     removeRealityStreamNginxInclude || status=1
     return "${status}"
 }
@@ -673,14 +696,8 @@ disableRealityStreamSplit() {
 
 # 删除 Nginx 默认配置
 removeNginxDefaultConf() {
-    local configDir="${nginxConfigPath:-}"
     local defaultConf
-    if [[ -z "${configDir}" ]]; then
-        padmShowUnsafePathError "删除 Nginx 默认配置"
-        return 1
-    fi
-    defaultConf="${configDir%/}/default.conf"
-    if ! padmIsSafeAbsolutePath "${defaultConf}"; then
+    if ! defaultConf=$(nginxConfigFilePath default.conf); then
         padmShowUnsafePathError "删除 Nginx 默认配置"
         return 1
     fi

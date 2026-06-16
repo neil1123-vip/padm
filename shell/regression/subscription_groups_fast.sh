@@ -199,6 +199,69 @@ runRemoveNginxDefaultConfSafetyRegression() {
     )
 }
 
+runCleanAgentNginxConfSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/clean-agent-nginx-conf-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        local managedFiles=(alone.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf checkPortOpen.conf)
+        local file
+        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+        PADM_REALITY_STREAM_CONF_FILE="${root}/stream.conf"
+        PADM_REALITY_STREAM_STATE_FILE="${root}/stream-state.json"
+        PADM_REALITY_STREAM_NGINX_CONF="${root}/missing-nginx.conf"
+
+        for file in "${managedFiles[@]}"; do
+            printf 'managed\n' >"${unsafeRoot}/${file}"
+        done
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath=
+            ! cleanAgentNginxConf
+            for file in "${managedFiles[@]}"; do
+                [[ -f "${file}" ]]
+            done
+        )
+
+        for file in "${managedFiles[@]}"; do
+            printf 'managed\n' >"${nginxRoot}/${file}"
+        done
+        printf 'stream\n' >"${PADM_REALITY_STREAM_CONF_FILE}"
+        printf 'state\n' >"${PADM_REALITY_STREAM_STATE_FILE}"
+        nginxConfigPath="${nginxRoot}/"
+        cleanAgentNginxConf
+        for file in "${managedFiles[@]}"; do
+            [[ ! -e "${nginxRoot}/${file}" ]]
+        done
+        [[ ! -e "${PADM_REALITY_STREAM_CONF_FILE}" ]]
+        [[ ! -e "${PADM_REALITY_STREAM_STATE_FILE}" ]]
+    )
+}
+
+runUninstallSubscribeNginxPathSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/uninstall-subscribe-nginx-path-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+
+        printf 'subscribe\n' >"${unsafeRoot}/subscribe.conf"
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath=
+            ! unInstallSubscribe
+            [[ -f subscribe.conf ]]
+        )
+
+        printf 'subscribe\n' >"${nginxRoot}/subscribe.conf"
+        nginxConfigPath="${nginxRoot}/"
+        unInstallSubscribe
+        [[ ! -e "${nginxRoot}/subscribe.conf" ]]
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -2152,6 +2215,8 @@ runRegressionFast() {
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression &&
         runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression &&
+        runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression &&
+        runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&

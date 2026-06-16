@@ -300,10 +300,15 @@ EOF
 
 # 卸载订阅服务
 unInstallSubscribe() {
-    if [[ ! -e "${nginxConfigPath}subscribe.conf" && ! -L "${nginxConfigPath}subscribe.conf" ]]; then
+    local targetPath
+    if ! targetPath=$(nginxConfigFilePath subscribe.conf); then
+        padmShowUnsafePathError "卸载订阅 Nginx 配置"
+        return 1
+    fi
+    if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
         return 0
     fi
-    rm -rf "${nginxConfigPath}subscribe.conf" >/dev/null 2>&1
+    rm -f -- "${targetPath}" >/dev/null 2>&1
 }
 
 
