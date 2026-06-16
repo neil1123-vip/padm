@@ -4418,6 +4418,20 @@ runWarpConfigSafeDirRegression() (
     [[ "${rc}" == "1" ]]
     [[ ! -s "${rmLog}" ]]
     [[ ! -s "${errorLog}" ]]
+
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        coreInstallType=1
+        configPath="${root}/xray/"
+        singBoxConfigPath=
+        mkdir -p "${configPath}"
+        set +e
+        unInstallWireGuard IPv4 >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+    )
+    [[ ! -s "${rmLog}" ]]
 )
 
 runUninstallNginxCleanupRegression() {

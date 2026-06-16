@@ -156,7 +156,7 @@ addWireGuardRoute() {
 unInstallWireGuard() {
     local type=$1
     local warpDir
-    warpDir=$(warpConfigDir)
+    warpDir=$(warpConfigSafeDir) || return 1
     if [[ "${coreInstallType}" == "1" ]]; then
 
         if [[ "${type}" == "IPv4" ]]; then
