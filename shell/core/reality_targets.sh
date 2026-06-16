@@ -962,10 +962,6 @@ selectRealityAsnScanPlan() {
     done
 }
 
-selectRealityAsnPrefixSet() {
-    selectRealityAsnScanPlan "$@"
-}
-
 realityTargetProviderMatches() {
     local currentOrg=$1
     local candidateOrg=$2
@@ -1729,7 +1725,7 @@ runRealityScannerSameAsnPrefixes() {
         realityTargetStatusBlock red "同 ASN 前缀扫描" "未获取到 ${currentAsn} 的 IPv4 前缀"
         return 1
     fi
-    if ! selectRealityAsnPrefixSet "${currentAsn}" "${allPrefixFile}"; then
+    if ! selectRealityAsnScanPlan "${currentAsn}" "${allPrefixFile}"; then
         padmRemoveCleanupPath "${allPrefixFile}"
         return 1
     fi
