@@ -224,15 +224,11 @@ coreLatestReleaseTag() {
 }
 
 xrayInstalled() {
-    [[ -x "$(coreXrayBinaryPath)" ]]
+    [[ -x "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}" ]]
 }
 
 singBoxInstalled() {
-    [[ -x "$(coreSingBoxBinaryPath)" ]]
-}
-
-coreXrayBinaryPath() {
-    printf '%s\n' "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+    [[ -x "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" ]]
 }
 
 coreXrayConfigDir() {
@@ -241,10 +237,6 @@ coreXrayConfigDir() {
         return
     fi
     printf '%s\n' "${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
-}
-
-coreSingBoxBinaryPath() {
-    printf '%s\n' "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
 }
 
 xrayConfigInstalled() {
@@ -259,7 +251,7 @@ xrayConfigInstalled() {
 
 getSingBoxCurrentVersion() {
     if singBoxInstalled; then
-        "$(coreSingBoxBinaryPath)" version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}'
+        "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}'
     else
         echo "未安装"
     fi
@@ -753,7 +745,7 @@ showXrayStrictValidation() {
         statusCard "Xray 严格模式校验" "跳过" "未检测到 Xray 配置"
         return 0
     fi
-    if validateXrayConfigStrictWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
+    if validateXrayConfigStrictWithBinary "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}" "${logFile}"; then
         statusCard "Xray 严格模式校验" "通过"
         return 0
     fi
@@ -851,7 +843,7 @@ coreValidationState() {
     local logFile
     if [[ "${core}" == "xray" ]]; then
         logFile=$(coreTmpFilePath padm-core-xray-test.log)
-        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
+        if validateXrayConfigWithBinary "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}" "${logFile}"; then
             echo "通过"
         else
             echo "失败，查看 ${logFile}"
@@ -887,7 +879,7 @@ showCoreStatusOverview() {
 
     xrayConfigDir=$(coreXrayConfigDir)
     xrayDir=$(dirname "${xrayConfigDir}")
-    xrayBinary=$(coreXrayBinaryPath)
+    xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
 
     if [[ -x "${xrayBinary}" ]]; then
         xrayVersion=$("${xrayBinary}" --version 2>/dev/null | awk 'NR==1 {print "v"$2}')
@@ -1014,7 +1006,7 @@ installDownloadedXrayBinary() {
         return 1
     fi
 
-    oldBinary=$(coreXrayBinaryPath)
+    oldBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
     backupBinary="${oldBinary}.bak.$(date +%s)"
     if ! mkdir -p "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
@@ -1081,7 +1073,7 @@ installDownloadedSingBoxBinary() {
         return 1
     fi
 
-    oldBinary=$(coreSingBoxBinaryPath)
+    oldBinary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
     backupBinary="${oldBinary}.bak.$(date +%s)"
     if ! mkdir -p "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
@@ -1203,7 +1195,7 @@ xrayVersionManageMenu() {
     5)
         local logFile
         logFile=$(coreTmpFilePath padm-core-xray-test.log)
-        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
+        if validateXrayConfigWithBinary "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}" "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
             statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
@@ -2011,7 +2003,7 @@ coreConfigMaintenanceMenu() {
     1)
         local logFile
         logFile=$(coreTmpFilePath padm-core-xray-test.log)
-        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
+        if validateXrayConfigWithBinary "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}" "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
             statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
