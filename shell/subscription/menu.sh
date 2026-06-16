@@ -45,18 +45,6 @@ subscriptionRequireMainFeatures() {
     return 1
 }
 
-manageSubscriptionQuickStart() {
-    manageSubscription
-}
-
-manageSubscriptionMultiServerQuickStart() {
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main) runSubscriptionMainControllerWizard ;;
-    controlled) runSubscriptionControlledWizard ;;
-    *) manageSubscriptionRoleSelection ;;
-    esac
-}
-
 runSubscriptionMainControllerWizard() {
     initSubscriptionWireGuardMain || return 1
     showSubscriptionWireGuardMainCredential
@@ -108,12 +96,6 @@ syncAndShowUserSubscriptionLinks() {
     showUserSubscriptionLinks "${userSubscriptionId}"
 }
 
-showUserSubscriptionLinksMenu() {
-    local userSubscriptionId
-    userSubscriptionId=$(selectUserSubscriptionId) || return 1
-    showUserSubscriptionLinks "${userSubscriptionId}"
-}
-
 showSubscriptionCurrentRoleCredential() {
     local state
     local role
@@ -131,15 +113,6 @@ showSubscriptionCurrentRoleCredential() {
         return 1
         ;;
     esac
-}
-
-showSubscriptionControlPlaneDetails() {
-    local role
-    role=$(subscriptionCurrentRoleNormalized)
-    showSubscriptionWireGuardStatus
-    if [[ "${role}" != "controlled" ]]; then
-        showSubscriptionSourceControlUrls
-    fi
 }
 
 subscriptionRequireMainRole() {
@@ -446,10 +419,6 @@ manageSubscription() {
     done
 }
 
-manageLocalSubscription() {
-    manageSubscriptionPublishSubscriptions
-}
-
 showSubscriptionServiceStatus() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" ]]; then
@@ -460,10 +429,6 @@ showSubscriptionServiceStatus() {
 }
 
 manageAdminSubscription() {
-    manageSubscriptionPublishSubscriptions
-}
-
-manageSharedSubscriptions() {
     manageSubscriptionPublishSubscriptions
 }
 
@@ -607,19 +572,6 @@ showUserSubscriptions() {
         esac
     done <<<"${output}"
     menuClose
-}
-
-createUserSubscription() {
-    local id=
-    local name=
-    autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
-    autoRead user_subscription_name "请输入显示名称[例 家人A/团队A]:" name
-    if [[ -z "${id}" || -z "${name}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
-        errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线，名称不能为空"
-        return 1
-    fi
-    addUserSubscriptionState "${id}" "${name}"
-    successCard "用户订阅已创建"
 }
 
 createAndSyncUserSubscriptionWizard() {
@@ -1034,18 +986,6 @@ showSubscriptionSourceSyncResults() {
       "\n---"'
 }
 
-manageMainControllerSubscriptions() {
-    manageSubscriptionMainMaintenance
-}
-
-manageControlledSubscription() {
-    manageSubscriptionControlledMaintenance
-}
-
-manageSubscriptionMainControlMenu() {
-    manageSubscriptionMainControlDetails
-}
-
 manageSubscriptionWireGuardControlMenu() {
     case "$(subscriptionCurrentRoleNormalized)" in
     main) manageSubscriptionMainControlDetails ;;
@@ -1174,14 +1114,6 @@ showSubscriptionDiagnosticsOverview() {
     showSubscriptionGroupsStateSummary
     showSubscriptionRemoteHealthPlan
     showSubscriptionSourceSyncResults
-}
-
-manageSubscriptionDiagnostics() {
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main) manageSubscriptionMainMaintenance ;;
-    controlled) manageSubscriptionControlledMaintenance ;;
-    *) manageSubscriptionRoleSelection ;;
-    esac
 }
 
 removeSubscriptionGroupSyncCron() {

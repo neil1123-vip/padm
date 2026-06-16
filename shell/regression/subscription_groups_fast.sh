@@ -1088,6 +1088,15 @@ runAutoInstallTypeSingleCustomBranchRegression() {
     [[ "${explicitCustomMenuCount}" == "1" ]]
 }
 
+runSubscriptionMenuWrapperCountRegression() {
+    local wrapperCount
+    wrapperCount=$(awk '
+        /^(manageSubscriptionQuickStart|manageSubscriptionMultiServerQuickStart|showUserSubscriptionLinksMenu|showSubscriptionControlPlaneDetails|manageLocalSubscription|manageSharedSubscriptions|createUserSubscription|manageMainControllerSubscriptions|manageControlledSubscription|manageSubscriptionMainControlMenu|manageSubscriptionDiagnostics)\(\) \{/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/subscription/menu.sh")
+    [[ "${wrapperCount}" == "0" ]]
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -2050,6 +2059,7 @@ runRegressionPlatform() {
         runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression &&
         runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
         runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression &&
+        runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
