@@ -18,6 +18,37 @@ cleanSingBoxDownloadArtifacts() {
     rm -rf -- "${extractedDir}" >/dev/null 2>&1 || return 1
 }
 
+downloadXrayReleaseBinaryToTempDir() {
+    local version=$1
+    local tmpDir=$2
+    local binary="${tmpDir}/xray"
+
+    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
+        return 1
+    fi
+    if ! unzip -o "${tmpDir}/${xrayCoreCPUVendor}.zip" -d "${tmpDir}" >/dev/null 2>&1; then
+        return 2
+    fi
+    [[ -x "${binary}" ]] || return 3
+}
+
+downloadSingBoxReleaseBinaryToTempDir() {
+    local version=$1
+    local tmpDir=$2
+    local asset="sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
+    local extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
+    local binary="${extractedDir}/sing-box"
+
+    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
+        return 1
+    fi
+    if ! tar zxf "${tmpDir}/${asset}" -C "${tmpDir}" >/dev/null 2>&1; then
+        return 2
+    fi
+    [[ -f "${extractedDir}/libcronet.so" ]] || return 3
+    [[ -x "${binary}" ]] || return 4
+}
+
 downloadXrayGeoFilesToStage() {
     local stageDir=$1
     local geoVersion=$2
@@ -111,6 +142,12 @@ showXrayGeoStatus() {
 installSingBox() {
     local version
     local prereleaseStatus=${prereleaseStatus:-false}
+    local tmpDir=
+    local extractedDir=
+    local targetBinary=
+    local targetCronet=
+    local cronetBackup=
+    local rollbackCronetOk=true
     readInstallType
     progressCard "$1" "安装 sing-box"
 
@@ -121,43 +158,53 @@ installSingBox() {
 
         successCard "最新版本:${version}"
 
-        if ! downloadGitHubReleaseAsset -P /etc/padm/sing-box/ SagerNet/sing-box "${version}" "sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"; then
-            errorCard "sing-box下载失败"
+        padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.install.XXXXXX || exit 1
+        downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
+        local rc=$?
+        if [[ "${rc}" -ne 0 ]]; then
+            padmRemoveCleanupPath "${tmpDir}"
+            case "${rc}" in
+            2) errorCard "sing-box解压失败" ;;
+            3) errorCard "sing-box安装包缺少libcronet.so" ;;
+            4) errorCard "sing-box安装失败" ;;
+            *) errorCard "sing-box下载失败" ;;
+            esac
             exit 1
         fi
 
-        if [[ ! -f "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz" ]]; then
-            autoRead core_download_retry "核心下载失败，请重新尝试安装，是否重新尝试？[y/n]" downloadStatus
-            if [[ "${downloadStatus}" == "y" ]]; then
-                installSingBox "$1"
-            fi
-        else
-
-            if ! tar zxvf "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz" -C "/etc/padm/sing-box/" >/dev/null 2>&1; then
-                errorCard "sing-box解压失败"
-                exit 1
-            fi
-
-            if [[ ! -f "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}/libcronet.so" ]]; then
-                errorCard "sing-box安装包缺少libcronet.so"
-                exit 1
-            fi
-
-            cp "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}/libcronet.so" /etc/padm/sing-box/libcronet.so || {
-                errorCard "sing-box cronet依赖安装失败"
+        extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
+        targetBinary=$(coreSingBoxBinaryPath)
+        targetCronet=$(coreSingBoxCronetPath)
+        validateCoreInstallTargetPath "${targetBinary}" "sing-box" || { padmRemoveCleanupPath "${tmpDir}"; exit 1; }
+        validateCoreInstallTargetPath "${targetCronet}" "sing-box cronet依赖" || { padmRemoveCleanupPath "${tmpDir}"; exit 1; }
+        if [[ -f "${targetCronet}" ]]; then
+            cronetBackup="${tmpDir}/libcronet.so.bak"
+            cp "${targetCronet}" "${cronetBackup}" || {
+                padmRemoveCleanupPath "${tmpDir}"
+                errorCard "sing-box cronet依赖备份失败"
                 exit 1
             }
-
-            if ! mv "/etc/padm/sing-box/sing-box-${version/v/}${singBoxCoreCPUVendor}/sing-box" /etc/padm/sing-box/sing-box; then
-                errorCard "sing-box安装失败"
-                exit 1
-            fi
-            cleanSingBoxDownloadArtifacts /etc/padm/sing-box "${version}" || {
-                errorCard "sing-box安装残留清理失败"
-                exit 1
-            }
-            chmod 655 /etc/padm/sing-box/sing-box
         fi
+        if ! commitStagedCoreInstallFile "${extractedDir}/libcronet.so" "${targetCronet}" 644; then
+            padmRemoveCleanupPath "${tmpDir}"
+            errorCard "sing-box cronet依赖安装失败"
+            exit 1
+        fi
+        if ! commitStagedCoreInstallFile "${extractedDir}/sing-box" "${targetBinary}" 655; then
+            if [[ -n "${cronetBackup}" ]]; then
+                cp "${cronetBackup}" "${targetCronet}" >/dev/null 2>&1 || rollbackCronetOk=false
+            else
+                rm -f -- "${targetCronet}" >/dev/null 2>&1 || rollbackCronetOk=false
+            fi
+            padmRemoveCleanupPath "${tmpDir}"
+            if [[ "${rollbackCronetOk}" == "true" ]]; then
+                errorCard "sing-box安装失败"
+            else
+                errorCard "sing-box安装失败，cronet依赖回滚失败"
+            fi
+            exit 1
+        fi
+        padmRemoveCleanupPath "${tmpDir}"
     else
         successCard "当前版本:$(getSingBoxCurrentVersion)"
 
@@ -180,6 +227,9 @@ installXray() {
     readInstallType
     local version
     local prereleaseStatus=false
+    local tmpDir=
+    local targetDir=
+    local targetBinary=
     if [[ "${2:-}" == "true" ]]; then
         prereleaseStatus=true
     fi
@@ -191,33 +241,38 @@ installXray() {
         version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
         checkVersionNotEmpty "${version}"
         successCard "Xray-core版本:${version}"
-        if ! downloadGitHubReleaseAsset -P /etc/padm/xray/ XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
-            errorCard "Xray-core下载失败"
+        padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.install.XXXXXX || exit 1
+        downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
+        local rc=$?
+        if [[ "${rc}" -ne 0 ]]; then
+            padmRemoveCleanupPath "${tmpDir}"
+            case "${rc}" in
+            2) errorCard "Xray-core解压失败" ;;
+            3) errorCard "Xray-core安装失败" ;;
+            *) errorCard "Xray-core下载失败" ;;
+            esac
             exit 1
         fi
 
-        if [[ ! -f "/etc/padm/xray/${xrayCoreCPUVendor}.zip" ]]; then
-            autoRead core_download_retry "核心下载失败，请重新尝试安装，是否重新尝试？[y/n]" downloadStatus
-            if [[ "${downloadStatus}" == "y" ]]; then
-                installXray "$1"
-            fi
-        else
-            if ! unzip -o "/etc/padm/xray/${xrayCoreCPUVendor}.zip" -d /etc/padm/xray >/dev/null; then
-                errorCard "Xray-core解压失败"
-                exit 1
-            fi
-            rm -f -- "/etc/padm/xray/${xrayCoreCPUVendor}.zip"
-
-            if ! ensureXrayGeoFiles /etc/padm/xray force; then
-                exit 1
-            fi
-
-            chmod 655 /etc/padm/xray/xray
+        targetDir=$(coreXrayInstallDir)
+        targetBinary=$(coreXrayBinaryPath)
+        validateCoreInstallTargetPath "${targetBinary}" "Xray-core" || { padmRemoveCleanupPath "${tmpDir}"; exit 1; }
+        if ! commitStagedCoreInstallFile "${tmpDir}/xray" "${targetBinary}" 655; then
+            padmRemoveCleanupPath "${tmpDir}"
+            errorCard "Xray-core安装失败"
+            exit 1
         fi
+        if ! ensureXrayGeoFiles "${targetDir}" force; then
+            rm -f -- "${targetBinary}" >/dev/null 2>&1 || true
+            cleanXrayGeoFiles "${targetDir}"
+            padmRemoveCleanupPath "${tmpDir}"
+            exit 1
+        fi
+        padmRemoveCleanupPath "${tmpDir}"
     else
         if [[ -z "${lastInstallationConfig}" ]]; then
             successCard "Xray-core版本:$(getXrayCurrentVersion)"
-            if ! ensureXrayGeoFiles /etc/padm/xray; then
+            if ! ensureXrayGeoFiles "$(coreXrayInstallDir)"; then
                 exit 1
             fi
             autoRead xray_reinstall "是否更新、升级？[y/n]:" reInstallXrayStatus
@@ -269,6 +324,41 @@ coreXrayConfigDir() {
 
 coreSingBoxBinaryPath() {
     printf '%s\n' "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
+}
+
+coreXrayInstallDir() {
+    dirname -- "$(coreXrayBinaryPath)"
+}
+
+coreSingBoxInstallDir() {
+    dirname -- "$(coreSingBoxBinaryPath)"
+}
+
+coreSingBoxCronetPath() {
+    printf '%s/libcronet.so\n' "$(coreSingBoxInstallDir)"
+}
+
+validateCoreInstallTargetPath() {
+    local targetFile=$1
+    local description=$2
+    local targetDir
+    targetDir=$(dirname -- "${targetFile}")
+    if ! padmIsSafeAbsolutePath "${targetFile}" || ! padmIsSafeAbsolutePath "${targetDir}"; then
+        errorCard "${description}安装路径异常"
+        return 1
+    fi
+}
+
+commitStagedCoreInstallFile() {
+    local stagedFile=$1
+    local targetFile=$2
+    local mode=$3
+    local tmpFile
+
+    padmIsSafeAbsolutePath "${targetFile}" || return 1
+    padmCreateTempFileForTarget tmpFile "${targetFile}" install || return 1
+    cp "${stagedFile}" "${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    commitGeneratedFile "${tmpFile}" "${targetFile}" "${mode}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 xrayConfigInstalled() {
@@ -577,26 +667,21 @@ downloadSingBoxReleaseBinaryToTemp() {
     local version=$1
     local outVar=$2
     local tmpDirVar=${3:-}
-    local tmpDir asset extractedDir binary
+    local tmpDir extractedDir binary
 
     padmCreateTempPath tmpDir -d "$(coreSingBoxCompatTempDirTemplate)" || return 1
-    asset="sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
-    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
+    downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
+    local rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
         padmRemoveCleanupPath "${tmpDir}"
-        return 1
-    fi
-    if ! tar zxf "${tmpDir}/${asset}" -C "${tmpDir}" >/dev/null 2>&1; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "sing-box 预发布包解压失败"
+        case "${rc}" in
+        2) errorCard "sing-box 预发布包解压失败" ;;
+        3|4) errorCard "sing-box 预发布包中未找到二进制" ;;
+        esac
         return 1
     fi
     extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
     binary="${extractedDir}/sing-box"
-    if [[ ! -x "${binary}" ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "sing-box 预发布包中未找到二进制"
-        return 1
-    fi
     printf -v "${outVar}" '%s' "${binary}"
     if [[ -n "${tmpDirVar}" ]]; then
         printf -v "${tmpDirVar}" '%s' "${tmpDir}"
@@ -832,21 +917,17 @@ downloadXrayReleaseBinaryToTemp() {
     local tmpDir binary
 
     padmCreateTempPath tmpDir -d "$(coreXrayCompatTempDirTemplate)" || return 1
-    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
+    downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
+    local rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
         padmRemoveCleanupPath "${tmpDir}"
-        return 1
-    fi
-    if ! unzip -o "${tmpDir}/${xrayCoreCPUVendor}.zip" -d "${tmpDir}" >/dev/null 2>&1; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "Xray 预发布包解压失败"
+        case "${rc}" in
+        2) errorCard "Xray 预发布包解压失败" ;;
+        3) errorCard "Xray 预发布包中未找到二进制" ;;
+        esac
         return 1
     fi
     binary="${tmpDir}/xray"
-    if [[ ! -x "${binary}" ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "Xray 预发布包中未找到二进制"
-        return 1
-    fi
     printf -v "${outVar}" '%s' "${binary}"
     if [[ -n "${tmpDirVar}" ]]; then
         printf -v "${tmpDirVar}" '%s' "${tmpDir}"
@@ -1102,23 +1183,20 @@ finalizeFailedCoreBinaryInstall() {
 installDownloadedXrayBinary() {
     local version=$1
     local tmpDir oldBinary backupBinary newBinary logFile
+    local rc
     logFile=$(coreXrayUpgradeTestLog)
     padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.XXXXXX || return 1
-    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
+    downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
+    rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
         padmRemoveCleanupPath "${tmpDir}"
-        return 1
-    fi
-    if ! unzip -o "${tmpDir}/${xrayCoreCPUVendor}.zip" -d "${tmpDir}" >/dev/null; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "Xray-core 解压失败"
+        case "${rc}" in
+        2) errorCard "Xray-core 解压失败" ;;
+        3) errorCard "Xray-core 资产中未找到 xray 二进制" ;;
+        esac
         return 1
     fi
     newBinary="${tmpDir}/xray"
-    if [[ ! -x "${newBinary}" ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "Xray-core 资产中未找到 xray 二进制"
-        return 1
-    fi
     if xrayConfigInstalled && ! validateXrayConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "Xray 配置校验失败" "已取消升级" "排查日志: ${logFile}"
@@ -1126,6 +1204,7 @@ installDownloadedXrayBinary() {
     fi
 
     oldBinary=$(coreXrayBinaryPath)
+    validateCoreInstallTargetPath "${oldBinary}" "Xray-core" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     backupBinary="${oldBinary}.bak.$(date +%s)"
     if ! mkdir -p "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
@@ -1161,38 +1240,31 @@ installDownloadedXrayBinary() {
 
 installDownloadedSingBoxBinary() {
     local version=$1
-    local tmpDir asset oldBinary backupBinary extractedDir newBinary logFile
+    local tmpDir oldBinary backupBinary extractedDir newBinary logFile cronetPath
+    local rc
     logFile=$(coreSingBoxUpgradeTestLog)
     padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
-    asset="sing-box-${version/v/}${singBoxCoreCPUVendor}.tar.gz"
-    if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
+    downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
+    rc=$?
+    if [[ "${rc}" -ne 0 ]]; then
         padmRemoveCleanupPath "${tmpDir}"
-        return 1
-    fi
-    if ! tar zxf "${tmpDir}/${asset}" -C "${tmpDir}" >/dev/null 2>&1; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "sing-box 解压失败"
+        case "${rc}" in
+        2) errorCard "sing-box 解压失败" ;;
+        3) errorCard "sing-box 资产中缺少 libcronet.so" ;;
+        4) errorCard "sing-box 资产中未找到 sing-box 二进制" ;;
+        esac
         return 1
     fi
     extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
     newBinary="${extractedDir}/sing-box"
-    if [[ ! -f "${extractedDir}/libcronet.so" ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "sing-box 资产中缺少 libcronet.so"
-        return 1
-    fi
-    if [[ ! -x "${newBinary}" ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        errorCard "sing-box 资产中未找到 sing-box 二进制"
-        return 1
-    fi
-    if [[ -d /etc/padm/sing-box/conf ]] && ! validateSingBoxConfigWithBinary "${newBinary}" "${logFile}"; then
+    if singBoxConfigInstalled && ! validateSingBoxConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "sing-box 配置校验失败" "已取消升级" "排查日志: ${logFile}"
         return 1
     fi
 
     oldBinary=$(coreSingBoxBinaryPath)
+    validateCoreInstallTargetPath "${oldBinary}" "sing-box" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     backupBinary="${oldBinary}.bak.$(date +%s)"
     if ! mkdir -p "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
@@ -1215,7 +1287,9 @@ installDownloadedSingBoxBinary() {
         finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
         return 1
     fi
-    if ! cp "${extractedDir}/libcronet.so" "/etc/padm/sing-box/libcronet.so"; then
+    cronetPath=$(coreSingBoxCronetPath)
+    validateCoreInstallTargetPath "${cronetPath}" "sing-box cronet依赖" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    if ! cp "${extractedDir}/libcronet.so" "${cronetPath}"; then
         padmRemoveCleanupPath "${tmpDir}"
         finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
         return 1
