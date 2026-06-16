@@ -4,10 +4,6 @@ warpConfigDir() {
     printf '%s\n' "${PADM_WARP_DIR:-/etc/padm/warp}"
 }
 
-warpRegBinaryPath() {
-    printf '%s\n' "$(warpConfigDir)/warp-reg"
-}
-
 warpRegConfigLooksValid() {
     local targetPath=$1
     [[ -s "${targetPath}" ]] || return 1
@@ -21,7 +17,7 @@ warpRegConfigLooksValid() {
 readConfigWarpReg() {
     local configFile warpBinary tmpFile
     configFile="$(warpConfigDir)/config"
-    warpBinary=$(warpRegBinaryPath)
+    warpBinary="$(warpConfigDir)/warp-reg"
 
     if ! warpRegConfigLooksValid "${configFile}"; then
         mkdir -p "$(warpConfigDir)" || return 1
@@ -56,7 +52,7 @@ readConfigWarpReg() {
 installWarpReg() {
     local warpDir warpBinary
     warpDir=$(warpConfigDir)
-    warpBinary=$(warpRegBinaryPath)
+    warpBinary="${warpDir}/warp-reg"
     if [[ ! -f "${warpBinary}" ]]; then
         echo
         echoContent title "\n┌─ warp-reg 第三方工具 ──────────────────────────────"
