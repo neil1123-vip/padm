@@ -1175,7 +1175,7 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(cleanXrayGeoFiles|coreSingBoxCompatTempDirTemplate|coreXrayCompatTempDirTemplate|singBoxCompatibilityConfigFiles|xrayCompatibilityConfigFiles|coreAlpineInitTemplate|coreSingBoxServiceTemplate|coreXrayServiceTemplate|coreXrayConfigTestLog|coreXrayStrictConfigTestLog|coreXrayUpgradeTestLog|coreXrayPrereleaseAuditLog|coreSingBoxConfigTestLog|coreSingBoxUpgradeTestLog|coreSingBoxPrereleaseAuditLog)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
             awk '/^(getXrayCurrentVersion)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
             awk '/^(updateXray)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
-            awk '/^(disableRunningService|handleFirewall)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
+            awk '/^(disableRunningService|handleFirewall)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/services.sh"
             awk '/^(switchAlpn|handleHysteria|vlessEncryptionVisionConfigFile|vlessEncryptionXHTTPConfigFile)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/manage.sh"
             awk '/^(singBoxDnsHostsTag|singBoxDnsRoutingTag|singBoxDnsResolverTag)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_dns.sh"
             awk '/^(checkRealityDest|installRealityScanner|realityScanner|initTCPBrutal)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
@@ -1757,8 +1757,8 @@ runSingBoxRunningIgnoresClientProcessRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/services.sh"
         singBoxMergedConfigFile() { printf '%s\n' "/etc/padm/sing-box/conf/config.json"; }
-        singBoxSystemdServiceFile() { printf '%s\n' "${TMP_DIR}/sing-box.service"; }
-        singBoxOpenRcServiceFile() { printf '%s\n' "${TMP_DIR}/sing-box.openrc"; }
+        PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${TMP_DIR}/sing-box.service"
+        PADM_SINGBOX_OPENRC_SERVICE_FILE="${TMP_DIR}/sing-box.openrc"
         : >"${TMP_DIR}/sing-box.service"
         pgrep() { printf '2001\n2002\n'; }
         padmReadProcExe() { printf '/etc/padm/sing-box/sing-box\n'; }
