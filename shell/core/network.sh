@@ -146,7 +146,11 @@ writeCheckPortOpenNginxConfig() {
     local port=$1
     local domain=$2
     local listenIPv6PortConfig=$3
-    local targetPath="${nginxConfigPath}checkPortOpen.conf"
+    local targetPath
+    if ! targetPath=$(nginxConfigFilePath checkPortOpen.conf); then
+        CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置路径异常"
+        return 1
+    fi
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
     local tmpBase="${TMPDIR:-/tmp}"
@@ -210,6 +214,12 @@ EOF
     fi
 }
 
+removeCheckPortOpenNginxConfig() {
+    local targetPath
+    targetPath=$(nginxConfigFilePath checkPortOpen.conf) || return 1
+    rm -f -- "${targetPath}" >/dev/null 2>&1
+}
+
 # 检查端口实际开放状态
 checkPortOpen() {
     local port=$1
@@ -249,18 +259,18 @@ checkPortOpen() {
         fi
         if ! runCoreServiceActionAllowFailure handleNginx start; then
             statusCard "Nginx 启动失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
-            rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
+            removeCheckPortOpenNginxConfig || true
             return 1
         fi
         if [[ -z $(pgrep -f "nginx") ]]; then
             statusCard "Nginx 启动失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
-            rm -f "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1
+            removeCheckPortOpenNginxConfig || true
             return 1
         fi
         # 检查域名和端口开放状态
         checkPortOpenResult=$(curl -s -m 10 "http://${domain}:${port}/checkPort")
         localIP=$(curl -s -m 10 "http://${domain}:${port}/ip")
-        rm "${nginxConfigPath}checkPortOpen.conf"
+        removeCheckPortOpenNginxConfig || { errorCard "端口检测 Nginx 配置删除失败"; return 1; }
         if ! runCoreServiceActionAllowFailure handleNginx stop; then
             errorCard "Nginx 服务停止失败，端口检测配置已删除"
             return 1

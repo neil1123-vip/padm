@@ -262,6 +262,32 @@ runUninstallSubscribeNginxPathSafetyRegression() {
     )
 }
 
+runCheckPortOpenNginxPathSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/check-port-open-nginx-path-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+
+        nginx() { return 0; }
+
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath=
+            ! writeCheckPortOpenNginxConfig 2443 example.com ""
+            [[ ! -e checkPortOpen.conf ]]
+            [[ ! -e checkPortOpen.conf.tmp ]]
+        )
+
+        nginxConfigPath="${nginxRoot}/"
+        writeCheckPortOpenNginxConfig 2443 example.com ""
+        grep -q 'listen 2443;' "${nginxRoot}/checkPortOpen.conf"
+        removeCheckPortOpenNginxConfig
+        [[ ! -e "${nginxRoot}/checkPortOpen.conf" ]]
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -2217,6 +2243,7 @@ runRegressionFast() {
         runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression &&
         runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression &&
         runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression &&
+        runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
