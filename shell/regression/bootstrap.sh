@@ -115,8 +115,6 @@ source "${PROJECT_ROOT}/shell/core/fail2ban.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
 # shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/users.sh"
-# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/groups.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/subscription.sh"

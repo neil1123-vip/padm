@@ -61,8 +61,6 @@ source "${CORE_DIR}/core_templates.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/protocol_runtime.sh"
 # shellcheck source=/dev/null
-source "${CORE_DIR}/users.sh"
-# shellcheck source=/dev/null
 source "${SUB_DIR}/groups.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/subscription.sh"

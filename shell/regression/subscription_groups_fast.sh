@@ -1191,6 +1191,12 @@ runUnusedHelperFunctionCountRegression() {
     [[ "${helperCount}" == "0" ]]
 }
 
+runLegacyUsersModuleRemovedRegression() {
+    [[ ! -e "${PROJECT_ROOT}/shell/core/users.sh" ]]
+    ! grep -q 'source "${CORE_DIR}/users.sh"' "${PROJECT_ROOT}/shell/core/bootstrap.sh"
+    ! grep -q 'source "${PROJECT_ROOT}/shell/core/users.sh"' "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+}
+
 runInstallEnsureModulesRegression() {
     local fixtureDir marker
     fixtureDir="${TMP_DIR}/install-entry"
@@ -2156,6 +2162,7 @@ runRegressionPlatform() {
         runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression &&
         runRegressionStep subscription-menu-dead-entry-count runSubscriptionMenuDeadEntryCountRegression &&
         runRegressionStep unused-helper-function-count runUnusedHelperFunctionCountRegression &&
+        runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
