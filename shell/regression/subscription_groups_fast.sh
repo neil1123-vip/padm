@@ -740,6 +740,66 @@ EOF
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
+runInstallRefreshFallbackMainRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local fixtureDir archiveRoot outputLog oldTmpDir
+        fixtureDir="${TMP_DIR}/install-refresh-fallback-main"
+        archiveRoot="${fixtureDir}/archive"
+        outputLog="${fixtureDir}/refresh.log"
+        oldTmpDir="${TMPDIR:-}"
+        mkdir -p "${archiveRoot}/padm-main/shell" "${archiveRoot}/padm-main/documents" "${archiveRoot}/padm-main/assets" "${fixtureDir}/shell" "${fixtureDir}/documents"
+        printf 'old-shell\n' >"${fixtureDir}/shell/marker"
+        printf 'old-doc\n' >"${fixtureDir}/documents/marker"
+        printf 'old-readme\n' >"${fixtureDir}/README.md"
+        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
+        printf 'new-shell\n' >"${archiveRoot}/padm-main/shell/marker"
+        printf 'new-doc\n' >"${archiveRoot}/padm-main/documents/marker"
+        printf 'new-readme\n' >"${archiveRoot}/padm-main/README.md"
+
+        (
+            set +e
+            TMPDIR="${fixtureDir}/tmp"
+            eval "$(awk '
+                /^scriptTmpPath\(\)/ { capture = 1 }
+                /^ensureScriptModules\(\)/ { capture = 0 }
+                capture { print }
+            ' "${PROJECT_ROOT}/install.sh")"
+            SCRIPT_DIR="${fixtureDir}"
+            REPO_ARCHIVE_DIR="padm-main"
+            SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+            SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+            SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+            REPO_ZIP_URL="fixture.tar.gz"
+            command() {
+                if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+                    return 0
+                fi
+                builtin command "$@"
+            }
+            curl() {
+                if [[ "$*" == *"dead-ref.tar.gz"* ]]; then
+                    return 22
+                fi
+                tar -cz -C "${archiveRoot}" padm-main
+            }
+            refreshScriptModules dead-ref
+        ) >"${outputLog}" 2>&1
+
+        grep -q '指定版本完整安装包不可用，回退到主分支最新完整安装包' "${outputLog}"
+        [[ ! -f "${fixtureDir}/.padm-ref" || "$(<"${fixtureDir}/.padm-ref")" != "dead-ref" ]]
+        [[ ! -f "${fixtureDir}/.padm-entry-ref" || "$(<"${fixtureDir}/.padm-entry-ref")" != "dead-ref" ]]
+        [[ "$(<"${fixtureDir}/shell/marker")" == "new-shell" ]]
+        [[ "$(<"${fixtureDir}/documents/marker")" == "new-doc" ]]
+        [[ "$(<"${fixtureDir}/README.md")" == "new-readme" ]]
+
+        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    )
+}
+
 runInstallRefreshRestoresBackupRegression() {
     local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
     fixtureDir="${TMP_DIR}/install-refresh-restore"
@@ -1790,6 +1850,7 @@ runRegressionPlatform() {
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
+        runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&

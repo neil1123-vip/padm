@@ -1,23 +1,67 @@
 #!/usr/bin/env bash
 
+warpConfigDir() {
+    printf '%s\n' "${PADM_WARP_DIR:-/etc/padm/warp}"
+}
+
+warpRegBinaryPath() {
+    printf '%s\n' "$(warpConfigDir)/warp-reg"
+}
+
+warpRegConfigPath() {
+    printf '%s\n' "$(warpConfigDir)/config"
+}
+
+warpRegConfigLooksValid() {
+    local targetPath=$1
+    [[ -s "${targetPath}" ]] || return 1
+    grep -qE '^[[:space:]]*private_key[[:space:]]*:' "${targetPath}" &&
+        grep -qE '^[[:space:]]*public_key[[:space:]]*:' "${targetPath}" &&
+        grep -qE '^[[:space:]]*reserved[[:space:]]*:' "${targetPath}" &&
+        grep -qE '^[[:space:]]*v6[[:space:]]*:' "${targetPath}"
+}
+
 # 读取第三方 WARP 配置
 readConfigWarpReg() {
-    if [[ ! -f "/etc/padm/warp/config" ]]; then
-        /etc/padm/warp/warp-reg >/etc/padm/warp/config
+    local configFile warpBinary tmpFile
+    configFile=$(warpRegConfigPath)
+    warpBinary=$(warpRegBinaryPath)
+
+    if ! warpRegConfigLooksValid "${configFile}"; then
+        mkdir -p "$(warpConfigDir)" || return 1
+        if [[ ! -x "${warpBinary}" ]]; then
+            installWarpReg || return 1
+        fi
+        tmpFile=$(mktemp "$(warpConfigDir)/.config.XXXXXX") || return 1
+        if ! "${warpBinary}" >"${tmpFile}" 2>&1; then
+            rm -f "${tmpFile}" "${configFile}" >/dev/null 2>&1 || true
+            return 1
+        fi
+        if ! warpRegConfigLooksValid "${tmpFile}"; then
+            rm -f "${tmpFile}" "${configFile}" >/dev/null 2>&1 || true
+            return 1
+        fi
+        mv "${tmpFile}" "${configFile}" || {
+            rm -f "${tmpFile}" >/dev/null 2>&1 || true
+            return 1
+        }
     fi
 
-    secretKeyWarpReg=$(grep <"/etc/padm/warp/config" private_key | awk '{print $2}')
+    secretKeyWarpReg=$(grep <"${configFile}" private_key | awk '{print $2}')
 
-    addressWarpReg=$(grep <"/etc/padm/warp/config" v6 | awk '{print $2}')
+    addressWarpReg=$(grep <"${configFile}" v6 | awk '{print $2}')
 
-    publicKeyWarpReg=$(grep <"/etc/padm/warp/config" public_key | awk '{print $2}')
+    publicKeyWarpReg=$(grep <"${configFile}" public_key | awk '{print $2}')
 
-    reservedWarpReg=$(grep <"/etc/padm/warp/config" reserved | awk -F "[:]" '{print $2}')
+    reservedWarpReg=$(grep <"${configFile}" reserved | awk -F "[:]" '{print $2}')
 
 }
 # 安装 warp-reg 工具
 installWarpReg() {
-    if [[ ! -f "/etc/padm/warp/warp-reg" ]]; then
+    local warpDir warpBinary
+    warpDir=$(warpConfigDir)
+    warpBinary=$(warpRegBinaryPath)
+    if [[ ! -f "${warpBinary}" ]]; then
         echo
         echoContent title "\n┌─ warp-reg 第三方工具 ──────────────────────────────"
         menuLine "依赖第三方程序，请熟知其中风险"
@@ -28,16 +72,17 @@ installWarpReg() {
 
         if [[ "${installWarpRegStatus}" == "y" ]]; then
 
-            if ! downloadGitHubReleaseAsset -P /etc/padm/warp/ badafans/warp-reg v1.0 "${warpRegCoreCPUVendor}"; then
+            mkdir -p "${warpDir}" || return 1
+            if ! downloadGitHubReleaseAsset -P "${warpDir}/" badafans/warp-reg v1.0 "${warpRegCoreCPUVendor}"; then
                 errorCard "warp-reg下载失败"
                 exit 1
             fi
-            if [[ ! -s "/etc/padm/warp/${warpRegCoreCPUVendor}" ]]; then
+            if [[ ! -s "${warpDir}/${warpRegCoreCPUVendor}" ]]; then
                 errorCard "warp-reg文件异常"
                 exit 1
             fi
-            mv "/etc/padm/warp/${warpRegCoreCPUVendor}" /etc/padm/warp/warp-reg
-            chmod 655 /etc/padm/warp/warp-reg
+            mv "${warpDir}/${warpRegCoreCPUVendor}" "${warpBinary}"
+            chmod 655 "${warpBinary}"
 
         else
             statusCard "已取消" "放弃安装"
@@ -101,15 +146,17 @@ addWireGuardRoute() {
 # 卸载 WireGuard
 unInstallWireGuard() {
     local type=$1
+    local warpDir
+    warpDir=$(warpConfigDir)
     if [[ "${coreInstallType}" == "1" ]]; then
 
         if [[ "${type}" == "IPv4" ]]; then
             if [[ ! -f "${configPath}wireguard_out_IPv6.json" ]]; then
-                rm -rf /etc/padm/warp/config >/dev/null 2>&1 || return 1
+                rm -rf "${warpDir}/config" >/dev/null 2>&1 || return 1
             fi
         elif [[ "${type}" == "IPv6" ]]; then
             if [[ ! -f "${configPath}wireguard_out_IPv4.json" ]]; then
-                rm -rf /etc/padm/warp/config >/dev/null 2>&1 || return 1
+                rm -rf "${warpDir}/config" >/dev/null 2>&1 || return 1
             fi
         fi
     fi
@@ -117,7 +164,7 @@ unInstallWireGuard() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ ! -f "${singBoxConfigPath}wireguard_endpoints_IPv6_route.json" && ! -f "${singBoxConfigPath}wireguard_endpoints_IPv4_route.json" ]]; then
             rm -f "${singBoxConfigPath}wireguard_outbound.json" >/dev/null 2>&1 || return 1
-            rm -rf /etc/padm/warp/config >/dev/null 2>&1 || return 1
+            rm -rf "${warpDir}/config" >/dev/null 2>&1 || return 1
         fi
     fi
 }

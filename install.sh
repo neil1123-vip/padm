@@ -118,39 +118,106 @@ fetchRemoteRef() {
     printf '%s\n' "${metadata}" | grep -m 1 '"sha"' | cut -d '"' -f 4
 }
 
+downloadRepoArchive() {
+    local archiveUrl=$1
+    local extractDir=$2
+    rm -rf "${extractDir}" >/dev/null 2>&1 || return 1
+    mkdir -p "${extractDir}" || return 1
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "${archiveUrl}" | tar -xz -C "${extractDir}"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "${archiveUrl}" | tar -xz -C "${extractDir}"
+    else
+        return 127
+    fi
+}
+
+resolveExtractedArchiveDir() {
+    local extractDir=$1
+    local archiveDir=$2
+    local archiveCandidate
+
+    if [[ -d "${archiveDir}/shell" ]]; then
+        printf '%s\n' "${archiveDir}"
+        return 0
+    fi
+    for archiveCandidate in "${extractDir}"/*; do
+        if [[ -d "${archiveCandidate}/shell" ]]; then
+            printf '%s\n' "${archiveCandidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 refreshScriptModules() {
     local remoteRef=$1
-    local tmpDir archiveDir backupDir copyStatus archiveUrl archiveCandidate
+    local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl fallbackRef resolvedRef
     tmpDir=$(scriptCreateTempDir padm.XXXXXX) || exit 1
+    extractDir="${tmpDir}/extract"
     backupDir="${SCRIPT_DIR}/.padm-update-backup"
     trap 'rm -rf "${tmpDir}"' EXIT INT TERM
     archiveUrl="${REPO_ZIP_URL}"
     if [[ -n "${remoteRef}" ]]; then
         archiveUrl="https://github.com/neil1123-vip/padm/archive/${remoteRef}.tar.gz"
     fi
-    archiveDir="${tmpDir}/${REPO_ARCHIVE_DIR}"
+    archiveDir="${extractDir}/${REPO_ARCHIVE_DIR}"
+    resolvedRef="${remoteRef:-}"
 
     printf '正在下载最新完整安装包\n'
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${archiveUrl}" | tar -xz -C "${tmpDir}"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "${archiveUrl}" | tar -xz -C "${tmpDir}"
-    else
-        printf '缺少 curl 或 wget，无法下载完整安装包\n'
+    if ! downloadRepoArchive "${archiveUrl}" "${extractDir}"; then
+        if [[ -n "${remoteRef}" ]]; then
+            fallbackRef=$(fetchRemoteRef || true)
+            printf '指定版本完整安装包不可用，回退到主分支最新完整安装包\n'
+            if ! downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"; then
+                printf '完整安装包下载失败，请重新执行安装命令\n'
+                rm -rf "${tmpDir}"
+                exit 1
+            fi
+            archiveUrl="${REPO_ZIP_URL}"
+            resolvedRef="${fallbackRef:-}"
+            archiveDir="${extractDir}/${REPO_ARCHIVE_DIR}"
+        else
+            if [[ "$?" -eq 127 ]]; then
+                printf '缺少 curl 或 wget，无法下载完整安装包\n'
+            else
+                printf '完整安装包下载失败，请重新执行安装命令\n'
+            fi
+            rm -rf "${tmpDir}"
+            exit 1
+        fi
+    fi
+
+    if ! archiveDir=$(resolveExtractedArchiveDir "${extractDir}" "${archiveDir}"); then
+        if [[ -n "${remoteRef}" && "${archiveUrl}" != "${REPO_ZIP_URL}" ]]; then
+            fallbackRef=$(fetchRemoteRef || true)
+            printf '指定版本完整安装包结构异常，回退到主分支最新完整安装包\n'
+            if ! downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"; then
+                printf '完整安装包下载失败，请重新执行安装命令\n'
+                rm -rf "${tmpDir}"
+                exit 1
+            fi
+            archiveDir=$(resolveExtractedArchiveDir "${extractDir}" "${extractDir}/${REPO_ARCHIVE_DIR}") || {
+                printf '完整安装包下载失败，请重新执行安装命令\n'
+                rm -rf "${tmpDir}"
+                exit 1
+            }
+            resolvedRef="${fallbackRef:-}"
+        else
+            printf '完整安装包下载失败，请重新执行安装命令\n'
+            rm -rf "${tmpDir}"
+            exit 1
+        fi
+    fi
+
+    if [[ ! -d "${archiveDir}/shell" ]]; then
+        printf '完整安装包下载失败，请重新执行安装命令\n'
         rm -rf "${tmpDir}"
         exit 1
     fi
 
     if [[ ! -d "${archiveDir}/shell" ]]; then
-        for archiveCandidate in "${tmpDir}"/*; do
-            if [[ -d "${archiveCandidate}/shell" ]]; then
-                archiveDir="${archiveCandidate}"
-                break
-            fi
-        done
-    fi
-    if [[ ! -d "${archiveDir}/shell" ]]; then
-        printf '完整安装包下载失败，请重新执行安装命令\n'
+        printf '缺少 curl 或 wget，无法下载完整安装包\n'
         rm -rf "${tmpDir}"
         exit 1
     fi
@@ -195,7 +262,11 @@ refreshScriptModules() {
         failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
     fi
 
-    [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_REF_FILE}"
+    if [[ -n "${resolvedRef}" ]]; then
+        printf '%s\n' "${resolvedRef}" >"${SCRIPT_REF_FILE}"
+    else
+        rm -f "${SCRIPT_REF_FILE}" >/dev/null 2>&1 || true
+    fi
     rm -rf "${backupDir}" "${tmpDir}"
     trap - EXIT INT TERM
 }
@@ -282,7 +353,11 @@ ensureScriptModules() {
     if [[ "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" == "1" ]]; then
         remoteRef=$(fetchRemoteRef || true)
         refreshScriptModules "${remoteRef}"
-        [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_EXPECTED_REF_FILE}"
+        if [[ -s "${SCRIPT_REF_FILE}" ]]; then
+            cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}"
+        else
+            rm -f "${SCRIPT_EXPECTED_REF_FILE}" >/dev/null 2>&1 || true
+        fi
         return 0
     fi
     if scriptModulesReady; then
@@ -302,7 +377,11 @@ ensureScriptModules() {
     remoteRef="${expectedRef}"
     [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef || true)
     refreshScriptModules "${remoteRef}"
-    [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_EXPECTED_REF_FILE}"
+    if [[ -s "${SCRIPT_REF_FILE}" ]]; then
+        cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}"
+    else
+        rm -f "${SCRIPT_EXPECTED_REF_FILE}" >/dev/null 2>&1 || true
+    fi
 }
 
 loadScriptModules() {

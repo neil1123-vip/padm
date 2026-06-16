@@ -328,8 +328,16 @@ removeSingBoxConfig() {
 # 初始化 WARP 出站信息
 addSingBoxWireGuardEndpoints() {
     local type=$1
+    local addressValue="${address:-}"
 
-    readConfigWarpReg
+    readConfigWarpReg || return 1
+    if [[ -z "${addressValue}" ]]; then
+        if [[ "${type}" == "IPv6" && -n "${addressWarpReg:-}" ]]; then
+            addressValue="${addressWarpReg}"
+        else
+            addressValue="172.16.0.2/32"
+        fi
+    fi
 
     writeRoutingJsonConfig "${singBoxConfigPath}wireguard_endpoints_${type}.json" <<EOF || return 1
 {
@@ -338,7 +346,7 @@ addSingBoxWireGuardEndpoints() {
             "type": "wireguard",
             "tag": "wireguard_endpoints_${type}",
             "address": [
-                "${address}"
+                "${addressValue}"
             ],
             "private_key": "${secretKeyWarpReg}",
             "peers": [
