@@ -4525,6 +4525,34 @@ runWarpConfigSafeDirRegression() (
     [[ ! -s "${rmLog}" ]]
 )
 
+runWarpConfigFileCleanupRegression() (
+    local rootRel="${TMP_DIR}/warp-config-file-cleanup"
+    local root rmLog
+
+    mkdir -p "${rootRel}/warp" "${rootRel}/xray"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    rmLog="${root}/rm.log"
+    : >"${rmLog}"
+    printf 'config\n' >"${root}/warp/config"
+
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        PADM_WARP_DIR="${root}/warp"
+        coreInstallType=1
+        configPath="${root}/xray/"
+        singBoxConfigPath=
+        rm() {
+            printf 'rm:%s\n' "$*" >>"${rmLog}"
+            command rm "$@"
+        }
+        unInstallWireGuard IPv4
+    )
+
+    grep -qxF "rm:-f -- ${root}/warp/config" "${rmLog}"
+    ! grep -q "rm:-rf ${root}/warp/config" "${rmLog}"
+    [[ ! -e "${root}/warp/config" ]]
+)
+
 runUninstallNginxCleanupRegression() {
     local primaryDir="${TMP_DIR}/uninstall-nginx-primary/"
     local actualDir="${TMP_DIR}/uninstall-nginx-actual/"
@@ -13183,6 +13211,7 @@ runRegressionTransactionSystem() {
         runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
         runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&
+        runRegressionStep warp-config-file-cleanup runWarpConfigFileCleanupRegression &&
         runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
         runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
         runRegressionStep clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression &&

@@ -156,16 +156,18 @@ addWireGuardRoute() {
 unInstallWireGuard() {
     local type=$1
     local warpDir
+    local warpConfig
     warpDir=$(warpConfigSafeDir) || return 1
+    warpConfig=$(warpRegConfigPath)
     if [[ "${coreInstallType}" == "1" ]]; then
 
         if [[ "${type}" == "IPv4" ]]; then
             if [[ ! -f "${configPath}wireguard_out_IPv6.json" ]]; then
-                rm -rf "${warpDir}/config" >/dev/null 2>&1 || return 1
+                rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
             fi
         elif [[ "${type}" == "IPv6" ]]; then
             if [[ ! -f "${configPath}wireguard_out_IPv4.json" ]]; then
-                rm -rf "${warpDir}/config" >/dev/null 2>&1 || return 1
+                rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
             fi
         fi
     fi
@@ -173,7 +175,7 @@ unInstallWireGuard() {
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ ! -f "${singBoxConfigPath}wireguard_endpoints_IPv6_route.json" && ! -f "${singBoxConfigPath}wireguard_endpoints_IPv4_route.json" ]]; then
             rm -f "${singBoxConfigPath}wireguard_outbound.json" >/dev/null 2>&1 || return 1
-            rm -rf "${warpDir}/config" >/dev/null 2>&1 || return 1
+            rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
         fi
     fi
 }
