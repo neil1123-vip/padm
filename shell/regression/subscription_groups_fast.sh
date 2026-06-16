@@ -1495,6 +1495,90 @@ EOF
     fi
 }
 
+runAliasInstallRejectsUnsafeTargetRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/alias-install-unsafe-target"
+        local sourceDir="${root}/source"
+        local targetDir="${root}/unsafe-target"
+        mkdir -p "${sourceDir}/shell" "${sourceDir}/documents" "${sourceDir}/assets" "${targetDir}/shell"
+        cat >"${sourceDir}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+EOF
+        printf 'keep\n' >"${targetDir}/shell/sentinel"
+
+        local oldScriptDir="${SCRIPT_DIR:-}"
+        local oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
+        local oldHome="${HOME:-}"
+        SCRIPT_DIR="${sourceDir}"
+        PADM_INSTALL_DIR="unsafe-target"
+        HOME="${root}/home"
+        mkdir -p "${HOME}"
+        cd "${root}"
+
+        (
+            cp() { :; }
+            chmod() { :; }
+            ln() { :; }
+            ! aliasInstall
+        )
+
+        [[ -f "${targetDir}/shell/sentinel" ]]
+
+        SCRIPT_DIR="${oldScriptDir}"
+        HOME="${oldHome}"
+        if [[ -n "${oldPadmInstallDir}" ]]; then
+            PADM_INSTALL_DIR="${oldPadmInstallDir}"
+        else
+            unset PADM_INSTALL_DIR
+        fi
+    )
+}
+
+runAliasInstallRejectsUnsafeHomeFallbackRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/alias-install-unsafe-home"
+        local sourceDir="${root}/source"
+        local targetDir="${root}/target"
+        mkdir -p "${sourceDir}" "${targetDir}"
+        cat >"${root}/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+EOF
+
+        local oldScriptDir="${SCRIPT_DIR:-}"
+        local oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
+        local oldHome="${HOME:-}"
+        SCRIPT_DIR="${sourceDir}"
+        PADM_INSTALL_DIR="${targetDir}"
+        HOME="."
+        cd "${root}"
+
+        (
+            cp() { :; }
+            chmod() { :; }
+            ln() { :; }
+            aliasInstall || true
+        )
+
+        [[ -f "${root}/install.sh" ]]
+
+        SCRIPT_DIR="${oldScriptDir}"
+        if [[ -n "${oldPadmInstallDir}" ]]; then
+            PADM_INSTALL_DIR="${oldPadmInstallDir}"
+        else
+            unset PADM_INSTALL_DIR
+        fi
+        if [[ -n "${oldHome}" ]]; then
+            HOME="${oldHome}"
+        else
+            unset HOME
+        fi
+    )
+}
+
 runInstallModulePathsRegression() {
     local outputList moduleTmpRoot fixtureDir oldTmpDir moduleListBefore moduleListAfter
     outputList="${TMP_DIR}/install-module-paths.txt"
@@ -2437,6 +2521,8 @@ runRegressionPlatform() {
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
         runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression &&
         runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&
+        runRegressionStep alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression &&
+        runRegressionStep alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression &&
         runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression &&
         runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression &&
         runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression &&

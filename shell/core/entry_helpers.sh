@@ -1074,8 +1074,16 @@ syncInstallMetadataFile() {
 aliasInstall() {
     local sourceInstall="${SCRIPT_DIR}/install.sh"
     local targetDir="${PADM_INSTALL_DIR:-/etc/padm}"
-    if [[ ! -f "${sourceInstall}" && -f "$HOME/install.sh" ]]; then
-        sourceInstall="$HOME/install.sh"
+    local homeInstall=
+    if ! padmIsSafeAbsolutePath "${targetDir}"; then
+        errorCard "脚本安装目录异常"
+        return 1
+    fi
+    if [[ ! -f "${sourceInstall}" && -n "${HOME:-}" ]]; then
+        homeInstall="${HOME%/}/install.sh"
+        if padmIsSafeAbsolutePath "${homeInstall}" && [[ -f "${homeInstall}" ]]; then
+            sourceInstall="${homeInstall}"
+        fi
     fi
 
     if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
@@ -1113,8 +1121,8 @@ aliasInstall() {
                 shortcutCreated=true
             fi
         fi
-        if [[ "${sourceInstall}" == "$HOME/install.sh" ]]; then
-            rm -rf "$HOME/install.sh"
+        if [[ -n "${homeInstall}" && "${sourceInstall}" == "${homeInstall}" ]]; then
+            rm -f -- "${sourceInstall}"
         fi
         if [[ "${shortcutCreated}" == "true" ]]; then
             echoContent green "快捷方式创建成功，可执行[padm]重新打开脚本"
