@@ -2112,7 +2112,7 @@ singBoxVersionManageMenu() {
     menuItem 5 "校验配置" "执行 sing-box merge + check"
     menuItem 6 "兼容体检" "扫描 1.13/1.14 已知迁移风险"
     local logStatus=
-    if [[ -f "$(singBoxLogConfigFile)" && "$(jq -r .log.disabled "$(singBoxLogConfigFile)")" == "false" ]]; then
+    if [[ -f "${PADM_SINGBOX_LOG_CONFIG_FILE:-/etc/padm/sing-box/conf/config/log.json}" && "$(jq -r .log.disabled "${PADM_SINGBOX_LOG_CONFIG_FILE:-/etc/padm/sing-box/conf/config/log.json}")" == "false" ]]; then
         menuItem 7 "关闭 debug 日志" "停止写入 sing-box debug 日志"
         logStatus=true
     else
@@ -2155,16 +2155,11 @@ singBoxVersionManageMenu() {
     esac
 }
 
-
-singBoxLogConfigFile() {
-    printf '%s\n' "${PADM_SINGBOX_LOG_CONFIG_FILE:-/etc/padm/sing-box/conf/config/log.json}"
-}
-
 # sing-box 日志
 singBoxLog() {
     local targetPath
     local tmpPath backupPath hadBackup=false
-    targetPath=$(singBoxLogConfigFile)
+    targetPath="${PADM_SINGBOX_LOG_CONFIG_FILE:-/etc/padm/sing-box/conf/config/log.json}"
     mkdir -p "$(dirname "${targetPath}")" || { errorCard "sing-box 日志目录创建失败"; return 1; }
     padmCreateTempFileForTarget tmpPath "${targetPath}" log || return 1
     if [[ -f "${targetPath}" ]]; then
