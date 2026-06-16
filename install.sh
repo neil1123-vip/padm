@@ -34,12 +34,40 @@ scriptTmpPath() {
     printf '%s\n' "${tmpBase%/}/${template}"
 }
 
+scriptIsSafeAbsolutePath() {
+    local targetPath=$1
+    if [[ -z "${targetPath}" || "${targetPath}" != /* || "${targetPath}" == "/" ||
+        "${targetPath}" == "/." || "${targetPath}" == "/.." ||
+        "${targetPath}" == */./* || "${targetPath}" == */. ||
+        "${targetPath}" == */../* || "${targetPath}" == */.. ]]; then
+        return 1
+    fi
+}
+
+scriptRemovePath() {
+    local targetPath=$1
+    scriptIsSafeAbsolutePath "${targetPath}" || return 1
+    rm -rf -- "${targetPath}"
+}
+
 scriptCreateTempPath() {
-    mktemp "$(scriptTmpPath "$1")"
+    local tempPath
+    tempPath=$(mktemp "$(scriptTmpPath "$1")") || return 1
+    scriptIsSafeAbsolutePath "${tempPath}" || return 1
+    printf '%s\n' "${tempPath}"
 }
 
 scriptCreateTempDir() {
-    mktemp -d "$(scriptTmpPath "$1")"
+    local tempPath
+    tempPath=$(mktemp -d "$(scriptTmpPath "$1")") || return 1
+    scriptIsSafeAbsolutePath "${tempPath}" || return 1
+    printf '%s\n' "${tempPath}"
+}
+
+removeScriptModuleItems() {
+    local scriptDir=$1
+    scriptIsSafeAbsolutePath "${scriptDir}" || return 1
+    rm -rf -- "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest"
 }
 
 restoreScriptModuleBackup() {
@@ -47,7 +75,9 @@ restoreScriptModuleBackup() {
     local scriptDir=$2
     local restoreStatus=0
     [[ -d "${backupDir}" ]] || return 0
-    rm -rf "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest" || return 1
+    scriptIsSafeAbsolutePath "${scriptDir}" || return 1
+    scriptIsSafeAbsolutePath "${backupDir}" || return 1
+    removeScriptModuleItems "${scriptDir}" || return 1
     [[ -e "${backupDir}/shell" ]] && { mv "${backupDir}/shell" "${scriptDir}/shell" || restoreStatus=1; }
     [[ -e "${backupDir}/documents" ]] && { mv "${backupDir}/documents" "${scriptDir}/documents" || restoreStatus=1; }
     [[ -e "${backupDir}/assets" ]] && { mv "${backupDir}/assets" "${scriptDir}/assets" || restoreStatus=1; }
@@ -62,12 +92,12 @@ cleanupScriptModuleRefresh() {
     local tmpDir=$3
     if [[ -d "${backupDir}" ]]; then
         if restoreScriptModuleBackup "${backupDir}" "${scriptDir}"; then
-            rm -rf "${backupDir}"
+            scriptRemovePath "${backupDir}"
         else
             printf '完整安装包替换中断，旧模块恢复失败，请手动检查备份目录: %s\n' "${backupDir}" >&2
         fi
     fi
-    rm -rf "${tmpDir}"
+    scriptRemovePath "${tmpDir}" || true
 }
 
 backupScriptModuleItem() {
@@ -84,6 +114,8 @@ backupScriptModuleItem() {
 backupScriptModules() {
     local backupDir=$1
     local scriptDir=$2
+    scriptIsSafeAbsolutePath "${scriptDir}" || return 1
+    scriptIsSafeAbsolutePath "${backupDir}" || return 1
     backupScriptModuleItem "${scriptDir}/shell" "${backupDir}/shell" || return 1
     backupScriptModuleItem "${scriptDir}/documents" "${backupDir}/documents" || return 1
     backupScriptModuleItem "${scriptDir}/assets" "${backupDir}/assets" || return 1
@@ -97,11 +129,11 @@ failScriptModuleRefreshAfterBackup() {
     local tmpDir=$3
     if restoreScriptModuleBackup "${backupDir}" "${scriptDir}"; then
         printf '完整安装包替换失败，已恢复旧模块\n'
-        rm -rf "${backupDir}"
+        scriptRemovePath "${backupDir}"
     else
         printf '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录: %s\n' "${backupDir}"
     fi
-    rm -rf "${tmpDir}"
+    scriptRemovePath "${tmpDir}" || true
     trap - EXIT INT TERM
     exit 1
 }
@@ -121,7 +153,7 @@ fetchRemoteRef() {
 downloadRepoArchive() {
     local archiveUrl=$1
     local extractDir=$2
-    rm -rf "${extractDir}" >/dev/null 2>&1 || return 1
+    scriptRemovePath "${extractDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${extractDir}" || return 1
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "${archiveUrl}" | tar -xz -C "${extractDir}"
@@ -153,10 +185,14 @@ resolveExtractedArchiveDir() {
 refreshScriptModules() {
     local remoteRef=$1
     local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl fallbackRef resolvedRef
+    if ! scriptIsSafeAbsolutePath "${SCRIPT_DIR}"; then
+        printf '脚本目录异常，已取消完整安装包替换\n'
+        exit 1
+    fi
     tmpDir=$(scriptCreateTempDir padm.XXXXXX) || exit 1
     extractDir="${tmpDir}/extract"
     backupDir="${SCRIPT_DIR}/.padm-update-backup"
-    trap 'rm -rf "${tmpDir}"' EXIT INT TERM
+    trap 'scriptRemovePath "${tmpDir}" || true' EXIT INT TERM
     archiveUrl="${REPO_ZIP_URL}"
     if [[ -n "${remoteRef}" ]]; then
         archiveUrl="https://github.com/neil1123-vip/padm/archive/${remoteRef}.tar.gz"
@@ -171,7 +207,7 @@ refreshScriptModules() {
             printf '指定版本完整安装包不可用，回退到主分支最新完整安装包\n'
             if ! downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"; then
                 printf '完整安装包下载失败，请重新执行安装命令\n'
-                rm -rf "${tmpDir}"
+                scriptRemovePath "${tmpDir}" || true
                 exit 1
             fi
             archiveUrl="${REPO_ZIP_URL}"
@@ -183,7 +219,7 @@ refreshScriptModules() {
             else
                 printf '完整安装包下载失败，请重新执行安装命令\n'
             fi
-            rm -rf "${tmpDir}"
+            scriptRemovePath "${tmpDir}" || true
             exit 1
         fi
     fi
@@ -194,43 +230,44 @@ refreshScriptModules() {
             printf '指定版本完整安装包结构异常，回退到主分支最新完整安装包\n'
             if ! downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"; then
                 printf '完整安装包下载失败，请重新执行安装命令\n'
-                rm -rf "${tmpDir}"
+                scriptRemovePath "${tmpDir}" || true
                 exit 1
             fi
             archiveDir=$(resolveExtractedArchiveDir "${extractDir}" "${extractDir}/${REPO_ARCHIVE_DIR}") || {
                 printf '完整安装包下载失败，请重新执行安装命令\n'
-                rm -rf "${tmpDir}"
+                scriptRemovePath "${tmpDir}" || true
                 exit 1
             }
             resolvedRef="${fallbackRef:-}"
         else
             printf '完整安装包下载失败，请重新执行安装命令\n'
-            rm -rf "${tmpDir}"
+            scriptRemovePath "${tmpDir}" || true
             exit 1
         fi
     fi
 
     if [[ ! -d "${archiveDir}/shell" ]]; then
         printf '完整安装包下载失败，请重新执行安装命令\n'
-        rm -rf "${tmpDir}"
+        scriptRemovePath "${tmpDir}" || true
         exit 1
     fi
 
     if [[ -e "${backupDir}" ]]; then
         printf '存在未处理模块备份目录，请手动检查后重试: %s\n' "${backupDir}"
-        rm -rf "${tmpDir}"
+        scriptRemovePath "${tmpDir}" || true
         trap - EXIT INT TERM
         exit 1
     fi
-    mkdir -p "${backupDir}" || { rm -rf "${tmpDir}"; trap - EXIT INT TERM; exit 1; }
+    mkdir -p "${backupDir}" || { scriptRemovePath "${tmpDir}" || true; trap - EXIT INT TERM; exit 1; }
     if ! backupScriptModules "${backupDir}" "${SCRIPT_DIR}"; then
         printf '旧模块备份失败，已取消完整安装包替换\n'
-        rm -rf "${backupDir}" "${tmpDir}"
+        scriptRemovePath "${backupDir}" || true
+        scriptRemovePath "${tmpDir}" || true
         trap - EXIT INT TERM
         exit 1
     fi
     trap 'cleanupScriptModuleRefresh "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' EXIT INT TERM
-    rm -rf "${SCRIPT_DIR}/shell" "${SCRIPT_DIR}/documents" "${SCRIPT_DIR}/assets" "${SCRIPT_DIR}/README.md" "${SCRIPT_MANIFEST_FILE}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
+    removeScriptModuleItems "${SCRIPT_DIR}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
 
     cp -R "${archiveDir}/shell" "${SCRIPT_DIR}/"
     copyStatus=$?
@@ -259,7 +296,8 @@ refreshScriptModules() {
     if [[ -n "${resolvedRef}" ]]; then
         printf '%s\n' "${resolvedRef}" >"${SCRIPT_REF_FILE}"
     fi
-    rm -rf "${backupDir}" "${tmpDir}"
+    scriptRemovePath "${backupDir}" || true
+    scriptRemovePath "${tmpDir}" || true
     trap - EXIT INT TERM
 }
 

@@ -1293,6 +1293,47 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
     )
 }
 
+runInstallRefreshRejectsUnsafeScriptDirRegression() {
+    local root archiveRoot outputLog oldTmpDir
+    root="${TMP_DIR}/install-refresh-unsafe-script-dir"
+    archiveRoot="${root}/archive/padm-main"
+    outputLog="${root}/refresh.log"
+    oldTmpDir="${TMPDIR:-}"
+    mkdir -p "${archiveRoot}/shell" "${root}/relative-script/shell" "${root}/tmp"
+    printf '#!/usr/bin/env bash\n' >"${archiveRoot}/install.sh"
+    printf 'new-shell\n' >"${archiveRoot}/shell/marker"
+    printf 'keep\n' >"${root}/relative-script/shell/sentinel"
+
+    (
+        set +e
+        cd "${root}"
+        TMPDIR="${root}/tmp"
+        eval "$(awk '
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="relative-script"
+        REPO_ARCHIVE_DIR="padm-main"
+        SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
+        SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
+        SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
+        REPO_ZIP_URL="fixture.tar.gz"
+        command() {
+            if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        curl() { tar -cz -C "${root}/archive" padm-main; }
+        refreshScriptModules new-ref
+    ) >"${outputLog}" 2>&1 && return 1
+
+    grep -q '脚本目录异常' "${outputLog}"
+    [[ -f "${root}/relative-script/shell/sentinel" ]]
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
 runRemoveInstallPathRetryRegression() {
     (
         set -euo pipefail
@@ -2599,6 +2640,7 @@ runRegressionPlatform() {
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
         runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
+        runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
