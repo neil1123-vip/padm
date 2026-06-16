@@ -814,10 +814,15 @@ EOF
         statusCard "VMess HTTPUpgrade端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf
+        removeNginxDefaultConf || return 1
         stopSingBoxBeforeTemplateWrite || return 1
         randomPathFunction
-        rm -rf "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" >/dev/null 2>&1
+        local httpUpgradeNginxConf
+        if ! httpUpgradeNginxConf=$(nginxConfigFilePath sing_box_VMess_HTTPUpgrade.conf); then
+            padmShowUnsafePathError "配置 VMess HTTPUpgrade"
+            return 1
+        fi
+        rm -f -- "${httpUpgradeNginxConf}" >/dev/null 2>&1 || return 1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         singBoxNginxConfig "$1" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json padm-sing-box-vmess-httpupgrade <<EOF || { errorCard "sing-box VMess HTTPUpgrade 入站模板提交失败"; return 1; }

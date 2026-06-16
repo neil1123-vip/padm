@@ -1742,6 +1742,59 @@ runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
     )
 }
 
+runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/httpupgrade-unsafe-nginx-path"
+        local unsafeRoot="${root}/unsafe"
+        local singBoxRoot="${root}/etc/padm/sing-box/conf/config"
+        local rc
+        mkdir -p "${unsafeRoot}" "${singBoxRoot}"
+        printf 'stale\n' >"${unsafeRoot}/sing_box_VMess_HTTPUpgrade.conf"
+        cd "${unsafeRoot}"
+
+        selectCustomInstallType=",11,"
+        currentUUID="11111111-1111-4111-8111-111111111111"
+        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_TCP/TLS_Vision"}]'
+        lastInstallationConfig=true
+        currentHost=example.com
+        domain=example.com
+        singBoxVMessHTTPUpgradePort=
+        singBoxConfigPath="${singBoxRoot}/"
+        nginxConfigPath=
+
+        collectTLSProfile() { tlsCertDomain=example.com; }
+        readSingBoxPortResult() {
+            local -n resultRef=$1
+            resultRef=(24443)
+        }
+        initSingBoxClients() { printf '[]'; }
+        checkDNSIP() { return 0; }
+        stopSingBoxBeforeTemplateWrite() { return 0; }
+        randomPathFunction() { currentPath=httpup; }
+        checkPortOpen() { return 0; }
+        singBoxNginxConfig() { return 0; }
+        bootStartup() { return 0; }
+        handleNginx() { return 0; }
+        runCoreServiceActionAllowFailure() {
+            "$@"
+        }
+        writeGeneratedJsonFile() {
+            cat >/dev/null
+        }
+
+        set +e
+        initSingBoxConfig custom 1 true >/dev/null
+        rc=$?
+        set -e
+        [[ "${rc}" != "0" ]]
+        [[ -f sing_box_VMess_HTTPUpgrade.conf ]]
+    )
+}
+
 runAllowPortOptionalProtocolRegression() {
     (
         set -euo pipefail
@@ -2255,6 +2308,7 @@ runRegressionFast() {
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
         runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression &&
+        runRegressionStep httpupgrade-rejects-unsafe-nginx-path runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression &&
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
