@@ -2544,16 +2544,16 @@ restoreRealityTargetConfigs() {
     local backupDir=$1
     local status=0
     if [[ -f "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" ]]; then
-        cp "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" "$(realityXrayVisionConfigPath)" || status=1
+        restoreManagedFileFromBackup "${backupDir}/xray/07_VLESS_vision_reality_inbounds.json" "$(realityXrayVisionConfigPath)" 644 || status=1
     fi
     if [[ -f "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" ]]; then
-        cp "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" "$(realityXrayXhttpConfigPath)" || status=1
+        restoreManagedFileFromBackup "${backupDir}/xray/12_VLESS_XHTTP_inbounds.json" "$(realityXrayXhttpConfigPath)" 644 || status=1
     fi
     if [[ -f "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" ]]; then
-        cp "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" "$(realitySingBoxVisionConfigPath)" || status=1
+        restoreManagedFileFromBackup "${backupDir}/sing-box/07_VLESS_vision_reality_inbounds.json" "$(realitySingBoxVisionConfigPath)" 644 || status=1
     fi
     if [[ -f "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" ]]; then
-        cp "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" "$(realitySingBoxGrpcConfigPath)" || status=1
+        restoreManagedFileFromBackup "${backupDir}/sing-box/08_VLESS_vision_gRPC_inbounds.json" "$(realitySingBoxGrpcConfigPath)" 644 || status=1
     fi
     return "${status}"
 }

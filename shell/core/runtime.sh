@@ -113,6 +113,21 @@ commitGeneratedJsonFile() {
     jq empty "${tmpFile}" >/dev/null 2>&1 && commitGeneratedFile "${tmpFile}" "${targetFile}" "${mode}"
 }
 
+restoreManagedFileFromBackup() {
+    local backupFile=$1
+    local targetFile=$2
+    local mode=${3:-644}
+    local restoreStage
+
+    [[ -f "${backupFile}" ]] || return 1
+    padmCreateTempFileForTarget restoreStage "${targetFile}" restore || return 1
+    if ! cp -p "${backupFile}" "${restoreStage}"; then
+        padmRemoveCleanupPath "${restoreStage}"
+        return 1
+    fi
+    commitGeneratedFile "${restoreStage}" "${targetFile}" "${mode}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
+}
+
 writeGeneratedJsonFile() {
     local targetFile=$1
     local tmpPrefix=$2

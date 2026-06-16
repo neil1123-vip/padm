@@ -2208,6 +2208,25 @@ runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression() {
     )
 }
 
+runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression() (
+    local root="${TMP_DIR}/restore-managed-file-directory-target"
+    local backupFile="${root}/backup.json"
+    local targetFile="${root}/live.json"
+    local status
+
+    mkdir -p "${targetFile}"
+    printf '{"restored":true}\n' >"${backupFile}"
+
+    set +e
+    restoreManagedFileFromBackup "${backupFile}" "${targetFile}" 644
+    status=$?
+    set -e
+
+    [[ "${status}" -ne 0 ]]
+    [[ -d "${targetFile}" ]]
+    [[ ! -e "${targetFile}/.live.json.restore"* ]]
+)
+
 runSubscriptionSyncMissingRestoreScopeRegression() {
     (
         set -euo pipefail
@@ -2996,6 +3015,7 @@ runRegressionPlatform() {
 runRegressionFast() {
     runRegressionStep platform runRegressionPlatform &&
         runRegressionStep commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression &&
+        runRegressionStep restore-managed-file-directory-target runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression &&
         runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
         runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&

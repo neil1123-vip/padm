@@ -574,10 +574,14 @@ runAccessControlFailureReturnRegression() {
 }
 
 runAccessControlConfigTransactionRegression() (
-    local root="${TMP_DIR}/access-control-config-transaction"
-    local statusLog="${root}/status.log"
+    local rootRel="${TMP_DIR}/access-control-config-transaction"
+    local root
+    local statusLog
     local rc reloadCalls=0
 
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    statusLog="${root}/status.log"
     configPath="${root}/xray/"
     singBoxConfigPath="${root}/sing-box/"
     PADM_ACCESS_CONTROL_BACKUP_DIR="${root}/backup"
@@ -639,7 +643,7 @@ JSON
 {"routing":{"rules":[{"outboundTag":"new","domain":["domain:new.example"]}]}}
 JSON
     cp() {
-        if [[ "$1" == "${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray/09_routing.json" && "$2" == "${configPath}09_routing.json" ]]; then
+        if [[ "$1" == "-p" && "$2" == "${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray/09_routing.json" && "$3" == "${root}/xray/.09_routing.json.restore."* ]]; then
             return 1
         fi
         command cp "$@"
@@ -1398,14 +1402,20 @@ YAML
 )
 
 runDNSRoutingFailureReturnRegression() (
-    local root="${TMP_DIR}/dns-routing-failure"
-    local reloadMarker="${root}/reload"
-    local statusMarker="${root}/status"
-    local successMarker="${root}/success"
-    local errorLog="${root}/error.log"
+    local rootRel="${TMP_DIR}/dns-routing-failure"
+    local root
+    local reloadMarker
+    local statusMarker
+    local successMarker
+    local errorLog
     local rc
 
-    mkdir -p "${root}"
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    reloadMarker="${root}/reload"
+    statusMarker="${root}/status"
+    successMarker="${root}/success"
+    errorLog="${root}/error.log"
     PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
@@ -1638,7 +1648,7 @@ JSON
             esac
         }
         cp() {
-            if [[ "$1" == "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" && "$2" == "${configPath}11_dns.json" ]]; then
+            if [[ "$1" == "-p" && "$2" == "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" && "$3" == "${root}/dns-xray-restore-fail/.11_dns.json.restore."* ]]; then
                 return 1
             fi
             command cp "$@"
@@ -8454,7 +8464,7 @@ JSON
 {bad-json
 JSON
     cp() {
-        if [[ "$1" == */xray/07_VLESS_vision_reality_inbounds.json && "$2" == "${xrayVision}" ]]; then
+        if [[ "$1" == "-p" && "$2" == */xray/07_VLESS_vision_reality_inbounds.json && "$3" == "${root}/.xray-vision.json.restore."* ]]; then
             return 1
         fi
         command cp "$@"
@@ -8494,7 +8504,7 @@ JSON
 {"inbounds":[{"streamSettings":{"realitySettings":{"target":"old.example.com:443","serverNames":["old-sni.example.com"]},"xhttpSettings":{"host":"old-sni.example.com"}}}]}
 JSON
     cp() {
-        if [[ "$1" == */xray/07_VLESS_vision_reality_inbounds.json && "$2" == "${xrayVision}" ]]; then
+        if [[ "$1" == "-p" && "$2" == */xray/07_VLESS_vision_reality_inbounds.json && "$3" == "${root}/.xray-vision.json.restore."* ]]; then
             return 1
         fi
         command cp "$@"

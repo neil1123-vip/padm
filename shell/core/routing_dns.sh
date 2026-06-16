@@ -146,14 +146,14 @@ dnsRoutingBackupRestore() {
     if [[ -n "${xrayConfigDir}" ]]; then
         rm -f "${xrayConfigDir}11_dns.json" >/dev/null 2>&1 || status=1
         if [[ -f "${backupDir}/xray/11_dns.json" ]]; then
-            cp "${backupDir}/xray/11_dns.json" "${xrayConfigDir}11_dns.json" || status=1
+            restoreManagedFileFromBackup "${backupDir}/xray/11_dns.json" "${xrayConfigDir}11_dns.json" 644 || status=1
         fi
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r singBoxFile; do
             rm -f "${singBoxConfigDir}${singBoxFile}" >/dev/null 2>&1 || status=1
             if [[ -f "${backupDir}/sing-box/${singBoxFile}" ]]; then
-                cp "${backupDir}/sing-box/${singBoxFile}" "${singBoxConfigDir}${singBoxFile}" || status=1
+                restoreManagedFileFromBackup "${backupDir}/sing-box/${singBoxFile}" "${singBoxConfigDir}${singBoxFile}" 644 || status=1
             fi
         done < <(dnsRoutingManagedSingBoxFiles)
     fi

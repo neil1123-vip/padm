@@ -444,7 +444,7 @@ accessControlBackupRestore() {
         for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
             rm -f "${xrayConfigDir}${file}" >/dev/null 2>&1 || status=1
             if [[ -f "${backupDir}/xray/${file}" ]]; then
-                cp "${backupDir}/xray/${file}" "${xrayConfigDir}${file}" || status=1
+                restoreManagedFileFromBackup "${backupDir}/xray/${file}" "${xrayConfigDir}${file}" 644 || status=1
             fi
         done
     fi
@@ -452,7 +452,7 @@ accessControlBackupRestore() {
         for file in block_domain_route.json block_domain_outbound.json block_ip_route.json block_ip_outbound.json cn_block_route.json cn_block_outbound.json cn_block_ip_route.json 00_allow_domain_route.json 01_direct_outbound.json; do
             rm -f "${singBoxConfigDir}${file}" >/dev/null 2>&1 || status=1
             if [[ -f "${backupDir}/sing-box/${file}" ]]; then
-                cp "${backupDir}/sing-box/${file}" "${singBoxConfigDir}${file}" || status=1
+                restoreManagedFileFromBackup "${backupDir}/sing-box/${file}" "${singBoxConfigDir}${file}" 644 || status=1
             fi
         done
     fi
