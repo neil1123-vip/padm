@@ -10586,7 +10586,6 @@ runMenuSmokeRegression() {
     restoreSubscriptionGroupsBackupMenu() { recordMenuAction restoreSubscriptionGroupsBackupMenu; }
     resetSubscriptionGroupsStateMenu() { recordMenuAction resetSubscriptionGroupsStateMenu; }
     refreshSubscriptionGroupSyncCron() { recordMenuAction refreshSubscriptionGroupSyncCron; }
-    subscriptionGroupSyncCronStatus() { recordMenuAction subscriptionGroupSyncCronStatus; }
     installUserCrontabContent() { return 0; }
     xrayInstalled() { return 0; }
     singBoxInstalled() { return 0; }
@@ -10596,7 +10595,14 @@ runMenuSmokeRegression() {
     singBoxRunning() { return 1; }
     validateXrayConfigWithBinary() { return 0; }
     singBoxConfigInstalled() { return 1; }
-    crontab() { return 1; }
+    crontab() {
+        recordMenuAction "crontab:$*"
+        if [[ "${1:-}" == "-l" ]]; then
+            printf '0 * * * * SyncSubscriptionGroups\n'
+            return 0
+        fi
+        return 1
+    }
     coreReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; return 1; }
     serviceQueueStart() { recordMenuAction "serviceQueueStart:$*"; }
     serviceQueueStop() { recordMenuAction "serviceQueueStop:$*"; }
@@ -10857,6 +10863,12 @@ main
         printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
         return 1
     fi
+    resetMenuActions
+    output=
+    manageSubscriptionSyncSettings <<<"10
+11"
+    assertMenuAction 'crontab:-l'
+    grep -q 'SyncSubscriptionGroups' <<<"${output}"
     resetMenuActions
     output=
     manageSubscriptionMainMaintenance <<<"6

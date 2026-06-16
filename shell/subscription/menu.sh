@@ -1037,10 +1037,6 @@ refreshSubscriptionGroupSyncCron() {
     fi
 }
 
-subscriptionGroupSyncCronStatus() {
-    crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
-}
-
 manageSubscriptionSyncSettings() {
     subscriptionRequireMainRole || return 1
     local groupId
@@ -1096,7 +1092,7 @@ manageSubscriptionSyncSettings() {
             subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.quota_auto_apply = ((.sync.quota_auto_apply // false) | not) else . end)'
             successCard "限额自动执行状态已切换"
             ;;
-        10) subscriptionGroupSyncCronStatus ;;
+        10) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
         11) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
