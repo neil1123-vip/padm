@@ -271,10 +271,6 @@ cloudflare.com|cloudflare.com|Cloudflare Root|global|cdn|yes|32|no|CDN 目标可
 EOF
 }
 
-realityTargetBlockedCandidatesFile() {
-    printf '%s\n' "${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
-}
-
 realityTargetBlockedCandidates() {
     cat <<'EOF'
 www.apple.com|Apple|xray_warn|Xray 会提示 Apple/iCloud 类目标可能带来封锁风险
@@ -285,7 +281,7 @@ www.akamai.com|Akamai|cdn|CDN 目标可能带来转发滥用风险
 cloudflare.com|Cloudflare Root|cdn|CDN 目标可能带来转发滥用风险
 EOF
     local customBlockedFile
-    customBlockedFile=$(realityTargetBlockedCandidatesFile)
+    customBlockedFile="${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
     [[ -f "${customBlockedFile}" ]] && cat "${customBlockedFile}"
 }
 
@@ -296,7 +292,7 @@ addRealityTargetBlockedCandidate() {
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
     [[ -n "${host}" ]] || return 1
-    blockedFile=$(realityTargetBlockedCandidatesFile)
+    blockedFile="${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
     mkdir -p "$(dirname "${blockedFile}")"
     if realityTargetCandidateBlocked "${host}"; then
         realityTargetStatusBlock yellow "REALITY 目标站黑名单" "已在黑名单中: ${host}"
@@ -374,13 +370,9 @@ showRealityTargetBlockedCandidates() {
     menuClose
 }
 
-realityTargetResultsFile() {
-    printf '%s\n' "${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
-}
-
 realityTargetResultCount() {
     local resultsFile
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     [[ -f "${resultsFile}" ]] || {
         printf '0\n'
         return 0
@@ -417,7 +409,7 @@ realityTargetResultField() {
 removeRealityTargetResultLine() {
     local target=$1
     local resultsFile tmpFile
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     [[ -f "${resultsFile}" ]] || return 0
     tmpFile="${resultsFile}.tmp"
     awk -F'\t' -v target="${target}" '$1 != target' "${resultsFile}" >"${tmpFile}"
@@ -478,7 +470,7 @@ writeRealityTargetResultLine() {
     local checkedAt=${14}
     local note=${15}
     local resultsFile tmpFile
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     mkdir -p "$(dirname "${resultsFile}")"
     tmpFile="${resultsFile}.tmp"
     if [[ -f "${resultsFile}" ]]; then
@@ -494,7 +486,7 @@ writeRealityTargetResultLines() {
     local linesFile=$1
     local resultsFile tmpFile
     [[ -s "${linesFile}" ]] || return 0
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     mkdir -p "$(dirname "${resultsFile}")"
     tmpFile="${resultsFile}.tmp"
     if [[ -f "${resultsFile}" ]]; then
@@ -529,7 +521,7 @@ removeRealityTargetsFromUnifiedLibrary() {
     local targetsFile=$1
     local resultsFile candidatesFile tmpFile hostsFile target parsed host
     [[ -s "${targetsFile}" ]] || return 0
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     if [[ -f "${resultsFile}" ]]; then
         tmpFile="${resultsFile}.tmp"
         awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets)' "${targetsFile}" "${resultsFile}" >"${tmpFile}"
@@ -553,7 +545,7 @@ removeRealityTargetsFromUnifiedLibrary() {
 
 sortedRealityTargetResults() {
     local resultsFile
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     [[ -f "${resultsFile}" ]] || return 1
     awk -F'\t' '
       {
@@ -2077,7 +2069,7 @@ scanLocalAsnRealityTargets() {
     local rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
     currentOrg=${rest#*$'\t'}
-    realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "正在复测统一目标库并写入结果表: $(realityTargetResultsFile)"
+    realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "正在复测统一目标库并写入结果表: ${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
 
     while IFS= read -r line; do
         IFS='|' read -r host sni name _region category cdnRisk _rank _recommended _note <<<"${line}"
