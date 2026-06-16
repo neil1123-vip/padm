@@ -4,28 +4,20 @@ vlessEncryptionStateFile() {
     echo "${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
 }
 
-vlessEncryptionXrayBinary() {
-    echo "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
-}
-
-vlessEncryptionXrayConfDir() {
-    echo "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}"
-}
-
 vlessEncryptionConfigFile() {
     local xhttpConfig
-    xhttpConfig="${PADM_VLESS_XHTTP_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/12_VLESS_XHTTP_inbounds.json}"
+    xhttpConfig="${PADM_VLESS_XHTTP_CONFIG_FILE:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}/12_VLESS_XHTTP_inbounds.json}"
     if [[ -f "${xhttpConfig}" ]]; then
         echo "${xhttpConfig}"
     else
-        echo "${PADM_VLESS_REALITY_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/07_VLESS_vision_reality_inbounds.json}"
+        echo "${PADM_VLESS_REALITY_CONFIG_FILE:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}/07_VLESS_vision_reality_inbounds.json}"
     fi
 }
 
 validateVlessEncryptionConfig() {
     local xrayBinary
-    xrayBinary=$(vlessEncryptionXrayBinary)
-    "${xrayBinary}" -test -confdir "$(vlessEncryptionXrayConfDir)" >"$(vlessEncryptionXrayTestLog)" 2>&1
+    xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+    "${xrayBinary}" -test -confdir "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}" >"$(vlessEncryptionXrayTestLog)" 2>&1
 }
 
 vlessEncryptionXrayTestLog() {
@@ -176,7 +168,7 @@ setVlessRealityEncryption() {
     local hadStateBackup=false
     configFile=$(vlessEncryptionConfigFile)
     stateFile=$(vlessEncryptionStateFile)
-    xrayBinary=$(vlessEncryptionXrayBinary)
+    xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
 
     if [[ "${coreInstallType}" != "1" ]]; then
         errorCard "此实验功能仅支持 Xray-core"
