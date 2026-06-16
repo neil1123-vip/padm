@@ -639,7 +639,9 @@ EOF
     elif [[ "${release}" == "fedora" ]]; then
         statusCard "Nginx 源" "nginx.org 未提供 Fedora ${centosVersion} 仓库，使用系统默认仓库安装 Nginx"
     elif [[ "${release}" == "alpine" ]]; then
-        rm "${nginxConfigPath}default.conf"
+        local defaultNginxConf
+        defaultNginxConf=$(nginxConfigFilePath default.conf) || failPackageInstallTransaction "Nginx 默认配置路径异常"
+        rm -f -- "${defaultNginxConf}" || failPackageInstallTransaction "Nginx 默认配置删除失败"
     fi
     installPackageTracked "nginx" nginx
     if nginxServiceInstalled; then

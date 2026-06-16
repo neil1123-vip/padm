@@ -412,6 +412,42 @@ runCleanLastInstallationSkipsDuplicateNginxCleanupRegression() {
     )
 }
 
+runInstallNginxAlpineDefaultPathSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/install-nginx-alpine-default-path-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        local rc
+        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+        printf 'default\n' >"${unsafeRoot}/default.conf"
+
+        release=alpine
+        beginPackageInstallTransaction() { PADM_PACKAGE_TRANSACTION_STARTED=true; }
+        endPackageInstallTransaction() { return 0; }
+        installPackageTracked() { return 0; }
+        nginxServiceInstalled() { return 0; }
+        bootStartup() { return 0; }
+        failPackageInstallTransaction() { exit 77; }
+
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath=
+            set +e
+            ( installNginxTools )
+            rc=$?
+            set -e
+            [[ "${rc}" == "77" ]]
+            [[ -f default.conf ]]
+        )
+
+        printf 'default\n' >"${nginxRoot}/default.conf"
+        nginxConfigPath="${nginxRoot}/"
+        installNginxTools
+        [[ ! -e "${nginxRoot}/default.conf" ]]
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -2424,6 +2460,7 @@ runRegressionFast() {
         runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression &&
         runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
         runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
+        runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
