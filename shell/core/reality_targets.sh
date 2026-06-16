@@ -359,23 +359,6 @@ realityTargetCandidates() {
     done < <(realityTargetCandidatePool)
 }
 
-realityTargetBlockedCandidateCount() {
-    realityTargetBlockedCandidates | wc -l | tr -d ' '
-}
-
-realityTargetBlockedCandidateLineByIndex() {
-    local wanted=$1
-    local line index=1
-    while IFS= read -r line; do
-        if [[ "${index}" == "${wanted}" ]]; then
-            printf '%s\n' "${line}"
-            return 0
-        fi
-        index=$((index + 1))
-    done < <(realityTargetBlockedCandidates)
-    return 1
-}
-
 realityTargetCandidateExists() {
     local host=$1
     realityTargetCandidatePool | awk -F'|' -v host="${host}" '$1 == host {found=1} END{exit !found}'
@@ -454,10 +437,6 @@ realityTargetResultsFile() {
 }
 
 realityTargetCacheFile() {
-    realityTargetResultsFile
-}
-
-realityTargetScanFile() {
     realityTargetResultsFile
 }
 
@@ -550,18 +529,6 @@ removeRealityTargetFromUnifiedLibrary() {
     local target=$1
     removeRealityTargetResultLine "${target}"
     removeRealityTargetCandidateLine "${target}"
-}
-
-realityTargetRecentlyFailed() {
-    local target=$1
-    local ip=$2
-    local now=$3
-    local line checkedAt
-    line=$(realityTargetResultLineByTargetIp "${target}" "${ip}") || return 1
-    checkedAt=$(realityTargetResultField "${line}" 14)
-    [[ "$(realityTargetResultField "${line}" 10)" == "FAIL" ]] || return 1
-    [[ "${checkedAt}" =~ ^[0-9]+$ ]] || return 1
-    [[ $((now - checkedAt)) -lt 86400 ]]
 }
 
 formatRealityTargetResultLine() {
@@ -687,18 +654,6 @@ sortedRealityTargetResults() {
         printf "%d\t%d\t%d\t%d\t%d\t%s\n", scoreRank, networkRank, cdnRank, certRank, checked, $0
       }
     ' "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr -k4,4nr -k5,5nr | cut -f6-
-}
-
-realityTargetScanResultCount() {
-    realityTargetResultCount
-}
-
-realityTargetScanLineByIndex() {
-    realityTargetResultLineByIndex "$1"
-}
-
-realityTargetScanField() {
-    realityTargetResultField "$1" "$2"
 }
 
 writeRealityTargetScanLine() {
@@ -1354,19 +1309,6 @@ selectRealityTargetCandidateInteractive() {
             errorCard "输入无效，请输入编号或 n/p/f/a/m/r"
             ;;
         esac
-    done
-}
-
-showRealityTargetCandidates() {
-    local page=1
-    local pageSize=${REALITY_TARGET_PAGE_SIZE:-12}
-    local total maxPage
-    total=$(realityTargetFilteredCandidateCount all)
-    maxPage=$(( (total + pageSize - 1) / pageSize ))
-    (( maxPage < 1 )) && maxPage=1
-    while (( page <= maxPage )); do
-        showRealityTargetCandidatePage all "${page}" "${pageSize}"
-        page=$((page + 1))
     done
 }
 
