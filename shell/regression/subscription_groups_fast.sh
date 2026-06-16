@@ -344,6 +344,74 @@ EOF
     )
 }
 
+runCleanLastInstallationSkipsDuplicateNginxCleanupRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/clean-last-installation-nginx-safety"
+        local unsafeRoot="${root}/unsafe"
+        local cleanupLog="${root}/cleanup.log"
+        local managedFiles=(alone.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf checkPortOpen.conf)
+        local file
+        mkdir -p "${unsafeRoot}"
+        for file in "${managedFiles[@]}"; do
+            printf 'managed\n' >"${unsafeRoot}/${file}"
+        done
+        cd "${unsafeRoot}"
+
+        currentDefaultPort=
+        currentPort=
+        customPort=
+        xrayVLESSRealityPort=
+        xrayVLESSRealityXHTTPort=
+        singBoxVLESSVisionPort=
+        singBoxVLESSRealityVisionPort=
+        singBoxVLESSRealityGRPCPort=
+        singBoxHysteria2Port=
+        singBoxTuicPort=
+        singBoxSocks5Port=
+        hysteriaPort=
+        tuicPort=
+        nginxConfigPath=
+        nginxStaticPath="${root}/static"
+
+        handleXray() { return 0; }
+        handleSingBox() { return 0; }
+        handleNginx() { return 0; }
+        runCoreServiceActionAllowFailure() {
+            "$@"
+        }
+        cleanAgentNginxConf() {
+            printf 'clean-agent\n' >>"${cleanupLog}"
+            return 0
+        }
+        cleanDirectoryContent() {
+            printf 'clean-dir:%s\n' "$1" >>"${cleanupLog}"
+            return 0
+        }
+        rm() {
+            local arg safeArgs=()
+            printf 'rm:%s\n' "$*" >>"${cleanupLog}"
+            for arg in "$@"; do
+                [[ "${arg}" == -* ]] && { safeArgs+=("${arg}"); continue; }
+                [[ "${arg}" == /* ]] && return 0
+                safeArgs+=("${arg}")
+            done
+            command rm "${safeArgs[@]}"
+        }
+        systemctl() { return 0; }
+        lsof() { return 1; }
+        autoRead() { printf -v "$3" 'n'; }
+        readInstallType() { return 0; }
+        mkdirTools() { return 0; }
+
+        cleanLastInstallationConfig >/dev/null
+        grep -qx 'clean-agent' "${cleanupLog}"
+        for file in "${managedFiles[@]}"; do
+            [[ -f "${file}" ]]
+        done
+    )
+}
+
 runAutoInstallGeneratedIdentityRegression() {
     (
         set -euo pipefail
@@ -2355,6 +2423,7 @@ runRegressionFast() {
         runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression &&
         runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression &&
         runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
+        runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&

@@ -506,10 +506,6 @@ cleanLastInstallationConfig() {
         errorCard "Reality entry host 清理失败，已取消清空上次安装配置"
         return 1
     fi
-    if ! rm -f "${nginxConfigPath}alone.conf" "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" "${nginxConfigPath}subscribe.conf" "${nginxConfigPath}checkPortOpen.conf" >/dev/null 2>&1; then
-        errorCard "Nginx 残留配置清理失败，已取消清空上次安装配置"
-        return 1
-    fi
     if ! rm -f /etc/systemd/system/xray.service /etc/systemd/system/sing-box.service >/dev/null 2>&1; then
         errorCard "核心服务文件清理失败，已取消清空上次安装配置"
         return 1
