@@ -4605,6 +4605,10 @@ runUninstallServiceStopFailureRegression() (
         printf 'wireguard-cleanup\n' >>"${actionLog}"
         return 0
     }
+    cleanupPadmManagedRootOnUninstall() {
+        printf 'padm-root-cleanup\n' >>"${actionLog}"
+        return 0
+    }
     removePadmNginxConfigFragments() {
         printf 'nginx-fragments\n' >>"${actionLog}"
         return 0
@@ -4662,7 +4666,7 @@ runUninstallServiceStopFailureRegression() (
         grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
-        grep -qxF 'remove:/etc/padm:PADM配置目录' "${actionLog}"
+        grep -qxF 'padm-root-cleanup' "${actionLog}"
         grep -qxF 'unsubscribe-cleanup' "${actionLog}"
         grep -q '卸载未完全完成' "${errorLog}"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]

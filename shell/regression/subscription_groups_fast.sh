@@ -1400,6 +1400,77 @@ runRemoveInstallPathFileModeRegression() {
     )
 }
 
+runUninstallPadmRootScopeRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local rootRel="${TMP_DIR}/remove-install-path-padm-root-scope"
+        local root
+        local padmRoot
+        local rmLog
+        local serviceLog
+        local errorLog
+        local successLog
+        mkdir -p "${rootRel}/etc/padm/xray/conf" "${rootRel}/etc/padm/custom"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        padmRoot="${root}/etc/padm"
+        rmLog="${root}/rm.log"
+        serviceLog="${root}/service.log"
+        errorLog="${root}/error.log"
+        successLog="${root}/success.log"
+        printf 'managed\n' >"${padmRoot}/xray/conf/00_log.json"
+        printf 'keep\n' >"${padmRoot}/custom/keep"
+        : >"${rmLog}"
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        : >"${successLog}"
+
+        PADM_INSTALL_DIR="${padmRoot}"
+        PADM_SUBSCRIPTION_GROUPS_DIR="${padmRoot}/subscribe_groups"
+        PADM_SUBSCRIBE_LOCAL_DIR="${padmRoot}/subscribe_local"
+        PADM_SUBSCRIBE_DIR="${padmRoot}/subscribe"
+        PADM_REALITY_TARGET_RESULTS_FILE="${padmRoot}/reality_targets_results.tsv"
+        PADM_REALITY_TARGET_BLOCKED_FILE="${padmRoot}/reality_target_blocked.tsv"
+        PADM_REALITY_ENTRY_HOST_FILE="${padmRoot}/reality_entry_host"
+        PADM_VLESS_ENCRYPTION_STATE_FILE="${padmRoot}/vless_encryption.json"
+        PADM_WARP_DIR="${padmRoot}/warp"
+        REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        REGRESSION_SUCCESS_CARD_LOG="${successLog}"
+
+        rm() {
+            printf '%s\n' "$*" >>"${rmLog}"
+            command rm "$@"
+        }
+
+        autoRead() { printf -v "$3" 'y'; }
+        menu() { return 0; }
+        pgrep() { return 1; }
+        runCoreServiceActionAllowFailure() {
+            printf '%s:%s\n' "$1" "$2" >>"${serviceLog}"
+            return 0
+        }
+        cleanupSubscriptionWireGuardControlOnUninstall() { return 0; }
+        cleanupFail2banManagedFilesOnUninstall() { return 0; }
+        removePadmNginxConfigFragments() { return 0; }
+        unInstallSubscribe() { return 0; }
+
+        release=centos
+        coreInstallType=1
+        singBoxConfigPath=
+        nginxStaticPath="${root}/static"
+
+        unInstall >/dev/null
+        [[ ! -e "${padmRoot}/xray/conf/00_log.json" ]]
+        [[ -f "${padmRoot}/custom/keep" ]]
+        ! grep -qxF -- "-rf ${padmRoot}" "${rmLog}"
+        grep -qx 'handleNginx:stop' "${serviceLog}"
+        grep -qx 'handleXray:stop' "${serviceLog}"
+        [[ ! -s "${errorLog}" ]]
+    )
+}
+
 runRemoveInstallPathSafetyRegression() {
     (
         set -euo pipefail
@@ -2770,6 +2841,7 @@ runRegressionFast() {
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep remove-install-path-file-mode runRemoveInstallPathFileModeRegression &&
+        runRegressionStep uninstall-padm-root-scope runUninstallPadmRootScopeRegression &&
         runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression &&
         runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression &&
         runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression &&

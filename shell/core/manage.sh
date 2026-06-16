@@ -1196,6 +1196,73 @@ cleanupFail2banManagedFilesOnUninstall() {
     [[ "${failed}" != "true" ]]
 }
 
+cleanupPadmManagedRootOnUninstall() {
+    local installRoot="${PADM_INSTALL_DIR:-/etc/padm}"
+    local resolvedRoot
+    local failed=false
+    local target
+    local -a managedPaths=(
+        "${installRoot%/}/xray"
+        "${installRoot%/}/sing-box"
+        "${installRoot%/}/hysteria"
+        "${installRoot%/}/tls"
+        "${installRoot%/}/subscribe"
+        "${installRoot%/}/subscribe_local"
+        "${installRoot%/}/subscribe_remote"
+        "${installRoot%/}/subscribe_groups"
+        "${installRoot%/}/warp"
+        "${installRoot%/}/wireguard"
+        "${installRoot%/}/shell"
+        "${installRoot%/}/documents"
+        "${installRoot%/}/assets"
+        "${installRoot%/}/install.sh"
+        "${installRoot%/}/install.sh.bak"
+        "${installRoot%/}/.padm-ref"
+        "${installRoot%/}/.padm-module-manifest"
+        "${installRoot%/}/.padm-entry-ref"
+        "${installRoot%/}/cdn"
+        "${installRoot%/}/reality_entry_host"
+        "${installRoot%/}/reality_target_blocked.tsv"
+        "${installRoot%/}/reality_targets_results.tsv"
+        "${installRoot%/}/reality_stream_split.json"
+        "${installRoot%/}/vless_encryption.json"
+        "${installRoot%/}/alone_backup.conf"
+        "${installRoot%/}/padm-bbr.state"
+        "${installRoot%/}/install.log"
+        "${installRoot%/}/install.log.dpkg-recover"
+        "${installRoot%/}/nginx_error.log"
+        "${installRoot%/}/crontab_tls.log"
+    )
+
+    if ! padmIsSafeAbsolutePath "${installRoot%/}"; then
+        errorCard "PADM配置目录路径异常，已终止: ${installRoot}"
+        return 1
+    fi
+
+    for target in "${managedPaths[@]}"; do
+        removeInstallPath "${target}" "PADM配置目录受管项" || failed=true
+    done
+
+    if [[ -d "${installRoot}" && ! -L "${installRoot}" ]]; then
+        resolvedRoot=$(cd -- "${installRoot}" && pwd -P) || {
+            errorCard "PADM配置目录解析失败: ${installRoot}"
+            return 1
+        }
+        if ! find "${resolvedRoot}" -mindepth 1 -maxdepth 1 \( -name 'tmp.geo.*' -o -name 'tmp.xray.*' -o -name 'tmp.sing-box.*' \) -exec rm -rf -- {} +; then
+            errorCard "PADM配置目录临时产物清理失败: ${installRoot}"
+            failed=true
+        fi
+        if ! find "${resolvedRoot}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+            rmdir "${resolvedRoot}" >/dev/null 2>&1 || {
+                errorCard "PADM配置目录删除失败: ${installRoot}"
+                failed=true
+            }
+        fi
+    fi
+
+    [[ "${failed}" != "true" ]]
+}
+
 unInstall() {
     autoRead uninstall_confirm "是否确认卸载安装内容？[y/n]:" unInstallStatus
     if [[ "${unInstallStatus}" != "y" ]]; then
@@ -1258,7 +1325,7 @@ unInstall() {
     if ! removePadmNginxConfigFragments; then
         uninstallFailed=true
     fi
-    removeInstallPath /etc/padm "PADM配置目录" || uninstallFailed=true
+    cleanupPadmManagedRootOnUninstall || uninstallFailed=true
 
     if ! unInstallSubscribe; then
         uninstallFailed=true
