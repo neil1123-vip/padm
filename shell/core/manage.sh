@@ -638,7 +638,8 @@ restoreTraditionalTlsAlpnBackup() {
     local backupFile=$1
     local configFile=$2
     local reason=$3
-    if mv "${backupFile}" "${configFile}"; then
+    if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
+        removeManagedFileIfPresent "${backupFile}" || true
         return 0
     fi
     errorCard "${reason}，且旧配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
@@ -789,22 +790,23 @@ applyTraditionalTlsAlpn() {
     local alpnJson=$1
     local configFile backupFile tmpFile
     configFile=$(traditionalTlsFallbackConfigFile)
+    configFile=$(padmRequireSafeAbsolutePath "${configFile}") || { errorCard "传统 TLS fallback 配置路径异常"; return 1; }
     backupFile="${configFile}.alpn.bak"
     if [[ ! -f "${configFile}" ]]; then
         errorCard "未检测到传统 TLS fallback 入站配置"
         return 1
     fi
-    cp "${configFile}" "${backupFile}"
-    padmCreateTempFileForTarget tmpFile "${configFile}" alpn || { rm -f "${backupFile}"; return 1; }
+    backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
+    padmCreateTempFileForTarget tmpFile "${configFile}" alpn || { removeManagedFileIfPresent "${backupFile}" || true; return 1; }
     if ! jq --argjson alpn "${alpnJson}" '.inbounds[0].streamSettings.tlsSettings.alpn = $alpn' "${configFile}" >"${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
-        rm -f "${backupFile}"
+        removeManagedFileIfPresent "${backupFile}" || true
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
     if ! commitGeneratedJsonFile "${tmpFile}" "${configFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
-        rm -f "${backupFile}"
+        removeManagedFileIfPresent "${backupFile}" || true
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
@@ -829,7 +831,7 @@ applyTraditionalTlsAlpn() {
         fi
         return 1
     fi
-    rm -f "${backupFile}"
+    removeManagedFileIfPresent "${backupFile}" || true
     successCard "ALPN 配置已更新"
 }
 
@@ -2508,6 +2510,7 @@ refreshXHTTPSubscriptions() {
 configTransactionCommit() {
     local configFile=$1
     local backupFile=$2
+    local stagedFile="${configFile}.tmp"
     local validateFn=$3
     local failureTitle=$4
     local rollbackMessage=$5
@@ -2515,17 +2518,23 @@ configTransactionCommit() {
     local refreshFn=$7
     local reloadFn=${8:-reloadCore}
 
-    cp "${configFile}" "${backupFile}" || return 1
-    mv "${configFile}.tmp" "${configFile}" || { rm -f "${backupFile}" "${configFile}.tmp"; return 1; }
+    configFile=$(padmRequireSafeAbsolutePath "${configFile}") || return 1
+    backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
+    if ! commitGeneratedJsonFile "${stagedFile}" "${configFile}"; then
+        removeManagedFileIfPresent "${backupFile}" || true
+        removeManagedFileIfPresent "${stagedFile}" || true
+        return 1
+    fi
     if ! "${validateFn}"; then
-        if mv "${backupFile}" "${configFile}"; then
-            rm -f "${backupFile}" "${configFile}.tmp"
+        if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
+            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFileIfPresent "${stagedFile}" || true
             "${validateFn}" >/dev/null 2>&1 || true
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
             menuLine "${rollbackMessage}"
             menuClose
         else
-            rm -f "${configFile}.tmp"
+            removeManagedFileIfPresent "${stagedFile}" || true
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
             menuLine "配置校验失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
             menuClose
@@ -2533,8 +2542,9 @@ configTransactionCommit() {
         return 1
     fi
     if ! "${reloadFn}"; then
-        if mv "${backupFile}" "${configFile}"; then
-            rm -f "${configFile}.tmp"
+        if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
+            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFileIfPresent "${stagedFile}" || true
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
             if "${reloadFn}" >/dev/null 2>&1; then
                 menuLine "已回滚本次修改"
@@ -2543,13 +2553,14 @@ configTransactionCommit() {
             fi
             menuClose
         else
+            removeManagedFileIfPresent "${stagedFile}" || true
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
             menuLine "核心重载失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
             menuClose
         fi
         return 1
     fi
-    rm -f "${backupFile}"
+    removeManagedFileIfPresent "${backupFile}" || true
     if ! "${refreshFn}"; then
         echoContent title "\n┌─ 订阅刷新失败 ────────────────────────────────"
         menuLine "核心配置已更新，但订阅刷新失败，请手动刷新订阅"
