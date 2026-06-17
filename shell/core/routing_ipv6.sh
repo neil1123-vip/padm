@@ -122,10 +122,12 @@ ipv6Routing() {
         if [[ "${IPv6OutStatus}" == "y" ]]; then
 
             if [[ "${coreInstallType}" == "1" ]]; then
+                local xrayRoutingFile
 
                 addXrayOutbound IPv6_out || return 1
 
-                rm -f "${configPath}09_routing.json" >/dev/null 2>&1 || return 1
+                xrayRoutingFile=$(padmManagedFilePath "${configPath:-/etc/padm/xray/conf/}" "09_routing.json") || return 1
+                removeManagedFileIfPresent "${xrayRoutingFile}" || return 1
 
                 removeXrayOutbound IPv4_out || return 1
 

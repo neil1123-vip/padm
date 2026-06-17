@@ -504,6 +504,7 @@ EOF
 writeRoutingJsonConfig() {
     local targetPath=$1
     local tmpPath
+    targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
     padmCreateTempFileForTarget tmpPath "${targetPath}" routing || return 1
     if ! cat >"${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"
@@ -517,6 +518,7 @@ updateRoutingJsonConfig() {
     local filter=$2
     local tmpPath
     shift 2
+    targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
     padmCreateTempFileForTarget tmpPath "${targetPath}" routing || return 1
     if ! jq "$@" "${filter}" "${targetPath}" >"${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"

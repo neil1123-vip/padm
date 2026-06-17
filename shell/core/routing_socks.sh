@@ -144,6 +144,7 @@ setSocks5OutboundRoutingAll() {
 
     if [[ "${socksOutStatus}" == "y" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
+            local xrayRoutingFile
             removeXrayOutbound IPv4_out || return 1
             removeXrayOutbound IPv6_out || return 1
             removeXrayOutbound z_direct_outbound || return 1
@@ -151,7 +152,8 @@ setSocks5OutboundRoutingAll() {
             removeXrayOutbound wireguard_out_IPv4 || return 1
             removeXrayOutbound wireguard_out_IPv6 || return 1
 
-            rm -f "${configPath}09_routing.json" >/dev/null 2>&1 || return 1
+            xrayRoutingFile=$(padmManagedFilePath "${configPath:-/etc/padm/xray/conf/}" "09_routing.json") || return 1
+            removeManagedFileIfPresent "${xrayRoutingFile}" || return 1
         fi
         if [[ -n "${singBoxConfigPath}" ]]; then
 

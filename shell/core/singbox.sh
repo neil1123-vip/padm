@@ -322,19 +322,27 @@ EOF
 # 删除 Xray-core 出站
 removeXrayOutbound() {
     local tag=$1
+    local fileName="${tag}"
+    local targetPath
     local xrayConfigPath="${configPath:-/etc/padm/xray/conf/}"
-    if [[ -f "${xrayConfigPath}${tag}.json" ]]; then
-        rm "${xrayConfigPath}${tag}.json" >/dev/null 2>&1
-    fi
+
+    [[ -n "${fileName}" ]] || return 1
+    [[ "${fileName}" == *.json ]] || fileName="${fileName}.json"
+    targetPath=$(padmManagedFilePath "${xrayConfigPath}" "${fileName}") || return 1
+    removeManagedFileIfPresent "${targetPath}"
 }
 
 # 移除 sing-box 配置
 removeSingBoxConfig() {
 
     local tag=$1
-    if [[ -f "${singBoxConfigPath}${tag}.json" ]]; then
-        rm "${singBoxConfigPath}${tag}.json"
-    fi
+    local fileName="${tag}"
+    local targetPath
+
+    [[ -n "${fileName}" ]] || return 1
+    [[ "${fileName}" == *.json ]] || fileName="${fileName}.json"
+    targetPath=$(padmManagedFilePath "${singBoxConfigPath}" "${fileName}") || return 1
+    removeManagedFileIfPresent "${targetPath}"
 }
 
 

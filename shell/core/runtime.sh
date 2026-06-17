@@ -35,6 +35,22 @@ padmResolveManagedAbsolutePath() {
     printf '%s\n' "${path}"
 }
 
+padmRequireSafeAbsolutePath() {
+    local path=$1
+    [[ -n "${path}" ]] || return 1
+    padmIsSafeAbsolutePath "${path}" || return 1
+    printf '%s\n' "${path}"
+}
+
+padmManagedFilePath() {
+    local dirPath=$1
+    local fileName=$2
+
+    [[ -n "${fileName}" && "${fileName}" != "." && "${fileName}" != ".." && "${fileName}" != */* ]] || return 1
+    dirPath=$(padmRequireSafeAbsolutePath "${dirPath%/}") || return 1
+    printf '%s\n' "${dirPath}/${fileName}"
+}
+
 padmInstallCleanupTrap() {
     if [[ -n "${PADM_CLEANUP_TRAP_INSTALLED}" ]]; then
         return 0
@@ -111,6 +127,14 @@ padmCommitTargetIsFileLike() {
     targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || return 1
     [[ ! -d "${targetFile}" ]] || return 1
     [[ ! -e "${targetFile}" || -f "${targetFile}" || -L "${targetFile}" ]]
+}
+
+removeManagedFileIfPresent() {
+    local targetFile=$1
+
+    targetFile=$(padmRequireSafeAbsolutePath "${targetFile}") || return 1
+    [[ ! -e "${targetFile}" || -f "${targetFile}" || -L "${targetFile}" ]] || return 1
+    rm -f -- "${targetFile}" >/dev/null 2>&1 || return 1
 }
 
 commitGeneratedFile() {

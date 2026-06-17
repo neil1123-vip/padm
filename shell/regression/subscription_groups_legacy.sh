@@ -413,6 +413,58 @@ JSON
     ! validateAccessIPList 'bad-ip' >/dev/null
 }
 
+runRoutingCoreRejectsUnsafeConfigDirRegression() (
+    local root="${TMP_DIR}/routing-core-unsafe-config"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}/relative-config" "${root}/relative-sing-box"
+    : >"${rmLog}"
+    printf '{"routing":{"rules":[]}}\n' >"${root}/relative-config/09_routing.json"
+    printf '{"outbounds":[]}\n' >"${root}/relative-sing-box/socks5_outbound.json"
+
+    cd "${root}"
+    configPath="relative-config/"
+    singBoxConfigPath="relative-sing-box/"
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    writeRoutingJsonConfig "${configPath}11_dns.json" <<'JSON' >/dev/null 2>&1
+{"dns":{"servers":["localhost"]}}
+JSON
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${root}/relative-config/11_dns.json" ]]
+    ! compgen -G "${root}/relative-config/.11_dns.json.routing.*" >/dev/null
+
+    set +e
+    updateRoutingJsonConfig "${configPath}09_routing.json" '.routing.rules += [{"type":"field"}]' >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    jq -e '.routing.rules == []' "${root}/relative-config/09_routing.json" >/dev/null
+    ! compgen -G "${root}/relative-config/.09_routing.json.routing.*" >/dev/null
+
+    set +e
+    removeXrayOutbound "09_routing" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -f "${root}/relative-config/09_routing.json" ]]
+
+    set +e
+    removeSingBoxConfig "socks5_outbound" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -f "${root}/relative-sing-box/socks5_outbound.json" ]]
+    [[ ! -s "${rmLog}" ]]
+)
+
 runAccessControlFailureReturnCase() {
     (
     local mode=$1
@@ -14253,6 +14305,7 @@ runRegressionMenuSmokeFull() {
 
 runRegressionRouting() {
     runRegressionStep routing-core runRoutingRegression
+    runRegressionStep routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
     runRegressionStep routing-socks5-udp-associate runSocks5UdpAssociateRegression
     runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
     runRegressionStep routing-access-control-config-transaction runAccessControlConfigTransactionRegression

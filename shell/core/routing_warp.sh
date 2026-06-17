@@ -174,7 +174,9 @@ unInstallWireGuard() {
 
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ ! -f "${singBoxConfigPath}wireguard_endpoints_IPv6_route.json" && ! -f "${singBoxConfigPath}wireguard_endpoints_IPv4_route.json" ]]; then
-            rm -f "${singBoxConfigPath}wireguard_outbound.json" >/dev/null 2>&1 || return 1
+            local wireguardOutboundFile
+            wireguardOutboundFile=$(padmManagedFilePath "${singBoxConfigPath}" "wireguard_outbound.json") || return 1
+            removeManagedFileIfPresent "${wireguardOutboundFile}" || return 1
             rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
         fi
     fi
@@ -253,8 +255,10 @@ warpRoutingReg() {
         if [[ "${warpOutStatus}" == "y" ]]; then
             readConfigWarpReg || return 1
             if [[ "${coreInstallType}" == "1" ]]; then
+                local xrayRoutingFile
                 addXrayOutbound "wireguard_out_${type}" || return 1
-                rm -f "${configPath}09_routing.json" >/dev/null 2>&1 || return 1
+                xrayRoutingFile=$(padmManagedFilePath "${configPath:-/etc/padm/xray/conf/}" "09_routing.json") || return 1
+                removeManagedFileIfPresent "${xrayRoutingFile}" || return 1
                 if [[ "${type}" == "IPv4" ]]; then
                     removeXrayOutbound "wireguard_out_IPv6" || return 1
                 elif [[ "${type}" == "IPv6" ]]; then
