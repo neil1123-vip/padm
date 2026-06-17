@@ -42,16 +42,6 @@ realityTargetTmpPath() {
     fi
 }
 
-realityScannerOutputPath() {
-    local stamp=$1
-    local suffix=${2:-}
-    if [[ -n "${suffix}" ]]; then
-        realityTargetTmpPath "padm-realitlscanner-${stamp}-${suffix}.csv"
-    else
-        realityTargetTmpPath "padm-realitlscanner-${stamp}.csv"
-    fi
-}
-
 realityTargetScoreStyle() {
     case $1 in
     A) uiStyle ok A ;;
@@ -1538,7 +1528,7 @@ runRealityScannerRange() {
     scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
-    outputFile=$(realityScannerOutputPath "$(date +%s)")
+    outputFile=$(realityTargetTmpPath "padm-realitlscanner-$(date +%s).csv")
     startAt=$(date +%s)
     realityTargetProgressLine "RealiTLScanner 扫描范围：${scanRange} 已耗时：0s"
     "${scannerBin}" -addr "${scanRange}" -thread 20 -timeout 3 -out "${outputFile}" &
@@ -1589,7 +1579,7 @@ runRealityScannerTargetFile() {
             padmRemoveCleanupPath "${batchFile}"
             break
         }
-        outputFile=$(realityScannerOutputPath "$(date +%s)" "sample-${batchIndex}")
+        outputFile=$(realityTargetTmpPath "padm-realitlscanner-$(date +%s)-sample-${batchIndex}.csv")
         startAt=$(date +%s)
         realityTargetProgressLine "RealiTLScanner 抽样扫描进度：$((processed + 1))-$((processed + batchCount))/${total} 已耗时：0s"
         "${scannerBin}" -in "${batchFile}" -thread 20 -timeout 3 -out "${outputFile}" &
@@ -1639,7 +1629,7 @@ runRealityScannerPrefixFile() {
     while IFS= read -r prefix; do
         [[ -n "${prefix}" ]] || continue
         index=$((index + 1))
-        outputFile=$(realityScannerOutputPath "$(date +%s)" "${index}")
+        outputFile=$(realityTargetTmpPath "padm-realitlscanner-$(date +%s)-${index}.csv")
         startAt=$(date +%s)
         realityTargetProgressLine "RealiTLScanner 扫描 prefix ${index}/${total}：${prefix} 已耗时：0s"
         "${scannerBin}" -addr "${prefix}" -thread 20 -timeout 3 -out "${outputFile}" &
