@@ -12493,9 +12493,6 @@ fast)
 fast-reality)
     regressionRunner=runRegressionFastReality
     ;;
-platform)
-    regressionRunner=runRegressionPlatform
-    ;;
 platform-io)
     regressionRunner=runRegressionPlatformIo
     ;;
@@ -12569,7 +12566,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
