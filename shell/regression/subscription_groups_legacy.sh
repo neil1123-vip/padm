@@ -7355,6 +7355,37 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionGroupsRejectsUnsafeDirRegression() (
+    local root="${TMP_DIR}/subscription-groups-unsafe-dir"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${rmLog}"
+    export PADM_SUBSCRIPTION_GROUPS_DIR=relative-groups
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    ensureSubscriptionGroupsState >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -e "${root}/relative-groups" ]]
+
+    set +e
+    createSubscriptionGroupsBackup >/dev/null 2>&1
+    rc=$?
+    set -e
+    unset -f rm
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+)
+
 runRefreshLocalSubscriptionsRollbackRegression() (
     local root="${TMP_DIR}/refresh-local-subscriptions-rollback"
     local localDir="${root}/subscribe_local"
@@ -11013,6 +11044,47 @@ SH
     fi
 )
 
+runSubscriptionControlRejectsUnsafeGroupsDirRegression() (
+    local root="${TMP_DIR}/remote-control-unsafe-groups-dir"
+    local fakeBin="${root}/fake-bin"
+    local actionsFile="${root}/actions.log"
+    local healthTokensFile="${root}/health.log"
+    local oldPath="${PATH}"
+    local installStatus
+
+    mkdir -p "${fakeBin}" "${root}"
+    cat >"${fakeBin}/python3" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+    cat >"${fakeBin}/systemctl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS}"
+exit 0
+SH
+    chmod +x "${fakeBin}/python3" "${fakeBin}/systemctl"
+
+    export PADM_FAKE_SYSTEMCTL_ACTIONS="${actionsFile}"
+    export PADM_FAKE_HEALTH_TOKENS="${healthTokensFile}"
+    PATH="${fakeBin}:${oldPath}"
+    PADM_SUBSCRIPTION_GROUPS_DIR=relative-control
+
+    set +e
+    subscriptionControlEnsureToken >/dev/null 2>&1
+    installStatus=$?
+    set -e
+    [[ "${installStatus}" == "1" ]]
+    [[ ! -e "${root}/relative-control" ]]
+
+    set +e
+    installSubscriptionControlService >/dev/null 2>&1
+    installStatus=$?
+    set -e
+    [[ "${installStatus}" == "1" ]]
+    [[ ! -s "${actionsFile}" ]]
+    [[ ! -e "${root}/relative-control" ]]
+)
+
 runSubscriptionControlServerResponseRegression() (
     command -v python3 >/dev/null 2>&1 || return 0
 
@@ -14176,6 +14248,7 @@ runRegressionSubscriptionState() {
     runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
     runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
     runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
+    runRegressionStep subscription-groups-unsafe-dir runSubscriptionGroupsRejectsUnsafeDirRegression
 }
 
 runRegressionSubscriptionRemoteFetch() {
@@ -14295,6 +14368,7 @@ runRegressionRemoteControl() {
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&
+        runRegressionStep remote-control-unsafe-groups-dir runSubscriptionControlRejectsUnsafeGroupsDirRegression &&
         runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression &&
         runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }

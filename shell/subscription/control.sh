@@ -482,7 +482,9 @@ subscriptionControlPort() {
 }
 
 subscriptionControlServerScript() {
-    echo "$(subscriptionGroupsDir)/control_server.py"
+    local groupsDir
+    groupsDir=$(subscriptionGroupsSafeDir) || return 1
+    printf '%s/control_server.py\n' "${groupsDir}"
 }
 
 subscriptionControlServiceFile() {
@@ -844,7 +846,9 @@ EOF
 }
 
 subscriptionControlTokenFile() {
-    echo "$(subscriptionGroupsDir)/control.token"
+    local groupsDir
+    groupsDir=$(subscriptionGroupsSafeDir) || return 1
+    printf '%s/control.token\n' "${groupsDir}"
 }
 
 subscriptionControlEnsureToken() {

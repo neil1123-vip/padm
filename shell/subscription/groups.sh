@@ -4,12 +4,37 @@ subscriptionGroupsDir() {
     echo "${PADM_SUBSCRIPTION_GROUPS_DIR:-/etc/padm/subscribe_groups}"
 }
 
+subscriptionGroupsSafeDir() {
+    local groupsDir
+    local resolvedPath=
+    groupsDir=$(subscriptionGroupsDir)
+    [[ -n "${groupsDir}" ]] || return 1
+    if [[ "${groupsDir}" == /* ]]; then
+        padmIsSafeAbsolutePath "${groupsDir%/}" || return 1
+        printf '%s\n' "${groupsDir%/}"
+        return 0
+    fi
+    if [[ "${groupsDir}" == "." || "${groupsDir}" == ".." ||
+        "${groupsDir}" == */./* || "${groupsDir}" == */. ||
+        "${groupsDir}" == */../* || "${groupsDir}" == */.. ]]; then
+        return 1
+    fi
+    resolvedPath=$(padmResolveCleanupPath "${groupsDir}" 2>/dev/null || true)
+    [[ -n "${resolvedPath}" ]] || return 1
+    padmIsSafeAbsolutePath "${resolvedPath%/}" || return 1
+    printf '%s\n' "${resolvedPath%/}"
+}
+
 subscriptionGroupsFile() {
-    echo "$(subscriptionGroupsDir)/groups.json"
+    local groupsDir
+    groupsDir=$(subscriptionGroupsSafeDir) || return 1
+    printf '%s/groups.json\n' "${groupsDir}"
 }
 
 subscriptionGroupsBackupDir() {
-    echo "$(subscriptionGroupsDir)/backups"
+    local groupsDir
+    groupsDir=$(subscriptionGroupsSafeDir) || return 1
+    printf '%s/backups\n' "${groupsDir}"
 }
 
 subscriptionGroupsSchemaVersion() {
@@ -182,7 +207,7 @@ ensureSubscriptionGroupsState() {
     local stateDir
     local stateFile
     local stageFile
-    stateDir=$(subscriptionGroupsDir)
+    stateDir=$(subscriptionGroupsSafeDir) || return 1
     stateFile=$(subscriptionGroupsFile)
     padmEnsureSafeDirectory "${stateDir}" || return 1
     if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
