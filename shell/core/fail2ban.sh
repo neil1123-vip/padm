@@ -435,7 +435,11 @@ fail2banValidateManagedConfig() {
 
 fail2banRemoveManagedFiles() {
     local status=0
-    rm -f "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)" "$(fail2banPadmControlLogFile)" >/dev/null 2>&1 || status=1
+    removeManagedFilesIfPresent \
+        "$(fail2banManagedJailFile)" \
+        "$(fail2banManagedFilterFile)" \
+        "$(fail2banManagedNginxScanFilterFile)" \
+        "$(fail2banPadmControlLogFile)" || status=1
     return "${status}"
 }
 

@@ -19,7 +19,7 @@ cleanAgentNginxConf() {
             padmShowUnsafePathError "清理 Nginx 配置"
             return 1
         fi
-        rm -f -- "${targetPath}" >/dev/null 2>&1 || status=1
+        removeManagedFileIfPresent "${targetPath}" || status=1
     done
     streamConf=$(realityStreamSplitConfFile)
     streamState=$(realityStreamSplitStateFile)
@@ -27,7 +27,7 @@ cleanAgentNginxConf() {
         padmShowUnsafePathError "清理 Nginx 配置"
         return 1
     fi
-    rm -f -- "${streamConf}" "${streamState}" >/dev/null 2>&1 || status=1
+    removeManagedFilesIfPresent "${streamConf}" "${streamState}" || status=1
     removeRealityStreamNginxInclude || status=1
     return "${status}"
 }

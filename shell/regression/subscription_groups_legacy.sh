@@ -4521,6 +4521,57 @@ runSingBoxUninstallRejectsUnsafeConfigPathRegression() (
     grep -q '路径异常' "${errorLog}"
 )
 
+runSingBoxManagedCleanupRegression() (
+    local root="${TMP_DIR}/sing-box-managed-cleanup"
+    local serviceLog="${root}/service.log"
+    local rmLog="${root}/rm.log"
+    local cleanupLog="${root}/cleanup.log"
+
+    mkdir -p "${root}"
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${cleanupLog}"
+
+    readInstallType() { return 0; }
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    cleanCoreInstallDirectory() {
+        printf 'clean-core:%s:%s\n' "$1" "$2" >>"${cleanupLog}"
+        return 0
+    }
+    handleSingBox() {
+        printf 'handle:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
+    }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        return 0
+    }
+
+    singBoxConfigPath=
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    unInstallSingBox >/dev/null 2>&1
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    grep -qx 'handle:stop:true' "${serviceLog}"
+    grep -qx 'rm:-f -- /etc/systemd/system/sing-box.service' "${rmLog}"
+    grep -qx 'clean-core:/etc/padm/sing-box:sing-box' "${cleanupLog}"
+
+    : >"${serviceLog}"
+    : >"${rmLog}"
+    : >"${cleanupLog}"
+    cleanDirectoryContent() {
+        printf 'clean-dir:%s\n' "$1" >>"${cleanupLog}"
+        return 0
+    }
+
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    cleanUp singBoxDel >/dev/null 2>&1
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    grep -qx 'handle:stop:true' "${serviceLog}"
+    grep -qx 'rm:-f -- /etc/padm/sing-box/conf/config.json' "${rmLog}"
+    grep -qx 'clean-dir:/etc/padm/sing-box/conf/config' "${cleanupLog}"
+)
+
 runSingBoxLogTransactionRegression() (
     local root="${TMP_DIR}/sing-box-log-transaction"
     local targetPath="${root}/conf/config/log.json"
@@ -5504,6 +5555,101 @@ runUninstallNginxCleanupRegression() {
     nginxConfigPath="${oldNginxConfigPath}"
     PADM_NGINX_CONF_FALLBACK_DIR="${oldFallbackDir}"
 }
+
+runCleanAgentNginxManagedRemovalRegression() (
+    local rootRel="${TMP_DIR}/clean-agent-nginx-managed-removal"
+    local root
+    local rmLog
+    local includeLog
+    local name
+
+    mkdir -p "${rootRel}/nginx"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    rmLog="${root}/rm.log"
+    includeLog="${root}/include.log"
+    : >"${rmLog}"
+    : >"${includeLog}"
+
+    nginxConfigPath="${root}/nginx/"
+    PADM_REALITY_STREAM_CONF_FILE="${root}/reality-stream.conf"
+    PADM_REALITY_STREAM_STATE_FILE="${root}/reality-stream.json"
+
+    for name in alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf; do
+        printf 'managed\n' >"${root}/nginx/${name}"
+    done
+    printf 'stream\n' >"${root}/reality-stream.conf"
+    printf 'state\n' >"${root}/reality-stream.json"
+
+    removeRealityStreamNginxInclude() {
+        printf 'remove-include\n' >>"${includeLog}"
+        return 0
+    }
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    cleanAgentNginxConf
+    for name in alone.conf checkPortOpen.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf; do
+        grep -qxF "rm:-f -- ${root}/nginx/${name}" "${rmLog}"
+        [[ ! -e "${root}/nginx/${name}" ]]
+    done
+    grep -qxF "rm:-f -- ${root}/reality-stream.conf" "${rmLog}"
+    grep -qxF "rm:-f -- ${root}/reality-stream.json" "${rmLog}"
+    [[ ! -e "${root}/reality-stream.conf" ]]
+    [[ ! -e "${root}/reality-stream.json" ]]
+    grep -qx 'remove-include' "${includeLog}"
+
+    : >"${rmLog}"
+    nginxConfigPath="relative-nginx/"
+    if cleanAgentNginxConf >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -s "${rmLog}" ]]
+)
+
+runFail2banManagedCleanupRegression() (
+    local rootRel="${TMP_DIR}/fail2ban-managed-cleanup"
+    local root
+    local rmLog
+
+    mkdir -p "${rootRel}/jail.d" "${rootRel}/filter.d" "${rootRel}/log"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    rmLog="${root}/rm.log"
+    : >"${rmLog}"
+
+    PADM_FAIL2BAN_JAIL_FILE="${root}/jail.d/padm.local"
+    PADM_FAIL2BAN_FILTER_FILE="${root}/filter.d/padm-control.conf"
+    PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE="${root}/filter.d/padm-nginx-scan-basic.conf"
+    PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/log/padm-control-access.log"
+
+    printf 'jail\n' >"${PADM_FAIL2BAN_JAIL_FILE}"
+    printf 'filter\n' >"${PADM_FAIL2BAN_FILTER_FILE}"
+    printf 'scan\n' >"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+    printf 'log\n' >"${PADM_FAIL2BAN_CONTROL_LOG_FILE}"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    fail2banRemoveManagedFiles
+    grep -qxF "rm:-f -- ${PADM_FAIL2BAN_JAIL_FILE}" "${rmLog}"
+    grep -qxF "rm:-f -- ${PADM_FAIL2BAN_FILTER_FILE}" "${rmLog}"
+    grep -qxF "rm:-f -- ${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}" "${rmLog}"
+    grep -qxF "rm:-f -- ${PADM_FAIL2BAN_CONTROL_LOG_FILE}" "${rmLog}"
+    [[ ! -e "${PADM_FAIL2BAN_JAIL_FILE}" ]]
+    [[ ! -e "${PADM_FAIL2BAN_FILTER_FILE}" ]]
+    [[ ! -e "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}" ]]
+    [[ ! -e "${PADM_FAIL2BAN_CONTROL_LOG_FILE}" ]]
+
+    : >"${rmLog}"
+    PADM_FAIL2BAN_JAIL_FILE="relative/padm.local"
+    if fail2banRemoveManagedFiles >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -s "${rmLog}" ]]
+)
 
 runUninstallServiceStopFailureRegression() (
     local root="${TMP_DIR}/uninstall-service-stop"
@@ -14541,6 +14687,7 @@ runRegressionTransactionCore() {
         runRegressionStep sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
         runRegressionStep sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression &&
+        runRegressionStep sing-box-managed-cleanup runSingBoxManagedCleanupRegression &&
         runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
         runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
         runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
@@ -14564,6 +14711,8 @@ runRegressionTransactionSubscription() {
 runRegressionTransactionSystem() {
     runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
         runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
+        runRegressionStep clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression &&
+        runRegressionStep fail2ban-managed-cleanup runFail2banManagedCleanupRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
         runRegressionStep wireguard-control-safe-dir runWireGuardControlSafeDirRegression &&
         runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&

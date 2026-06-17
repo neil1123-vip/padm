@@ -526,7 +526,7 @@ unInstallSingBox() {
             errorCard "sing-box 服务停止失败，已取消卸载"
             return 1
         fi
-        rm -f /etc/systemd/system/sing-box.service || { errorCard "sing-box systemd 服务文件删除失败"; return 1; }
+        removeManagedFileIfPresent /etc/systemd/system/sing-box.service || { errorCard "sing-box systemd 服务文件删除失败"; return 1; }
         cleanCoreInstallDirectory /etc/padm/sing-box "sing-box" || return 1
         successCard "sing-box 卸载完成"
     fi
@@ -540,7 +540,7 @@ cleanUp() {
         cleanCoreInstallDirectory /etc/padm/xray "Xray" || return 1
     elif [[ "$1" == "singBoxDel" ]]; then
         runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消清理旧核心"; return 1; }
-        rm -f /etc/padm/sing-box/conf/config.json >/dev/null 2>&1 || { errorCard "sing-box 主配置清理失败"; return 1; }
+        removeManagedFileIfPresent /etc/padm/sing-box/conf/config.json || { errorCard "sing-box 主配置清理失败"; return 1; }
         cleanDirectoryContent /etc/padm/sing-box/conf/config || { errorCard "sing-box 分片配置清理失败"; return 1; }
     fi
 }
