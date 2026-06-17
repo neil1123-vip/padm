@@ -2782,8 +2782,6 @@ runCoreInstallServiceActionFailureRegression() (
     serviceQueueRestart() { printf 'queueRestart:%s\n' "$*" >>"${callLog}"; return 0; }
     serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; return 0; }
     serviceQueueApply() { printf 'queueApply\n' >>"${callLog}"; return 0; }
-    checkGFWStatue() { printf 'reached\n' >"${reachedFile}"; return 0; }
-    showAccounts() { printf 'reached\n' >"${reachedFile}"; return 0; }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
