@@ -10525,8 +10525,6 @@ runInstallToolsAcmeResultFailureRegression() {
         runPackageCommandWithProgress() { return 0; }
         waitAptProcess() { return 0; }
         installBasePackages() { return 0; }
-        installNginxTools() { return 0; }
-        nginx() { return 0; }
         protocolSelectionSkipsNginx() { return 0; }
         protocolSelectionNeedsLocalCertificate() { return 0; }
         curl() {
@@ -10615,8 +10613,6 @@ runInstallToolsAcmeCommitFailureRegression() {
         runPackageCommandWithProgress() { return 0; }
         waitAptProcess() { return 0; }
         installBasePackages() { return 0; }
-        installNginxTools() { return 0; }
-        nginx() { return 0; }
         protocolSelectionSkipsNginx() { return 0; }
         protocolSelectionNeedsLocalCertificate() { return 0; }
         curl() {
@@ -10829,7 +10825,6 @@ runInstallToolsNginxReinstallFailureRegression() {
         selectCustomInstallType=",1,"
         unInstallNginxStatus=y
         protocolSelectionSkipsNginx() { return 1; }
-        protocolSelectionNeedsLocalCertificate() { return 0; }
         runWithTimeout() { return 0; }
         runPackageCommandWithProgress() { return 0; }
         waitAptProcess() { return 0; }
