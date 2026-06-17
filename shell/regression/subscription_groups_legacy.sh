@@ -15657,10 +15657,121 @@ runTlsRenewalFailurePropagationRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
+runTlsReinstallRollbackRegression() (
+    local root="${TMP_DIR}/tls-reinstall-rollback"
+    local tlsDir="${root}/tls"
+    local resolvedTlsDir
+    local homeDir="${root}/home"
+    local statusLog="${root}/status.log"
+    local errorLog="${root}/error.log"
+    local cleanLog="${root}/clean.log"
+    local oldHome="${HOME}"
+    local oldTlsDir="${PADM_TLS_DIR:-}"
+    local oldCurrentHost="${currentHost:-}"
+    local oldDomain="${domain:-}"
+    local oldTlsDomain="${tlsDomain:-}"
+    local oldInstalledDNSAPIStatus="${installedDNSAPIStatus:-}"
+    local oldLastInstallationConfig="${lastInstallationConfig:-}"
+    local oldInstallTLSCount="${installTLSCount:-}"
+    local oldSslType="${sslType:-}"
+    local oldDnsAPIType="${dnsAPIType:-}"
+    local oldDnsAPIStatus="${dnsAPIStatus:-}"
+    local shellRc
+
+    mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/reinstall.example.com_ecc"
+    printf 'old-cert\n' >"${tlsDir}/reinstall.example.com.crt"
+    printf 'old-key\n' >"${tlsDir}/reinstall.example.com.key"
+    printf 'acme-cert\n' >"${homeDir}/.acme.sh/reinstall.example.com_ecc/reinstall.example.com.cer"
+    printf 'acme-key\n' >"${homeDir}/.acme.sh/reinstall.example.com_ecc/reinstall.example.com.key"
+    : >"${statusLog}"
+    : >"${errorLog}"
+    : >"${cleanLog}"
+    resolvedTlsDir=$(cd -- "${tlsDir}" && pwd -P) || return 1
+
+    HOME="${homeDir}"
+    PADM_TLS_DIR="${tlsDir}"
+    currentHost=
+    domain=reinstall.example.com
+    tlsDomain=
+    installedDNSAPIStatus=
+    lastInstallationConfig=
+    installTLSCount=
+    sslType=letsencrypt
+    dnsAPIType=
+    dnsAPIStatus=
+    export REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    progressCard() { return 0; }
+    echoContent() { return 0; }
+    menuLine() { return 0; }
+    menuClose() { return 0; }
+    menuItem() { return 0; }
+    menuRecommendedItem() { return 0; }
+    autoRead() {
+        case "$3" in
+        reInstallStatus) printf -v "$3" 'y' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    renewalTLS() { return 0; }
+    allowPort() { return 0; }
+    switchDNSAPI() { return 0; }
+    switchSSLType() { return 0; }
+    customSSLEmail() { return 0; }
+    cleanDirectoryContent() {
+        printf 'clean:%s\n' "$1" >>"${cleanLog}"
+        mkdir -p "$1" || return 1
+        find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || return 1
+    }
+    selectAcmeInstallSSL() { return 0; }
+    sudo() {
+        printf 'sudo:%s\n' "$*" >>"${cleanLog}"
+        return 1
+    }
+
+    set +e
+    (
+        set +e
+        installTLS 1 >/dev/null 2>&1
+        printf '%s\n' "$?" >"${root}/install.rc"
+    )
+    shellRc=$?
+    set -e
+    [[ "${shellRc}" == "0" ]]
+    [[ "$(<"${root}/install.rc")" == "1" ]]
+    grep -qx "clean:${resolvedTlsDir}" "${cleanLog}"
+    grep -q '^sudo:.*--installcert -d reinstall.example.com' "${cleanLog}"
+    [[ "$(<"${tlsDir}/reinstall.example.com.crt")" == "old-cert" ]]
+    [[ "$(<"${tlsDir}/reinstall.example.com.key")" == "old-key" ]]
+    grep -q 'TLS安装失败' "${errorLog}"
+    ! grep -q 'TLS生成成功' "${statusLog}"
+
+    if [[ -n "${oldTlsDir}" ]]; then
+        PADM_TLS_DIR="${oldTlsDir}"
+    else
+        unset PADM_TLS_DIR
+    fi
+    HOME="${oldHome}"
+    currentHost="${oldCurrentHost}"
+    domain="${oldDomain}"
+    tlsDomain="${oldTlsDomain}"
+    installedDNSAPIStatus="${oldInstalledDNSAPIStatus}"
+    lastInstallationConfig="${oldLastInstallationConfig}"
+    installTLSCount="${oldInstallTLSCount}"
+    sslType="${oldSslType}"
+    dnsAPIType="${oldDnsAPIType}"
+    dnsAPIStatus="${oldDnsAPIStatus}"
+)
+
 runRegressionTls() {
     runRegressionStep tls-dns-api-domain-selection runTlsDnsApiDomainSelectionRegression &&
         runRegressionStep tls-custom-email-home-account runTlsCustomSSLEmailUsesHomeAccountFileRegression &&
         runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
+        runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 }
 
@@ -15794,6 +15905,7 @@ runRegressionTransactionCore() {
         runRegressionStep sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
+        runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression &&
         runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
         runRegressionStep core-install-service-action-failure runCoreInstallServiceActionFailureRegression &&

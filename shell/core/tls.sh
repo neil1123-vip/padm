@@ -9,6 +9,24 @@ acmeAccountFile() {
     printf '%s\n' "$(acmeHomeDir)/account.conf"
 }
 
+tlsManagedDir() {
+    local tlsDir="${PADM_TLS_DIR:-/etc/padm/tls}"
+    tlsDir=$(padmResolveManagedAbsolutePath "${tlsDir}") || return 1
+    printf '%s\n' "${tlsDir}"
+}
+
+tlsSslTypeFile() {
+    local tlsDir
+    tlsDir=$(tlsManagedDir) || return 1
+    printf '%s/ssl_type\n' "${tlsDir}"
+}
+
+tlsAcmeLogFile() {
+    local tlsDir
+    tlsDir=$(tlsManagedDir) || return 1
+    printf '%s/acme.log\n' "${tlsDir}"
+}
+
 # 自定义 Email
 customSSLEmail() {
     local accountFile accountTmp
@@ -102,6 +120,7 @@ initDNSAPIConfig() {
 # 选择ssl安装类型
 switchSSLType() {
     if [[ -z "${sslType:-}" ]]; then
+        local sslTypeFile
         echoContent title "\n┌─ 证书 CA ──────────────────────────────────────────"
         menuRecommendedItem 1 "letsencrypt" "默认 CA"
         menuItem 2 "zerossl" "ZeroSSL CA"
@@ -126,7 +145,9 @@ switchSSLType() {
             errorCard "buypass不支持API申请证书"
             return 1
         fi
-        echo "${sslType}" >/etc/padm/tls/ssl_type || return 1
+        sslTypeFile=$(tlsSslTypeFile) || return 1
+        padmEnsureSafeDirectory "$(dirname -- "${sslTypeFile}")" || return 1
+        echo "${sslType}" >"${sslTypeFile}" || return 1
     fi
 }
 
@@ -147,6 +168,9 @@ selectAcmeInstallSSL() {
 acmeInstallSSL() {
     local dnsAPIDomain="${tlsDomain}"
     local dnsAPIExtraDomain=
+    local acmeLogFile
+    acmeLogFile=$(tlsAcmeLogFile) || return 1
+    padmEnsureSafeDirectory "$(dirname -- "${acmeLogFile}")" || return 1
     if [[ "${dnsAPIStatus:-}" == "y" ]]; then
         dnsAPIDomain="*.${dnsTLSDomain}"
         dnsAPIExtraDomain="-d ${dnsTLSDomain}"
@@ -155,17 +179,91 @@ acmeInstallSSL() {
     if [[ "${dnsAPIType:-}" == "cloudflare" ]]; then
         successCard "DNS API 生成证书中"
         if [[ -n "${cfZoneID:-}" ]]; then
-            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
         else
-            CF_Token="${cfAPIToken}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+            CF_Token="${cfAPIToken}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
         fi
     elif [[ "${dnsAPIType:-}" == "aliyun" ]]; then
         successCard "DNS API 生成证书中"
-        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
     else
         successCard "生成证书中"
-        sudo "$HOME/.acme.sh/acme.sh" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a /etc/padm/tls/acme.log >/dev/null
+        sudo "$HOME/.acme.sh/acme.sh" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
     fi
+}
+
+installTLSFromAcme() {
+    local tlsDomain=${domain}
+    local tlsDir
+    local crtFile
+    local keyFile
+    local acmeLogFile
+    local backupDir=
+    local backupCrt=
+    local backupKey=
+    local installStatus=0
+
+    tlsDir=$(tlsManagedDir) || return 1
+    crtFile="${tlsDir}/${tlsDomain}.crt"
+    keyFile="${tlsDir}/${tlsDomain}.key"
+    acmeLogFile=$(tlsAcmeLogFile) || return 1
+
+    if [[ -s "${crtFile}" && -s "${keyFile}" ]]; then
+        padmCreateTempPath backupDir -d "${TMPDIR:-/tmp}/padm-tls-install.XXXXXX" || return 1
+        backupCrt="${backupDir}/$(basename -- "${crtFile}")"
+        backupKey="${backupDir}/$(basename -- "${keyFile}")"
+        cp -p "${crtFile}" "${backupCrt}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+        cp -p "${keyFile}" "${backupKey}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+    fi
+
+    if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+        if ! sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null; then
+            installStatus=$?
+        fi
+    else
+        if ! sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null; then
+            installStatus=$?
+        fi
+    fi
+
+    if [[ "${installStatus}" -ne 0 || ! -f "${crtFile}" || ! -f "${keyFile}" ]] || [[ -z $(cat "${keyFile}") || -z $(cat "${crtFile}") ]]; then
+        tail -n 10 "${acmeLogFile}" 2>/dev/null || true
+        if [[ -n "${backupDir}" ]]; then
+            restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+            restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600 || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+        fi
+        if [[ ${installTLSCount:-} == "1" ]]; then
+            [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
+            errorCard "TLS安装失败，请检查acme日志"
+            return 1
+        fi
+
+        installTLSCount=1
+        echo
+
+        if tail -n 10 "${acmeLogFile}" | grep -q "Could not validate email address as valid"; then
+            errorCard "邮箱无法通过SSL厂商验证，请重新输入"
+            echo
+            customSSLEmail "validate email" || {
+                [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+            [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
+            installTLSFromAcme || return 1
+        else
+            [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
+            installTLSFromAcme || return 1
+        fi
+    fi
+
+    [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
+    successCard "TLS生成成功"
 }
 
 # 安装 TLS 证书
@@ -173,26 +271,42 @@ installTLS() {
     progressCard "$1" "申请 TLS 证书"
     readAcmeTLS
     local tlsDomain=${domain}
+    local tlsDir
+    local crtFile
+    local keyFile
+    local reinstallBackupDir=
+    tlsDir=$(tlsManagedDir) || return 1
+    crtFile="${tlsDir}/${tlsDomain}.crt"
+    keyFile="${tlsDir}/${tlsDomain}.key"
 
-    if [[ -f "/etc/padm/tls/${tlsDomain}.crt" && -f "/etc/padm/tls/${tlsDomain}.key" && -n $(cat "/etc/padm/tls/${tlsDomain}.crt") ]] || [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+    if [[ -f "${crtFile}" && -f "${keyFile}" && -n $(cat "${crtFile}") ]] || [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
         successCard "检测到证书"
         renewalTLS
 
-        if [[ -z $(find /etc/padm/tls/ -name "${tlsDomain}.crt") ]] || [[ -z $(find /etc/padm/tls/ -name "${tlsDomain}.key") ]] || [[ -z $(cat "/etc/padm/tls/${tlsDomain}.crt") ]]; then
-            if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || return 1
-            else
-                sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || return 1
-            fi
-
+        if [[ -z $(find "${tlsDir}/" -name "${tlsDomain}.crt") ]] || [[ -z $(find "${tlsDir}/" -name "${tlsDomain}.key") ]] || [[ -z $(cat "${crtFile}") ]]; then
+            installTLSFromAcme || return 1
         else
             if [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 if [[ -z "${lastInstallationConfig}" ]]; then
                     statusCard "TLS 证书" "如未过期或者自定义证书请选择 [n]"
                     autoRead tls_reinstall "是否重新安装？[y/n]:" reInstallStatus
                     if [[ "${reInstallStatus}" == "y" ]]; then
-                        cleanDirectoryContent /etc/padm/tls
-                        installTLS "$1" || return 1
+                        padmCreateTempPath reinstallBackupDir -d "${TMPDIR:-/tmp}/padm-tls-reinstall.XXXXXX" || return 1
+                        if ! cp -a "${tlsDir}/." "${reinstallBackupDir}/" >/dev/null 2>&1; then
+                            padmRemoveCleanupPath "${reinstallBackupDir}"
+                            return 1
+                        fi
+                        if ! cleanDirectoryContent "${tlsDir}"; then
+                            cp -a "${reinstallBackupDir}/." "${tlsDir}/" >/dev/null 2>&1 || true
+                            padmRemoveCleanupPath "${reinstallBackupDir}"
+                            return 1
+                        fi
+                        if ! installTLSFromAcme; then
+                            cp -a "${reinstallBackupDir}/." "${tlsDir}/" >/dev/null 2>&1 || true
+                            padmRemoveCleanupPath "${reinstallBackupDir}"
+                            return 1
+                        fi
+                        padmRemoveCleanupPath "${reinstallBackupDir}"
                     fi
                 fi
             fi
@@ -210,33 +324,7 @@ installTLS() {
         customSSLEmail || return 1
         selectAcmeInstallSSL
 
-        if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || true
-        else
-            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "/etc/padm/tls/${tlsDomain}.crt" --keypath "/etc/padm/tls/${tlsDomain}.key" --ecc >/dev/null || true
-        fi
-
-        if [[ ! -f "/etc/padm/tls/${tlsDomain}.crt" || ! -f "/etc/padm/tls/${tlsDomain}.key" ]] || [[ -z $(cat "/etc/padm/tls/${tlsDomain}.key") || -z $(cat "/etc/padm/tls/${tlsDomain}.crt") ]]; then
-            tail -n 10 /etc/padm/tls/acme.log 2>/dev/null || true
-            if [[ ${installTLSCount:-} == "1" ]]; then
-                errorCard "TLS安装失败，请检查acme日志"
-                return 1
-            fi
-
-            installTLSCount=1
-            echo
-
-            if tail -n 10 /etc/padm/tls/acme.log | grep -q "Could not validate email address as valid"; then
-                errorCard "邮箱无法通过SSL厂商验证，请重新输入"
-                echo
-                customSSLEmail "validate email" || return 1
-                installTLS "$1" || return 1
-            else
-                installTLS "$1" || return 1
-            fi
-        fi
-
-        successCard "TLS生成成功"
+        installTLSFromAcme || return 1
     else
         statusCard "acme.sh" "未安装 acme.sh"
         return 1
@@ -281,7 +369,8 @@ installCronUpdateGeo() {
 
 # 解析已有 TLS 证书域名
 resolveInstalledTLSDomain() {
-    local tlsDir="${PADM_TLS_DIR:-/etc/padm/tls}"
+    local tlsDir
+    tlsDir=$(tlsManagedDir) || return 1
     local candidate
     for candidate in "${currentHost:-}" "${tlsDomain:-}" "${domain:-}"; do
         if [[ -n "${candidate}" && -s "${tlsDir}/${candidate}.crt" && -s "${tlsDir}/${candidate}.key" ]]; then
@@ -312,16 +401,19 @@ tlsRenewCronState() {
 tlsCertificateStatusJson() {
     readAcmeTLS
     local domain=${currentHost}
+    local sslTypeFile
+    local tlsDir
     if [[ -z "${domain}" && -n "${tlsDomain}" ]]; then
         domain=${tlsDomain}
     fi
-    local tlsDir="${PADM_TLS_DIR:-/etc/padm/tls}"
+    tlsDir=$(tlsManagedDir) || return 1
     if [[ -z "${domain}" || ! -s "${tlsDir}/${domain}.crt" || ! -s "${tlsDir}/${domain}.key" ]]; then
         domain=$(resolveInstalledTLSDomain)
     fi
 
     local sslDays=90
-    if [[ -f "/etc/padm/tls/ssl_type" ]] && grep -q "buypass" <"/etc/padm/tls/ssl_type"; then
+    sslTypeFile=$(tlsSslTypeFile) || return 1
+    if [[ -f "${sslTypeFile}" ]] && grep -q "buypass" <"${sslTypeFile}"; then
         sslDays=180
     fi
 
@@ -444,16 +536,19 @@ renewalTLS() {
     fi
     readAcmeTLS
     local domain=${currentHost}
+    local sslTypeFile
+    local tlsDir
     if [[ -z "${domain}" && -n "${tlsDomain}" ]]; then
         domain=${tlsDomain}
     fi
-    local tlsDir="${PADM_TLS_DIR:-/etc/padm/tls}"
+    tlsDir=$(tlsManagedDir) || return 1
     if [[ -z "${domain}" || ! -s "${tlsDir}/${domain}.crt" || ! -s "${tlsDir}/${domain}.key" ]]; then
         domain=$(resolveInstalledTLSDomain)
     fi
 
-    if [[ -f "/etc/padm/tls/ssl_type" ]]; then
-        if grep -q "buypass" <"/etc/padm/tls/ssl_type"; then
+    sslTypeFile=$(tlsSslTypeFile) || return 1
+    if [[ -f "${sslTypeFile}" ]]; then
+        if [[ -f "${sslTypeFile}" ]] && grep -q "buypass" <"${sslTypeFile}"; then
             sslRenewalDays=180
         fi
     fi
@@ -486,18 +581,30 @@ renewalTLS() {
 
         if [[ ${remainingDays} -le 1 ]]; then
             local installDomain="${domain}"
+            local crtFile="${tlsDir}/${domain}.crt"
+            local keyFile="${tlsDir}/${domain}.key"
             statusCard "TLS 证书" "重新生成证书"
             stopServicesForTLSRenewal || return 1
 
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 installDomain="*.${dnsTLSDomain}"
             fi
-            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${installDomain}" --fullchainpath /etc/padm/tls/"${domain}.crt" --keypath /etc/padm/tls/"${domain}.key" --ecc || {
+            local backupDir backupCrt backupKey
+            padmCreateTempPath backupDir -d "${TMPDIR:-/tmp}/padm-tls-renew.XXXXXX" || return 1
+            backupCrt="${backupDir}/$(basename -- "${crtFile}")"
+            backupKey="${backupDir}/$(basename -- "${keyFile}")"
+            cp -p "${crtFile}" "${backupCrt}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+            cp -p "${keyFile}" "${backupKey}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || {
                 local installStatus=$?
                 errorCard "TLS 证书安装失败，正在尝试恢复服务"
+                restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || errorCard "TLS 证书恢复失败"
+                restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600 || errorCard "TLS 证书恢复失败"
+                padmRemoveCleanupPath "${backupDir}"
                 restoreServicesAfterTLSRenewal || errorCard "TLS 证书安装失败，且服务恢复失败"
                 return "${installStatus}"
             }
+            padmRemoveCleanupPath "${backupDir}"
             if ! restoreServicesAfterTLSRenewal; then
                 errorCard "TLS 证书已安装，但服务恢复失败"
                 return 1
