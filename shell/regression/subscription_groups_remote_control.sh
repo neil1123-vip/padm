@@ -1422,10 +1422,6 @@ runRegressionRemoteControlSmokeRefreshReconcileSteps() {
     runRegressionStep remote-control-server-refresh-light-reconcile runRemoteControlServerRefreshLightReconcileRegression
 }
 
-runRegressionRemoteControlSmokeRefreshSteps() {
-    runRegressionRemoteControlSmokeRefreshSerialSteps
-}
-
 runRegressionRemoteControlContractServiceInstallSuccessSteps() {
     runRegressionStep remote-control-service-install-success runSubscriptionControlServiceInstallSuccessRegression
 }
