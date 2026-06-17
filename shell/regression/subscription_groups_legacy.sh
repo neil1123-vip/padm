@@ -215,16 +215,6 @@ JSON
             reservedWarpReg='[1,2,3]'
         fi
     }
-    initHysteriaPort() {
-        :
-    }
-    initHysteria2Network() {
-        hysteria2ClientDownloadSpeed=120
-        hysteria2ClientUploadSpeed=60
-    }
-    initXrayClients() {
-        printf '[{"password":"user-pass","name":"user-singbox_hysteria2"}]\n'
-    }
     addSingBoxWireGuardEndpoints IPv4
     jq -e '
       .endpoints[0].tag == "wireguard_endpoints_IPv4" and
@@ -238,23 +228,7 @@ JSON
     fi
     [[ "$(<"${singBoxConfigPath}wireguard_endpoints_IPv4.json")" == "${originalContent}" ]]
     [[ ! -e "${singBoxConfigPath}wireguard_endpoints_IPv4.json.tmp" ]]
-    reservedWarpReg='[1,2,3]'
-    hysteriaPort=23456
-    currentHost=example.com
-    initSingBoxHysteria2Config
-    jq -e '
-      .inbounds[0].listen_port == 23456 and
-      .inbounds[0].users[0].password == "user-pass" and
-      .inbounds[0].tls.server_name == "example.com"
-    ' "${singBoxConfigPath}06_hysteria2_inbounds.json" >/dev/null
-    originalContent=$(<"${singBoxConfigPath}06_hysteria2_inbounds.json")
-    hysteriaPort=
-    if initSingBoxHysteria2Config 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"${singBoxConfigPath}06_hysteria2_inbounds.json")" == "${originalContent}" ]]
-    [[ ! -e "${singBoxConfigPath}06_hysteria2_inbounds.json.tmp" ]]
-    unset -f readConfigWarpReg initHysteriaPort initHysteria2Network initXrayClients
+    unset -f readConfigWarpReg
     hysteriaPort=23456
     setSniffRouting
     jq -e '.route.rules[0].action == "sniff"' "${singBoxConfigPath}sniff.json" >/dev/null
