@@ -1067,21 +1067,17 @@ JSON
     readInstallProtocolType() { return 0; }
     readConfigHostPathUUID() { return 0; }
     reloadCore() {
-        printf 'reload\n' >>"${callLog}"
         return 0
     }
     readNginxSubscribe() {
-        printf 'read-subscribe\n' >>"${callLog}"
         subscribePort=39778
         subscribeType=https
         subscribeDomain=self.example.com
     }
     installSubscriptionControlService() {
-        printf 'install-control\n' >>"${callLog}"
         return 0
     }
     ensureSubscriptionControlNginxLocation() {
-        printf 'ensure-nginx-location\n' >>"${callLog}"
         return 1
     }
     subscriptionSyncPlan() {
