@@ -186,15 +186,6 @@ JSON
       .outbounds[0].settings.servers[0].address == "127.0.0.1" and
       .outbounds[0].settings.servers[0].port == 1080
     ' "${configPath}socks5_outbound.json" >/dev/null
-    setVMessWSTLSPath="/ws"
-    setVMessWSTLSAddress="example.com"
-    setVMessWSTLSPort=443
-    setVMessWSTLSUUID="00000000-0000-0000-0000-000000000000"
-    addXrayOutbound "vmess-out"
-    jq -e '
-      .outbounds[0].protocol == "vmess" and
-      .outbounds[0].streamSettings.wsSettings.path == "/ws"
-    ' "${configPath}vmess-out.json" >/dev/null
     writeRoutingJsonConfig "${configPath}socks5_outbound.json" <<'JSON'
 {"outbounds":[{"protocol":"socks","tag":"old"}]}
 JSON
@@ -1592,138 +1583,6 @@ JSON
         [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" ]]
         grep -q 'DNS 分流核心重载失败，且旧配置恢复失败' "${errorLog}"
     )
-)
-
-runVMessRoutingFailureReturnRegression() (
-    local root="${TMP_DIR}/vmess-routing-failure"
-    local removeMarker="${root}/remove"
-    local outboundMarker="${root}/outbound"
-    local routingMarker="${root}/routing"
-    local uninstallRoutingMarker="${root}/uninstall-routing"
-    local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
-    local mode=invalid-port
-    local rc
-
-    mkdir -p "${root}"
-    errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
-    autoRead() {
-        case "$3" in
-        setVMessWSTLSAddress) printf -v "$3" 'edge.example.com' ;;
-        domainList) printf -v "$3" 'example.com' ;;
-        setVMessWSTLSPort)
-            if [[ "${mode}" == "invalid-port" ]]; then
-                printf -v "$3" 'bad-port'
-            else
-                printf -v "$3" '443'
-            fi
-            ;;
-        setVMessWSTLSUUID) printf -v "$3" '11111111-1111-1111-1111-111111111111' ;;
-        setVMessWSTLSPath) printf -v "$3" 'ws' ;;
-        *) printf -v "$3" '' ;;
-        esac
-    }
-    reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
-    }
-
-    mode=success
-    configPath="${root}/success-xray/"
-    mkdir -p "${configPath}"
-    cat >"${configPath}09_routing.json" <<'JSON'
-{"routing":{"type":"field","rules":[{"type":"field","domain":["domain:legacy.example"],"outboundTag":"VMess-out"}]}}
-JSON
-    cat >"${configPath}VMess-out.json" <<'JSON'
-{"outbounds":[{"tag":"VMess-out","protocol":"vmess"}]}
-JSON
-    rm -f "${reloadMarker}" "${successMarker}"
-    (
-        setVMessWSRoutingOutbounds >/dev/null 2>&1
-    )
-    [[ -e "${reloadMarker}" ]]
-    [[ -e "${successMarker}" ]]
-    jq -e '
-      .outbounds[0].tag == "vmess-out" and
-      .outbounds[0].protocol == "vmess" and
-      .outbounds[0].streamSettings.wsSettings.path == "/ws"
-    ' "${configPath}vmess-out.json" >/dev/null
-    jq -e '[.routing.rules[] | select(.outboundTag == "vmess-out")] | length == 1' "${configPath}09_routing.json" >/dev/null
-    ! jq -e '.routing.rules[] | select(.outboundTag == "VMess-out")' "${configPath}09_routing.json" >/dev/null
-
-    removeXrayOutbound() {
-        printf 'remove\n' >"${removeMarker}"
-        return 0
-    }
-    addXrayOutbound() {
-        printf 'outbound\n' >"${outboundMarker}"
-        [[ "${mode}" != "outbound-fail" ]]
-    }
-    addXrayRouting() {
-        printf 'routing\n' >"${routingMarker}"
-        return 0
-    }
-    unInstallRouting() {
-        printf 'uninstall-routing\n' >"${uninstallRoutingMarker}"
-        return 0
-    }
-    mode=invalid-port
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -e "${removeMarker}" ]]
-    [[ ! -e "${outboundMarker}" ]]
-    [[ ! -e "${uninstallRoutingMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    mode=outbound-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${outboundMarker}" ]]
-    [[ ! -e "${routingMarker}" ]]
-    [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    mode=reload-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${outboundMarker}" ]]
-    [[ -e "${routingMarker}" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    rm -f "${removeMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    removeVMessWSRouting >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runPortAndPanelHelperRegression() {
@@ -12359,7 +12218,6 @@ runRegressionRouting() {
     runRegressionStep routing-warp-failure-return runWARPRoutingFailureReturnRegression
     runRegressionStep routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
     runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
-    runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }
 

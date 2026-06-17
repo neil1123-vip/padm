@@ -45,8 +45,6 @@ source "${CORE_DIR}/routing_warp.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/routing_socks.sh"
 # shellcheck source=/dev/null
-source "${CORE_DIR}/routing_vmess.sh"
-# shellcheck source=/dev/null
 source "${CORE_DIR}/routing.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/routing_access_control.sh"

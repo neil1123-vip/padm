@@ -264,45 +264,6 @@ EOF
 }
 EOF
     fi
-    if [[ "${tag}" == *vmess-out* ]]; then
-        writeRoutingJsonConfig "${xrayConfigPath}${tag}.json" <<EOF || return 1
-{
-  "outbounds": [
-    {
-      "tag": "${tag}",
-      "protocol": "vmess",
-      "streamSettings": {
-        "network": "ws",
-        "security": "tls",
-        "tlsSettings": {},
-        "wsSettings": {
-          "path": "${setVMessWSTLSPath}"
-        }
-      },
-      "mux": {
-        "enabled": true,
-        "concurrency": 8
-      },
-      "settings": {
-        "vnext": [
-          {
-            "address": "${setVMessWSTLSAddress}",
-            "port": "${setVMessWSTLSPort}",
-            "users": [
-              {
-                "id": "${setVMessWSTLSUUID}",
-                "security": "auto",
-                "alterId": 0
-              }
-            ]
-          }
-        ]
-      }
-    }
-  ]
-}
-EOF
-    fi
 }
 
 

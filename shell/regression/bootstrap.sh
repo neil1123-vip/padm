@@ -95,8 +95,6 @@ source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing_socks.sh"
 # shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_vmess.sh"
-# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing_access_control.sh"
