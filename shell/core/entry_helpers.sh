@@ -551,7 +551,7 @@ restorePadmEntryBackup() {
 updatePadm() {
     local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
     local installPath backupPath
-    local tmpDir newInstall
+    local tmpDir newInstall installStage
     local tmpBase="${TMPDIR:-/tmp}"
     if ! padmIsSafeAbsolutePath "${installDir}"; then
         errorCard "更新入口目录异常"
@@ -559,7 +559,7 @@ updatePadm() {
     fi
     installPath=$(padmManagedFilePath "${installDir}" "install.sh") || { errorCard "更新入口路径异常"; return 1; }
     backupPath=$(padmManagedFilePath "${installDir}" "install.sh.bak") || { errorCard "更新入口备份路径异常"; return 1; }
-    if ! mkdir -p "${installDir}"; then
+    if ! padmEnsureSafeDirectory "${installDir}"; then
         errorCard "更新入口目录创建失败"
         return 1
     fi
@@ -594,27 +594,35 @@ updatePadm() {
         return 1
     fi
 
+    if ! padmCreateTempFileForTarget installStage "${installPath}" install; then
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "更新入口暂存失败，已取消更新"
+        return 1
+    fi
+    if ! cp -p "${newInstall}" "${installStage}"; then
+        padmRemoveCleanupPath "${installStage}" 2>/dev/null || true
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "更新入口暂存失败，已取消更新"
+        return 1
+    fi
+
     if ! removeManagedFileIfPresent "${backupPath}"; then
+        padmRemoveCleanupPath "${installStage}" 2>/dev/null || true
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
         errorCard "旧入口备份清理失败，已取消更新"
         return 1
     fi
     if [[ -f "${installPath}" ]] && ! backupManagedFileToPath "${installPath}" "${backupPath}" 700; then
+        padmRemoveCleanupPath "${installStage}" 2>/dev/null || true
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
         errorCard "旧入口备份失败，已取消更新"
         return 1
     fi
-    if ! mv "${newInstall}" "${installPath}" || ! sudo chmod 700 "${installPath}"; then
-        local restoreStatus=0
-        restorePadmEntryBackup "${backupPath}" "${installPath}" || restoreStatus=$?
+    if ! commitGeneratedFile "${installStage}" "${installPath}" 700; then
+        removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
+        padmRemoveCleanupPath "${installStage}" 2>/dev/null || true
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
-        if [[ "${restoreStatus}" -eq 0 ]]; then
-            errorCard "更新入口替换失败，已恢复旧入口"
-        elif [[ "${restoreStatus}" -eq 2 ]]; then
-            errorCard "更新入口替换失败，旧入口备份不存在"
-        else
-            errorCard "更新入口替换失败，旧入口恢复失败，请手动检查 ${installPath} 和 ${backupPath}"
-        fi
+        errorCard "更新入口提交失败，已取消更新"
         return 1
     fi
     padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
