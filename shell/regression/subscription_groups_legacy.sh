@@ -5980,8 +5980,28 @@ SH
     singBoxNginxConfig 11 443
     grep -q 'server_name example.com;' "${nginxTarget}"
     grep -q 'location /padm' "${nginxTarget}"
+    ! grep -qx 'old config' "${nginxTarget}"
     [[ ! -e "${nginxTarget}.tmp" ]]
     [[ ! -e "${nginxTarget}.bak" ]]
+    ! compgen -G "${TMP_DIR}/entry-helper-nginx/.sing_box_VMess_HTTPUpgrade.conf.*" >/dev/null
+
+    (
+        local unsafeRoot="${TMP_DIR}/entry-helper-nginx-unsafe"
+        local rc
+        mkdir -p "${unsafeRoot}/relative-nginx"
+        printf 'stale\n' >"${unsafeRoot}/relative-nginx/sing_box_VMess_HTTPUpgrade.conf"
+        cd "${unsafeRoot}"
+        nginxConfigPath="relative-nginx/"
+        set +e
+        writeSingBoxVMessHTTPUpgradeNginxConfig <<'EOF' >/dev/null 2>&1
+server {}
+EOF
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "$(<"${unsafeRoot}/relative-nginx/sing_box_VMess_HTTPUpgrade.conf")" == "stale" ]]
+        ! compgen -G "${unsafeRoot}/relative-nginx/.sing_box_VMess_HTTPUpgrade.conf.*" >/dev/null
+    )
 
     cat >"${realityVisionFile}" <<'JSON'
 {"inbounds":[{"streamSettings":{"realitySettings":{"show":false}}}]}
@@ -11557,6 +11577,35 @@ runCheckLogBackupMissingRestoreRegression() (
     [[ "$(<"${root}/policy.json")" == "old-policy" ]]
 )
 
+runCheckLogBackupRejectsUnsafeTargetRegression() (
+    local root="${TMP_DIR}/check-log-backup-unsafe"
+    local restoreDir="${root}/restore"
+    local backupDir=
+    local rc
+
+    mkdir -p "${root}/relative" "${restoreDir}"
+    printf 'keep\n' >"${root}/relative/stats.json"
+    cd "${root}"
+
+    set +e
+    checkLogBackupCreate backupDir "relative/stats.json" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -z "${backupDir}" ]]
+    [[ "$(<"${root}/relative/stats.json")" == "keep" ]]
+
+    cat >"${restoreDir}/manifest" <<'EOF'
+-	relative/stats.json	missing
+EOF
+    set +e
+    checkLogBackupRestore "${restoreDir}" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${root}/relative/stats.json")" == "keep" ]]
+)
+
 runDpkgInstalledPatternRegression() {
     printf 'ii  ufw                             0.36.2-6                                all          program for managing a Netfilter firewall\n' | grep -Eq '^[[:space:]]*ii[[:space:]]+ufw[[:space:]]'
     printf 'ii  netfilter-persistent            1.0.20                                   all          boot-time loader for netfilter rules\n' | grep -Eq '^[[:space:]]*ii[[:space:]]+netfilter-persistent[[:space:]]'
@@ -14033,6 +14082,7 @@ runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
+        runRegressionStep check-log-backup-unsafe-target runCheckLogBackupRejectsUnsafeTargetRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
@@ -14441,6 +14491,7 @@ runRegressionTransactionCore() {
     runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
         runRegressionStep core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression &&
+        runRegressionStep entry-helper-config runEntryHelperConfigRegression &&
         runRegressionStep check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression &&
         runRegressionStep alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression &&
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&

@@ -19,6 +19,16 @@ thirdPartyTcpScriptPath() {
     entryHelperTmpPath padm-tcpx.sh
 }
 
+entryHelperNginxConfigFile() {
+    local fileName=$1
+    if declare -F nginxConfigFilePath >/dev/null 2>&1; then
+        nginxConfigFilePath "${fileName}"
+        return $?
+    fi
+    [[ -n "${nginxConfigPath:-}" ]] || return 1
+    padmManagedFilePath "${nginxConfigPath}" "${fileName}"
+}
+
 initTLSNginxConfig() {
     if ! runCoreServiceActionAllowFailure handleNginx stop; then
         errorCard "Nginx 服务停止失败，已取消 TLS 初始化"
@@ -62,29 +72,58 @@ initTLSNginxConfig() {
 
 # sing-box Nginx 配置
 writeSingBoxVMessHTTPUpgradeNginxConfig() {
-    local targetPath="${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf"
-    local tmpPath="${targetPath}.tmp"
+    local targetPath
+    local tmpPath
+    local backupPath=
     local logFile
-    mkdir -p "$(dirname "${targetPath}")"
-    cat >"${tmpPath}"
+    if ! targetPath=$(entryHelperNginxConfigFile "sing_box_VMess_HTTPUpgrade.conf"); then
+        errorCard "sing-box HTTPUpgrade Nginx 配置路径异常"
+        return 1
+    fi
+    padmCommitTargetIsFileLike "${targetPath}" || {
+        errorCard "sing-box HTTPUpgrade Nginx 配置目标异常"
+        return 1
+    }
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || return 1
+    if ! cat >"${tmpPath}"; then
+        padmRemoveCleanupPath "${tmpPath}"
+        return 1
+    fi
     if command -v nginx >/dev/null 2>&1; then
-        local backupPath="${targetPath}.bak"
-        [[ -f "${targetPath}" ]] && cp "${targetPath}" "${backupPath}"
-        cat "${tmpPath}" >>"${targetPath}"
-        rm -f "${tmpPath}"
+        if [[ -f "${targetPath}" ]]; then
+            padmCreateTempFileForTarget backupPath "${targetPath}" backup || {
+                padmRemoveCleanupPath "${tmpPath}"
+                return 1
+            }
+            cp "${targetPath}" "${backupPath}" || {
+                padmRemoveCleanupPath "${backupPath}"
+                padmRemoveCleanupPath "${tmpPath}"
+                return 1
+            }
+        fi
+        if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
+            padmRemoveCleanupPath "${tmpPath}"
+            [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
+            return 1
+        fi
         logFile=$(singBoxVMessHTTPUpgradeNginxTestLog)
         if ! nginx -t >"${logFile}" 2>&1; then
-            if [[ -f "${backupPath}" ]]; then
-                mv "${backupPath}" "${targetPath}"
+            if [[ -n "${backupPath}" ]]; then
+                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || {
+                    padmRemoveCleanupPath "${backupPath}"
+                    return 1
+                }
             else
-                rm -f "${targetPath}"
+                removeManagedFileIfPresent "${targetPath}" || return 1
             fi
             return 1
         fi
-        rm -f "${backupPath}"
+        [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
     else
-        cat "${tmpPath}" >>"${targetPath}"
-        rm -f "${tmpPath}"
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || {
+            padmRemoveCleanupPath "${tmpPath}"
+            return 1
+        }
     fi
 }
 
@@ -883,6 +922,14 @@ checkLogBackupCreate() {
     }
     for targetPath in "$@"; do
         [[ -n "${targetPath}" ]] || continue
+        targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || {
+            padmRemoveCleanupPath "${backupDir}"
+            return 1
+        }
+        [[ ! -e "${targetPath}" || -f "${targetPath}" || -L "${targetPath}" ]] || {
+            padmRemoveCleanupPath "${backupDir}"
+            return 1
+        }
         if [[ -f "${targetPath}" ]]; then
             printf -v backupFile '%s/%06d.json' "${backupDir}" "${backupIndex}"
             backupIndex=$((backupIndex + 1))
@@ -923,13 +970,13 @@ checkLogBackupRestore() {
             backupFile=
         fi
         [[ -n "${targetPath}" ]] || continue
+        targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
         case "${state}" in
         file)
-            mkdir -p "$(dirname "${targetPath}")" || status=1
-            cp -p "${backupFile}" "${targetPath}" || status=1
+            restoreManagedFileFromBackup "${backupFile}" "${targetPath}" 644 || status=1
             ;;
         missing)
-            rm -f "${targetPath}" >/dev/null 2>&1 || status=1
+            removeManagedFileIfPresent "${targetPath}" || status=1
             ;;
         *)
             status=1
