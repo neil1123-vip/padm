@@ -736,7 +736,7 @@ writeAloneNginxConfig() {
         aloneNginxConfigWriteError "Nginx 配置路径异常"
         return 1
     fi
-    local tmpPath="${targetPath}.tmp"
+    local tmpPath
     local backupPath="${targetPath}.bak"
     local targetDir
     local logFile
@@ -746,11 +746,8 @@ writeAloneNginxConfig() {
         return 1
     fi
     targetDir=$(dirname -- "${targetPath}")
-    if [[ -e "${targetDir}" ]]; then
-        [[ -d "${targetDir}" ]] || { aloneNginxConfigWriteError "Nginx 配置目录异常，请手动检查 ${targetDir}"; return 1; }
-    else
-        mkdir -p "${targetDir}" || { aloneNginxConfigWriteError "Nginx 配置目录创建失败，请手动检查 ${targetPath}"; return 1; }
-    fi
+    padmEnsureSafeDirectory "${targetDir}" || { aloneNginxConfigWriteError "Nginx 配置目录创建失败，请手动检查 ${targetPath}"; return 1; }
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || { aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"; return 1; }
     cat >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 配置临时文件写入失败，请手动检查 ${tmpPath}"; return 1; }
     if command -v nginx >/dev/null 2>&1; then
         if [[ -f "${targetPath}" ]] && ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
@@ -786,12 +783,13 @@ updateAloneNginxConfig() {
         aloneNginxConfigWriteError "Nginx 配置路径异常"
         return 1
     fi
-    local tmpPath="${targetPath}.tmp"
+    local tmpPath
     local backupPath="${targetPath}.bak"
     local logFile
     ALONE_NGINX_CONFIG_ERROR=
     [[ -f "${targetPath}" ]] || { aloneNginxConfigWriteError "未检测到传统 TLS fallback 配置，请先重建 alone.conf"; return 1; }
     padmCommitTargetIsFileLike "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置目标异常，请手动检查 ${targetPath}"; return 1; }
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || { aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"; return 1; }
     if ! cp "${targetPath}" "${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"
         aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"
