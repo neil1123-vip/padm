@@ -1956,13 +1956,7 @@ runFail2banMenuRegression() {
         fail2banControlSurfaceText() { printf '已检测到 /s/control/'; }
         fail2banCurrentProfileLabel() { printf 'SSH + 控制面防护'; }
         fail2banNginxScanStatusText() { printf '默认关闭'; }
-        showFail2banRuntimeStatus() { recordMenuAction showFail2banRuntimeStatus; }
-        fail2banRecommendedProfileName() { printf 'sshd+control\n'; }
-        fail2banApplyProfile() { recordMenuAction "fail2banApplyProfile:$1:${2:-}"; }
         fail2banApplyNginxScanExtension() { recordMenuAction "fail2banApplyNginxScanExtension:$1"; }
-        showFail2banBans() { recordMenuAction showFail2banBans; }
-        systemScriptMenu() { recordMenuAction systemScriptMenu; }
-        errorCard() { recordMenuAction "errorCard:$1"; }
 
         manageFail2ban <<<"5"
         grep -q "启用站点扫描扩展防护" <<<"${output}"
