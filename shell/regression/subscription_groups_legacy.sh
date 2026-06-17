@@ -11880,7 +11880,6 @@ runTlsRenewalFailurePropagationRegression() (
     export REGRESSION_ERROR_CARD_LOG="${errorLog}"
 
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
-    successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     progressCard() { return 0; }
     handleNginx() {
