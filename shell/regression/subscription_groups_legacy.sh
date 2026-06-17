@@ -13983,6 +13983,98 @@ runInstallToolsUpdateFailureRegression() {
     )
 }
 
+runInstallToolsUsesConfiguredInstallLogRegression() {
+    (
+        local oldHome="${HOME}"
+        local oldSelect="${selectCustomInstallType:-}"
+        local oldInstallLog="${PADM_INSTALL_LOG:-}"
+        local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
+        local fakeHome="${TMP_DIR}/install-tools-log-home"
+        local logRoot="${TMP_DIR}/custom-log"
+        local callLog="${TMP_DIR}/install-tools-log-calls.log"
+        local statusLog="${TMP_DIR}/install-tools-log-status.log"
+        local errorLog="${TMP_DIR}/install-tools-log-error.log"
+        local installStatus
+        local resolvedInstallLog
+
+        rm -rf "${fakeHome}" "${logRoot}"
+        mkdir -p "${fakeHome}"
+        : >"${callLog}"
+        : >"${statusLog}"
+        : >"${errorLog}"
+        HOME="${fakeHome}"
+        PADM_INSTALL_LOG="${logRoot}/install.log"
+        resolvedInstallLog=$(padmResolveManagedAbsolutePath "${PADM_INSTALL_LOG}")
+        export REGRESSION_STATUS_CARD_LOG="${statusLog}"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE=
+        release=debian
+        rhelLike=false
+        upgrade=true
+        updateReleaseInfoChange=true
+        packageManager=apt
+        installType=true
+        removeType=true
+        selectCustomInstallType=",7,"
+        command() {
+            if [[ "$1" == "-v" && "$2" == "qrencode" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        runWithTimeout() { return 0; }
+        waitAptProcess() { return 0; }
+        packageInstalled() { return 1; }
+        installBasePackages() { installPackageTracked "基础工具" curl; }
+        installNginxTools() { return 0; }
+        nginx() { return 0; }
+        protocolSelectionSkipsNginx() { return 0; }
+        protocolSelectionNeedsLocalCertificate() { return 1; }
+        runPackageCommandWithProgress() {
+            printf '%s|%s\n' "$1" "$4" >>"${callLog}"
+            return 0
+        }
+
+        set +e
+        (
+            installTools 1
+        ) >/dev/null 2>&1
+        installStatus=$?
+        set -e
+        [[ "${installStatus}" == "0" ]]
+        [[ -f "${resolvedInstallLog}" ]]
+        [[ "$(grep -cF "|${resolvedInstallLog}" "${callLog}")" == "2" ]]
+        grep -q "^检查、安装更新|${resolvedInstallLog}\$" "${callLog}"
+        grep -q "^安装基础工具|${resolvedInstallLog}\$" "${callLog}"
+
+        if [[ -n "${oldStatusLog}" ]]; then
+            REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
+        else
+            unset REGRESSION_STATUS_CARD_LOG
+        fi
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        if [[ -n "${oldInstallLog}" ]]; then
+            PADM_INSTALL_LOG="${oldInstallLog}"
+        else
+            unset PADM_INSTALL_LOG
+        fi
+        if [[ -n "${oldBasePackageCalledFile}" ]]; then
+            PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
+        else
+            unset PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE
+        fi
+        HOME="${oldHome}"
+        selectCustomInstallType="${oldSelect}"
+        unset -f command runWithTimeout waitAptProcess packageInstalled installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate runPackageCommandWithProgress
+    )
+}
+
 runInstallToolsReleaseInfoFailureRegression() {
     (
         local oldHome="${HOME}"
@@ -15200,9 +15292,10 @@ runRegressionPlatform() {
 }
 
 runRegressionPlatformIo() {
-    runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression &&
+        runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression &&
         runRegressionStep install-tools-acme-result-failure runInstallToolsAcmeResultFailureRegression &&
         runRegressionStep install-tools-acme-commit-failure runInstallToolsAcmeCommitFailureRegression &&
+        runRegressionStep install-tools-configured-log runInstallToolsUsesConfiguredInstallLogRegression &&
         runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression &&
         runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression &&
         runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression &&

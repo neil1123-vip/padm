@@ -50,6 +50,16 @@ adapterManagedRollbackTemplate() {
     adapterTmpPath padm-package-managed-backup.XXXXXX
 }
 
+adapterInstallLogPath() {
+    padmResolveManagedAbsolutePath "${PADM_INSTALL_LOG:-/etc/padm/install.log}"
+}
+
+adapterInstallLogRecoverPath() {
+    local installLog
+    installLog=$(adapterInstallLogPath) || return 1
+    printf '%s.dpkg-recover\n' "${installLog}"
+}
+
 adapterNginxAptKeyringFile() {
     printf '%s\n' "${PADM_NGINX_APT_KEYRING_FILE:-/usr/share/keyrings/nginx-archive-keyring.gpg}"
 }
@@ -558,15 +568,20 @@ allPackagesInstalled() {
 
 recoverAptInstallAfterTimeout() {
     local displayName=$1
+    local recoverLog
+    local recoverCommand
     shift
 
     [[ "${packageManager}" == "apt" ]] || return 1
     allPackagesInstalled "$@" || return 1
+    recoverLog=$(adapterInstallLogRecoverPath) || return 1
+    padmEnsureSafeDirectory "$(dirname -- "${recoverLog}")" || return 1
+    printf -v recoverCommand 'DEBIAN_FRONTEND=noninteractive dpkg --configure -a >"%s" 2>&1' "${recoverLog}"
 
     statusCard "${displayName}安装收尾" "软件包已安装，apt/dpkg 收尾阶段可能卡住，正在尝试恢复"
     pkill -TERM -x mandb >/dev/null 2>&1 || true
-    runWithTimeout 120 "DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/etc/padm/install.log.dpkg-recover 2>&1" || {
-        statusCard "${displayName}安装收尾" "dpkg 收尾失败，日志：/etc/padm/install.log.dpkg-recover"
+    runWithTimeout 120 "${recoverCommand}" || {
+        statusCard "${displayName}安装收尾" "dpkg 收尾失败，日志：${recoverLog}"
         return 1
     }
     statusCard "${displayName}安装收尾" "dpkg 收尾完成，继续后续流程"
@@ -574,12 +589,14 @@ recoverAptInstallAfterTimeout() {
 }
 
 diagnosePackageInstallFailure() {
+    local installLog
     if [[ "${packageManager}" != "apt" ]]; then
         return 0
     fi
+    installLog=$(adapterInstallLogPath 2>/dev/null || printf '%s\n' "${PADM_INSTALL_LOG:-/etc/padm/install.log}")
 
     statusCard "软件包安装排障" \
-        "可查看日志：/etc/padm/install.log" \
+        "可查看日志：${installLog}" \
         "可检查锁：lsof /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/cache/apt/archives/lock" \
         "可检查未完成配置：dpkg --audit" \
         "若卡在 man-db trigger：ps -ef | grep '[m]andb\\|[d]pkg\\|[a]pt'"
@@ -590,14 +607,17 @@ installPackageTracked() {
     shift
     local packages=("$@")
     local missingPackagesFile
+    local installLog
 
     local packageTimeout=300
 
+    installLog=$(adapterInstallLogPath) || failPackageInstallTransaction "${displayName}安装日志路径异常"
+    padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || failPackageInstallTransaction "${displayName}安装日志目录创建失败"
     padmCreateTempPath missingPackagesFile "$(adapterPackagesTempTemplate)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
-    runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" /etc/padm/install.log || {
+    runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}" || {
         if recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}"; then
             :
         else
@@ -614,14 +634,17 @@ installOptionalPackageTracked() {
     shift
     local packages=("$@")
     local missingPackagesFile
+    local installLog
 
     local packageTimeout=300
 
+    installLog=$(adapterInstallLogPath) || return 1
+    padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || return 1
     padmCreateTempPath missingPackagesFile "$(adapterPackagesTempTemplate)" || return 1
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
-    if ! runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" /etc/padm/install.log; then
+    if ! runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}"; then
         recoverAptInstallAfterTimeout "${displayName}" "${packages[@]}" || {
             padmRemoveCleanupPath "${missingPackagesFile}"
             diagnosePackageInstallFailure
@@ -703,8 +726,9 @@ installTools() {
     initInstallProgress
     successCard "检查、安装工具依赖【新机器会很慢，请根据工具依赖进度判断是否仍在执行】"
 
-    local installLog=${PADM_INSTALL_LOG:-/etc/padm/install.log}
-    mkdir -p "${installLog%/*}"
+    local installLog
+    installLog=$(adapterInstallLogPath) || failPackageInstallTransaction "安装日志路径异常"
+    padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || failPackageInstallTransaction "安装日志目录创建失败"
     : >"${installLog}"
     if [[ "${rhelLike:-}" == "true" ]]; then
         statusCard "系统更新" "RHEL-like/Fedora 基础安装跳过全量系统更新，仅安装所需依赖"
