@@ -965,7 +965,7 @@ checkLogBackupCreate() {
         if [[ -f "${targetPath}" ]]; then
             printf -v backupFile '%s/%06d.json' "${backupDir}" "${backupIndex}"
             backupIndex=$((backupIndex + 1))
-            cp -p "${targetPath}" "${backupFile}" || {
+            backupManagedFileToPath "${targetPath}" "${backupFile}" 644 || {
                 padmRemoveCleanupPath "${backupDir}"
                 return 1
             }

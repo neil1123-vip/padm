@@ -11916,9 +11916,11 @@ JSON
 )
 
 runCheckLogBackupMissingRestoreRegression() (
-    local root="${TMP_DIR}/check-log-backup-restore"
+    local rootRel="${TMP_DIR}/check-log-backup-restore"
+    local root
     local restoreBackupDir
-    mkdir -p "${root}"
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
     printf 'old-policy\n' >"${root}/policy.json"
 
     checkLogBackupCreate restoreBackupDir "${root}/stats.json" "${root}/policy.json"
@@ -12046,12 +12048,15 @@ runPadmBbrManagedCleanupRegression() (
 )
 
 runCheckLogBackupRejectsUnsafeTargetRegression() (
-    local root="${TMP_DIR}/check-log-backup-unsafe"
-    local restoreDir="${root}/restore"
+    local rootRel="${TMP_DIR}/check-log-backup-unsafe"
+    local root
+    local restoreDir
     local backupDir=
     local rc
 
-    mkdir -p "${root}/relative" "${restoreDir}"
+    mkdir -p "${rootRel}/relative" "${rootRel}/restore"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    restoreDir="${root}/restore"
     printf 'keep\n' >"${root}/relative/stats.json"
     cd "${root}"
 
