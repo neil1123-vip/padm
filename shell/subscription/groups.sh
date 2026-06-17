@@ -67,22 +67,6 @@ writeDefaultSubscriptionGroupsState() {
 EOF
 }
 
-backupSubscriptionGroupsStateForMigration() {
-    local backupDir
-    local backupFile
-    local stateFile
-    backupDir=$(subscriptionGroupsBackupDir)
-    stateFile=$(subscriptionGroupsFile)
-    [[ -f "${stateFile}" ]] || return 0
-    mkdir -p "${backupDir}" || return 1
-    backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S').json"
-    if ! cp "${stateFile}" "${backupFile}"; then
-        rm -f -- "${backupFile}" >/dev/null 2>&1 || true
-        return 1
-    fi
-    printf '%s\n' "${backupFile}"
-}
-
 normalizeSubscriptionGroupsState() {
     local schemaVersion
     schemaVersion=$(subscriptionGroupsSchemaVersion)
@@ -158,6 +142,7 @@ migrateSubscriptionGroupsState() {
     local currentVersion
     local schemaVersion
     local backupFile
+    local backupDir
     stateFile=$(subscriptionGroupsFile)
     schemaVersion=$(subscriptionGroupsSchemaVersion)
     currentVersion=$(jq -r '.version // 0' "${stateFile}" 2>/dev/null || echo 0)
@@ -167,7 +152,14 @@ migrateSubscriptionGroupsState() {
     ' "${stateFile}" >/dev/null 2>&1; then
         return 0
     fi
-    backupFile=$(backupSubscriptionGroupsStateForMigration) || return 1
+    backupDir=$(subscriptionGroupsBackupDir)
+    [[ -f "${stateFile}" ]] || return 0
+    mkdir -p "${backupDir}" || return 1
+    backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S').json"
+    if ! cp "${stateFile}" "${backupFile}"; then
+        rm -f -- "${backupFile}" >/dev/null 2>&1 || true
+        return 1
+    fi
     padmCreateTempFileForTarget tmpFile "${stateFile}" migrate || return 1
     if normalizeSubscriptionGroupsState <"${stateFile}" >"${tmpFile}"; then
         commitGeneratedJsonFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
