@@ -628,14 +628,12 @@ runBTRoutingFailureReturnRegression() (
     local sniffMarker="${root}/sniff"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local rc
 
     mkdir -p "${root}/xray" "${root}/sing-box"
     configPath="${root}/xray/"
     singBoxConfigPath=
     coreInstallType=1
-    statusCard() { return 0; }
     errorCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
@@ -644,11 +642,6 @@ runBTRoutingFailureReturnRegression() (
     menuClose() { return 0; }
     showBTBlockStatus() { return 0; }
     readInstallType() { coreInstallType=1; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
-
     (
         configPath="${root}/xray/"
         cat >"${configPath}09_routing.json" <<'JSON'
@@ -691,7 +684,7 @@ JSON
         printf 'reload\n' >"${reloadMarker}"
         return 1
     }
-    rm -f "${installMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${reloadMarker}"
     set +e
     btTools >/dev/null 2>&1
     rc=$?
@@ -699,14 +692,13 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -e "${installMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     autoRead() { printf -v "$3" '2'; }
     uninstallBTBlock() {
         printf 'uninstall\n' >"${uninstallMarker}"
         return 0
     }
-    rm -f "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${uninstallMarker}" "${reloadMarker}"
     set +e
     btTools >/dev/null 2>&1
     rc=$?
@@ -714,7 +706,6 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -e "${uninstallMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runIPv6RoutingFailureReturnRegression() (
@@ -724,7 +715,6 @@ runIPv6RoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local mode=success
     local menuChoice=2
     local rc
@@ -735,7 +725,6 @@ runIPv6RoutingFailureReturnRegression() (
     coreInstallType=1
 
     errorCard() { return 0; }
-    statusCard() { return 0; }
     warnCard() { return 0; }
     echoContent() { return 0; }
     progressCard() { return 0; }
@@ -744,10 +733,6 @@ runIPv6RoutingFailureReturnRegression() (
     menuDangerItem() { return 0; }
     menuReturnItem() { return 0; }
     menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     hasIPv6Connectivity() { return 0; }
     autoConfirm() {
         printf -v "$4" 'y'
@@ -788,19 +773,18 @@ runIPv6RoutingFailureReturnRegression() (
     }
 
     hasIPv6Connectivity() { return 1; }
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     hasIPv6Connectivity() { return 0; }
     mode=empty-domain
     menuChoice=2
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -809,10 +793,9 @@ runIPv6RoutingFailureReturnRegression() (
     [[ ! -e "${outboundMarker}" ]]
     [[ ! -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=routing-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -821,21 +804,19 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=outbound-fail
     menuChoice=3
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -844,11 +825,10 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=uninstall-fail
     menuChoice=4
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -857,10 +837,9 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -870,7 +849,6 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runWARPRoutingFailureReturnRegression() (
@@ -882,7 +860,6 @@ runWARPRoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local mode=success
     local menuChoice=2
     local rc
@@ -893,7 +870,6 @@ runWARPRoutingFailureReturnRegression() (
     coreInstallType=1
 
     errorCard() { return 0; }
-    statusCard() { return 0; }
     warnCard() { return 0; }
     echoContent() { return 0; }
     progressCard() { return 0; }
@@ -902,10 +878,6 @@ runWARPRoutingFailureReturnRegression() (
     menuDangerItem() { return 0; }
     menuReturnItem() { return 0; }
     menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     installWarpReg() {
         printf 'install\n' >"${installMarker}"
         [[ "${mode}" != "install-fail" ]]
@@ -958,7 +930,7 @@ runWARPRoutingFailureReturnRegression() (
     }
 
     mode=install-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -970,7 +942,7 @@ runWARPRoutingFailureReturnRegression() (
 
     mode=empty-domain
     menuChoice=2
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -980,10 +952,9 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${readMarker}" ]]
     [[ ! -e "${outboundMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=routing-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -992,21 +963,19 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=outbound-fail
     menuChoice=3
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1015,11 +984,10 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=uninstall-fail
     menuChoice=4
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1028,10 +996,9 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1041,7 +1008,6 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runSocks5RoutingFailureReturnRegression() (
@@ -1052,7 +1018,6 @@ runSocks5RoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local reloadMarker="${root}/reload"
     local stopMarker="${root}/stop"
-    local successMarker="${root}/success"
     local menuChoice=1
     local uninstallChoice=1
     local mode=invalid-port
@@ -1064,7 +1029,6 @@ runSocks5RoutingFailureReturnRegression() (
     coreInstallType=1
 
     errorCard() { return 0; }
-    statusCard() { return 0; }
     warnCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
@@ -1072,10 +1036,6 @@ runSocks5RoutingFailureReturnRegression() (
     menuDangerItem() { return 0; }
     menuReturnItem() { return 0; }
     menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     autoConfirm() {
         printf -v "$4" 'y'
         return 0
@@ -1120,7 +1080,7 @@ runSocks5RoutingFailureReturnRegression() (
     }
 
     mode=invalid-port
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     setSocks5Outbound >/dev/null 2>&1
     rc=$?
@@ -1129,7 +1089,7 @@ runSocks5RoutingFailureReturnRegression() (
     [[ ! -e "${outboundMarker}" ]]
 
     mode=outbound-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     setSocks5Outbound >/dev/null 2>&1
     rc=$?
@@ -1138,7 +1098,7 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
 
     mode=uninstall-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     setSocks5OutboundRouting >/dev/null 2>&1
     rc=$?
@@ -1158,7 +1118,7 @@ runSocks5RoutingFailureReturnRegression() (
 
     mode=reload-fail
     menuChoice=1
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     socks5OutboundRoutingMenu >/dev/null 2>&1
     rc=$?
@@ -1167,11 +1127,10 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=stop-fail
     uninstallChoice=2
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${stopMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${stopMarker}"
     set +e
     removeSocks5Routing >/dev/null 2>&1
     rc=$?
@@ -1179,11 +1138,10 @@ runSocks5RoutingFailureReturnRegression() (
     [[ "${rc}" == "1" ]]
     [[ -e "${stopMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=uninstall-fail
     uninstallChoice=1
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     removeSocks5Routing >/dev/null 2>&1
     rc=$?
@@ -1192,10 +1150,9 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     removeSocks5Routing >/dev/null 2>&1
     rc=$?
@@ -1205,7 +1162,6 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runSocks5UdpAssociateRegression() (
