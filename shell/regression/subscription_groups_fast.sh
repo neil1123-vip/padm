@@ -1156,7 +1156,7 @@ EOF
             return 1
         }
         mv() {
-            if [[ "$1" == "${restoreFailureDir}/install.sh.bak" && "$2" == "${restoreFailureDir}/install.sh" ]]; then
+            if [[ "$1" == "-f" && "$2" == "--" && "$3" == "${restoreFailureDir}/install.sh.bak" && "$4" == "${restoreFailureDir}/install.sh" ]]; then
                 return 1
             fi
             command mv "$@"
@@ -1200,7 +1200,7 @@ EOF
             "$@"
         }
         mv() {
-            if [[ "$1" == "${replaceFailureDir}/install.sh.bak" && "$2" == "${replaceFailureDir}/install.sh" ]]; then
+            if [[ "$1" == "-f" && "$2" == "--" && "$3" == "${replaceFailureDir}/install.sh.bak" && "$4" == "${replaceFailureDir}/install.sh" ]]; then
                 return 1
             fi
             command mv "$@"

@@ -500,23 +500,25 @@ showPadmScriptInstallStatus() {
 restorePadmEntryBackup() {
     local backupPath=$1
     local installPath=$2
+    backupPath=$(padmResolveManagedAbsolutePath "${backupPath}") || return 1
+    installPath=$(padmResolveManagedAbsolutePath "${installPath}") || return 1
     [[ -f "${backupPath}" ]] || return 2
     [[ ! -d "${installPath}" ]] || return 1
-    mv "${backupPath}" "${installPath}" || return 1
-    sudo chmod 700 "${installPath}" || return 1
+    commitGeneratedFile "${backupPath}" "${installPath}" 700
 }
 
 # 更新脚本
 updatePadm() {
     local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
-    local installPath="${installDir}/install.sh"
-    local backupPath="${installDir}/install.sh.bak"
+    local installPath backupPath
     local tmpDir newInstall
     local tmpBase="${TMPDIR:-/tmp}"
     if ! padmIsSafeAbsolutePath "${installDir}"; then
         errorCard "更新入口目录异常"
         return 1
     fi
+    installPath=$(padmManagedFilePath "${installDir}" "install.sh") || { errorCard "更新入口路径异常"; return 1; }
+    backupPath=$(padmManagedFilePath "${installDir}" "install.sh.bak") || { errorCard "更新入口备份路径异常"; return 1; }
     if ! mkdir -p "${installDir}"; then
         errorCard "更新入口目录创建失败"
         return 1
@@ -552,8 +554,12 @@ updatePadm() {
         return 1
     fi
 
-    rm -f "${backupPath}"
-    if [[ -f "${installPath}" ]] && ! cp "${installPath}" "${backupPath}"; then
+    if ! removeManagedFileIfPresent "${backupPath}"; then
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "旧入口备份清理失败，已取消更新"
+        return 1
+    fi
+    if [[ -f "${installPath}" ]] && ! backupManagedFileToPath "${installPath}" "${backupPath}" 700; then
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
         errorCard "旧入口备份失败，已取消更新"
         return 1
@@ -575,7 +581,7 @@ updatePadm() {
 
     successCard "更新入口已下载，正在重新打开新版脚本"
     if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 "${installPath}" RefreshScriptModules; then
-        rm -f "${backupPath}"
+        removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
         exit 0
     fi
 
@@ -1141,14 +1147,30 @@ syncInstallMetadataFile() {
 
 cleanupInstallSyncPath() {
     local targetPath=$1
+    [[ -n "${targetPath}" ]] || return 0
+    if declare -F removeManagedPathIfPresent >/dev/null 2>&1; then
+        removeManagedPathIfPresent "${targetPath}" >/dev/null 2>&1 || true
+        return 0
+    fi
     padmRemoveCleanupPath "${targetPath}" 2>/dev/null || rm -rf -- "${targetPath}"
+}
+
+preserveInstallSyncPath() {
+    local targetPath=$1
+    [[ -n "${targetPath}" ]] || return 0
+    if declare -F padmForgetCleanupPath >/dev/null 2>&1; then
+        padmForgetCleanupPath "${targetPath}" >/dev/null 2>&1 || true
+    fi
 }
 
 syncInstallDirectoryTree() {
     local sourceDir=$1
     local targetDir=$2
     local targetParent targetName stageRoot stageDir backupRoot= backupPath=
+    local restoreStatus=0
 
+    sourceDir=$(padmResolveManagedAbsolutePath "${sourceDir}") || return 1
+    targetDir=$(padmResolveManagedAbsolutePath "${targetDir}") || return 1
     [[ -d "${sourceDir}" ]] || return 0
     if sameInstallPath "${sourceDir}" "${targetDir}"; then
         return 0
@@ -1156,7 +1178,7 @@ syncInstallDirectoryTree() {
 
     targetParent=$(dirname -- "${targetDir}")
     targetName=$(basename -- "${targetDir}")
-    mkdir -p "${targetParent}" || return 1
+    padmEnsureSafeDirectory "${targetParent}" || return 1
 
     if declare -F padmCreateTempPath >/dev/null 2>&1; then
         padmCreateTempPath stageRoot -d "${targetParent}/.${targetName}.padm-stage.XXXXXX" || return 1
@@ -1190,9 +1212,12 @@ syncInstallDirectoryTree() {
     fi
 
     if ! mv "${stageDir}" "${targetDir}"; then
-        [[ -n "${backupPath}" ]] && mv "${backupPath}" "${targetDir}" >/dev/null 2>&1 || true
+        if [[ -n "${backupPath}" ]] && ! mv "${backupPath}" "${targetDir}" >/dev/null 2>&1; then
+            restoreStatus=1
+            preserveInstallSyncPath "${backupRoot}"
+        fi
         cleanupInstallSyncPath "${stageRoot}"
-        cleanupInstallSyncPath "${backupRoot}"
+        [[ "${restoreStatus}" -eq 0 ]] && cleanupInstallSyncPath "${backupRoot}"
         return 1
     fi
 

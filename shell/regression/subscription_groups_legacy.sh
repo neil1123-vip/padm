@@ -13989,7 +13989,7 @@ EOF
             "$@"
         }
         mv() {
-            if [[ "$1" == "${replaceFailureDir}/install.sh.bak" && "$2" == "${replaceFailureDir}/install.sh" ]]; then
+            if [[ "$1" == "-f" && "$2" == "--" && "$3" == "${replaceFailureDir}/install.sh.bak" && "$4" == "${replaceFailureDir}/install.sh" ]]; then
                 return 1
             fi
             command mv "$@"
@@ -14328,6 +14328,44 @@ EOF
     fi
 }
 
+runSyncInstallDirectoryTreeRestoreFailureRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/sync-install-tree-restore-failure"
+        local rootAbs sourceDir targetDir backupPath backupRoot
+        mkdir -p "${root}/source" "${root}/target"
+        rootAbs=$(cd -- "${root}" && pwd -P)
+        sourceDir="${rootAbs}/source"
+        targetDir="${rootAbs}/target"
+        printf 'new\n' >"${sourceDir}/marker"
+        printf 'old\n' >"${targetDir}/marker"
+
+        mv() {
+            if [[ "$1" == "${targetDir}" && "$2" == */.target.padm-backup.*/target ]]; then
+                backupPath="$2"
+                command mv "$@"
+                return
+            fi
+            if [[ "$1" == */.target.padm-stage.*/target && "$2" == "${targetDir}" ]]; then
+                return 1
+            fi
+            if [[ -n "${backupPath:-}" && "$1" == "${backupPath}" && "$2" == "${targetDir}" ]]; then
+                return 1
+            fi
+            command mv "$@"
+        }
+
+        ! syncInstallDirectoryTree "${sourceDir}" "${targetDir}"
+        [[ ! -e "${targetDir}" ]]
+        backupRoot=$(find "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-backup.*' -print -quit)
+        [[ -n "${backupRoot}" ]]
+        [[ "$(<"${backupRoot}/target/marker")" == "old" ]]
+        if find "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-stage.*' | grep -q .; then
+            return 1
+        fi
+    )
+}
+
 runInstallModulePathsRegression() {
     local outputList moduleTmpRoot oldTmpDir moduleListBefore moduleListAfter
     outputList="${TMP_DIR}/install-module-paths.txt"
@@ -14371,6 +14409,7 @@ runRegressionPlatform() {
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&
         runRegressionStep alias-install-sync-failure runAliasInstallModuleSyncFailureRegression &&
+        runRegressionStep install-sync-restore-failure runSyncInstallDirectoryTreeRestoreFailureRegression &&
         runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression &&
         runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression &&
         runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression &&
