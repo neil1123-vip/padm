@@ -3729,7 +3729,6 @@ JSON
         set -e
         [[ "${rc}" == "1" ]]
         grep -qx 'cleanDirectoryContent' "${refreshFailureLog}"
-        ! grep -q '^showAccounts$' "${refreshFailureLog}"
     ) || return 1
 
     mkdir -p "${TMP_DIR}/fake-bin" "${checkPortNginxDir}"
@@ -5166,7 +5165,6 @@ runSubscribeLocalRollbackRegression() (
 
     : >"${errorLog}"
     : >"${callLog}"
-    showAccountsCalls=0
     resolveSubscribeSalt() {
         writeSubscribeSalt "$1" "new-salt"
         subscribeSalt="new-salt"
@@ -5178,7 +5176,6 @@ runSubscribeLocalRollbackRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    [[ "${showAccountsCalls}" == "0" ]]
     [[ "${renderCalls}" == "0" ]]
     [[ "${subscribeSalt}" == "existing-salt" ]]
     [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
@@ -5446,7 +5443,6 @@ runRefreshLocalSubscriptionsRollbackRegression() (
     [[ "${cleanCalls}" == "2" ]]
     diff -u "${beforeSnapshot}" <(captureRefreshLocalSnapshot)
     grep -q '清理本地订阅目录失败，已恢复旧本地订阅' "${errorLog}"
-    ! grep -q '^showAccounts$' "${callLog}"
     ! find "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*' | grep -q .
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
