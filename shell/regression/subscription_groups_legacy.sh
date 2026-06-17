@@ -10936,7 +10936,6 @@ runNginxYumMainlineEnableFailureRegression() {
         installPackageTracked() { return 0; }
         packageInstalled() { return 0; }
         nginxServiceInstalled() { return 0; }
-        bootStartup() { return 0; }
         sudo() {
             [[ "$1" == "yum-config-manager" && "$2" == "--enable" && "$3" == "nginx-mainline" ]] && return 1
             "$@"
@@ -10956,7 +10955,7 @@ runNginxYumMainlineEnableFailureRegression() {
         else
             unset REGRESSION_ERROR_CARD_LOG
         fi
-        unset -f installPackageTracked packageInstalled nginxServiceInstalled bootStartup sudo
+        unset -f installPackageTracked packageInstalled nginxServiceInstalled sudo
         unset PADM_YUM_REPOS_DIR
     )
 }
