@@ -6624,6 +6624,56 @@ runSubscribeSaltWriteTransactionRegression() (
     ! compgen -G "${root}/.subscribeSalt.subscribe.*" >/dev/null
 )
 
+runCdnAddressTransactionRegression() (
+    local rootRel="${TMP_DIR}/cdn-address-write-transaction"
+    local root cdnFile
+    local rc
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    cdnFile="${root}/cdn"
+    printf 'old-cdn.example.com\n' >"${cdnFile}"
+
+    cdnAddressFile() {
+        printf '%s' "${cdnFile}"
+    }
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${cdnFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    cdnWriteAddress "new-cdn.example.com"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
+    ! compgen -G "${root}/.cdn.cdn.*" >/dev/null
+
+    set +e
+    cdnClearAddress
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
+    ! compgen -G "${root}/.cdn.cdn.*" >/dev/null
+
+    commitGeneratedFile() {
+        originalCommitGeneratedFile "$@"
+    }
+    cdnWriteAddress "new-cdn.example.com"
+    [[ "$(<"${cdnFile}")" == "new-cdn.example.com" ]]
+    ! compgen -G "${root}/.cdn.cdn.*" >/dev/null
+
+    cdnClearAddress
+    [[ ! -s "${cdnFile}" ]]
+    ! compgen -G "${root}/.cdn.cdn.*" >/dev/null
+)
+
 runSingBoxSubscribeWriteRegression() {
     local targetPath="${SUBSCRIBE_CAPTURE_DIR}/sing-box/atomic-user"
     rm -rf "${SUBSCRIBE_CAPTURE_DIR}/sing-box"
@@ -7432,6 +7482,26 @@ runSubscribeUserOutputTransactionRegression() {
     [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
     [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
     [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
+
+    writeOldSubscribeOutputs
+    writeLocalSubscribeOutputs
+    (
+        SCRIPT_DIR="${root}/missing-sing-box-template"
+        downloadFile() {
+            return 1
+        }
+        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
+            return 1
+        fi
+    )
+    [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+    [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+    [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
+    [[ "$(<"${publicDir}/sing-box_profiles/${emailMd5}")" == "old-sing-profile" ]]
+    [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
+    if find "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        return 1
+    fi
 
     writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
@@ -15002,6 +15072,7 @@ runRegressionSubscriptionRemoteFetch() {
 
 runRegressionSubscriptionWriteTransaction() {
     runRegressionStep sing-box-subscribe-write runSingBoxSubscribeWriteRegression
+    runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression
     runRegressionStep subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
     runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression
@@ -15085,6 +15156,7 @@ runRegressionTransactionCore() {
 }
 
 runRegressionTransactionSubscription() {
+    runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression &&
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression &&
         runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression &&
         runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression &&

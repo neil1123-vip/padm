@@ -1422,13 +1422,25 @@ cdnCurrentAddress() {
 
 cdnWriteAddress() {
     local address=$1
-    mkdir -p /etc/padm
-    printf '%s\n' "${address}" >"$(cdnAddressFile)"
+    local targetFile targetParent stagedPath
+
+    targetFile=$(padmResolveManagedAbsolutePath "$(cdnAddressFile)") || return 1
+    targetParent=$(dirname -- "${targetFile}")
+    padmEnsureSafeDirectory "${targetParent}" || return 1
+    padmCreateTempFileForTarget stagedPath "${targetFile}" cdn || return 1
+    printf '%s\n' "${address}" >"${stagedPath}" || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
+    commitGeneratedFile "${stagedPath}" "${targetFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
 }
 
 cdnClearAddress() {
-    mkdir -p /etc/padm
-    : >"$(cdnAddressFile)"
+    local targetFile targetParent stagedPath
+
+    targetFile=$(padmResolveManagedAbsolutePath "$(cdnAddressFile)") || return 1
+    targetParent=$(dirname -- "${targetFile}")
+    padmEnsureSafeDirectory "${targetParent}" || return 1
+    padmCreateTempFileForTarget stagedPath "${targetFile}" cdn || return 1
+    : >"${stagedPath}" || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
+    commitGeneratedFile "${stagedPath}" "${targetFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
 }
 
 showCDNUsageNotes() {
@@ -2104,7 +2116,10 @@ renderSubscribeUserOutputs() {
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
     padmCreateTempPath stageDir -d "${tmpBase%/}/padm-subscribe-user.XXXXXX" || return 1
-    mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/clashMetaProfiles" "${stageDir}/sing-box" "${stageDir}/sing-box_profiles"
+    mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/clashMetaProfiles" "${stageDir}/sing-box" "${stageDir}/sing-box_profiles" || {
+        padmRemoveCleanupPath "${stageDir}"
+        return 1
+    }
 
     defaultPath="${stageDir}/default/${emailMd5}"
     clashPath="${stageDir}/clashMeta/${emailMd5}"
@@ -2137,7 +2152,7 @@ renderSubscribeUserOutputs() {
         padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
-    printf '%s\n' "${base64Result}" >"${defaultPath}"
+    printf '%s\n' "${base64Result}" >"${defaultPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
 
     clashSourcePath="${localBase}/clashMeta/${email}"
     if [[ ! -f "${clashSourcePath}" && -s "${clashPath}" ]]; then
@@ -2169,9 +2184,10 @@ renderSubscribeUserOutputs() {
         [[ -z "${showStatus}" ]] && statusCard "sing-box 通用配置" "正在下载 sing-box 通用配置文件"
         localSingBoxTemplate="${SCRIPT_DIR:-/etc/padm}/documents/sing-box.json"
         if [[ -f "${localSingBoxTemplate}" ]]; then
-            cp "${localSingBoxTemplate}" "${singBoxPath}"
-        else
-            downloadFile -O "${singBoxPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/documents/sing-box.json"
+            cp "${localSingBoxTemplate}" "${singBoxPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+        elif ! downloadFile -O "${singBoxPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/documents/sing-box.json"; then
+            padmRemoveCleanupPath "${stageDir}"
+            return 1
         fi
         padmCreateTempFileForTarget singBoxTmpPath "${singBoxPath}" singbox || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         if ! jq --slurpfile localOutbounds "${localBase}/sing-box/${email}" '
