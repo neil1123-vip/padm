@@ -5511,7 +5511,6 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
     }
-    statusCard() { return 0; }
 
     runRemoveCase() {
         mode=$1
