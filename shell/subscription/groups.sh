@@ -74,7 +74,7 @@ backupSubscriptionGroupsStateForMigration() {
     backupDir=$(subscriptionGroupsBackupDir)
     stateFile=$(subscriptionGroupsFile)
     [[ -f "${stateFile}" ]] || return 0
-    mkdir -p "${backupDir}" || return 1
+    padmEnsureSafeDirectory "${backupDir}" || return 1
     backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S').json"
     if ! cp "${stateFile}" "${backupFile}"; then
         rm -f -- "${backupFile}" >/dev/null 2>&1 || true
@@ -181,11 +181,18 @@ migrateSubscriptionGroupsState() {
 ensureSubscriptionGroupsState() {
     local stateDir
     local stateFile
+    local stageFile
     stateDir=$(subscriptionGroupsDir)
     stateFile=$(subscriptionGroupsFile)
-    mkdir -p "${stateDir}" || return 1
+    padmEnsureSafeDirectory "${stateDir}" || return 1
     if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
-        writeDefaultSubscriptionGroupsState "${stateFile}" || return 1
+        padmCreateTempFileForTarget stageFile "${stateFile}" init || return 1
+        if ! writeDefaultSubscriptionGroupsState "${stageFile}" ||
+            ! subscriptionGroupsStateReplace "${stageFile}" "${stateFile}"; then
+            padmRemoveCleanupPath "${stageFile}"
+            return 1
+        fi
+        padmRemoveCleanupPath "${stageFile}"
     fi
     migrateSubscriptionGroupsState || return 1
     subscriptionGroupsSecureStateFiles 2>/dev/null || true
@@ -231,7 +238,7 @@ createSubscriptionGroupsBackup() {
     local backupFile
     backupDir=$(subscriptionGroupsBackupDir)
     ensureSubscriptionGroupsState || return 1
-    mkdir -p "${backupDir}" || return 1
+    padmEnsureSafeDirectory "${backupDir}" || return 1
     backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S').json"
     if ! cp "$(subscriptionGroupsFile)" "${backupFile}"; then
         rm -f -- "${backupFile}" >/dev/null 2>&1 || true

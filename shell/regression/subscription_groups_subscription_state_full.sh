@@ -126,10 +126,39 @@ runSubscriptionGroupStateStructureFoundationNormalizeRegression() {
     [[ "$(subscriptionSyncAccountId "${accountDashDash}")" == "team-a-b" ]]
 }
 
+runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
+    local initRoot="${TMP_DIR}/subscription-state-init-transaction"
+    local initGroupsDir="${initRoot}/groups"
+    local initStateFile="${initGroupsDir}/groups.json"
+    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+    local initStatus
+
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${initGroupsDir}"
+    mkdir -p "${initRoot}"
+    writeDefaultSubscriptionGroupsState() {
+        printf '{bad-json\n' >"$1"
+        return 1
+    }
+
+    set +e
+    ensureSubscriptionGroupsState >/dev/null 2>&1
+    initStatus=$?
+    set -e
+
+    [[ "${initStatus}" == "1" ]]
+    [[ ! -e "${initStateFile}" ]]
+    if find "${initGroupsDir}" -maxdepth 1 -type f -name '.groups.json.init.*' | grep -q .; then
+        return 1
+    fi
+
+    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+)
+
 runSubscriptionGroupStateStructureFoundationSerialRegression() {
     runRegressionStep subscription-state-structure-foundation-add-remove runSubscriptionGroupStateStructureFoundationAddRemoveRegression &&
         runRegressionStep subscription-state-structure-foundation-credential runSubscriptionGroupStateStructureFoundationCredentialRegression &&
-        runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression
+        runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression &&
+        runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
 }
 
 runSubscriptionGroupStateStructureFoundationRegression() {
@@ -137,7 +166,8 @@ runSubscriptionGroupStateStructureFoundationRegression() {
         "${TMP_DIR}/subscription-state-structure-foundation" \
         add-remove subscription-state-structure-foundation-add-remove \
         credential subscription-state-structure-foundation-credential \
-        normalize subscription-state-structure-foundation-normalize
+        normalize subscription-state-structure-foundation-normalize \
+        init-transaction subscription-state-structure-foundation-init-transaction
 }
 
 runSubscriptionGroupStateStructureMigrationRegression() {
@@ -1435,6 +1465,10 @@ runRegressionSubscriptionStateStructureFoundationNormalize() {
     runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression
 }
 
+runRegressionSubscriptionStateStructureFoundationInitTransaction() {
+    runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
+}
+
 runRegressionSubscriptionStateStructureFoundationSerial() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
 }
@@ -1670,6 +1704,9 @@ subscription-state-structure-foundation-credential)
     ;;
 subscription-state-structure-foundation-normalize)
     regressionRunner=runRegressionSubscriptionStateStructureFoundationNormalize
+    ;;
+subscription-state-structure-foundation-init-transaction)
+    regressionRunner=runRegressionSubscriptionStateStructureFoundationInitTransaction
     ;;
 subscription-state-structure-foundation-serial)
     regressionRunner=runRegressionSubscriptionStateStructureFoundationSerial

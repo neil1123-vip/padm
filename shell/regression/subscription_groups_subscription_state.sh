@@ -91,6 +91,10 @@ runRegressionSubscriptionStateStructureFoundationNormalize() {
     runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression
 }
 
+runRegressionSubscriptionStateStructureFoundationInitTransaction() {
+    runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
+}
+
 runRegressionSubscriptionStateStructureFoundationSerial() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
 }
@@ -257,6 +261,9 @@ subscription-state-structure-foundation-credential)
     ;;
 subscription-state-structure-foundation-normalize)
     regressionRunner=runRegressionSubscriptionStateStructureFoundationNormalize
+    ;;
+subscription-state-structure-foundation-init-transaction)
+    regressionRunner=runRegressionSubscriptionStateStructureFoundationInitTransaction
     ;;
 subscription-state-structure-foundation-serial)
     regressionRunner=runRegressionSubscriptionStateStructureFoundationSerial

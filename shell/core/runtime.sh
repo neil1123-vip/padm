@@ -17,6 +17,24 @@ padmResolveCleanupPath() {
     printf '%s\n' "${path}"
 }
 
+padmResolveManagedAbsolutePath() {
+    local path=$1
+    [[ -n "${path}" ]] || return 1
+    while [[ "${path}" == ./* ]]; do
+        path="${path#./}"
+    done
+    if [[ "${path}" != /* ]]; then
+        if [[ "${path}" == "." || "${path}" == ".." ||
+            "${path}" == */./* || "${path}" == */. ||
+            "${path}" == */../* || "${path}" == */.. ]]; then
+            return 1
+        fi
+        path="$(pwd -P)/${path}"
+    fi
+    padmIsSafeAbsolutePath "${path}" || return 1
+    printf '%s\n' "${path}"
+}
+
 padmInstallCleanupTrap() {
     if [[ -n "${PADM_CLEANUP_TRAP_INSTALLED}" ]]; then
         return 0
@@ -60,9 +78,10 @@ padmCreateTempFileForTarget() {
     local targetFile=$2
     local label=${3:-tmp}
     local targetDir targetName
+    targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || return 1
     targetDir=$(dirname -- "${targetFile}")
     targetName=$(basename -- "${targetFile}")
-    [[ -d "${targetDir}" ]] || mkdir -p "${targetDir}" || return 1
+    padmEnsureSafeDirectory "${targetDir}" || return 1
     padmCreateTempPath "${resultVar}" "${targetDir}/.${targetName}.${label}.XXXXXX"
 }
 
@@ -89,6 +108,7 @@ padmRemoveCleanupPath() {
 
 padmCommitTargetIsFileLike() {
     local targetFile=$1
+    targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || return 1
     [[ ! -d "${targetFile}" ]] || return 1
     [[ ! -e "${targetFile}" || -f "${targetFile}" || -L "${targetFile}" ]]
 }
@@ -97,6 +117,8 @@ commitGeneratedFile() {
     local tmpFile=$1
     local targetFile=$2
     local mode=$3
+
+    targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || return 1
 
     if [[ -n "${mode}" ]]; then
         chmod "${mode}" "${tmpFile}" || return 1
@@ -957,9 +979,7 @@ padmShowUnsafePathError() {
 padmEnsureSafeDirectory() {
     local targetPath=$1
     local parentPath targetName
-    if ! padmIsSafeAbsolutePath "${targetPath}"; then
-        return 1
-    fi
+    targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || return 1
     if [[ -e "${targetPath}" ]]; then
         [[ -d "${targetPath}" ]] || return 1
         return 0

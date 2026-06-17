@@ -969,6 +969,37 @@ runSubscriptionControlServiceInstallHealthRollbackRegression() (
     runSubscriptionControlServiceInstallRegression health-rollback
 )
 
+runSubscriptionControlTokenTransactionRegression() (
+    local tokenRoot="${TMP_DIR}/remote-control-token-transaction"
+    local fakeBin="${tokenRoot}/bin"
+    local tokenFile
+    local oldPath="${PATH}"
+    local tokenStatus
+
+    mkdir -p "${fakeBin}" "${tokenRoot}"
+    cat >"${fakeBin}/openssl" <<'SH'
+#!/usr/bin/env bash
+printf 'partial-token'
+exit 1
+SH
+    chmod +x "${fakeBin}/openssl"
+
+    PATH="${fakeBin}:${oldPath}"
+    PADM_SUBSCRIPTION_GROUPS_DIR="${tokenRoot}/groups"
+    tokenFile=$(subscriptionControlTokenFile)
+
+    set +e
+    subscriptionControlEnsureToken >/dev/null 2>&1
+    tokenStatus=$?
+    set -e
+
+    [[ "${tokenStatus}" == "1" ]]
+    [[ ! -e "${tokenFile}" ]]
+    if find "${tokenRoot}" -maxdepth 2 -type f -name '.control.token.token.*' | grep -q .; then
+        return 1
+    fi
+)
+
 runSubscriptionControlServiceInstallRegression() (
     local installMode=${1:-all}
     local installModeTag=${installMode}
@@ -1463,6 +1494,10 @@ runRegressionRemoteControlContractServiceInstallHealthRollbackSteps() {
     runRegressionStep remote-control-service-install-health-rollback runSubscriptionControlServiceInstallHealthRollbackRegression
 }
 
+runRegressionRemoteControlContractServiceInstallTokenTransactionSteps() {
+    runRegressionStep remote-control-service-install-token-transaction runSubscriptionControlTokenTransactionRegression
+}
+
 runRegressionRemoteControlContractServerResponseSteps() {
     runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
@@ -1665,7 +1700,8 @@ runRegressionRemoteControlContractServiceInstall() {
         remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess \
         remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail \
         remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail \
-        remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback
+        remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback \
+        remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction
 }
 
 runRegressionRemoteControlContractServiceInstallSuccess() {
@@ -1682,6 +1718,10 @@ runRegressionRemoteControlContractServiceInstallHealthFail() {
 
 runRegressionRemoteControlContractServiceInstallHealthRollback() {
     runRegressionRemoteControlContractServiceInstallHealthRollbackSteps
+}
+
+runRegressionRemoteControlContractServiceInstallTokenTransaction() {
+    runRegressionRemoteControlContractServiceInstallTokenTransactionSteps
 }
 
 runRegressionRemoteControlContractServerResponse() {
@@ -1741,6 +1781,9 @@ remote-control-contract-service-install-health-fail)
     ;;
 remote-control-contract-service-install-health-rollback)
     regressionRunner=runRegressionRemoteControlContractServiceInstallHealthRollback
+    ;;
+remote-control-contract-service-install-token-transaction)
+    regressionRunner=runRegressionRemoteControlContractServiceInstallTokenTransaction
     ;;
 remote-control-contract-server-response)
     regressionRunner=runRegressionRemoteControlContractServerResponse

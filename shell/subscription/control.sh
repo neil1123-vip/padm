@@ -850,16 +850,29 @@ subscriptionControlTokenFile() {
 subscriptionControlEnsureToken() {
     local tokenFile
     local tokenValue
+    local tokenDir
+    local tmpFile
     tokenFile=$(subscriptionControlTokenFile)
-    mkdir -p "$(dirname "${tokenFile}")" || return 1
-    chmod 700 "$(dirname "${tokenFile}")" 2>/dev/null || true
+    tokenDir=$(dirname -- "${tokenFile}")
+    padmEnsureSafeDirectory "${tokenDir}" || return 1
+    chmod 700 "${tokenDir}" 2>/dev/null || true
     if [[ ! -s "${tokenFile}" ]]; then
+        padmCreateTempFileForTarget tmpFile "${tokenFile}" token || return 1
         if command -v openssl >/dev/null 2>&1; then
-            openssl rand -hex 32 >"${tokenFile}" || return 1
+            if ! openssl rand -hex 32 >"${tmpFile}"; then
+                padmRemoveCleanupPath "${tmpFile}"
+                return 1
+            fi
         else
             tokenValue=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 64 || true)
-            [[ "${#tokenValue}" -ge 64 ]] || return 1
-            printf '%s\n' "${tokenValue}" >"${tokenFile}" || return 1
+            if [[ "${#tokenValue}" -lt 64 ]] || ! printf '%s\n' "${tokenValue}" >"${tmpFile}"; then
+                padmRemoveCleanupPath "${tmpFile}"
+                return 1
+            fi
+        fi
+        if ! commitGeneratedFile "${tmpFile}" "${tokenFile}" 600; then
+            padmRemoveCleanupPath "${tmpFile}"
+            return 1
         fi
     fi
     [[ -s "${tokenFile}" ]] || return 1
@@ -871,7 +884,7 @@ subscriptionGroupsSecureStateFiles() {
     local groupsFile
     groupsDir=$(subscriptionGroupsDir)
     groupsFile=$(subscriptionGroupsFile)
-    mkdir -p "${groupsDir}" || return 1
+    padmEnsureSafeDirectory "${groupsDir}" || return 1
     chmod 700 "${groupsDir}" 2>/dev/null || true
     [[ -f "${groupsFile}" ]] && chmod 600 "${groupsFile}" 2>/dev/null || true
 }
