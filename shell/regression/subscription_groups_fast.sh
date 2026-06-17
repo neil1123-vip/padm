@@ -1790,13 +1790,6 @@ runWarpConfigGenerationFailureRegression() {
         warpRegCoreCPUVendor="main-linux-amd64"
         address="172.16.0.2/32"
 
-        autoRead() {
-            if [[ "$1" == "warp_reg_install" ]]; then
-                printf -v "$3" '%s' 'n'
-            else
-                printf -v "$3" '%s' ''
-            fi
-        }
         reloadCore() { return 0; }
 
         cat >"${warpDir}/warp-reg" <<'EOF'
