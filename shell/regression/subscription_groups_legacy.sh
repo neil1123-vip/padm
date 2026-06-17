@@ -15657,6 +15657,96 @@ runTlsRenewalFailurePropagationRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
+runTlsRenewalInstallRollbackRegression() (
+    local root="${TMP_DIR}/tls-renew-install-rollback"
+    local tlsDir="${root}/certs"
+    local homeDir="${root}/home"
+    local serviceLog="${root}/services.log"
+    local commandLog="${root}/commands.log"
+    local statusLog="${root}/status.log"
+    local errorLog="${root}/error.log"
+    local oldHome="${HOME}"
+    local oldTlsDir="${PADM_TLS_DIR:-}"
+    local oldCurrentHost="${currentHost:-}"
+    local oldDomain="${domain:-}"
+    local oldTlsDomain="${tlsDomain:-}"
+    local oldInstalledDNSAPIStatus="${installedDNSAPIStatus:-}"
+    local oldSslRenewalDays="${sslRenewalDays:-}"
+    local oldCoreInstallType="${coreInstallType:-}"
+    local oldDnsTLSDomain="${dnsTLSDomain:-}"
+    local rc
+
+    mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/renew.example.com_ecc"
+    HOME="${homeDir}"
+    PADM_TLS_DIR="${tlsDir}"
+    currentHost=renew.example.com
+    domain=
+    tlsDomain=
+    dnsTLSDomain=
+    installedDNSAPIStatus=
+    coreInstallType=1
+    sslRenewalDays=90
+    export REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    printf 'old-cert\n' >"${tlsDir}/renew.example.com.crt"
+    printf 'old-key\n' >"${tlsDir}/renew.example.com.key"
+    printf 'acme-cert\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.cer"
+    printf 'acme-key\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.key"
+    : >"${serviceLog}"
+    : >"${commandLog}"
+    : >"${statusLog}"
+    : >"${errorLog}"
+
+    statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    progressCard() { return 0; }
+    handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; return 0; }
+    handleXray() { printf 'xray:%s\n' "$1" >>"${serviceLog}"; return 0; }
+    handleSingBox() { printf 'sing-box:%s\n' "$1" >>"${serviceLog}"; return 0; }
+    reloadCore() { printf 'reload\n' >>"${serviceLog}"; return 0; }
+    stat() {
+        if [[ "$1" == "--format=%z" && "${2:-}" == *"/renew.example.com_ecc/renew.example.com.cer" ]]; then
+            date -d '89 days ago' '+%F %T.000000000 %z'
+            return 0
+        fi
+        command stat "$@"
+    }
+    sudo() {
+        printf 'sudo:%s\n' "$*" >>"${commandLog}"
+        printf 'new-cert\n' >"${tlsDir}/renew.example.com.crt"
+        printf 'new-key\n' >"${tlsDir}/renew.example.com.key"
+        return 1
+    }
+
+    set +e
+    renewalTLS >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${tlsDir}/renew.example.com.crt")" == "old-cert" ]]
+    [[ "$(<"${tlsDir}/renew.example.com.key")" == "old-key" ]]
+    grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
+    grep -q 'TLS 证书安装失败，正在尝试恢复服务' "${errorLog}"
+    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
+
+    if [[ -n "${oldTlsDir}" ]]; then
+        PADM_TLS_DIR="${oldTlsDir}"
+    else
+        unset PADM_TLS_DIR
+    fi
+    HOME="${oldHome}"
+    currentHost="${oldCurrentHost}"
+    domain="${oldDomain}"
+    tlsDomain="${oldTlsDomain}"
+    installedDNSAPIStatus="${oldInstalledDNSAPIStatus}"
+    sslRenewalDays="${oldSslRenewalDays}"
+    coreInstallType="${oldCoreInstallType}"
+    dnsTLSDomain="${oldDnsTLSDomain}"
+)
+
 runTlsReinstallRollbackRegression() (
     local root="${TMP_DIR}/tls-reinstall-rollback"
     local tlsDir="${root}/tls"
@@ -15771,6 +15861,7 @@ runRegressionTls() {
     runRegressionStep tls-dns-api-domain-selection runTlsDnsApiDomainSelectionRegression &&
         runRegressionStep tls-custom-email-home-account runTlsCustomSSLEmailUsesHomeAccountFileRegression &&
         runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
+        runRegressionStep tls-renew-install-rollback runTlsRenewalInstallRollbackRegression &&
         runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 }
