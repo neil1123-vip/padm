@@ -2496,7 +2496,7 @@ EOF
         fi
         backupPath=
     else
-        if ! rm -f "${targetPath}" >/dev/null 2>&1; then
+        if ! removeManagedPathIfPresent "${targetPath}"; then
             errorCard "sing-box 日志配置重载失败，且新配置清理失败，请手动检查 ${targetPath}"
             return 1
         fi

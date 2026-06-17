@@ -147,11 +147,9 @@ restoreVlessEncryptionBackup() {
     local stateMode=$6
     local reason=$7
     local restoreFailed=false
-    if ! mv "${backupFile}" "${configFile}"; then
-        if ! restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
-            errorCard "${reason}，且 VLESS Encryption 配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
-            return 1
-        fi
+    if ! restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
+        errorCard "${reason}，且 VLESS Encryption 配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
+        return 1
     fi
     removeManagedFileIfPresent "${backupFile}" || true
     if [[ "${hadStateBackup}" == "true" ]]; then
