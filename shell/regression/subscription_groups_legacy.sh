@@ -7843,7 +7843,6 @@ JSON
             printf '%s\n' "$2" >"${resultFailures}"
             return 0
         }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
         statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
         set +e
@@ -7920,7 +7919,6 @@ JSON
             printf '%s\n' "$2" >"${resultFailures}"
             return 0
         }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
         statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
         set +e
@@ -8002,7 +8000,6 @@ JSON
             printf '%s\n' "$2" >"${resultFailures}"
             return 0
         }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
         statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
         set +e
