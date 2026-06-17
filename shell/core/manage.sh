@@ -2504,32 +2504,32 @@ refreshXHTTPSubscriptions() {
 
 configTransactionCommit() {
     local configFile=$1
-    local backupFile=$2
-    local stagedFile="${configFile}.tmp"
-    local validateFn=$3
-    local failureTitle=$4
-    local rollbackMessage=$5
-    local successMessage=$6
-    local refreshFn=$7
-    local reloadFn=${8:-reloadCore}
+    local stagedFile=$2
+    local backupFile=$3
+    local validateFn=$4
+    local failureTitle=$5
+    local rollbackMessage=$6
+    local successMessage=$7
+    local refreshFn=$8
+    local reloadFn=${9:-reloadCore}
 
     configFile=$(padmRequireSafeAbsolutePath "${configFile}") || return 1
     backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
     if ! commitGeneratedJsonFile "${stagedFile}" "${configFile}"; then
         removeManagedFileIfPresent "${backupFile}" || true
-        removeManagedFileIfPresent "${stagedFile}" || true
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
     if ! "${validateFn}"; then
         if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
             removeManagedFileIfPresent "${backupFile}" || true
-            removeManagedFileIfPresent "${stagedFile}" || true
+            padmRemoveCleanupPath "${stagedFile}"
             "${validateFn}" >/dev/null 2>&1 || true
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
             menuLine "${rollbackMessage}"
             menuClose
         else
-            removeManagedFileIfPresent "${stagedFile}" || true
+            padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
             menuLine "配置校验失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
             menuClose
@@ -2539,7 +2539,7 @@ configTransactionCommit() {
     if ! "${reloadFn}"; then
         if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
             removeManagedFileIfPresent "${backupFile}" || true
-            removeManagedFileIfPresent "${stagedFile}" || true
+            padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
             if "${reloadFn}" >/dev/null 2>&1; then
                 menuLine "已回滚本次修改"
@@ -2548,7 +2548,7 @@ configTransactionCommit() {
             fi
             menuClose
         else
-            removeManagedFileIfPresent "${stagedFile}" || true
+            padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
             menuLine "核心重载失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
             menuClose
@@ -2576,29 +2576,32 @@ xhttpConfigTestLog() {
 }
 
 commitXHTTPConfigUpdate() {
-    local successMessage=$1
+    local stagedFile=$1
+    local successMessage=$2
     local configFile backupFile
     configFile=$(manageXHTTPConfigFile)
+    configFile=$(padmResolveManagedAbsolutePath "${configFile}") || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     if [[ "${coreInstallType}" != "1" || ! -f "${configFile}" ]]; then
         errorCard "未检测到 Xray Reality XHTTP 配置，请先安装 12.VLESS Reality XHTTP"
-        rm -f "${configFile}.tmp"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
     backupFile="${configFile}.xhttp.bak"
-    configTransactionCommit "${configFile}" "${backupFile}" validateXHTTPConfigUpdate "XHTTP 配置校验失败" "已回滚本次 XHTTP 修改；排查日志：$(xhttpConfigTestLog)" "${successMessage}" refreshXHTTPSubscriptions
+    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateXHTTPConfigUpdate "XHTTP 配置校验失败" "已回滚本次 XHTTP 修改；排查日志：$(xhttpConfigTestLog)" "${successMessage}" refreshXHTTPSubscriptions
 }
 
 applyXHTTPConfigUpdate() {
     local jqFilter=$1
     local successMessage=$2
-    local configFile
+    local configFile stagedFile
     configFile=$(manageXHTTPConfigFile)
-    if ! jq "${jqFilter}" "${configFile}" >"${configFile}.tmp"; then
+    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP 配置失败，已取消"; return 1; }
+    if ! jq "${jqFilter}" "${configFile}" >"${stagedFile}"; then
         errorCard "写入 XHTTP 配置失败，已取消"
-        rm -f "${configFile}.tmp"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitXHTTPConfigUpdate "${successMessage}"
+    commitXHTTPConfigUpdate "${stagedFile}" "${successMessage}"
 }
 
 setXHTTPMode() {
@@ -2653,7 +2656,7 @@ readXHTTPRange() {
 }
 
 setXHTTPCustomXmux() {
-    local concurrency requestTimes reusableSecs concurrencyFrom concurrencyTo requestFrom requestTo reusableFrom reusableTo configFile
+    local concurrency requestTimes reusableSecs concurrencyFrom concurrencyTo requestFrom requestTo reusableFrom reusableTo configFile stagedFile
     concurrency=$(readXHTTPRange "请输入 maxConcurrency 范围" 16 32) || return 1
     requestTimes=$(readXHTTPRange "请输入 hMaxRequestTimes 范围" 600 900) || return 1
     reusableSecs=$(readXHTTPRange "请输入 hMaxReusableSecs 范围" 1800 3000) || return 1
@@ -2675,15 +2678,17 @@ setXHTTPCustomXmux() {
         menuClose
     fi
     configFile=$(manageXHTTPConfigFile)
-    if ! jq --arg concurrency "${concurrencyFrom}-${concurrencyTo}" --arg requestTimes "${requestFrom}-${requestTo}" --arg reusableSecs "${reusableFrom}-${reusableTo}" '.inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$concurrency,"hMaxRequestTimes":$requestTimes,"hMaxReusableSecs":$reusableSecs}' "${configFile}" >"${configFile}.tmp"; then
+    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP XMUX 失败"; return 1; }
+    if ! jq --arg concurrency "${concurrencyFrom}-${concurrencyTo}" --arg requestTimes "${requestFrom}-${requestTo}" --arg reusableSecs "${reusableFrom}-${reusableTo}" '.inbounds[0].streamSettings.xhttpSettings.xmux = {"maxConcurrency":$concurrency,"hMaxRequestTimes":$requestTimes,"hMaxReusableSecs":$reusableSecs}' "${configFile}" >"${stagedFile}"; then
         errorCard "写入 XHTTP XMUX 失败"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitXHTTPConfigUpdate "XHTTP XMUX 自定义范围已应用"
+    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP XMUX 自定义范围已应用"
 }
 
 setXHTTPPathHost() {
-    local configFile currentPath currentHost newPath newHost
+    local configFile currentPath currentHost newPath newHost stagedFile
     configFile=$(manageXHTTPConfigFile)
     currentPath=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.path // ""' "${configFile}" 2>/dev/null)
     currentHost=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.host // ""' "${configFile}" 2>/dev/null)
@@ -2703,15 +2708,17 @@ setXHTTPPathHost() {
     menuLine "通常建议 host 与 Reality SNI 保持一致"
     menuLine "仅 CDN 域前置或特殊反代场景才需要改"
     menuClose
-    if ! jq --arg path "${newPath}" --arg host "${newHost}" '.inbounds[0].streamSettings.xhttpSettings.path = $path | .inbounds[0].streamSettings.xhttpSettings.host = $host' "${configFile}" >"${configFile}.tmp"; then
+    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP path/host 失败"; return 1; }
+    if ! jq --arg path "${newPath}" --arg host "${newHost}" '.inbounds[0].streamSettings.xhttpSettings.path = $path | .inbounds[0].streamSettings.xhttpSettings.host = $host' "${configFile}" >"${stagedFile}"; then
         errorCard "写入 XHTTP path/host 失败"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitXHTTPConfigUpdate "XHTTP path/host 已更新"
+    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP path/host 已更新"
 }
 
 setXHTTPAdvancedParams() {
-    local configFile padding maxPost minInterval maxBuffered streamSecs noGrpc noSse pf pt sf st
+    local configFile padding maxPost minInterval maxBuffered streamSecs noGrpc noSse pf pt sf st stagedFile
     configFile=$(manageXHTTPConfigFile)
     padding=$(readXHTTPRange "请输入 xPaddingBytes 范围" 100 1000) || return 1
     read -r pf pt <<<"${padding}"
@@ -2729,15 +2736,17 @@ setXHTTPAdvancedParams() {
         errorCard "数值参数必须是非负整数"
         return 1
     }
-    if ! jq --arg padding "${pf}-${pt}" --argjson maxPost "${maxPost}" --argjson minInterval "${minInterval}" --argjson maxBuffered "${maxBuffered}" --arg streamSecs "${sf}-${st}" --argjson noGrpc "$([[ "${noGrpc}" == "y" ]] && echo true || echo false)" --argjson noSse "$([[ "${noSse}" == "y" ]] && echo true || echo false)" '.inbounds[0].streamSettings.xhttpSettings.xPaddingBytes = $padding | .inbounds[0].streamSettings.xhttpSettings.scMaxEachPostBytes = $maxPost | .inbounds[0].streamSettings.xhttpSettings.scMinPostsIntervalMs = $minInterval | .inbounds[0].streamSettings.xhttpSettings.scMaxBufferedPosts = $maxBuffered | .inbounds[0].streamSettings.xhttpSettings.scStreamUpServerSecs = $streamSecs | .inbounds[0].streamSettings.xhttpSettings.noGRPCHeader = $noGrpc | .inbounds[0].streamSettings.xhttpSettings.noSSEHeader = $noSse' "${configFile}" >"${configFile}.tmp"; then
+    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP 高级参数失败"; return 1; }
+    if ! jq --arg padding "${pf}-${pt}" --argjson maxPost "${maxPost}" --argjson minInterval "${minInterval}" --argjson maxBuffered "${maxBuffered}" --arg streamSecs "${sf}-${st}" --argjson noGrpc "$([[ "${noGrpc}" == "y" ]] && echo true || echo false)" --argjson noSse "$([[ "${noSse}" == "y" ]] && echo true || echo false)" '.inbounds[0].streamSettings.xhttpSettings.xPaddingBytes = $padding | .inbounds[0].streamSettings.xhttpSettings.scMaxEachPostBytes = $maxPost | .inbounds[0].streamSettings.xhttpSettings.scMinPostsIntervalMs = $minInterval | .inbounds[0].streamSettings.xhttpSettings.scMaxBufferedPosts = $maxBuffered | .inbounds[0].streamSettings.xhttpSettings.scStreamUpServerSecs = $streamSecs | .inbounds[0].streamSettings.xhttpSettings.noGRPCHeader = $noGrpc | .inbounds[0].streamSettings.xhttpSettings.noSSEHeader = $noSse' "${configFile}" >"${stagedFile}"; then
         errorCard "写入 XHTTP 高级参数失败"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitXHTTPConfigUpdate "XHTTP 高级参数已更新"
+    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP 高级参数已更新"
 }
 
 setXHTTPDownloadSettings() {
-    local configFile address port security serverName host path alpn mode publicKey shortId
+    local configFile address port security serverName host path alpn mode publicKey shortId stagedFile
     configFile=$(manageXHTTPConfigFile)
     echoContent title "\n┌─ XHTTP 上下行分离风险 ─────────────────────────────"
     menuLine "上下行分离属于高级功能"
@@ -2769,11 +2778,13 @@ setXHTTPDownloadSettings() {
         errorCard "下行 Reality 需要 publicKey；当前配置未找到，请先确认 Reality 密钥"
         return 1
     fi
-    if ! jq --arg address "${address}" --argjson port "${port}" --arg security "${security}" --arg serverName "${serverName}" --arg host "${host}" --arg path "${path}" --arg alpn "${alpn}" --arg mode "${mode}" --arg publicKey "${publicKey}" --arg shortId "${shortId}" '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings = {"address":$address,"port":$port,"network":"xhttp","security":$security,"xhttpSettings":{"host":$host,"path":$path,"mode":$mode}} | if $security == "reality" then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings = {"serverName":$serverName,"fingerprint":"chrome","show":false,"publicKey":$publicKey,"shortId":$shortId,"spiderX":"/"} else .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings = {"serverName":$serverName,"alpn":[$alpn],"fingerprint":"chrome"} end' "${configFile}" >"${configFile}.tmp"; then
+    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP 上下行分离配置失败"; return 1; }
+    if ! jq --arg address "${address}" --argjson port "${port}" --arg security "${security}" --arg serverName "${serverName}" --arg host "${host}" --arg path "${path}" --arg alpn "${alpn}" --arg mode "${mode}" --arg publicKey "${publicKey}" --arg shortId "${shortId}" '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings = {"address":$address,"port":$port,"network":"xhttp","security":$security,"xhttpSettings":{"host":$host,"path":$path,"mode":$mode}} | if $security == "reality" then .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings = {"serverName":$serverName,"fingerprint":"chrome","show":false,"publicKey":$publicKey,"shortId":$shortId,"spiderX":"/"} else .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings = {"serverName":$serverName,"alpn":[$alpn],"fingerprint":"chrome"} end' "${configFile}" >"${stagedFile}"; then
         errorCard "写入 XHTTP 上下行分离配置失败"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitXHTTPConfigUpdate "XHTTP 上下行分离配置已启用"
+    commitXHTTPConfigUpdate "${stagedFile}" "XHTTP 上下行分离配置已启用"
 }
 
 disableXHTTPDownloadSettings() {
@@ -3061,29 +3072,32 @@ tuicConfigTestLog() {
 }
 
 commitTuicConfigUpdate() {
-    local successMessage=$1
+    local stagedFile=$1
+    local successMessage=$2
     local configFile backupFile
     configFile=$(tuicConfigFile)
+    configFile=$(padmResolveManagedAbsolutePath "${configFile}") || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     if [[ ! -f "${configFile}" ]]; then
         errorCard "未检测到 Tuic 配置，请先安装 Tuic"
-        rm -f "${configFile}.tmp"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
     backupFile="${configFile}.tuic.bak"
-    configTransactionCommit "${configFile}" "${backupFile}" validateTuicConfigUpdate "Tuic 配置校验失败" "已回滚本次 Tuic 修改；排查日志：$(tuicConfigTestLog)" "${successMessage}" refreshTuicSubscriptions
+    configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateTuicConfigUpdate "Tuic 配置校验失败" "已回滚本次 Tuic 修改；排查日志：$(tuicConfigTestLog)" "${successMessage}" refreshTuicSubscriptions
 }
 
 applyTuicConfigUpdate() {
     local jqFilter=$1
     local successMessage=$2
-    local configFile
+    local configFile stagedFile
     configFile=$(tuicConfigFile)
-    if ! jq "${jqFilter}" "${configFile}" >"${configFile}.tmp"; then
+    padmCreateTempFileForTarget stagedFile "${configFile}" tuic || { errorCard "写入 Tuic 配置失败，已取消"; return 1; }
+    if ! jq "${jqFilter}" "${configFile}" >"${stagedFile}"; then
         errorCard "写入 Tuic 配置失败，已取消"
-        rm -f "${configFile}.tmp"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitTuicConfigUpdate "${successMessage}"
+    commitTuicConfigUpdate "${stagedFile}" "${successMessage}"
 }
 
 setTuicCongestionControl() {
@@ -3105,16 +3119,17 @@ readTuicDuration() {
 }
 
 setTuicConnectionParams() {
-    local authTimeout heartbeat configFile
+    local authTimeout heartbeat configFile stagedFile
     authTimeout=$(readTuicDuration "请输入认证超时时间 auth_timeout" "3s") || return 1
     heartbeat=$(readTuicDuration "请输入心跳间隔 heartbeat" "10s") || return 1
     configFile=$(tuicConfigFile)
-    if ! jq --arg authTimeout "${authTimeout}" --arg heartbeat "${heartbeat}" '.inbounds[0].auth_timeout = $authTimeout | .inbounds[0].heartbeat = $heartbeat' "${configFile}" >"${configFile}.tmp"; then
+    padmCreateTempFileForTarget stagedFile "${configFile}" tuic || { errorCard "写入 Tuic 连接参数失败"; return 1; }
+    if ! jq --arg authTimeout "${authTimeout}" --arg heartbeat "${heartbeat}" '.inbounds[0].auth_timeout = $authTimeout | .inbounds[0].heartbeat = $heartbeat' "${configFile}" >"${stagedFile}"; then
         errorCard "写入 Tuic 连接参数失败"
-        rm -f "${configFile}.tmp"
+        padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitTuicConfigUpdate "Tuic 连接参数已更新"
+    commitTuicConfigUpdate "${stagedFile}" "Tuic 连接参数已更新"
 }
 
 setTuicZeroRtt() {

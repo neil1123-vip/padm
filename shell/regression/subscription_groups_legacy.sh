@@ -5235,21 +5235,28 @@ JSON
     [[ -e "${subscribeMarker}" ]]
 )
 
-runConfigTransactionRegression() {
-    local targetFile="${TMP_DIR}/transaction.json"
+runConfigTransactionRegression() (
+    local tmpRoot
+    tmpRoot=$(cd -- "${TMP_DIR}" && pwd -P) || return 1
+    local targetFile="${tmpRoot}/transaction.json"
     local backupFile="${targetFile}.bak"
+    local stagedFile
     local originalContent updatedContent
-    local reloadCountFile="${TMP_DIR}/transaction-reload-count"
-    local refreshCountFile="${TMP_DIR}/transaction-refresh-count"
+    local reloadCountFile="${tmpRoot}/transaction-reload-count"
+    local refreshCountFile="${tmpRoot}/transaction-refresh-count"
     local validateMode=success
     local reloadMode=success
     local refreshMode=success
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
-    local checkPortTmpRoot="${TMP_DIR}/check-port-tmp"
+    local checkPortTmpRootRel="${TMP_DIR}/check-port-tmp"
+    local checkPortTmpRoot
     local checkPortNginxDirRel="${TMP_DIR}/check-port-nginx"
     local checkPortNginxDir checkPortTarget
-    mkdir -p "${checkPortTmpRoot}" "${checkPortNginxDirRel}"
+    local fakeBinDirRel="${TMP_DIR}/fake-bin"
+    local fakeBinDir="${tmpRoot}/fake-bin"
+    mkdir -p "${checkPortTmpRootRel}" "${checkPortNginxDirRel}" "${fakeBinDirRel}"
+    checkPortTmpRoot="$(cd -- "${checkPortTmpRootRel}" && pwd -P)"
     checkPortNginxDir="$(cd -- "${checkPortNginxDirRel}" && pwd -P)/"
     checkPortTarget="${checkPortNginxDir}checkPortOpen.conf"
     TMPDIR="${checkPortTmpRoot}"
@@ -5272,13 +5279,14 @@ runConfigTransactionRegression() {
 {"mode":"old","port":443}
 JSON
     originalContent=$(<"${targetFile}")
-    jq '.mode = "new"' "${targetFile}" >"${targetFile}.tmp"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new"' "${targetFile}" >"${stagedFile}"
     validateMode=fail
-    if configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock; then
+    if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock; then
         return 1
     fi
     [[ "$(<"${targetFile}")" == "${originalContent}" ]]
-    [[ ! -e "${targetFile}.tmp" ]]
+    [[ ! -e "${stagedFile}" ]]
     [[ ! -e "${backupFile}" ]]
     [[ ! -e "${reloadCountFile}" ]]
     [[ ! -e "${refreshCountFile}" ]]
@@ -5286,35 +5294,39 @@ JSON
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
     originalContent=$(<"${targetFile}")
     rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
-    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
     validateMode=fail
     (
-        mv() {
-            if [[ "$1" == "${backupFile}" && "$2" == "${targetFile}" ]]; then
+        cp() {
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${tmpRoot}"/.transaction.json.restore.* ]]; then
                 return 1
             fi
-            command mv "$@"
+            command cp "$@"
         }
-        if configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+        if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
             return 1
         fi
         [[ "$(<"${targetFile}")" != "${originalContent}" ]]
         jq -e '.mode == "new" and .port == 8443' "${targetFile}" >/dev/null
         [[ "$(<"${backupFile}")" == "${originalContent}" ]]
-        [[ ! -e "${targetFile}.tmp" ]]
+        [[ ! -e "${stagedFile}" ]]
         [[ ! -e "${reloadCountFile}" ]]
         [[ ! -e "${refreshCountFile}" ]]
     ) || return 1
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
     rm -f "${backupFile}"
-    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
     validateMode=success
-    configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock
+    configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock
     updatedContent=$(<"${targetFile}")
     [[ "${updatedContent}" != "${originalContent}" ]]
     jq -e '.mode == "new" and .port == 8443' "${targetFile}" >/dev/null
-    [[ ! -e "${targetFile}.tmp" ]]
+    [[ ! -e "${stagedFile}" ]]
     [[ ! -e "${backupFile}" ]]
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "1" ]]
     [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
@@ -5322,34 +5334,40 @@ JSON
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
     originalContent=$(<"${targetFile}")
     rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
-    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
     reloadMode=fail
     refreshMode=success
-    if configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+    if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
         return 1
     fi
     [[ "$(<"${targetFile}")" == "${originalContent}" ]]
-    [[ ! -e "${targetFile}.tmp" ]]
+    [[ ! -e "${stagedFile}" ]]
     [[ ! -e "${backupFile}" ]]
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "2" ]]
     [[ ! -e "${refreshCountFile}" ]]
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
     rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
-    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${targetFile}.tmp"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
     reloadMode=success
     refreshMode=fail
-    if configTransactionCommit "${targetFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+    if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
         return 1
     fi
     jq -e '.mode == "new" and .port == 8443' "${targetFile}" >/dev/null
-    [[ ! -e "${targetFile}.tmp" ]]
+    [[ ! -e "${stagedFile}" ]]
     [[ ! -e "${backupFile}" ]]
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "1" ]]
     [[ "$(wc -l <"${refreshCountFile}" | tr -d ' ')" == "1" ]]
     refreshMode=success
 
-    local refreshFailureLog="${TMP_DIR}/transaction-refresh-failure.log"
+    local refreshFailureLog="${tmpRoot}/transaction-refresh-failure.log"
+    local localSubscribeBase
+    mkdir -p "${TMP_DIR}/subscribe_local/default" "${TMP_DIR}/subscribe_local/clashMeta" "${TMP_DIR}/subscribe_local/sing-box"
+    PADM_SUBSCRIBE_LOCAL_DIR="${tmpRoot}/subscribe_local"
+    localSubscribeBase=$(subscribeLocalBaseDir)
     readNginxSubscribe() {
         subscribePort=443
         nginxConfigPath="${TMP_DIR}/nginx-refresh/"
@@ -5363,7 +5381,7 @@ JSON
         return 1
     }
     errorCard() { return 0; }
-    rm -f "${refreshFailureLog}"
+    : >"${refreshFailureLog}"
     if refreshXHTTPSubscriptions >/dev/null 2>&1; then
         return 1
     fi
@@ -5373,7 +5391,7 @@ JSON
         subscribePort=
         nginxConfigPath="${TMP_DIR}/nginx-refresh/"
     }
-    rm -f "${refreshFailureLog}"
+    : >"${refreshFailureLog}"
     if refreshTuicSubscriptions >/dev/null 2>&1; then
         return 1
     fi
@@ -5392,7 +5410,7 @@ JSON
             subscribePort=
             nginxConfigPath="${TMP_DIR}/nginx-refresh/"
         }
-        rm -f "${refreshFailureLog}"
+        : >"${refreshFailureLog}"
         set +e
         refreshVlessEncryptionSubscriptions >/dev/null 2>&1
         rc=$?
@@ -5402,15 +5420,14 @@ JSON
         ! grep -q '^showAccounts$' "${refreshFailureLog}"
     ) || return 1
 
-    mkdir -p "${TMP_DIR}/fake-bin" "${checkPortNginxDir}"
-    cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
+    cat >"${fakeBinDir}/nginx" <<'SH'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
 printf 'check-port validate %s\n' "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}"
 [[ "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}" == "success" ]]
 SH
-    chmod +x "${TMP_DIR}/fake-bin/nginx"
-    PATH="${TMP_DIR}/fake-bin:${PATH}"
+    chmod +x "${fakeBinDir}/nginx"
+    PATH="${fakeBinDir}:${PATH}"
     nginxConfigPath="${checkPortNginxDir}"
     printf 'old config\n' >"${checkPortTarget}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=fail
@@ -5447,7 +5464,7 @@ SH
     PATH="${oldPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_FAKE_NGINX_VALIDATE_MODE
-}
+)
 
 runNginxServiceFailureRegression() {
     (
