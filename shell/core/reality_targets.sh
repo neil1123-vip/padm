@@ -930,14 +930,6 @@ realityTargetCandidateLineByIndex() {
     return 1
 }
 
-realityTargetCandidateCount() {
-    local line count=0
-    while IFS= read -r line; do
-        count=$((count + 1))
-    done < <(realityTargetCandidates)
-    printf '%s\n' "${count}"
-}
-
 realityTargetCandidateField() {
     local line=$1
     local field=$2
@@ -1191,7 +1183,7 @@ selectDefaultRealityTarget() {
 
 selectRandomRealityTargetCandidate() {
     local count randomNum line host sni
-    count=$(realityTargetCandidateCount)
+    count=$(realityTargetCandidates | awk 'END { print NR + 0 }')
     randomNum=$(randomNum 1 "${count}")
     line=$(realityTargetCandidateLineByIndex "${randomNum}") || line=$(realityTargetCandidateLineByIndex 1)
     host=$(realityTargetCandidateField "${line}" 1)
@@ -2014,7 +2006,7 @@ scanLocalAsnRealityTargets() {
         return 1
     fi
     scanStart=$(date +%s)
-    totalCandidates=$(realityTargetCandidateCount)
+    totalCandidates=$(realityTargetCandidates | awk 'END { print NR + 0 }')
     padmCreateTempPath resultLinesFile || return 1
     padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
     currentIp=${networkProfile%%$'\t'*}

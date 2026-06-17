@@ -6642,7 +6642,7 @@ EOF
     REALITY_TARGET_PAGE_SIZE=2
     AUTO_INSTALL=
 
-    [[ "$(realityTargetCandidateCount)" == "5" ]]
+    [[ "$(realityTargetCandidates | awk 'END { print NR + 0 }')" == "5" ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
     [[ "$(realityTargetFilteredCandidateCount developer)" == "1" ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
@@ -6767,7 +6767,7 @@ y
 
 runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate
-    [[ "$(realityTargetCandidateCount)" -ge 194 ]]
+    [[ "$(realityTargetCandidates | awk 'END { print NR + 0 }')" -ge 194 ]]
     [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 50 ]]
     [[ "$(realityTargetFilteredCandidateCount developer)" -ge 10 ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
