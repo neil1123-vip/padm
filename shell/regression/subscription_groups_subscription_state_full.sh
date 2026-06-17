@@ -963,7 +963,6 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
     local syncLocalFile="${syncRoot}/subscribe_local/default/user"
     local syncPublicFile="${syncRoot}/subscribe/default/user"
     local remoteLog="${syncRoot}/remote.log"
-    local reconcileLog="${syncRoot}/reconcile.log"
     local statusLog="${syncRoot}/status.log"
     local resultStatus="${syncRoot}/mark-status.log"
     local resultFailures="${syncRoot}/mark-failures.log"
@@ -1002,7 +1001,6 @@ JSON
         return 0
     }
     subscriptionSyncReconcileLocalServices() {
-        printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
         if [[ -z "${1:-}" ]]; then
             printf 'new-local\n' >"${syncLocalFile}"
             printf 'new-public\n' >"${syncPublicFile}"
