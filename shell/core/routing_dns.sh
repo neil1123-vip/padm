@@ -74,6 +74,9 @@ dnsRoutingBackupDir() {
         return 0
     fi
     local tmpBase="${TMPDIR:-/tmp}"
+    if [[ "${tmpBase}" != /* ]]; then
+        tmpBase=$(cd -- "${tmpBase}" 2>/dev/null && pwd -P) || return 1
+    fi
     printf '%s\n' "${tmpBase%/}/padm-dns-routing-backup"
 }
 
@@ -115,7 +118,8 @@ dnsRoutingBackupCreate() {
         return 1
     fi
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
-    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
+    padmEnsureSafeDirectory "${backupDir}/xray" || return 1
+    padmEnsureSafeDirectory "${backupDir}/sing-box" || return 1
     if [[ -n "${xrayConfigDir}" && -f "${xrayConfigDir}11_dns.json" ]]; then
         cp "${xrayConfigDir}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
     fi

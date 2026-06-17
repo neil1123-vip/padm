@@ -85,7 +85,15 @@ SUBSCRIBE_CAPTURE_DIR="${TMP_DIR}/subscribe_local"
 configPath="${TMP_DIR}/xray-conf/"
 singBoxConfigPath="${TMP_DIR}/sing-box-conf/"
 runRoutingRegression() {
-    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    local routingRootRel="${TMP_DIR}/routing-core"
+    local routingRoot
+    mkdir -p "${routingRootRel}/xray-conf" "${routingRootRel}/sing-box-conf" "${routingRootRel}/tmp"
+    routingRoot=$(cd -- "${routingRootRel}" && pwd -P)
+    local configPath="${routingRoot}/xray-conf/"
+    local singBoxConfigPath="${routingRoot}/sing-box-conf/"
+    local TMPDIR="${routingRoot}/tmp"
+    local PADM_ACCESS_CONTROL_BACKUP_DIR="${routingRoot}/access_control_backup"
+    export TMPDIR
     cat >"${singBoxConfigPath}dlc.dat_plain.yml" <<'YAML'
 - name: openai
 YAML
@@ -386,7 +394,6 @@ JSON
     addXrayBTBlockRule
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_out" and (.protocol | index("bittorrent")))' "${configPath}09_routing.json" >/dev/null
     coreInstallType=2
-    mkdir -p "${singBoxConfigPath}"
     addSingBoxBTBlockRule
     hasSingBoxBTBlockRule
     accessControlBackupCreate
@@ -586,7 +593,7 @@ runAccessControlConfigTransactionRegression() (
     singBoxConfigPath="${root}/sing-box/"
     PADM_ACCESS_CONTROL_BACKUP_DIR="${root}/backup"
     coreInstallType=1
-    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    mkdir -p "${rootRel}/xray" "${rootRel}/sing-box"
     : >"${statusLog}"
 
     echoContent() { printf 'title:%s\n' "$*" >>"${statusLog}"; }
@@ -631,8 +638,13 @@ JSON
     [[ ! -e "${PADM_ACCESS_CONTROL_BACKUP_DIR}" ]]
     grep -q '核心重载失败，已回滚本次修改' "${statusLog}"
 
-    rm -rf "${root}"
-    mkdir -p "${configPath}" "${singBoxConfigPath}"
+    rm -rf "${rootRel}"
+    mkdir -p "${rootRel}/xray" "${rootRel}/sing-box"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    statusLog="${root}/status.log"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    PADM_ACCESS_CONTROL_BACKUP_DIR="${root}/backup"
     : >"${statusLog}"
     reloadCalls=0
     cat >"${configPath}09_routing.json" <<'JSON'
@@ -1439,7 +1451,7 @@ runDNSRoutingFailureReturnRegression() (
     }
 
     (
-        mkdir -p "${root}/dns-sing-box-helper"
+        mkdir -p "${rootRel}/dns-sing-box-helper"
         configPath=
         singBoxConfigPath="${root}/dns-sing-box-helper/"
         printf '{"dns":{"servers":["old"]}}\n' >"${singBoxConfigPath}dns.json"
@@ -1453,7 +1465,7 @@ runDNSRoutingFailureReturnRegression() (
     )
 
     (
-        mkdir -p "${root}/dns-xray"
+        mkdir -p "${rootRel}/dns-xray"
         configPath="${root}/dns-xray/"
         singBoxConfigPath=
         coreInstallType=1
@@ -1480,7 +1492,7 @@ runDNSRoutingFailureReturnRegression() (
     )
 
     (
-        mkdir -p "${root}/dns-sing-box-outbound"
+        mkdir -p "${rootRel}/dns-sing-box-outbound"
         configPath=
         singBoxConfigPath="${root}/dns-sing-box-outbound/"
         coreInstallType=2
@@ -1506,7 +1518,7 @@ runDNSRoutingFailureReturnRegression() (
     )
 
     (
-        mkdir -p "${root}/sni-xray"
+        mkdir -p "${rootRel}/sni-xray"
         configPath="${root}/sni-xray/"
         singBoxConfigPath=
         coreInstallType=1
@@ -1533,7 +1545,7 @@ runDNSRoutingFailureReturnRegression() (
     )
 
     (
-        mkdir -p "${root}/sni-sing-box"
+        mkdir -p "${rootRel}/sni-sing-box"
         configPath=
         singBoxConfigPath="${root}/sni-sing-box/"
         coreInstallType=2
@@ -1560,7 +1572,7 @@ runDNSRoutingFailureReturnRegression() (
     )
 
     (
-        mkdir -p "${root}/remove-dns"
+        mkdir -p "${rootRel}/remove-dns"
         configPath="${root}/remove-dns/"
         singBoxConfigPath=
         coreInstallType=1
@@ -1583,7 +1595,7 @@ JSON
     )
 
     (
-        mkdir -p "${root}/remove-dns-xray-sing-box-assist/xray" "${root}/remove-dns-xray-sing-box-assist/sing-box"
+        mkdir -p "${rootRel}/remove-dns-xray-sing-box-assist/xray" "${rootRel}/remove-dns-xray-sing-box-assist/sing-box"
         configPath="${root}/remove-dns-xray-sing-box-assist/xray/"
         singBoxConfigPath="${root}/remove-dns-xray-sing-box-assist/sing-box/"
         coreInstallType=1
@@ -1609,7 +1621,7 @@ JSON
     )
 
     (
-        mkdir -p "${root}/remove-sni-xray-sing-box-assist/xray" "${root}/remove-sni-xray-sing-box-assist/sing-box"
+        mkdir -p "${rootRel}/remove-sni-xray-sing-box-assist/xray" "${rootRel}/remove-sni-xray-sing-box-assist/sing-box"
         configPath="${root}/remove-sni-xray-sing-box-assist/xray/"
         singBoxConfigPath="${root}/remove-sni-xray-sing-box-assist/sing-box/"
         coreInstallType=1
@@ -1635,7 +1647,7 @@ JSON
     )
 
     (
-        mkdir -p "${root}/dns-xray-restore-fail"
+        mkdir -p "${rootRel}/dns-xray-restore-fail"
         configPath="${root}/dns-xray-restore-fail/"
         singBoxConfigPath=
         coreInstallType=1
@@ -1736,11 +1748,13 @@ runDNSRoutingRejectsUnsafeConfigDirRegression() (
 )
 
 runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() (
-    local root="${TMP_DIR}/dns-routing-restore-scope"
+    local rootRel="${TMP_DIR}/dns-routing-restore-scope"
+    local root
     local backupDir
     local customFile
 
-    mkdir -p "${root}/xray" "${root}/sing-box"
+    mkdir -p "${rootRel}/xray" "${rootRel}/sing-box"
+    root=$(cd -- "${rootRel}" && pwd -P)
     backupDir="${root}/backup"
     customFile="${root}/sing-box/custom.json"
     configPath="${root}/xray/"
@@ -1771,17 +1785,25 @@ runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() (
 )
 
 runVMessRoutingFailureReturnRegression() (
-    local root="${TMP_DIR}/vmess-routing-failure"
-    local removeMarker="${root}/remove"
-    local outboundMarker="${root}/outbound"
-    local routingMarker="${root}/routing"
-    local uninstallRoutingMarker="${root}/uninstall-routing"
-    local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
+    local rootRel="${TMP_DIR}/vmess-routing-failure"
+    local root
+    local removeMarker
+    local outboundMarker
+    local routingMarker
+    local uninstallRoutingMarker
+    local reloadMarker
+    local successMarker
     local mode=invalid-port
     local rc
 
-    mkdir -p "${root}"
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    removeMarker="${root}/remove"
+    outboundMarker="${root}/outbound"
+    routingMarker="${root}/routing"
+    uninstallRoutingMarker="${root}/uninstall-routing"
+    reloadMarker="${root}/reload"
+    successMarker="${root}/success"
     errorCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
@@ -1813,7 +1835,7 @@ runVMessRoutingFailureReturnRegression() (
 
     mode=success
     configPath="${root}/success-xray/"
-    mkdir -p "${configPath}"
+    mkdir -p "${rootRel}/success-xray"
     cat >"${configPath}09_routing.json" <<'JSON'
 {"routing":{"type":"field","rules":[{"type":"field","domain":["domain:legacy.example"],"outboundTag":"VMess-out"}]}}
 JSON

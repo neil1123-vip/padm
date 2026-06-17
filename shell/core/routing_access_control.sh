@@ -353,6 +353,9 @@ accessControlBackupDir() {
         return 0
     fi
     local tmpBase="${TMPDIR:-/tmp}"
+    if [[ "${tmpBase}" != /* ]]; then
+        tmpBase=$(cd -- "${tmpBase}" 2>/dev/null && pwd -P) || return 1
+    fi
     printf '%s\n' "${tmpBase%/}/padm-access-control-backup"
 }
 
@@ -407,7 +410,8 @@ accessControlBackupCreate() {
         return 1
     fi
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
-    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
+    padmEnsureSafeDirectory "${backupDir}/xray" || return 1
+    padmEnsureSafeDirectory "${backupDir}/sing-box" || return 1
     if [[ -n "${xrayConfigDir}" ]]; then
         for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
             if [[ -f "${xrayConfigDir}${file}" ]]; then

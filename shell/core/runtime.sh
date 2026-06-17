@@ -954,6 +954,24 @@ padmShowUnsafePathError() {
     menuClose
 }
 
+padmEnsureSafeDirectory() {
+    local targetPath=$1
+    local parentPath targetName
+    if ! padmIsSafeAbsolutePath "${targetPath}"; then
+        return 1
+    fi
+    if [[ -e "${targetPath}" ]]; then
+        [[ -d "${targetPath}" ]] || return 1
+        return 0
+    fi
+    parentPath=$(dirname -- "${targetPath}")
+    targetName=$(basename -- "${targetPath}")
+    if [[ ! -d "${parentPath}" && "${parentPath}" != "/" ]]; then
+        padmEnsureSafeDirectory "${parentPath}" || return 1
+    fi
+    (cd -- "${parentPath}" && mkdir -p -- "${targetName}") >/dev/null 2>&1 || return 1
+}
+
 # 安全清理目录内容
 cleanDirectoryContent() {
     local targetPath=$1

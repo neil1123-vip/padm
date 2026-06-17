@@ -124,8 +124,21 @@ addXrayOutbound() {
     local tag=$1
     local domainStrategy=
     local xrayConfigPath="${configPath:-/etc/padm/xray/conf/}"
+    local xrayConfigDir="${xrayConfigPath%/}"
 
-    mkdir -p "${xrayConfigPath}" >/dev/null 2>&1
+    if ! padmIsSafeAbsolutePath "${xrayConfigDir}"; then
+        padmShowUnsafePathError "配置 Xray 出站"
+        return 1
+    fi
+    if [[ -e "${xrayConfigDir}" ]]; then
+        [[ -d "${xrayConfigDir}" ]] || {
+            errorCard "Xray 出站配置目录异常"
+            return 1
+        }
+    elif ! padmEnsureSafeDirectory "${xrayConfigDir}"; then
+        errorCard "Xray 出站配置目录创建失败"
+        return 1
+    fi
 
     if [[ "${tag}" == *IPv4* ]]; then
         domainStrategy="ForceIPv4"
