@@ -378,6 +378,22 @@ accessControlSafeSingBoxConfigDir() {
     printf '%s\n' "${singBoxConfigPath%/}/"
 }
 
+accessControlManagedXrayFiles() {
+    printf '%s\n' "09_routing.json" "blackhole_out.json" "blackhole_ip_out.json" "allow_domain_direct_outbound.json"
+}
+
+accessControlManagedSingBoxFiles() {
+    printf '%s\n' "block_domain_route.json" "block_domain_outbound.json" "block_ip_route.json" "block_ip_outbound.json" "cn_block_route.json" "cn_block_outbound.json" "cn_block_ip_route.json" "00_allow_domain_route.json" "01_direct_outbound.json"
+}
+
+accessControlManagedXrayFile() {
+    padmManagedFilePath "$(accessControlSafeXrayConfigDir)" "$1"
+}
+
+accessControlManagedSingBoxFile() {
+    padmManagedFilePath "$(accessControlSafeSingBoxConfigDir)" "$1"
+}
+
 accessControlXrayTestLog() {
     if declare -F padmTmpFilePath >/dev/null 2>&1; then
         padmTmpFilePath padm-access-xray-test.log
@@ -413,18 +429,20 @@ accessControlBackupCreate() {
     padmEnsureSafeDirectory "${backupDir}/xray" || return 1
     padmEnsureSafeDirectory "${backupDir}/sing-box" || return 1
     if [[ -n "${xrayConfigDir}" ]]; then
-        for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
-            if [[ -f "${xrayConfigDir}${file}" ]]; then
-                cp "${xrayConfigDir}${file}" "${backupDir}/xray/${file}" || return 1
-            fi
-        done
+        while IFS= read -r file; do
+            local managedFile
+            managedFile=$(accessControlManagedXrayFile "${file}") || return 1
+            [[ -f "${managedFile}" ]] || continue
+            cp "${managedFile}" "${backupDir}/xray/${file}" || return 1
+        done < <(accessControlManagedXrayFiles)
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
-        for file in block_domain_route.json block_domain_outbound.json block_ip_route.json block_ip_outbound.json cn_block_route.json cn_block_outbound.json cn_block_ip_route.json 00_allow_domain_route.json 01_direct_outbound.json; do
-            if [[ -f "${singBoxConfigDir}${file}" ]]; then
-                cp "${singBoxConfigDir}${file}" "${backupDir}/sing-box/${file}" || return 1
-            fi
-        done
+        while IFS= read -r file; do
+            local managedFile
+            managedFile=$(accessControlManagedSingBoxFile "${file}") || return 1
+            [[ -f "${managedFile}" ]] || continue
+            cp "${managedFile}" "${backupDir}/sing-box/${file}" || return 1
+        done < <(accessControlManagedSingBoxFiles)
     fi
     return 0
 }
@@ -434,7 +452,7 @@ accessControlBackupRestore() {
     local status=0
     local xrayConfigDir=
     local singBoxConfigDir=
-    backupDir=$(accessControlBackupDir)
+    backupDir=$(accessControlSafeBackupDir) || return 1
     [[ -d "${backupDir}" ]] || return 1
     [[ -n "${configPath:-}" ]] && xrayConfigDir=$(accessControlSafeXrayConfigDir) || true
     [[ -n "${singBoxConfigPath:-}" ]] && singBoxConfigDir=$(accessControlSafeSingBoxConfigDir) || true
@@ -445,20 +463,24 @@ accessControlBackupRestore() {
         return 1
     fi
     if [[ -n "${xrayConfigDir}" ]]; then
-        for file in 09_routing.json blackhole_out.json blackhole_ip_out.json allow_domain_direct_outbound.json; do
-            rm -f "${xrayConfigDir}${file}" >/dev/null 2>&1 || status=1
+        while IFS= read -r file; do
+            local managedFile
+            managedFile=$(accessControlManagedXrayFile "${file}") || return 1
+            removeManagedFileIfPresent "${managedFile}" || status=1
             if [[ -f "${backupDir}/xray/${file}" ]]; then
-                restoreManagedFileFromBackup "${backupDir}/xray/${file}" "${xrayConfigDir}${file}" 644 || status=1
+                restoreManagedFileFromBackup "${backupDir}/xray/${file}" "${managedFile}" 644 || status=1
             fi
-        done
+        done < <(accessControlManagedXrayFiles)
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
-        for file in block_domain_route.json block_domain_outbound.json block_ip_route.json block_ip_outbound.json cn_block_route.json cn_block_outbound.json cn_block_ip_route.json 00_allow_domain_route.json 01_direct_outbound.json; do
-            rm -f "${singBoxConfigDir}${file}" >/dev/null 2>&1 || status=1
+        while IFS= read -r file; do
+            local managedFile
+            managedFile=$(accessControlManagedSingBoxFile "${file}") || return 1
+            removeManagedFileIfPresent "${managedFile}" || status=1
             if [[ -f "${backupDir}/sing-box/${file}" ]]; then
-                restoreManagedFileFromBackup "${backupDir}/sing-box/${file}" "${singBoxConfigDir}${file}" 644 || status=1
+                restoreManagedFileFromBackup "${backupDir}/sing-box/${file}" "${managedFile}" 644 || status=1
             fi
-        done
+        done < <(accessControlManagedSingBoxFiles)
     fi
     return "${status}"
 }

@@ -754,6 +754,18 @@ runAccessControlRejectsUnsafeBackupDirRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ ! -s "${rmLog}" ]]
+
+    mkdir -p "${root}/relative-backup/xray"
+    printf 'old\n' >"${root}/relative-backup/xray/09_routing.json"
+    (
+        cd "${root}"
+        set +e
+        accessControlBackupRestore >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+    )
+    [[ ! -s "${rmLog}" ]]
 )
 
 runAccessControlRejectsUnsafeConfigDirRegression() (
@@ -1762,6 +1774,18 @@ runDNSRoutingRejectsUnsafeBackupDirRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+
+    mkdir -p "${root}/relative-backup/xray"
+    printf 'old\n' >"${root}/relative-backup/xray/11_dns.json"
+    (
+        cd "${root}"
+        set +e
+        dnsRoutingBackupRestore >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+    )
     [[ ! -s "${rmLog}" ]]
 )
 
