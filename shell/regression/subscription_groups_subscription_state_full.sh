@@ -851,7 +851,6 @@ JSON
     printf 'old-public\n' >"${syncPublicFile}"
     originalConfig=$(<"${syncConfigFile}")
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
     subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
@@ -929,7 +928,6 @@ JSON
     printf 'old-public\n' >"${syncPublicFile}"
     originalConfig=$(<"${syncConfigFile}")
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
     subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
@@ -1016,7 +1014,6 @@ JSON
     printf 'old-public\n' >"${syncPublicFile}"
     originalConfig=$(<"${syncConfigFile}")
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
     subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
@@ -1093,7 +1090,6 @@ JSON
 {"inbounds":[{"settings":{"clients":[]}}]}
 JSON
 
-    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
     subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
