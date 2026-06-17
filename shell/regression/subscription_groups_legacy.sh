@@ -9118,6 +9118,90 @@ runRealityBlockedCandidateTransactionRegression() (
     fi
 )
 
+runSingBoxRealityKeyTransactionRegression() (
+    local rootRel="${TMP_DIR}/singbox-reality-key-transaction"
+    local root singBoxBinary keyFile
+    local oldSingBoxBinary="${PADM_SINGBOX_BINARY:-}"
+    local oldRealityKeyFile="${PADM_SINGBOX_REALITY_KEY_FILE:-}"
+    local oldSelectCoreType="${selectCoreType:-}"
+    local oldCoreInstallType="${coreInstallType:-}"
+    local oldLastInstallationConfig="${lastInstallationConfig:-}"
+    local oldCurrentRealityPublicKey="${currentRealityPublicKey:-}"
+    local oldCurrentRealityPrivateKey="${currentRealityPrivateKey:-}"
+    local oldRealityPrivateKey="${realityPrivateKey:-}"
+    local oldRealityPublicKey="${realityPublicKey:-}"
+    local rc
+
+    mkdir -p "${rootRel}/sing-box" "${rootRel}/config"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    singBoxBinary="${root}/sing-box/sing-box"
+    keyFile="${root}/config/reality_key"
+    cat >"${singBoxBinary}" <<'EOF'
+#!/usr/bin/env bash
+printf 'PrivateKey private-generated\n'
+printf 'PublicKey public-generated\n'
+EOF
+    chmod +x "${singBoxBinary}"
+    printf 'publicKey:old-public\n' >"${keyFile}"
+
+    PADM_SINGBOX_BINARY="${singBoxBinary}"
+    PADM_SINGBOX_REALITY_KEY_FILE="${keyFile}"
+    selectCoreType=2
+    coreInstallType=2
+    lastInstallationConfig=
+    currentRealityPublicKey=
+    currentRealityPrivateKey=
+    realityPrivateKey=
+    realityPublicKey=
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${keyFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    initRealityKey >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${keyFile}")" == "publicKey:old-public" ]]
+    [[ "${realityPrivateKey}" == "private-generated" ]]
+    [[ "${realityPublicKey}" == "public-generated" ]]
+    ! compgen -G "${root}/config/.reality_key.reality.*" >/dev/null
+
+    commitGeneratedFile() {
+        originalCommitGeneratedFile "$@"
+    }
+    realityPrivateKey=
+    realityPublicKey=
+    initRealityKey >/dev/null
+    [[ "${realityPrivateKey}" == "private-generated" ]]
+    [[ "${realityPublicKey}" == "public-generated" ]]
+    [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
+    ! compgen -G "${root}/config/.reality_key.reality.*" >/dev/null
+
+    if [[ -n "${oldSingBoxBinary}" ]]; then
+        PADM_SINGBOX_BINARY="${oldSingBoxBinary}"
+    else
+        unset PADM_SINGBOX_BINARY
+    fi
+    if [[ -n "${oldRealityKeyFile}" ]]; then
+        PADM_SINGBOX_REALITY_KEY_FILE="${oldRealityKeyFile}"
+    else
+        unset PADM_SINGBOX_REALITY_KEY_FILE
+    fi
+    selectCoreType="${oldSelectCoreType}"
+    coreInstallType="${oldCoreInstallType}"
+    lastInstallationConfig="${oldLastInstallationConfig}"
+    currentRealityPublicKey="${oldCurrentRealityPublicKey}"
+    currentRealityPrivateKey="${oldCurrentRealityPrivateKey}"
+    realityPrivateKey="${oldRealityPrivateKey}"
+    realityPublicKey="${oldRealityPublicKey}"
+)
+
 runRuntimeAndRealityRegression() {
     visionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a")
     [[ "${visionLink}" == "vless://uuid-a@node.example.com:443?encryption=none&security=reality&pqv=pqv&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
@@ -15695,6 +15779,7 @@ runRegressionTransactionCore() {
         runRegressionStep alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression &&
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
+        runRegressionStep sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
         runRegressionStep core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression &&
         runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+realityKeyFile() {
+    printf '%s\n' "${PADM_SINGBOX_REALITY_KEY_FILE:-/etc/padm/sing-box/conf/config/reality_key}"
+}
+
 # 初始化 Hysteria2 端口
 initHysteriaPort() {
     readSingBoxConfig
@@ -408,10 +412,15 @@ initRealityKey() {
     fi
     if [[ -z "${realityPrivateKey}" ]]; then
         if [[ "${selectCoreType}" == "2" || "${coreInstallType}" == "2" ]]; then
-            realityX25519Key=$(/etc/padm/sing-box/sing-box generate reality-keypair)
+            local singBoxBinary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
+            realityX25519Key=$("${singBoxBinary}" generate reality-keypair)
             realityPrivateKey=$(echo "${realityX25519Key}" | head -1 | awk '{print $2}')
             realityPublicKey=$(echo "${realityX25519Key}" | tail -n 1 | awk '{print $2}')
-            echo "publicKey:${realityPublicKey}" >/etc/padm/sing-box/conf/config/reality_key
+            local realityKeyPath realityKeyStage
+            realityKeyPath=$(realityKeyFile) || return 1
+            padmCreateTempFileForTarget realityKeyStage "${realityKeyPath}" reality || return 1
+            printf 'publicKey:%s\n' "${realityPublicKey}" >"${realityKeyStage}" || { padmRemoveCleanupPath "${realityKeyStage}"; return 1; }
+            commitGeneratedFile "${realityKeyStage}" "${realityKeyPath}" 600 || { padmRemoveCleanupPath "${realityKeyStage}"; return 1; }
         else
             autoRead reality_private_key "请输入Private Key[回车自动生成]:" historyPrivateKey
             if [[ -n "${historyPrivateKey}" ]]; then
