@@ -10696,11 +10696,8 @@ runInstallToolsUpdateFailureRegression() {
         installType=true
         removeType=true
         selectCustomInstallType=",7,"
-        protocolSelectionSkipsNginx() { return 0; }
-        protocolSelectionNeedsLocalCertificate() { return 0; }
         runWithTimeout() { return 0; }
         waitAptProcess() { return 0; }
-        installBasePackages() { : >"${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}"; }
         runPackageCommandWithProgress() {
             [[ "$1" == "检查、安装更新" ]] && return 1
             return 0
@@ -10767,10 +10764,7 @@ runInstallToolsReleaseInfoFailureRegression() {
         installType=true
         removeType=true
         selectCustomInstallType=",7,"
-        protocolSelectionSkipsNginx() { return 0; }
-        protocolSelectionNeedsLocalCertificate() { return 0; }
         waitAptProcess() { return 0; }
-        installBasePackages() { : >"${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}"; }
         runPackageCommandWithProgress() {
             printf 'changed\n' >"$4"
             return 0
