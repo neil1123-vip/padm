@@ -1,21 +1,5 @@
 #!/usr/bin/env bash
 
-# 检查 IPv6、IPv4
-
-checkIPv6() {
-
-    if ! hasIPv6Connectivity; then
-
-        errorCard "不支持ipv6"
-
-        return 1
-
-    fi
-
-}
-
-
-
 # IPv6 分流
 
 ipv6Routing() {
@@ -32,7 +16,10 @@ ipv6Routing() {
 
 
 
-    checkIPv6 || return 1
+    if ! hasIPv6Connectivity; then
+        errorCard "不支持ipv6"
+        return 1
+    fi
 
     local successMessage=
 
