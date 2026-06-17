@@ -1112,19 +1112,11 @@ installDownloadedSingBoxBinary() {
     finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${oldBinary}" handleSingBox "${logFile}"
 }
 
-confirmCoreUpgrade() {
-    local core=$1
-    local version=$2
-    local channel=$3
-    local confirmVar
-    autoRead core_upgrade_confirm "${core} 将切换到 ${channel} ${version}，是否继续？[y/n]:" confirmVar
-    [[ "${confirmVar}" == "y" ]]
-}
-
 upgradeXrayCore() {
     local prerelease=${1:-false}
     local version=${2:-}
     local channel="稳定版"
+    local confirmVar
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
     version=${version:-$(coreReleaseTags XTLS/Xray-core "${prerelease}" 1)}
     checkVersionNotEmpty "${version}"
@@ -1133,7 +1125,8 @@ upgradeXrayCore() {
             return 1
         fi
     fi
-    confirmCoreUpgrade "Xray-core" "${version}" "${channel}" || { statusCard "已取消" "未更新 Xray-core"; return 0; }
+    autoRead core_upgrade_confirm "Xray-core 将切换到 ${channel} ${version}，是否继续？[y/n]:" confirmVar
+    [[ "${confirmVar}" == "y" ]] || { statusCard "已取消" "未更新 Xray-core"; return 0; }
     installDownloadedXrayBinary "${version}"
 }
 
@@ -1141,6 +1134,7 @@ upgradeSingBoxCore() {
     local prerelease=${1:-false}
     local version=${2:-}
     local channel="稳定版"
+    local confirmVar
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
     version=${version:-$(coreReleaseTags SagerNet/sing-box "${prerelease}" 1)}
     checkVersionNotEmpty "${version}"
@@ -1149,7 +1143,8 @@ upgradeSingBoxCore() {
             return 1
         fi
     fi
-    confirmCoreUpgrade "sing-box" "${version}" "${channel}" || { statusCard "已取消" "未更新 sing-box"; return 0; }
+    autoRead core_upgrade_confirm "sing-box 将切换到 ${channel} ${version}，是否继续？[y/n]:" confirmVar
+    [[ "${confirmVar}" == "y" ]] || { statusCard "已取消" "未更新 sing-box"; return 0; }
     installDownloadedSingBoxBinary "${version}"
 }
 
