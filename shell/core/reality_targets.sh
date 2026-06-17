@@ -604,22 +604,6 @@ currentRealityNetworkProfile() {
     printf '%s\t%s\n' "${currentIp}" "${profile}"
 }
 
-realityTargetAsnSummary() {
-    local host=$1
-    local ip profile asn org
-    ip=$(resolveRealityTargetIPv4 "${host}") || {
-        printf '未知（解析失败）\n'
-        return 1
-    }
-    profile=$(lookupRealityTargetAsn "${ip}") || {
-        printf '%s（ASN 未识别）\n' "${ip}"
-        return 1
-    }
-    asn=${profile%%$'\t'*}
-    org=${profile#*$'\t'}
-    printf '%s %s %s\n' "${ip}" "${asn}" "${org}"
-}
-
 normalizeRealityAsn() {
     local asn=$1
     asn=${asn#AS}

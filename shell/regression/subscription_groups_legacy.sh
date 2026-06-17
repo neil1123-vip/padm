@@ -6651,7 +6651,11 @@ EOF
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
     firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
     [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
-    targetAsnSummary=$(realityTargetAsnSummary "www.ibm.com")
+    targetIp=$(resolveRealityTargetIPv4 "www.ibm.com")
+    targetProfile=$(lookupRealityTargetAsn "${targetIp}")
+    targetAsn=${targetProfile%%$'\t'*}
+    targetOrg=${targetProfile#*$'\t'}
+    targetAsnSummary="${targetIp} ${targetAsn} ${targetOrg}"
     [[ "${targetAsnSummary}" == "192.0.2.1 AS64500 ExampleNet" ]]
     currentProfile=$(currentRealityNetworkProfile)
     currentIp=${currentProfile%%$'\t'*}

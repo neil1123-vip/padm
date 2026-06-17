@@ -2126,7 +2126,7 @@ initRandomSalt() {
 }
 
 manageRealityTarget() {
-    local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary currentProfile currentIp currentProfileRest currentAsn currentOrg
+    local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary currentProfile currentIp currentProfileRest currentAsn currentOrg targetIp targetProfile targetAsn targetOrg
     while true; do
     readInstallProtocolType
     readConfigHostPathUUID
@@ -2134,7 +2134,17 @@ manageRealityTarget() {
     readSingBoxConfig
     if [[ -n "${realityTargetHost:-}" ]]; then
         currentTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
-        targetAsnSummary=$(realityTargetAsnSummary "${realityTargetHost}" || true)
+        if targetIp=$(resolveRealityTargetIPv4 "${realityTargetHost}"); then
+            if targetProfile=$(lookupRealityTargetAsn "${targetIp}"); then
+                targetAsn=${targetProfile%%$'\t'*}
+                targetOrg=${targetProfile#*$'\t'}
+                targetAsnSummary="${targetIp} ${targetAsn} ${targetOrg}"
+            else
+                targetAsnSummary="${targetIp}（ASN 未识别）"
+            fi
+        else
+            targetAsnSummary="未知（解析失败）"
+        fi
     else
         currentTarget="未读取到"
         targetAsnSummary="未读取到目标站"
