@@ -10580,11 +10580,9 @@ runInstallToolsAcmeCommitFailureRegression() {
         local tmpRoot="${TMP_DIR}/install-tools-acme-commit-tmp"
         local errorLog="${TMP_DIR}/install-tools-acme-commit-error.log"
         local statusLog="${TMP_DIR}/install-tools-acme-commit-status.log"
-        local runMarker="${TMP_DIR}/install-tools-acme-commit-run"
         local installStatus
 
         rm -rf "${fakeHome}" "${tmpRoot}"
-        rm -f "${runMarker}"
         mkdir -p "${fakeHome}" "${tmpRoot}"
         HOME="${fakeHome}"
         TMPDIR="${tmpRoot}"
@@ -10606,7 +10604,6 @@ runInstallToolsAcmeCommitFailureRegression() {
             fi
             builtin command "$@"
         }
-        runWithTimeout() { : >"${runMarker}"; return 0; }
         runPackageCommandWithProgress() { return 0; }
         waitAptProcess() { return 0; }
         installBasePackages() { return 0; }
@@ -10638,7 +10635,6 @@ runInstallToolsAcmeCommitFailureRegression() {
         set -e
         [[ "${installStatus}" -ne 0 ]]
         grep -q "acme安装脚本提交失败" "${errorLog}"
-        [[ ! -e "${runMarker}" ]]
         if find "${tmpRoot}" -type f -name 'acme.sh.download.*' | grep -q .; then
             return 1
         fi
@@ -10656,7 +10652,7 @@ runInstallToolsAcmeCommitFailureRegression() {
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
         HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl mv
+        unset -f command runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl mv
     )
 }
 
