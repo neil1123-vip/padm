@@ -630,19 +630,6 @@ realityTargetAsnSummary() {
     printf '%s %s %s\n' "${ip}" "${asn}" "${org}"
 }
 
-currentRealityAsnSummary() {
-    local profile ip rest asn org
-    profile=$(currentRealityNetworkProfile) || {
-        printf '未知（公网 ASN 未识别）\n'
-        return 1
-    }
-    ip=${profile%%$'\t'*}
-    rest=${profile#*$'\t'}
-    asn=${rest%%$'\t'*}
-    org=${rest#*$'\t'}
-    printf '%s %s %s\n' "${ip}" "${asn}" "${org}"
-}
-
 normalizeRealityAsn() {
     local asn=$1
     asn=${asn#AS}

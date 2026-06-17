@@ -2126,7 +2126,7 @@ initRandomSalt() {
 }
 
 manageRealityTarget() {
-    local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary
+    local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary currentProfile currentIp currentProfileRest currentAsn currentOrg
     while true; do
     readInstallProtocolType
     readConfigHostPathUUID
@@ -2139,7 +2139,15 @@ manageRealityTarget() {
         currentTarget="未读取到"
         targetAsnSummary="未读取到目标站"
     fi
-    currentAsnSummary=$(currentRealityAsnSummary || true)
+    if currentProfile=$(currentRealityNetworkProfile); then
+        currentIp=${currentProfile%%$'\t'*}
+        currentProfileRest=${currentProfile#*$'\t'}
+        currentAsn=${currentProfileRest%%$'\t'*}
+        currentOrg=${currentProfileRest#*$'\t'}
+        currentAsnSummary="${currentIp} ${currentAsn} ${currentOrg}"
+    else
+        currentAsnSummary="未知（公网 ASN 未识别）"
+    fi
 
     echoContent title "\n┌─ REALITY 目标站管理 ───────────────────────────────"
     menuLine "当前目标: ${currentTarget}"

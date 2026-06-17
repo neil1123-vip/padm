@@ -6653,7 +6653,12 @@ EOF
     [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
     targetAsnSummary=$(realityTargetAsnSummary "www.ibm.com")
     [[ "${targetAsnSummary}" == "192.0.2.1 AS64500 ExampleNet" ]]
-    currentAsnSummary=$(currentRealityAsnSummary)
+    currentProfile=$(currentRealityNetworkProfile)
+    currentIp=${currentProfile%%$'\t'*}
+    currentProfileRest=${currentProfile#*$'\t'}
+    currentAsn=${currentProfileRest%%$'\t'*}
+    currentOrg=${currentProfileRest#*$'\t'}
+    currentAsnSummary="${currentIp} ${currentAsn} ${currentOrg}"
     [[ "${currentAsnSummary}" == "203.0.113.10 AS64500 ExampleNet" ]]
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
