@@ -4,8 +4,31 @@ subscriptionWireGuardDir() {
     echo "${PADM_WIREGUARD_CONTROL_DIR:-/etc/padm/wireguard}"
 }
 
+subscriptionWireGuardSafeDir() {
+    local wireGuardDir
+    local resolvedPath=
+    wireGuardDir=$(subscriptionWireGuardDir)
+    [[ -n "${wireGuardDir}" ]] || return 1
+    if [[ "${wireGuardDir}" == /* ]]; then
+        padmIsSafeAbsolutePath "${wireGuardDir%/}" || return 1
+        printf '%s\n' "${wireGuardDir%/}"
+        return 0
+    fi
+    if [[ "${wireGuardDir}" == "." || "${wireGuardDir}" == ".." ||
+        "${wireGuardDir}" == */./* || "${wireGuardDir}" == */. ||
+        "${wireGuardDir}" == */../* || "${wireGuardDir}" == */.. ]]; then
+        return 1
+    fi
+    resolvedPath=$(padmResolveCleanupPath "${wireGuardDir}" 2>/dev/null || true)
+    [[ -n "${resolvedPath}" ]] || return 1
+    padmIsSafeAbsolutePath "${resolvedPath%/}" || return 1
+    printf '%s\n' "${resolvedPath%/}"
+}
+
 subscriptionWireGuardStateFile() {
-    echo "$(subscriptionWireGuardDir)/control.json"
+    local wireGuardDir
+    wireGuardDir=$(subscriptionWireGuardSafeDir) || return 1
+    printf '%s/control.json\n' "${wireGuardDir}"
 }
 
 subscriptionWireGuardInterface() {
@@ -33,11 +56,15 @@ subscriptionWireGuardDefaultControlPort() {
 }
 
 subscriptionWireGuardPrivateKeyFile() {
-    echo "$(subscriptionWireGuardDir)/private.key"
+    local wireGuardDir
+    wireGuardDir=$(subscriptionWireGuardSafeDir) || return 1
+    printf '%s/private.key\n' "${wireGuardDir}"
 }
 
 subscriptionWireGuardPublicKeyFile() {
-    echo "$(subscriptionWireGuardDir)/public.key"
+    local wireGuardDir
+    wireGuardDir=$(subscriptionWireGuardSafeDir) || return 1
+    printf '%s/public.key\n' "${wireGuardDir}"
 }
 
 subscriptionWireGuardAddressHost() {
@@ -173,8 +200,9 @@ subscriptionWireGuardWriteState() {
     local filter
     local jqArgs=()
     stateFile=$(subscriptionWireGuardStateFile)
+    [[ -n "${stateFile}" ]] || return 1
     stateDir=$(dirname "${stateFile}")
-    mkdir -p "${stateDir}" || return 1
+    padmEnsureSafeDirectory "${stateDir}" || return 1
     chmod 700 "${stateDir}" 2>/dev/null || true
     padmCreateTempFileForTarget tmpFile "${stateFile}" state || return 1
     while (($# > 1)); do
@@ -271,7 +299,8 @@ subscriptionWireGuardEnsureKeys() {
     local privateKey
     privateKeyFile=$(subscriptionWireGuardPrivateKeyFile)
     publicKeyFile=$(subscriptionWireGuardPublicKeyFile)
-    mkdir -p "$(dirname "${privateKeyFile}")"
+    [[ -n "${privateKeyFile}" && -n "${publicKeyFile}" ]] || return 1
+    padmEnsureSafeDirectory "$(dirname "${privateKeyFile}")" || return 1
     chmod 700 "$(dirname "${privateKeyFile}")" 2>/dev/null || true
     if [[ ! -s "${privateKeyFile}" ]]; then
         privateKey=$(umask 077 && wg genkey) || return 1

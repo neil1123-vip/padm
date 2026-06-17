@@ -5285,6 +5285,38 @@ runWarpConfigSafeDirRegression() (
     [[ ! -s "${rmLog}" ]]
 )
 
+runWireGuardControlSafeDirRegression() (
+    local root="${TMP_DIR}/wireguard-control-safe-dir"
+    local rmLog="${root}/rm.log"
+    local rc
+
+    mkdir -p "${root}"
+    : >"${rmLog}"
+    PADM_WIREGUARD_CONTROL_DIR=relative-wireguard
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    set +e
+    subscriptionWireGuardWriteState '.enabled = true' >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -e "${root}/relative-wireguard" ]]
+
+    set +e
+    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
+    rc=$?
+    set -e
+    unset -f rm
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -e "${root}/relative-wireguard" ]]
+)
+
 runWarpConfigFileCleanupRegression() (
     local rootRel="${TMP_DIR}/warp-config-file-cleanup"
     local root rmLog
@@ -14347,6 +14379,7 @@ runRegressionTransactionSystem() {
     runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
         runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
+        runRegressionStep wireguard-control-safe-dir runWireGuardControlSafeDirRegression &&
         runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&
         runRegressionStep warp-config-file-cleanup runWarpConfigFileCleanupRegression &&
         runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
