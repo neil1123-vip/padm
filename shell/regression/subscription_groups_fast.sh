@@ -239,6 +239,30 @@ runReleaseWorkflowVersionRegression() {
     [[ "${result}" == "v1.3.0 false" ]]
 }
 
+runVersionHelpersRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/version.sh"
+
+        local nextVersion versionFile
+        nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'fix(update): harden script refresh rollback')
+        [[ "${nextVersion}" == "1.2.1" ]]
+        nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'feat(subscription): add new flow')
+        [[ "${nextVersion}" == "1.3.0" ]]
+        nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'style: whitespace only')
+        [[ "${nextVersion}" == "1.2.0" ]]
+
+        versionFile="${TMP_DIR}/version-helper-version.sh"
+        cat >"${versionFile}" <<'EOF'
+#!/usr/bin/env bash
+SCRIPT_VERSION="1.2.0"
+EOF
+        setScriptVersion v1.2.3 "${versionFile}"
+        grep -q '^SCRIPT_VERSION="1\.2\.3"$' "${versionFile}"
+    )
+}
+
 runNginxBlogAutoInstallRegression() {
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local staticDir="${TMP_DIR}/nginx-blog-auto/"
@@ -1169,8 +1193,6 @@ runUnusedHelperFunctionCountRegression() {
             awk '/^(setSubscriptionSourceEnabled)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/groups.sh"
             awk '/^(normalizeSubscriptionSourceInput)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
             awk '/^(initSingBoxHysteria2Config)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/singbox.sh"
-            awk '/^(setScriptVersion)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
-            awk '/^(commitRequiresMajorBump|commitRequiresMinorBump|commitRequiresPatchBump|nextScriptVersionFromCommits)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/version.sh"
             awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
         } | awk '{ sum += $1 } END { print sum + 0 }'
     )
@@ -2102,6 +2124,7 @@ runXrayPrereleaseDryRunRegression() {
 
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
+        runRegressionStep version-helpers runVersionHelpersRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
