@@ -1402,10 +1402,6 @@ runRegressionRemoteControlSmokeRefreshSerialSteps() {
     runRegressionStep remote-control-server-refresh-light runRemoteControlServerRefreshLightRegression
 }
 
-runRegressionRemoteControlSmokeRefreshApplySteps() {
-    runRegressionStep remote-control-server-refresh-light-apply runRemoteControlServerRefreshLightApplyRegression
-}
-
 runRegressionRemoteControlSmokeRefreshApplyBasicSteps() {
     runRegressionStep remote-control-server-refresh-light-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
 }
