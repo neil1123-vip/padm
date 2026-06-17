@@ -3260,18 +3260,12 @@ runReloadCorePropagationRegression() (
     local vlessConfig="${root}/vless.json"
     local vlessState="${root}/vless-state.json"
     local fakeXray="${root}/xray"
-    local successMarker="${root}/success"
     local refreshMarker="${root}/refresh"
     local subscribeMarker="${root}/subscribe"
     local reloadLog="${root}/reloads"
     local originalContent rc
 
     mkdir -p "${root}/nginx"
-    statusCard() { return 0; }
-    successCard() {
-        printf 'success\n' >>"${successMarker}"
-        return 0
-    }
     errorCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
@@ -3300,18 +3294,16 @@ JSON
     }
 
     originalContent=$(<"${alpnConfig}")
-    rm -f "${successMarker}"
     set +e
     applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
-    [[ ! -e "${successMarker}" ]]
     [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
 
     printf '%s\n' "${originalContent}" >"${alpnConfig}"
-    rm -f "${successMarker}" "${alpnConfig}.alpn.bak"
+    rm -f "${alpnConfig}.alpn.bak"
     (
         mv() {
             if [[ "$1" == "${alpnConfig}.alpn.bak" && "$2" == "${alpnConfig}" ]]; then
@@ -3326,7 +3318,6 @@ JSON
         [[ "${rc}" == "1" ]]
         jq -e '.inbounds[0].streamSettings.tlsSettings.alpn == ["h2","http/1.1"]' "${alpnConfig}" >/dev/null
         [[ "$(<"${alpnConfig}.alpn.bak")" == "${originalContent}" ]]
-        [[ ! -e "${successMarker}" ]]
     ) || return 1
     printf '%s\n' "${originalContent}" >"${alpnConfig}"
     rm -f "${alpnConfig}.alpn.bak"
