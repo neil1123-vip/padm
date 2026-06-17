@@ -137,6 +137,16 @@ removeManagedFileIfPresent() {
     rm -f -- "${targetFile}" >/dev/null 2>&1 || return 1
 }
 
+removeManagedFilesIfPresent() {
+    local targetFile
+    local status=0
+
+    for targetFile in "$@"; do
+        removeManagedFileIfPresent "${targetFile}" || status=1
+    done
+    return "${status}"
+}
+
 commitGeneratedFile() {
     local tmpFile=$1
     local targetFile=$2

@@ -5749,7 +5749,7 @@ runCleanLastInstallationConfigFailureRegression() (
     runCleanupStepFailureCase rm-warp-fail \
         'WARP 配置清理失败，已取消清空上次安装配置' \
         'rm:-f -- /etc/padm/warp/config' \
-        'rm:-f /etc/padm/cdn'
+        'rm:-f -- /etc/padm/cdn'
 
     runCleanupStepFailureCase daemon-reload-fail \
         'systemd 配置重载失败，已取消清空上次安装配置' \
