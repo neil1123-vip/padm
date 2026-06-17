@@ -901,19 +901,6 @@ realityTargetDetector() {
     fi
 }
 
-realityTargetCandidateLineByIndex() {
-    local wanted=$1
-    local line index=1
-    while IFS= read -r line; do
-        if [[ "${index}" == "${wanted}" ]]; then
-            printf '%s\n' "${line}"
-            return 0
-        fi
-        index=$((index + 1))
-    done < <(realityTargetCandidates)
-    return 1
-}
-
 realityTargetCandidateField() {
     local line=$1
     local field=$2
@@ -1161,7 +1148,8 @@ selectRandomRealityTargetCandidate() {
     local count randomNum line host sni
     count=$(realityTargetCandidates | awk 'END { print NR + 0 }')
     randomNum=$(randomNum 1 "${count}")
-    line=$(realityTargetCandidateLineByIndex "${randomNum}") || line=$(realityTargetCandidateLineByIndex 1)
+    line=$(realityTargetCandidates | awk -v wanted="${randomNum}" 'NR == wanted { print; found=1; exit } END { exit (found ? 0 : 1) }') ||
+        line=$(realityTargetCandidates | awk 'NR == 1 { print; found=1; exit } END { exit (found ? 0 : 1) }')
     host=$(realityTargetCandidateField "${line}" 1)
     sni=$(realityTargetCandidateField "${line}" 2)
     realityTargetHost=${host}

@@ -6780,9 +6780,9 @@ runRealityCandidateFullRegression() {
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
     firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
     [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
-    firstRealityCandidate=$(realityTargetCandidateLineByIndex 1)
+    firstRealityCandidate=$(realityTargetCandidates | awk 'NR == 1 { print; exit }')
     [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.ibm.com" ]]
-    secondRealityCandidate=$(realityTargetCandidateLineByIndex 2)
+    secondRealityCandidate=$(realityTargetCandidates | awk 'NR == 2 { print; exit }')
     [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.microsoft.com" ]]
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
