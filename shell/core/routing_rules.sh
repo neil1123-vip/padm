@@ -26,13 +26,6 @@ downloadDLCPlainYAML() {
     mv "${tmpFilePath}" "${dlcFilePath}" >/dev/null 2>&1
 }
 
-# 转义 grep/regex 匹配字符
-escapeDLCRegexPattern() {
-    # shellcheck disable=SC2016
-    # shellcheck disable=SC2001
-    echo "$1" | sed -e 's/[.[\*^$()+?{|]/\\&/g'
-}
-
 isDomainFormat() {
     local target=$1
     [[ "${target}" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9-]{2,63}$ ]]
@@ -70,7 +63,8 @@ getDLCGeositeName() {
     fi
 
     local escapedInput=
-    escapedInput=$(escapeDLCRegexPattern "${normalizedInput}")
+    # shellcheck disable=SC2016
+    escapedInput=$(echo "${normalizedInput}" | sed -e 's/[.[\*^$()+?{|]/\\&/g')
 
     local matchedLine=
     matchedLine=$(grep -n -m1 -E "^[[:space:]]*-[[:space:]]*name:[[:space:]]*${escapedInput}[[:space:]]*$" "${dlcFilePath}")
