@@ -4441,8 +4441,6 @@ runSingBoxPortFailureRegression() (
     local oldTlsDir="${PADM_TLS_DIR:-}"
     local writeCalls=0
 
-    allowPort() { return 0; }
-
     if readSingBoxPortResult result 70000 false 2>/dev/null; then
         return 1
     fi
@@ -4471,12 +4469,6 @@ SH
         writeCalls=$((writeCalls + 1))
         return 0
     }
-    nginxBlog() { return 0; }
-    hasIPv6Connectivity() { return 1; }
-    installSubscriptionControlService() { return 0; }
-    bootStartup() { return 0; }
-    handleNginx() { return 0; }
-    pgrep() { return 0; }
 
     if installSubscribe 2>/dev/null; then
         return 1
