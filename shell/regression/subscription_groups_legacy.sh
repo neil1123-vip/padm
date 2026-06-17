@@ -5221,11 +5221,6 @@ runSubscribeLocalRollbackRegression() (
         subscribeSalt="new-salt"
         return 1
     }
-    showAccounts() {
-        showAccountsCalls=$((showAccountsCalls + 1))
-        printf 'showAccounts\n' >>"${callLog}"
-        return 0
-    }
     coreInstallType=1
     set +e
     subscribe false true >/dev/null 2>&1
@@ -5491,10 +5486,6 @@ runRefreshLocalSubscriptionsRollbackRegression() (
         mkdir -p "$1" || return 1
         find "$1" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || return 1
         [[ "${cleanCalls}" -lt 2 ]]
-    }
-    showAccounts() {
-        printf 'showAccounts\n' >>"${callLog}"
-        return 0
     }
     set +e
     refreshLocalSubscriptions "XHTTP" "已刷新本地订阅" >/dev/null 2>&1
