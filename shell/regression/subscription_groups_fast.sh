@@ -1707,7 +1707,6 @@ runSingBoxServiceMainPidTemplateRegression() {
         bootStartup() { return 0; }
         commitGeneratedFile() { cp "$1" "${TMP_DIR}/sing-box.service" && return 0; }
         progressCard() { return 0; }
-        errorCard() { return 1; }
         padmCreateTempPath() { printf -v "$1" '%s' "$(mktemp "$2")"; }
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/cores.sh"
