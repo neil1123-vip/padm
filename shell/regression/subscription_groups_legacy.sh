@@ -10662,7 +10662,6 @@ runInstallToolsAcmeCommitFailureRegression() {
 
 runInstallToolsUpdateFailureRegression() {
     (
-        local oldHome="${HOME}"
         local oldSelect="${selectCustomInstallType:-}"
         local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
         local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
@@ -10670,12 +10669,8 @@ runInstallToolsUpdateFailureRegression() {
         local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
         local statusLog="${TMP_DIR}/install-tools-update-status.log"
         local errorLog="${TMP_DIR}/install-tools-update-error.log"
-        local fakeHome="${TMP_DIR}/install-tools-update-home"
         PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-update-base-called"
 
-        mkdir -p "${fakeHome}/.acme.sh"
-        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
-        HOME="${fakeHome}"
         export REGRESSION_STATUS_CARD_LOG="${statusLog}"
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         PADM_INSTALL_LOG="${TMP_DIR}/install-tools-update-install.log"
@@ -10721,7 +10716,6 @@ runInstallToolsUpdateFailureRegression() {
         else
             unset PADM_INSTALL_LOG
         fi
-        HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
         if [[ -n "${oldBasePackageCalledFile}" ]]; then
             PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
@@ -10733,18 +10727,13 @@ runInstallToolsUpdateFailureRegression() {
 
 runInstallToolsReleaseInfoFailureRegression() {
     (
-        local oldHome="${HOME}"
         local oldSelect="${selectCustomInstallType:-}"
         local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
         local oldInstallLog="${PADM_INSTALL_LOG:-}"
         local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
         local errorLog="${TMP_DIR}/install-tools-release-info-error.log"
-        local fakeHome="${TMP_DIR}/install-tools-release-info-home"
         PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-release-info-base-called"
 
-        mkdir -p "${fakeHome}/.acme.sh"
-        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
-        HOME="${fakeHome}"
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         PADM_INSTALL_LOG="${TMP_DIR}/install-tools-release-info-install.log"
         : >"${errorLog}"
@@ -10787,7 +10776,6 @@ runInstallToolsReleaseInfoFailureRegression() {
         else
             unset PADM_INSTALL_LOG
         fi
-        HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
         if [[ -n "${oldBasePackageCalledFile}" ]]; then
             PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
@@ -10799,16 +10787,10 @@ runInstallToolsReleaseInfoFailureRegression() {
 
 runInstallToolsNginxReinstallFailureRegression() {
     (
-        local oldHome="${HOME}"
         local oldSelect="${selectCustomInstallType:-}"
         local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
         local oldInstallLog="${PADM_INSTALL_LOG:-}"
         local errorLog="${TMP_DIR}/install-tools-nginx-reinstall-error.log"
-        local fakeHome="${TMP_DIR}/install-tools-nginx-reinstall-home"
-
-        mkdir -p "${fakeHome}/.acme.sh"
-        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
-        HOME="${fakeHome}"
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         PADM_INSTALL_LOG="${TMP_DIR}/install-tools-nginx-reinstall-install.log"
         : >"${errorLog}"
@@ -10862,7 +10844,6 @@ runInstallToolsNginxReinstallFailureRegression() {
         else
             unset PADM_INSTALL_LOG
         fi
-        HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
     )
 }
