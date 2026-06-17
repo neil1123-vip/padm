@@ -6894,7 +6894,7 @@ SH
         : >"${errorLog}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         cp() {
-            if [[ "$1" == "${targetPath}" && "$2" == "${targetPath}.bak" ]]; then
+            if [[ "$1" == "-p" && "$2" == "${targetPath}" ]]; then
                 return 1
             fi
             command cp "$@"
@@ -6958,7 +6958,7 @@ SH
         : >"${errorLog}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         rm() {
-            if [[ "$1" == "-f" && "$2" == "${targetPath}.bak" ]]; then
+            if [[ "$1" == "-f" && "$2" == "--" && "$3" == "${targetPath}.bak" ]]; then
                 return 1
             fi
             command rm "$@"
@@ -7158,7 +7158,7 @@ SH
         : >"${errorLog}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         cp() {
-            if [[ "$1" == "${PADM_ALONE_NGINX_BACKUP_FILE}" && "$2" == "${targetPath}" ]]; then
+            if [[ "$1" == "-p" && "$2" == "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]; then
                 return 1
             fi
             command cp "$@"
@@ -8358,8 +8358,15 @@ SH
     cat >"${fakeBin}/cp" <<'SH'
 #!/usr/bin/env bash
 target="${@: -1}"
-if [[ "${PADM_FAKE_REALITY_STREAM_CP_MODE:-success}" == "restore-vision-fail" && "${target}" == "${PADM_FAKE_REALITY_STREAM_VISION_FILE:-}" ]]; then
-    exit 1
+vision_file="${PADM_FAKE_REALITY_STREAM_VISION_FILE:-}"
+if [[ "${PADM_FAKE_REALITY_STREAM_CP_MODE:-success}" == "restore-vision-fail" && -n "${vision_file}" ]]; then
+    vision_dir="$(dirname -- "${vision_file}")"
+    vision_base="$(basename -- "${vision_file}")"
+    case "${target}" in
+    "${vision_file}"|${vision_dir}/.${vision_base}.restore.*)
+        exit 1
+        ;;
+    esac
 fi
 PATH="${PADM_FAKE_REALITY_STREAM_OLD_PATH:-/usr/bin:/bin}" exec cp "$@"
 SH
@@ -8531,11 +8538,16 @@ EOF
     if [[ "${enableStatus}" -eq 0 ]]; then
         return 1
     fi
-    jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443' "${visionFile}" >/dev/null
-    grep -q '回滚失败' "${errorLog}"
-    keptBackup=$(find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' -print -quit)
-    [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
-    rm -rf "${keptBackup}"
+    [[ "$(<"${visionFile}")" == "${originalVision}" ]]
+    [[ "$(<"${xhttpFile}")" == "${originalXHTTP}" ]]
+    [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
+    [[ ! -e "${stateFile}" ]]
+    [[ ! -e "${streamConf}" ]]
+    grep -q '已回滚本次修改' "${errorLog}"
+    grep -q '恢复旧配置后服务应用仍失败' "${errorLog}"
+    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+        return 1
+    fi
     export PADM_FAKE_REALITY_STREAM_CP_MODE=success
 
     writeRealityStreamEnableFixture

@@ -174,21 +174,24 @@ realityStreamWarnWebsiteBackend() {
 backupRealityStreamFile() {
     local file=$1
     local backup=$2
+    file=$(padmResolveManagedAbsolutePath "${file}") || return 1
+    backup=$(padmResolveManagedAbsolutePath "${backup}") || return 1
     if [[ -f "${file}" ]]; then
-        cp "${file}" "${backup}" || return 1
+        backupManagedFileToPath "${file}" "${backup}" 644 || return 1
     else
-        rm -f "${backup}" >/dev/null 2>&1 || return 1
+        removeManagedFileIfPresent "${backup}" || return 1
     fi
 }
 
 restoreRealityStreamFile() {
     local file=$1
     local backup=$2
+    file=$(padmResolveManagedAbsolutePath "${file}") || return 1
+    backup=$(padmResolveManagedAbsolutePath "${backup}") || return 1
     if [[ -f "${backup}" ]]; then
-        mkdir -p "$(dirname "${file}")" || return 1
-        cp "${backup}" "${file}" || return 1
+        restoreManagedFileFromBackup "${backup}" "${file}" 644 || return 1
     else
-        rm -f "${file}" >/dev/null 2>&1 || return 1
+        removeManagedFileIfPresent "${file}" || return 1
     fi
 }
 
@@ -748,16 +751,16 @@ writeAloneNginxConfig() {
     else
         mkdir -p "${targetDir}" || { aloneNginxConfigWriteError "Nginx 配置目录创建失败，请手动检查 ${targetPath}"; return 1; }
     fi
-    cat >"${tmpPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置临时文件写入失败，请手动检查 ${tmpPath}"; return 1; }
+    cat >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 配置临时文件写入失败，请手动检查 ${tmpPath}"; return 1; }
     if command -v nginx >/dev/null 2>&1; then
-        if [[ -f "${targetPath}" ]] && ! cp "${targetPath}" "${backupPath}"; then
-            rm -f "${tmpPath}" >/dev/null 2>&1
+        if [[ -f "${targetPath}" ]] && ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
+            padmRemoveCleanupPath "${tmpPath}"
             aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
             return 1
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
-            rm -f "${tmpPath}" >/dev/null 2>&1
-            [[ -f "${backupPath}" ]] && rm -f "${backupPath}" >/dev/null 2>&1
+            padmRemoveCleanupPath "${tmpPath}"
+            [[ -f "${backupPath}" ]] && removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1
             aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
             return 1
         fi
@@ -766,14 +769,14 @@ writeAloneNginxConfig() {
             if [[ -f "${backupPath}" ]]; then
                 restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             else
-                rm -f "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置检测失败，且新 alone.conf 清理失败，请手动检查 ${targetPath}"; return 1; }
+                removeManagedFileIfPresent "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置检测失败，且新 alone.conf 清理失败，请手动检查 ${targetPath}"; return 1; }
                 aloneNginxConfigWriteError "Nginx 配置检测失败，已删除新 alone.conf"
             fi
             return 1
         fi
-        rm -f "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
+        removeManagedFileIfPresent "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
     else
-        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
     fi
 }
 
@@ -790,22 +793,23 @@ updateAloneNginxConfig() {
     [[ -f "${targetPath}" ]] || { aloneNginxConfigWriteError "未检测到传统 TLS fallback 配置，请先重建 alone.conf"; return 1; }
     padmCommitTargetIsFileLike "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置目标异常，请手动检查 ${targetPath}"; return 1; }
     if ! cp "${targetPath}" "${tmpPath}"; then
+        padmRemoveCleanupPath "${tmpPath}"
         aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"
         return 1
     fi
     "$@" "${tmpPath}" || {
-        rm -f "${tmpPath}"
+        padmRemoveCleanupPath "${tmpPath}"
         return 1
     }
     if command -v nginx >/dev/null 2>&1; then
-        if ! cp "${targetPath}" "${backupPath}"; then
-            rm -f "${tmpPath}" >/dev/null 2>&1
+        if ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
+            padmRemoveCleanupPath "${tmpPath}"
             aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
             return 1
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
-            rm -f "${tmpPath}" >/dev/null 2>&1
-            rm -f "${backupPath}" >/dev/null 2>&1
+            padmRemoveCleanupPath "${tmpPath}"
+            removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1
             aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
             return 1
         fi
@@ -814,9 +818,9 @@ updateAloneNginxConfig() {
             restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             return 1
         fi
-        rm -f "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
+        removeManagedFileIfPresent "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
     else
-        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
     fi
 }
 
@@ -900,8 +904,8 @@ ensureTraditionalTlsFallbackNginxConfig() {
 removeNginx302FromFile() {
     local targetPath=$1
     local tmpPath="${targetPath}.rewrite"
-    awk '!(/return 302/ && $0 !~ /request_uri/)' "${targetPath}" >"${tmpPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 302 配置编辑失败，请手动检查 ${targetPath}"; return 1; }
-    mv "${tmpPath}" "${targetPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 302 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+    awk '!(/return 302/ && $0 !~ /request_uri/)' "${targetPath}" >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 302 配置编辑失败，请手动检查 ${targetPath}"; return 1; }
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 302 配置提交失败，请手动检查 ${targetPath}"; return 1; }
 }
 
 # 修改 Nginx 重定向配置
@@ -1083,19 +1087,20 @@ aloneNginxBackupFile() {
 
 # 备份恢复nginx文件
 backupNginxConfig() {
-    local backupFile
+    local backupFile targetFile
     backupFile=$(aloneNginxBackupFile)
+    backupFile=$(padmResolveManagedAbsolutePath "${backupFile}") || { errorCard "nginx配置备份路径异常"; return 1; }
+    targetFile=$(padmResolveManagedAbsolutePath "${nginxConfigPath}alone.conf") || { errorCard "nginx配置路径异常"; return 1; }
     if [[ "$1" == "backup" ]]; then
-        mkdir -p "$(dirname "${backupFile}")" || { errorCard "nginx配置备份目录创建失败"; return 1; }
-        cp "${nginxConfigPath}alone.conf" "${backupFile}" || { errorCard "nginx配置文件备份失败"; return 1; }
+        backupManagedFileToPath "${targetFile}" "${backupFile}" 644 || { errorCard "nginx配置文件备份失败"; return 1; }
         successCard "nginx配置文件备份成功"
         return 0
     fi
 
     if [[ "$1" == "restoreBackup" ]] && [[ -f "${backupFile}" ]]; then
-        cp "${backupFile}" "${nginxConfigPath}alone.conf" || { errorCard "nginx配置文件恢复备份失败"; return 1; }
+        restoreManagedFileFromBackup "${backupFile}" "${targetFile}" 644 || { errorCard "nginx配置文件恢复备份失败"; return 1; }
         successCard "nginx配置文件恢复备份成功"
-        rm "${backupFile}" || { errorCard "nginx配置备份文件删除失败: ${backupFile}"; return 1; }
+        removeManagedFileIfPresent "${backupFile}" || { errorCard "nginx配置备份文件删除失败: ${backupFile}"; return 1; }
         return 0
     fi
 
