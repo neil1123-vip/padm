@@ -1289,12 +1289,12 @@ installDownloadedXrayBinary() {
     oldBinary=$(coreXrayBinaryPath)
     validateCoreInstallTargetPath "${oldBinary}" "Xray-core" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     backupBinary="${oldBinary}.bak.$(date +%s)"
-    if ! mkdir -p "$(dirname "${oldBinary}")"; then
+    if ! padmEnsureSafeDirectory "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "Xray-core 安装目录创建失败"
         return 1
     fi
-    if [[ -f "${oldBinary}" ]] && ! cp "${oldBinary}" "${backupBinary}"; then
+    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 655; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "Xray-core 旧二进制备份失败"
         return 1
@@ -1352,17 +1352,17 @@ installDownloadedSingBoxBinary() {
     cronetPath=$(coreSingBoxCronetPath)
     validateCoreInstallTargetPath "${cronetPath}" "sing-box cronet依赖" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     cronetBackup="${cronetPath}.bak.$(date +%s)"
-    if ! mkdir -p "$(dirname "${oldBinary}")"; then
+    if ! padmEnsureSafeDirectory "$(dirname "${oldBinary}")"; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "sing-box 安装目录创建失败"
         return 1
     fi
-    if [[ -f "${oldBinary}" ]] && ! cp "${oldBinary}" "${backupBinary}"; then
+    if [[ -f "${oldBinary}" ]] && ! backupManagedFileToPath "${oldBinary}" "${backupBinary}" 655; then
         padmRemoveCleanupPath "${tmpDir}"
         errorCard "sing-box 旧二进制备份失败"
         return 1
     fi
-    if [[ -f "${cronetPath}" ]] && ! cp "${cronetPath}" "${cronetBackup}"; then
+    if [[ -f "${cronetPath}" ]] && ! backupManagedFileToPath "${cronetPath}" "${cronetBackup}" 644; then
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && removeManagedFileIfPresent "${backupBinary}" || true
         errorCard "sing-box 旧 cronet 依赖备份失败"
@@ -2454,11 +2454,12 @@ singBoxLog() {
     local targetPath
     local tmpPath backupPath hadBackup=false
     targetPath=$(singBoxLogConfigFile)
-    mkdir -p "$(dirname "${targetPath}")" || { errorCard "sing-box 日志目录创建失败"; return 1; }
+    targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || { errorCard "sing-box 日志配置路径异常"; return 1; }
+    padmEnsureSafeDirectory "$(dirname "${targetPath}")" || { errorCard "sing-box 日志目录创建失败"; return 1; }
     padmCreateTempFileForTarget tmpPath "${targetPath}" log || return 1
     if [[ -f "${targetPath}" ]]; then
-        padmCreateTempFileForTarget backupPath "${targetPath}" backup || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-        cp "${targetPath}" "${backupPath}" || { padmRemoveCleanupPath "${backupPath}"; padmRemoveCleanupPath "${tmpPath}"; return 1; }
+        backupPath="${targetPath}.bak.$(date +%s)"
+        backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
         hadBackup=true
     fi
     cat <<EOF >"${tmpPath}"
@@ -2473,7 +2474,7 @@ singBoxLog() {
 EOF
     if ! commitGeneratedJsonFile "${tmpPath}" "${targetPath}"; then
         if [[ -n "${backupPath}" ]]; then
-            padmRemoveCleanupPath "${backupPath}"
+            removeManagedFileIfPresent "${backupPath}" || true
         fi
         padmRemoveCleanupPath "${tmpPath}"
         errorCard "sing-box 日志配置写入失败"
@@ -2483,17 +2484,17 @@ EOF
     serviceQueueRestart sing-box
     if serviceQueueApply; then
         if [[ -n "${backupPath}" ]]; then
-            padmRemoveCleanupPath "${backupPath}"
+            removeManagedFileIfPresent "${backupPath}" || true
         fi
         return 0
     fi
     if [[ "${hadBackup}" == "true" ]]; then
-        if ! commitGeneratedFile "${backupPath}" "${targetPath}" 644; then
-            padmForgetCleanupPath "${backupPath}"
+        if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
             errorCard "sing-box 日志配置重载失败，且旧配置恢复失败，请手动检查 ${targetPath}，备份文件：${backupPath}"
             backupPath=
             return 1
         fi
+        removeManagedFileIfPresent "${backupPath}" || true
         backupPath=
     else
         if ! removeManagedPathIfPresent "${targetPath}"; then
@@ -2502,7 +2503,7 @@ EOF
         fi
     fi
     if [[ -n "${backupPath}" ]]; then
-        padmRemoveCleanupPath "${backupPath}"
+        removeManagedFileIfPresent "${backupPath}" || true
     fi
     errorCard "sing-box 日志配置重载失败，已回滚日志配置"
     return 1

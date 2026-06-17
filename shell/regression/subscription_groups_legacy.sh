@@ -3612,7 +3612,7 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
         local targetDir targetName
         targetDir=$(dirname -- "${targetFile}")
         targetName=$(basename -- "${targetFile}")
-        [[ -d "${targetDir}" ]] || return 1
+        mkdir -p "${targetDir}" || return 1
         path=$(cd -- "${targetDir}" && mktemp ".${targetName}.install.XXXXXX") || return 1
         printf -v "${resultVar}" '%s' "${targetDir}/${path}"
     }
@@ -4668,7 +4668,7 @@ runSingBoxLogTransactionRegression() (
     local targetPath="${root}/conf/config/log.json"
     local serviceLog="${root}/service.log"
     local errorLog="${root}/error.log"
-    local applyMode rc
+    local applyMode rc keptBackup
 
     set +e
     mkdir -p "$(dirname "${targetPath}")" || return 1
@@ -4730,6 +4730,7 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'apply:fail' "${serviceLog}" || return 1
     grep -q 'sing-box 日志配置重载失败' "${errorLog}" || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
+    ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
 
     rm -f "${targetPath}" || return 1
     : >"${serviceLog}" || return 1
@@ -4741,6 +4742,46 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'apply:fail' "${serviceLog}" || return 1
     grep -q 'sing-box 日志配置重载失败' "${errorLog}" || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
+    ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
+
+    printf '{"log":{"disabled":true,"level":"warning"}}\n' >"${targetPath}" || return 1
+    : >"${serviceLog}" || return 1
+    : >"${errorLog}" || return 1
+    applyMode=fail
+    PADM_REGRESSION_APPLY_MODE="${applyMode}" \
+        PADM_SINGBOX_LOG_CONFIG_FILE="${targetPath}" \
+        bash -c '
+            set +e
+            source "$1/shell/core/runtime.sh"
+            source "$1/shell/core/services.sh"
+            source "$1/shell/core/cores.sh"
+            serviceLog=$2
+            errorLog=$3
+            rcFile=$4
+            serviceQueueRestart() {
+                printf "restart:%s\n" "$1" >>"${serviceLog}"
+                return 0
+            }
+            serviceQueueApply() {
+                printf "apply:%s\n" "${PADM_REGRESSION_APPLY_MODE}" >>"${serviceLog}"
+                return 1
+            }
+            errorCard() { printf "%s\n" "$*" >>"${errorLog}"; }
+            restoreManagedFileFromBackup() { return 1; }
+            singBoxLog false >/dev/null 2>&1
+            printf "%s\n" "$?" >"${rcFile}"
+        ' _ "${PROJECT_ROOT}" "${serviceLog}" "${errorLog}" "${root}/sing-box-log-restore-fail.rc" || return 1
+    rc=$(<"${root}/sing-box-log-restore-fail.rc") || return 1
+    [[ "${rc}" == "1" ]] || return 1
+    jq -e '.log.disabled == false and .log.level == "debug" and .log.output == "/etc/padm/sing-box/conf/box.log"' "${targetPath}" >/dev/null || return 1
+    grep -qx 'restart:sing-box' "${serviceLog}" || return 1
+    grep -qx 'apply:fail' "${serviceLog}" || return 1
+    grep -q '旧配置恢复失败' "${errorLog}" || return 1
+    keptBackup=$(compgen -G "${targetPath}.bak.*" | head -n 1) || true
+    [[ -n "${keptBackup}" && -f "${keptBackup}" ]] || return 1
+    jq -e '.log.disabled == true and .log.level == "warning"' "${keptBackup}" >/dev/null || return 1
+    rm -f "${keptBackup}" || return 1
+    ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
 
     : >"${serviceLog}" || return 1
     : >"${errorLog}" || return 1
@@ -4751,6 +4792,7 @@ runSingBoxLogTransactionRegression() (
     grep -qx 'apply:success' "${serviceLog}" || return 1
     [[ ! -s "${errorLog}" ]] || return 1
     ! compgen -G "$(dirname "${targetPath}")/.log.json.*" >/dev/null || return 1
+    ! compgen -G "${targetPath}.bak.*" >/dev/null || return 1
     return 0
 )
 
