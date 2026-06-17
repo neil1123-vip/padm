@@ -14481,17 +14481,15 @@ EOF
     SCRIPT_DIR="${sourceDir}"
     PADM_INSTALL_DIR="${targetDir}"
     HOME="${fixtureDir}/home"
+    printf 'old-install\n' >"${targetDir}/install.sh"
 
     (
         cp() {
             printf 'cp %s\n' "$*" >>"${cpLog}"
-            if [[ "$1" == "${sourceDir}/install.sh" && "$2" == "${targetDir}/install.sh" ]]; then
-                return 0
-            fi
             if [[ "$1" == "-R" && "$2" == "${sourceDir}/shell" ]]; then
                 return 1
             fi
-            return 0
+            command cp "$@"
         }
         rm() { printf 'rm %s\n' "$*" >>"${cpLog}"; return 0; }
         chmod() { :; }
@@ -14509,6 +14507,7 @@ EOF
     [[ "$(<"${targetDir}/shell/marker")" == "old-shell" ]]
     [[ "$(<"${targetDir}/documents/marker")" == "old-doc" ]]
     [[ "$(<"${targetDir}/assets/marker")" == "old-asset" ]]
+    [[ "$(<"${targetDir}/install.sh")" == "old-install" ]]
 
     SCRIPT_DIR="${oldScriptDir}"
     HOME="${oldHome}"

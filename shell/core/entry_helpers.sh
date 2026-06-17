@@ -1163,12 +1163,34 @@ sameInstallPath() {
     [[ "${leftDir}/${leftBase}" == "${rightDir}/${rightBase}" ]]
 }
 
+syncInstallManagedFile() {
+    local sourcePath=$1
+    local targetPath=$2
+    local mode=${3:-644}
+    local targetParent stagedFile
+
+    [[ -f "${sourcePath}" ]] || return 0
+    if sameInstallPath "${sourcePath}" "${targetPath}"; then
+        return 0
+    fi
+    targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || return 1
+    targetParent=$(dirname -- "${targetPath}")
+    padmEnsureSafeDirectory "${targetParent}" || return 1
+    padmCreateTempFileForTarget stagedFile "${targetPath}" install || return 1
+    if ! cp -p "${sourcePath}" "${stagedFile}"; then
+        padmRemoveCleanupPath "${stagedFile}"
+        return 1
+    fi
+    commitGeneratedFile "${stagedFile}" "${targetPath}" "${mode}" || {
+        padmRemoveCleanupPath "${stagedFile}"
+        return 1
+    }
+}
+
 syncInstallMetadataFile() {
     local sourcePath=$1
     local targetPath=$2
-    if [[ -f "${sourcePath}" ]] && ! sameInstallPath "${sourcePath}" "${targetPath}"; then
-        cp "${sourcePath}" "${targetPath}"
-    fi
+    syncInstallManagedFile "${sourcePath}" "${targetPath}" 644
 }
 
 cleanupInstallSyncPath() {
@@ -1268,9 +1290,6 @@ aliasInstall() {
     fi
 
     if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
-        if ! sameInstallPath "${sourceInstall}" "${targetDir}/install.sh"; then
-            cp "${sourceInstall}" "${targetDir}/install.sh" && chmod 700 "${targetDir}/install.sh" || return 1
-        fi
         syncInstallDirectoryTree "${SCRIPT_DIR}/shell" "${targetDir}/shell" || return 1
         syncInstallDirectoryTree "${SCRIPT_DIR}/documents" "${targetDir}/documents" || return 1
         syncInstallDirectoryTree "${SCRIPT_DIR}/assets" "${targetDir}/assets" || return 1
@@ -1278,6 +1297,7 @@ aliasInstall() {
         syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref" || return 1
         syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref" || return 1
         rm -f "${targetDir}/xray/README.md"
+        syncInstallManagedFile "${sourceInstall}" "${targetDir}/install.sh" 700 || return 1
         local shortcutCreated=
         if [[ -d "/usr/bin/" ]]; then
             if [[ ! -f "/usr/bin/padm" ]]; then
