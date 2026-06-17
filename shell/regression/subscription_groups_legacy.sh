@@ -6846,7 +6846,7 @@ runRuntimeAndRealityRegression() {
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 4096')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "A" ]]
     showRealityTargetQuality "www.microsoft.com:443"
-    [[ "$(realityTargetResultCount)" -ge "1" ]]
+    [[ "$(awk -F'\t' '$10 == "A" || $10 == "B" {count++} END{print count + 0}' "${PADM_REALITY_TARGET_SCAN_FILE}")" -ge "1" ]]
     cachedLine=$(awk -F'\t' '$1 == "www.microsoft.com:443" {printf "%s\t%s\t%s\t%s\t%s\t%s\n", $10, $11, $12, $13, $14, $15; exit}' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $1}')" == "A" ]]
     grep -q "tls ping www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
@@ -7172,7 +7172,7 @@ CSV
     unset AUTO_REALITY_SERVER_NAME
     writeRealityTargetResultLine "local.example.com:443" "sni.local.example.com" "Local Example" "test" "no" "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "same ASN test target"
     writeRealityTargetResultLine "remote.example.com:443" "sni.remote.example.com" "Remote Example" "test" "no" "198.51.100.1" "AS64501" "RemoteNet" "different_network" "A" "yes" "8192" "yes" "1234567899" "longer cert but different network"
-    [[ "$(realityTargetResultCount)" == "2" ]]
+    [[ "$(awk -F'\t' '$10 == "A" || $10 == "B" {count++} END{print count + 0}' "${PADM_REALITY_TARGET_SCAN_FILE}")" == "2" ]]
     scanLine=$(sortedRealityTargetResults | awk -F'\t' '$10 == "A" || $10 == "B" {print; exit}')
     [[ "$(realityTargetResultField "${scanLine}" 1)" == "local.example.com:443" ]]
     selectDefaultRealityTarget

@@ -360,16 +360,6 @@ showRealityTargetBlockedCandidates() {
     menuClose
 }
 
-realityTargetResultCount() {
-    local resultsFile
-    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
-    [[ -f "${resultsFile}" ]] || {
-        printf '0\n'
-        return 0
-    }
-    awk -F'\t' '$10 == "A" || $10 == "B" {count++} END{print count + 0}' "${resultsFile}"
-}
-
 realityTargetResultField() {
     local line=$1
     local field=$2
@@ -2087,7 +2077,7 @@ scanLocalAsnRealityTargets() {
     padmRemoveCleanupPath "${failedTargetsFile}"
     scanSeconds=$(( $(date +%s) - scanStart ))
     realityTargetStatusBlock green "REALITY 目标库质量刷新" "复测完成" "候选: ${scanned}" "ASN 已识别: ${resolved}" "same_asn: ${sameAsn}" "same_provider: ${sameProvider}" "different_network: ${differentNetwork}" "解析/ASN 失败: ${failed}" "耗时: ${scanSeconds}s"
-    if [[ "$(realityTargetResultCount)" -gt 0 ]]; then
+    if [[ "$(awk -F'\t' '$10 == "A" || $10 == "B" {count++} END{print count + 0}' "${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}" 2>/dev/null)" -gt 0 ]]; then
         realityTargetStatusBlock green "REALITY 目标库质量刷新" "自动推荐将优先使用统一结果表中的 A/B 级目标"
     else
         realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "未得到 A/B 级结果" "自动推荐仍回退到 www.ibm.com:443"
