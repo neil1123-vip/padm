@@ -1,6 +1,49 @@
 #!/usr/bin/env bash
 
 # 初始化 sing-box订阅配置
+subscribeLocalOutputFilePath() {
+    local category=$1
+    local user=$2
+    printf '%s/%s/%s\n' "$(subscribeLocalBaseDir)" "${category}" "${user}"
+}
+
+subscribeLocalOutputCategoryDir() {
+    local category=$1
+    printf '%s/%s\n' "$(subscribeLocalBaseDir)" "${category}"
+}
+
+subscribeLocalOutputSafeCategoryDir() {
+    local category=$1
+    local targetDir
+    targetDir=$(subscribeLocalOutputCategoryDir "${category}")
+    targetDir=$(padmResolveManagedAbsolutePath "${targetDir}") || return 1
+    padmEnsureSafeDirectory "${targetDir}" || return 1
+    printf '%s\n' "${targetDir}"
+}
+
+subscribeLocalOutputAppendLine() {
+    local targetPath=$1
+    local line=$2
+    local tmpPath
+
+    padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
+    if [[ -f "${targetPath}" ]]; then
+        cp -p "${targetPath}" "${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    fi
+    printf '%s\n' "${line}" >>"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+}
+
+ensureSubscribeLocalSingBoxConfig() {
+    local targetPath=$1
+    local tmpPath
+
+    [[ -f "${targetPath}" ]] && return 0
+    padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe-init || return 1
+    printf '[]\n' >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+}
+
 initSubscribeLocalConfig() {
     cleanDirectoryContent "$(subscribeLocalBaseDir)/default"
     cleanDirectoryContent "$(subscribeLocalBaseDir)/clashMeta"
@@ -10,13 +53,33 @@ initSubscribeLocalConfig() {
 appendDefaultSubscribeLine() {
     local user=$1
     local line=$2
-    printf '%s\n' "${line}" >>"$(subscribeLocalBaseDir)/default/${user}"
+    local defaultDir
+    defaultDir=$(subscribeLocalOutputSafeCategoryDir default) || return 1
+    subscribeLocalOutputAppendLine "${defaultDir}/${user}" "${line}"
 }
 
 appendClashMetaSubscribeBlock() {
     local user=$1
     local block=$2
-    printf '%s\n' "${block}" >>"$(subscribeLocalBaseDir)/clashMeta/${user}"
+    local clashDir
+    clashDir=$(subscribeLocalOutputSafeCategoryDir clashMeta) || return 1
+    subscribeLocalOutputAppendLine "${clashDir}/${user}" "${block}"
+}
+
+appendClashMetaSubscribeLines() {
+    local user=$1
+    local clashDir
+    local tmpPath
+    local targetPath
+
+    clashDir=$(subscribeLocalOutputSafeCategoryDir clashMeta) || return 1
+    targetPath="${clashDir}/${user}"
+    padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
+    if [[ -f "${targetPath}" ]]; then
+        cp -p "${targetPath}" "${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    fi
+    cat >>"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 serializeVlessRealityVisionLink() {
@@ -76,9 +139,13 @@ serializeVlessRealityXHTTPLink() {
 appendSingBoxSubscribeLocalConfig() {
     local user=$1
     local jqFilter=$2
-    local targetPath="$(subscribeLocalBaseDir)/sing-box/${user}"
+    local singBoxDir
+    local targetPath
     local tmpPath
 
+    singBoxDir=$(subscribeLocalOutputSafeCategoryDir sing-box) || return 1
+    targetPath="${singBoxDir}/${user}"
+    ensureSubscribeLocalSingBoxConfig "${targetPath}" || return 1
     padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
     if ! jq -r "${jqFilter}" "${targetPath}" | jq . >"${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"
@@ -125,11 +192,11 @@ defaultBase64Code() {
     local add=${5:-}
     local path=${6:-}
     local user=
+    local defaultDir clashDir singBoxDir
     user=$(stripClientNameSuffix "${email}")
-    mkdir -p "$(subscribeLocalBaseDir)/default" "$(subscribeLocalBaseDir)/clashMeta" "$(subscribeLocalBaseDir)/sing-box"
-    if [[ ! -f "$(subscribeLocalBaseDir)/sing-box/${user}" ]]; then
-        echo [] >"$(subscribeLocalBaseDir)/sing-box/${user}"
-    fi
+    defaultDir=$(subscribeLocalOutputSafeCategoryDir default) || return 1
+    clashDir=$(subscribeLocalOutputSafeCategoryDir clashMeta) || return 1
+    singBoxDir=$(subscribeLocalOutputSafeCategoryDir sing-box) || return 1
 
     case "${type}" in
     vlesstcp)

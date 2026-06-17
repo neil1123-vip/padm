@@ -6006,6 +6006,11 @@ JSON
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
+eval "$(declare -f appendDefaultSubscribeLine | sed '1s/^appendDefaultSubscribeLine/padmRealAppendDefaultSubscribeLine/')"
+eval "$(declare -f appendClashMetaSubscribeBlock | sed '1s/^appendClashMetaSubscribeBlock/padmRealAppendClashMetaSubscribeBlock/')"
+eval "$(declare -f appendClashMetaSubscribeLines | sed '1s/^appendClashMetaSubscribeLines/padmRealAppendClashMetaSubscribeLines/')"
+eval "$(declare -f appendSingBoxSubscribeLocalConfig | sed '1s/^appendSingBoxSubscribeLocalConfig/padmRealAppendSingBoxSubscribeLocalConfig/')"
+
 appendDefaultSubscribeLine() {
     local user=$1
     local line=$2
@@ -6034,17 +6039,79 @@ appendSingBoxSubscribeLocalConfig() {
     mv "${tmpPath}" "${targetPath}"
 }
 
+runSubscribeLocalOutputTransactionRegression() (
+    local root="${TMP_DIR}/subscribe-local-output-transaction"
+    local localDir="${root}/subscribe_local"
+    local defaultFile="${localDir}/default/user"
+    local clashFile="${localDir}/clashMeta/user"
+    local clashLinesFile="${localDir}/clashMeta/xhttp-user"
+    local rc
+
+    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    mkdir -p "${localDir}/default" "${localDir}/clashMeta"
+    printf 'old-default\n' >"${defaultFile}"
+    printf 'old-clash\n' >"${clashFile}"
+    printf 'old-lines\n' >"${clashLinesFile}"
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${defaultFile}" || "$2" == "${clashFile}" || "$2" == "${clashLinesFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    padmRealAppendDefaultSubscribeLine user 'new-default'
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${defaultFile}")" == "old-default" ]]
+    if find "${localDir}/default" -maxdepth 1 -type f -name '.user.subscribe.*' | grep -q .; then
+        return 1
+    fi
+
+    set +e
+    padmRealAppendClashMetaSubscribeBlock user 'new-clash'
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${clashFile}")" == "old-clash" ]]
+    if find "${localDir}/clashMeta" -maxdepth 1 -type f -name '.user.subscribe.*' | grep -q .; then
+        return 1
+    fi
+
+    set +e
+    padmRealAppendClashMetaSubscribeLines xhttp-user <<'EOF'
+  - name: "xhttp-user"
+    type: vless
+EOF
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${clashLinesFile}")" == "old-lines" ]]
+    if find "${localDir}/clashMeta" -maxdepth 1 -type f -name '.xhttp-user.subscribe.*' | grep -q .; then
+        return 1
+    fi
+)
+
 runSingBoxSubscribeWriteRegression() {
     local targetPath="${SUBSCRIBE_CAPTURE_DIR}/sing-box/atomic-user"
-    mkdir -p "${SUBSCRIBE_CAPTURE_DIR}/sing-box"
+    rm -rf "${SUBSCRIBE_CAPTURE_DIR}/sing-box"
+    mkdir -p "$(dirname "${targetPath}")"
     printf '[{"tag":"old"}]\n' >"${targetPath}"
-    if appendSingBoxSubscribeLocalConfig atomic-user '. += [' 2>/dev/null; then
+    if padmRealAppendSingBoxSubscribeLocalConfig atomic-user '. += [' 2>/dev/null; then
         return 1
     fi
     jq -e '.[0].tag == "old"' "${targetPath}" >/dev/null
-    [[ ! -e "${targetPath}.tmp" ]]
-    appendSingBoxSubscribeLocalConfig atomic-user '. += [{"tag":"new"}]'
+    if find "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*' | grep -q .; then
+        return 1
+    fi
+    padmRealAppendSingBoxSubscribeLocalConfig atomic-user '. += [{"tag":"new"}]'
     jq -e 'length == 2 and .[1].tag == "new"' "${targetPath}" >/dev/null
+    if find "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*' | grep -q .; then
+        return 1
+    fi
 }
 
 runSubscribeServerNameRegression() {
@@ -8960,14 +9027,14 @@ currentRealityPublicKey="pubkey"
 currentRealityMldsa65Verify="pqv"
 defaultBase64Code vlessReality 443 user-a-main uuid-a "" ""
 expectedVisionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a-main")
-assertCapturedSubscribeOutputs "user" "${expectedVisionLink}" "node.example.com" "www.microsoft.com" "tcp" "vless"
-jq -e '.[0].flow == "xtls-rprx-vision" and .[0].tls.reality.public_key == "pubkey"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user" >/dev/null
+assertCapturedSubscribeOutputs "user-a-main" "${expectedVisionLink}" "node.example.com" "www.microsoft.com" "tcp" "vless"
+jq -e '.[0].flow == "xtls-rprx-vision" and .[0].tls.reality.public_key == "pubkey"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-main" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 defaultBase64Code vlessRealityGRPC 8443 user-a-grpc uuid-a "" ""
 expectedGrpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "node.example.com" "8443" "www.microsoft.com" "pubkey" "pqv" "user-a-grpc")
-assertCapturedSubscribeOutputs "user" "${expectedGrpcLink}" "node.example.com" "www.microsoft.com" "grpc" "vless"
-jq -e '.[0].transport.service_name == "grpc" and .[0].tls.reality.short_id == "6ba85179e30d4fc2"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user" >/dev/null
+assertCapturedSubscribeOutputs "user-a-grpc" "${expectedGrpcLink}" "node.example.com" "www.microsoft.com" "grpc" "vless"
+jq -e '.[0].transport.service_name == "grpc" and .[0].tls.reality.short_id == "6ba85179e30d4fc2"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-grpc" >/dev/null
 grep -q 'pqv%3Dpqv' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -8981,12 +9048,12 @@ xrayVLESSRealityXHTTPSNI="www.microsoft.com"
 currentRealityXHTTPPublicKey="pubkey"
 defaultBase64Code vlessXHTTP 443 user-a-xhttp uuid-a "cdn.example.com" "/ignored"
 expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp" none "front.example.com" "packet-up")
-grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user"
-grep -qx "    server: cdn.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user"
-grep -qx "    servername: www.microsoft.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user"
-grep -qx "      path: /custom-xhttp" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user"
-grep -qx "      host: front.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user"
-grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user"
+grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp"
+grep -qx "    server: cdn.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
+grep -qx "    servername: www.microsoft.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
+grep -qx "      path: /custom-xhttp" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
+grep -qx "      host: front.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
+grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 configPath="${oldConfigPath}"
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14117,6 +14184,7 @@ runRegressionSubscriptionRemoteFetch() {
 
 runRegressionSubscriptionWriteTransaction() {
     runRegressionStep sing-box-subscribe-write runSingBoxSubscribeWriteRegression
+    runRegressionStep subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression
     runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
     runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression

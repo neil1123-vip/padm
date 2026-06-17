@@ -156,7 +156,7 @@ emitVlessXHTTPSubscribeOutput() {
     echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2,serverNames：${xrayVLESSRealityXHTTPSNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${xrayVLESSRealityXHTTPSNI}，用户ID:${id}，传输方式:xhttp，flow:xtls-rprx-vision，账户名:${email}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"
 
-    cat <<EOF >>"$(subscribeLocalBaseDir)/clashMeta/${user}"
+    appendClashMetaSubscribeLines "${user}" <<EOF
   - name: "${email}"
     type: vless
     server: ${add}
