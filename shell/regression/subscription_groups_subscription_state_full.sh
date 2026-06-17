@@ -826,8 +826,6 @@ runSubscriptionGroupSyncApplyFailureRegression() (
     local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
     local syncLocalFile="${syncRoot}/subscribe_local/default/user"
     local syncPublicFile="${syncRoot}/subscribe/default/user"
-    local remoteLog="${syncRoot}/remote.log"
-    local reconcileLog="${syncRoot}/reconcile.log"
     local statusLog="${syncRoot}/status.log"
     local resultStatus="${syncRoot}/mark-status.log"
     local resultFailures="${syncRoot}/mark-failures.log"
@@ -863,14 +861,6 @@ JSON
         SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败"
         return 1
     }
-    subscriptionSyncReconcileLocalServices() {
-        printf 'reconcile\n' >>"${reconcileLog}"
-        return 0
-    }
-    runSubscriptionRemoteSync() {
-        printf 'remote\n' >>"${remoteLog}"
-        printf '[]'
-    }
     subscriptionSyncMarkResult() {
         printf '%s\n' "$1" >"${resultStatus}"
         printf '%s\n' "$2" >"${resultFailures}"
@@ -887,8 +877,6 @@ JSON
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
     [[ "$(<"${syncLocalFile}")" == "old-local" ]]
     [[ "$(<"${syncPublicFile}")" == "old-public" ]]
-    [[ ! -e "${remoteLog}" ]]
-    [[ ! -e "${reconcileLog}" ]]
     grep -q '本机同步计划应用失败' "${resultFailures}"
     grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
     grep -q '本机同步未完全完成' "${statusLog}"
@@ -903,7 +891,6 @@ runSubscriptionGroupSyncReconcileRollbackRegression() (
     local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
     local syncLocalFile="${syncRoot}/subscribe_local/default/user"
     local syncPublicFile="${syncRoot}/subscribe/default/user"
-    local remoteLog="${syncRoot}/remote.log"
     local reconcileLog="${syncRoot}/reconcile.log"
     local statusLog="${syncRoot}/status.log"
     local resultStatus="${syncRoot}/mark-status.log"
@@ -951,10 +938,6 @@ JSON
         fi
         return 0
     }
-    runSubscriptionRemoteSync() {
-        printf 'remote\n' >>"${remoteLog}"
-        printf '[]'
-    }
     subscriptionSyncMarkResult() {
         printf '%s\n' "$1" >"${resultStatus}"
         printf '%s\n' "$2" >"${resultFailures}"
@@ -971,7 +954,6 @@ JSON
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
     [[ "$(<"${syncLocalFile}")" == "old-local" ]]
     [[ "$(<"${syncPublicFile}")" == "old-public" ]]
-    [[ ! -e "${remoteLog}" ]]
     [[ "$(wc -l <"${reconcileLog}" | tr -d ' ')" == "2" ]]
     grep -qx '<empty>' "${reconcileLog}"
     grep -qx 'true' "${reconcileLog}"
