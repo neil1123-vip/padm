@@ -171,20 +171,9 @@ writeSubscribeNginxConfig() {
     fi
 }
 
-availableSubscribeCertificateDomain() {
+resolveSubscribeServerName() {
     local certDir="${PADM_TLS_DIR:-/etc/padm/tls}"
     local certFile domainName
-    for certFile in "${certDir}"/*.crt; do
-        [[ -s "${certFile}" ]] || continue
-        domainName=$(basename "${certFile}" .crt)
-        [[ -s "${certDir}/${domainName}.key" ]] || continue
-        printf '%s\n' "${domainName}"
-        return 0
-    done
-    return 1
-}
-
-resolveSubscribeServerName() {
     if [[ -n "${currentHost:-}" ]]; then
         printf '%s\n' "${currentHost}"
         return 0
@@ -193,7 +182,14 @@ resolveSubscribeServerName() {
         printf '%s\n' "${domain}"
         return 0
     fi
-    availableSubscribeCertificateDomain
+    for certFile in "${certDir}"/*.crt; do
+        [[ -s "${certFile}" ]] || continue
+        domainName=$(basename "${certFile}" .crt)
+        [[ -s "${certDir}/${domainName}.key" ]] || continue
+        printf '%s\n' "${domainName}"
+        return 0
+    done
+    return 1
 }
 
 runSubscribeNginxAction() {
