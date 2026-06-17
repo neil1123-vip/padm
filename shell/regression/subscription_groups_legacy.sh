@@ -3232,11 +3232,6 @@ runSingBoxProtocolReloadFailureRegression() (
         printf 'reload\n' >>"${callLog}"
         return 1
     }
-    showAccounts() {
-        printf 'accounts\n' >"${reachedFile}"
-        return 0
-    }
-
     set +e
     singBoxTuicInstall >/dev/null 2>&1
     tuicRc=$?
@@ -3349,15 +3344,6 @@ runCoreCleanupFailurePropagationRegression() (
         printf 'apply\n' >>"${queueLog}"
         return 0
     }
-    checkGFWStatue() {
-        printf 'reached\n' >"${reachedFile}"
-        return 0
-    }
-    showAccounts() {
-        printf 'reached\n' >"${reachedFile}"
-        return 0
-    }
-
     set +e
     installSingBoxReality >/dev/null 2>&1
     rc=$?
