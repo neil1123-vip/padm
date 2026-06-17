@@ -495,20 +495,24 @@ cleanCoreInstallDirectory() {
 unInstallSingBox() {
     local type=${1:-}
     if [[ -n "${singBoxConfigPath}" ]]; then
+        local targetFile
         if ! padmIsSafeAbsolutePath "${singBoxConfigPath%/}"; then
             errorCard "sing-box 配置路径异常，已取消卸载"
             return 1
         fi
         if grep -q 'tuic' </etc/padm/sing-box/conf/config.json && [[ "${type}" == "tuic" ]]; then
-            rm "${singBoxConfigPath}09_tuic_inbounds.json"
+            targetFile=$(padmManagedFilePath "${singBoxConfigPath}" "09_tuic_inbounds.json") || return 1
+            removeManagedFileIfPresent "${targetFile}" || return 1
             successCard "删除sing-box tuic配置成功"
         fi
 
         if grep -q 'hysteria2' </etc/padm/sing-box/conf/config.json && [[ "${type}" == "hysteria2" ]]; then
-            rm "${singBoxConfigPath}06_hysteria2_inbounds.json"
+            targetFile=$(padmManagedFilePath "${singBoxConfigPath}" "06_hysteria2_inbounds.json") || return 1
+            removeManagedFileIfPresent "${targetFile}" || return 1
             successCard "删除sing-box hysteria2配置成功"
         fi
-        rm "${singBoxConfigPath}config.json"
+        targetFile=$(padmManagedFilePath "${singBoxConfigPath}" "config.json") || return 1
+        removeManagedFileIfPresent "${targetFile}" || return 1
     fi
 
     readInstallType
@@ -873,10 +877,30 @@ corePortParseList() {
     done
 }
 
+corePortSafeConfigDir() {
+    [[ -n "${configPath:-}" ]] || return 1
+    padmIsSafeAbsolutePath "${configPath%/}" || return 1
+    printf '%s\n' "${configPath%/}/"
+}
+
+corePortManagedFilesByPattern() {
+    local pattern=$1
+    local configDir
+    configDir=$(corePortSafeConfigDir) || return 1
+    [[ -d "${configDir}" ]] || return 0
+    find "${configDir}" -maxdepth 1 -type f -name "${pattern}" -print | LC_ALL=C sort
+}
+
+corePortManagedFilePath() {
+    local fileName=$1
+    local configDir
+    configDir=$(corePortSafeConfigDir) || return 1
+    padmManagedFilePath "${configDir}" "${fileName}"
+}
+
 corePortListExtra() {
     local file base port defaultMark count=0
-    for file in "${configPath}"02_dokodemodoor_inbounds_*.json; do
-        [[ -f "${file}" ]] || continue
+    while IFS= read -r file; do
         base=${file##*/}
         [[ "${base}" == *hysteria* ]] && continue
         if [[ "${base}" =~ ^02_dokodemodoor_inbounds_([0-9]+)(_default)?\.json$ ]]; then
@@ -886,7 +910,7 @@ corePortListExtra() {
             count=$((count + 1))
             printf '%s:%s%s\n' "${count}" "${port}" "${defaultMark}"
         fi
-    done
+    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
 }
 
 corePortResolveByIndex() {
@@ -901,70 +925,82 @@ corePortResolveByIndex() {
 
 corePortDefaultFile() {
     local file
-    for file in "${configPath}"02_dokodemodoor_inbounds_*_default.json; do
-        [[ -f "${file}" ]] && printf '%s\n' "${file}" && return 0
-    done
+    while IFS= read -r file; do
+        printf '%s\n' "${file}"
+        return 0
+    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*_default.json')
     return 1
 }
 
 corePortRemove() {
     local port=$1
     local status=0
-    rm -f "${configPath}02_dokodemodoor_inbounds_${port}.json" || status=1
-    rm -f "${configPath}02_dokodemodoor_inbounds_${port}_default.json" || status=1
-    rm -f "${configPath}02_dokodemodoor_inbounds_hysteria_${port}.json" || status=1
+    local targetFile
+    targetFile=$(corePortManagedFilePath "02_dokodemodoor_inbounds_${port}.json") || return 1
+    removeManagedFileIfPresent "${targetFile}" || status=1
+    targetFile=$(corePortManagedFilePath "02_dokodemodoor_inbounds_${port}_default.json") || return 1
+    removeManagedFileIfPresent "${targetFile}" || status=1
+    targetFile=$(corePortManagedFilePath "02_dokodemodoor_inbounds_hysteria_${port}.json") || return 1
+    removeManagedFileIfPresent "${targetFile}" || status=1
     return "${status}"
 }
 
 corePortBackupFiles() {
     local backupDir=$1
     local file base
+    corePortSafeConfigDir >/dev/null || return 1
     mkdir -p "${backupDir}" || return 1
-    for file in "${configPath}"02_dokodemodoor_inbounds_*.json; do
-        [[ -f "${file}" ]] || continue
+    while IFS= read -r file; do
         base=${file##*/}
         cp "${file}" "${backupDir}/${base}" || return 1
-    done
+    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
 }
 
 corePortRollbackFiles() {
     local backupDir=$1
+    local configDir
     local file status=0
+    configDir=$(corePortSafeConfigDir) || return 1
     [[ -d "${backupDir}" ]] || return 1
-    rm -f "${configPath}"02_dokodemodoor_inbounds_*.json || status=1
+    while IFS= read -r file; do
+        removeManagedFileIfPresent "${file}" || status=1
+    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
     for file in "${backupDir}"/*.json; do
+        local targetFile
         [[ -f "${file}" ]] || continue
-        cp "${file}" "${configPath}${file##*/}" || status=1
+        targetFile=$(padmManagedFilePath "${configDir}" "${file##*/}") || return 1
+        restoreManagedFileFromBackup "${file}" "${targetFile}" 644 || status=1
     done
     return "${status}"
 }
 
 corePortValidateFiles() {
     local file
-    for file in "${configPath}"02_dokodemodoor_inbounds_*.json; do
-        [[ -f "${file}" ]] || continue
+    while IFS= read -r file; do
         jq empty "${file}" >/dev/null || return 1
-    done
+    done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
 }
 
 corePortWriteAddFiles() {
     local ports=$1
     local defaultPort=$2
     local settingsPort=$3
+    local configDir
     local port fileName hysteriaFileName defaultFile
+    configDir=$(corePortSafeConfigDir) || return 1
     if [[ -n "${defaultPort}" ]]; then
         defaultFile=$(corePortDefaultFile || true)
-        [[ -z "${defaultFile}" ]] || rm -f "${defaultFile}" || return 1
+        [[ -z "${defaultFile}" ]] || removeManagedFileIfPresent "${defaultFile}" || return 1
     fi
     while read -r port; do
         corePortRemove "${port}" || return 1
         if [[ -n "${defaultPort}" && "${port}" == "${defaultPort}" ]]; then
-            fileName="${configPath}02_dokodemodoor_inbounds_${port}_default.json"
+            fileName="${configDir}02_dokodemodoor_inbounds_${port}_default.json"
         else
-            fileName="${configPath}02_dokodemodoor_inbounds_${port}.json"
+            fileName="${configDir}02_dokodemodoor_inbounds_${port}.json"
         fi
         if [[ -n ${hysteriaPort:-} ]]; then
-            hysteriaFileName="${configPath}02_dokodemodoor_inbounds_hysteria_${port}.json"
+            hysteriaFileName="${configDir}02_dokodemodoor_inbounds_hysteria_${port}.json"
             writeCoreDokodemoInbound "${hysteriaFileName}" "${port}" "${hysteriaPort}" udp "dokodemo-door-newPort-hysteria-${port}" || return 1
         fi
         writeCoreDokodemoInbound "${fileName}" "${port}" "${settingsPort}" tcp "dokodemo-door-newPort-${port}" || return 1
@@ -1035,8 +1071,10 @@ writeCoreDokodemoInbound() {
     local targetPort=$3
     local network=$4
     local tag=$5
-    mkdir -p "$(dirname "${fileName}")" || return 1
-    cat <<EOF >"${fileName}" || return 1
+    local tmpFile
+    fileName=$(padmRequireSafeAbsolutePath "${fileName}") || return 1
+    padmCreateTempFileForTarget tmpFile "${fileName}" dokodemo || return 1
+    if ! cat >"${tmpFile}" <<EOF
 {
   "inbounds": [
     {
@@ -1054,6 +1092,11 @@ writeCoreDokodemoInbound() {
   ]
 }
 EOF
+    then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    commitGeneratedJsonFile "${tmpFile}" "${fileName}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
 addCorePort() {

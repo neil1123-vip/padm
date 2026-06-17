@@ -2421,6 +2421,61 @@ runCorePortFileTransactionRegression() {
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
+runCorePortRejectsUnsafeConfigDirRegression() (
+    local root="${TMP_DIR}/core-port-unsafe-config"
+    local rmLog="${root}/rm.log"
+    local cpLog="${root}/cp.log"
+    local rc
+
+    mkdir -p "${root}/relative-config" "${root}/backup-restore"
+    : >"${rmLog}"
+    : >"${cpLog}"
+    printf '{"inbounds":[{"port":2053,"settings":{"port":443}}]}\n' >"${root}/relative-config/02_dokodemodoor_inbounds_2053_default.json"
+    printf '{"inbounds":[{"port":2443,"settings":{"port":443}}]}\n' >"${root}/backup-restore/02_dokodemodoor_inbounds_2443_default.json"
+
+    cd "${root}"
+    configPath="relative-config/"
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+    cp() {
+        printf 'cp:%s\n' "$*" >>"${cpLog}"
+        command cp "$@"
+    }
+
+    set +e
+    writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-unsafe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${root}/relative-config/02_dokodemodoor_inbounds_2053.json" ]]
+
+    set +e
+    corePortRemove 2053 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -f "${root}/relative-config/02_dokodemodoor_inbounds_2053_default.json" ]]
+
+    set +e
+    corePortBackupFiles "${root}/backup-out" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${root}/backup-out" ]]
+
+    set +e
+    corePortRollbackFiles "${root}/backup-restore" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -f "${root}/relative-config/02_dokodemodoor_inbounds_2053_default.json" ]]
+    [[ ! -e "${root}/relative-config/02_dokodemodoor_inbounds_2443_default.json" ]]
+    [[ ! -s "${rmLog}" ]]
+    [[ ! -s "${cpLog}" ]]
+)
+
 runXrayRealityPortFailureRegression() (
     local xrayRoot="${TMP_DIR}/xray-reality-port-failure"
     local oldConfigPath="${configPath:-}"
@@ -14385,6 +14440,7 @@ runRegressionRuntime() {
 runRegressionTransactionCore() {
     runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
+        runRegressionStep core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression &&
         runRegressionStep check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression &&
         runRegressionStep alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression &&
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
