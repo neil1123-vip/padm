@@ -36,12 +36,6 @@ writeSubscriptionStateLegacyEdgeGroupFixture() {
 JSON
 }
 
-writeSubscriptionStateMigratedEdgeGroupFixture() {
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"edge-group","groups":[{"id":"edge-group","name":"Edge Group","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","scheme":"https","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{"edge":{"upload":0,"download":0}}},"user_groups":{"team-a":{"upload":1,"download":2,"sources":{"edge":{"upload":1,"download":2}}}},"sources":{"edge":{"upload":1,"download":2}}}}]}
-JSON
-}
-
 writeSubscriptionStateSourceCredentialFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
