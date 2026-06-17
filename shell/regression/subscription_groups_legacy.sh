@@ -3435,6 +3435,45 @@ runSingBoxDownloadArtifactsCleanupRegression() (
     [[ "${rc}" == "1" ]]
 )
 
+runXrayGeoManagedFileRegression() (
+    local root="${TMP_DIR}/xray-geo-managed-files"
+    local geoDir="${root}/geo"
+    local stageDir="${root}/stage"
+    local rmLog="${root}/rm.log"
+
+    mkdir -p "${geoDir}" "${stageDir}"
+    printf 'old-geoip\n' >"${geoDir}/geoip.dat"
+    printf 'old-geosite\n' >"${geoDir}/geosite.dat"
+    printf 'v-old\n' >"${geoDir}/geo.version"
+    printf 'new-geoip\n' >"${stageDir}/geoip.dat"
+    printf 'new-geosite\n' >"${stageDir}/geosite.dat"
+    : >"${rmLog}"
+
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${rmLog}"
+        command rm "$@"
+    }
+
+    cleanXrayGeoFiles "${geoDir}"
+    grep -qxF "rm:-f -- ${geoDir}/geosite.dat" "${rmLog}"
+    grep -qxF "rm:-f -- ${geoDir}/geoip.dat" "${rmLog}"
+    grep -qxF "rm:-f -- ${geoDir}/geo.version" "${rmLog}"
+    [[ ! -e "${geoDir}/geoip.dat" ]]
+    [[ ! -e "${geoDir}/geosite.dat" ]]
+    [[ ! -e "${geoDir}/geo.version" ]]
+
+    commitXrayGeoFilesFromStage "${stageDir}" "${geoDir}" v20260617
+    [[ "$(<"${geoDir}/geoip.dat")" == "new-geoip" ]]
+    [[ "$(<"${geoDir}/geosite.dat")" == "new-geosite" ]]
+    [[ "$(<"${geoDir}/geo.version")" == "v20260617" ]]
+
+    : >"${rmLog}"
+    if cleanXrayGeoFiles relative-geo >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -s "${rmLog}" ]]
+)
+
 runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
     local rootRel="${TMP_DIR}/core-first-install-failure"
     local root
@@ -14709,6 +14748,7 @@ runRegressionTransactionCore() {
         runRegressionStep core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression &&
         runRegressionStep core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression &&
         runRegressionStep core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression &&
+        runRegressionStep xray-geo-managed-files runXrayGeoManagedFileRegression &&
         runRegressionStep sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&

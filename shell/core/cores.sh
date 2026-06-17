@@ -3,7 +3,14 @@
 # 清理 Xray geo 数据文件
 cleanXrayGeoFiles() {
     local targetDir=$1
-    rm -f "${targetDir}/geosite.dat" "${targetDir}/geoip.dat" "${targetDir}/geo.version" >/dev/null 2>&1
+    local geoipFile
+    local geositeFile
+    local geoVersionFile
+
+    geoipFile=$(padmManagedFilePath "${targetDir}" "geoip.dat") || return 1
+    geositeFile=$(padmManagedFilePath "${targetDir}" "geosite.dat") || return 1
+    geoVersionFile=$(padmManagedFilePath "${targetDir}" "geo.version") || return 1
+    removeManagedFilesIfPresent "${geositeFile}" "${geoipFile}" "${geoVersionFile}"
 }
 
 cleanSingBoxDownloadArtifacts() {
@@ -14,8 +21,9 @@ cleanSingBoxDownloadArtifacts() {
 
     padmIsSafeAbsolutePath "${assetPath}" || return 1
     padmIsSafeAbsolutePath "${extractedDir}" || return 1
-    rm -f -- "${assetPath}" >/dev/null 2>&1 || return 1
-    rm -rf -- "${extractedDir}" >/dev/null 2>&1 || return 1
+    removeManagedFileIfPresent "${assetPath}" || return 1
+    padmRemoveCleanupPath "${extractedDir}"
+    [[ ! -e "${extractedDir}" ]]
 }
 
 downloadXrayReleaseBinaryToTempDir() {
@@ -67,11 +75,54 @@ commitXrayGeoFilesFromStage() {
     local stageDir=$1
     local targetDir=$2
     local geoVersion=$3
+    local geositeStage
+    local geoipStage
+    local versionStage
+    local geositeTarget
+    local geoipTarget
+    local versionTarget
 
-    mkdir -p "${targetDir}" || return 1
-    cp "${stageDir}/geosite.dat" "${targetDir}/geosite.dat" || return 1
-    cp "${stageDir}/geoip.dat" "${targetDir}/geoip.dat" || return 1
-    printf '%s\n' "${geoVersion}" >"${targetDir}/geo.version" || return 1
+    geositeTarget=$(padmManagedFilePath "${targetDir}" "geosite.dat") || return 1
+    geoipTarget=$(padmManagedFilePath "${targetDir}" "geoip.dat") || return 1
+    versionTarget=$(padmManagedFilePath "${targetDir}" "geo.version") || return 1
+
+    padmCreateTempFileForTarget geositeStage "${geositeTarget}" geo || return 1
+    if ! cp -p "${stageDir}/geosite.dat" "${geositeStage}"; then
+        padmRemoveCleanupPath "${geositeStage}"
+        return 1
+    fi
+    padmCreateTempFileForTarget geoipStage "${geoipTarget}" geo || { padmRemoveCleanupPath "${geositeStage}"; return 1; }
+    if ! cp -p "${stageDir}/geoip.dat" "${geoipStage}"; then
+        padmRemoveCleanupPath "${geositeStage}"
+        padmRemoveCleanupPath "${geoipStage}"
+        return 1
+    fi
+    padmCreateTempFileForTarget versionStage "${versionTarget}" geo || {
+        padmRemoveCleanupPath "${geositeStage}"
+        padmRemoveCleanupPath "${geoipStage}"
+        return 1
+    }
+    if ! printf '%s\n' "${geoVersion}" >"${versionStage}"; then
+        padmRemoveCleanupPath "${geositeStage}"
+        padmRemoveCleanupPath "${geoipStage}"
+        padmRemoveCleanupPath "${versionStage}"
+        return 1
+    fi
+    commitGeneratedFile "${geositeStage}" "${geositeTarget}" 644 || {
+        padmRemoveCleanupPath "${geositeStage}"
+        padmRemoveCleanupPath "${geoipStage}"
+        padmRemoveCleanupPath "${versionStage}"
+        return 1
+    }
+    commitGeneratedFile "${geoipStage}" "${geoipTarget}" 644 || {
+        padmRemoveCleanupPath "${geoipStage}"
+        padmRemoveCleanupPath "${versionStage}"
+        return 1
+    }
+    commitGeneratedFile "${versionStage}" "${versionTarget}" 644 || {
+        padmRemoveCleanupPath "${versionStage}"
+        return 1
+    }
 }
 
 ensureXrayGeoFiles() {
@@ -1169,7 +1220,7 @@ finalizeFailedCoreBinaryInstall() {
         if restoreCoreBinaryBackup "${backupBinary}" "${targetBinary}"; then
             restoreMessage="已恢复旧二进制"
             restoredBinary=true
-            rm -f "${backupBinary}" >/dev/null 2>&1 || true
+            removeManagedFileIfPresent "${backupBinary}" || true
         else
             restoreMessage="旧二进制恢复失败"
         fi
@@ -1193,7 +1244,7 @@ restoreCoreOptionalFileBackup() {
     local mode=${3:-644}
     if [[ ! -e "${backupFile}" ]]; then
         padmCommitTargetIsFileLike "${targetFile}" || return 1
-        rm -f -- "${targetFile}" >/dev/null 2>&1 || return 1
+        removeManagedFileIfPresent "${targetFile}" || return 1
         return 0
     fi
     restoreManagedFileFromBackup "${backupFile}" "${targetFile}" "${mode}"
@@ -1212,7 +1263,7 @@ finalizeFailedSingBoxBinaryInstall() {
         statusCard "sing-box 更新失败" "libcronet.so 恢复失败，请手动检查 ${cronetPath}" "排查日志: ${logFile}"
         return 1
     fi
-    [[ -e "${cronetBackup}" ]] && rm -f "${cronetBackup}" >/dev/null 2>&1 || true
+    [[ -e "${cronetBackup}" ]] && removeManagedFileIfPresent "${cronetBackup}" || true
     return "${restoreStatus}"
 }
 
@@ -1254,7 +1305,7 @@ installDownloadedXrayBinary() {
     fi
     if ! runCoreServiceActionAllowFailure handleXray stop; then
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}" >/dev/null 2>&1 || true
+        [[ -f "${backupBinary}" ]] && removeManagedFileIfPresent "${backupBinary}" || true
         statusCard "Xray-core 更新失败" "Xray 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
@@ -1267,7 +1318,7 @@ installDownloadedXrayBinary() {
     if xrayInstalled && xrayRunning; then
         successCard "Xray-core更新成功"
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}"
+        [[ -f "${backupBinary}" ]] && removeManagedFileIfPresent "${backupBinary}" || true
         return 0
     fi
     padmRemoveCleanupPath "${tmpDir}"
@@ -1317,14 +1368,14 @@ installDownloadedSingBoxBinary() {
     fi
     if [[ -f "${cronetPath}" ]] && ! cp "${cronetPath}" "${cronetBackup}"; then
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}" >/dev/null 2>&1 || true
+        [[ -f "${backupBinary}" ]] && removeManagedFileIfPresent "${backupBinary}" || true
         errorCard "sing-box 旧 cronet 依赖备份失败"
         return 1
     fi
     if ! runCoreServiceActionAllowFailure handleSingBox stop; then
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}" >/dev/null 2>&1 || true
-        [[ -f "${cronetBackup}" ]] && rm -f "${cronetBackup}" >/dev/null 2>&1 || true
+        [[ -f "${backupBinary}" ]] && removeManagedFileIfPresent "${backupBinary}" || true
+        [[ -f "${cronetBackup}" ]] && removeManagedFileIfPresent "${cronetBackup}" || true
         statusCard "sing-box 更新失败" "sing-box 服务停止失败，已取消替换" "排查日志: ${logFile}"
         return 1
     fi
@@ -1342,8 +1393,8 @@ installDownloadedSingBoxBinary() {
     if singBoxInstalled && singBoxRunning; then
         successCard "sing-box更新成功"
         padmRemoveCleanupPath "${tmpDir}"
-        [[ -f "${backupBinary}" ]] && rm -f "${backupBinary}"
-        [[ -f "${cronetBackup}" ]] && rm -f "${cronetBackup}"
+        [[ -f "${backupBinary}" ]] && removeManagedFileIfPresent "${backupBinary}" || true
+        [[ -f "${cronetBackup}" ]] && removeManagedFileIfPresent "${cronetBackup}" || true
         return 0
     fi
     padmRemoveCleanupPath "${tmpDir}"
