@@ -64,6 +64,62 @@ scriptCreateTempDir() {
     printf '%s\n' "${tempPath}"
 }
 
+scriptArchiveEntryIsSafe() {
+    local entryPath=$1
+    local normalizedPath segment
+    [[ -n "${entryPath}" ]] || return 1
+    normalizedPath="${entryPath}"
+    while [[ "${normalizedPath}" == ./* ]]; do
+        normalizedPath="${normalizedPath#./}"
+    done
+    normalizedPath="${normalizedPath%/}"
+    [[ -n "${normalizedPath}" && "${normalizedPath}" != /* ]] || return 1
+    IFS='/' read -r -a pathSegments <<<"${normalizedPath}"
+    for segment in "${pathSegments[@]}"; do
+        [[ -n "${segment}" && "${segment}" != "." && "${segment}" != ".." ]] || return 1
+    done
+}
+
+validateRepoArchive() {
+    local archiveFile=$1
+    local entryList detailList entry line lineType
+    entryList=$(scriptCreateTempPath padm-archive-entries.XXXXXX) || return 1
+    detailList=$(scriptCreateTempPath padm-archive-details.XXXXXX) || {
+        scriptRemovePath "${entryList}" || true
+        return 1
+    }
+    tar -tzf "${archiveFile}" >"${entryList}" 2>/dev/null || {
+        scriptRemovePath "${entryList}" || true
+        scriptRemovePath "${detailList}" || true
+        return 1
+    }
+    while IFS= read -r entry; do
+        scriptArchiveEntryIsSafe "${entry}" || {
+            scriptRemovePath "${entryList}" || true
+            scriptRemovePath "${detailList}" || true
+            return 1
+        }
+    done <"${entryList}"
+    tar -tvzf "${archiveFile}" >"${detailList}" 2>/dev/null || {
+        scriptRemovePath "${entryList}" || true
+        scriptRemovePath "${detailList}" || true
+        return 1
+    }
+    while IFS= read -r line; do
+        lineType="${line:0:1}"
+        case "${lineType}" in
+        - | d) ;;
+        *)
+            scriptRemovePath "${entryList}" || true
+            scriptRemovePath "${detailList}" || true
+            return 1
+            ;;
+        esac
+    done <"${detailList}"
+    scriptRemovePath "${entryList}" || true
+    scriptRemovePath "${detailList}" || true
+}
+
 removeScriptModuleItems() {
     local scriptDir=$1
     scriptIsSafeAbsolutePath "${scriptDir}" || return 1
@@ -153,15 +209,46 @@ fetchRemoteRef() {
 downloadRepoArchive() {
     local archiveUrl=$1
     local extractDir=$2
+    local archiveFile
     scriptRemovePath "${extractDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${extractDir}" || return 1
+    archiveFile=$(scriptCreateTempPath padm-archive.XXXXXX.tar.gz) || return 1
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${archiveUrl}" | tar -xz -C "${extractDir}"
+        curl -fsSL "${archiveUrl}" >"${archiveFile}" || {
+            scriptRemovePath "${archiveFile}" || true
+            return 1
+        }
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "${archiveUrl}" | tar -xz -C "${extractDir}"
+        wget -qO- "${archiveUrl}" >"${archiveFile}" || {
+            scriptRemovePath "${archiveFile}" || true
+            return 1
+        }
     else
+        scriptRemovePath "${archiveFile}" || true
         return 127
     fi
+    [[ -s "${archiveFile}" ]] || {
+        scriptRemovePath "${archiveFile}" || true
+        return 1
+    }
+    validateRepoArchive "${archiveFile}" || {
+        scriptRemovePath "${archiveFile}" || true
+        return 2
+    }
+    tar -xzf "${archiveFile}" -C "${extractDir}" || {
+        scriptRemovePath "${archiveFile}" || true
+        return 1
+    }
+    scriptRemovePath "${archiveFile}" || true
+}
+
+printRepoArchiveDownloadFailure() {
+    local status=$1
+    case "${status}" in
+    127) printf '缺少 curl 或 wget，无法下载完整安装包\n' ;;
+    2) printf '完整安装包结构异常，请重新执行安装命令\n' ;;
+    *) printf '完整安装包下载失败，请重新执行安装命令\n' ;;
+    esac
 }
 
 resolveExtractedArchiveDir() {
@@ -184,7 +271,7 @@ resolveExtractedArchiveDir() {
 
 refreshScriptModules() {
     local remoteRef=$1
-    local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl fallbackRef resolvedRef
+    local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl fallbackRef resolvedRef downloadStatus
     if ! scriptIsSafeAbsolutePath "${SCRIPT_DIR}"; then
         printf '脚本目录异常，已取消完整安装包替换\n'
         exit 1
@@ -201,12 +288,16 @@ refreshScriptModules() {
     resolvedRef="${remoteRef:-}"
 
     printf '正在下载最新完整安装包\n'
-    if ! downloadRepoArchive "${archiveUrl}" "${extractDir}"; then
+    downloadRepoArchive "${archiveUrl}" "${extractDir}"
+    downloadStatus=$?
+    if [[ "${downloadStatus}" -ne 0 ]]; then
         if [[ -n "${remoteRef}" ]]; then
             fallbackRef=$(fetchRemoteRef || true)
             printf '指定版本完整安装包不可用，回退到主分支最新完整安装包\n'
-            if ! downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"; then
-                printf '完整安装包下载失败，请重新执行安装命令\n'
+            downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"
+            downloadStatus=$?
+            if [[ "${downloadStatus}" -ne 0 ]]; then
+                printRepoArchiveDownloadFailure "${downloadStatus}"
                 scriptRemovePath "${tmpDir}" || true
                 exit 1
             fi
@@ -214,11 +305,7 @@ refreshScriptModules() {
             resolvedRef="${fallbackRef:-}"
             archiveDir="${extractDir}/${REPO_ARCHIVE_DIR}"
         else
-            if [[ "$?" -eq 127 ]]; then
-                printf '缺少 curl 或 wget，无法下载完整安装包\n'
-            else
-                printf '完整安装包下载失败，请重新执行安装命令\n'
-            fi
+            printRepoArchiveDownloadFailure "${downloadStatus}"
             scriptRemovePath "${tmpDir}" || true
             exit 1
         fi

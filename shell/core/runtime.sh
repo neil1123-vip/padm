@@ -962,7 +962,11 @@ cleanDirectoryContent() {
         padmShowUnsafePathError "清理目录"
         return 1
     fi
-    mkdir -p "${targetPath}" || return 1
+    if [[ -e "${targetPath}" ]]; then
+        [[ -d "${targetPath}" ]] || return 1
+    else
+        mkdir -p "${targetPath}" || return 1
+    fi
     resolvedPath=$(cd -- "${targetPath}" && pwd -P) || return 1
     if [[ -z "${resolvedPath}" || "${resolvedPath}" == "/" ]]; then
         padmShowUnsafePathError "清理目录"

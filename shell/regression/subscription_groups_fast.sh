@@ -210,15 +210,18 @@ runCleanDirectoryContentSafetyRegression() {
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/runtime.sh"
-        local root="${TMP_DIR}/clean-directory-safety"
-        local safeDir="${root}/safe"
-        local unsafeDir="${root}/unsafe"
-        mkdir -p "${safeDir}" "${unsafeDir}"
+        local rootRel="${TMP_DIR}/clean-directory-safety"
+        local root safeDir unsafeDir
+        mkdir -p "${rootRel}/safe" "${rootRel}/unsafe"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        safeDir="${root}/safe"
+        unsafeDir="${root}/unsafe"
         printf 'keep\n' >"${unsafeDir}/sentinel"
         printf 'remove\n' >"${safeDir}/child"
         echoContent() { :; }
         menuLine() { :; }
         menuClose() { :; }
+        padmIsSafeAbsolutePath() { [[ "$1" == "${safeDir}" ]]; }
         (
             cd "${unsafeDir}"
             ! cleanDirectoryContent "."
@@ -1314,14 +1317,18 @@ runInstallRefreshFallbackMainRegression() {
 
         local fixtureDir archiveRoot outputLog oldTmpDir
         fixtureDir="${TMP_DIR}/install-refresh-fallback-main"
+        mkdir -p "${fixtureDir}"
         archiveRoot="${fixtureDir}/archive"
         outputLog="${fixtureDir}/refresh.log"
         oldTmpDir="${TMPDIR:-}"
-        mkdir -p "${archiveRoot}/padm-main/shell" "${archiveRoot}/padm-main/documents" "${archiveRoot}/padm-main/assets" "${fixtureDir}/shell" "${fixtureDir}/documents"
+        mkdir -p "${archiveRoot}/padm-main/shell/core" "${archiveRoot}/padm-main/documents" "${archiveRoot}/padm-main/assets" "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/tmp"
+        printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
         printf 'old-shell\n' >"${fixtureDir}/shell/marker"
         printf 'old-doc\n' >"${fixtureDir}/documents/marker"
         printf 'old-readme\n' >"${fixtureDir}/README.md"
         printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
+        printf '# bootstrap fixture\n' >"${archiveRoot}/padm-main/shell/core/bootstrap.sh"
+        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/shell/validate_install.sh"
         printf 'new-shell\n' >"${archiveRoot}/padm-main/shell/marker"
         printf 'new-doc\n' >"${archiveRoot}/padm-main/documents/marker"
         printf 'new-readme\n' >"${archiveRoot}/padm-main/README.md"
@@ -1340,6 +1347,7 @@ runInstallRefreshFallbackMainRegression() {
             SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
             SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
             REPO_ZIP_URL="fixture.tar.gz"
+            scriptIsSafeAbsolutePath() { return 0; }
             command() {
                 if [[ "$1" == "-v" && "$2" == "curl" ]]; then
                     return 0
@@ -1358,6 +1366,7 @@ runInstallRefreshFallbackMainRegression() {
         grep -q '指定版本完整安装包不可用，回退到主分支最新完整安装包' "${outputLog}"
         [[ ! -f "${fixtureDir}/.padm-ref" || "$(<"${fixtureDir}/.padm-ref")" != "dead-ref" ]]
         [[ ! -f "${fixtureDir}/.padm-entry-ref" || "$(<"${fixtureDir}/.padm-entry-ref")" != "dead-ref" ]]
+        [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
         [[ "$(<"${fixtureDir}/shell/marker")" == "new-shell" ]]
         [[ "$(<"${fixtureDir}/documents/marker")" == "new-doc" ]]
         [[ "$(<"${fixtureDir}/README.md")" == "new-readme" ]]
@@ -1374,14 +1383,18 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
 
         local fixtureDir archiveRoot outputLog oldTmpDir
         fixtureDir="${TMP_DIR}/install-refresh-keep-ref-on-lookup-fail"
+        mkdir -p "${fixtureDir}"
         archiveRoot="${fixtureDir}/archive"
         outputLog="${fixtureDir}/refresh.log"
         oldTmpDir="${TMPDIR:-}"
-        mkdir -p "${archiveRoot}/padm-main/shell" "${archiveRoot}/padm-main/documents" "${archiveRoot}/padm-main/assets" "${fixtureDir}/shell"
+        mkdir -p "${archiveRoot}/padm-main/shell/core" "${archiveRoot}/padm-main/documents" "${archiveRoot}/padm-main/assets" "${fixtureDir}/shell" "${fixtureDir}/tmp"
+        printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
         printf 'old-shell\n' >"${fixtureDir}/shell/marker"
         printf 'keep-ref\n' >"${fixtureDir}/.padm-ref"
         printf 'keep-ref\n' >"${fixtureDir}/.padm-entry-ref"
         printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
+        printf '# bootstrap fixture\n' >"${archiveRoot}/padm-main/shell/core/bootstrap.sh"
+        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/shell/validate_install.sh"
         printf 'new-shell\n' >"${archiveRoot}/padm-main/shell/marker"
         printf 'new-readme\n' >"${archiveRoot}/padm-main/README.md"
 
@@ -1399,6 +1412,7 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
             SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
             SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
             REPO_ZIP_URL="fixture.tar.gz"
+            scriptIsSafeAbsolutePath() { return 0; }
             command() {
                 if [[ "$1" == "-v" && "$2" == "curl" ]]; then
                     return 0
@@ -1411,6 +1425,7 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
 
         [[ "$(<"${fixtureDir}/.padm-ref")" == "keep-ref" ]]
         [[ "$(<"${fixtureDir}/.padm-entry-ref")" == "keep-ref" ]]
+        [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
         [[ "$(<"${fixtureDir}/shell/marker")" == "new-shell" ]]
 
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -1456,6 +1471,114 @@ runInstallRefreshRejectsUnsafeScriptDirRegression() {
     grep -q '脚本目录异常' "${outputLog}"
     [[ -f "${root}/relative-script/shell/sentinel" ]]
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
+runInstallRefreshRejectsUnsafeArchiveRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local fixtureDir archiveRoot outputLog oldTmpDir
+        fixtureDir="${TMP_DIR}/install-refresh-unsafe-archive"
+        mkdir -p "${fixtureDir}"
+        archiveRoot="${fixtureDir}/archive"
+        outputLog="${fixtureDir}/refresh.log"
+        oldTmpDir="${TMPDIR:-}"
+        mkdir -p "${archiveRoot}/padm-main/shell/core" "${fixtureDir}/shell" "${fixtureDir}/tmp"
+        printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
+        printf 'old-shell\n' >"${fixtureDir}/shell/marker"
+        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
+        printf '# bootstrap fixture\n' >"${archiveRoot}/padm-main/shell/core/bootstrap.sh"
+        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/shell/validate_install.sh"
+        printf 'new-shell\n' >"${archiveRoot}/padm-main/shell/marker"
+        printf 'escape\n' >"${archiveRoot}/escape.txt"
+
+        (
+            set +e
+            TMPDIR="${fixtureDir}/tmp"
+            eval "$(awk '
+                /^scriptTmpPath\(\)/ { capture = 1 }
+                /^ensureScriptModules\(\)/ { capture = 0 }
+                capture { print }
+            ' "${PROJECT_ROOT}/install.sh")"
+            SCRIPT_DIR="${fixtureDir}"
+            REPO_ARCHIVE_DIR="padm-main"
+            SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+            SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+            SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+            REPO_ZIP_URL="fixture.tar.gz"
+            scriptIsSafeAbsolutePath() { return 0; }
+            command() {
+                if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+                    return 0
+                fi
+                builtin command "$@"
+            }
+            curl() { tar -cz -C "${archiveRoot}" padm-main --transform='s#^escape.txt$#../escape.txt#' escape.txt; }
+            refreshScriptModules new-ref
+        ) >"${outputLog}" 2>&1 && return 1
+
+        grep -q '完整安装包结构异常，请重新执行安装命令' "${outputLog}"
+        [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
+        [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+        [[ ! -e "${fixtureDir}/escape.txt" ]]
+        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    )
+}
+
+runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local fixtureDir archiveRoot outputLog oldTmpDir
+        fixtureDir="${TMP_DIR}/install-refresh-unsupported-archive-entry"
+        mkdir -p "${fixtureDir}"
+        archiveRoot="${fixtureDir}/archive"
+        outputLog="${fixtureDir}/refresh.log"
+        oldTmpDir="${TMPDIR:-}"
+        mkdir -p "${archiveRoot}/padm-main/shell/core" "${fixtureDir}/shell" "${fixtureDir}/tmp"
+        printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
+        printf 'old-shell\n' >"${fixtureDir}/shell/marker"
+        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
+        printf '# bootstrap fixture\n' >"${archiveRoot}/padm-main/shell/core/bootstrap.sh"
+        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/shell/validate_install.sh"
+        printf 'new-shell\n' >"${archiveRoot}/padm-main/shell/marker"
+        mkfifo "${archiveRoot}/padm-main/unsupported.pipe"
+
+        (
+            set +e
+            TMPDIR="${fixtureDir}/tmp"
+            eval "$(awk '
+                /^scriptTmpPath\(\)/ { capture = 1 }
+                /^ensureScriptModules\(\)/ { capture = 0 }
+                capture { print }
+            ' "${PROJECT_ROOT}/install.sh")"
+            SCRIPT_DIR="${fixtureDir}"
+            REPO_ARCHIVE_DIR="padm-main"
+            SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+            SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+            SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+            REPO_ZIP_URL="fixture.tar.gz"
+            scriptIsSafeAbsolutePath() { return 0; }
+            command() {
+                if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+                    return 0
+                fi
+                builtin command "$@"
+            }
+            curl() { tar -cz -C "${archiveRoot}" padm-main; }
+            refreshScriptModules new-ref
+        ) >"${outputLog}" 2>&1 && return 1
+
+        grep -q '完整安装包结构异常，请重新执行安装命令' "${outputLog}"
+        [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
+        [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+        [[ ! -e "${fixtureDir}/unsupported.pipe" ]]
+        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    )
 }
 
 runRemoveInstallPathRetryRegression() {
@@ -1644,15 +1767,18 @@ runInstallRefreshRestoresBackupRegression() {
     local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
     fixtureDir="${TMP_DIR}/install-refresh-restore"
     archiveDirName="padm-main"
+    mkdir -p "${fixtureDir}"
     archiveRoot="${fixtureDir}/archive/${archiveDirName}"
     outputLog="${fixtureDir}/refresh.log"
     refreshTmpRoot="${fixtureDir}/tmp"
     restoreFailureDir="${TMP_DIR}/install-refresh-restore-failure"
+    mkdir -p "${restoreFailureDir}"
     restoreFailureArchiveRoot="${restoreFailureDir}/archive/${archiveDirName}"
     restoreFailureOutputLog="${restoreFailureDir}/refresh.log"
     restoreFailureTmpRoot="${restoreFailureDir}/tmp"
     oldTmpDir="${TMPDIR:-}"
     mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${archiveRoot}/shell" "${archiveRoot}/documents" "${refreshTmpRoot}"
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
     printf 'old-shell\n' >"${fixtureDir}/shell/marker"
     printf 'old-doc\n' >"${fixtureDir}/documents/marker"
     printf 'old-readme\n' >"${fixtureDir}/README.md"
@@ -1673,6 +1799,7 @@ runInstallRefreshRestoresBackupRegression() {
         SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
         SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
         REPO_ZIP_URL="fixture.tar.gz"
+        scriptIsSafeAbsolutePath() { return 0; }
         command() {
             if [[ "$1" == "-v" && "$2" == "curl" ]]; then
                 return 0
@@ -1689,11 +1816,13 @@ runInstallRefreshRestoresBackupRegression() {
         refreshScriptModules new-ref
     ) >"${outputLog}" 2>&1
     grep -q '完整安装包替换失败，已恢复旧模块' "${outputLog}"
+    [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
     [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
     [[ "$(<"${fixtureDir}/documents/marker")" == "old-doc" ]]
     [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
 
     mkdir -p "${restoreFailureDir}/shell" "${restoreFailureDir}/documents" "${restoreFailureArchiveRoot}/shell" "${restoreFailureArchiveRoot}/documents" "${restoreFailureTmpRoot}"
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${restoreFailureDir}/install.sh"
     printf 'old-shell\n' >"${restoreFailureDir}/shell/marker"
     printf 'old-doc\n' >"${restoreFailureDir}/documents/marker"
     printf 'old-readme\n' >"${restoreFailureDir}/README.md"
@@ -1714,6 +1843,7 @@ runInstallRefreshRestoresBackupRegression() {
         SCRIPT_REF_FILE="${restoreFailureDir}/.padm-ref"
         SCRIPT_MANIFEST_FILE="${restoreFailureDir}/.padm-module-manifest"
         REPO_ZIP_URL="fixture.tar.gz"
+        scriptIsSafeAbsolutePath() { return 0; }
         command() {
             if [[ "$1" == "-v" && "$2" == "curl" ]]; then
                 return 0
@@ -1736,6 +1866,7 @@ runInstallRefreshRestoresBackupRegression() {
         refreshScriptModules new-ref
     ) >"${restoreFailureOutputLog}" 2>&1
     grep -q '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录' "${restoreFailureOutputLog}"
+    [[ "$(<"${restoreFailureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
     [[ -d "${restoreFailureDir}/.padm-update-backup" ]]
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
@@ -2038,9 +2169,10 @@ EOF
 runInstallEntrySymlinkPathRegression() {
     local fixtureDir realDir linkDir
     fixtureDir="${TMP_DIR}/install-entry-real"
+    mkdir -p "${fixtureDir}/real" "${fixtureDir}/link"
+    fixtureDir=$(cd -- "${fixtureDir}" && pwd -P)
     realDir="${fixtureDir}/real"
     linkDir="${fixtureDir}/link"
-    mkdir -p "${realDir}" "${linkDir}"
     printf '#!/usr/bin/env bash\n' >"${realDir}/install.sh"
     (
         eval "$(awk '
@@ -3035,6 +3167,8 @@ runRegressionPlatform() {
         runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
         runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
         runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
+        runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
+        runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
