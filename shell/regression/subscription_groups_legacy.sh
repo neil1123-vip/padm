@@ -4128,20 +4128,6 @@ runCleanLastInstallationConfigFailureRegression() (
         [[ "${mode}" == "rm-warp-fail" && "$*" == "-rf /etc/padm/warp/config" ]] && return 1
         return 0
     }
-    unInstallSubscribe() { printf 'uninstall-subscribe\n' >>"${installLog}"; return 0; }
-    installTools() { printf 'install-tools:%s\n' "$*" >>"${installLog}"; return 0; }
-    initTLSNginxConfig() { printf 'init-tls:%s\n' "$*" >>"${installLog}"; return 0; }
-    installTLS() { printf 'install-tls:%s\n' "$*" >>"${installLog}"; return 0; }
-    randomPathFunction() { printf 'random-path:%s\n' "$*" >>"${installLog}"; return 0; }
-    installXray() { printf 'install-xray:%s\n' "$*" >>"${installLog}"; return 0; }
-    installXrayService() { printf 'install-xray-service:%s\n' "$*" >>"${installLog}"; return 0; }
-    initXrayConfig() { printf 'init-xray-config:%s\n' "$*" >>"${installLog}"; return 0; }
-    cleanUp() { printf 'cleanup-core:%s\n' "$*" >>"${installLog}"; return 0; }
-    installCronTLS() { printf 'install-cron:%s\n' "$*" >>"${installLog}"; return 0; }
-    nginxBlog() { printf 'nginx-blog:%s\n' "$*" >>"${installLog}"; return 0; }
-    updateRedirectNginxConf() { printf 'update-redirect\n' >>"${installLog}"; return 0; }
-    checkGFWStatue() { printf 'check-gfw:%s\n' "$*" >>"${installLog}"; return 0; }
-    showAccounts() { printf 'show-accounts:%s\n' "$*" >>"${installLog}"; return 0; }
 
     runCleanFailureCase() {
         local failureMode=$1
