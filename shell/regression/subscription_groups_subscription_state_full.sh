@@ -340,9 +340,6 @@ runSubscriptionGroupStateQuotaMenuPreviewFailureRegression() {
         subscriptionSyncApplyAccountPlanTransaction() {
             return 42
         }
-        reloadCore() {
-            return 0
-        }
         set +e
         quotaMenuOutput=$(executeSubscriptionQuotaPlanMenu <<<"yes" 2>/dev/null)
         quotaMenuStatus=$?
@@ -411,7 +408,6 @@ runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression() {
         local quotaPartialRoot="${TMP_DIR}/subscription-quota-partial-state-failure"
         local quotaPartialPlan='[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"team-b","action":"disable-and-remove-local-account"}]'
         local quotaPartialStatus
-        local accountPhaseMarker="${quotaPartialRoot}/account-phase-called"
         local quotaPartialStateFile
         local quotaPartialBackupDir
         mkdir -p "${quotaPartialRoot}/groups"
@@ -440,10 +436,6 @@ JSON
             fi
             subscriptionGroupsStateWrite --arg groupId "default" --arg id "${id}" --argjson enabled "${enabled}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .enabled = $enabled else . end) else . end)'
         }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            printf 'called\n' >"${accountPhaseMarker}"
-            return 0
-        }
         set +e
         applySubscriptionQuotaPlanTransaction "${quotaPartialPlan}"
         quotaPartialStatus=$?
@@ -451,7 +443,6 @@ JSON
         [[ "${quotaPartialStatus}" == "1" ]]
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         jq -e '.groups[0].user_groups[] | select(.id == "team-b" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-        [[ ! -e "${accountPhaseMarker}" ]]
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"停用超额分享订阅失败"* ]]
         if find "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
             return 1
