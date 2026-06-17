@@ -2712,14 +2712,6 @@ runServiceQueueApplyPropagationRegression() (
     cleanUp() { return 0; }
     serviceQueueRestart() { return 0; }
     serviceQueueApply() { return 1; }
-    checkGFWStatue() {
-        printf 'reached\n' >"${reachedFile}"
-        return 0
-    }
-    showAccounts() {
-        printf 'reached\n' >"${reachedFile}"
-        return 0
-    }
 
     set +e
     (
