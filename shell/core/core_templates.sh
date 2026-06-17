@@ -1,5 +1,38 @@
 #!/usr/bin/env bash
 
+# core template managed config helpers
+xrayTemplateConfigFile() {
+    padmManagedFilePath "/etc/padm/xray/conf" "$1"
+}
+
+removeXrayTemplateConfigFiles() {
+    local fileName
+    local targetFile
+    local status=0
+
+    for fileName in "$@"; do
+        targetFile=$(xrayTemplateConfigFile "${fileName}") || return 1
+        removeManagedFileIfPresent "${targetFile}" || status=1
+    done
+    return "${status}"
+}
+
+singBoxTemplateConfigFile() {
+    padmManagedFilePath "/etc/padm/sing-box/conf/config" "$1"
+}
+
+removeSingBoxTemplateConfigFiles() {
+    local fileName
+    local targetFile
+    local status=0
+
+    for fileName in "$@"; do
+        targetFile=$(singBoxTemplateConfigFile "${fileName}") || return 1
+        removeManagedFileIfPresent "${targetFile}" || status=1
+    done
+    return "${status}"
+}
+
 # 初始化 Xray 配置文件
 initXrayConfig() {
     set -- "${1:-}" "${2:-}" "${3:-}"
@@ -141,7 +174,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/xray/conf/04_trojan_TCP_inbounds.json >/dev/null 2>&1
+        removeXrayTemplateConfigFiles 04_trojan_TCP_inbounds.json || return 1
     fi
 
     # VLESS_WS_TLS
@@ -172,7 +205,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/xray/conf/03_VLESS_WS_inbounds.json >/dev/null 2>&1
+        removeXrayTemplateConfigFiles 03_VLESS_WS_inbounds.json || return 1
     fi
     # VLESS_Reality_XHTTP_TLS
     if protocolSelectionIncludes "${selectCustomInstallType}" 12 "$1"; then
@@ -226,7 +259,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json >/dev/null 2>&1
+        removeXrayTemplateConfigFiles 12_VLESS_XHTTP_inbounds.json || return 1
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 3 "$1"; then
         fallbacksList=${fallbacksList}',{"path":"/'${customPath}'vws","dest":31299,"xver":1}'
@@ -254,7 +287,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/xray/conf/05_VMess_WS_inbounds.json >/dev/null 2>&1
+        removeXrayTemplateConfigFiles 05_VMess_WS_inbounds.json || return 1
     fi
     # VLESS Vision
     if protocolSelectionIncludes "${selectCustomInstallType}" 0 "$1"; then
@@ -294,7 +327,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/xray/conf/02_VLESS_TCP_inbounds.json >/dev/null 2>&1
+        removeXrayTemplateConfigFiles 02_VLESS_TCP_inbounds.json || return 1
     fi
 
     # VLESS_TCP/reality
@@ -391,8 +424,9 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json >/dev/null 2>&1
-        rm /etc/padm/xray/conf/08_VLESS_vision_gRPC_inbounds.json >/dev/null 2>&1
+        removeXrayTemplateConfigFiles \
+            07_VLESS_vision_reality_inbounds.json \
+            08_VLESS_vision_gRPC_inbounds.json || return 1
     fi
     installSniffing
     if [[ -z "$3" ]]; then
@@ -498,7 +532,7 @@ initSingBoxConfig() {
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 02_VLESS_TCP_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 1 "$1"; then
@@ -540,7 +574,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 03_VLESS_WS_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 3 "$1"; then
@@ -582,7 +616,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/05_VMess_WS_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 05_VMess_WS_inbounds.json || return 1
     fi
 
     # VLESS_Reality_Vision
@@ -625,7 +659,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 07_VLESS_vision_reality_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 8 "$1"; then
@@ -671,7 +705,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 08_VLESS_vision_gRPC_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 6 "$1"; then
@@ -706,7 +740,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 06_hysteria2_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 4 "$1"; then
@@ -735,7 +769,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/04_trojan_TCP_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 04_trojan_TCP_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 9 "$1"; then
@@ -773,7 +807,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/09_tuic_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 09_tuic_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 10 "$1"; then
@@ -803,7 +837,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/10_naive_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 10_naive_inbounds.json || return 1
     fi
     if protocolSelectionIncludes "${selectCustomInstallType}" 11 "$1"; then
         echoContent title "\n┌─ 配置 VMess HTTPUpgrade ───────────────────────────"
@@ -822,7 +856,7 @@ EOF
             padmShowUnsafePathError "配置 VMess HTTPUpgrade"
             return 1
         fi
-        rm -f -- "${httpUpgradeNginxConf}" >/dev/null 2>&1 || return 1
+        removeManagedFileIfPresent "${httpUpgradeNginxConf}" || return 1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         singBoxNginxConfig "$1" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json padm-sing-box-vmess-httpupgrade <<EOF || { errorCard "sing-box VMess HTTPUpgrade 入站模板提交失败"; return 1; }
@@ -848,7 +882,7 @@ EOF
             return 1
         fi
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 11_VMess_HTTPUpgrade_inbounds.json || return 1
     fi
 
     if protocolSelectionIncludes "${selectCustomInstallType}" 13 "$1"; then
@@ -878,7 +912,7 @@ EOF
 }
 EOF
     elif [[ -z "$3" ]]; then
-        rm /etc/padm/sing-box/conf/config/13_anytls_inbounds.json >/dev/null 2>&1
+        removeSingBoxTemplateConfigFiles 13_anytls_inbounds.json || return 1
     fi
 
     if [[ -z "$3" ]]; then

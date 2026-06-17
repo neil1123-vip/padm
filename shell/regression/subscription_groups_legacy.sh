@@ -2808,6 +2808,31 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${writeCalls}" != "0" ]]
 )
 
+runCoreTemplateManagedConfigRemovalRegression() (
+    local cleanupLog="${TMP_DIR}/core-template-managed-remove.log"
+
+    : >"${cleanupLog}"
+    rm() {
+        printf 'rm:%s\n' "$*" >>"${cleanupLog}"
+        return 0
+    }
+
+    removeXrayTemplateConfigFiles 03_VLESS_WS_inbounds.json 07_VLESS_vision_reality_inbounds.json
+    grep -qx 'rm:-f -- /etc/padm/xray/conf/03_VLESS_WS_inbounds.json' "${cleanupLog}"
+    grep -qx 'rm:-f -- /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json' "${cleanupLog}"
+
+    : >"${cleanupLog}"
+    removeSingBoxTemplateConfigFiles 11_VMess_HTTPUpgrade_inbounds.json 13_anytls_inbounds.json
+    grep -qx 'rm:-f -- /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json' "${cleanupLog}"
+    grep -qx 'rm:-f -- /etc/padm/sing-box/conf/config/13_anytls_inbounds.json' "${cleanupLog}"
+
+    : >"${cleanupLog}"
+    if removeXrayTemplateConfigFiles ../unsafe.json >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -s "${cleanupLog}" ]]
+)
+
 runCoreBinaryInstallCopyFailureRegression() (
     local root="${TMP_DIR}/core-binary-copy-failure"
     local xrayBinary="${root}/xray/xray"
@@ -14497,6 +14522,7 @@ runRegressionTransactionCore() {
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
+        runRegressionStep core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression &&
         runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
         runRegressionStep sing-box-cronet-rollback runSingBoxCronetRollbackRegression &&
         runRegressionStep finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression &&
