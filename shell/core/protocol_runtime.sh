@@ -1,36 +1,5 @@
 #!/usr/bin/env bash
 
-# 初始化 Hysteria2 端口
-initHysteriaPort() {
-    readSingBoxConfig
-    if [[ -n "${hysteriaPort}" ]]; then
-        autoRead hysteria_history_port "读取到上次安装时的Hysteria端口 [${hysteriaPort}]，是否使用？[y/n]:" historyHysteriaPortStatus
-        if [[ "${historyHysteriaPortStatus}" == "y" ]]; then
-            statusCard "Hysteria2 端口" "${hysteriaPort}"
-        else
-            hysteriaPort=
-        fi
-    fi
-
-    if [[ -z "${hysteriaPort}" ]]; then
-        echoContent yellow "请输入Hysteria端口[回车随机10000-30000]，不可与其他服务重复"
-        autoRead hysteria_port "端口:" hysteriaPort
-        if [[ -z "${hysteriaPort}" ]]; then
-            hysteriaPort=$((RANDOM % 20001 + 10000))
-        fi
-    fi
-    if [[ -z ${hysteriaPort} ]]; then
-        statusCard "端口输入" "端口不可为空"
-        initHysteriaPort "$2"
-    elif ((hysteriaPort < 1 || hysteriaPort > 65535)); then
-        statusCard "端口输入" "端口不合法"
-        initHysteriaPort "$2"
-    fi
-    allowPort "${hysteriaPort}" || return 1
-    allowPort "${hysteriaPort}" "udp" || return 1
-}
-
-
 # 初始化 Hysteria2 网络信息
 initHysteria2Network() {
 
