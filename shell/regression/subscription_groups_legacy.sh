@@ -11859,6 +11859,121 @@ runCheckLogBackupMissingRestoreRegression() (
     [[ "$(<"${root}/policy.json")" == "old-policy" ]]
 )
 
+runPadmBbrManagedCleanupRegression() (
+    local root="${TMP_DIR}/padm-bbr-managed-cleanup"
+    local tempFailStatus="${root}/temp-fail.status"
+    local tempFailHelper="${root}/temp-fail.helper"
+    local applyFailStatus="${root}/apply-fail.status"
+    local applyFailHelper="${root}/apply-fail.helper"
+    local disableStatus="${root}/disable.status"
+    local disableHelper="${root}/disable.helper"
+    mkdir -p "${root}"
+
+    bash -c '
+        set -e
+        export TMPDIR="$1"
+        export PADM_BBR_SYSCTL_CONF="$1/temp-fail-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/temp-fail.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        createCount=0
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        padmBbrAvailable() { return 0; }
+        readSysctlValue() {
+            case "$1" in
+            net.ipv4.tcp_congestion_control) printf "cubic\n" ;;
+            net.core.default_qdisc) printf "fq_codel\n" ;;
+            *) return 0 ;;
+            esac
+        }
+        padmEnsureSafeDirectory() { printf "ensure-dir:%s\n" "$1" >>"${helperLog}"; return 0; }
+        padmCreateTempPath() {
+            local resultVar=$1
+            createCount=$((createCount + 1))
+            if [[ "${createCount}" -eq 1 ]]; then
+                local path="$TMPDIR/state-stage"
+                : >"${path}"
+                printf -v "${resultVar}" "%s" "${path}"
+                return 0
+            fi
+            return 1
+        }
+        commitGeneratedFile() { printf "commit:%s\n" "$2" >>"${helperLog}"; return 0; }
+        removeManagedFileIfPresent() { printf "remove-file:%s\n" "$1" >>"${helperLog}"; return 0; }
+        enableOfficialBbrFq
+    ' _ "${root}" "${PROJECT_ROOT}" "${tempFailStatus}" "${tempFailHelper}"
+    grep -q "remove-file:${root}/temp-fail.state" "${tempFailHelper}" || return 1
+    grep -q 'BBR 启用失败|无法创建 sysctl 临时文件' "${tempFailStatus}" || return 1
+
+    bash -c '
+        set -e
+        export TMPDIR="$1"
+        export PADM_BBR_SYSCTL_CONF="$1/apply-fail-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/apply-fail.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        createCount=0
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        padmBbrAvailable() { return 0; }
+        readSysctlValue() {
+            case "$1" in
+            net.ipv4.tcp_congestion_control) printf "cubic\n" ;;
+            net.core.default_qdisc) printf "fq_codel\n" ;;
+            *) return 0 ;;
+            esac
+        }
+        padmEnsureSafeDirectory() { return 0; }
+        padmCreateTempPath() {
+            local resultVar=$1
+            createCount=$((createCount + 1))
+            local path="$TMPDIR/stage-${createCount}"
+            : >"${path}"
+            printf -v "${resultVar}" "%s" "${path}"
+        }
+        commitGeneratedFile() { printf "commit:%s\n" "$2" >>"${helperLog}"; return 0; }
+        removeManagedFilesIfPresent() { printf "remove-files:%s|%s\n" "$1" "$2" >>"${helperLog}"; return 0; }
+        restorePadmBbrRuntime() { printf "restore:%s:%s\n" "$1" "$2" >>"${helperLog}"; }
+        sysctl() {
+            if [[ "$1" == "-p" ]]; then
+                return 1
+            fi
+            printf "sysctl:%s\n" "$*" >>"${helperLog}"
+            return 0
+        }
+        enableOfficialBbrFq
+    ' _ "${root}" "${PROJECT_ROOT}" "${applyFailStatus}" "${applyFailHelper}"
+    grep -q "remove-files:${root}/apply-fail-sysctl.conf|${root}/apply-fail.state" "${applyFailHelper}" || return 1
+    grep -q 'restore:cubic:fq_codel' "${applyFailHelper}" || return 1
+    grep -q 'BBR 启用失败|sysctl 应用失败，已删除本次写入并尝试恢复原运行值' "${applyFailStatus}" || return 1
+
+    printf 'net.core.default_qdisc = fq\n' >"${root}/disable-sysctl.conf" || return 1
+    printf 'previous_congestion=reno\nprevious_qdisc=cake\n' >"${root}/disable.state" || return 1
+    bash -c '
+        set -e
+        export PADM_BBR_SYSCTL_CONF="$1/disable-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/disable.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        printNetworkOptimizationStatus() { printf "print-status\n" >>"${helperLog}"; }
+        removeManagedFilesIfPresent() { printf "remove-files:%s|%s\n" "$1" "$2" >>"${helperLog}"; return 0; }
+        sysctl() { printf "sysctl:%s\n" "$*" >>"${helperLog}"; return 0; }
+        disablePadmBbr
+    ' _ "${root}" "${PROJECT_ROOT}" "${disableStatus}" "${disableHelper}"
+    grep -q "remove-files:${root}/disable-sysctl.conf|${root}/disable.state" "${disableHelper}" || return 1
+    grep -q 'sysctl:--system' "${disableHelper}" || return 1
+    grep -q 'padm BBR 已关闭|已删除 '"${root}"'/disable-sysctl.conf' "${disableStatus}" || return 1
+)
+
 runCheckLogBackupRejectsUnsafeTargetRegression() (
     local root="${TMP_DIR}/check-log-backup-unsafe"
     local restoreDir="${root}/restore"
@@ -14403,6 +14518,7 @@ runRegressionPlatform() {
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep check-log-backup-unsafe-target runCheckLogBackupRejectsUnsafeTargetRegression &&
+        runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&

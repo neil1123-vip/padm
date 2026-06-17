@@ -711,8 +711,7 @@ commitPadmBbrFile() {
     local tmpFile=$1
     local targetFile=$2
 
-    chmod 644 "${tmpFile}" || return 1
-    mv "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
+    commitGeneratedFile "${tmpFile}" "${targetFile}" 644
 }
 
 restorePadmBbrRuntime() {
@@ -743,7 +742,7 @@ enableOfficialBbrFq() {
     previousCongestion=${previousCongestion:-cubic}
     previousQdisc=${previousQdisc:-fq_codel}
 
-    mkdir -p "$(dirname "${PADM_BBR_STATE_FILE}")"
+    padmEnsureSafeDirectory "$(dirname "${PADM_BBR_STATE_FILE}")" || { statusCard "BBR 启用失败" "状态目录创建失败"; bbrInstall; return; }
     padmCreateTempPath stateTmp "$(bbrStateTempTemplate)" || { statusCard "BBR 启用失败" "无法创建状态临时文件"; bbrInstall; return; }
     cat >"${stateTmp}" <<EOF
 previous_congestion=${previousCongestion}
@@ -756,21 +755,37 @@ EOF
         return
     fi
 
-    padmCreateTempPath sysctlTmp "$(bbrSysctlTempTemplate)" || { rm -f "${PADM_BBR_STATE_FILE}"; statusCard "BBR 启用失败" "无法创建 sysctl 临时文件"; bbrInstall; return; }
+    if ! padmCreateTempPath sysctlTmp "$(bbrSysctlTempTemplate)"; then
+        if ! removeManagedFileIfPresent "${PADM_BBR_STATE_FILE}"; then
+            statusCard "BBR 启用失败" "无法创建 sysctl 临时文件，且状态文件清理失败，请手动检查 ${PADM_BBR_STATE_FILE}"
+        else
+            statusCard "BBR 启用失败" "无法创建 sysctl 临时文件，已删除本次状态记录"
+        fi
+        bbrInstall
+        return
+    fi
     cat >"${sysctlTmp}" <<EOF
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 EOF
     if ! commitPadmBbrFile "${sysctlTmp}" "${PADM_BBR_SYSCTL_CONF}"; then
         padmRemoveCleanupPath "${sysctlTmp}"
-        rm -f "${PADM_BBR_STATE_FILE}"
-        statusCard "BBR 启用失败" "sysctl 配置提交失败，已删除本次状态记录"
+        if ! removeManagedFileIfPresent "${PADM_BBR_STATE_FILE}"; then
+            statusCard "BBR 启用失败" "sysctl 配置提交失败，且状态文件清理失败，请手动检查 ${PADM_BBR_STATE_FILE}"
+        else
+            statusCard "BBR 启用失败" "sysctl 配置提交失败，已删除本次状态记录"
+        fi
         bbrInstall
         return
     fi
 
     if ! sysctl -p "${PADM_BBR_SYSCTL_CONF}" >"${logFile}" 2>&1; then
-        rm -f "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
+        if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
+            restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
+            statusCard "BBR 启用失败" "sysctl 应用失败，且本次写入清理失败，请手动检查 ${PADM_BBR_SYSCTL_CONF} 和 ${PADM_BBR_STATE_FILE}" "日志：${logFile}"
+            bbrInstall
+            return
+        fi
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
         statusCard "BBR 启用失败" "sysctl 应用失败，已删除本次写入并尝试恢复原运行值" "日志：${logFile}"
         bbrInstall
@@ -780,7 +795,13 @@ EOF
     if [[ "$(readSysctlValue net.ipv4.tcp_congestion_control)" == "bbr" && "$(readSysctlValue net.core.default_qdisc)" == "fq" ]]; then
         statusCard "BBR 已启用" "当前拥塞控制：bbr" "当前默认 qdisc：fq"
     else
-        rm -f "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
+        if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
+            restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
+            statusCard "BBR 启用失败" "配置已应用但当前状态未完全匹配，且本次写入清理失败，请手动检查 ${PADM_BBR_SYSCTL_CONF} 和 ${PADM_BBR_STATE_FILE}" "请查看下方状态和 ${logFile}"
+            printNetworkOptimizationStatus
+            bbrInstall
+            return
+        fi
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
         statusCard "BBR 启用失败" "配置已应用但当前状态未完全匹配，已删除本次写入并尝试恢复原运行值" "请查看下方状态和 ${logFile}"
     fi
@@ -802,7 +823,12 @@ disablePadmBbr() {
         . "${PADM_BBR_STATE_FILE}"
     fi
 
-    rm -f "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
+    if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
+        statusCard "padm BBR 关闭失败" "配置文件清理失败，请手动检查 ${PADM_BBR_SYSCTL_CONF} 和 ${PADM_BBR_STATE_FILE}"
+        printNetworkOptimizationStatus
+        bbrInstall
+        return
+    fi
     local logFile
     logFile=$(bbrSysctlLog)
     sysctl --system >"${logFile}" 2>&1 || true
