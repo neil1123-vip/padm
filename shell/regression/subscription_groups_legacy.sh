@@ -10457,11 +10457,8 @@ runInstallToolsCertificateDependencyRegression() {
     runPackageCommandWithProgress() { return 0; }
     waitAptProcess() { return 0; }
     installBasePackages() { return 0; }
-    installNginxTools() { printf 'unexpected-nginx\n' >>"${statusLog}"; return 1; }
-    nginx() { return 0; }
     protocolSelectionSkipsNginx() { return 0; }
     beginPackageInstallTransaction() { PADM_PACKAGE_TRANSACTION_STARTED=; }
-    completePackageInstallTransaction() { return 0; }
 
     installTools 1
     grep -q "跳过安装 acme.sh" "${statusLog}"
