@@ -940,14 +940,6 @@ coreInstallServiceAction() {
     fi
 }
 
-restoreCoreBinaryBackup() {
-    local backupBinary=$1
-    local targetBinary=$2
-    [[ -f "${backupBinary}" ]] || return 0
-    cp "${backupBinary}" "${targetBinary}" || return 1
-    chmod 655 "${targetBinary}" >/dev/null 2>&1 || return 1
-}
-
 finalizeFailedCoreBinaryInstall() {
     local coreName=$1
     local backupBinary=$2
@@ -959,7 +951,7 @@ finalizeFailedCoreBinaryInstall() {
     local restoredBinary=false
 
     if [[ -f "${backupBinary}" ]]; then
-        if restoreCoreBinaryBackup "${backupBinary}" "${targetBinary}"; then
+        if cp "${backupBinary}" "${targetBinary}" && chmod 655 "${targetBinary}" >/dev/null 2>&1; then
             restoreMessage="已恢复旧二进制"
             restoredBinary=true
             rm -f "${backupBinary}" >/dev/null 2>&1 || true
