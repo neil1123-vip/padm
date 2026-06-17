@@ -6532,13 +6532,16 @@ appendSingBoxSubscribeLocalConfig() {
 }
 
 runSubscribeLocalOutputTransactionRegression() (
-    local root="${TMP_DIR}/subscribe-local-output-transaction"
-    local localDir="${root}/subscribe_local"
-    local defaultFile="${localDir}/default/user"
-    local clashFile="${localDir}/clashMeta/user"
-    local clashLinesFile="${localDir}/clashMeta/xhttp-user"
+    local rootRel="${TMP_DIR}/subscribe-local-output-transaction"
+    local root localDir defaultFile clashFile clashLinesFile
     local rc
 
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    localDir="${root}/subscribe_local"
+    defaultFile="${localDir}/default/user"
+    clashFile="${localDir}/clashMeta/user"
+    clashLinesFile="${localDir}/clashMeta/xhttp-user"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     mkdir -p "${localDir}/default" "${localDir}/clashMeta"
     printf 'old-default\n' >"${defaultFile}"
@@ -6585,6 +6588,40 @@ EOF
     if find "${localDir}/clashMeta" -maxdepth 1 -type f -name '.xhttp-user.subscribe.*' | grep -q .; then
         return 1
     fi
+)
+
+runSubscribeSaltWriteTransactionRegression() (
+    local rootRel="${TMP_DIR}/subscribe-salt-write-transaction"
+    local root saltFile
+    local rc
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    saltFile="${root}/subscribeSalt"
+    printf 'old-salt\n' >"${saltFile}"
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${saltFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    writeSubscribeSalt "${saltFile}" "new-salt"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${saltFile}")" == "old-salt" ]]
+    ! compgen -G "${root}/.subscribeSalt.subscribe.*" >/dev/null
+
+    commitGeneratedFile() {
+        originalCommitGeneratedFile "$@"
+    }
+    writeSubscribeSalt "${saltFile}" "new-salt"
+    [[ "$(<"${saltFile}")" == "new-salt" ]]
+    ! compgen -G "${root}/.subscribeSalt.subscribe.*" >/dev/null
 )
 
 runSingBoxSubscribeWriteRegression() {
@@ -7327,12 +7364,16 @@ runSubscribeUserOutputTransactionRegression() {
     local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
     local oldScriptDir="${SCRIPT_DIR}"
     local oldTmpDir="${TMPDIR:-}"
-    local localDir="${TMP_DIR}/subscribe-user-local"
-    local publicDir="${TMP_DIR}/subscribe-user-public"
-    local userTmpRoot="${TMP_DIR}/subscribe-user-tmp"
-    local stageMarker="${TMP_DIR}/subscribe-user-stage-dirs.txt"
+    local rootRel="${TMP_DIR}/subscribe-user-transaction"
+    local root localDir publicDir userTmpRoot stageMarker
     local email="atomic-user"
     local emailMd5="atomic-md5"
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    localDir="${root}/local"
+    publicDir="${root}/public"
+    userTmpRoot="${root}/tmp"
+    stageMarker="${root}/stage-dirs.txt"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     export PADM_SUBSCRIBE_DIR="${publicDir}"
     TMPDIR="${userTmpRoot}"
@@ -7586,11 +7627,8 @@ runSubscribeReturnFailureRegression() (
 )
 
 runSubscribeLocalRollbackRegression() (
-    local root="${TMP_DIR}/subscribe-local-rollback"
-    local localDir="${root}/subscribe_local"
-    local errorLog="${root}/error.log"
-    local callLog="${root}/calls.log"
-    local beforeSnapshot="${root}/before.txt"
+    local rootRel="${TMP_DIR}/subscribe-local-rollback"
+    local root localDir errorLog callLog beforeSnapshot
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
     local oldTmpDir="${TMPDIR:-}"
     local oldSubscribeSalt="${subscribeSalt:-}"
@@ -7602,6 +7640,12 @@ runSubscribeLocalRollbackRegression() (
         find "${localDir}" -type f -printf '%P\t' -exec cat {} \; | sort
     }
 
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    localDir="${root}/subscribe_local"
+    errorLog="${root}/error.log"
+    callLog="${root}/calls.log"
+    beforeSnapshot="${root}/before.txt"
     source "${PROJECT_ROOT}/shell/core/manage.sh"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     TMPDIR="${root}"
@@ -14959,6 +15003,7 @@ runRegressionSubscriptionRemoteFetch() {
 runRegressionSubscriptionWriteTransaction() {
     runRegressionStep sing-box-subscribe-write runSingBoxSubscribeWriteRegression
     runRegressionStep subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
+    runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression
     runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
     runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
@@ -15043,6 +15088,7 @@ runRegressionTransactionSubscription() {
     runRegressionStep subscribe-server-name runSubscribeServerNameRegression &&
         runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression &&
         runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression &&
+        runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression &&
         runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression &&
         runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression &&
         runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression &&

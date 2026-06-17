@@ -1903,7 +1903,10 @@ EOF
 commitSubscribeUserOutputFile() {
     local stagedPath=$1
     local targetPath=$2
-    mkdir -p "$(dirname "${targetPath}")" || return 1
+    local targetParent
+    targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || return 1
+    targetParent=$(dirname -- "${targetPath}")
+    padmEnsureSafeDirectory "${targetParent}" || return 1
     if [[ -f "${stagedPath}" ]]; then
         commitGeneratedFile "${stagedPath}" "${targetPath}" 644 || return 1
     else
@@ -1922,9 +1925,12 @@ readSubscribeSalt() {
 writeSubscribeSalt() {
     local subscribeSaltFile=$1
     local salt=$2
+    local stagedPath
 
-    mkdir -p "$(dirname "${subscribeSaltFile}")" || return 1
-    printf '%s\n' "${salt}" >"${subscribeSaltFile}"
+    subscribeSaltFile=$(padmResolveManagedAbsolutePath "${subscribeSaltFile}") || return 1
+    padmCreateTempFileForTarget stagedPath "${subscribeSaltFile}" subscribe || return 1
+    printf '%s\n' "${salt}" >"${stagedPath}" || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
+    commitGeneratedFile "${stagedPath}" "${subscribeSaltFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
 }
 
 resolveSubscribeSalt() {
