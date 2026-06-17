@@ -148,15 +148,20 @@ restoreVlessEncryptionBackup() {
     local reason=$7
     local restoreFailed=false
     if ! mv "${backupFile}" "${configFile}"; then
-        errorCard "${reason}，且 VLESS Encryption 配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
-        return 1
+        if ! restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
+            errorCard "${reason}，且 VLESS Encryption 配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
+            return 1
+        fi
     fi
+    removeManagedFileIfPresent "${backupFile}" || true
     if [[ "${hadStateBackup}" == "true" ]]; then
-        if ! mv "${stateBackupFile}" "${stateFile}"; then
+        if ! restoreManagedFileFromBackup "${stateBackupFile}" "${stateFile}" 600; then
             restoreFailed=true
+        else
+            removeManagedFileIfPresent "${stateBackupFile}" || true
         fi
     elif [[ "${stateMode}" == "remove" ]]; then
-        if ! rm -f "${stateFile}" >/dev/null 2>&1; then
+        if ! removeManagedFileIfPresent "${stateFile}"; then
             restoreFailed=true
         fi
     fi
@@ -178,13 +183,16 @@ setVlessRealityEncryption() {
     local vlessEncOutput
     local vlessEncOut
     local vlessEncErr
-    local tmpBase
+    local configTmpFile
+    local stateStageFile
     local encryption
     local decryption
     local hadStateBackup=false
     configFile=$(vlessEncryptionConfigFile)
     stateFile=$(vlessEncryptionStateFile)
     xrayBinary=$(vlessEncryptionXrayBinary)
+    configFile=$(padmRequireSafeAbsolutePath "${configFile}") || { errorCard "VLESS Encryption 配置路径异常"; return 1; }
+    stateFile=$(padmResolveManagedAbsolutePath "${stateFile}") || { errorCard "VLESS Encryption 状态路径异常"; return 1; }
 
     if [[ "${coreInstallType}" != "1" ]]; then
         errorCard "此实验功能仅支持 Xray-core"
@@ -197,48 +205,59 @@ setVlessRealityEncryption() {
 
     backupFile="${configFile}.vlessenc.bak"
     stateBackupFile="${stateFile}.bak"
-    stateTmpFile="${stateFile}.tmp"
-    if ! cp "${configFile}" "${backupFile}"; then
+    if ! backupManagedFileToPath "${configFile}" "${backupFile}" 644; then
         errorCard "创建 VLESS Encryption 配置备份失败，请手动检查 ${configFile}"
         return 1
     fi
     if [[ -f "${stateFile}" ]]; then
-        if ! cp "${stateFile}" "${stateBackupFile}"; then
-            rm -f "${backupFile}"
+        if ! backupManagedFileToPath "${stateFile}" "${stateBackupFile}" 600; then
+            removeManagedFileIfPresent "${backupFile}" || true
             errorCard "创建 VLESS Encryption 状态备份失败，请手动检查 ${stateFile}"
             return 1
         fi
         hadStateBackup=true
     else
-        if ! rm -f "${stateBackupFile}" >/dev/null 2>&1; then
-            rm -f "${backupFile}"
+        if ! removeManagedFileIfPresent "${stateBackupFile}"; then
+            removeManagedFileIfPresent "${backupFile}" || true
             errorCard "清理 VLESS Encryption 旧状态备份失败，请手动检查 ${stateBackupFile}"
             return 1
         fi
     fi
+    padmCreateTempFileForTarget configTmpFile "${configFile}" vlessenc || {
+        removeManagedFileIfPresent "${backupFile}" || true
+        [[ "${hadStateBackup}" == "true" ]] && removeManagedFileIfPresent "${stateBackupFile}" || true
+        return 1
+    }
 
     if [[ "${mode}" == "enable" ]]; then
         xrayVersion=$("${xrayBinary}" --version | awk 'NR==1 {print $2}')
         if ! xrayVersionAtLeast "${xrayVersion}" "25.9.5"; then
             errorCard "当前 Xray-core ${xrayVersion} 不支持 vlessenc，请先升级到 v25.9.5 或更高版本"
-            rm -f "${backupFile}" "${stateBackupFile}"
+            padmRemoveCleanupPath "${configTmpFile}"
+            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFileIfPresent "${stateBackupFile}" || true
             return 1
         fi
-        tmpBase="${TMPDIR:-/tmp}"
-        padmCreateTempPath vlessEncOut "${tmpBase%/}/padm-vlessenc.out.XXXXXX" || {
-            rm -f "${backupFile}" "${stateBackupFile}"
+        padmCreateTempPath vlessEncOut "$(padmTmpFilePath "padm-vlessenc.out.XXXXXX")" || {
+            padmRemoveCleanupPath "${configTmpFile}"
+            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFileIfPresent "${stateBackupFile}" || true
             return 1
         }
-        padmCreateTempPath vlessEncErr "${tmpBase%/}/padm-vlessenc.err.XXXXXX" || {
+        padmCreateTempPath vlessEncErr "$(padmTmpFilePath "padm-vlessenc.err.XXXXXX")" || {
             padmRemoveCleanupPath "${vlessEncOut}"
-            rm -f "${backupFile}" "${stateBackupFile}"
+            padmRemoveCleanupPath "${configTmpFile}"
+            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFileIfPresent "${stateBackupFile}" || true
             return 1
         }
         if ! "${xrayBinary}" vlessenc >"${vlessEncOut}" 2>"${vlessEncErr}"; then
             errorCard "xray vlessenc 执行失败，请先确认当前 Xray-core 支持该命令"
             padmRemoveCleanupPath "${vlessEncOut}"
             padmRemoveCleanupPath "${vlessEncErr}"
-            rm -f "${backupFile}" "${stateBackupFile}"
+            padmRemoveCleanupPath "${configTmpFile}"
+            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFileIfPresent "${stateBackupFile}" || true
             return 1
         fi
         vlessEncOutput=$(cat "${vlessEncOut}")
@@ -248,7 +267,9 @@ setVlessRealityEncryption() {
         padmRemoveCleanupPath "${vlessEncErr}"
         if [[ -z "${encryption}" || -z "${decryption}" ]]; then
             errorCard "无法解析 xray vlessenc 输出，已取消启用"
-            rm -f "${backupFile}" "${stateBackupFile}"
+            padmRemoveCleanupPath "${configTmpFile}"
+            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFileIfPresent "${stateBackupFile}" || true
             return 1
         fi
         if ! jq --arg decryption "${decryption}" '
@@ -257,21 +278,22 @@ setVlessRealityEncryption() {
             else
                 del(.inbounds[0].settings.fallbacks) | .inbounds[0].settings.decryption = $decryption | .inbounds[0].settings.clients |= map(.flow = "xtls-rprx-vision")
             end
-        ' "${configFile}" >"${configFile}.tmp"; then
+        ' "${configFile}" >"${configTmpFile}"; then
             errorCard "写入 Xray 配置失败，已取消启用"
             restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "写入 Xray 配置失败" || return 1
-            rm -f "${configFile}.tmp" "${stateBackupFile}"
+            padmRemoveCleanupPath "${configTmpFile}"
             return 1
         fi
-        if ! mkdir -p "$(dirname "${stateFile}")"; then
+        if ! padmCreateTempFileForTarget stateStageFile "${stateFile}" vlessenc-state; then
             errorCard "创建 VLESS Encryption 状态目录失败，已取消启用"
-            rm -f "${configFile}.tmp" "${stateTmpFile}"
+            padmRemoveCleanupPath "${configTmpFile}"
             restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "创建 VLESS Encryption 状态目录失败" || return 1
             return 1
         fi
-        if ! jq -n --arg encryption "${encryption}" --arg decryption "${decryption}" '{enabled:true,encryption:$encryption,decryption:$decryption}' >"${stateTmpFile}"; then
+        if ! jq -n --arg encryption "${encryption}" --arg decryption "${decryption}" '{enabled:true,encryption:$encryption,decryption:$decryption}' >"${stateStageFile}"; then
             errorCard "写入 VLESS Encryption 状态失败，已取消启用"
-            rm -f "${configFile}.tmp" "${stateTmpFile}"
+            padmRemoveCleanupPath "${configTmpFile}"
+            padmRemoveCleanupPath "${stateStageFile}"
             restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "写入 VLESS Encryption 状态失败" || return 1
             return 1
         fi
@@ -282,32 +304,32 @@ setVlessRealityEncryption() {
             else
                 .inbounds[0].settings.decryption = "none" | del(.inbounds[0].settings.fallbacks)
             end
-        ' "${configFile}" >"${configFile}.tmp"; then
+        ' "${configFile}" >"${configTmpFile}"; then
             errorCard "写入 Xray 配置失败，已取消关闭"
-            rm -f "${configFile}.tmp"
+            padmRemoveCleanupPath "${configTmpFile}"
             restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "写入 Xray 配置失败" || return 1
             return 1
         fi
     fi
 
-    if ! mv "${configFile}.tmp" "${configFile}"; then
-        errorCard "提交 VLESS Encryption 配置失败，请手动检查 ${configFile}、${configFile}.tmp 和 ${backupFile}"
-        rm -f "${stateTmpFile}"
+    if ! commitGeneratedJsonFile "${configTmpFile}" "${configFile}"; then
+        errorCard "提交 VLESS Encryption 配置失败，请手动检查 ${configFile} 和 ${backupFile}"
+        [[ -n "${stateStageFile:-}" ]] && padmRemoveCleanupPath "${stateStageFile}"
         return 1
     fi
     if [[ "${mode}" == "enable" ]]; then
-        if ! mv "${stateTmpFile}" "${stateFile}"; then
+        if ! commitGeneratedJsonFile "${stateStageFile}" "${stateFile}" 600; then
             if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "提交 VLESS Encryption 状态失败"; then
-                rm -f "${stateTmpFile}"
+                padmRemoveCleanupPath "${stateStageFile}"
                 return 1
             fi
-            rm -f "${stateTmpFile}"
+            padmRemoveCleanupPath "${stateStageFile}"
             errorCard "提交 VLESS Encryption 状态失败，已恢复旧配置"
             return 1
         fi
         chmod 600 "${stateFile}" 2>/dev/null || true
     else
-        if ! rm -f "${stateFile}" >/dev/null 2>&1; then
+        if ! removeManagedFileIfPresent "${stateFile}"; then
             if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "删除 VLESS Encryption 状态失败"; then
                 return 1
             fi
@@ -318,10 +340,8 @@ setVlessRealityEncryption() {
 
     if ! validateVlessEncryptionConfig; then
         if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "Xray 配置校验失败"; then
-            rm -f "${stateTmpFile}"
             return 1
         fi
-        rm -f "${stateTmpFile}"
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
         menuLine "已回滚本次 VLESS Encryption 修改"
         menuLine "排查日志：$(vlessEncryptionXrayTestLog)"
@@ -330,10 +350,8 @@ setVlessRealityEncryption() {
     fi
     if ! reloadCore; then
         if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "核心重载失败"; then
-            rm -f "${stateTmpFile}"
             return 1
         fi
-        rm -f "${stateTmpFile}"
         if reloadCore; then
             errorCard "核心重载失败，已回滚 VLESS Encryption 修改"
         else
@@ -343,19 +361,19 @@ setVlessRealityEncryption() {
     fi
     if ! refreshVlessEncryptionSubscriptions; then
         if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "刷新 VLESS Encryption 订阅失败"; then
-            rm -f "${stateTmpFile}"
             return 1
         fi
         if ! reloadCore; then
-            rm -f "${stateTmpFile}"
             errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置；恢复旧配置后核心重载失败，请检查核心服务日志"
             return 1
         fi
-        rm -f "${backupFile}" "${stateBackupFile}" "${stateTmpFile}"
+        removeManagedFileIfPresent "${backupFile}" || true
+        removeManagedFileIfPresent "${stateBackupFile}" || true
         errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置"
         return 1
     fi
-    rm -f "${backupFile}" "${stateBackupFile}" "${stateTmpFile}"
+    removeManagedFileIfPresent "${backupFile}" || true
+    removeManagedFileIfPresent "${stateBackupFile}" || true
     return 0
 }
 

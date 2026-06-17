@@ -184,6 +184,22 @@ restoreManagedFileFromBackup() {
     commitGeneratedFile "${restoreStage}" "${targetFile}" "${mode}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
 }
 
+backupManagedFileToPath() {
+    local sourceFile=$1
+    local backupFile=$2
+    local mode=${3:-644}
+    local backupStage
+
+    sourceFile=$(padmRequireSafeAbsolutePath "${sourceFile}") || return 1
+    [[ -f "${sourceFile}" ]] || return 1
+    padmCreateTempFileForTarget backupStage "${backupFile}" backup || return 1
+    if ! cp -p "${sourceFile}" "${backupStage}"; then
+        padmRemoveCleanupPath "${backupStage}"
+        return 1
+    fi
+    commitGeneratedFile "${backupStage}" "${backupFile}" "${mode}" || { padmRemoveCleanupPath "${backupStage}"; return 1; }
+}
+
 writeGeneratedJsonFile() {
     local targetFile=$1
     local tmpPrefix=$2

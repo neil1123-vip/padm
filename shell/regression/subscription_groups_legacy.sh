@@ -8937,6 +8937,14 @@ JSON
     if find "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) | grep -q .; then
         return 1
     fi
+
+    PADM_VLESS_ENCRYPTION_STATE_FILE="relative-vless-state.json"
+    if setVlessRealityEncryption enable >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -e "${vlessConfigFile}.vlessenc.bak" ]]
+    [[ ! -e "${vlessConfigFile}.tmp" ]]
+    [[ ! -e "${vlessTmpRoot}/relative-vless-state.json" ]]
     unset PADM_XRAY_BINARY PADM_XRAY_CONF_DIR PADM_VLESS_REALITY_CONFIG_FILE PADM_VLESS_XHTTP_CONFIG_FILE PADM_VLESS_ENCRYPTION_STATE_FILE PADM_FAKE_XRAY_VALIDATE_MODE PADM_FAKE_VLESSENC_TMP_MARKER
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
