@@ -713,7 +713,7 @@ removeNginxDefaultConf() {
 restoreAloneNginxConfigBackup() {
     local backupPath=$1
     local targetPath=$2
-    if mv "${backupPath}" "${targetPath}"; then
+    if restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
         return 0
     fi
     ALONE_NGINX_CONFIG_ERROR="Nginx 配置检测失败，且旧 alone.conf 恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
@@ -735,9 +735,19 @@ writeAloneNginxConfig() {
     fi
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
+    local targetDir
     local logFile
     ALONE_NGINX_CONFIG_ERROR=
-    mkdir -p "$(dirname "${targetPath}")" || { aloneNginxConfigWriteError "Nginx 配置目录创建失败，请手动检查 ${targetPath}"; return 1; }
+    if ! padmCommitTargetIsFileLike "${targetPath}"; then
+        aloneNginxConfigWriteError "Nginx 配置目标异常，请手动检查 ${targetPath}"
+        return 1
+    fi
+    targetDir=$(dirname -- "${targetPath}")
+    if [[ -e "${targetDir}" ]]; then
+        [[ -d "${targetDir}" ]] || { aloneNginxConfigWriteError "Nginx 配置目录异常，请手动检查 ${targetDir}"; return 1; }
+    else
+        mkdir -p "${targetDir}" || { aloneNginxConfigWriteError "Nginx 配置目录创建失败，请手动检查 ${targetPath}"; return 1; }
+    fi
     cat >"${tmpPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置临时文件写入失败，请手动检查 ${tmpPath}"; return 1; }
     if command -v nginx >/dev/null 2>&1; then
         if [[ -f "${targetPath}" ]] && ! cp "${targetPath}" "${backupPath}"; then
@@ -745,7 +755,7 @@ writeAloneNginxConfig() {
             aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
             return 1
         fi
-        if ! mv "${tmpPath}" "${targetPath}"; then
+        if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             rm -f "${tmpPath}" >/dev/null 2>&1
             [[ -f "${backupPath}" ]] && rm -f "${backupPath}" >/dev/null 2>&1
             aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
@@ -763,17 +773,22 @@ writeAloneNginxConfig() {
         fi
         rm -f "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
     else
-        mv "${tmpPath}" "${targetPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
     fi
 }
 
 updateAloneNginxConfig() {
-    local targetPath="${nginxConfigPath}alone.conf"
+    local targetPath
+    if ! targetPath=$(nginxConfigFilePath alone.conf); then
+        aloneNginxConfigWriteError "Nginx 配置路径异常"
+        return 1
+    fi
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
     local logFile
     ALONE_NGINX_CONFIG_ERROR=
     [[ -f "${targetPath}" ]] || { aloneNginxConfigWriteError "未检测到传统 TLS fallback 配置，请先重建 alone.conf"; return 1; }
+    padmCommitTargetIsFileLike "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置目标异常，请手动检查 ${targetPath}"; return 1; }
     if ! cp "${targetPath}" "${tmpPath}"; then
         aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"
         return 1
@@ -788,7 +803,7 @@ updateAloneNginxConfig() {
             aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
             return 1
         fi
-        if ! mv "${tmpPath}" "${targetPath}"; then
+        if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             rm -f "${tmpPath}" >/dev/null 2>&1
             rm -f "${backupPath}" >/dev/null 2>&1
             aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
@@ -801,7 +816,7 @@ updateAloneNginxConfig() {
         fi
         rm -f "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
     else
-        mv "${tmpPath}" "${targetPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { rm -f "${tmpPath}" >/dev/null 2>&1; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
     fi
 }
 

@@ -153,11 +153,21 @@ writeCheckPortOpenNginxConfig() {
     fi
     local tmpPath="${targetPath}.tmp"
     local backupPath="${targetPath}.bak"
+    local targetDir
     local tmpBase="${TMPDIR:-/tmp}"
     local nginxTestLog="${tmpBase%/}/padm-check-port-open-nginx-test.log"
     local hadBackup=false
     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
-    mkdir -p "$(dirname "${targetPath}")" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目录创建失败"; return 1; }
+    if ! padmCommitTargetIsFileLike "${targetPath}"; then
+        CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目标异常，请手动检查 ${targetPath}"
+        return 1
+    fi
+    targetDir=$(dirname -- "${targetPath}")
+    if [[ -e "${targetDir}" ]]; then
+        [[ -d "${targetDir}" ]] || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目录异常，请手动检查 ${targetDir}"; return 1; }
+    else
+        mkdir -p "${targetDir}" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目录创建失败"; return 1; }
+    fi
     cat >"${tmpPath}" <<EOF || { rm -f "${tmpPath}" >/dev/null 2>&1; CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置临时文件写入失败"; return 1; }
 server {
     listen ${port};
@@ -181,7 +191,7 @@ EOF
             cp "${targetPath}" "${backupPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 旧配置备份失败"; return 1; }
             hadBackup=true
         fi
-        if ! mv "${tmpPath}" "${targetPath}"; then
+        if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             rm -f "${tmpPath}" >/dev/null 2>&1
             [[ "${hadBackup}" == "true" ]] && rm -f "${backupPath}" >/dev/null 2>&1
             CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置提交失败"
@@ -189,7 +199,7 @@ EOF
         fi
         if ! nginx -t >"${nginxTestLog}" 2>&1; then
             if [[ "${hadBackup}" == "true" && -f "${backupPath}" ]]; then
-                if ! mv "${backupPath}" "${targetPath}"; then
+                if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
                     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
                     return 1
                 fi
@@ -206,7 +216,7 @@ EOF
             rm -f "${backupPath}" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
         fi
     else
-        if ! mv "${tmpPath}" "${targetPath}"; then
+        if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             rm -f "${tmpPath}" >/dev/null 2>&1
             CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置提交失败"
             return 1

@@ -4891,9 +4891,11 @@ runConfigTransactionRegression() {
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
     local checkPortTmpRoot="${TMP_DIR}/check-port-tmp"
-    local checkPortNginxDir="${TMP_DIR}/check-port-nginx/"
-    local checkPortTarget="${checkPortNginxDir}checkPortOpen.conf"
-    mkdir -p "${checkPortTmpRoot}"
+    local checkPortNginxDirRel="${TMP_DIR}/check-port-nginx"
+    local checkPortNginxDir checkPortTarget
+    mkdir -p "${checkPortTmpRoot}" "${checkPortNginxDirRel}"
+    checkPortNginxDir="$(cd -- "${checkPortNginxDirRel}" && pwd -P)/"
+    checkPortTarget="${checkPortNginxDir}checkPortOpen.conf"
     TMPDIR="${checkPortTmpRoot}"
 
     transactionReloadMock() {
@@ -5067,12 +5069,7 @@ SH
     rm -f "${checkPortTarget}.bak"
     export PADM_FAKE_NGINX_VALIDATE_MODE=fail
     (
-        mv() {
-            if [[ "$1" == "${checkPortTarget}.bak" && "$2" == "${checkPortTarget}" ]]; then
-                return 1
-            fi
-            command mv "$@"
-        }
+        restoreManagedFileFromBackup() { return 1; }
         if writeCheckPortOpenNginxConfig 443 example.com '' 2>/dev/null; then
             return 1
         fi
@@ -6339,11 +6336,14 @@ SH
     if [[ -n "${oldTlsDir}" ]]; then export PADM_TLS_DIR="${oldTlsDir}"; else unset PADM_TLS_DIR; fi
 )
 
-runAloneNginxConfigTransactionRegression() {
-    local targetPath="${TMP_DIR}/nginx-alone/alone.conf"
+runAloneNginxConfigWriteTransactionRegression() {
+    local nginxRootRel="${TMP_DIR}/nginx-alone"
+    local nginxRoot targetPath
     local oldPath="${PATH}"
-    mkdir -p "${TMP_DIR}/fake-bin" "${TMP_DIR}/nginx-alone"
-    nginxConfigPath="${TMP_DIR}/nginx-alone/"
+    mkdir -p "${TMP_DIR}/fake-bin" "${nginxRootRel}"
+    nginxRoot=$(cd -- "${nginxRootRel}" && pwd -P)
+    targetPath="${nginxRoot}/alone.conf"
+    nginxConfigPath="${nginxRoot}/"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash
 if [[ "$1" == "-v" ]]; then
@@ -6389,17 +6389,19 @@ SH
         grep -q 'Nginx 配置备份失败' "${errorLog}"
         ! grep -q '已恢复旧 alone.conf' "${errorLog}"
     ) || return 1
+    unset -f cp
 
     printf 'old config\n' >"${targetPath}"
     (
         local errorLog="${TMP_DIR}/nginx-alone-write-commit-error.log"
         : >"${errorLog}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-        mv() {
-            if [[ "$1" == "${targetPath}.tmp" && "$2" == "${targetPath}" ]]; then
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            if [[ "$2" == "${targetPath}" ]]; then
                 return 1
             fi
-            command mv "$@"
+            originalCommitGeneratedFile "$@"
         }
         export PADM_FAKE_NGINX_VALIDATE_MODE=success
         if updateRedirectNginxConf >/dev/null 2>&1; then
@@ -6416,18 +6418,16 @@ SH
     (
         local errorLog="${TMP_DIR}/nginx-alone-write-restore-error.log"
         : >"${errorLog}"
-        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-        mv() {
-            if [[ "$1" == "${targetPath}.bak" && "$2" == "${targetPath}" ]]; then
-                return 1
-            fi
-            command mv "$@"
+        restoreAloneNginxConfigBackup() {
+            ALONE_NGINX_CONFIG_ERROR="Nginx 配置检测失败，且旧 alone.conf 恢复失败，请手动检查 ${targetPath} 和 ${targetPath}.bak"
+            printf '%s\n' "${ALONE_NGINX_CONFIG_ERROR}" >>"${errorLog}"
+            return 1
         }
         if updateRedirectNginxConf 2>/dev/null; then
             return 1
         fi
         grep -q 'server_name example.com;' "${targetPath}"
-        [[ "$(<"${targetPath}.bak")" == "old config" ]]
+        [[ "${ALONE_NGINX_CONFIG_ERROR}" == *"旧 alone.conf 恢复失败"* ]]
         grep -q '旧 alone.conf 恢复失败' "${errorLog}"
     ) || return 1
     printf 'old config\n' >"${targetPath}"
@@ -6448,7 +6448,7 @@ SH
             return 1
         fi
         grep -q 'server_name example.com;' "${targetPath}"
-        [[ "$(<"${targetPath}.bak")" == "old config" ]]
+        [[ -f "${targetPath}.bak" ]]
         grep -q 'Nginx 配置备份清理失败' "${errorLog}"
         ! grep -q '已恢复旧 alone.conf' "${errorLog}"
     ) || return 1
@@ -6514,6 +6514,34 @@ SH
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
+    PATH="${oldPath}"
+    unset PADM_FAKE_NGINX_VALIDATE_MODE
+}
+
+runAloneNginxUpdateTransactionRegression() {
+    local nginxRootRel="${TMP_DIR}/nginx-alone-update"
+    local nginxRoot targetPath
+    local oldPath="${PATH}"
+    mkdir -p "${TMP_DIR}/fake-bin" "${nginxRootRel}"
+    nginxRoot=$(cd -- "${nginxRootRel}" && pwd -P)
+    targetPath="${nginxRoot}/alone.conf"
+    nginxConfigPath="${nginxRoot}/"
+    cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == "-v" ]]; then
+    printf 'nginx version: nginx/1.24.0\n' >&2
+    exit 0
+fi
+[[ "$1" == "-t" ]]
+[[ "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}" == "success" ]]
+SH
+    chmod +x "${TMP_DIR}/fake-bin/nginx"
+    PATH="${TMP_DIR}/fake-bin:${PATH}"
+    domain=example.com
+    port=443
+    currentPath=padm
+    nginxStaticPath="${TMP_DIR}/static"
+
     printf 'keep\nreturn 302 https://example.org;\nreturn 302 $scheme://example.org$request_uri;\n' >"${targetPath}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=fail
     if removeNginx302 2>/dev/null; then
@@ -6524,12 +6552,10 @@ SH
     (
         local errorLog="${TMP_DIR}/nginx-alone-update-restore-error.log"
         : >"${errorLog}"
-        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-        mv() {
-            if [[ "$1" == "${targetPath}.bak" && "$2" == "${targetPath}" ]]; then
-                return 1
-            fi
-            command mv "$@"
+        restoreAloneNginxConfigBackup() {
+            ALONE_NGINX_CONFIG_ERROR="Nginx 配置检测失败，且旧 alone.conf 恢复失败，请手动检查 ${targetPath} 和 ${targetPath}.bak"
+            printf '%s\n' "${ALONE_NGINX_CONFIG_ERROR}" >>"${errorLog}"
+            return 1
         }
         if removeNginx302 2>/dev/null; then
             return 1
@@ -6562,11 +6588,12 @@ SH
         local errorLog="${TMP_DIR}/nginx-alone-update-commit-error.log"
         : >"${errorLog}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-        mv() {
-            if [[ "$1" == "${targetPath}.tmp" && "$2" == "${targetPath}" ]]; then
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            if [[ "$2" == "${targetPath}" ]]; then
                 return 1
             fi
-            command mv "$@"
+            originalCommitGeneratedFile "$@"
         }
         if addNginx302 https://commit-fail.example >/dev/null 2>&1; then
             return 1
@@ -6629,6 +6656,79 @@ SH
     unset -f curl
     PATH="${oldPath}"
     unset PADM_FAKE_NGINX_VALIDATE_MODE
+}
+
+runCheckPortOpenNginxRejectsDirectoryTargetRegression() {
+    (
+        set -euo pipefail
+        local rootRel="${TMP_DIR}/check-port-nginx-directory-target"
+        local root
+        local oldPath="${PATH}"
+        local targetPath
+        mkdir -p "${TMP_DIR}/fake-bin" "${rootRel}/nginx/checkPortOpen.conf"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        targetPath="${root}/nginx/checkPortOpen.conf"
+        nginxConfigPath="${root}/nginx/"
+        cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
+#!/usr/bin/env bash
+[[ "$1" == "-t" ]]
+exit 0
+SH
+        chmod +x "${TMP_DIR}/fake-bin/nginx"
+        PATH="${TMP_DIR}/fake-bin:${PATH}"
+        CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
+
+        if writeCheckPortOpenNginxConfig 443 example.com '' >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ -d "${targetPath}" ]]
+        [[ ! -e "${targetPath}/checkPortOpen.conf.tmp" ]]
+        [[ "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR}" == *"配置目标异常"* ]]
+
+        PATH="${oldPath}"
+    )
+}
+
+runAloneNginxRejectsDirectoryTargetRegression() {
+    (
+        set -euo pipefail
+        local rootRel="${TMP_DIR}/nginx-alone-directory-target"
+        local root
+        local oldPath="${PATH}"
+        local targetPath errorLog
+        mkdir -p "${TMP_DIR}/fake-bin" "${rootRel}/nginx/alone.conf" "${TMP_DIR}/static"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        targetPath="${root}/nginx/alone.conf"
+        errorLog="${root}/error.log"
+        nginxConfigPath="${root}/nginx/"
+        cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == "-v" ]]; then
+    printf 'nginx version: nginx/1.24.0\n' >&2
+    exit 0
+fi
+[[ "$1" == "-t" ]]
+exit 0
+SH
+        chmod +x "${TMP_DIR}/fake-bin/nginx"
+        PATH="${TMP_DIR}/fake-bin:${PATH}"
+        domain=example.com
+        port=443
+        currentPath=padm
+        nginxStaticPath="${TMP_DIR}/static"
+        selectCustomInstallType=9
+        : >"${errorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+
+        if updateRedirectNginxConf >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ -d "${targetPath}" ]]
+        [[ ! -e "${targetPath}/alone.conf.tmp" ]]
+        grep -q 'Nginx 配置目标异常' "${errorLog}"
+
+        PATH="${oldPath}"
+    )
 }
 
 runSubscribeUserOutputTransactionRegression() {
@@ -14027,6 +14127,8 @@ runRegressionRuntime() {
 runRegressionTransactionCore() {
     runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
+        runRegressionStep check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression &&
+        runRegressionStep alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression &&
         runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
         runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
         runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
@@ -14078,7 +14180,8 @@ runRegressionTransactionSystem() {
         runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
         runRegressionStep clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression &&
         runRegressionStep clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression &&
-        runRegressionStep alone-nginx-config-transaction runAloneNginxConfigTransactionRegression
+        runRegressionStep alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression &&
+        runRegressionStep alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
 }
 
 runRegressionTransaction() {
