@@ -832,7 +832,10 @@ EOF
         statusCard "Nginx 源" "nginx.org 未提供 Fedora ${centosVersion} 仓库，使用系统默认仓库安装 Nginx"
     elif [[ "${release}" == "alpine" ]]; then
         local defaultNginxConf
+        local repoBackupDir
         defaultNginxConf=$(nginxConfigFilePath default.conf) || failPackageInstallTransaction "Nginx 默认配置路径异常"
+        adapterCreateManagedRollbackBackup repoBackupDir "${defaultNginxConf}" || failPackageInstallTransaction "Nginx 默认配置备份失败"
+        adapterRegisterPackageManagedRollback "${repoBackupDir}"
         rm -f -- "${defaultNginxConf}" || failPackageInstallTransaction "Nginx 默认配置删除失败"
     fi
     installPackageTracked "nginx" nginx

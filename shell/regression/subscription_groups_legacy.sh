@@ -14103,6 +14103,51 @@ runNginxYumMainlineEnableFailureRegression() {
     )
 }
 
+runNginxAlpineDefaultConfRollbackRegression() {
+    (
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local errorLog="${TMP_DIR}/nginx-alpine-default-conf-error.log"
+        local rootRel="${TMP_DIR}/nginx-alpine-default-conf-rollback"
+        local root defaultConf
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        : >"${errorLog}"
+        mkdir -p "${rootRel}"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        defaultConf="${root}/nginx/default.conf"
+        mkdir -p "$(dirname "${defaultConf}")"
+        printf 'old-default-conf\n' >"${defaultConf}"
+        release=alpine
+        packageManager=apk
+        removeType=true
+        nginxConfigFilePath() {
+            [[ "$1" == "default.conf" ]] && printf '%s\n' "${defaultConf}"
+        }
+        installPackageTracked() { return 0; }
+        nginxServiceInstalled() { return 0; }
+        bootStartup() { return 1; }
+
+        set +e
+        (
+            installNginxTools
+        ) >/dev/null 2>&1
+        local nginxStatus=$?
+        set -e
+        [[ "${nginxStatus}" -ne 0 ]]
+        [[ "$(<"${defaultConf}")" == "old-default-conf" ]]
+        grep -q "Nginx开机自启配置失败" "${errorLog}"
+        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+            return 1
+        fi
+
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        unset -f nginxConfigFilePath installPackageTracked nginxServiceInstalled bootStartup
+    )
+}
+
 runBasePackageBatchRegression() {
     local commands=(sudo wget curl unzip socat tar crontab jq ld openssl ping6 ping lsb_release lsof dig iptables-save nginx)
     local cmd
@@ -14948,6 +14993,7 @@ runRegressionPlatformIo() {
         runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression &&
         runRegressionStep apt-key-install-failure runAptKeyInstallFailureRegression &&
         runRegressionStep nginx-apt-refresh-rollback runNginxAptRepoRefreshRollbackRegression &&
+        runRegressionStep nginx-alpine-default-conf-rollback runNginxAlpineDefaultConfRollbackRegression &&
         runRegressionStep nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureRegression &&
         runRegressionStep base-package-batch runBasePackageBatchRegression &&
         runRegressionStep package-rollback-failure runPackageRollbackFailureRegression &&
