@@ -10593,8 +10593,6 @@ runMenuSmokeRegression() {
     installUserCrontabContent() { return 0; }
     xrayInstalled() { return 0; }
     singBoxInstalled() { return 0; }
-    getXrayCurrentVersion() { printf 'v1.0.0\n'; }
-    getSingBoxCurrentVersion() { printf 'v1.0.0\n'; }
     xrayRunning() { return 0; }
     singBoxRunning() { return 1; }
     validateXrayConfigWithBinary() { return 0; }
@@ -10626,11 +10624,15 @@ runMenuSmokeRegression() {
     mkdir -p "${geoOverviewDir}/conf"
     printf '#!/usr/bin/env bash\ncase "$1" in --version) printf "Xray 1.0.0 test\\n" ;; -test) exit 0 ;; *) exit 1 ;; esac\n' >"${geoOverviewDir}/xray"
     chmod +x "${geoOverviewDir}/xray"
+    local singBoxOverviewDir="${TMP_DIR}/menu-smoke-singbox-overview"
+    mkdir -p "${singBoxOverviewDir}"
+    printf '#!/usr/bin/env bash\ncase "$1" in version) printf "sing-box version 1.0.0\\n" ;; *) exit 1 ;; esac\n' >"${singBoxOverviewDir}/sing-box"
+    chmod +x "${singBoxOverviewDir}/sing-box"
     printf 'geoip' >"${geoOverviewDir}/geoip.dat"
     printf 'geosite' >"${geoOverviewDir}/geosite.dat"
     printf 'v20260513' >"${geoOverviewDir}/geo.version"
     local output=
-    PADM_XRAY_DIR="${geoOverviewDir}" showCoreStatusOverview
+    PADM_XRAY_DIR="${geoOverviewDir}" PADM_SINGBOX_BINARY="${singBoxOverviewDir}/sing-box" showCoreStatusOverview
     [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
     customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
     installMenu <<<"7"

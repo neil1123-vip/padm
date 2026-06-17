@@ -239,14 +239,6 @@ xrayConfigInstalled() {
     return 1
 }
 
-getSingBoxCurrentVersion() {
-    if singBoxInstalled; then
-        "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}'
-    else
-        echo "未安装"
-    fi
-}
-
 coreServiceState() {
     local serviceName=$1
     local runningFn=$2
@@ -890,7 +882,9 @@ showCoreStatusOverview() {
     if [[ -x "${xrayBinary}" ]]; then
         xrayVersion=$("${xrayBinary}" --version 2>/dev/null | awk 'NR==1 {print "v"$2}')
     fi
-    singBoxVersion=$(getSingBoxCurrentVersion)
+    if singBoxInstalled; then
+        singBoxVersion=$("${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}')
+    fi
 
     if [[ -s "${xrayDir}/geosite.dat" && -s "${xrayDir}/geoip.dat" ]]; then
         geoStatus="已安装"
