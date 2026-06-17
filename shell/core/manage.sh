@@ -967,10 +967,10 @@ corePortBackupFiles() {
     local backupDir=$1
     local file base
     corePortSafeConfigDir >/dev/null || return 1
-    mkdir -p "${backupDir}" || return 1
+    padmEnsureSafeDirectory "${backupDir}" || return 1
     while IFS= read -r file; do
         base=${file##*/}
-        cp "${file}" "${backupDir}/${base}" || return 1
+        backupManagedFileToPath "${file}" "${backupDir}/${base}" 644 || return 1
     done < <(corePortManagedFilesByPattern '02_dokodemodoor_inbounds_*.json')
 }
 

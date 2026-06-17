@@ -2302,10 +2302,14 @@ runRuntimeTempDirRegression() (
 
 runCorePortFileTransactionRegression() {
     local oldTmpDir="${TMPDIR:-}"
+    local configRoot
     local portTmpRoot="${TMP_DIR}/core-port-tmp"
     mkdir -p "${portTmpRoot}"
+    portTmpRoot=$(cd -- "${portTmpRoot}" && pwd -P) || return 1
     TMPDIR="${portTmpRoot}"
     mkdir -p "${configPath}"
+    configRoot=$(cd -- "${configPath}" && pwd -P) || return 1
+    configPath="${configRoot%/}/"
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-newPort-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2083_default.json" 2083 443 tcp dokodemo-door-newPort-2083
     local original2053 original2083 keptBackup
@@ -2344,7 +2348,9 @@ runCorePortFileTransactionRegression() {
     : >"${errorLog}"
     (
         cp() {
-            if [[ "${2:-}" == "${portTmpRoot}"/padm-core-port.*/* ]]; then
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${portTmpRoot}"/padm-core-port.*/.* ]]; then
                 return 1
             fi
             command cp "$@"
@@ -2363,7 +2369,9 @@ runCorePortFileTransactionRegression() {
     : >"${errorLog}"
     (
         cp() {
-            if [[ "${2:-}" == "${configPath}"02_dokodemodoor_inbounds_2053_default.json ]]; then
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${configPath}".02_dokodemodoor_inbounds_2053_default.json.restore.* ]]; then
                 return 1
             fi
             command cp "$@"
@@ -2413,7 +2421,9 @@ runCorePortFileTransactionRegression() {
     }
     (
         cp() {
-            if [[ "${2:-}" == "${configPath}"02_dokodemodoor_inbounds_2053_default.json ]]; then
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${configPath}".02_dokodemodoor_inbounds_2053_default.json.restore.* ]]; then
                 return 1
             fi
             command cp "$@"
@@ -2446,12 +2456,14 @@ runCorePortFileTransactionRegression() {
 }
 
 runCorePortRejectsUnsafeConfigDirRegression() (
-    local root="${TMP_DIR}/core-port-unsafe-config"
-    local rmLog="${root}/rm.log"
-    local cpLog="${root}/cp.log"
+    local rootRel="${TMP_DIR}/core-port-unsafe-config"
+    local root rmLog cpLog
     local rc
 
-    mkdir -p "${root}/relative-config" "${root}/backup-restore"
+    mkdir -p "${rootRel}/relative-config" "${rootRel}/backup-restore"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    rmLog="${root}/rm.log"
+    cpLog="${root}/cp.log"
     : >"${rmLog}"
     : >"${cpLog}"
     printf '{"inbounds":[{"port":2053,"settings":{"port":443}}]}\n' >"${root}/relative-config/02_dokodemodoor_inbounds_2053_default.json"
