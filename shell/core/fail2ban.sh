@@ -523,7 +523,7 @@ fail2banEnsurePadmControlNginxLogging() {
 fail2banApplyProfile() {
     local profile=$1
     local nginxScanEnabled=${2:-}
-    local backupDir=
+    local managedBackupDir=
     local serviceWasActive=false
     local serviceWasEnabled=false
     local validateLog
@@ -610,60 +610,60 @@ fail2banApplyProfile() {
         fi
     fi
 
-    checkLogBackupCreate backupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)" || {
+    checkLogBackupCreate managedBackupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)" || {
         errorCard "Fail2ban 配置备份失败"
         return 1
     }
 
     fail2banWriteManagedFilter || {
-        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${backupDir}"
+        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+            padmRemoveCleanupPath "${managedBackupDir}"
         else
-            padmForgetCleanupPath "${backupDir}"
+            padmForgetCleanupPath "${managedBackupDir}"
         fi
         errorCard "Fail2ban 过滤器写入失败"
         return 1
     }
     fail2banWriteNginxScanFilter || {
-        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${backupDir}"
+        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+            padmRemoveCleanupPath "${managedBackupDir}"
         else
-            padmForgetCleanupPath "${backupDir}"
+            padmForgetCleanupPath "${managedBackupDir}"
         fi
         errorCard "Fail2ban 站点扫描过滤器写入失败"
         return 1
     }
     fail2banWriteManagedJail "${profile}" "${nginxScanEnabled}" || {
-        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${backupDir}"
+        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+            padmRemoveCleanupPath "${managedBackupDir}"
         else
-            padmForgetCleanupPath "${backupDir}"
+            padmForgetCleanupPath "${managedBackupDir}"
         fi
         errorCard "Fail2ban jail 写入失败"
         return 1
     }
     if ! fail2banValidateManagedConfig; then
         validateLog=$(fail2banValidateLog)
-        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${backupDir}"
+        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+            padmRemoveCleanupPath "${managedBackupDir}"
             errorCard "Fail2ban 配置校验失败，已恢复旧配置" "校验日志：${validateLog}"
         else
-            padmForgetCleanupPath "${backupDir}"
+            padmForgetCleanupPath "${managedBackupDir}"
             errorCard "Fail2ban 配置校验失败，且旧配置恢复失败" "校验日志：${validateLog}"
         fi
         return 1
     fi
     if ! fail2banStartOrReloadService; then
-        if fail2banRestoreManagedFiles "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
-            padmRemoveCleanupPath "${backupDir}"
+        if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
+            padmRemoveCleanupPath "${managedBackupDir}"
             errorCard "Fail2ban 服务应用失败，已恢复旧配置"
         else
-            padmForgetCleanupPath "${backupDir}"
+            padmForgetCleanupPath "${managedBackupDir}"
             errorCard "Fail2ban 服务应用失败，且旧配置恢复失败"
         fi
         return 1
     fi
-    padmRemoveCleanupPath "${backupDir}"
+    padmRemoveCleanupPath "${managedBackupDir}"
     successCard "Fail2ban 防护已更新" "当前策略：$(fail2banProfileLabel "${profile}")；站点扫描扩展：$(fail2banNginxScanStatusText)"
 }
 

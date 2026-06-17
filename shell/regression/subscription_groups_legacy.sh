@@ -5890,6 +5890,76 @@ runFail2banManagedCleanupRegression() (
     [[ ! -s "${rmLog}" ]]
 )
 
+runFail2banApplyTransactionRegression() (
+    local rootRel="${TMP_DIR}/fail2ban-apply-transaction"
+    local root
+    local errorLog="${TMP_DIR}/fail2ban-apply-transaction-errors.log"
+    local rc
+    local jailCommitFailures=0
+
+    mkdir -p "${rootRel}/fail2ban/jail.d" "${rootRel}/fail2ban/filter.d"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    export TMPDIR="${root}"
+    export PADM_FAIL2BAN_JAIL_FILE="${root}/fail2ban/jail.d/padm.local"
+    export PADM_FAIL2BAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-control.conf"
+    export PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-nginx-scan-basic.conf"
+    export PADM_FAIL2BAN_VALIDATE_LOG="${root}/fail2ban/validate.log"
+    : >"${errorLog}"
+
+    printf 'legacy jail\n' >"${PADM_FAIL2BAN_JAIL_FILE}"
+    printf 'legacy filter\n' >"${PADM_FAIL2BAN_FILTER_FILE}"
+    printf 'legacy scan\n' >"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+
+    fail2banServiceActive() { return 1; }
+    fail2banServiceEnabled() { return 1; }
+    fail2banInstalled() { return 0; }
+    fail2banSystemdServiceInstalled() { return 1; }
+    fail2banOpenRcServiceInstalled() { return 1; }
+    fail2banValidateManagedConfig() { return 0; }
+    fail2banStartOrReloadService() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    successCard() { return 0; }
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${PADM_FAIL2BAN_JAIL_FILE}" && "${jailCommitFailures}" == "0" ]]; then
+            jailCommitFailures=1
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    fail2banApplyProfile sshd false >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${PADM_FAIL2BAN_JAIL_FILE}")" == "legacy jail" ]]
+    [[ "$(<"${PADM_FAIL2BAN_FILTER_FILE}")" == "legacy filter" ]]
+    [[ "$(<"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}")" == "legacy scan" ]]
+    ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
+    ! compgen -G "${root}/fail2ban/filter.d/.padm-control.conf.fail2ban.*" >/dev/null
+    ! compgen -G "${root}/fail2ban/filter.d/.padm-nginx-scan-basic.conf.fail2ban.*" >/dev/null
+    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        return 1
+    fi
+
+    commitGeneratedFile() {
+        originalCommitGeneratedFile "$@"
+    }
+    fail2banApplyProfile sshd false >/dev/null
+    grep -q '^\[sshd\]' "${PADM_FAIL2BAN_JAIL_FILE}"
+    grep -q '^enabled = true$' "${PADM_FAIL2BAN_JAIL_FILE}"
+    grep -q '/s/control/' "${PADM_FAIL2BAN_FILTER_FILE}"
+    grep -Eq 'wp-login\.php|\.env|phpmyadmin|actuator' "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+    ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
+    ! compgen -G "${root}/fail2ban/filter.d/.padm-control.conf.fail2ban.*" >/dev/null
+    ! compgen -G "${root}/fail2ban/filter.d/.padm-nginx-scan-basic.conf.fail2ban.*" >/dev/null
+    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        return 1
+    fi
+)
+
 runUninstallServiceStopFailureRegression() (
     local root="${TMP_DIR}/uninstall-service-stop"
     local serviceLog="${root}/service.log"
@@ -9004,6 +9074,50 @@ runRealityCandidateFullRegression() {
     ! realityTargetCandidates | grep -q '^www.apple.com|'
 }
 
+runRealityBlockedCandidateTransactionRegression() (
+    local rootRel="${TMP_DIR}/reality-blocked-write-transaction"
+    local root blockedFile
+    local oldBlockedFile="${PADM_REALITY_TARGET_BLOCKED_FILE:-}"
+    local rc
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    blockedFile="${root}/reality_target_blocked.tsv"
+    printf 'old.example.com|手动加入|legacy|old note\n' >"${blockedFile}"
+    export PADM_REALITY_TARGET_BLOCKED_FILE="${blockedFile}"
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${blockedFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    addRealityTargetBlockedCandidate "new.example.com:443" "manual" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${blockedFile}")" == "old.example.com|手动加入|legacy|old note" ]]
+    ! compgen -G "${root}/.reality_target_blocked.tsv.reality.*" >/dev/null
+
+    commitGeneratedFile() {
+        originalCommitGeneratedFile "$@"
+    }
+    addRealityTargetBlockedCandidate "new.example.com:443" "manual" >/dev/null
+    grep -q '^new.example.com|手动加入|manual|' "${blockedFile}"
+    addRealityTargetBlockedCandidate "new.example.com:443" "manual" >/dev/null
+    [[ "$(grep -c '^new.example.com|' "${blockedFile}")" == "1" ]]
+    ! compgen -G "${root}/.reality_target_blocked.tsv.reality.*" >/dev/null
+
+    if [[ -n "${oldBlockedFile}" ]]; then
+        export PADM_REALITY_TARGET_BLOCKED_FILE="${oldBlockedFile}"
+    else
+        unset PADM_REALITY_TARGET_BLOCKED_FILE
+    fi
+)
+
 runRuntimeAndRealityRegression() {
     visionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a")
     [[ "${visionLink}" == "vless://uuid-a@node.example.com:443?encryption=none&security=reality&pqv=pqv&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
@@ -9361,6 +9475,87 @@ CSV
     fi
     unset PADM_FAKE_XRAY_ONLY_IBM
 }
+
+runRealityUnifiedLibraryRollbackRegression() (
+    local rootRel="${TMP_DIR}/reality-unified-library-rollback"
+    local root resultsFile candidatesFile targetsFile
+    local oldResultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-}"
+    local oldScanFile="${PADM_REALITY_TARGET_SCAN_FILE:-}"
+    local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
+    local rc
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    resultsFile="${root}/reality_targets_results.tsv"
+    candidatesFile="${root}/reality_candidates.tsv"
+    targetsFile="${root}/remove-targets.txt"
+    export PADM_REALITY_TARGET_RESULTS_FILE="${resultsFile}"
+    export PADM_REALITY_TARGET_SCAN_FILE="${resultsFile}"
+    export PADM_REALITY_TARGET_CANDIDATES_FILE="${candidatesFile}"
+
+    {
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "remove.example.com:443" "remove.example.com" "Remove Example" "scanner" "unknown" "192.0.2.10" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "remove line"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "keep.example.com:443" "keep.example.com" "Keep Example" "scanner" "unknown" "192.0.2.11" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567891" "keep line"
+    } >"${resultsFile}"
+    {
+        printf '%s\n' 'remove.example.com|remove.example.com|Remove Example|global|scanner|unknown|9|yes|remove candidate'
+        printf '%s\n' 'keep.example.com|keep.example.com|Keep Example|global|scanner|unknown|10|yes|keep candidate'
+    } >"${candidatesFile}"
+    printf '%s\n' 'remove.example.com:443' >"${targetsFile}"
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${candidatesFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    removeRealityTargetsFromUnifiedLibrary "${targetsFile}" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qF $'remove.example.com:443\t' "${resultsFile}"
+    grep -qF $'keep.example.com:443\t' "${resultsFile}"
+    grep -q '^remove.example.com|' "${candidatesFile}"
+    grep -q '^keep.example.com|' "${candidatesFile}"
+    ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
+    ! compgen -G "${root}/.reality_candidates.tsv.reality.*" >/dev/null
+    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        return 1
+    fi
+
+    commitGeneratedFile() {
+        originalCommitGeneratedFile "$@"
+    }
+    removeRealityTargetsFromUnifiedLibrary "${targetsFile}"
+    ! grep -qF $'remove.example.com:443\t' "${resultsFile}"
+    grep -qF $'keep.example.com:443\t' "${resultsFile}"
+    ! grep -q '^remove.example.com|' "${candidatesFile}"
+    grep -q '^keep.example.com|' "${candidatesFile}"
+    ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
+    ! compgen -G "${root}/.reality_candidates.tsv.reality.*" >/dev/null
+    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        return 1
+    fi
+
+    if [[ -n "${oldResultsFile}" ]]; then
+        export PADM_REALITY_TARGET_RESULTS_FILE="${oldResultsFile}"
+    else
+        unset PADM_REALITY_TARGET_RESULTS_FILE
+    fi
+    if [[ -n "${oldScanFile}" ]]; then
+        export PADM_REALITY_TARGET_SCAN_FILE="${oldScanFile}"
+    else
+        unset PADM_REALITY_TARGET_SCAN_FILE
+    fi
+    if [[ -n "${oldCandidatesFile}" ]]; then
+        export PADM_REALITY_TARGET_CANDIDATES_FILE="${oldCandidatesFile}"
+    else
+        unset PADM_REALITY_TARGET_CANDIDATES_FILE
+    fi
+)
 
 runRealityConfigApplyRegression() {
     local realityPatchDir="${TMP_DIR}/reality-target-patch"
@@ -9737,6 +9932,8 @@ CSV
 runRealityConfigRegression() {
     runRegressionStep reality-config-vless-encryption runRealityConfigVlessEncryptionRegression
     runRegressionStep reality-config-scanner runRealityConfigScannerRegression
+    runRegressionStep reality-config-blocked-transaction runRealityBlockedCandidateTransactionRegression
+    runRegressionStep reality-config-unified-library-rollback runRealityUnifiedLibraryRollbackRegression
     runRegressionStep reality-config-apply runRealityConfigApplyRegression
     runRegressionStep reality-config-change-reload-failure runRealityConfigChangeReloadFailureRegression
     runRegressionStep reality-config-change-subscription-refresh-failure runRealityConfigChangeSubscriptionRefreshFailureRegression
@@ -15436,6 +15633,7 @@ runRegressionTransactionSystem() {
         runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
         runRegressionStep clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression &&
         runRegressionStep fail2ban-managed-cleanup runFail2banManagedCleanupRegression &&
+        runRegressionStep fail2ban-apply-transaction runFail2banApplyTransactionRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
         runRegressionStep wireguard-key-transaction runWireGuardKeyTransactionRegression &&
         runRegressionStep wireguard-control-safe-dir runWireGuardControlSafeDirRegression &&

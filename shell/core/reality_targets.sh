@@ -295,6 +295,29 @@ realityTargetBlockedCandidatesFile() {
     printf '%s\n' "${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
 }
 
+realityTargetManagedBlockedCandidatesFile() {
+    padmResolveManagedAbsolutePath "$(realityTargetBlockedCandidatesFile)"
+}
+
+realityTargetManagedResultsFile() {
+    padmResolveManagedAbsolutePath "$(realityTargetResultsFile)"
+}
+
+realityTargetManagedCandidatesFile() {
+    local candidatesFile=${PADM_REALITY_TARGET_CANDIDATES_FILE:-}
+    [[ -n "${candidatesFile}" ]] || return 1
+    padmResolveManagedAbsolutePath "${candidatesFile}"
+}
+
+realityTargetRestoreManagedBackup() {
+    local backupDir=$1
+    if ! checkLogBackupRestore "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${backupDir}"
+}
+
 realityTargetBlockedCandidates() {
     cat <<'EOF'
 www.apple.com|Apple|xray_warn|Xray 会提示 Apple/iCloud 类目标可能带来封锁风险
@@ -312,17 +335,22 @@ EOF
 addRealityTargetBlockedCandidate() {
     local target=$1
     local reason=${2:-manual}
-    local parsed host blockedFile
+    local parsed host blockedFile stagedFile
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
     [[ -n "${host}" ]] || return 1
-    blockedFile=$(realityTargetBlockedCandidatesFile)
-    mkdir -p "$(dirname "${blockedFile}")"
+    blockedFile=$(realityTargetManagedBlockedCandidatesFile) || return 1
     if realityTargetCandidateBlocked "${host}"; then
         realityTargetStatusBlock yellow "REALITY 目标站黑名单" "已在黑名单中: ${host}"
         return 0
     fi
-    printf '%s|%s|%s|%s\n' "${host}" "手动加入" "${reason}" "用户手动加入；后续不参与统一目标库刷新和扫描导入" >>"${blockedFile}"
+    padmEnsureSafeDirectory "$(dirname -- "${blockedFile}")" || return 1
+    padmCreateTempFileForTarget stagedFile "${blockedFile}" reality || return 1
+    if [[ -f "${blockedFile}" ]]; then
+        cp -p "${blockedFile}" "${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    fi
+    printf '%s|%s|%s|%s\n' "${host}" "手动加入" "${reason}" "用户手动加入；后续不参与统一目标库刷新和扫描导入" >>"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    commitGeneratedFile "${stagedFile}" "${blockedFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     realityTargetStatusBlock green "REALITY 目标站黑名单" "已加入: ${host}" "后续不参与统一目标库刷新和 RealiTLScanner 导入" "当前已安装目标不会自动切换"
 }
 
@@ -526,30 +554,35 @@ realityTargetResultLineByTargetIp() {
 
 removeRealityTargetResultLine() {
     local target=$1
-    local resultsFile tmpFile
-    resultsFile=$(realityTargetResultsFile)
+    local resultsFile stagedFile
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
     [[ -f "${resultsFile}" ]] || return 0
-    tmpFile="${resultsFile}.tmp"
-    awk -F'\t' -v target="${target}" '$1 != target' "${resultsFile}" >"${tmpFile}"
-    mv "${tmpFile}" "${resultsFile}"
+    padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
+    awk -F'\t' -v target="${target}" '$1 != target' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
 }
 
 removeRealityTargetCandidateLine() {
     local target=$1
-    local parsed host candidatesFile tmpFile
+    local parsed host candidatesFile stagedFile
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
-    candidatesFile=${PADM_REALITY_TARGET_CANDIDATES_FILE:-}
+    candidatesFile=$(realityTargetManagedCandidatesFile 2>/dev/null || true)
     [[ -n "${candidatesFile}" && -f "${candidatesFile}" ]] || return 0
-    tmpFile="${candidatesFile}.tmp"
-    awk -F'|' -v host="${host}" '$1 != host' "${candidatesFile}" >"${tmpFile}"
-    mv "${tmpFile}" "${candidatesFile}"
+    padmCreateTempFileForTarget stagedFile "${candidatesFile}" reality || return 1
+    awk -F'|' -v host="${host}" '$1 != host' "${candidatesFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    commitGeneratedFile "${stagedFile}" "${candidatesFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
 }
 
 removeRealityTargetFromUnifiedLibrary() {
     local target=$1
-    removeRealityTargetResultLine "${target}"
-    removeRealityTargetCandidateLine "${target}"
+    local targetsFile
+    padmCreateTempPath targetsFile "$(realityTargetTmpPath 'padm-reality-target-remove.XXXXXX')" || return 1
+    printf '%s\n' "${target}" >"${targetsFile}" || { padmRemoveCleanupPath "${targetsFile}"; return 1; }
+    removeRealityTargetsFromUnifiedLibrary "${targetsFile}"
+    local status=$?
+    padmRemoveCleanupPath "${targetsFile}"
+    return "${status}"
 }
 
 realityTargetRecentlyFailed() {
@@ -599,26 +632,26 @@ writeRealityTargetResultLine() {
     local tls13=${13}
     local checkedAt=${14}
     local note=${15}
-    local resultsFile tmpFile
-    resultsFile=$(realityTargetResultsFile)
-    mkdir -p "$(dirname "${resultsFile}")"
-    tmpFile="${resultsFile}.tmp"
+    local resultsFile stagedFile
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
+    padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
+    padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
     if [[ -f "${resultsFile}" ]]; then
-        awk -F'\t' -v target="${target}" '$1 != target' "${resultsFile}" >"${tmpFile}"
+        awk -F'\t' -v target="${target}" '$1 != target' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     else
-        : >"${tmpFile}"
+        : >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     fi
-    formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${tmpFile}"
-    mv "${tmpFile}" "${resultsFile}"
+    formatRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" >>"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
+    commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
 }
 
 writeRealityTargetResultLines() {
     local linesFile=$1
-    local resultsFile tmpFile
+    local resultsFile stagedFile
     [[ -s "${linesFile}" ]] || return 0
-    resultsFile=$(realityTargetResultsFile)
-    mkdir -p "$(dirname "${resultsFile}")"
-    tmpFile="${resultsFile}.tmp"
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
+    padmEnsureSafeDirectory "$(dirname -- "${resultsFile}")" || return 1
+    padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
     if [[ -f "${resultsFile}" ]]; then
         awk -F'\t' '
           NR == FNR {
@@ -631,7 +664,7 @@ writeRealityTargetResultLines() {
           END {
             for (i = 1; i <= count; i++) print line[order[i]]
           }
-        ' "${linesFile}" "${resultsFile}" >"${tmpFile}"
+        ' "${linesFile}" "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     else
         awk -F'\t' '
           {
@@ -642,35 +675,70 @@ writeRealityTargetResultLines() {
           END {
             for (i = 1; i <= count; i++) print line[order[i]]
           }
-        ' "${linesFile}" >"${tmpFile}"
+        ' "${linesFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     fi
-    mv "${tmpFile}" "${resultsFile}"
+    commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
 }
 
 removeRealityTargetsFromUnifiedLibrary() {
     local targetsFile=$1
-    local resultsFile candidatesFile tmpFile hostsFile target parsed host
+    local resultsFile candidatesFile resultsStageFile candidatesStageFile hostsFile target parsed host libraryBackupDir=
     [[ -s "${targetsFile}" ]] || return 0
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
+    candidatesFile=$(realityTargetManagedCandidatesFile 2>/dev/null || true)
+    checkLogBackupCreate libraryBackupDir "${resultsFile}" "${candidatesFile}" || return 1
     if [[ -f "${resultsFile}" ]]; then
-        tmpFile="${resultsFile}.tmp"
-        awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets)' "${targetsFile}" "${resultsFile}" >"${tmpFile}"
-        mv "${tmpFile}" "${resultsFile}"
+        padmCreateTempFileForTarget resultsStageFile "${resultsFile}" reality || { padmRemoveCleanupPath "${libraryBackupDir}"; return 1; }
+        awk -F'\t' 'NR == FNR {targets[$1] = 1; next} !($1 in targets)' "${targetsFile}" "${resultsFile}" >"${resultsStageFile}" || {
+            padmRemoveCleanupPath "${resultsStageFile}"
+            padmRemoveCleanupPath "${libraryBackupDir}"
+            return 1
+        }
+        commitGeneratedFile "${resultsStageFile}" "${resultsFile}" 644 || {
+            padmRemoveCleanupPath "${resultsStageFile}"
+            padmRemoveCleanupPath "${libraryBackupDir}"
+            return 1
+        }
     fi
-    candidatesFile=${PADM_REALITY_TARGET_CANDIDATES_FILE:-}
-    [[ -n "${candidatesFile}" && -f "${candidatesFile}" ]] || return 0
-    hostsFile="${targetsFile}.hosts"
-    : >"${hostsFile}"
+    [[ -n "${candidatesFile}" && -f "${candidatesFile}" ]] || { padmRemoveCleanupPath "${libraryBackupDir}"; return 0; }
+    padmCreateTempPath hostsFile "$(realityTargetTmpPath 'padm-reality-target-hosts.XXXXXX')" || {
+        realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+        return 1
+    }
+    : >"${hostsFile}" || {
+        padmRemoveCleanupPath "${hostsFile}"
+        realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+        return 1
+    }
     while IFS= read -r target; do
         [[ -n "${target}" ]] || continue
         parsed=$(parseHostPort "${target}" 443)
         host=${parsed%:*}
-        printf '%s\n' "${host}" >>"${hostsFile}"
+        printf '%s\n' "${host}" >>"${hostsFile}" || {
+            padmRemoveCleanupPath "${hostsFile}"
+            realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+            return 1
+        }
     done <"${targetsFile}"
-    tmpFile="${candidatesFile}.tmp"
-    awk -F'|' 'NR == FNR {hosts[$1] = 1; next} !($1 in hosts)' "${hostsFile}" "${candidatesFile}" >"${tmpFile}"
-    mv "${tmpFile}" "${candidatesFile}"
-    rm -f "${hostsFile}"
+    padmCreateTempFileForTarget candidatesStageFile "${candidatesFile}" reality || {
+        padmRemoveCleanupPath "${hostsFile}"
+        realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+        return 1
+    }
+    awk -F'|' 'NR == FNR {hosts[$1] = 1; next} !($1 in hosts)' "${hostsFile}" "${candidatesFile}" >"${candidatesStageFile}" || {
+        padmRemoveCleanupPath "${candidatesStageFile}"
+        padmRemoveCleanupPath "${hostsFile}"
+        realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+        return 1
+    }
+    if ! commitGeneratedFile "${candidatesStageFile}" "${candidatesFile}" 644; then
+        padmRemoveCleanupPath "${candidatesStageFile}"
+        padmRemoveCleanupPath "${hostsFile}"
+        realityTargetRestoreManagedBackup "${libraryBackupDir}" || return 1
+        return 1
+    fi
+    padmRemoveCleanupPath "${hostsFile}"
+    padmRemoveCleanupPath "${libraryBackupDir}"
 }
 
 sortedRealityTargetResults() {
