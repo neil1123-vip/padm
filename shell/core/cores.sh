@@ -239,18 +239,6 @@ xrayConfigInstalled() {
     return 1
 }
 
-coreServiceState() {
-    local serviceName=$1
-    local runningFn=$2
-    if "${runningFn}"; then
-        echo "运行中"
-    elif [[ -f "/etc/systemd/system/${serviceName}.service" || -f "/etc/init.d/${serviceName}" ]]; then
-        echo "已停止"
-    else
-        echo "未安装服务"
-    fi
-}
-
 validateXrayConfigWithBinary() {
     local binary=${1:-/etc/padm/xray/xray}
     local logFile=${2:-$(coreTmpFilePath padm-core-xray-test.log)}
@@ -898,7 +886,13 @@ showCoreStatusOverview() {
 
     echoContent title "\n┌─ 核心状态总览 ─────────────────────────────────────"
     menuLine "Xray-core: $(coreDisplayState "${xrayVersion}")"
-    menuLine "Xray 服务: $(coreDisplayState "$(coreServiceState xray xrayRunning)")"
+    if xrayRunning; then
+        menuLine "Xray 服务: $(coreDisplayState "运行中")"
+    elif [[ -f "/etc/systemd/system/xray.service" || -f "/etc/init.d/xray" ]]; then
+        menuLine "Xray 服务: $(coreDisplayState "已停止")"
+    else
+        menuLine "Xray 服务: $(coreDisplayState "未安装服务")"
+    fi
     if [[ -x "${xrayBinary}" ]]; then
         menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" "$(coreTmpFilePath padm-core-xray-test.log)")")"
         if xrayConfigInstalled; then
@@ -911,7 +905,13 @@ showCoreStatusOverview() {
         fi
     fi
     menuLine "sing-box: $(coreDisplayState "${singBoxVersion}")"
-    menuLine "sing-box 服务: $(coreDisplayState "$(coreServiceState sing-box singBoxRunning)")"
+    if singBoxRunning; then
+        menuLine "sing-box 服务: $(coreDisplayState "运行中")"
+    elif [[ -f "/etc/systemd/system/sing-box.service" || -f "/etc/init.d/sing-box" ]]; then
+        menuLine "sing-box 服务: $(coreDisplayState "已停止")"
+    else
+        menuLine "sing-box 服务: $(coreDisplayState "未安装服务")"
+    fi
     if singBoxConfigInstalled; then
         menuLine "sing-box 配置: $(coreDisplayState "$(coreValidationState sing-box)")"
         menuLine "sing-box 兼容: $(coreDisplayState "$(singBoxCompatibilityAuditOverviewSummary)")"
