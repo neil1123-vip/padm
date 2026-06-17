@@ -96,7 +96,7 @@ installSingBox() {
 
     if [[ ! -f "/etc/padm/sing-box/sing-box" ]]; then
 
-        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
+        version=$(coreReleaseTags SagerNet/sing-box "${prereleaseStatus}" 1)
         checkVersionNotEmpty "${version}"
 
         successCard "最新版本:${version}"
@@ -138,7 +138,7 @@ installSingBox() {
     else
         successCard "当前版本:v$(/etc/padm/sing-box/sing-box version | grep "sing-box version" | awk '{print $3}')"
 
-        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
+        version=$(coreReleaseTags SagerNet/sing-box "${prereleaseStatus}" 1)
         successCard "最新版本:${version}"
 
         if [[ -z "${lastInstallationConfig}" ]]; then
@@ -165,7 +165,7 @@ installXray() {
 
     if [[ ! -f "/etc/padm/xray/xray" ]]; then
 
-        version=$(coreLatestReleaseTag XTLS/Xray-core "${prereleaseStatus}")
+        version=$(coreReleaseTags XTLS/Xray-core "${prereleaseStatus}" 1)
         checkVersionNotEmpty "${version}"
         successCard "Xray-core版本:${version}"
         if ! downloadGitHubReleaseAsset -P /etc/padm/xray/ XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
@@ -215,12 +215,6 @@ coreReleaseTags() {
     local tags=
     tags=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases?per_page=100" 3 | jq -r ".[] | select(.prerelease==${prerelease}) | .tag_name" | head -n "${limit}" || true)
     printf '%s\n' "${tags}"
-}
-
-coreLatestReleaseTag() {
-    local repo=$1
-    local prerelease=${2:-false}
-    coreReleaseTags "${repo}" "${prerelease}" 1
 }
 
 xrayInstalled() {
@@ -515,7 +509,7 @@ checkSingBoxPrereleaseCompatibility() {
     local downloadTmpDir=
     local resolvedVersion=
 
-    resolvedVersion=${version:-$(coreLatestReleaseTag SagerNet/sing-box true)}
+    resolvedVersion=${version:-$(coreReleaseTags SagerNet/sing-box true 1)}
     checkVersionNotEmpty "${resolvedVersion}"
     if ! singBoxInstalled; then
         statusCard "sing-box 预发布兼容检查" "跳过" "未检测到 sing-box 二进制"
@@ -770,7 +764,7 @@ checkXrayPrereleaseCompatibility() {
     local resolvedVersion=
     local validateLog strictLog
 
-    resolvedVersion=${version:-$(coreLatestReleaseTag XTLS/Xray-core true)}
+    resolvedVersion=${version:-$(coreReleaseTags XTLS/Xray-core true 1)}
     checkVersionNotEmpty "${resolvedVersion}"
     if ! xrayInstalled; then
         statusCard "Xray 预发布兼容检查" "跳过" "未检测到 Xray 二进制"
@@ -1138,7 +1132,7 @@ upgradeXrayCore() {
     local version=${2:-}
     local channel="稳定版"
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
-    version=${version:-$(coreLatestReleaseTag XTLS/Xray-core "${prerelease}")}
+    version=${version:-$(coreReleaseTags XTLS/Xray-core "${prerelease}" 1)}
     checkVersionNotEmpty "${version}"
     if [[ "${prerelease}" == "true" ]]; then
         if ! checkXrayPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-xray-prerelease-audit.log)"; then
@@ -1154,7 +1148,7 @@ upgradeSingBoxCore() {
     local version=${2:-}
     local channel="稳定版"
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
-    version=${version:-$(coreLatestReleaseTag SagerNet/sing-box "${prerelease}")}
+    version=${version:-$(coreReleaseTags SagerNet/sing-box "${prerelease}" 1)}
     checkVersionNotEmpty "${version}"
     if [[ "${prerelease}" == "true" ]]; then
         if ! checkSingBoxPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)"; then
