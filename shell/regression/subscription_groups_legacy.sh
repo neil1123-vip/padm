@@ -6341,8 +6341,6 @@ runAutoInstallRealityRouteRegression() (
     menuReturnItem() { output+="$2 $3"$'\n'; }
     menuClose() { return 0; }
     progressCard() { return 0; }
-    statusCard() { recordMenuAction "statusCard:$1"; }
-    successCard() { recordMenuAction "successCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     showInstallStatus() { recordMenuAction showInstallStatus; }
     checkWgetShowProgress() { return 0; }
@@ -9749,9 +9747,7 @@ runMenuSmokeLightRegression() {
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
     menuClose() { return 0; }
-    statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
-    successCard() { recordMenuAction "successCard:$1"; }
     autoRead() {
         local targetVar=$3
         local input=
