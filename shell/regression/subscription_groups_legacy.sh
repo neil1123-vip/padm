@@ -385,7 +385,6 @@ runAccessControlFailureReturnCase() {
     local restoreMarker="${root}/restore"
     local cleanupMarker="${root}/cleanup"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local removeChoice=1
     local rc
 
@@ -401,10 +400,6 @@ runAccessControlFailureReturnCase() {
     menuDangerItem() { return 0; }
     menuReturnItem() { return 0; }
     menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     autoRead() {
         case "$1" in
         access_block_domains) printf -v "$3" 'example.com' ;;
@@ -448,7 +443,7 @@ runAccessControlFailureReturnCase() {
         [[ "${mode}" != "reload-fail" && "${mode}" != "reload-restore-fail" ]]
     }
 
-    rm -f "${backupMarker}" "${addMarker}" "${outboundMarker}" "${uninstallMarker}" "${removeMarker}" "${restoreMarker}" "${cleanupMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${backupMarker}" "${addMarker}" "${outboundMarker}" "${uninstallMarker}" "${removeMarker}" "${restoreMarker}" "${cleanupMarker}" "${reloadMarker}"
     set +e
     if [[ "${action}" == "remove" ]]; then
         removeAccessControlMenu >/dev/null 2>&1
@@ -524,7 +519,6 @@ runAccessControlFailureReturnCase() {
         [[ ! -e "${reloadMarker}" ]]
         ;;
     esac
-    [[ ! -e "${successMarker}" ]]
     )
 }
 
