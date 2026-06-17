@@ -3749,10 +3749,6 @@ JSON
             printf 'cleanDirectoryContent\n' >>"${refreshFailureLog}"
             return 1
         }
-        showAccounts() {
-            printf 'showAccounts\n' >>"${refreshFailureLog}"
-            return 0
-        }
         readNginxSubscribe() {
             subscribePort=
             nginxConfigPath="${TMP_DIR}/nginx-refresh/"
