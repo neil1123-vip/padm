@@ -980,14 +980,6 @@ realityTargetFilteredCandidates() {
     done < <(realityTargetCandidates)
 }
 
-realityTargetFilteredCandidateCount() {
-    local line count=0
-    while IFS= read -r line; do
-        count=$((count + 1))
-    done < <(realityTargetFilteredCandidates "${1:-recommended}")
-    printf '%s\n' "${count}"
-}
-
 realityTargetFilteredCandidateLineByIndex() {
     local filter=$1
     local wanted=$2
@@ -1007,7 +999,7 @@ showRealityTargetCandidatePage() {
     local page=${2:-1}
     local pageSize=${3:-12}
     local total start end line index=1 host sni name region category cdn rank recommended note marker
-    total=$(realityTargetFilteredCandidateCount "${filter}")
+    total=$(realityTargetFilteredCandidates "${filter}" | awk 'END { print NR + 0 }')
     start=$(( (page - 1) * pageSize + 1 ))
     end=$(( page * pageSize ))
 
@@ -1039,7 +1031,7 @@ selectRealityTargetCandidateInteractive() {
     local total maxPage choice selectedLine targetInput
 
     while true; do
-        total=$(realityTargetFilteredCandidateCount "${filter}")
+        total=$(realityTargetFilteredCandidates "${filter}" | awk 'END { print NR + 0 }')
         maxPage=$(( (total + pageSize - 1) / pageSize ))
         (( maxPage < 1 )) && maxPage=1
         (( page > maxPage )) && page=${maxPage}

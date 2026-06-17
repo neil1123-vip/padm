@@ -6643,10 +6643,10 @@ EOF
     AUTO_INSTALL=
 
     [[ "$(realityTargetCandidates | awk 'END { print NR + 0 }')" == "5" ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" == "4" ]]
-    [[ "$(realityTargetFilteredCandidateCount developer)" == "1" ]]
-    [[ "$(realityTargetFilteredCandidateCount asia)" == "1" ]]
-    [[ "$(realityTargetFilteredCandidateCount microsoft)" == "1" ]]
+    [[ "$(realityTargetFilteredCandidates recommended | awk 'END { print NR + 0 }')" == "4" ]]
+    [[ "$(realityTargetFilteredCandidates developer | awk 'END { print NR + 0 }')" == "1" ]]
+    [[ "$(realityTargetFilteredCandidates asia | awk 'END { print NR + 0 }')" == "1" ]]
+    [[ "$(realityTargetFilteredCandidates microsoft | awk 'END { print NR + 0 }')" == "1" ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
     firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
@@ -6772,10 +6772,10 @@ y
 runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate
     [[ "$(realityTargetCandidates | awk 'END { print NR + 0 }')" -ge 194 ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 50 ]]
-    [[ "$(realityTargetFilteredCandidateCount developer)" -ge 10 ]]
-    [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
-    [[ "$(realityTargetFilteredCandidateCount microsoft)" -ge 1 ]]
+    [[ "$(realityTargetFilteredCandidates recommended | awk 'END { print NR + 0 }')" -ge 50 ]]
+    [[ "$(realityTargetFilteredCandidates developer | awk 'END { print NR + 0 }')" -ge 10 ]]
+    [[ "$(realityTargetFilteredCandidates asia | awk 'END { print NR + 0 }')" -ge 2 ]]
+    [[ "$(realityTargetFilteredCandidates microsoft | awk 'END { print NR + 0 }')" -ge 1 ]]
     firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
     firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
