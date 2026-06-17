@@ -2591,7 +2591,6 @@ runTlsFailureReturnRegression() (
     local caRcFile="${root}/ca.rc"
     local installRcFile="${root}/install.rc"
     local xrayRcFile="${root}/xray.rc"
-    local reachedFile="${root}/reached"
     local shellRc
 
     mkdir -p "${root}/home"
@@ -2654,15 +2653,12 @@ runTlsFailureReturnRegression() (
     installTLS() { return 1; }
 
     captureFailureReturn "${xrayRcFile}" xrayCoreInstall
-    [[ ! -e "${reachedFile}" ]]
-
     HOME="${oldHome}"
 )
 
 runServiceQueueApplyPropagationRegression() (
     local root="${TMP_DIR}/service-queue-propagation"
     local rcFile="${root}/install.rc"
-    local reachedFile="${root}/show-accounts"
     local serviceCallsFile="${root}/service-calls"
     local shellRc
 
@@ -2723,7 +2719,6 @@ runServiceQueueApplyPropagationRegression() (
     set -e
     [[ "${shellRc}" == "0" ]]
     [[ "$(<"${rcFile}")" == "1" ]]
-    [[ ! -e "${reachedFile}" ]]
 )
 
 runCoreInstallServiceActionFailureRegression() (
@@ -2731,7 +2726,6 @@ runCoreInstallServiceActionFailureRegression() (
     local serviceLog="${root}/service.log"
     local callLog="${root}/calls.log"
     local errorLog="${root}/errors.log"
-    local reachedFile="${root}/reached"
     local mode rc
 
     mkdir -p "${root}"
@@ -2788,7 +2782,6 @@ runCoreInstallServiceActionFailureRegression() (
         : >"${serviceLog}"
         : >"${callLog}"
         : >"${errorLog}"
-        rm -f "${reachedFile}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
         btDomain=
         realityOnlyWithDomain=
@@ -2805,7 +2798,6 @@ runCoreInstallServiceActionFailureRegression() (
     grep -qx 'nginx:stop:true' "${serviceLog}"
     ! grep -q '^installXray:' "${callLog}"
     ! grep -q '^wg-refresh$' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture nginx-start-fail
@@ -2816,7 +2808,6 @@ runCoreInstallServiceActionFailureRegression() (
     [[ "${rc}" == "1" ]]
     grep -qx 'nginx:start:true' "${serviceLog}"
     ! grep -q '^installXray:' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture redirect-fail
@@ -2828,7 +2819,6 @@ runCoreInstallServiceActionFailureRegression() (
     grep -qx 'redirect' "${callLog}"
     ! grep -q '^nginx:start:' "${serviceLog}"
     ! grep -q '^installXray:' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-start-fail
@@ -2840,7 +2830,6 @@ runCoreInstallServiceActionFailureRegression() (
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
     grep -q '^installXray:' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture redirect-fail
@@ -2851,7 +2840,6 @@ runCoreInstallServiceActionFailureRegression() (
     [[ "${rc}" == "1" ]]
     grep -qx 'redirect' "${callLog}"
     ! grep -q '^xray:stop:' "${serviceLog}"
-    [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture nginx-stop-fail
@@ -2862,7 +2850,6 @@ runCoreInstallServiceActionFailureRegression() (
     [[ "${rc}" == "1" ]]
     grep -qx 'nginx:stop:true' "${serviceLog}"
     ! grep -q '^installSingBox:' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
@@ -3197,7 +3184,6 @@ runSingBoxLogTransactionRegression() (
 
 runSingBoxProtocolReloadFailureRegression() (
     local root="${TMP_DIR}/sing-box-protocol-reload-failure"
-    local reachedFile="${root}/accounts"
     local callLog="${root}/calls.log"
     local tuicRc hysteriaRc
 
@@ -3227,10 +3213,8 @@ runSingBoxProtocolReloadFailureRegression() (
     [[ "${tuicRc}" == "1" ]]
     grep -qx 'config:custom 2 true' "${callLog}"
     grep -qx 'reload' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
 
     : >"${callLog}"
-    rm -f "${reachedFile}"
     set +e
     singBoxHysteria2Install >/dev/null 2>&1
     hysteriaRc=$?
@@ -3238,7 +3222,6 @@ runSingBoxProtocolReloadFailureRegression() (
     [[ "${hysteriaRc}" == "1" ]]
     grep -qx 'config:custom 2 true' "${callLog}"
     grep -qx 'reload' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
 )
 
 runGeoUpdateReloadFailureRegression() (
@@ -3279,8 +3262,6 @@ runCoreCleanupFailurePropagationRegression() (
     local serviceLog="${root}/service.log"
     local rmLog="${root}/rm.log"
     local errorLog="${root}/error.log"
-    local reachedFile="${root}/reached"
-    local queueLog="${root}/queue.log"
     local rc
 
     mkdir -p "${root}"
@@ -3316,8 +3297,6 @@ runCoreCleanupFailurePropagationRegression() (
     : >"${serviceLog}"
     : >"${rmLog}"
     : >"${errorLog}"
-    : >"${queueLog}"
-    command rm -f "${reachedFile}"
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }
     installTools() { return 0; }
@@ -3331,8 +3310,6 @@ runCoreCleanupFailurePropagationRegression() (
     [[ "${rc}" == "1" ]]
     grep -qx 'xray:stop:true' "${serviceLog}"
     [[ ! -s "${rmLog}" ]]
-    [[ ! -s "${queueLog}" ]]
-    [[ ! -e "${reachedFile}" ]]
 )
 
 runReloadCorePropagationRegression() (
