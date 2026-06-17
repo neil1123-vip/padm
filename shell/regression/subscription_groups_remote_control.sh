@@ -1398,10 +1398,6 @@ runRegressionRemoteControlSmokeCoreSteps() {
         runRegressionStep remote-control-health runRemoteControlHealthRegression
 }
 
-runRegressionRemoteControlSmokeRefreshSerialSteps() {
-    runRegressionStep remote-control-server-refresh-light runRemoteControlServerRefreshLightRegression
-}
-
 runRegressionRemoteControlSmokeRefreshApplyBasicSteps() {
     runRegressionStep remote-control-server-refresh-light-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
 }
