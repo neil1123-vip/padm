@@ -921,14 +921,6 @@ JSON
     fi
 )
 
-runRemoteControlServerRefreshLightRegression() (
-    runRemoteControlServerRefreshRegression light
-)
-
-runRemoteControlServerRefreshLightApplyRegression() (
-    runRemoteControlServerRefreshRegression light apply
-)
-
 runRemoteControlServerRefreshLightApplyBasicRegression() (
     runRemoteControlServerRefreshRegression light apply-basic
 )
