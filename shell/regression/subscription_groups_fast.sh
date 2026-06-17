@@ -1790,8 +1790,6 @@ runWarpConfigGenerationFailureRegression() {
         warpRegCoreCPUVendor="main-linux-amd64"
         address="172.16.0.2/32"
 
-        reloadCore() { return 0; }
-
         cat >"${warpDir}/warp-reg" <<'EOF'
 #!/usr/bin/env bash
 printf 'Post "https://api.cloudflareclient.com/v0a2158/reg": EOF\n'
