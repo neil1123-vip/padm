@@ -1805,17 +1805,6 @@ runWarpConfigGenerationFailureRegression() {
                 printf -v "$3" '%s' ''
             fi
         }
-        downloadGitHubReleaseAsset() { return 1; }
-        errorCard() { return 0; }
-        statusCard() { return 0; }
-        successCard() { return 0; }
-        progressCard() { return 0; }
-        echoContent() { return 0; }
-        menuLine() { return 0; }
-        menuItem() { return 0; }
-        menuDangerItem() { return 0; }
-        menuReturnItem() { return 0; }
-        menuClose() { return 0; }
         reloadCore() { return 0; }
 
         cat >"${warpDir}/warp-reg" <<'EOF'
