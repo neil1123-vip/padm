@@ -811,12 +811,6 @@ setTraditionalTlsAlpnManual() {
 
 
 
-# 入口端口管理
-corePortIsValid() {
-    local port=$1
-    [[ "${port}" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535))
-}
-
 corePortParseList() {
     local input=$1
     local item
@@ -824,7 +818,7 @@ corePortParseList() {
     printf '%s\n' "${input}" | tr ',' '\n' | while read -r item; do
         item=${item//[[:space:]]/}
         [[ -z "${item}" ]] && continue
-        if ! corePortIsValid "${item}"; then
+        if ! [[ "${item}" =~ ^[0-9]+$ ]] || ! ((item >= 1 && item <= 65535)); then
             return 1
         fi
         if [[ "${seen}" != *",${item},"* ]]; then
