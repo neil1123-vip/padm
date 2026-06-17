@@ -1600,7 +1600,7 @@ runRemoveInstallPathRetryRegression() {
 
         rm() {
             printf '%s\n' "$*" >>"${attemptsFile}"
-            if [[ "$1" == "-rf" && "$2" == "${target}" ]]; then
+            if [[ "$1" == "-rf" && "$2" == "--" && "$3" == "${target}" ]]; then
                 local count
                 count=$(wc -l <"${attemptsFile}")
                 if [[ "${count}" == "1" ]]; then

@@ -3565,20 +3565,27 @@ runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
 runCoreFirstInstallCommitFailureRollbackRegression() (
     local rootRel="${TMP_DIR}/core-first-install-commit-failure"
     local root
+    local xrayDir
     local singBoxDir
     local errorLog
     local copyLog
-    local singBoxRc
+    local rmLog
+    local xrayRc singBoxRc
 
     mkdir -p "${rootRel}/tmp" "${rootRel}/sing-box"
     root=$(cd -- "${rootRel}" && pwd -P)
+    xrayDir="${root}/xray"
     singBoxDir="${root}/sing-box"
     errorLog="${root}/error.log"
     copyLog="${root}/copy.log"
+    rmLog="${root}/rm.log"
     : >"${errorLog}"
     : >"${copyLog}"
+    : >"${rmLog}"
 
+    PADM_XRAY_BINARY="${xrayDir}/xray"
     PADM_SINGBOX_BINARY="${singBoxDir}/sing-box"
+    xrayCoreCPUVendor=linux-64
     singBoxCoreCPUVendor=-linux-amd64
     TMPDIR="${root}/tmp"
 
@@ -3611,6 +3618,10 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     }
     padmRemoveCleanupPath() { rm -rf "$1"; }
     padmForgetCleanupPath() { return 0; }
+    removeManagedFileIfPresent() {
+        printf 'rm:%s\n' "$1" >>"${rmLog}"
+        command rm -f -- "$1"
+    }
     commitGeneratedFile() {
         local tmpFile=$1
         local targetFile=$2
@@ -3621,7 +3632,19 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
         fi
         mv "${tmpFile}" "${targetFile}"
     }
+    xrayInstalled() { return 1; }
     singBoxInstalled() { return 1; }
+    ensureXrayGeoFiles() { return 1; }
+    downloadXrayReleaseBinaryToTempDir() {
+        local version=$1
+        local tmpDir=$2
+        (
+            cd -- "${tmpDir}" || return 1
+            printf '#!/usr/bin/env bash\nexit 0\n' >xray || return 1
+            chmod 755 xray || return 1
+        ) || return 1
+        return 0
+    }
     downloadSingBoxReleaseBinaryToTempDir() {
         local version=$1
         local tmpDir=$2
@@ -3643,13 +3666,18 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     }
 
     set +e
+    ( installXray 1 false >/dev/null 2>&1 )
+    xrayRc=$?
     ( installSingBox 1 >/dev/null 2>&1 )
     singBoxRc=$?
     set -e
 
+    [[ "${xrayRc}" == "1" ]]
     [[ "${singBoxRc}" == "1" ]]
+    [[ ! -e "${xrayDir}/xray" ]]
     [[ ! -e "${singBoxDir}/sing-box" ]]
     [[ ! -e "${singBoxDir}/libcronet.so" ]]
+    grep -qxF "rm:${xrayDir}/xray" "${rmLog}"
     grep -q 'sing-box安装失败' "${errorLog}"
     ! grep -q 'cronet依赖回滚失败' "${errorLog}"
 )

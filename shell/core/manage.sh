@@ -1190,7 +1190,6 @@ removeInstallPath() {
     local targetPath=$1
     local description=$2
     local attempt
-    local -a removeArgs
 
     if ! padmIsSafeAbsolutePath "${targetPath}"; then
         errorCard "${description}路径异常，已终止: ${targetPath}"
@@ -1201,14 +1200,8 @@ removeInstallPath() {
         return 0
     fi
 
-    if [[ -d "${targetPath}" && ! -L "${targetPath}" ]]; then
-        removeArgs=(-rf "${targetPath}")
-    else
-        removeArgs=(-f -- "${targetPath}")
-    fi
-
     for attempt in 1 2 3; do
-        if rm "${removeArgs[@]}"; then
+        if removeManagedPathIfPresent "${targetPath}"; then
             if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
                 return 0
             fi
@@ -1264,6 +1257,7 @@ cleanupPadmManagedRootOnUninstall() {
     local resolvedRoot
     local failed=false
     local target
+    local childPath
     local -a managedPaths=(
         "${installRoot%/}/xray"
         "${installRoot%/}/sing-box"
@@ -1311,10 +1305,10 @@ cleanupPadmManagedRootOnUninstall() {
             errorCard "PADM配置目录解析失败: ${installRoot}"
             return 1
         }
-        if ! find "${resolvedRoot}" -mindepth 1 -maxdepth 1 \( -name 'tmp.geo.*' -o -name 'tmp.xray.*' -o -name 'tmp.sing-box.*' \) -exec rm -rf -- {} +; then
-            errorCard "PADM配置目录临时产物清理失败: ${installRoot}"
-            failed=true
-        fi
+        while IFS= read -r childPath; do
+            [[ -n "${childPath}" ]] || continue
+            removeManagedPathWithinRootIfPresent "${resolvedRoot}" "${childPath}" || failed=true
+        done < <(find "${resolvedRoot}" -mindepth 1 -maxdepth 1 \( -name 'tmp.geo.*' -o -name 'tmp.xray.*' -o -name 'tmp.sing-box.*' \) -print)
         if ! find "${resolvedRoot}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
             rmdir "${resolvedRoot}" >/dev/null 2>&1 || {
                 errorCard "PADM配置目录删除失败: ${installRoot}"
@@ -1913,9 +1907,9 @@ commitSubscribeUserOutputFile() {
     local targetPath=$2
     mkdir -p "$(dirname "${targetPath}")" || return 1
     if [[ -f "${stagedPath}" ]]; then
-        mv "${stagedPath}" "${targetPath}" || return 1
+        commitGeneratedFile "${stagedPath}" "${targetPath}" 644 || return 1
     else
-        rm -f "${targetPath}" || return 1
+        removeManagedFileIfPresent "${targetPath}" || return 1
     fi
 }
 
@@ -2070,6 +2064,7 @@ cleanupStaleSubscribeOutputs() {
     local defaultFile
     local staleMd5
     local currentMd5s='[]'
+    local -a staleTargets
 
     publicBase=$(subscribePublicBaseDir)
     [[ -d "${publicBase}/default" ]] || return 0
@@ -2080,12 +2075,14 @@ cleanupStaleSubscribeOutputs() {
 
     while IFS= read -r staleMd5; do
         [[ -n "${staleMd5}" ]] || continue
-        rm -f \
-            "${publicBase}/default/${staleMd5}" \
-            "${publicBase}/clashMeta/${staleMd5}" \
-            "${publicBase}/clashMetaProfiles/${staleMd5}" \
-            "${publicBase}/sing-box/${staleMd5}" \
-            "${publicBase}/sing-box_profiles/${staleMd5}" || return 1
+        staleTargets=(
+            "${publicBase}/default/${staleMd5}"
+            "${publicBase}/clashMeta/${staleMd5}"
+            "${publicBase}/clashMetaProfiles/${staleMd5}"
+            "${publicBase}/sing-box/${staleMd5}"
+            "${publicBase}/sing-box_profiles/${staleMd5}"
+        )
+        removeManagedFilesIfPresent "${staleTargets[@]}" || return 1
     done < <(jq -r --argjson existing "${existingMd5s}" --argjson current "${currentMd5s}" '$current - $existing | .[]' <<<"null")
 }
 

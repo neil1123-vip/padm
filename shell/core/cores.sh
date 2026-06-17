@@ -198,7 +198,6 @@ installSingBox() {
     local targetBinary=
     local targetCronet=
     local cronetBackup=
-    local rollbackCronetOk=true
     readInstallType
     progressCard "$1" "安装 sing-box"
 
@@ -242,19 +241,16 @@ installSingBox() {
             exit 1
         fi
         if ! commitStagedCoreInstallFile "${extractedDir}/sing-box" "${targetBinary}" 655; then
-            if [[ -n "${cronetBackup}" ]]; then
-                cp "${cronetBackup}" "${targetCronet}" >/dev/null 2>&1 || rollbackCronetOk=false
-            else
-                rm -f -- "${targetCronet}" >/dev/null 2>&1 || rollbackCronetOk=false
-            fi
             padmRemoveCleanupPath "${tmpDir}"
-            if [[ "${rollbackCronetOk}" == "true" ]]; then
-                errorCard "sing-box安装失败"
-            else
+            if ! restoreCoreOptionalFileBackup "${cronetBackup}" "${targetCronet}" 644; then
                 errorCard "sing-box安装失败，cronet依赖回滚失败"
+                exit 1
             fi
+            [[ -n "${cronetBackup}" && -e "${cronetBackup}" ]] && removeManagedFileIfPresent "${cronetBackup}" || true
+            errorCard "sing-box安装失败"
             exit 1
         fi
+        [[ -n "${cronetBackup}" && -e "${cronetBackup}" ]] && removeManagedFileIfPresent "${cronetBackup}" || true
         padmRemoveCleanupPath "${tmpDir}"
     else
         successCard "当前版本:$(getSingBoxCurrentVersion)"
@@ -314,7 +310,7 @@ installXray() {
             exit 1
         fi
         if ! ensureXrayGeoFiles "${targetDir}" force; then
-            rm -f -- "${targetBinary}" >/dev/null 2>&1 || true
+            removeManagedFileIfPresent "${targetBinary}" || true
             cleanXrayGeoFiles "${targetDir}"
             padmRemoveCleanupPath "${tmpDir}"
             exit 1

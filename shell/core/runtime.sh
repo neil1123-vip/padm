@@ -147,6 +147,55 @@ removeManagedFilesIfPresent() {
     return "${status}"
 }
 
+removeManagedPathIfPresent() {
+    local targetPath=$1
+
+    targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || return 1
+    if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
+        return 0
+    fi
+    if [[ -d "${targetPath}" && ! -L "${targetPath}" ]]; then
+        padmRemoveCleanupPath "${targetPath}"
+        [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]
+        return $?
+    fi
+    removeManagedFileIfPresent "${targetPath}"
+}
+
+padmResolvePathWithinRoot() {
+    local rootPath=$1
+    local targetPath=$2
+    local parentPath targetName resolvedTarget
+
+    rootPath=$(padmResolveManagedAbsolutePath "${rootPath}") || return 1
+    [[ -n "${targetPath}" && "${targetPath}" == /* ]] || return 1
+    parentPath=$(dirname -- "${targetPath}")
+    targetName=$(basename -- "${targetPath}")
+    parentPath=$(cd -- "${parentPath}" 2>/dev/null && pwd -P) || return 1
+    resolvedTarget="${parentPath}/${targetName}"
+    case "${resolvedTarget}" in
+    "${rootPath}"/*) printf '%s\n' "${resolvedTarget}" ;;
+    *) return 1 ;;
+    esac
+}
+
+removeManagedPathWithinRootIfPresent() {
+    local rootPath=$1
+    local targetPath=$2
+
+    targetPath=$(padmResolvePathWithinRoot "${rootPath}" "${targetPath}") || return 1
+    if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
+        return 0
+    fi
+    if [[ -d "${targetPath}" && ! -L "${targetPath}" ]]; then
+        padmRemoveCleanupPath "${targetPath}"
+    else
+        rm -f -- "${targetPath}" >/dev/null 2>&1 || return 1
+        padmUnregisterCleanupPath "${targetPath}"
+    fi
+    [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]
+}
+
 commitGeneratedFile() {
     local tmpFile=$1
     local targetFile=$2
@@ -1046,6 +1095,7 @@ padmEnsureSafeDirectory() {
 cleanDirectoryContent() {
     local targetPath=$1
     local resolvedPath
+    local childPath
     if ! padmIsSafeAbsolutePath "${targetPath}"; then
         padmShowUnsafePathError "清理目录"
         return 1
@@ -1060,7 +1110,10 @@ cleanDirectoryContent() {
         padmShowUnsafePathError "清理目录"
         return 1
     fi
-    find "${resolvedPath}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || return 1
+    while IFS= read -r childPath; do
+        [[ -n "${childPath}" ]] || continue
+        removeManagedPathWithinRootIfPresent "${resolvedPath}" "${childPath}" || return 1
+    done < <(find "${resolvedPath}" -mindepth 1 -maxdepth 1 -print)
 }
 
 
