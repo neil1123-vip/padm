@@ -542,11 +542,6 @@ runMenuSmokeLightRegression() {
         printf -v "${targetVar}" '%s' "${input}"
     }
     selectCoreInstall() { recordMenuAction selectCoreInstall; }
-    manageXHTTP() { recordMenuAction manageXHTTP; }
-    manageHysteria() { recordMenuAction manageHysteria; }
-    manageTuic() { recordMenuAction manageTuic; }
-    addCorePort() { recordMenuAction addCorePort; }
-    manageCDN() { recordMenuAction manageCDN; }
     manageFail2ban() { recordMenuAction manageFail2ban; }
     updatePadm() { recordMenuAction "updatePadm:$*"; }
     showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
