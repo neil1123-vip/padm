@@ -4513,14 +4513,20 @@ runGeoUpdateReloadFailureRegression() (
     local root="${TMP_DIR}/geo-update-reload-failure"
     local callLog="${root}/calls.log"
     local statusLog="${root}/status.log"
+    local geoVersionFile="${root}/geo-version.txt"
     local rc
 
     mkdir -p "${root}"
     : >"${callLog}"
     : >"${statusLog}"
+    printf 'old-version\n' >"${geoVersionFile}"
     ensureXrayGeoFiles() {
         printf 'geo:%s\n' "$*" >>"${callLog}"
+        printf 'new-version\n' >"${geoVersionFile}"
         return 0
+    }
+    xrayGeoDisplayVersion() {
+        cat "${geoVersionFile}"
     }
     reloadCore() {
         printf 'reload\n' >>"${callLog}"
@@ -6051,13 +6057,16 @@ runSubscribeServerNameRegression() {
 }
 
 runSubscribeNginxConfigWriteRegression() {
-    local targetPath="${TMP_DIR}/nginx-subscribe/subscribe.conf"
+    local nginxRootRel="${TMP_DIR}/nginx-subscribe"
+    local nginxRoot targetPath
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
     local nginxTmpRoot="${TMP_DIR}/nginx-subscribe-tmp"
-    mkdir -p "${TMP_DIR}/fake-bin" "${TMP_DIR}/nginx-subscribe" "${nginxTmpRoot}"
+    mkdir -p "${TMP_DIR}/fake-bin" "${nginxRootRel}" "${nginxTmpRoot}"
+    nginxRoot=$(cd -- "${nginxRootRel}" && pwd -P)
+    targetPath="${nginxRoot}/subscribe.conf"
     TMPDIR="${nginxTmpRoot}"
-    nginxConfigPath="${TMP_DIR}/nginx-subscribe/"
+    nginxConfigPath="${nginxRoot}/"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
@@ -6092,13 +6101,14 @@ EOF
     ! compgen -G "${TMP_DIR}/nginx-subscribe/.subscribe.conf.*" >/dev/null
     printf 'old config\n' >"${targetPath}"
     (
-        local backupGlob="${TMP_DIR}/nginx-subscribe/.subscribe.conf.backup.*"
+        local backupGlob="${nginxRoot}/.subscribe.conf.backup.*"
         local backups=()
-        mv() {
-            if [[ "$1" == "${TMP_DIR}/nginx-subscribe/.subscribe.conf.backup."* && "$2" == "${targetPath}" ]]; then
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            if [[ "$2" == "${targetPath}" && "$1" == "${nginxRoot}/.subscribe.conf.backup."* ]]; then
                 return 1
             fi
-            command mv "$@"
+            originalCommitGeneratedFile "$@"
         }
         if writeSubscribeNginxConfig <<'EOF' 2>/dev/null
 rollback fail config

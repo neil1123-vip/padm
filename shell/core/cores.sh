@@ -211,7 +211,7 @@ installSingBox() {
         version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
         successCard "最新版本:${version}"
 
-        if [[ -z "${lastInstallationConfig}" ]]; then
+        if [[ -z "${lastInstallationConfig:-}" ]]; then
             autoRead singbox_reinstall "是否更新、升级？[y/n]:" reInstallSingBoxStatus
             if [[ "${reInstallSingBoxStatus}" == "y" ]]; then
                 installDownloadedSingBoxBinary "${version}" || exit 1
@@ -270,7 +270,7 @@ installXray() {
         fi
         padmRemoveCleanupPath "${tmpDir}"
     else
-        if [[ -z "${lastInstallationConfig}" ]]; then
+        if [[ -z "${lastInstallationConfig:-}" ]]; then
             successCard "Xray-core版本:$(getXrayCurrentVersion)"
             if ! ensureXrayGeoFiles "$(coreXrayInstallDir)"; then
                 exit 1
