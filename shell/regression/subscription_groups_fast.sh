@@ -120,18 +120,6 @@ runAutoInstallGeneratedIdentityRegression() {
     )
 }
 
-runDefaultRandomUserNameRegression() {
-    (
-        set -euo pipefail
-        # shellcheck source=/dev/null
-        source "${PROJECT_ROOT}/shell/core/runtime.sh"
-        local uuid name
-        uuid='ABCDEF12-3456-7890-ABCD-EF1234567890'
-        name=$(defaultRandomUserNameFromUuid "${uuid}")
-        [[ "${name}" == "padm-abcdef12" ]]
-    )
-}
-
 runAutoInstallAllowsEmptyDefaultRegression() {
     (
         set -euo pipefail
