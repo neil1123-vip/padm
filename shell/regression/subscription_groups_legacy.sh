@@ -2652,10 +2652,6 @@ runTlsFailureReturnRegression() (
     installTools() { return 0; }
     initTLSNginxConfig() { return 0; }
     installTLS() { return 1; }
-    randomPathFunction() {
-        printf 'reached\n' >"${reachedFile}"
-        return 0
-    }
 
     captureFailureReturn "${xrayRcFile}" xrayCoreInstall
     [[ ! -e "${reachedFile}" ]]
