@@ -3324,14 +3324,6 @@ runCoreCleanupFailurePropagationRegression() (
     installSingBox() { return 0; }
     installSingBoxService() { return 0; }
     initSingBoxConfig() { return 0; }
-    serviceQueueRestart() {
-        printf 'restart:%s\n' "$1" >>"${queueLog}"
-        return 0
-    }
-    serviceQueueApply() {
-        printf 'apply\n' >>"${queueLog}"
-        return 0
-    }
     set +e
     installSingBoxReality >/dev/null 2>&1
     rc=$?
