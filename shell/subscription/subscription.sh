@@ -384,20 +384,35 @@ updateRemoteSubscribe() {
     local line=
     local source=
     local sourceLines=
-    local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget
+    local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
+    local commitFailed=false
     local tmpBase="${TMPDIR:-/tmp}"
 
     padmCreateTempPath tmpDir -d "${tmpBase%/}/padm-remote-subscribe-fetch.XXXXXX" || return 1
     padmCreateTempPath stageDir -d "${tmpBase%/}/padm-remote-subscribe-stage.XXXXXX" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     publicBase=$(subscribePublicBaseDir)
     localBase=$(subscribeLocalBaseDir)
-    mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/sing-box"
+    publicBase=$(padmResolveManagedAbsolutePath "${publicBase}") || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    localBase=$(padmResolveManagedAbsolutePath "${localBase}") || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/sing-box" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     defaultTarget="${stageDir}/default/${emailMD5}"
     clashTarget="${stageDir}/clashMeta/${emailMD5}"
     singBoxTarget="${stageDir}/sing-box/${email}"
-    [[ -f "${publicBase}/default/${emailMD5}" ]] && cp "${publicBase}/default/${emailMD5}" "${defaultTarget}" || : >"${defaultTarget}"
-    [[ -f "${publicBase}/clashMeta/${emailMD5}" ]] && cp "${publicBase}/clashMeta/${emailMD5}" "${clashTarget}" || : >"${clashTarget}"
-    [[ -f "${localBase}/sing-box/${email}" ]] && cp "${localBase}/sing-box/${email}" "${singBoxTarget}" || printf '[]\n' >"${singBoxTarget}"
+    if [[ -f "${publicBase}/default/${emailMD5}" ]]; then
+        cp "${publicBase}/default/${emailMD5}" "${defaultTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    else
+        : >"${defaultTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    fi
+    if [[ -f "${publicBase}/clashMeta/${emailMD5}" ]]; then
+        cp "${publicBase}/clashMeta/${emailMD5}" "${clashTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    else
+        : >"${clashTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    fi
+    if [[ -f "${localBase}/sing-box/${email}" ]]; then
+        cp "${localBase}/sing-box/${email}" "${singBoxTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    else
+        printf '[]\n' >"${singBoxTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    fi
 
     sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount "${email}" 2>/dev/null) || sourceLines=
     if [[ -z "${sourceLines}" ]]; then
@@ -426,13 +441,13 @@ updateRemoteSubscribe() {
         if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
             controlledResponse=$(fetchRemoteControlledSubscribePayload "${source}" "${email}" 2>/dev/null || true)
             if [[ -n "${controlledResponse}" ]] && jq -e '.ok == true' <<<"${controlledResponse}" >/dev/null 2>&1; then
-                jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}"
-                jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}"
-                jq -c '.sing_box // []' <<<"${controlledResponse}" >"${singBoxFile}"
+                jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+                jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+                jq -c '.sing_box // []' <<<"${controlledResponse}" >"${singBoxFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
             else
-                : >"${clashFile}"
-                : >"${defaultFile}"
-                printf '[]\n' >"${singBoxFile}"
+                : >"${clashFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+                : >"${defaultFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+                printf '[]\n' >"${singBoxFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
             fi
         else
             fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/clashMeta/${emailMD5}" >"${clashFile}" & clashPid=$!
@@ -491,10 +506,33 @@ updateRemoteSubscribe() {
         rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
     done <<<"${sourceLines}"
 
-    mkdir -p "${publicBase}/default" "${publicBase}/clashMeta" "${localBase}/sing-box" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-    commitGeneratedFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" 644 || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-    commitGeneratedFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" 644 || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-    commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    checkLogBackupCreate remoteBackupDir \
+        "${publicBase}/default/${emailMD5}" \
+        "${publicBase}/clashMeta/${emailMD5}" \
+        "${localBase}/sing-box/${email}" || {
+        padmRemoveCleanupPath "${tmpDir}"
+        padmRemoveCleanupPath "${stageDir}"
+        return 1
+    }
+    padmEnsureSafeDirectory "${publicBase}/default" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    padmEnsureSafeDirectory "${publicBase}/clashMeta" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    padmEnsureSafeDirectory "${localBase}/sing-box" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitGeneratedFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" 644 || commitFailed=true
+    commitGeneratedFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" 644 || commitFailed=true
+    commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || commitFailed=true
+    if [[ "${commitFailed}" == "true" ]]; then
+        if ! checkLogBackupRestore "${remoteBackupDir}"; then
+            padmForgetCleanupPath "${remoteBackupDir}"
+            padmRemoveCleanupPath "${tmpDir}"
+            padmRemoveCleanupPath "${stageDir}"
+            return 1
+        fi
+        padmRemoveCleanupPath "${remoteBackupDir}"
+        padmRemoveCleanupPath "${tmpDir}"
+        padmRemoveCleanupPath "${stageDir}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${remoteBackupDir}"
     padmRemoveCleanupPath "${tmpDir}"
     padmRemoveCleanupPath "${stageDir}"
 }
