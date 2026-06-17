@@ -151,24 +151,20 @@ writeCheckPortOpenNginxConfig() {
         CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置路径异常"
         return 1
     fi
-    local tmpPath="${targetPath}.tmp"
+    local tmpPath
     local backupPath="${targetPath}.bak"
     local targetDir
     local tmpBase="${TMPDIR:-/tmp}"
     local nginxTestLog="${tmpBase%/}/padm-check-port-open-nginx-test.log"
-    local hadBackup=false
     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
     if ! padmCommitTargetIsFileLike "${targetPath}"; then
         CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目标异常，请手动检查 ${targetPath}"
         return 1
     fi
     targetDir=$(dirname -- "${targetPath}")
-    if [[ -e "${targetDir}" ]]; then
-        [[ -d "${targetDir}" ]] || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目录异常，请手动检查 ${targetDir}"; return 1; }
-    else
-        mkdir -p "${targetDir}" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目录创建失败"; return 1; }
-    fi
-    cat >"${tmpPath}" <<EOF || { rm -f "${tmpPath}" >/dev/null 2>&1; CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置临时文件写入失败"; return 1; }
+    padmEnsureSafeDirectory "${targetDir}" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目录创建失败"; return 1; }
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置临时文件写入失败"; return 1; }
+    cat >"${tmpPath}" <<EOF || { padmRemoveCleanupPath "${tmpPath}"; CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置临时文件写入失败"; return 1; }
 server {
     listen ${port};
     ${listenIPv6PortConfig}
@@ -187,24 +183,25 @@ server {
 }
 EOF
     if command -v nginx >/dev/null 2>&1; then
-        if [[ -f "${targetPath}" ]]; then
-            cp "${targetPath}" "${backupPath}" || { rm -f "${tmpPath}" >/dev/null 2>&1; CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 旧配置备份失败"; return 1; }
-            hadBackup=true
+        if [[ -f "${targetPath}" ]] && ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
+            padmRemoveCleanupPath "${tmpPath}"
+            CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 旧配置备份失败"
+            return 1
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
-            rm -f "${tmpPath}" >/dev/null 2>&1
-            [[ "${hadBackup}" == "true" ]] && rm -f "${backupPath}" >/dev/null 2>&1
+            padmRemoveCleanupPath "${tmpPath}"
+            removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
             CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置提交失败"
             return 1
         fi
         if ! nginx -t >"${nginxTestLog}" 2>&1; then
-            if [[ "${hadBackup}" == "true" && -f "${backupPath}" ]]; then
+            if [[ -f "${backupPath}" ]]; then
                 if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
                     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
                     return 1
                 fi
             else
-                if ! rm -f "${targetPath}"; then
+                if ! removeManagedFileIfPresent "${targetPath}"; then
                     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败，且新配置清理失败，请手动检查 ${targetPath}"
                     return 1
                 fi
@@ -212,12 +209,13 @@ EOF
             CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败"
             return 1
         fi
-        if [[ "${hadBackup}" == "true" ]]; then
-            rm -f "${backupPath}" || { CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
+        if [[ -f "${backupPath}" ]] && ! removeManagedFileIfPresent "${backupPath}"; then
+            CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置备份清理失败，请手动检查 ${backupPath}"
+            return 1
         fi
     else
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
-            rm -f "${tmpPath}" >/dev/null 2>&1
+            padmRemoveCleanupPath "${tmpPath}"
             CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置提交失败"
             return 1
         fi

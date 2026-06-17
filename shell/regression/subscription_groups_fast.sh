@@ -542,6 +542,48 @@ runInstallNginxStaticRejectsUnsafePathRegression() {
     )
 }
 
+runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/install-nginx-static-unzip-failure"
+        local scriptDir="${root}/script"
+        local staticDir="${root}/static"
+        mkdir -p "${scriptDir}/assets/static-sites/templates" "${staticDir}"
+        printf 'zip\n' >"${scriptDir}/assets/static-sites/templates/html1.zip"
+        printf 'keep\n' >"${staticDir}/index.html"
+        printf 'marker\n' >"${staticDir}/check"
+
+        SCRIPT_DIR="${scriptDir}"
+        nginxStaticPath="${staticDir}"
+        unzip() {
+            local targetDir=
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -d)
+                    targetDir=$2
+                    shift 2
+                    ;;
+                *)
+                    shift
+                    ;;
+                esac
+            done
+            [[ -n "${targetDir}" ]]
+            printf 'partial\n' >"${targetDir}/index.html"
+            return 1
+        }
+        renderNginxStaticTemplate() {
+            printf 'render\n' >"${root}/render.log"
+        }
+
+        ! installNginxStaticTemplate 1
+        [[ "$(<"${staticDir}/index.html")" == "keep" ]]
+        [[ "$(<"${staticDir}/check")" == "marker" ]]
+        [[ ! -e "${root}/render.log" ]]
+        ! compgen -G "${root}/.static.*" >/dev/null
+    )
+}
+
 runCleanLastInstallationRejectsUnsafeStaticPathRegression() {
     (
         set -euo pipefail
@@ -3206,6 +3248,7 @@ runRegressionFast() {
         runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
         runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression &&
         runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression &&
+        runRegressionStep install-nginx-static-unzip-failure runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression &&
         runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&

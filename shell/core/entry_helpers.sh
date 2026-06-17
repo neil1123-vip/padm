@@ -74,7 +74,7 @@ initTLSNginxConfig() {
 writeSingBoxVMessHTTPUpgradeNginxConfig() {
     local targetPath
     local tmpPath
-    local backupPath=
+    local backupPath
     local logFile
     if ! targetPath=$(entryHelperNginxConfigFile "sing_box_VMess_HTTPUpgrade.conf"); then
         errorCard "sing-box HTTPUpgrade Nginx 配置路径异常"
@@ -89,36 +89,27 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
         padmRemoveCleanupPath "${tmpPath}"
         return 1
     fi
+    backupPath="${targetPath}.bak"
     if command -v nginx >/dev/null 2>&1; then
-        if [[ -f "${targetPath}" ]]; then
-            padmCreateTempFileForTarget backupPath "${targetPath}" backup || {
-                padmRemoveCleanupPath "${tmpPath}"
-                return 1
-            }
-            cp "${targetPath}" "${backupPath}" || {
-                padmRemoveCleanupPath "${backupPath}"
-                padmRemoveCleanupPath "${tmpPath}"
-                return 1
-            }
+        if [[ -f "${targetPath}" ]] && ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
+            padmRemoveCleanupPath "${tmpPath}"
+            return 1
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
-            [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
+            removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
             return 1
         fi
         logFile=$(singBoxVMessHTTPUpgradeNginxTestLog)
         if ! nginx -t >"${logFile}" 2>&1; then
-            if [[ -n "${backupPath}" ]]; then
-                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || {
-                    padmRemoveCleanupPath "${backupPath}"
-                    return 1
-                }
+            if [[ -f "${backupPath}" ]]; then
+                restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644 || return 1
             else
                 removeManagedFileIfPresent "${targetPath}" || return 1
             fi
             return 1
         fi
-        [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
+        [[ -f "${backupPath}" ]] && removeManagedFileIfPresent "${backupPath}" || true
     else
         commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || {
             padmRemoveCleanupPath "${tmpPath}"
@@ -346,28 +337,77 @@ nginxStaticSafePath() {
 installNginxStaticTemplate() {
     local templateIndex=$1
     local localTemplate="${SCRIPT_DIR:-/etc/padm}/assets/static-sites/templates/html${templateIndex}.zip"
-    local staticPath targetZip
+    local staticPath resolvedStaticPath staticParent staticName
+    local stageRoot stageStaticPath targetZip
+    local oldStaticPath renderStatus=0
     if ! staticPath=$(nginxStaticSafePath); then
         errorCard "静态站点目录异常"
         return 1
     fi
-    targetZip="${staticPath}html${templateIndex}.zip"
-    cleanDirectoryContent "${staticPath}" || return 1
-    if [[ -f "${localTemplate}" ]]; then
-        cp "${localTemplate}" "${targetZip}"
+    resolvedStaticPath="${staticPath%/}"
+    staticParent=$(dirname -- "${resolvedStaticPath}")
+    staticName=$(basename -- "${resolvedStaticPath}")
+    padmEnsureSafeDirectory "${staticParent}" || { errorCard "静态站点目录异常"; return 1; }
+    if declare -F padmCreateTempPath >/dev/null 2>&1; then
+        padmCreateTempPath stageRoot -d "${staticParent}/.${staticName}.padm-template.XXXXXX" || {
+            errorCard "静态站点模板暂存目录创建失败"
+            return 1
+        }
     else
-        downloadFile -P "${staticPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/assets/static-sites/templates/html${templateIndex}.zip"
+        stageRoot=$(mktemp -d "${staticParent}/.${staticName}.padm-template.XXXXXX") || {
+            errorCard "静态站点模板暂存目录创建失败"
+            return 1
+        }
     fi
-    if [[ ! -f "${targetZip}" ]]; then
+    stageStaticPath="${stageRoot}/${staticName}"
+    mkdir -p "${stageStaticPath}" || {
+        cleanupInstallSyncPath "${stageRoot}"
+        errorCard "静态站点模板暂存目录创建失败"
+        return 1
+    }
+    targetZip="${stageStaticPath}/html${templateIndex}.zip"
+    if [[ -f "${localTemplate}" ]]; then
+        cp "${localTemplate}" "${targetZip}" || {
+            cleanupInstallSyncPath "${stageRoot}"
+            errorCard "静态站点模板准备失败"
+            return 1
+        }
+    elif ! downloadFile -O "${targetZip}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/assets/static-sites/templates/html${templateIndex}.zip"; then
+        cleanupInstallSyncPath "${stageRoot}"
         errorCard "静态站点模板下载失败"
         return 1
     fi
-    if ! unzip -o "${targetZip}" -d "${staticPath}" >/dev/null; then
+    if [[ ! -f "${targetZip}" ]]; then
+        cleanupInstallSyncPath "${stageRoot}"
+        errorCard "静态站点模板下载失败"
+        return 1
+    fi
+    if ! unzip -o "${targetZip}" -d "${stageStaticPath}" >/dev/null; then
+        cleanupInstallSyncPath "${stageRoot}"
         errorCard "静态站点模板解压失败"
         return 1
     fi
-    rm -f -- "${staticPath}html${templateIndex}.zip"*
-    renderNginxStaticTemplate
+    removeManagedFileIfPresent "${targetZip}" || {
+        cleanupInstallSyncPath "${stageRoot}"
+        errorCard "静态站点模板清理失败"
+        return 1
+    }
+
+    oldStaticPath="${nginxStaticPath:-}"
+    nginxStaticPath="${stageStaticPath}"
+    renderNginxStaticTemplate || renderStatus=$?
+    nginxStaticPath="${oldStaticPath}"
+    if [[ "${renderStatus}" -ne 0 ]]; then
+        cleanupInstallSyncPath "${stageRoot}"
+        return "${renderStatus}"
+    fi
+
+    if ! syncInstallDirectoryTree "${stageStaticPath}" "${resolvedStaticPath}"; then
+        cleanupInstallSyncPath "${stageRoot}"
+        errorCard "静态站点模板安装失败，已保留旧站点"
+        return 1
+    fi
+    cleanupInstallSyncPath "${stageRoot}"
 }
 
 # Nginx 传统 TLS fallback 静态站点
