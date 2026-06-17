@@ -2285,7 +2285,6 @@ runNetworkCheckReturnFailureRegression() (
 
     mkdir -p "${root}/nginx"
     statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
