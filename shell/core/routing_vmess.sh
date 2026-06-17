@@ -1,33 +1,5 @@
 #!/usr/bin/env bash
 
-# VMess+WS+TLS 分流
-vmessWSRouting() {
-    echoContent title "\n┌─ VMess WS TLS 分流 ────────────────────────────────"
-    menuLine "请按 README 中的分流说明配置域名或规则"
-    menuItem 1 "添加出站" "添加 VMess WS TLS 出站分流"
-    menuDangerItem 2 "卸载" "移除 VMess WS TLS 分流"
-    menuReturnItem 3 "返回分流工具" "回到上一级分流菜单"
-    menuClose
-    autoRead vmess_ws_routing_menu "请选择:" selectType
-
-    case ${selectType} in
-    1)
-        setVMessWSRoutingOutbounds
-        ;;
-    2)
-        removeVMessWSRouting
-        ;;
-    3)
-        routingToolsMenu
-        ;;
-    *)
-        errorCard "选择错误，请重新选择"
-        vmessWSRouting
-        ;;
-    esac
-}
-
-
 # 设置 VMess WS TLS 出站
 setVMessWSRoutingOutbounds() {
     local outboundTag="vmess-out"
