@@ -14,17 +14,6 @@ downloadXrayGeoFilesToStage() {
     [[ -s "${stageDir}/geosite.dat" && -s "${stageDir}/geoip.dat" ]]
 }
 
-commitXrayGeoFilesFromStage() {
-    local stageDir=$1
-    local targetDir=$2
-    local geoVersion=$3
-
-    mkdir -p "${targetDir}" || return 1
-    cp "${stageDir}/geosite.dat" "${targetDir}/geosite.dat" || return 1
-    cp "${stageDir}/geoip.dat" "${targetDir}/geoip.dat" || return 1
-    printf '%s\n' "${geoVersion}" >"${targetDir}/geo.version" || return 1
-}
-
 ensureXrayGeoFiles() {
     local targetDir=$1
     local force=${2:-}
@@ -46,7 +35,14 @@ ensureXrayGeoFiles() {
         errorCard "geo文件下载失败"
         return 1
     fi
-    if ! commitXrayGeoFilesFromStage "${stageDir}" "${targetDir}" "${geoVersion}"; then
+    mkdir -p "${targetDir}" || {
+        padmRemoveCleanupPath "${stageDir}"
+        errorCard "geo文件写入失败"
+        return 1
+    }
+    if ! cp "${stageDir}/geosite.dat" "${targetDir}/geosite.dat" ||
+        ! cp "${stageDir}/geoip.dat" "${targetDir}/geoip.dat" ||
+        ! printf '%s\n' "${geoVersion}" >"${targetDir}/geo.version"; then
         padmRemoveCleanupPath "${stageDir}"
         errorCard "geo文件写入失败"
         return 1
