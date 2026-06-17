@@ -1179,30 +1179,6 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
             printf 'reload\n' >>"${callLog}"
             return 1
         }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 0
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 0
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
         set +e
         subscriptionSyncReconcileLocalServices
         rc=$?
@@ -1226,22 +1202,6 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
         installSubscriptionControlService() {
             printf 'install\n' >>"${callLog}"
             return 1
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 0
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
         }
         set +e
         subscriptionSyncReconcileLocalServices
@@ -1280,10 +1240,6 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
         serviceQueueApply() {
             printf 'apply\n' >>"${callLog}"
             return 1
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
         }
         set +e
         subscriptionSyncReconcileLocalServices
