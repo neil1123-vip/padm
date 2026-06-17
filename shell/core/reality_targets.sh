@@ -549,13 +549,9 @@ sortedRealityTargetResults() {
     ' "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr -k4,4nr -k5,5nr | cut -f6-
 }
 
-bestScannedRealityTargetLine() {
-    sortedRealityTargetResults | awk -F'\t' '$10 == "A" || $10 == "B" {print; found=1; exit} END{if (!found) exit 1}'
-}
-
 selectScannedRealityTarget() {
     local line target sni parsed
-    line=$(bestScannedRealityTargetLine) || return 1
+    line=$(sortedRealityTargetResults | awk -F'\t' '$10 == "A" || $10 == "B" {print; found=1; exit} END{if (!found) exit 1}') || return 1
     target=$(realityTargetResultField "${line}" 1)
     sni=$(realityTargetResultField "${line}" 2)
     parsed=$(parseHostPort "${target}" 443)
