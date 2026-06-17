@@ -793,22 +793,6 @@ appendSingBoxCompatibilityHints() {
     fi
 }
 
-coreValidationStateWithPaths() {
-    local core=$1
-    local binary=$2
-    local configDir=$3
-    local logFile=$4
-    if [[ "${core}" == "xray" ]]; then
-        if [[ -x "${binary}" && -d "${configDir}" ]] && "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1; then
-            echo "通过"
-        else
-            echo "失败，查看 ${logFile}"
-        fi
-    elif [[ "${core}" == "sing-box" ]]; then
-        coreValidationState sing-box
-    fi
-}
-
 coreValidationState() {
     local core=$1
     local logFile
@@ -883,7 +867,15 @@ showCoreStatusOverview() {
         menuLine "Xray 服务: $(coreDisplayState "未安装服务")"
     fi
     if [[ -x "${xrayBinary}" ]]; then
-        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" "$(coreTmpFilePath padm-core-xray-test.log)")")"
+        local xrayConfigState
+        local xrayConfigLog
+        xrayConfigLog=$(coreTmpFilePath padm-core-xray-test.log)
+        if [[ -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${xrayConfigLog}" 2>&1; then
+            xrayConfigState="通过"
+        else
+            xrayConfigState="失败，查看 ${xrayConfigLog}"
+        fi
+        menuLine "Xray 配置: $(coreDisplayState "${xrayConfigState}")"
         if xrayConfigInstalled; then
             menuLine "Xray 兼容: $(coreDisplayState "$(xrayCompatibilityAuditOverviewSummary)")"
         fi
