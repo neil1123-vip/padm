@@ -1426,10 +1426,6 @@ runRegressionRemoteControlSmokeRefreshSteps() {
     runRegressionRemoteControlSmokeRefreshSerialSteps
 }
 
-runRegressionRemoteControlContractServiceInstallSteps() {
-    runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression
-}
-
 runRegressionRemoteControlContractServiceInstallSuccessSteps() {
     runRegressionStep remote-control-service-install-success runSubscriptionControlServiceInstallSuccessRegression
 }
