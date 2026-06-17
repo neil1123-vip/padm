@@ -1832,21 +1832,6 @@ showRealityTargetCachedQuality() {
     showRealityTargetQualityActions "${target}" || true
 }
 
-realityTargetFilterTitle() {
-    case "$1" in
-    A|a) printf 'A 级\n' ;;
-    B|b) printf 'B 级\n' ;;
-    AB|ab|available|可选) printf 'A/B 可选\n' ;;
-    same_asn|同ASN) printf '同 ASN\n' ;;
-    same_provider|同提供商|相近网络) printf '同提供商\n' ;;
-    local_network|同网络|本机网络) printf '同网络\n' ;;
-    C|c) printf 'C 级\n' ;;
-    scanner|扫描)
-        printf 'RealiTLScanner\n' ;;
-    all|全部|*) printf '全部\n' ;;
-    esac
-}
-
 realityTargetScanResultFilterMatches() {
     local score=$1
     local networkMatch=$2
@@ -1942,7 +1927,17 @@ showRealityTargetScanResults() {
         (( page < 1 )) && page=1
         start=$(( (page - 1) * pageSize + 1 ))
         end=$(( page * pageSize ))
-        titleFilter=$(realityTargetFilterTitle "${filter}")
+        case "${filter}" in
+        A|a) titleFilter='A 级' ;;
+        B|b) titleFilter='B 级' ;;
+        AB|ab|available|可选) titleFilter='A/B 可选' ;;
+        same_asn|同ASN) titleFilter='同 ASN' ;;
+        same_provider|同提供商|相近网络) titleFilter='同提供商' ;;
+        local_network|同网络|本机网络) titleFilter='同网络' ;;
+        C|c) titleFilter='C 级' ;;
+        scanner|扫描) titleFilter='RealiTLScanner' ;;
+        all|全部|*) titleFilter='全部' ;;
+        esac
         echoContent title "\n┌─ REALITY 目标站实测结果：${titleFilter} ───────────────────────────"
         menuLine "筛选条件：${filter}；第 ${page}/${maxPage} 页；总数：${total}；n 下一页；p 上一页；f 重新筛选；r 返回"
         itemIndex=0
