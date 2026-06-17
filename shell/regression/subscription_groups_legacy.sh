@@ -1315,14 +1315,6 @@ runDNSRoutingFailureReturnRegression() (
     menuLine() { return 0; }
     menuClose() { return 0; }
     getDLCMatchedRuleValue() { printf 'domain:%s\n' "$1"; }
-    statusCard() {
-        printf 'status\n' >"${statusMarker}"
-        return 0
-    }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     reloadCore() {
         printf 'reload\n' >>"${reloadMarker}"
         return 1
