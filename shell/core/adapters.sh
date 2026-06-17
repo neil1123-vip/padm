@@ -147,11 +147,26 @@ adapterCreateManagedRollbackBackup() {
             padmRemoveCleanupPath "${backupDir}"
             return 1
         }
-        [[ ! -e "${targetPath}" || -f "${targetPath}" || -L "${targetPath}" ]] || {
+        [[ ! -e "${targetPath}" || -f "${targetPath}" || -d "${targetPath}" ]] || {
             padmRemoveCleanupPath "${backupDir}"
             return 1
         }
-        if [[ -f "${targetPath}" || -L "${targetPath}" ]]; then
+        if [[ -d "${targetPath}" ]]; then
+            printf -v backupFile '%s/%06d.dir' "${backupDir}" "${backupIndex}"
+            backupIndex=$((backupIndex + 1))
+            mkdir -p "${backupFile}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+            cp -a "${targetPath}/." "${backupFile}/" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+            printf '%s\t%s\tdir\n' "${backupFile}" "${targetPath}" >>"${manifest}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+        elif [[ -f "${targetPath}" ]]; then
             printf -v backupFile '%s/%06d.backup' "${backupDir}" "${backupIndex}"
             backupIndex=$((backupIndex + 1))
             backupManagedFileToPath "${targetPath}" "${backupFile}" 644 || {
@@ -172,6 +187,56 @@ adapterCreateManagedRollbackBackup() {
     printf -v "${resultVar}" '%s' "${backupDir}"
 }
 
+adapterRestoreManagedRollbackDirectory() {
+    local backupPath=$1
+    local targetPath=$2
+    local restoreStage
+    local targetParent
+    local rollbackDir
+    local rollbackPath
+    local targetName
+
+    backupPath=$(padmResolveCleanupPath "${backupPath}") || return 1
+    targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
+    [[ -d "${backupPath}" ]] || return 1
+
+    targetParent=$(dirname -- "${targetPath}")
+    targetName=$(basename -- "${targetPath}")
+    mkdir -p "${targetParent}" || return 1
+    padmCreateTempPath restoreStage -d "${targetParent%/}/.${targetName}.restore.XXXXXX" || return 1
+    if ! cp -a "${backupPath}/." "${restoreStage}/"; then
+        padmRemoveCleanupPath "${restoreStage}"
+        return 1
+    fi
+    if [[ -e "${targetPath}" ]]; then
+        padmCreateTempPath rollbackDir -d "${targetParent%/}/.${targetName}.rollback.XXXXXX" || {
+            padmRemoveCleanupPath "${restoreStage}"
+            return 1
+        }
+        rollbackPath="${rollbackDir}/${targetName}"
+        if ! mv "${targetPath}" "${rollbackPath}"; then
+            padmRemoveCleanupPath "${restoreStage}"
+            padmRemoveCleanupPath "${rollbackDir}"
+            return 1
+        fi
+        if mv "${restoreStage}" "${targetPath}"; then
+            padmForgetCleanupPath "${restoreStage}"
+            padmRemoveCleanupPath "${rollbackDir}"
+            return 0
+        fi
+        if ! mv "${rollbackPath}" "${targetPath}" >/dev/null 2>&1; then
+            padmRemoveCleanupPath "${restoreStage}"
+            padmForgetCleanupPath "${rollbackDir}"
+            return 1
+        fi
+        padmRemoveCleanupPath "${restoreStage}"
+        padmRemoveCleanupPath "${rollbackDir}"
+        return 1
+    fi
+    mv "${restoreStage}" "${targetPath}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
+    padmForgetCleanupPath "${restoreStage}"
+}
+
 adapterRestoreManagedRollbackBackup() {
     local backupDir=$1
     local manifest
@@ -188,8 +253,11 @@ adapterRestoreManagedRollbackBackup() {
         file)
             restoreManagedFileFromBackup "${backupFile}" "${targetPath}" 644 || status=1
             ;;
+        dir)
+            adapterRestoreManagedRollbackDirectory "${backupFile}" "${targetPath}" || status=1
+            ;;
         missing)
-            removeManagedFileIfPresent "${targetPath}" || status=1
+            removeManagedPathIfPresent "${targetPath}" || status=1
             ;;
         *)
             status=1
@@ -704,8 +772,13 @@ installTools() {
             successCard "安装acme.sh"
             local acmeInstallScript
             local acmeDownloadScript
+            local acmeHomeDirPath
+            local acmeBackupDir
             acmeInstallScript=$(adapterAcmeInstallScriptPath)
-            mkdir -p "$(adapterAcmeTmpDir)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
+            acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
+            adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
+            adapterRegisterPackageManagedRollback "${acmeBackupDir}"
+            padmEnsureSafeDirectory "$(adapterAcmeTmpDir)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
             padmCreateTempPath acmeDownloadScript "$(adapterAcmeDownloadTemplate)" || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
             if curl -fsSL -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
                 if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then

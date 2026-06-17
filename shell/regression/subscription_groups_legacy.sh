@@ -13725,6 +13725,8 @@ runInstallToolsAcmeResultFailureRegression() {
 
         rm -rf "${fakeHome}" "${tmpRoot}"
         mkdir -p "${fakeHome}" "${tmpRoot}"
+        mkdir -p "${fakeHome}/.acme.sh"
+        printf 'legacy-state\n' >"${fakeHome}/.acme.sh/account.conf"
         HOME="${fakeHome}"
         TMPDIR="${tmpRoot}"
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
@@ -13745,7 +13747,13 @@ runInstallToolsAcmeResultFailureRegression() {
             fi
             builtin command "$@"
         }
-        runWithTimeout() { return 0; }
+        runWithTimeout() {
+            if [[ "${2:-}" == *"acme.sh"* ]]; then
+                mkdir -p "${fakeHome}/.acme.sh"
+                printf 'partial-install\n' >"${fakeHome}/.acme.sh/partial.txt"
+            fi
+            return 0
+        }
         runPackageCommandWithProgress() { return 0; }
         waitAptProcess() { return 0; }
         installBasePackages() { return 0; }
@@ -13780,6 +13788,11 @@ runInstallToolsAcmeResultFailureRegression() {
         [[ "${installStatus}" -ne 0 ]]
         grep -q "acme.sh安装结果校验失败" "${errorLog}"
         [[ ! -e "${fakeHome}/.acme.sh/acme.sh" ]]
+        [[ "$(<"${fakeHome}/.acme.sh/account.conf")" == "legacy-state" ]]
+        [[ ! -e "${fakeHome}/.acme.sh/partial.txt" ]]
+        if find "${tmpRoot}" -maxdepth 1 -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+            return 1
+        fi
 
         if [[ -n "${oldErrorLog}" ]]; then
             REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
@@ -13835,7 +13848,12 @@ runInstallToolsAcmeCommitFailureRegression() {
             fi
             builtin command "$@"
         }
-        runWithTimeout() { : >"${runMarker}"; return 0; }
+        runWithTimeout() {
+            if [[ "${2:-}" == *"acme.sh"* ]]; then
+                : >"${runMarker}"
+            fi
+            return 0
+        }
         runPackageCommandWithProgress() { return 0; }
         waitAptProcess() { return 0; }
         installBasePackages() { return 0; }
