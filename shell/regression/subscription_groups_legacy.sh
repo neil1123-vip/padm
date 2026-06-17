@@ -1250,8 +1250,6 @@ YAML
 runDNSRoutingFailureReturnRegression() (
     local root="${TMP_DIR}/dns-routing-failure"
     local reloadMarker="${root}/reload"
-    local statusMarker="${root}/status"
-    local successMarker="${root}/success"
     local errorLog="${root}/error.log"
     local rc
 
@@ -1298,7 +1296,7 @@ runDNSRoutingFailureReturnRegression() (
             esac
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1325,7 +1323,7 @@ runDNSRoutingFailureReturnRegression() (
         }
         addSingBoxOutbound() { return 1; }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1351,7 +1349,7 @@ runDNSRoutingFailureReturnRegression() (
             esac
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockSNI >/dev/null 2>&1
         rc=$?
@@ -1361,7 +1359,6 @@ runDNSRoutingFailureReturnRegression() (
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-sni"]' "${configPath}11_dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${statusMarker}" ]]
     )
 
     (
@@ -1379,14 +1376,13 @@ runDNSRoutingFailureReturnRegression() (
         }
         addSingBoxDNSConfig() { return 1; }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockSNI >/dev/null 2>&1
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
         [[ ! -e "${reloadMarker}" ]]
-        [[ ! -e "${statusMarker}" ]]
         jq -e '.dns.servers == ["old-sing-sni"]' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
     )
@@ -1400,7 +1396,7 @@ runDNSRoutingFailureReturnRegression() (
 {"dns":{"servers":["8.8.8.8"]}}
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         removeUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1410,7 +1406,6 @@ JSON
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${successMarker}" ]]
         [[ ! -e "${root}/remove-dns/dns.json" ]]
     )
 
@@ -1426,7 +1421,7 @@ JSON
 {"dns":{"servers":[{"tag":"hosts","type":"hosts","predefined":{"example.com":"203.0.113.10"}}]}}
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         removeUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1437,7 +1432,6 @@ JSON
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${successMarker}" ]]
     )
 
     (
@@ -1452,7 +1446,7 @@ JSON
 {"dns":{"servers":[{"tag":"hosts","type":"hosts","predefined":{"example.com":"203.0.113.10"}}],"rules":[{"domain_suffix":["example.com"],"server":"hosts"}]}}
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         removeUnlockSNI >/dev/null 2>&1
         rc=$?
@@ -1463,7 +1457,6 @@ JSON
         jq -e '.dns.hosts["domain:example.com"] == "203.0.113.10"' "${configPath}11_dns.json" >/dev/null
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${successMarker}" ]]
     )
 
     (
@@ -1486,7 +1479,7 @@ JSON
             command cp "$@"
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
