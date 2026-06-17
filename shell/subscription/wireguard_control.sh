@@ -6,23 +6,11 @@ subscriptionWireGuardDir() {
 
 subscriptionWireGuardSafeDir() {
     local wireGuardDir
-    local resolvedPath=
     wireGuardDir=$(subscriptionWireGuardDir)
     [[ -n "${wireGuardDir}" ]] || return 1
-    if [[ "${wireGuardDir}" == /* ]]; then
-        padmIsSafeAbsolutePath "${wireGuardDir%/}" || return 1
-        printf '%s\n' "${wireGuardDir%/}"
-        return 0
-    fi
-    if [[ "${wireGuardDir}" == "." || "${wireGuardDir}" == ".." ||
-        "${wireGuardDir}" == */./* || "${wireGuardDir}" == */. ||
-        "${wireGuardDir}" == */../* || "${wireGuardDir}" == */.. ]]; then
-        return 1
-    fi
-    resolvedPath=$(padmResolveCleanupPath "${wireGuardDir}" 2>/dev/null || true)
-    [[ -n "${resolvedPath}" ]] || return 1
-    padmIsSafeAbsolutePath "${resolvedPath%/}" || return 1
-    printf '%s\n' "${resolvedPath%/}"
+    [[ "${wireGuardDir}" == /* ]] || return 1
+    padmIsSafeAbsolutePath "${wireGuardDir%/}" || return 1
+    printf '%s\n' "${wireGuardDir%/}"
 }
 
 subscriptionWireGuardStateFile() {
@@ -297,18 +285,88 @@ subscriptionWireGuardEnsureKeys() {
     local privateKeyFile
     local publicKeyFile
     local privateKey
+    local privateDir
+    local privateStage
+    local publicStage
+    local rollbackDir=
+    local privateBackup=
+    local publicBackup=
+    local rollbackStatus=0
+    local tmpBase="${TMPDIR:-/tmp}"
     privateKeyFile=$(subscriptionWireGuardPrivateKeyFile)
     publicKeyFile=$(subscriptionWireGuardPublicKeyFile)
     [[ -n "${privateKeyFile}" && -n "${publicKeyFile}" ]] || return 1
-    padmEnsureSafeDirectory "$(dirname "${privateKeyFile}")" || return 1
-    chmod 700 "$(dirname "${privateKeyFile}")" 2>/dev/null || true
+    privateDir=$(dirname "${privateKeyFile}")
+    padmEnsureSafeDirectory "${privateDir}" || return 1
+    chmod 700 "${privateDir}" 2>/dev/null || true
     if [[ ! -s "${privateKeyFile}" ]]; then
         privateKey=$(umask 077 && wg genkey) || return 1
-        printf '%s\n' "${privateKey}" >"${privateKeyFile}"
-        chmod 600 "${privateKeyFile}" 2>/dev/null || true
+        [[ -n "${privateKey}" ]] || return 1
+        padmCreateTempFileForTarget privateStage "${privateKeyFile}" wireguard || return 1
+        printf '%s\n' "${privateKey}" >"${privateStage}" || { padmRemoveCleanupPath "${privateStage}"; return 1; }
+        padmCreateTempFileForTarget publicStage "${publicKeyFile}" wireguard || { padmRemoveCleanupPath "${privateStage}"; return 1; }
+        if ! wg pubkey <"${privateStage}" | tr -d '[:space:]' >"${publicStage}"; then
+            padmRemoveCleanupPath "${publicStage}"
+            padmRemoveCleanupPath "${privateStage}"
+            return 1
+        fi
+        [[ -s "${publicStage}" ]] || { padmRemoveCleanupPath "${publicStage}"; padmRemoveCleanupPath "${privateStage}"; return 1; }
+        padmCreateTempPath rollbackDir -d "${tmpBase%/}/padm-wireguard-keys.XXXXXX" || {
+            padmRemoveCleanupPath "${publicStage}"
+            padmRemoveCleanupPath "${privateStage}"
+            return 1
+        }
+        if [[ -f "${privateKeyFile}" ]]; then
+            privateBackup="${rollbackDir}/private.key"
+            backupManagedFileToPath "${privateKeyFile}" "${privateBackup}" 600 || {
+                padmRemoveCleanupPath "${rollbackDir}"
+                padmRemoveCleanupPath "${publicStage}"
+                padmRemoveCleanupPath "${privateStage}"
+                return 1
+            }
+        fi
+        if [[ -f "${publicKeyFile}" ]]; then
+            publicBackup="${rollbackDir}/public.key"
+            backupManagedFileToPath "${publicKeyFile}" "${publicBackup}" 600 || {
+                padmRemoveCleanupPath "${rollbackDir}"
+                padmRemoveCleanupPath "${publicStage}"
+                padmRemoveCleanupPath "${privateStage}"
+                return 1
+            }
+        fi
+        if ! commitGeneratedFile "${privateStage}" "${privateKeyFile}" 600; then
+            padmRemoveCleanupPath "${privateStage}"
+            padmRemoveCleanupPath "${publicStage}"
+            padmRemoveCleanupPath "${rollbackDir}"
+            return 1
+        fi
+        if ! commitGeneratedFile "${publicStage}" "${publicKeyFile}" 600; then
+            padmRemoveCleanupPath "${publicStage}"
+            if [[ -n "${privateBackup}" ]]; then
+                restoreManagedFileFromBackup "${privateBackup}" "${privateKeyFile}" 600 || rollbackStatus=1
+            else
+                removeManagedFileIfPresent "${privateKeyFile}" || rollbackStatus=1
+            fi
+            if [[ -n "${publicBackup}" ]]; then
+                restoreManagedFileFromBackup "${publicBackup}" "${publicKeyFile}" 600 || rollbackStatus=1
+            else
+                removeManagedFileIfPresent "${publicKeyFile}" || rollbackStatus=1
+            fi
+            padmRemoveCleanupPath "${rollbackDir}"
+            [[ "${rollbackStatus}" == "0" ]] || return 1
+            return 1
+        fi
+        padmRemoveCleanupPath "${rollbackDir}"
+    else
+        padmCreateTempFileForTarget publicStage "${publicKeyFile}" wireguard || return 1
+        if ! wg pubkey <"${privateKeyFile}" | tr -d '[:space:]' >"${publicStage}"; then
+            padmRemoveCleanupPath "${publicStage}"
+            return 1
+        fi
+        [[ -s "${publicStage}" ]] || { padmRemoveCleanupPath "${publicStage}"; return 1; }
+        commitGeneratedFile "${publicStage}" "${publicKeyFile}" 600 || { padmRemoveCleanupPath "${publicStage}"; return 1; }
     fi
-    wg pubkey <"${privateKeyFile}" | tr -d '[:space:]' >"${publicKeyFile}" || return 1
-    chmod 600 "${publicKeyFile}" 2>/dev/null || true
+    chmod 600 "${privateKeyFile}" "${publicKeyFile}" 2>/dev/null || true
 }
 
 subscriptionWireGuardPublicKey() {

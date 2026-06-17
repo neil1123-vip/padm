@@ -5662,6 +5662,83 @@ runWireGuardControlSafeDirRegression() (
     [[ ! -e "${root}/relative-wireguard" ]]
 )
 
+runWireGuardKeyTransactionRegression() (
+    local rootRel="${TMP_DIR}/wireguard-key-transaction"
+    local root wireGuardDir privateKeyFile publicKeyFile
+    local rc
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    wireGuardDir="${root}/wireguard"
+    privateKeyFile="${wireGuardDir}/private.key"
+    publicKeyFile="${wireGuardDir}/public.key"
+    PADM_WIREGUARD_CONTROL_DIR="${wireGuardDir}"
+
+    wg() {
+        case "${1:-}" in
+        genkey)
+            printf 'generated-private-key\n'
+            ;;
+        pubkey)
+            cat >/dev/null
+            printf 'generated-public-key\n'
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    }
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${publicKeyFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -e "${privateKeyFile}" ]]
+    [[ ! -e "${publicKeyFile}" ]]
+    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+        return 1
+    fi
+
+    mkdir -p "${wireGuardDir}"
+    printf 'existing-private-key\n' >"${privateKeyFile}"
+    printf 'existing-public-key\n' >"${publicKeyFile}"
+
+    set +e
+    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${privateKeyFile}")" == "existing-private-key" ]]
+    [[ "$(<"${publicKeyFile}")" == "existing-public-key" ]]
+    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+        return 1
+    fi
+
+    commitGeneratedFile() {
+        originalCommitGeneratedFile "$@"
+    }
+    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
+    [[ "$(<"${privateKeyFile}")" == "existing-private-key" ]]
+    [[ "$(<"${publicKeyFile}")" == "generated-public-key" ]]
+
+    rm -f "${privateKeyFile}" "${publicKeyFile}"
+    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
+    [[ "$(<"${privateKeyFile}")" == "generated-private-key" ]]
+    [[ "$(<"${publicKeyFile}")" == "generated-public-key" ]]
+    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+        return 1
+    fi
+)
+
 runWarpConfigFileCleanupRegression() (
     local rootRel="${TMP_DIR}/warp-config-file-cleanup"
     local root rmLog
@@ -15173,6 +15250,7 @@ runRegressionTransactionSystem() {
         runRegressionStep clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression &&
         runRegressionStep fail2ban-managed-cleanup runFail2banManagedCleanupRegression &&
         runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
+        runRegressionStep wireguard-key-transaction runWireGuardKeyTransactionRegression &&
         runRegressionStep wireguard-control-safe-dir runWireGuardControlSafeDirRegression &&
         runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&
         runRegressionStep warp-config-file-cleanup runWarpConfigFileCleanupRegression &&
