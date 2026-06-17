@@ -6647,9 +6647,9 @@ EOF
     [[ "$(realityTargetFilteredCandidates developer | awk 'END { print NR + 0 }')" == "1" ]]
     [[ "$(realityTargetFilteredCandidates asia | awk 'END { print NR + 0 }')" == "1" ]]
     [[ "$(realityTargetFilteredCandidates microsoft | awk 'END { print NR + 0 }')" == "1" ]]
-    firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
+    firstRecommendedRealityCandidate=$(realityTargetFilteredCandidates recommended | awk 'NR == 1 { print; exit }')
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
-    firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
+    firstDeveloperRealityCandidate=$(realityTargetFilteredCandidates developer | awk 'NR == 1 { print; exit }')
     [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
     targetIp=$(resolveRealityTargetIPv4 "www.ibm.com")
     targetProfile=$(lookupRealityTargetAsn "${targetIp}")
@@ -6671,7 +6671,7 @@ EOF
 3
 "
     [[ "${realityTargetHost}" == "www.reuters.com" ]]
-    microsoftCandidate=$(realityTargetFilteredCandidateLineByIndex microsoft 1)
+    microsoftCandidate=$(realityTargetFilteredCandidates microsoft | awk 'NR == 1 { print; exit }')
     [[ "$(realityTargetCandidateField "${microsoftCandidate}" 1)" == "www.microsoft.com" ]]
     selectRealityTargetCandidateInteractive recommended <<<"m
 manual.example.com:8443
@@ -6776,9 +6776,9 @@ runRealityCandidateFullRegression() {
     [[ "$(realityTargetFilteredCandidates developer | awk 'END { print NR + 0 }')" -ge 10 ]]
     [[ "$(realityTargetFilteredCandidates asia | awk 'END { print NR + 0 }')" -ge 2 ]]
     [[ "$(realityTargetFilteredCandidates microsoft | awk 'END { print NR + 0 }')" -ge 1 ]]
-    firstRecommendedRealityCandidate=$(realityTargetFilteredCandidateLineByIndex recommended 1)
+    firstRecommendedRealityCandidate=$(realityTargetFilteredCandidates recommended | awk 'NR == 1 { print; exit }')
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
-    firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
+    firstDeveloperRealityCandidate=$(realityTargetFilteredCandidates developer | awk 'NR == 1 { print; exit }')
     [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
     firstRealityCandidate=$(realityTargetCandidates | awk 'NR == 1 { print; exit }')
     [[ "$(realityTargetCandidateField "${firstRealityCandidate}" 1)" == "www.ibm.com" ]]

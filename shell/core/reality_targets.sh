@@ -967,20 +967,6 @@ realityTargetFilteredCandidates() {
     done < <(realityTargetCandidates)
 }
 
-realityTargetFilteredCandidateLineByIndex() {
-    local filter=$1
-    local wanted=$2
-    local line index=1
-    while IFS= read -r line; do
-        if [[ "${index}" == "${wanted}" ]]; then
-            printf '%s\n' "${line}"
-            return 0
-        fi
-        index=$((index + 1))
-    done < <(realityTargetFilteredCandidates "${filter}")
-    return 1
-}
-
 showRealityTargetCandidatePage() {
     local filter=${1:-recommended}
     local page=${2:-1}
@@ -1058,7 +1044,7 @@ selectRealityTargetCandidateInteractive() {
             ;;
         *)
             if [[ "${choice}" =~ ^[0-9]+$ ]]; then
-                selectedLine=$(realityTargetFilteredCandidateLineByIndex "${filter}" "${choice}") || {
+                selectedLine=$(realityTargetFilteredCandidates "${filter}" | awk -v wanted="${choice}" 'NR == wanted { print; found=1; exit } END { exit (found ? 0 : 1) }') || {
                     errorCard "候选编号无效，请重新选择"
                     continue
                 }
