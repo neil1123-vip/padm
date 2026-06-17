@@ -1,19 +1,5 @@
 #!/usr/bin/env bash
 
-downloadXrayGeoFilesToStage() {
-    local stageDir=$1
-    local geoVersion=$2
-
-    mkdir -p "${stageDir}" || return 1
-    if ! downloadGitHubReleaseAsset -P "${stageDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geosite.dat; then
-        return 1
-    fi
-    if ! downloadGitHubReleaseAsset -P "${stageDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geoip.dat; then
-        return 1
-    fi
-    [[ -s "${stageDir}/geosite.dat" && -s "${stageDir}/geoip.dat" ]]
-}
-
 ensureXrayGeoFiles() {
     local targetDir=$1
     local force=${2:-}
@@ -30,7 +16,14 @@ ensureXrayGeoFiles() {
     menuClose
     local stageDir
     padmCreateTempPath stageDir -d /etc/padm/tmp.geo.XXXXXX || return 1
-    if ! downloadXrayGeoFilesToStage "${stageDir}" "${geoVersion}"; then
+    mkdir -p "${stageDir}" || {
+        padmRemoveCleanupPath "${stageDir}"
+        errorCard "geo文件下载失败"
+        return 1
+    }
+    if ! downloadGitHubReleaseAsset -P "${stageDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geosite.dat ||
+        ! downloadGitHubReleaseAsset -P "${stageDir}/" Loyalsoldier/v2ray-rules-dat "${geoVersion}" geoip.dat ||
+        [[ ! -s "${stageDir}/geosite.dat" || ! -s "${stageDir}/geoip.dat" ]]; then
         padmRemoveCleanupPath "${stageDir}"
         errorCard "geo文件下载失败"
         return 1
