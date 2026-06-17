@@ -1086,14 +1086,6 @@ JSON
         printf 'ensure-nginx-location\n' >>"${callLog}"
         return 1
     }
-    serviceQueueRestart() {
-        printf 'restart:%s\n' "$*" >>"${callLog}"
-        return 0
-    }
-    serviceQueueApply() {
-        printf 'apply-services\n' >>"${callLog}"
-        return 0
-    }
     subscriptionSyncPlan() {
         printf '{"create":["sub_real_sync_6"],"remove":[]}'
     }
