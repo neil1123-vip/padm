@@ -13913,6 +13913,8 @@ runAptKeyInstallFailureRegression() {
         local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
         local errorLog="${TMP_DIR}/apt-key-error.log"
         local curlCalls="${TMP_DIR}/apt-key-curl-calls.log"
+        local keyRootRel="${TMP_DIR}/apt-key-commit-failure"
+        local keyRoot keyringFile
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         : >"${errorLog}"
         : >"${curlCalls}"
@@ -13938,13 +13940,117 @@ runAptKeyInstallFailureRegression() {
         [[ "${keyStatus}" -ne 0 ]]
         grep -q "测试源 apt key 安装失败" "${errorLog}"
         grep -q "https://example.invalid/key.gpg" "${curlCalls}"
+        ! compgen -G "${TMP_DIR}/.missing-keyring.gpg.aptkey.*" >/dev/null
+
+        mkdir -p "${keyRootRel}"
+        keyRoot=$(cd -- "${keyRootRel}" && pwd -P)
+        keyringFile="${keyRoot}/existing-keyring.gpg"
+        printf 'old-keyring\n' >"${keyringFile}"
+        : >"${errorLog}"
+        curl() {
+            printf 'new-keyring\n'
+        }
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            if [[ "$2" == "${keyringFile}" ]]; then
+                return 1
+            fi
+            originalCommitGeneratedFile "$@"
+        }
+
+        set +e
+        (
+            installAptKeyringFromUrl https://example.invalid/key.gpg "${keyringFile}" "测试源"
+        ) >/dev/null 2>&1
+        keyStatus=$?
+        set -e
+        [[ "${keyStatus}" -ne 0 ]]
+        [[ "$(<"${keyringFile}")" == "old-keyring" ]]
+        grep -q "测试源 apt key 提交失败" "${errorLog}"
+        ! compgen -G "${keyRoot}/.existing-keyring.gpg.aptkey.*" >/dev/null
 
         if [[ -n "${oldErrorLog}" ]]; then
             REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
         else
             unset REGRESSION_ERROR_CARD_LOG
         fi
-        unset -f curl gpg sudo
+        unset -f curl gpg sudo commitGeneratedFile
+    )
+}
+
+runNginxAptRepoRefreshRollbackRegression() {
+    (
+        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
+        local errorLog="${TMP_DIR}/nginx-apt-refresh-error.log"
+        local rootRel="${TMP_DIR}/nginx-apt-refresh-rollback"
+        local root repoRoot keyringRoot
+        local keyringFile repoFile pinFile
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        : >"${errorLog}"
+        mkdir -p "${rootRel}"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        repoRoot="${root}/apt"
+        keyringRoot="${root}/keyrings"
+        keyringFile="${keyringRoot}/nginx-archive-keyring.gpg"
+        repoFile="${repoRoot}/sources.list.d/nginx.list"
+        pinFile="${repoRoot}/preferences.d/99nginx"
+        mkdir -p "$(dirname "${repoFile}")" "$(dirname "${pinFile}")" "${keyringRoot}"
+        printf 'old-key\n' >"${keyringFile}"
+        printf 'old-repo\n' >"${repoFile}"
+        printf 'old-pin\n' >"${pinFile}"
+        release=debian
+        packageManager=apt
+        removeType=true
+        PADM_NGINX_APT_KEYRING_FILE="${keyringFile}"
+        PADM_NGINX_APT_REPO_FILE="${repoFile}"
+        PADM_NGINX_APT_PIN_FILE="${pinFile}"
+        installPackageTracked() { return 0; }
+        nginxServiceInstalled() { return 0; }
+        bootStartup() { return 0; }
+        lsb_release() { [[ "$1" == "-cs" ]] && printf 'bookworm\n'; }
+        curl() {
+            case "${2:-}" in
+            https://nginx.org/packages/mainline/debian/dists/bookworm/Release)
+                return 0
+                ;;
+            https://nginx.org/keys/nginx_signing.key)
+                printf 'new-key\n'
+                return 0
+                ;;
+            *)
+                return 1
+                ;;
+            esac
+        }
+        gpg() {
+            [[ "${1:-}" == "--dearmor" ]] || return 1
+            cat
+        }
+        refreshAptAfterRepoChange() { return 1; }
+
+        set +e
+        (
+            installNginxTools
+        ) >/dev/null 2>&1
+        local nginxStatus=$?
+        set -e
+        [[ "${nginxStatus}" -ne 0 ]]
+        [[ "$(<"${keyringFile}")" == "old-key" ]]
+        [[ "$(<"${repoFile}")" == "old-repo" ]]
+        [[ "$(<"${pinFile}")" == "old-pin" ]]
+        grep -q "Nginx apt 源刷新失败" "${errorLog}"
+        ! compgen -G "${keyringRoot}/.nginx-archive-keyring.gpg.aptkey.*" >/dev/null
+        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+            return 1
+        fi
+
+        if [[ -n "${oldErrorLog}" ]]; then
+            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
+        else
+            unset REGRESSION_ERROR_CARD_LOG
+        fi
+        unset PADM_NGINX_APT_KEYRING_FILE PADM_NGINX_APT_REPO_FILE PADM_NGINX_APT_PIN_FILE
+        unset -f installPackageTracked nginxServiceInstalled bootStartup lsb_release curl gpg refreshAptAfterRepoChange
     )
 }
 
@@ -13952,10 +14058,15 @@ runNginxYumMainlineEnableFailureRegression() {
     (
         local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
         local errorLog="${TMP_DIR}/nginx-yum-mainline-error.log"
-        local repoDir="${TMP_DIR}/nginx-yum-repos"
+        local rootRel="${TMP_DIR}/nginx-yum-mainline-rollback"
+        local root repoDir
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         : >"${errorLog}"
+        mkdir -p "${rootRel}"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        repoDir="${root}/repos"
         mkdir -p "${repoDir}"
+        printf 'old-yum-repo\n' >"${repoDir}/nginx.repo"
         release=centos
         packageManager=yum
         removeType=true
@@ -13977,6 +14088,10 @@ runNginxYumMainlineEnableFailureRegression() {
         set -e
         [[ "${nginxStatus}" -ne 0 ]]
         grep -q "Nginx yum mainline 源启用失败" "${errorLog}"
+        [[ "$(<"${repoDir}/nginx.repo")" == "old-yum-repo" ]]
+        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+            return 1
+        fi
 
         if [[ -n "${oldErrorLog}" ]]; then
             REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
@@ -14832,6 +14947,7 @@ runRegressionPlatformIo() {
         runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression &&
         runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression &&
         runRegressionStep apt-key-install-failure runAptKeyInstallFailureRegression &&
+        runRegressionStep nginx-apt-refresh-rollback runNginxAptRepoRefreshRollbackRegression &&
         runRegressionStep nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureRegression &&
         runRegressionStep base-package-batch runBasePackageBatchRegression &&
         runRegressionStep package-rollback-failure runPackageRollbackFailureRegression &&

@@ -46,6 +46,43 @@ adapterWarpYumRepoTemplate() {
     adapterTmpPath padm-warp-yum-repo.XXXXXX
 }
 
+adapterManagedRollbackTemplate() {
+    adapterTmpPath padm-package-managed-backup.XXXXXX
+}
+
+adapterNginxAptKeyringFile() {
+    printf '%s\n' "${PADM_NGINX_APT_KEYRING_FILE:-/usr/share/keyrings/nginx-archive-keyring.gpg}"
+}
+
+adapterNginxAptRepoFile() {
+    printf '%s\n' "${PADM_NGINX_APT_REPO_FILE:-/etc/apt/sources.list.d/nginx.list}"
+}
+
+adapterNginxAptPinFile() {
+    printf '%s\n' "${PADM_NGINX_APT_PIN_FILE:-/etc/apt/preferences.d/99nginx}"
+}
+
+adapterNginxYumRepoFile() {
+    local yumReposDir=$1
+    printf '%s\n' "${yumReposDir%/}/nginx.repo"
+}
+
+adapterWarpAptKeyringFile() {
+    printf '%s\n' "${PADM_WARP_APT_KEYRING_FILE:-/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg}"
+}
+
+adapterWarpAptRepoFile() {
+    printf '%s\n' "${PADM_WARP_APT_REPO_FILE:-/etc/apt/sources.list.d/cloudflare-client.list}"
+}
+
+adapterWarpYumRepoFile() {
+    local yumReposDir=$1
+    printf '%s\n' "${yumReposDir%/}/cloudflare-client.repo"
+}
+
+PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
+PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES=
+
 refreshAptAfterRepoChange() {
     if [[ "${release}" != "ubuntu" && "${release}" != "debian" ]]; then
         return
@@ -58,23 +95,147 @@ installAptKeyringFromUrl() {
     local url=$1
     local targetFile=$2
     local displayName=$3
+    local stagedFile
 
-    if ! curl -fsSL "${url}" | gpg --dearmor | sudo tee "${targetFile}" >/dev/null; then
+    targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || failPackageInstallTransaction "${displayName} apt key 路径异常"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" aptkey || failPackageInstallTransaction "${displayName} apt key 临时文件创建失败"
+    if ! curl -fsSL "${url}" | gpg --dearmor >"${stagedFile}"; then
+        padmRemoveCleanupPath "${stagedFile}"
         failPackageInstallTransaction "${displayName} apt key 安装失败"
     fi
+    commitGeneratedFile "${stagedFile}" "${targetFile}" 644 || {
+        padmRemoveCleanupPath "${stagedFile}"
+        failPackageInstallTransaction "${displayName} apt key 提交失败"
+    }
 }
 
 commitRepoFile() {
     local tmpFile=$1
     local targetFile=$2
     local mode=${3:-644}
+    local targetDir
 
     if [[ ! -s "${tmpFile}" ]]; then
         padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
 
-    chmod "${mode}" "${tmpFile}" && mv "${tmpFile}" "${targetFile}" && padmForgetCleanupPath "${tmpFile}"
+    targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    targetDir=$(dirname -- "${targetFile}")
+    padmEnsureSafeDirectory "${targetDir}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    commitGeneratedFile "${tmpFile}" "${targetFile}" "${mode}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+}
+
+adapterCreateManagedRollbackBackup() {
+    local resultVar=$1
+    shift
+    local backupDir
+    local manifest
+    local targetPath
+    local backupFile
+    local backupIndex=0
+
+    padmCreateTempPath backupDir -d "$(adapterManagedRollbackTemplate)" || return 1
+    manifest="${backupDir}/manifest"
+    : >"${manifest}" || {
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    }
+    for targetPath in "$@"; do
+        [[ -n "${targetPath}" ]] || continue
+        targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || {
+            padmRemoveCleanupPath "${backupDir}"
+            return 1
+        }
+        [[ ! -e "${targetPath}" || -f "${targetPath}" || -L "${targetPath}" ]] || {
+            padmRemoveCleanupPath "${backupDir}"
+            return 1
+        }
+        if [[ -f "${targetPath}" || -L "${targetPath}" ]]; then
+            printf -v backupFile '%s/%06d.backup' "${backupDir}" "${backupIndex}"
+            backupIndex=$((backupIndex + 1))
+            backupManagedFileToPath "${targetPath}" "${backupFile}" 644 || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+            printf '%s\t%s\tfile\n' "${backupFile}" "${targetPath}" >>"${manifest}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+        else
+            printf -- '-\t%s\tmissing\n' "${targetPath}" >>"${manifest}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                return 1
+            }
+        fi
+    done
+    printf -v "${resultVar}" '%s' "${backupDir}"
+}
+
+adapterRestoreManagedRollbackBackup() {
+    local backupDir=$1
+    local manifest
+    local backupFile
+    local targetPath
+    local state
+    local status=0
+
+    manifest="${backupDir}/manifest"
+    [[ -f "${manifest}" ]] || return 1
+    while IFS=$'\t' read -r backupFile targetPath state; do
+        [[ -n "${targetPath}" ]] || continue
+        case "${state}" in
+        file)
+            restoreManagedFileFromBackup "${backupFile}" "${targetPath}" 644 || status=1
+            ;;
+        missing)
+            removeManagedFileIfPresent "${targetPath}" || status=1
+            ;;
+        *)
+            status=1
+            ;;
+        esac
+    done <"${manifest}"
+    return "${status}"
+}
+
+adapterRegisterPackageManagedRollback() {
+    local backupDir=$1
+    [[ -n "${backupDir}" ]] || return 0
+    PADM_PACKAGE_MANAGED_ROLLBACK_DIRS+=("${backupDir}")
+}
+
+adapterClearPackageManagedRollback() {
+    local backupDir
+    for backupDir in "${PADM_PACKAGE_MANAGED_ROLLBACK_DIRS[@]}"; do
+        [[ -n "${backupDir}" ]] || continue
+        padmRemoveCleanupPath "${backupDir}"
+    done
+    PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
+    PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES=
+}
+
+adapterRollbackPackageManagedFiles() {
+    local failedDirs=()
+    local backupDir
+    local index
+    local rc=0
+
+    PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES=
+    for ((index = ${#PADM_PACKAGE_MANAGED_ROLLBACK_DIRS[@]} - 1; index >= 0; index--)); do
+        backupDir=${PADM_PACKAGE_MANAGED_ROLLBACK_DIRS[$index]}
+        [[ -n "${backupDir}" ]] || continue
+        if adapterRestoreManagedRollbackBackup "${backupDir}"; then
+            padmRemoveCleanupPath "${backupDir}"
+        else
+            padmForgetCleanupPath "${backupDir}"
+            failedDirs+=("${backupDir}")
+            rc=1
+        fi
+    done
+    PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
+    PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES="${failedDirs[*]}"
+    return "${rc}"
 }
 
 packageInstalled() {
@@ -132,10 +293,13 @@ beginPackageInstallTransaction() {
     PADM_PACKAGE_TRANSACTION_STARTED=true
     PADM_INSTALLED_PACKAGES=
     PADM_PACKAGE_ROLLBACK_FAILURES=
+    PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
+    PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES=
 }
 
 endPackageInstallTransaction() {
     if [[ "$1" == "true" ]]; then
+        adapterClearPackageManagedRollback
         PADM_INSTALLED_PACKAGES=
         PADM_PACKAGE_ROLLBACK_FAILURES=
         PADM_PACKAGE_TRANSACTION_ACTIVE=
@@ -164,12 +328,25 @@ rollbackPackageInstallTransaction() {
 }
 
 failPackageInstallTransaction() {
+    local managedRollbackStatus=0
     local rollbackStatus=0
+    local managedRollbackCount=${#PADM_PACKAGE_MANAGED_ROLLBACK_DIRS[@]}
+    if [[ "${managedRollbackCount}" -gt 0 ]]; then
+        adapterRollbackPackageManagedFiles || managedRollbackStatus=$?
+    fi
     rollbackPackageInstallTransaction || rollbackStatus=$?
-    if [[ "${rollbackStatus}" -eq 0 ]]; then
+    if [[ "${managedRollbackCount}" -eq 0 && "${rollbackStatus}" -eq 0 ]]; then
         errorCard "$1，已尝试回滚本次新增软件包"
-    else
+    elif [[ "${managedRollbackCount}" -eq 0 ]]; then
         errorCard "$1，回滚部分软件包失败" "请手动检查：${PADM_PACKAGE_ROLLBACK_FAILURES}"
+    elif [[ "${managedRollbackStatus}" -eq 0 && "${rollbackStatus}" -eq 0 ]]; then
+        errorCard "$1，已尝试回滚本次新增软件包和系统源改动"
+    elif [[ "${managedRollbackStatus}" -eq 0 ]]; then
+        errorCard "$1，已尝试回滚系统源改动，但部分软件包回滚失败" "请手动检查：${PADM_PACKAGE_ROLLBACK_FAILURES}"
+    elif [[ "${rollbackStatus}" -eq 0 ]]; then
+        errorCard "$1，已回滚本次新增软件包，但系统源改动恢复失败" "请手动检查：${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES}"
+    else
+        errorCard "$1，系统源改动和软件包回滚均存在失败" "软件包：${PADM_PACKAGE_ROLLBACK_FAILURES}" "系统源备份：${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES}"
     fi
     exit 1
 }
@@ -580,41 +757,56 @@ installNginxTools() {
     if [[ "${release}" == "debian" ]]; then
         installPackageTracked "Nginx依赖" gnupg2 ca-certificates lsb-release
         local nginxRepoCodename
+        local nginxKeyringFile nginxRepoTarget nginxPinTarget repoBackupDir
         nginxRepoCodename=$(lsb_release -cs)
         if curl -fsSL "https://nginx.org/packages/mainline/debian/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
-            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key /usr/share/keyrings/nginx-archive-keyring.gpg Nginx
+            nginxKeyringFile=$(adapterNginxAptKeyringFile)
+            nginxRepoTarget=$(adapterNginxAptRepoFile)
+            nginxPinTarget=$(adapterNginxAptPinFile)
+            adapterCreateManagedRollbackBackup repoBackupDir "${nginxKeyringFile}" "${nginxRepoTarget}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt 源备份失败"
+            adapterRegisterPackageManagedRollback "${repoBackupDir}"
+            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key "${nginxKeyringFile}" Nginx
             local repoFile
             padmCreateTempPath repoFile "$(adapterNginxRepoTemplate)" || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/debian %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
-            commitRepoFile "${repoFile}" /etc/apt/sources.list.d/nginx.list || failPackageInstallTransaction "Nginx apt 源提交失败"
+            commitRepoFile "${repoFile}" "${nginxRepoTarget}" || failPackageInstallTransaction "Nginx apt 源提交失败"
             local pinFile
             padmCreateTempPath pinFile "$(adapterNginxPinTemplate)" || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
             printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n\n' >"${pinFile}"
-            commitRepoFile "${pinFile}" /etc/apt/preferences.d/99nginx || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
+            commitRepoFile "${pinFile}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
             refreshAptAfterRepoChange || failPackageInstallTransaction "Nginx apt 源刷新失败"
         fi
 
     elif [[ "${release}" == "ubuntu" ]]; then
         installPackageTracked "Nginx依赖" gnupg2 ca-certificates lsb-release
         local nginxRepoCodename
+        local nginxKeyringFile nginxRepoTarget nginxPinTarget repoBackupDir
         nginxRepoCodename=$(lsb_release -cs)
         if curl -fsSL "https://nginx.org/packages/mainline/ubuntu/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
-            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key /usr/share/keyrings/nginx-archive-keyring.gpg Nginx
+            nginxKeyringFile=$(adapterNginxAptKeyringFile)
+            nginxRepoTarget=$(adapterNginxAptRepoFile)
+            nginxPinTarget=$(adapterNginxAptPinFile)
+            adapterCreateManagedRollbackBackup repoBackupDir "${nginxKeyringFile}" "${nginxRepoTarget}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt 源备份失败"
+            adapterRegisterPackageManagedRollback "${repoBackupDir}"
+            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key "${nginxKeyringFile}" Nginx
             local repoFile
             padmCreateTempPath repoFile "$(adapterNginxRepoTemplate)" || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/ubuntu %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
-            commitRepoFile "${repoFile}" /etc/apt/sources.list.d/nginx.list || failPackageInstallTransaction "Nginx apt 源提交失败"
+            commitRepoFile "${repoFile}" "${nginxRepoTarget}" || failPackageInstallTransaction "Nginx apt 源提交失败"
             local pinFile
             padmCreateTempPath pinFile "$(adapterNginxPinTemplate)" || failPackageInstallTransaction "Nginx apt pin 临时文件创建失败"
             printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n\n' >"${pinFile}"
-            commitRepoFile "${pinFile}" /etc/apt/preferences.d/99nginx || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
+            commitRepoFile "${pinFile}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt pin 配置提交失败"
             refreshAptAfterRepoChange || failPackageInstallTransaction "Nginx apt 源刷新失败"
         fi
 
     elif [[ "${release}" == "centos" ]]; then
         installPackageTracked "yum-utils" yum-utils
         local yumReposDir=${PADM_YUM_REPOS_DIR:-/etc/yum.repos.d}
-        local repoFile
+        local repoFile repoBackupDir nginxRepoTarget
+        nginxRepoTarget=$(adapterNginxYumRepoFile "${yumReposDir}")
+        adapterCreateManagedRollbackBackup repoBackupDir "${nginxRepoTarget}" || failPackageInstallTransaction "Nginx yum 源备份失败"
+        adapterRegisterPackageManagedRollback "${repoBackupDir}"
         padmCreateTempPath repoFile "$(adapterNginxYumRepoTemplate)" || failPackageInstallTransaction "Nginx yum 源临时文件创建失败"
         cat <<EOF >"${repoFile}"
 [nginx-stable]
@@ -634,7 +826,7 @@ gpgkey=https://nginx.org/keys/nginx_signing.key
 module_hotfixes=true
 EOF
         mkdir -p "${yumReposDir}" || failPackageInstallTransaction "Nginx yum 源目录创建失败"
-        commitRepoFile "${repoFile}" "${yumReposDir}/nginx.repo" || failPackageInstallTransaction "Nginx yum 源提交失败"
+        commitRepoFile "${repoFile}" "${nginxRepoTarget}" || failPackageInstallTransaction "Nginx yum 源提交失败"
         sudo yum-config-manager --enable nginx-mainline >/dev/null 2>&1 || failPackageInstallTransaction "Nginx yum mainline 源启用失败"
     elif [[ "${release}" == "fedora" ]]; then
         statusCard "Nginx 源" "nginx.org 未提供 Fedora ${centosVersion} 仓库，使用系统默认仓库安装 Nginx"
@@ -739,13 +931,18 @@ installWarp() {
     installPackageTracked "gnupg2" gnupg2
     if [[ "${release}" == "debian" ]]; then
         local warpRepoCodename
+        local warpKeyringFile warpRepoTarget repoBackupDir
         warpRepoCodename=$(lsb_release -cs)
         if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
-            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg WARP
+            warpKeyringFile=$(adapterWarpAptKeyringFile)
+            warpRepoTarget=$(adapterWarpAptRepoFile)
+            adapterCreateManagedRollbackBackup repoBackupDir "${warpKeyringFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源备份失败"
+            adapterRegisterPackageManagedRollback "${repoBackupDir}"
+            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg "${warpKeyringFile}" WARP
             local repoFile
             padmCreateTempPath repoFile "$(adapterWarpRepoTemplate)" || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
-            commitRepoFile "${repoFile}" /etc/apt/sources.list.d/cloudflare-client.list || failPackageInstallTransaction "WARP apt 源提交失败"
+            commitRepoFile "${repoFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源提交失败"
             refreshAptAfterRepoChange || failPackageInstallTransaction "WARP apt 源刷新失败"
         else
             errorCard "当前Debian版本暂不支持官方WARP客户端"
@@ -755,12 +952,17 @@ installWarp() {
 
     elif [[ "${release}" == "ubuntu" ]]; then
         local warpRepoCodename="focal"
+        local warpKeyringFile warpRepoTarget repoBackupDir
         if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
-            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg WARP
+            warpKeyringFile=$(adapterWarpAptKeyringFile)
+            warpRepoTarget=$(adapterWarpAptRepoFile)
+            adapterCreateManagedRollbackBackup repoBackupDir "${warpKeyringFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源备份失败"
+            adapterRegisterPackageManagedRollback "${repoBackupDir}"
+            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg "${warpKeyringFile}" WARP
             local repoFile
             padmCreateTempPath repoFile "$(adapterWarpRepoTemplate)" || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
-            commitRepoFile "${repoFile}" /etc/apt/sources.list.d/cloudflare-client.list || failPackageInstallTransaction "WARP apt 源提交失败"
+            commitRepoFile "${repoFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源提交失败"
             refreshAptAfterRepoChange || failPackageInstallTransaction "WARP apt 源刷新失败"
         else
             errorCard "当前Ubuntu版本暂不支持官方WARP客户端"
@@ -771,7 +973,10 @@ installWarp() {
     elif [[ "${release}" == "centos" || "${release}" == "fedora" ]]; then
         installPackageTracked "yum-utils" yum-utils
         local yumReposDir=${PADM_YUM_REPOS_DIR:-/etc/yum.repos.d}
-        local repoFile
+        local repoFile repoBackupDir warpRepoTarget
+        warpRepoTarget=$(adapterWarpYumRepoFile "${yumReposDir}")
+        adapterCreateManagedRollbackBackup repoBackupDir "${warpRepoTarget}" || failPackageInstallTransaction "WARP yum 源备份失败"
+        adapterRegisterPackageManagedRollback "${repoBackupDir}"
         padmCreateTempPath repoFile "$(adapterWarpYumRepoTemplate)" || failPackageInstallTransaction "WARP yum 源临时文件创建失败"
         cat <<EOF >"${repoFile}"
 [cloudflare-warp]
@@ -782,7 +987,7 @@ gpgcheck=1
 gpgkey=https://pkg.cloudflareclient.com/pubkey.gpg
 EOF
         mkdir -p "${yumReposDir}" || failPackageInstallTransaction "WARP yum 源目录创建失败"
-        commitRepoFile "${repoFile}" "${yumReposDir}/cloudflare-client.repo" || failPackageInstallTransaction "WARP yum 源提交失败"
+        commitRepoFile "${repoFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP yum 源提交失败"
     fi
 
     installPackageTracked "cloudflare-warp" cloudflare-warp
