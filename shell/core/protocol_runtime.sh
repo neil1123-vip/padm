@@ -318,39 +318,6 @@ portHoppingMenu() {
     fi
 }
 
-
-# 初始化 TUIC 端口
-initTuicPort() {
-    readSingBoxConfig
-    if [[ -n "${tuicPort}" ]]; then
-        autoRead tuic_history_port "读取到上次安装时的Tuic端口 [${tuicPort}]，是否使用？[y/n]:" historyTuicPortStatus
-        if [[ "${historyTuicPortStatus}" == "y" ]]; then
-            statusCard "Tuic 端口" "${tuicPort}"
-        else
-            tuicPort=
-        fi
-    fi
-
-    if [[ -z "${tuicPort}" ]]; then
-        echoContent yellow "请输入Tuic端口[回车随机10000-30000]，不可与其他服务重复"
-        autoRead tuic_port "端口:" tuicPort
-        if [[ -z "${tuicPort}" ]]; then
-            tuicPort=$((RANDOM % 20001 + 10000))
-        fi
-    fi
-    if [[ -z ${tuicPort} ]]; then
-        statusCard "端口输入" "端口不可为空"
-        initTuicPort "$2"
-    elif ((tuicPort < 1 || tuicPort > 65535)); then
-        statusCard "端口输入" "端口不合法"
-        initTuicPort "$2"
-    fi
-    statusCard "Tuic 端口" "${tuicPort}"
-    allowPort "${tuicPort}" || return 1
-    allowPort "${tuicPort}" "udp" || return 1
-}
-
-
 # 初始化 TUIC 协议参数
 initTuicProtocol() {
     if [[ -n "${tuicAlgorithm}" && -z "${lastInstallationConfig}" ]]; then
