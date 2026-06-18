@@ -1600,7 +1600,7 @@ JSON
             esac
         }
         cp() {
-            if [[ "$1" == "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" && "$2" == "${configPath}11_dns.json" ]]; then
+            if [[ "$1" == "-p" && "$2" == "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" && "$3" == "${configPath}.11_dns.json.restore."* ]]; then
                 return 1
             fi
             command cp "$@"
@@ -12060,6 +12060,30 @@ runCheckLogBackupMissingRestoreRegression() (
     [[ "$(<"${root}/policy.json")" == "old-policy" ]]
 )
 
+runManagedFileBackupManifestRegression() (
+    local rootRel="${TMP_DIR}/managed-file-backup-manifest"
+    local root
+    local backupDir
+
+    mkdir -p "${rootRel}/targets"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    backupDir="${root}/backup"
+    printf 'old-one\n' >"${root}/targets/one.json"
+
+    padmWriteManagedFileBackupManifest "${backupDir}" \
+        "xray/one.json" "${root}/targets/one.json" \
+        "xray/two.json" "${root}/targets/two.json"
+    [[ -f "${backupDir}/xray/one.json" ]]
+    [[ -f "${backupDir}/manifest" ]]
+
+    printf 'new-one\n' >"${root}/targets/one.json"
+    printf 'new-two\n' >"${root}/targets/two.json"
+
+    padmRestoreManagedFileBackupManifest "${backupDir}"
+    [[ "$(<"${root}/targets/one.json")" == "old-one" ]]
+    [[ ! -e "${root}/targets/two.json" ]]
+)
+
 runPadmBbrManagedCleanupRegression() (
     local root="${TMP_DIR}/padm-bbr-managed-cleanup"
     local tempFailStatus="${root}/temp-fail.status"
@@ -14994,6 +15018,7 @@ runInstallModulePathsRegression() {
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
+        runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep check-log-backup-unsafe-target runCheckLogBackupRejectsUnsafeTargetRegression &&
         runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&

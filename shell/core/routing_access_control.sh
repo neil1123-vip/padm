@@ -397,6 +397,9 @@ accessControlBackupCreate() {
     local backupDir
     local xrayConfigDir=
     local singBoxConfigDir=
+    local file
+    local managedFile
+    local -a backupArgs=()
     backupDir=$(accessControlSafeBackupDir) || return 1
     [[ -n "${configPath:-}" ]] && xrayConfigDir=$(accessControlSafeXrayConfigDir) || true
     [[ -n "${singBoxConfigPath:-}" ]] && singBoxConfigDir=$(accessControlSafeSingBoxConfigDir) || true
@@ -406,31 +409,24 @@ accessControlBackupCreate() {
     if [[ -n "${singBoxConfigPath:-}" && -z "${singBoxConfigDir}" ]]; then
         return 1
     fi
-    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
-    padmEnsureSafeDirectory "${backupDir}/xray" || return 1
-    padmEnsureSafeDirectory "${backupDir}/sing-box" || return 1
+    removeManagedPathIfPresent "${backupDir}" || return 1
     if [[ -n "${xrayConfigDir}" ]]; then
         while IFS= read -r file; do
-            local managedFile
             managedFile=$(accessControlManagedXrayFile "${file}") || return 1
-            [[ -f "${managedFile}" ]] || continue
-            cp "${managedFile}" "${backupDir}/xray/${file}" || return 1
+            backupArgs+=("xray/${file}" "${managedFile}")
         done < <(accessControlManagedXrayFiles)
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r file; do
-            local managedFile
             managedFile=$(accessControlManagedSingBoxFile "${file}") || return 1
-            [[ -f "${managedFile}" ]] || continue
-            cp "${managedFile}" "${backupDir}/sing-box/${file}" || return 1
+            backupArgs+=("sing-box/${file}" "${managedFile}")
         done < <(accessControlManagedSingBoxFiles)
     fi
-    return 0
+    padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"
 }
 
 accessControlBackupRestore() {
     local backupDir
-    local status=0
     local xrayConfigDir=
     local singBoxConfigDir=
     backupDir=$(accessControlSafeBackupDir) || return 1
@@ -443,33 +439,13 @@ accessControlBackupRestore() {
     if [[ -n "${singBoxConfigPath:-}" && -z "${singBoxConfigDir}" ]]; then
         return 1
     fi
-    if [[ -n "${xrayConfigDir}" ]]; then
-        while IFS= read -r file; do
-            local managedFile
-            managedFile=$(accessControlManagedXrayFile "${file}") || return 1
-            removeManagedFileIfPresent "${managedFile}" || status=1
-            if [[ -f "${backupDir}/xray/${file}" ]]; then
-                restoreManagedFileFromBackup "${backupDir}/xray/${file}" "${managedFile}" 644 || status=1
-            fi
-        done < <(accessControlManagedXrayFiles)
-    fi
-    if [[ -n "${singBoxConfigDir}" ]]; then
-        while IFS= read -r file; do
-            local managedFile
-            managedFile=$(accessControlManagedSingBoxFile "${file}") || return 1
-            removeManagedFileIfPresent "${managedFile}" || status=1
-            if [[ -f "${backupDir}/sing-box/${file}" ]]; then
-                restoreManagedFileFromBackup "${backupDir}/sing-box/${file}" "${managedFile}" 644 || status=1
-            fi
-        done < <(accessControlManagedSingBoxFiles)
-    fi
-    return "${status}"
+    padmRestoreManagedFileBackupManifest "${backupDir}"
 }
 
 accessControlBackupCleanup() {
     local backupDir
     backupDir=$(accessControlSafeBackupDir) || return 1
-    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
+    removeManagedPathIfPresent "${backupDir}"
 }
 
 reportAccessControlApplyFailure() {

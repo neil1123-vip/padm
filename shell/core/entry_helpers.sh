@@ -937,81 +937,30 @@ checkLogBackupCreate() {
     local resultVar=$1
     shift
     local backupDir
-    local manifest
     local targetPath
-    local backupFile
     local backupIndex=0
+    local -a backupArgs=()
 
     padmCreateTmpRootPath backupDir padm-check-log-backup.XXXXXX -d || return 1
-    manifest="${backupDir}/manifest"
-    : >"${manifest}" || {
-        padmRemoveCleanupPath "${backupDir}"
-        return 1
-    }
     for targetPath in "$@"; do
         [[ -n "${targetPath}" ]] || continue
         targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || {
             padmRemoveCleanupPath "${backupDir}"
             return 1
         }
-        [[ ! -e "${targetPath}" || -f "${targetPath}" || -L "${targetPath}" ]] || {
-            padmRemoveCleanupPath "${backupDir}"
-            return 1
-        }
-        if [[ -f "${targetPath}" ]]; then
-            printf -v backupFile '%s/%06d.json' "${backupDir}" "${backupIndex}"
-            backupIndex=$((backupIndex + 1))
-            backupManagedFileToPath "${targetPath}" "${backupFile}" 644 || {
-                padmRemoveCleanupPath "${backupDir}"
-                return 1
-            }
-            printf '%s\t%s\tfile\n' "${backupFile}" "${targetPath}" >>"${manifest}" || {
-                padmRemoveCleanupPath "${backupDir}"
-                return 1
-            }
-        else
-            printf -- '-\t%s\tmissing\n' "${targetPath}" >>"${manifest}" || {
-                padmRemoveCleanupPath "${backupDir}"
-                return 1
-            }
-        fi
+        backupArgs+=("$(printf '%06d.json' "${backupIndex}")" "${targetPath}")
+        backupIndex=$((backupIndex + 1))
     done
+    if ! padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    fi
     printf -v "${resultVar}" '%s' "${backupDir}"
 }
 
 checkLogBackupRestore() {
     local backupDir=$1
-    local manifest
-    local backupFile
-    local targetPath
-    local state
-    local status=0
-
-    manifest="${backupDir}/manifest"
-    [[ -f "${manifest}" ]] || return 1
-    while IFS=$'\t' read -r backupFile targetPath state; do
-        # Older manifests wrote missing entries with a leading tab. Bash read with
-        # whitespace IFS collapses that shape into "<path>\tmissing", so normalize it.
-        if [[ -z "${state}" && "${targetPath}" == "missing" && -n "${backupFile}" ]]; then
-            targetPath="${backupFile}"
-            state=missing
-            backupFile=
-        fi
-        [[ -n "${targetPath}" ]] || continue
-        targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
-        case "${state}" in
-        file)
-            restoreManagedFileFromBackup "${backupFile}" "${targetPath}" 644 || status=1
-            ;;
-        missing)
-            removeManagedFileIfPresent "${targetPath}" || status=1
-            ;;
-        *)
-            status=1
-            ;;
-        esac
-    done <"${manifest}"
-    return "${status}"
+    padmRestoreManagedFileBackupManifest "${backupDir}"
 }
 
 # 日志管理

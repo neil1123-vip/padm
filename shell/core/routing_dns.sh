@@ -70,9 +70,12 @@ sniRouting() {
 
 dnsRoutingBackupCreate() {
     local backupDir
-    local singBoxFile
     local xrayConfigDir=
     local singBoxConfigDir=
+    local singBoxFile
+    local xrayManagedFile
+    local singBoxManagedFile
+    local -a backupArgs=()
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
     if [[ -n "${configPath:-}" ]]; then
         xrayConfigDir=$(dnsRoutingSafeXrayConfigDir) || return 1
@@ -80,50 +83,39 @@ dnsRoutingBackupCreate() {
     if [[ -n "${singBoxConfigPath:-}" ]]; then
         singBoxConfigDir=$(dnsRoutingSafeSingBoxConfigDir) || return 1
     fi
-    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
-    mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
-    if [[ -n "${xrayConfigDir}" && -f "${xrayConfigDir}11_dns.json" ]]; then
-        cp "${xrayConfigDir}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
+    removeManagedPathIfPresent "${backupDir}" || return 1
+    if [[ -n "${xrayConfigDir}" ]]; then
+        xrayManagedFile=$(padmManagedFilePath "${xrayConfigDir}" "11_dns.json") || return 1
+        backupArgs+=("xray/11_dns.json" "${xrayManagedFile}")
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r singBoxFile; do
-            [[ -f "${singBoxConfigDir}${singBoxFile}" ]] || continue
-            cp "${singBoxConfigDir}${singBoxFile}" "${backupDir}/sing-box/${singBoxFile}" || return 1
+            singBoxManagedFile=$(padmManagedFilePath "${singBoxConfigDir}" "${singBoxFile}") || return 1
+            backupArgs+=("sing-box/${singBoxFile}" "${singBoxManagedFile}")
         done < <(dnsRoutingManagedSingBoxFiles)
     fi
-    return 0
+    padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"
 }
 
 dnsRoutingBackupRestore() {
     local backupDir
     local xrayConfigDir=
     local singBoxConfigDir=
-    local status=0
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
     [[ -d "${backupDir}" ]] || return 1
     if [[ -n "${configPath:-}" ]]; then
         xrayConfigDir=$(dnsRoutingSafeXrayConfigDir) || return 1
-        rm -f "${xrayConfigDir}11_dns.json" >/dev/null 2>&1 || status=1
-        if [[ -f "${backupDir}/xray/11_dns.json" ]]; then
-            cp "${backupDir}/xray/11_dns.json" "${xrayConfigDir}11_dns.json" || status=1
-        fi
     fi
     if [[ -n "${singBoxConfigPath:-}" ]]; then
         singBoxConfigDir=$(dnsRoutingSafeSingBoxConfigDir) || return 1
-        while IFS= read -r singBoxFile; do
-            rm -f "${singBoxConfigDir}${singBoxFile}" >/dev/null 2>&1 || status=1
-            if [[ -f "${backupDir}/sing-box/${singBoxFile}" ]]; then
-                cp "${backupDir}/sing-box/${singBoxFile}" "${singBoxConfigDir}${singBoxFile}" || status=1
-            fi
-        done < <(dnsRoutingManagedSingBoxFiles)
     fi
-    return "${status}"
+    padmRestoreManagedFileBackupManifest "${backupDir}"
 }
 
 dnsRoutingBackupCleanup() {
     local backupDir
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
-    rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
+    removeManagedPathIfPresent "${backupDir}"
 }
 
 dnsRoutingAbortChange() {

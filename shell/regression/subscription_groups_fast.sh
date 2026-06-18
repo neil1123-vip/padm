@@ -1006,6 +1006,30 @@ runSubscriptionOutputRandomUserRegression() (
     [[ -f "${subscribeCaptureDir}/sing-box/padm-abcdef12" ]]
 )
 
+runManagedFileBackupManifestRegression() (
+    local rootRel="${TMP_DIR}/managed-file-backup-manifest"
+    local root
+    local backupDir
+
+    mkdir -p "${rootRel}/targets"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    backupDir="${root}/backup"
+    printf 'old-one\n' >"${root}/targets/one.json"
+
+    padmWriteManagedFileBackupManifest "${backupDir}" \
+        "xray/one.json" "${root}/targets/one.json" \
+        "xray/two.json" "${root}/targets/two.json"
+    [[ -f "${backupDir}/xray/one.json" ]]
+    [[ -f "${backupDir}/manifest" ]]
+
+    printf 'new-one\n' >"${root}/targets/one.json"
+    printf 'new-two\n' >"${root}/targets/two.json"
+
+    padmRestoreManagedFileBackupManifest "${backupDir}"
+    [[ "$(<"${root}/targets/one.json")" == "old-one" ]]
+    [[ ! -e "${root}/targets/two.json" ]]
+)
+
 runCheckLogBackupMissingRestoreRegression() (
     local root="${TMP_DIR}/check-log-backup-restore"
     local restoreBackupDir
@@ -3381,6 +3405,7 @@ runRegressionPlatform() {
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
         runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression &&
         runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
+        runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&

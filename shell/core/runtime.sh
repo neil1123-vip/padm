@@ -51,6 +51,18 @@ padmManagedFilePath() {
     printf '%s\n' "${dirPath}/${fileName}"
 }
 
+padmManagedPathWithinRoot() {
+    local rootPath=$1
+    local relativePath=$2
+
+    [[ -n "${relativePath}" && "${relativePath}" != /* &&
+        "${relativePath}" != "." && "${relativePath}" != ".." &&
+        "${relativePath}" != */./* && "${relativePath}" != */. &&
+        "${relativePath}" != */../* && "${relativePath}" != */.. ]] || return 1
+    rootPath=$(padmRequireSafeAbsolutePath "${rootPath%/}") || return 1
+    printf '%s\n' "${rootPath}/${relativePath}"
+}
+
 padmInstallCleanupTrap() {
     if [[ -n "${PADM_CLEANUP_TRAP_INSTALLED}" ]]; then
         return 0
@@ -281,6 +293,69 @@ backupManagedFileToPath() {
         return 1
     fi
     commitGeneratedFile "${backupStage}" "${backupFile}" "${mode}" || { padmRemoveCleanupPath "${backupStage}"; return 1; }
+}
+
+padmWriteManagedFileBackupManifest() {
+    local backupDir=$1
+    shift
+    local manifest
+    local backupPath
+    local targetPath
+
+    [[ $(($# % 2)) -eq 0 ]] || return 1
+    backupDir=$(padmRequireSafeAbsolutePath "${backupDir}") || return 1
+    padmEnsureSafeDirectory "${backupDir}" || return 1
+    manifest="${backupDir}/manifest"
+    : >"${manifest}" || return 1
+    while [[ $# -gt 0 ]]; do
+        backupPath=$(padmManagedPathWithinRoot "${backupDir}" "$1") || return 1
+        targetPath=$(padmRequireSafeAbsolutePath "$2") || return 1
+        shift 2
+        [[ ! -e "${targetPath}" || -f "${targetPath}" || -L "${targetPath}" ]] || return 1
+        if [[ -f "${targetPath}" ]]; then
+            padmEnsureSafeDirectory "$(dirname -- "${backupPath}")" || return 1
+            backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || return 1
+            printf '%s\t%s\tfile\n' "${backupPath}" "${targetPath}" >>"${manifest}" || return 1
+        else
+            printf -- '-\t%s\tmissing\n' "${targetPath}" >>"${manifest}" || return 1
+        fi
+    done
+}
+
+padmRestoreManagedFileBackupManifest() {
+    local backupDir=$1
+    local manifest
+    local backupPath
+    local targetPath
+    local state
+    local status=0
+
+    backupDir=$(padmRequireSafeAbsolutePath "${backupDir}") || return 1
+    manifest="${backupDir}/manifest"
+    [[ -f "${manifest}" ]] || return 1
+    while IFS=$'\t' read -r backupPath targetPath state; do
+        if [[ -z "${state}" && "${targetPath}" == "missing" && -n "${backupPath}" ]]; then
+            targetPath="${backupPath}"
+            state=missing
+            backupPath=
+        fi
+        [[ -n "${targetPath}" ]] || continue
+        targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
+        case "${state}" in
+        file)
+            backupPath=$(padmRequireSafeAbsolutePath "${backupPath}") || return 1
+            backupPath=$(padmResolvePathWithinRoot "${backupDir}" "${backupPath}") || return 1
+            restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644 || status=1
+            ;;
+        missing)
+            removeManagedFileIfPresent "${targetPath}" || status=1
+            ;;
+        *)
+            status=1
+            ;;
+        esac
+    done <"${manifest}"
+    return "${status}"
 }
 
 writeGeneratedJsonFile() {
