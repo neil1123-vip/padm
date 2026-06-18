@@ -8004,7 +8004,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf 'sub_%s\n' "$1"
     }
     subscribe() {
-        printf 'subscribe:%s\n' "$*" >>"${callLog}"
+        printf 'subscribe:%s|%s|%s|%s\n' "${1:-}" "${2:-}" "${3:-}" "${4:-}" >>"${callLog}"
         [[ "${mode}" != "subscribe-fail" ]]
     }
     listSubscriptionSources() {
@@ -8048,7 +8048,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    grep -qx 'subscribe:false' "${callLog}"
+    grep -qx 'subscribe:false||sub_team-a|true' "${callLog}"
     grep -q '订阅输出刷新失败' "${errorLog}"
     [[ ! -s "${statusLog}" ]]
 
