@@ -322,23 +322,19 @@ setVlessRealityEncryption() {
         if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "核心重载失败"; then
             return 1
         fi
-        if reloadCore; then
-            errorCard "核心重载失败，已回滚 VLESS Encryption 修改"
-        else
-            errorCard "核心重载失败，已回滚 VLESS Encryption 修改；恢复旧配置后核心重载仍失败，请检查核心服务日志"
-        fi
+        local rollbackMessage
+        coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚 VLESS Encryption 修改" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        errorCard "${rollbackMessage}"
         return 1
     fi
     if ! refreshVlessEncryptionSubscriptions; then
         if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "刷新 VLESS Encryption 订阅失败"; then
             return 1
         fi
-        if ! reloadCore; then
-            errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置；恢复旧配置后核心重载失败，请检查核心服务日志"
-            return 1
-        fi
+        local refreshRollbackMessage
+        coreSetRollbackResultMessage refreshRollbackMessage "刷新 VLESS Encryption 订阅失败" "已恢复旧配置" reloadCore "恢复旧配置后核心重载失败，请检查核心服务日志"
         removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
-        errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置"
+        errorCard "${refreshRollbackMessage}"
         return 1
     fi
     removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
@@ -794,11 +790,9 @@ applyTraditionalTlsAlpn() {
         if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "核心重载失败"; then
             return 1
         fi
-        if reloadCore; then
-            errorCard "核心重载失败，已回滚 ALPN 修改"
-        else
-            errorCard "核心重载失败，已回滚 ALPN 修改；恢复旧配置后核心重载仍失败，请检查核心服务日志"
-        fi
+        local rollbackMessage
+        coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚 ALPN 修改" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        errorCard "${rollbackMessage}"
         return 1
     fi
     removeManagedFilesIfPresentIgnoreFailure "${backupFile}"

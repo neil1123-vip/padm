@@ -1065,11 +1065,9 @@ checkLog() {
                 return 1
             fi
             padmRemoveCleanupPath "${logBackupDir}"
-            if reloadCore; then
-                errorCard "核心重载失败，已回滚日志配置修改"
-            else
-                errorCard "核心重载失败，已回滚日志配置修改；恢复旧配置后核心重载仍失败，请检查核心服务日志"
-            fi
+            local rollbackMessage
+            coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚日志配置修改" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
+            errorCard "${rollbackMessage}"
             return 1
         fi
         padmRemoveCleanupPath "${logBackupDir}"

@@ -1937,6 +1937,31 @@ runCoreRollbackResultMessageRegression() (
         dns
     [[ "${message}" == "核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志" ]]
     grep -q '^dns$' "${retryLog}"
+
+    coreSetRollbackResultMessage message \
+        "刷新 VLESS Encryption 订阅失败" \
+        "已恢复旧配置"
+    [[ "${message}" == "刷新 VLESS Encryption 订阅失败，已恢复旧配置" ]]
+
+    : >"${retryLog}"
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚日志配置修改" \
+        coreRollbackRetryFail \
+        "恢复旧配置后核心重载仍失败，请检查核心服务日志" \
+        log
+    [[ "${message}" == "核心重载失败，已回滚日志配置修改；恢复旧配置后核心重载仍失败，请检查核心服务日志" ]]
+    grep -q '^log$' "${retryLog}"
+
+    : >"${retryLog}"
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚配置" \
+        coreRollbackRetrySuccess \
+        "恢复旧配置后重载仍失败，请检查核心服务日志" \
+        reality
+    [[ "${message}" == "核心重载失败，已回滚配置" ]]
+    grep -q '^reality$' "${retryLog}"
 )
 
 runCorePortFileTransactionRegression() {

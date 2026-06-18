@@ -2467,8 +2467,10 @@ changeInstalledRealityTarget() {
             return 1
         fi
         restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
-        if reloadCore; then
-            realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，已回滚配置"
+        local rollbackMessage
+        coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚配置" reloadCore "恢复旧配置后重载仍失败，请检查核心服务日志"
+        if [[ "${rollbackMessage}" == "核心重载失败，已回滚配置" ]]; then
+            realityTargetStatusBlock red "REALITY 目标站" "${rollbackMessage}"
         else
             realityTargetStatusBlock red "REALITY 目标站" "核心重载失败，已回滚配置" "恢复旧配置后重载仍失败，请检查核心服务日志"
         fi
