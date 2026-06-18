@@ -233,26 +233,33 @@ subscriptionWireGuardReportRestoreFailure() {
     fi
 }
 
-subscriptionWireGuardRestoreStateOrReport() {
+subscriptionWireGuardRunRestoreSteps() {
     local previousState=$1
-    local failureTitle=$2
-    if ! subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1; then
+    local previousGroupsState=${2:-}
+    local failureTitle=$3
+    local restoreFailed=false
+
+    subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || restoreFailed=true
+    if [[ -n "${previousGroupsState}" ]]; then
+        subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || restoreFailed=true
+    fi
+    if [[ "${restoreFailed}" == "true" ]]; then
         subscriptionWireGuardReportRestoreFailure "${failureTitle}"
         return 1
     fi
+}
+
+subscriptionWireGuardRestoreStateOrReport() {
+    local previousState=$1
+    local failureTitle=$2
+    subscriptionWireGuardRunRestoreSteps "${previousState}" "" "${failureTitle}"
 }
 
 subscriptionWireGuardRestoreStateAndGroupsOrReport() {
     local previousState=$1
     local previousGroupsState=$2
     local failureTitle=$3
-    local restoreFailed=false
-    subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || restoreFailed=true
-    subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || restoreFailed=true
-    if [[ "${restoreFailed}" == "true" ]]; then
-        subscriptionWireGuardReportRestoreFailure "${failureTitle}"
-        return 1
-    fi
+    subscriptionWireGuardRunRestoreSteps "${previousState}" "${previousGroupsState}" "${failureTitle}"
 }
 
 subscriptionWireGuardRole() {

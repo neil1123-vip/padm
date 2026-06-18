@@ -12842,6 +12842,36 @@ enable"
     nginxConfigPath="${oldNginxConfigPath}"
 )
 
+runSubscriptionWireGuardRestoreRunnerRegression() (
+    local errorLog="${TMP_DIR}/subscription-wireguard-restore-runner-error.log"
+    : >"${errorLog}"
+    errorCard() { printf '%s\n' "$@" >>"${errorLog}"; }
+    subscriptionWireGuardStateFile() { printf '%s\n' "/tmp/wg-state.json"; }
+    subscriptionWireGuardConfigFile() { printf '%s\n' "/tmp/wg.conf"; }
+    subscriptionGroupsFile() { printf '%s\n' "/tmp/groups.json"; }
+
+    subscriptionWireGuardRestoreStateAndConfig() { return 1; }
+    set +e
+    subscriptionWireGuardRunRestoreSteps '{}' "" "WireGuard 主控服务启动失败"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -q '^WireGuard 主控服务启动失败，且旧状态恢复失败$' "${errorLog}"
+    grep -q 'WireGuard 状态文件' "${errorLog}"
+    grep -q 'WireGuard 配置文件' "${errorLog}"
+
+    : >"${errorLog}"
+    subscriptionWireGuardRestoreStateAndConfig() { return 0; }
+    subscriptionWireGuardRestoreGroupsState() { return 1; }
+    set +e
+    subscriptionWireGuardRunRestoreSteps '{}' '{}' "订阅来源凭据写入失败"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -q '^订阅来源凭据写入失败，且旧状态恢复失败$' "${errorLog}"
+    grep -q '订阅组状态文件' "${errorLog}"
+)
+
 runMenuSmokeLightRegression() {
     local actions=
     local output=
@@ -15786,6 +15816,7 @@ runRegressionFastReality() {
 runRegressionUi() {
     runRegressionStep ui-smoke-light runMenuSmokeLightRegression
     runRegressionStep ui-smoke runMenuSmokeRegression
+    runRegressionStep wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
     runRegressionStep wireguard-menu-flow runSubscriptionWireGuardMenuFlowRegression
 }
 
@@ -16085,6 +16116,12 @@ transaction-subscription)
 transaction-system)
     regressionRunner=runRegressionTransactionSystem
     ;;
+wireguard-menu-flow)
+    regressionRunner=runSubscriptionWireGuardMenuFlowRegression
+    ;;
+wireguard-restore-runner)
+    regressionRunner=runSubscriptionWireGuardRestoreRunnerRegression
+    ;;
 remote-control)
     regressionRunner=runRegressionRemoteControl
     ;;
@@ -16092,7 +16129,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
