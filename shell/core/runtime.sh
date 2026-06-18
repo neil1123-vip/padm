@@ -89,6 +89,18 @@ padmCreateTempPath() {
     printf -v "${resultVar}" '%s' "${path}"
 }
 
+padmCreateTempPathCompat() {
+    local resultVar=$1
+    shift
+    if declare -F padmCreateTempPath >/dev/null 2>&1; then
+        padmCreateTempPath "${resultVar}" "$@"
+        return $?
+    fi
+    local path
+    path=$(mktemp "$@") || return 1
+    printf -v "${resultVar}" '%s' "${path}"
+}
+
 padmCreateTempFileForTarget() {
     local resultVar=$1
     local targetFile=$2

@@ -62,18 +62,6 @@ getScriptVersion() {
     echo "v${SCRIPT_VERSION}"
 }
 
-versionCreateTempPathCompat() {
-    local resultVar=$1
-    shift
-    if declare -F padmCreateTempPath >/dev/null 2>&1; then
-        padmCreateTempPath "${resultVar}" "$@"
-        return $?
-    fi
-    local path
-    path=$(mktemp "$@") || return 1
-    printf -v "${resultVar}" '%s' "${path}"
-}
-
 setScriptVersion() {
     local version=${1#v}
     local versionFile=${2:-${BASH_SOURCE[0]}}
@@ -82,7 +70,7 @@ setScriptVersion() {
         echo "Invalid version: ${version}" >&2
         return 1
     fi
-    versionCreateTempPathCompat tmpFile || return 1
+    padmCreateTempPathCompat tmpFile || return 1
     awk -v version="${version}" '
         BEGIN { replaced = 0 }
         /^SCRIPT_VERSION=/ {

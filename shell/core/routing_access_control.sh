@@ -347,11 +347,7 @@ accessControlBackupDir() {
         printf '%s\n' "${PADM_ACCESS_CONTROL_BACKUP_DIR}"
         return 0
     fi
-    local tmpBase="${TMPDIR:-/tmp}"
-    if [[ "${tmpBase}" != /* ]]; then
-        tmpBase=$(cd -- "${tmpBase}" 2>/dev/null && pwd -P) || return 1
-    fi
-    printf '%s\n' "${tmpBase%/}/padm-access-control-backup"
+    printf '%s\n' "$(padmFallbackTmpFilePath padm-access-control-backup)"
 }
 
 accessControlSafeBackupDir() {

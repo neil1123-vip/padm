@@ -26,9 +26,7 @@ validate_tmp_root() {
         return 0
     fi
 
-    local baseDir="${TMPDIR:-/tmp}"
-    mkdir -p "${baseDir}" || return 1
-    PADM_VALIDATE_TMP_ROOT=$(mktemp -d "${baseDir%/}/padm-validate.XXXXXX") || return 1
+    padmCreateTempPathCompat PADM_VALIDATE_TMP_ROOT -d "$(padmFallbackTmpFilePath padm-validate.XXXXXX)" || return 1
     printf '%s\n' "${PADM_VALIDATE_TMP_ROOT}"
 }
 
