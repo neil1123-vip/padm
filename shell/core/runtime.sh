@@ -139,12 +139,17 @@ removeManagedFileIfPresent() {
 
 removeManagedFilesIfPresent() {
     local targetFile
-    local status=0
+    local resolvedTarget
+    local -a resolvedTargets=()
 
     for targetFile in "$@"; do
-        removeManagedFileIfPresent "${targetFile}" || status=1
+        resolvedTarget=$(padmRequireSafeAbsolutePath "${targetFile}") || return 1
+        [[ ! -e "${resolvedTarget}" || -f "${resolvedTarget}" || -L "${resolvedTarget}" ]] || return 1
+        resolvedTargets+=("${resolvedTarget}")
     done
-    return "${status}"
+    for resolvedTarget in "${resolvedTargets[@]}"; do
+        rm -f -- "${resolvedTarget}" >/dev/null 2>&1 || return 1
+    done
 }
 
 removeManagedPathIfPresent() {

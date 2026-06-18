@@ -5514,16 +5514,15 @@ SH
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 )
 
-runNginxServiceFailureRegression() {
-    (
-        set -euo pipefail
-        local serviceTmp
-        local fakeBin
-        serviceTmp=$(mktemp -d)
-        fakeBin="${serviceTmp}/bin"
-        mkdir -p "${fakeBin}" "${serviceTmp}/etc-padm"
+runNginxServiceFailureRegression() (
+    set -euo pipefail
+    local serviceTmp
+    local fakeBin
+    serviceTmp=$(mktemp -d)
+    fakeBin="${serviceTmp}/bin"
+    mkdir -p "${fakeBin}" "${serviceTmp}/etc-padm"
 
-        cat >"${fakeBin}/systemctl" <<'SH'
+    cat >"${fakeBin}/systemctl" <<'SH'
 #!/usr/bin/env bash
 case "$1" in
 start)
@@ -5539,7 +5538,7 @@ stop)
     ;;
 esac
 SH
-        cat >"${fakeBin}/pgrep" <<'SH'
+    cat >"${fakeBin}/pgrep" <<'SH'
 #!/usr/bin/env bash
 if [[ "$1" == "-x" && "$2" == "nginx" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]]; then
     printf '12345\n'
@@ -5547,60 +5546,59 @@ if [[ "$1" == "-x" && "$2" == "nginx" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 
 fi
 exit 1
 SH
-        cat >"${fakeBin}/kill" <<'SH'
+    cat >"${fakeBin}/kill" <<'SH'
 #!/usr/bin/env bash
 printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
 SH
-        cat >"${fakeBin}/sleep" <<'SH'
+    cat >"${fakeBin}/sleep" <<'SH'
 #!/usr/bin/env bash
 exit 0
 SH
-        cat >"${fakeBin}/nginx" <<'SH'
+    cat >"${fakeBin}/nginx" <<'SH'
 #!/usr/bin/env bash
 if [[ "$1" == "-s" && "$2" == "stop" ]]; then
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
 fi
 exit 0
 SH
-        chmod +x "${fakeBin}/systemctl" "${fakeBin}/pgrep" "${fakeBin}/kill" "${fakeBin}/sleep" "${fakeBin}/nginx"
+    chmod +x "${fakeBin}/systemctl" "${fakeBin}/pgrep" "${fakeBin}/kill" "${fakeBin}/sleep" "${fakeBin}/nginx"
 
-        PATH="${fakeBin}:${PATH}"
-        source "${PROJECT_ROOT}/shell/core/protocols.sh"
-        source "${PROJECT_ROOT}/shell/core/services.sh"
-        echoContent() { return 0; }
-        successCard() { return 0; }
-        statusCard() { return 0; }
-        errorCard() { return 0; }
-        updateSELinuxHTTPPortT() { return 0; }
-        protocolSelectionSkipsNginx() { return 1; }
-        nginxServiceInstalled() { return 0; }
-        release=centos
-        selectCustomInstallType=
-        btDomain=panel.example.com
-        SERVICE_QUEUE_ALLOW_FAILURE=true
-        export PADM_FAKE_NGINX_STATE_FILE="${serviceTmp}/nginx-running"
-        export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
+    PATH="${fakeBin}:${PATH}"
+    source "${PROJECT_ROOT}/shell/core/protocols.sh"
+    source "${PROJECT_ROOT}/shell/core/services.sh"
+    echoContent() { return 0; }
+    successCard() { return 0; }
+    statusCard() { return 0; }
+    errorCard() { return 0; }
+    updateSELinuxHTTPPortT() { return 0; }
+    protocolSelectionSkipsNginx() { return 1; }
+    nginxServiceInstalled() { return 0; }
+    release=centos
+    selectCustomInstallType=
+    btDomain=panel.example.com
+    SERVICE_QUEUE_ALLOW_FAILURE=true
+    export PADM_FAKE_NGINX_STATE_FILE="${serviceTmp}/nginx-running"
+    export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
 
-        printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
-        PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
-        printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
-        PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1
-        [[ "$(cat "${PADM_FAKE_NGINX_STATE_FILE}")" == "false" ]]
-        printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
-        PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
-        printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
-        PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=false handleNginx stop >/dev/null 2>&1
-        printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
-        SERVICE_ACTIONS=
-        serviceQueueStart nginx
-        serviceQueueStop nginx
-        if PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false serviceQueueApply >/dev/null 2>&1; then
-            return 1
-        fi
-        [[ -z "${SERVICE_ACTIONS}" ]]
-        rm -rf "${serviceTmp}"
-    )
-}
+    printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
+    printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1
+    [[ "$(cat "${PADM_FAKE_NGINX_STATE_FILE}")" == "false" ]]
+    printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
+    printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=false handleNginx stop >/dev/null 2>&1
+    printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    SERVICE_ACTIONS=
+    serviceQueueStart nginx
+    serviceQueueStop nginx
+    if PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false serviceQueueApply >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ -z "${SERVICE_ACTIONS}" ]]
+    rm -rf "${serviceTmp}"
+)
 
 
 runUninstallWireGuardCleanupRegression() (
@@ -5931,11 +5929,20 @@ runFail2banManagedCleanupRegression() (
     [[ ! -e "${PADM_FAIL2BAN_CONTROL_LOG_FILE}" ]]
 
     : >"${rmLog}"
+    PADM_FAIL2BAN_FILTER_FILE="${root}/filter.d/padm-control.conf"
+    PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE="${root}/filter.d/padm-nginx-scan-basic.conf"
+    PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/log/padm-control-access.log"
+    printf 'filter-again\n' >"${PADM_FAIL2BAN_FILTER_FILE}"
+    printf 'scan-again\n' >"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+    printf 'log-again\n' >"${PADM_FAIL2BAN_CONTROL_LOG_FILE}"
     PADM_FAIL2BAN_JAIL_FILE="relative/padm.local"
     if fail2banRemoveManagedFiles >/dev/null 2>&1; then
         return 1
     fi
     [[ ! -s "${rmLog}" ]]
+    [[ "$(<"${PADM_FAIL2BAN_FILTER_FILE}")" == "filter-again" ]]
+    [[ "$(<"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}")" == "scan-again" ]]
+    [[ "$(<"${PADM_FAIL2BAN_CONTROL_LOG_FILE}")" == "log-again" ]]
 )
 
 runFail2banApplyTransactionRegression() (
