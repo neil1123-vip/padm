@@ -27,6 +27,10 @@ subscriptionWireGuardConfigFile() {
     echo "/etc/wireguard/$(subscriptionWireGuardInterface).conf"
 }
 
+subscriptionWireGuardNginxTestLog() {
+    padmFallbackTmpFilePath padm-wg-control-nginx-test.log
+}
+
 subscriptionWireGuardDefaultListenPort() {
     echo 51820
 }
@@ -502,7 +506,7 @@ EOF
             cp "${targetPath}" "${backupPath}" || { padmRemoveCleanupPath "${tmpPath}"; padmRemoveCleanupPath "${backupPath}"; return 1; }
         fi
         commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"; return 1; }
-        if ! nginx -t >/tmp/padm-wg-control-nginx-test.log 2>&1; then
+        if ! nginx -t >"$(subscriptionWireGuardNginxTestLog)" 2>&1; then
             if [[ -n "${backupPath}" && -f "${backupPath}" ]]; then
                 commitGeneratedFile "${backupPath}" "${targetPath}" 644 || padmRemoveCleanupPath "${backupPath}"
             else

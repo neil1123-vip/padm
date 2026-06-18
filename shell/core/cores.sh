@@ -476,12 +476,7 @@ validateXrayConfigStrictWithBinary() {
 
 coreTmpFilePath() {
     local fileName=$1
-    if declare -F padmTmpFilePath >/dev/null 2>&1; then
-        padmTmpFilePath "${fileName}"
-    else
-        local tmpBase="${TMPDIR:-/tmp}"
-        printf '%s\n' "${tmpBase%/}/${fileName}"
-    fi
+    padmFallbackTmpFilePath "${fileName}"
 }
 
 singBoxConfigInstalled() {
