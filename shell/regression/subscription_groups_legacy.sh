@@ -15538,7 +15538,6 @@ runTlsRenewalFailurePropagationRegression() (
 
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
@@ -15676,7 +15675,6 @@ runTlsRenewalInstallRollbackRegression() (
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
     handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleXray() { printf 'xray:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleSingBox() { printf 'sing-box:%s\n' "$1" >>"${serviceLog}"; return 0; }
@@ -15758,9 +15756,7 @@ runTlsRenewalBackupPreparationRestoresServicesRegression() (
     : >"${serviceLog}"
     : >"${errorLog}"
 
-    statusCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
     handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleXray() { printf 'xray:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleSingBox() { printf 'sing-box:%s\n' "$1" >>"${serviceLog}"; return 0; }
@@ -15864,12 +15860,6 @@ runTlsReinstallRollbackRegression() (
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    menuItem() { return 0; }
-    menuRecommendedItem() { return 0; }
     autoRead() {
         case "$3" in
         reInstallStatus) printf -v "$3" 'y' ;;
