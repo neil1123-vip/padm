@@ -816,6 +816,7 @@ runBTRoutingFailureReturnRegression() (
     menuClose() { return 0; }
     showBTBlockStatus() { return 0; }
     readInstallType() { coreInstallType=1; }
+
     (
         configPath="${root}/xray/"
         cat >"${configPath}09_routing.json" <<'JSON'
@@ -866,6 +867,7 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -e "${installMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+
     autoRead() { printf -v "$3" '2'; }
     uninstallBTBlock() {
         printf 'uninstall\n' >"${uninstallMarker}"
@@ -953,6 +955,7 @@ runIPv6RoutingFailureReturnRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     hasIPv6Connectivity() { return 0; }
     mode=empty-domain
     menuChoice=2
@@ -965,6 +968,7 @@ runIPv6RoutingFailureReturnRegression() (
     [[ ! -e "${outboundMarker}" ]]
     [[ ! -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=routing-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
@@ -975,6 +979,7 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=reload-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
@@ -983,6 +988,7 @@ runIPv6RoutingFailureReturnRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
+
     mode=outbound-fail
     menuChoice=3
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
@@ -994,6 +1000,7 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=uninstall-fail
     menuChoice=4
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
@@ -1005,6 +1012,7 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=reload-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
@@ -1119,6 +1127,7 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${readMarker}" ]]
     [[ ! -e "${outboundMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=routing-fail
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
@@ -1129,6 +1138,7 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=reload-fail
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
@@ -1137,6 +1147,7 @@ runWARPRoutingFailureReturnRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
+
     mode=outbound-fail
     menuChoice=3
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
@@ -1148,6 +1159,7 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=uninstall-fail
     menuChoice=4
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
@@ -1159,6 +1171,7 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=reload-fail
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
@@ -1289,6 +1302,7 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+
     mode=stop-fail
     uninstallChoice=2
     rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${stopMarker}"
@@ -1299,6 +1313,7 @@ runSocks5RoutingFailureReturnRegression() (
     [[ "${rc}" == "1" ]]
     [[ -e "${stopMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=uninstall-fail
     uninstallChoice=1
     rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
@@ -1310,6 +1325,7 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+
     mode=reload-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
@@ -10951,6 +10967,30 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
             printf 'reload\n' >>"${callLog}"
             return 1
         }
+        readNginxSubscribe() {
+            printf 'read\n' >>"${callLog}"
+            subscribePort=39778
+        }
+        installSubscriptionControlService() {
+            printf 'install\n' >>"${callLog}"
+            return 0
+        }
+        ensureSubscriptionControlNginxLocation() {
+            printf 'ensure\n' >>"${callLog}"
+            return 0
+        }
+        serviceQueueRestart() {
+            printf 'restart:%s\n' "$1" >>"${callLog}"
+            return 0
+        }
+        serviceQueueApply() {
+            printf 'apply\n' >>"${callLog}"
+            return 0
+        }
+        subscribe() {
+            printf 'subscribe:%s\n' "$*" >>"${callLog}"
+            return 0
+        }
         set +e
         subscriptionSyncReconcileLocalServices
         rc=$?
@@ -10974,6 +11014,22 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
         installSubscriptionControlService() {
             printf 'install\n' >>"${callLog}"
             return 1
+        }
+        ensureSubscriptionControlNginxLocation() {
+            printf 'ensure\n' >>"${callLog}"
+            return 0
+        }
+        serviceQueueRestart() {
+            printf 'restart:%s\n' "$1" >>"${callLog}"
+            return 0
+        }
+        serviceQueueApply() {
+            printf 'apply\n' >>"${callLog}"
+            return 0
+        }
+        subscribe() {
+            printf 'subscribe:%s\n' "$*" >>"${callLog}"
+            return 0
         }
         set +e
         subscriptionSyncReconcileLocalServices
@@ -11012,6 +11068,10 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
         serviceQueueApply() {
             printf 'apply\n' >>"${callLog}"
             return 1
+        }
+        subscribe() {
+            printf 'subscribe:%s\n' "$*" >>"${callLog}"
+            return 0
         }
         set +e
         subscriptionSyncReconcileLocalServices
