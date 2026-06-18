@@ -739,10 +739,22 @@ subscriptionControlFailInstall() {
     SUBSCRIPTION_CONTROL_INSTALL_ERROR=
     if subscriptionControlRestoreServiceInstall "${backupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
         padmRemoveCleanupPath "${backupDir}"
-        SUBSCRIPTION_CONTROL_INSTALL_ERROR="${reason}，已恢复安装前状态"
+        subscriptionSyncSetSingleRestoreResultMessage \
+            SUBSCRIPTION_CONTROL_INSTALL_ERROR \
+            "${reason}" \
+            true \
+            "已恢复安装前状态" \
+            "安装前状态" \
+            "备份目录: ${backupDir}"
     else
         padmForgetCleanupPath "${backupDir}"
-        SUBSCRIPTION_CONTROL_INSTALL_ERROR="${reason}，且安装前状态恢复失败，请手动检查备份目录: ${backupDir}"
+        subscriptionSyncSetSingleRestoreResultMessage \
+            SUBSCRIPTION_CONTROL_INSTALL_ERROR \
+            "${reason}" \
+            false \
+            "已恢复安装前状态" \
+            "安装前状态" \
+            "备份目录: ${backupDir}"
     fi
     return 1
 }
@@ -975,19 +987,43 @@ subscriptionControlApplyAccountPlan() {
     if ! subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"; then
         applyError="控制面同步期望用户状态写入失败"
         if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}，且订阅状态恢复失败，请手动检查 $(subscriptionGroupsFile)"
+            subscriptionSyncSetSingleRestoreResultMessage \
+                SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+                "${applyError}" \
+                false \
+                "" \
+                "订阅状态" \
+                "$(subscriptionGroupsFile)"
             return 1
         fi
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}"
+        subscriptionSyncSetSingleRestoreResultMessage \
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+            "${applyError}" \
+            true \
+            "" \
+            "订阅状态" \
+            "$(subscriptionGroupsFile)"
         return 1
     fi
     if ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
         applyError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-控制面同步计划应用失败}"
         if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}，且订阅状态恢复失败，请手动检查 $(subscriptionGroupsFile)"
+            subscriptionSyncSetSingleRestoreResultMessage \
+                SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+                "${applyError}" \
+                false \
+                "" \
+                "订阅状态" \
+                "$(subscriptionGroupsFile)"
             return 1
         fi
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${applyError}"
+        subscriptionSyncSetSingleRestoreResultMessage \
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+            "${applyError}" \
+            true \
+            "" \
+            "订阅状态" \
+            "$(subscriptionGroupsFile)"
         return 1
     fi
 }

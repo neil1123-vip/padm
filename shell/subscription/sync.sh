@@ -651,6 +651,30 @@ subscriptionSyncAppendRestoreFailureDetail() {
     printf -v "${outputVar}" '%s' "${result}"
 }
 
+subscriptionSyncSetSingleRestoreResultMessage() {
+    local outputVar=$1
+    local reason=$2
+    local restored=$3
+    local restoredMessage=$4
+    local failedLabel=$5
+    local failedLocation=$6
+    local result=
+
+    if [[ "${restored}" == "true" ]]; then
+        if [[ -n "${restoredMessage}" ]]; then
+            result="${reason}，${restoredMessage}"
+        else
+            result="${reason}"
+        fi
+        printf -v "${outputVar}" '%s' "${result}"
+        return 0
+    fi
+
+    result="${reason}，且${failedLabel}恢复失败，请手动检查${failedLocation}"
+    printf -v "${outputVar}" '%s' "${result}"
+    return 1
+}
+
 subscriptionSyncSetRollbackRetryMessage() {
     local outputVar=$1
     local reason=$2
@@ -680,7 +704,13 @@ subscriptionSyncApplyAccountPlanTransaction() {
     fi
     if [[ "${applyStatus}" -ne 0 ]]; then
         if ! subscriptionSyncRestoreConfigBackups "${backupDir}" >/dev/null 2>&1; then
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败，且配置恢复失败，请手动检查备份目录: ${backupDir}"
+            subscriptionSyncSetSingleRestoreResultMessage \
+                SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+                "本机同步计划应用失败" \
+                false \
+                "" \
+                "配置" \
+                "备份目录: ${backupDir}"
             padmForgetCleanupPath "${backupDir}"
             return 1
         fi
@@ -690,7 +720,13 @@ subscriptionSyncApplyAccountPlanTransaction() {
     if [[ -n "${reloadFn}" ]]; then
         if ! "${reloadFn}"; then
             if ! subscriptionSyncRestoreConfigBackups "${backupDir}" >/dev/null 2>&1; then
-                SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用后核心重载失败，且配置恢复失败，请手动检查备份目录: ${backupDir}"
+                subscriptionSyncSetSingleRestoreResultMessage \
+                    SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+                    "本机同步计划应用后核心重载失败" \
+                    false \
+                    "" \
+                    "配置" \
+                    "备份目录: ${backupDir}"
                 padmForgetCleanupPath "${backupDir}"
                 return 1
             fi
@@ -829,12 +865,24 @@ applySubscriptionQuotaPlanTransaction() {
         return 0
     fi
     if ! restoreSubscriptionGroupsBackup "${backupFile}"; then
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${quotaError}，且订阅状态恢复失败，请手动检查备份文件: ${backupFile}"
+        subscriptionSyncSetSingleRestoreResultMessage \
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+            "${quotaError}" \
+            false \
+            "已恢复旧订阅状态" \
+            "订阅状态" \
+            "备份文件: ${backupFile}"
         padmForgetCleanupPath "${backupFile}"
         return 1
     fi
     padmRemoveCleanupPath "${backupFile}"
-    SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${quotaError}，已恢复旧订阅状态"
+    subscriptionSyncSetSingleRestoreResultMessage \
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+        "${quotaError}" \
+        true \
+        "已恢复旧订阅状态" \
+        "订阅状态" \
+        "备份文件: ${backupFile}"
     return 1
 }
 
