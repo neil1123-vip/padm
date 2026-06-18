@@ -294,7 +294,9 @@ setVlessRealityEncryption() {
                 return 1
             fi
             padmRemoveCleanupPath "${stateStageFile}"
-            errorCard "提交 VLESS Encryption 状态失败，已恢复旧配置"
+            local restoreMessage
+            coreSetSingleRestoreResultMessage restoreMessage "提交 VLESS Encryption 状态失败" true "已恢复旧配置" "旧配置" "${stateBackupFile}"
+            errorCard "${restoreMessage}"
             return 1
         fi
         chmod 600 "${stateFile}" 2>/dev/null || true
@@ -303,7 +305,9 @@ setVlessRealityEncryption() {
             if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" keep "删除 VLESS Encryption 状态失败"; then
                 return 1
             fi
-            errorCard "删除 VLESS Encryption 状态失败，已恢复旧配置"
+            local restoreMessage
+            coreSetSingleRestoreResultMessage restoreMessage "删除 VLESS Encryption 状态失败" true "已恢复旧配置" "旧配置" "${stateBackupFile}"
+            errorCard "${restoreMessage}"
             return 1
         fi
     fi

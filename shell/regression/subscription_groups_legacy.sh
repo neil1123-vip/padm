@@ -1986,6 +1986,18 @@ runCoreRollbackResultMessageRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "Fail2ban 服务应用失败，且旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "提交 VLESS Encryption 状态失败" \
+        true \
+        "已恢复旧配置" \
+        "旧配置" \
+        "/tmp/vless-state-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ "${message}" == "提交 VLESS Encryption 状态失败，已恢复旧配置" ]]
 )
 
 runCorePortFileTransactionRegression() {
