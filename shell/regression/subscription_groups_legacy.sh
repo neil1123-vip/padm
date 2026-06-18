@@ -12607,6 +12607,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         printf -v "${targetVar}" '%s' "${input}"
     }
     echoContent() { return 0; }
+    menuSection() { return 0; }
     menuLine() { return 0; }
     menuItem() { return 0; }
     menuReturnItem() { return 0; }
@@ -12619,6 +12620,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/menu-smoke-wireguard"
     currentHost="main.example.com"
     nginxConfigPath="${TMP_DIR}/menu-smoke-nginx/"
+    subscriptionWireGuardConfigFile() { echo "${TMP_DIR}/menu-smoke-wireguard/wg-padm.conf"; }
     rm -rf "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
     mkdir -p "${nginxConfigPath}"
     ensureSubscriptionGroupsState
@@ -12700,7 +12702,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     subscribe() { recordMenuAction subscribe; }
 
     resetMenuActions
-    manageSubscriptionWireGuardControlMenu <<<"1
+    manageSubscriptionRoleSelection <<<"1
 main.example.com
 3"
     assertMenuAction initSubscriptionWireGuardMain
