@@ -2039,6 +2039,11 @@ runCoreRollbackResultMessageRegression() (
         "sing-box 日志配置重载失败" \
         "已回滚日志配置"
     [[ "${message}" == "sing-box 日志配置重载失败，已回滚日志配置" ]]
+
+    coreSetRollbackResultMessage message \
+        "写入日志配置失败" \
+        "已回滚本次日志修改"
+    [[ "${message}" == "写入日志配置失败，已回滚本次日志修改" ]]
 )
 
 runCorePortFileTransactionRegression() {

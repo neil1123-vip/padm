@@ -963,6 +963,28 @@ checkLogBackupRestore() {
     padmRestoreManagedFileBackupManifest "${backupDir}"
 }
 
+checkLogRollbackOrReport() {
+    local backupDir=$1
+    local restoreReason=$2
+    local rollbackReason=$3
+    local restoreMessage
+    local rollbackMessage
+
+    if ! checkLogBackupRestore "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        coreSetSingleRestoreResultMessage restoreMessage "${restoreReason}" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
+        errorCard "${restoreMessage}"
+        return 1
+    fi
+
+    padmRemoveCleanupPath "${backupDir}"
+    if [[ -n "${rollbackReason}" ]]; then
+        coreSetRollbackResultMessage rollbackMessage "${restoreReason}" "${rollbackReason}"
+        errorCard "${rollbackMessage}"
+    fi
+    return 1
+}
+
 # 日志管理
 checkLog() {
     if [[ "${coreInstallType}" == "2" ]]; then
@@ -1011,58 +1033,26 @@ checkLog() {
         if [[ "${logStatus}" == "false" ]]; then
             realityLogShow=true
             if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" true; then
-                if ! checkLogBackupRestore "${logBackupDir}"; then
-                    padmForgetCleanupPath "${logBackupDir}"
-                    local restoreMessage
-                    coreSetSingleRestoreResultMessage restoreMessage "写入日志配置失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
-                    errorCard "${restoreMessage}"
-                    return 1
-                fi
-                padmRemoveCleanupPath "${logBackupDir}"
-                errorCard "写入日志配置失败，已回滚本次日志修改"
+                checkLogRollbackOrReport "${logBackupDir}" "写入日志配置失败" "已回滚本次日志修改"
                 return 1
             fi
         elif [[ "${logStatus}" == "true" ]]; then
             realityLogShow=false
             if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" false; then
-                if ! checkLogBackupRestore "${logBackupDir}"; then
-                    padmForgetCleanupPath "${logBackupDir}"
-                    local restoreMessage
-                    coreSetSingleRestoreResultMessage restoreMessage "写入日志配置失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
-                    errorCard "${restoreMessage}"
-                    return 1
-                fi
-                padmRemoveCleanupPath "${logBackupDir}"
-                errorCard "写入日志配置失败，已回滚本次日志修改"
+                checkLogRollbackOrReport "${logBackupDir}" "写入日志配置失败" "已回滚本次日志修改"
                 return 1
             fi
         fi
 
         if [[ ${realityStatus} == "7" ]]; then
             if ! updateRealityShowConfig "${configPath}07_VLESS_vision_reality_inbounds.json" "${realityLogShow}"; then
-                if ! checkLogBackupRestore "${logBackupDir}"; then
-                    padmForgetCleanupPath "${logBackupDir}"
-                    local restoreMessage
-                    coreSetSingleRestoreResultMessage restoreMessage "Reality 日志联动配置写入失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
-                    errorCard "${restoreMessage}"
-                    return 1
-                fi
-                padmRemoveCleanupPath "${logBackupDir}"
-                errorCard "Reality 日志联动配置写入失败，已回滚本次日志修改"
+                checkLogRollbackOrReport "${logBackupDir}" "Reality 日志联动配置写入失败" "已回滚本次日志修改"
                 return 1
             fi
         fi
         if [[ ${realityStatus} == "12" ]]; then
             if ! updateRealityShowConfig "${configPath}12_VLESS_XHTTP_inbounds.json" "${realityLogShow}"; then
-                if ! checkLogBackupRestore "${logBackupDir}"; then
-                    padmForgetCleanupPath "${logBackupDir}"
-                    local restoreMessage
-                    coreSetSingleRestoreResultMessage restoreMessage "Reality 日志联动配置写入失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
-                    errorCard "${restoreMessage}"
-                    return 1
-                fi
-                padmRemoveCleanupPath "${logBackupDir}"
-                errorCard "Reality 日志联动配置写入失败，已回滚本次日志修改"
+                checkLogRollbackOrReport "${logBackupDir}" "Reality 日志联动配置写入失败" "已回滚本次日志修改"
                 return 1
             fi
         fi
