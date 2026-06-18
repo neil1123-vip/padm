@@ -7851,15 +7851,15 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     }
     subscriptionSyncRemoveAccount() {
         printf 'account:%s\n' "$1" >>"${callLog}"
-        [[ "${mode}" != "account-fail" && "${mode}" != "state-restore-fail" && "${mode}" != "account-restore-fail" ]]
+        [[ "${mode}" != "account-fail" && "${mode}" != "state-restore-fail" && "${mode}" != "account-restore-fail" && "${mode}" != "both-restore-fail" ]]
     }
     subscriptionGroupsStateWrite() {
         printf 'state-restore\n' >>"${callLog}"
-        [[ "${mode}" != "state-restore-fail" ]]
+        [[ "${mode}" != "state-restore-fail" && "${mode}" != "both-restore-fail" ]]
     }
     subscriptionSyncRestoreConfigBackups() {
         printf 'account-restore:%s\n' "$1" >>"${callLog}"
-        [[ "${mode}" != "account-restore-fail" ]]
+        [[ "${mode}" != "account-restore-fail" && "${mode}" != "both-restore-fail" ]]
     }
     padmRemoveCleanupPath() {
         printf 'cleanup:%s\n' "$1" >>"${callLog}"
@@ -7939,6 +7939,16 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "keep-backup:${backupDir}" "${callLog}"
     grep -q '托管账号配置恢复失败' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase both-restore-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'state:team-a' "${callLog}"
+    grep -qx 'account:sub_team-a' "${callLog}"
+    grep -qx 'state-restore' "${callLog}"
+    grep -qx "account-restore:${backupDir}" "${callLog}"
+    grep -qx "keep-backup:${backupDir}" "${callLog}"
+    grep -q '订阅状态与托管账号配置恢复失败' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
     runRemoveCase success

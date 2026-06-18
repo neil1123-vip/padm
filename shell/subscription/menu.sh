@@ -638,6 +638,7 @@ removeUserSubscriptionRollback() {
     local reason=$3
     local stateRestored=true
     local configRestored=true
+    local rollbackMessage
 
     if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
         stateRestored=false
@@ -652,16 +653,13 @@ removeUserSubscriptionRollback() {
         padmForgetCleanupPath "${configBackupDir}"
     fi
 
-    if [[ "${stateRestored}" != "true" && "${configRestored}" != "true" ]]; then
-        errorCard "${reason}，且订阅状态与托管账号配置恢复失败，请手动检查 $(subscriptionGroupsFile) 和备份目录: ${configBackupDir}"
-        return 1
-    fi
-    if [[ "${stateRestored}" != "true" ]]; then
-        errorCard "${reason}，且订阅状态恢复失败，请手动检查 $(subscriptionGroupsFile)"
-        return 1
-    fi
-    if [[ "${configRestored}" != "true" ]]; then
-        errorCard "${reason}，且托管账号配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+    if ! subscriptionSyncSetRestorePairFailureMessage \
+        rollbackMessage \
+        "${reason}" \
+        "${stateRestored}" "订阅状态" "$(subscriptionGroupsFile)" \
+        "${configRestored}" "托管账号配置" "备份目录: ${configBackupDir}" \
+        "$(subscriptionGroupsFile) 和备份目录: ${configBackupDir}"; then
+        errorCard "${rollbackMessage}"
         return 1
     fi
 }

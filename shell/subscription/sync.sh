@@ -599,17 +599,56 @@ subscriptionSyncRollbackLocalApply() {
         outputRestored=false
     fi
 
-    if [[ "${configRestored}" == "true" && "${outputRestored}" == "true" ]]; then
+    subscriptionSyncSetRestorePairFailureMessage \
+        SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+        "${reason}" \
+        "${configRestored}" "配置" "备份目录: ${configBackupDir}" \
+        "${outputRestored}" "订阅输出" "备份目录: ${outputBackupDir}" \
+        "备份目录: ${configBackupDir} 和 ${outputBackupDir}"
+}
+
+subscriptionSyncSetRestorePairFailureMessage() {
+    local outputVar=$1
+    local reason=$2
+    local firstRestored=$3
+    local firstLabel=$4
+    local firstLocation=$5
+    local secondRestored=$6
+    local secondLabel=$7
+    local secondLocation=$8
+    local combinedLocation=$9
+    local result=
+
+    if [[ "${firstRestored}" == "true" && "${secondRestored}" == "true" ]]; then
+        printf -v "${outputVar}" '%s' ''
         return 0
     fi
-    if [[ "${configRestored}" != "true" && "${outputRestored}" != "true" ]]; then
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${reason}，且配置与订阅输出恢复失败，请手动检查备份目录: ${configBackupDir} 和 ${outputBackupDir}"
-    elif [[ "${configRestored}" != "true" ]]; then
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${reason}，且配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+
+    if [[ "${firstRestored}" != "true" && "${secondRestored}" != "true" ]]; then
+        result="${reason}，且${firstLabel}与${secondLabel}恢复失败，请手动检查${combinedLocation}"
+    elif [[ "${firstRestored}" != "true" ]]; then
+        result="${reason}，且${firstLabel}恢复失败，请手动检查${firstLocation}"
     else
-        SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${reason}，且订阅输出恢复失败，请手动检查备份目录: ${outputBackupDir}"
+        result="${reason}，且${secondLabel}恢复失败，请手动检查${secondLocation}"
     fi
+
+    printf -v "${outputVar}" '%s' "${result}"
     return 1
+}
+
+subscriptionSyncAppendRestoreFailureDetail() {
+    local outputVar=$1
+    local prefix=$2
+    local detail=$3
+    local result=${!outputVar:-}
+
+    if [[ -n "${result}" ]]; then
+        result="${result}；${detail}"
+    else
+        result="${prefix}${detail}"
+    fi
+
+    printf -v "${outputVar}" '%s' "${result}"
 }
 
 subscriptionSyncSetRollbackRetryMessage() {

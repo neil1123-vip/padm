@@ -732,6 +732,69 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionSyncRestorePairFailureMessageRegression() (
+    local message=
+    local rc
+
+    set +e
+    subscriptionSyncSetRestorePairFailureMessage message \
+        "本机同步失败" \
+        true "配置" "备份目录: /tmp/config" \
+        true "订阅输出" "备份目录: /tmp/output" \
+        "备份目录: /tmp/config 和 /tmp/output"
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ -z "${message}" ]]
+
+    set +e
+    subscriptionSyncSetRestorePairFailureMessage message \
+        "本机同步失败" \
+        false "配置" "备份目录: /tmp/config" \
+        true "订阅输出" "备份目录: /tmp/output" \
+        "备份目录: /tmp/config 和 /tmp/output"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "本机同步失败，且配置恢复失败，请手动检查备份目录: /tmp/config" ]]
+
+    set +e
+    subscriptionSyncSetRestorePairFailureMessage message \
+        "本机同步失败" \
+        true "配置" "备份目录: /tmp/config" \
+        false "订阅输出" "备份目录: /tmp/output" \
+        "备份目录: /tmp/config 和 /tmp/output"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "本机同步失败，且订阅输出恢复失败，请手动检查备份目录: /tmp/output" ]]
+
+    set +e
+    subscriptionSyncSetRestorePairFailureMessage message \
+        "本机同步失败" \
+        false "配置" "备份目录: /tmp/config" \
+        false "订阅输出" "备份目录: /tmp/output" \
+        "备份目录: /tmp/config 和 /tmp/output"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "本机同步失败，且配置与订阅输出恢复失败，请手动检查备份目录: /tmp/config 和 /tmp/output" ]]
+)
+
+runSubscriptionSyncAppendRestoreFailureDetailRegression() (
+    local message=
+
+    subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "状态恢复失败"
+    [[ "${message}" == "控制面同步失败后状态恢复失败" ]]
+
+    subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "配置恢复失败，请手动检查备份目录: /tmp/config"
+    [[ "${message}" == "控制面同步失败后状态恢复失败；配置恢复失败，请手动检查备份目录: /tmp/config" ]]
+
+    message=
+    subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "订阅输出恢复失败，请手动检查备份目录: /tmp/output"
+    [[ "${message}" == "控制面同步失败后订阅输出恢复失败，请手动检查备份目录: /tmp/output" ]]
+)
+
 runSubscriptionSyncRollbackConfigRestoreFailureRegression() (
     local rootRel="${TMP_DIR}/subscription-sync-rollback-failure"
     local root
@@ -1611,12 +1674,22 @@ runRegressionSubscriptionStateCore() {
 
 runRegressionSubscriptionStateSupport() {
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression &&
+        runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression &&
+        runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression &&
         runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression &&
         runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
 }
 
 runRegressionSubscriptionSyncTempDir() {
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
+}
+
+runRegressionSubscriptionSyncRestorePairFailureMessage() {
+    runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression
+}
+
+runRegressionSubscriptionSyncAppendRestoreFailureDetail() {
+    runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression
 }
 
 runRegressionSubscriptionStateSyncRollback() {
@@ -1670,6 +1743,8 @@ runRegressionSubscriptionGroupsRestoreFailure() {
 runRegressionSubscriptionStateSerial() {
     runRegressionStep subscription-state runSubscriptionGroupStateRegression &&
         runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression &&
+        runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression &&
+        runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression &&
         runRegressionStep subscription-sync-rollback-failure-serial runSubscriptionSyncRollbackFailureSerialRegression &&
         runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression &&
         runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
@@ -1820,6 +1895,12 @@ subscription-state-sync-rollback-serial)
 subscription-sync-tempdir)
     regressionRunner=runRegressionSubscriptionSyncTempDir
     ;;
+subscription-sync-restore-pair-failure-message)
+    regressionRunner=runRegressionSubscriptionSyncRestorePairFailureMessage
+    ;;
+subscription-sync-append-restore-failure-detail)
+    regressionRunner=runRegressionSubscriptionSyncAppendRestoreFailureDetail
+    ;;
 subscription-sync-rollback-failure)
     regressionRunner=runRegressionSubscriptionStateSyncRollback
     ;;
@@ -1857,7 +1938,7 @@ subscription-groups-restore-failure)
     regressionRunner=runRegressionSubscriptionGroupsRestoreFailure
     ;;
 *)
-    printf 'usage: %s [subscription-state|subscription-state-serial|subscription-state-core|subscription-state-structure|subscription-state-structure-foundation|subscription-state-structure-foundation-add-remove|subscription-state-structure-foundation-credential|subscription-state-structure-foundation-normalize|subscription-state-structure-foundation-serial|subscription-state-structure-source|subscription-state-structure-source-credential|subscription-state-structure-source-status|subscription-state-structure-source-remove|subscription-state-structure-source-serial|subscription-state-quota|subscription-state-quota-traffic|subscription-state-quota-traffic-summary|subscription-state-quota-traffic-invalid-input|subscription-state-quota-traffic-apply|subscription-state-quota-traffic-serial|subscription-state-quota-menu-tx|subscription-state-quota-menu-preview-fail|subscription-state-quota-menu-tx-rollback|subscription-state-quota-menu-tx-serial|subscription-state-quota-partial-sync|subscription-state-quota-partial-sync-apply-failure|subscription-state-quota-partial-sync-plan|subscription-state-quota-partial-sync-config|subscription-state-quota-partial-sync-serial|subscription-state-remote-restore|subscription-state-remote-restore-self-reference|subscription-state-remote-restore-self-reference-plan|subscription-state-remote-restore-self-reference-sync|subscription-state-remote-restore-self-reference-serial|subscription-state-remote-restore-state-write|subscription-state-remote-restore-legacy-menu|subscription-state-remote-restore-serial|subscription-state-support|subscription-state-sync-rollback|subscription-state-sync-rollback-serial|subscription-sync-tempdir|subscription-sync-rollback-failure|subscription-sync-rollback-failure-serial|subscription-sync-rollback-config-restore-failure|subscription-sync-restore-dir-failure|subscription-sync-reload-rollback|subscription-group-sync-rollback|subscription-group-sync-rollback-serial|subscription-group-sync-apply-failure|subscription-group-sync-reconcile-rollback|subscription-group-sync-remote-failure|subscription-sync-reconcile-early-exit|subscription-groups-restore-failure]\n' "$0" >&2
+    printf 'usage: %s [subscription-state|subscription-state-serial|subscription-state-core|subscription-state-structure|subscription-state-structure-foundation|subscription-state-structure-foundation-add-remove|subscription-state-structure-foundation-credential|subscription-state-structure-foundation-normalize|subscription-state-structure-foundation-serial|subscription-state-structure-source|subscription-state-structure-source-credential|subscription-state-structure-source-status|subscription-state-structure-source-remove|subscription-state-structure-source-serial|subscription-state-quota|subscription-state-quota-traffic|subscription-state-quota-traffic-summary|subscription-state-quota-traffic-invalid-input|subscription-state-quota-traffic-apply|subscription-state-quota-traffic-serial|subscription-state-quota-menu-tx|subscription-state-quota-menu-preview-fail|subscription-state-quota-menu-tx-rollback|subscription-state-quota-menu-tx-serial|subscription-state-quota-partial-sync|subscription-state-quota-partial-sync-apply-failure|subscription-state-quota-partial-sync-plan|subscription-state-quota-partial-sync-config|subscription-state-quota-partial-sync-serial|subscription-state-remote-restore|subscription-state-remote-restore-self-reference|subscription-state-remote-restore-self-reference-plan|subscription-state-remote-restore-self-reference-sync|subscription-state-remote-restore-self-reference-serial|subscription-state-remote-restore-state-write|subscription-state-remote-restore-legacy-menu|subscription-state-remote-restore-serial|subscription-state-support|subscription-state-sync-rollback|subscription-state-sync-rollback-serial|subscription-sync-tempdir|subscription-sync-restore-pair-failure-message|subscription-sync-append-restore-failure-detail|subscription-sync-rollback-failure|subscription-sync-rollback-failure-serial|subscription-sync-rollback-config-restore-failure|subscription-sync-restore-dir-failure|subscription-sync-reload-rollback|subscription-group-sync-rollback|subscription-group-sync-rollback-serial|subscription-group-sync-apply-failure|subscription-group-sync-reconcile-rollback|subscription-group-sync-remote-failure|subscription-sync-reconcile-early-exit|subscription-groups-restore-failure]\n' "$0" >&2
     exit 2
     ;;
 esac
