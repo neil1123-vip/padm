@@ -4077,7 +4077,6 @@ runTlsCustomSSLEmailUsesHomeAccountFileRegression() (
     HOME="${homeDir}"
     sslType=zerossl
     successCard() { return 0; }
-    echoContent() { return 0; }
     autoRead() {
         case "$3" in
         sslEmailStatus) printf -v "$3" 'y' ;;
@@ -4103,7 +4102,6 @@ runTlsCustomSSLEmailTransactionRegression() (
     printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
     HOME="${homeDir}"
     sslType=zerossl
-    echoContent() { return 0; }
     autoRead() {
         case "$3" in
         sslEmailStatus) printf -v "$3" 'y' ;;
