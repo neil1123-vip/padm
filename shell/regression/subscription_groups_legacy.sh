@@ -1998,6 +1998,18 @@ runCoreRollbackResultMessageRegression() (
     set -e
     [[ "${rc}" == "0" ]]
     [[ "${message}" == "提交 VLESS Encryption 状态失败，已恢复旧配置" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "写入日志配置失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        "备份目录: /tmp/check-log-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: /tmp/check-log-backup" ]]
 )
 
 runCorePortFileTransactionRegression() {

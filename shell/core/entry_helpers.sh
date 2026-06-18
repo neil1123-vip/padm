@@ -1013,7 +1013,9 @@ checkLog() {
             if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" true; then
                 if ! checkLogBackupRestore "${logBackupDir}"; then
                     padmForgetCleanupPath "${logBackupDir}"
-                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
+                    local restoreMessage
+                    coreSetSingleRestoreResultMessage restoreMessage "写入日志配置失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
+                    errorCard "${restoreMessage}"
                     return 1
                 fi
                 padmRemoveCleanupPath "${logBackupDir}"
@@ -1025,7 +1027,9 @@ checkLog() {
             if ! writeXrayLogConfig "${configPath}00_log.json" "${configPathLog}" false; then
                 if ! checkLogBackupRestore "${logBackupDir}"; then
                     padmForgetCleanupPath "${logBackupDir}"
-                    errorCard "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
+                    local restoreMessage
+                    coreSetSingleRestoreResultMessage restoreMessage "写入日志配置失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
+                    errorCard "${restoreMessage}"
                     return 1
                 fi
                 padmRemoveCleanupPath "${logBackupDir}"
@@ -1038,7 +1042,9 @@ checkLog() {
             if ! updateRealityShowConfig "${configPath}07_VLESS_vision_reality_inbounds.json" "${realityLogShow}"; then
                 if ! checkLogBackupRestore "${logBackupDir}"; then
                     padmForgetCleanupPath "${logBackupDir}"
-                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
+                    local restoreMessage
+                    coreSetSingleRestoreResultMessage restoreMessage "Reality 日志联动配置写入失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
+                    errorCard "${restoreMessage}"
                     return 1
                 fi
                 padmRemoveCleanupPath "${logBackupDir}"
@@ -1050,7 +1056,9 @@ checkLog() {
             if ! updateRealityShowConfig "${configPath}12_VLESS_XHTTP_inbounds.json" "${realityLogShow}"; then
                 if ! checkLogBackupRestore "${logBackupDir}"; then
                     padmForgetCleanupPath "${logBackupDir}"
-                    errorCard "Reality 日志联动配置写入失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
+                    local restoreMessage
+                    coreSetSingleRestoreResultMessage restoreMessage "Reality 日志联动配置写入失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
+                    errorCard "${restoreMessage}"
                     return 1
                 fi
                 padmRemoveCleanupPath "${logBackupDir}"
@@ -1061,7 +1069,9 @@ checkLog() {
         if ! reloadCore; then
             if ! checkLogBackupRestore "${logBackupDir}"; then
                 padmForgetCleanupPath "${logBackupDir}"
-                errorCard "日志配置更新后核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${logBackupDir}"
+                local restoreMessage
+                coreSetSingleRestoreResultMessage restoreMessage "日志配置更新后核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${logBackupDir}"
+                errorCard "${restoreMessage}"
                 return 1
             fi
             padmRemoveCleanupPath "${logBackupDir}"
