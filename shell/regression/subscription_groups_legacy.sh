@@ -1903,6 +1903,7 @@ runRuntimeTempDirRegression() (
 
 runCoreRollbackResultMessageRegression() (
     local message=
+    local detailMessage=
     local retryLog="${TMP_DIR}/core-rollback-result.log"
 
     coreSetRollbackResultMessage message \
@@ -1987,8 +1988,8 @@ runCoreRollbackResultMessageRegression() (
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "Fail2ban 服务应用失败，且旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
 
-    coreSetRestoreFailureDetail message "旧配置" "/tmp/fail2ban-backup"
-    [[ "${message}" == "旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
+    coreSetRestoreFailureDetail detailMessage "旧配置" "/tmp/fail2ban-backup"
+    [[ "${detailMessage}" == "旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
 
     set +e
     coreSetSingleRestoreResultMessage message \
@@ -2078,8 +2079,11 @@ runCoreRollbackResultMessageRegression() (
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "写入 Xray 配置失败，且VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
 
-    coreSetRestoreFailureDetail message "VLESS Encryption 配置" " /tmp/config.json 和 /tmp/config.json.bak"
-    [[ "${message}" == "VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+    coreSetRestoreFailureDetail detailMessage "VLESS Encryption 配置" " /tmp/config.json 和 /tmp/config.json.bak"
+    [[ "${detailMessage}" == "VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetManualCheckMessage detailMessage "VLESS Encryption 配置恢复失败" " /tmp/config.json 和 /tmp/config.json.bak"
+    [[ "${detailMessage}" == "VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
 
     set +e
     coreSetDualRestoreResultMessage message \
@@ -2107,6 +2111,9 @@ runCoreRollbackResultMessageRegression() (
         "/tmp/config.json" \
         "/tmp/config.json.bak"
     [[ "${message}" == "核心重载失败，且回滚配置失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetManualCheckMessage detailMessage "核心重载失败，且回滚配置失败" " /tmp/config.json 和 /tmp/config.json.bak"
+    [[ "${detailMessage}" == "核心重载失败，且回滚配置失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
 )
 
 runCorePortFileTransactionRegression() {

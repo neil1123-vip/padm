@@ -327,9 +327,16 @@ coreSetRestoreFailureDetail() {
     local outputVar=$1
     local failedLabel=$2
     local failedLocation=$3
-    local detail="${failedLabel}恢复失败，请手动检查${failedLocation}"
+    coreSetManualCheckMessage "${outputVar}" "${failedLabel}恢复失败" "${failedLocation}"
+}
 
-    printf -v "${outputVar}" '%s' "${detail}"
+coreSetManualCheckMessage() {
+    local outputVar=$1
+    local reason=$2
+    local checkTarget=$3
+    local formatted="${reason}，请手动检查${checkTarget}"
+
+    printf -v "${outputVar}" '%s' "${formatted}"
 }
 
 coreSetDualRestoreResultMessage() {
@@ -365,9 +372,7 @@ coreSetPairedFileManualCheckMessage() {
     local reason=$2
     local targetPath=$3
     local backupPath=$4
-    local result="${reason}，请手动检查 ${targetPath} 和 ${backupPath}"
-
-    printf -v "${outputVar}" '%s' "${result}"
+    coreSetManualCheckMessage "${outputVar}" "${reason}" " ${targetPath} 和 ${backupPath}"
 }
 
 coreSetPairedFileRestoreFailureMessage() {
@@ -384,12 +389,12 @@ coreSetRollbackFailureMessage() {
     local reason=$2
     local backupDir=$3
     local separator=${4-，且}
-    local result
+    local result=
 
     if [[ -n "${separator}" ]]; then
-        result="${reason}${separator}回滚失败，请手动检查备份目录: ${backupDir}"
+        coreSetManualCheckMessage result "${reason}${separator}回滚失败" "备份目录: ${backupDir}"
     else
-        result="${reason}，请手动检查备份目录: ${backupDir}"
+        coreSetManualCheckMessage result "${reason}" "备份目录: ${backupDir}"
     fi
 
     printf -v "${outputVar}" '%s' "${result}"
@@ -399,9 +404,7 @@ coreSetNewConfigCleanupFailureMessage() {
     local outputVar=$1
     local reason=$2
     local targetPath=$3
-    local result="${reason}，且新配置清理失败，请手动检查 ${targetPath}"
-
-    printf -v "${outputVar}" '%s' "${result}"
+    coreSetManualCheckMessage "${outputVar}" "${reason}，且新配置清理失败" " ${targetPath}"
 }
 
 restoreManagedFileFromBackup() {
