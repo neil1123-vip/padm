@@ -284,7 +284,6 @@ subscriptionWireGuardEnsureKeys() {
     local privateBackup=
     local publicBackup=
     local rollbackStatus=0
-    local tmpBase="${TMPDIR:-/tmp}"
     privateKeyFile=$(subscriptionWireGuardPrivateKeyFile)
     publicKeyFile=$(subscriptionWireGuardPublicKeyFile)
     [[ -n "${privateKeyFile}" && -n "${publicKeyFile}" ]] || return 1
@@ -303,7 +302,7 @@ subscriptionWireGuardEnsureKeys() {
             return 1
         fi
         [[ -s "${publicStage}" ]] || { padmRemoveCleanupPath "${publicStage}"; padmRemoveCleanupPath "${privateStage}"; return 1; }
-        padmCreateTempPath rollbackDir -d "${tmpBase%/}/padm-wireguard-keys.XXXXXX" || {
+        padmCreateTempPath rollbackDir -d "$(padmFallbackTmpFilePath padm-wireguard-keys.XXXXXX)" || {
             padmRemoveCleanupPath "${publicStage}"
             padmRemoveCleanupPath "${privateStage}"
             return 1

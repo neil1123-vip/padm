@@ -221,7 +221,7 @@ installTLSFromAcme() {
     acmeLogFile=$(tlsAcmeLogFile) || return 1
 
     if [[ -s "${crtFile}" && -s "${keyFile}" ]]; then
-        padmCreateTempPath backupDir -d "${TMPDIR:-/tmp}/padm-tls-install.XXXXXX" || return 1
+        padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-tls-install.XXXXXX)" || return 1
         backupCrt="${backupDir}/$(basename -- "${crtFile}")"
         backupKey="${backupDir}/$(basename -- "${keyFile}")"
         cp -p "${crtFile}" "${backupCrt}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
@@ -303,7 +303,7 @@ installTLS() {
                     statusCard "TLS 证书" "如未过期或者自定义证书请选择 [n]"
                     autoRead tls_reinstall "是否重新安装？[y/n]:" reInstallStatus
                     if [[ "${reInstallStatus}" == "y" ]]; then
-                        padmCreateTempPath reinstallBackupDir -d "${TMPDIR:-/tmp}/padm-tls-reinstall.XXXXXX" || return 1
+                        padmCreateTempPath reinstallBackupDir -d "$(padmFallbackTmpFilePath padm-tls-reinstall.XXXXXX)" || return 1
                         if ! cp -a "${tlsDir}/." "${reinstallBackupDir}/" >/dev/null 2>&1; then
                             padmRemoveCleanupPath "${reinstallBackupDir}"
                             return 1
@@ -610,7 +610,7 @@ renewalTLS() {
                 installDomain="*.${dnsTLSDomain}"
             fi
             local backupDir backupCrt backupKey
-            padmCreateTempPath backupDir -d "${TMPDIR:-/tmp}/padm-tls-renew.XXXXXX" || {
+            padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-tls-renew.XXXXXX)" || {
                 failTlsRenewalBeforeInstall "TLS 旧证书备份目录创建失败"
                 return 1
             }

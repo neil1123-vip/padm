@@ -154,8 +154,8 @@ writeCheckPortOpenNginxConfig() {
     local tmpPath
     local backupPath="${targetPath}.bak"
     local targetDir
-    local tmpBase="${TMPDIR:-/tmp}"
-    local nginxTestLog="${tmpBase%/}/padm-check-port-open-nginx-test.log"
+    local nginxTestLog
+    nginxTestLog="$(padmFallbackTmpFilePath padm-check-port-open-nginx-test.log)"
     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
     if ! padmCommitTargetIsFileLike "${targetPath}"; then
         CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目标异常，请手动检查 ${targetPath}"

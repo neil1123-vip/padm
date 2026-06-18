@@ -402,10 +402,9 @@ subscriptionSyncCreateConfigBackups() {
     local manifest
     local backupFile
     local backupIndex=0
-    local tmpBase="${TMPDIR:-/tmp}"
 
     subscriptionSyncRequireSafeConfigDirs || return 1
-    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-subscription-sync-backup.XXXXXX" || return 1
+    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-subscription-sync-backup.XXXXXX)" || return 1
     manifest="${backupDir}/manifest"
     : >"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
     while IFS= read -r file; do
@@ -540,9 +539,8 @@ subscriptionSyncCreateSubscribeOutputBackups() {
     local backupDir
     local localBase
     local publicBase
-    local tmpBase="${TMPDIR:-/tmp}"
 
-    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-subscription-output-backup.XXXXXX" || return 1
+    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-subscription-output-backup.XXXXXX)" || return 1
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
     subscriptionSyncBackupPath "${localBase}" "${backupDir}" local || { padmRemoveCleanupPath "${backupDir}"; return 1; }
