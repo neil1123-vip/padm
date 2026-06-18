@@ -15834,7 +15834,6 @@ runTlsRenewalBackupPreparationRestoresServicesRegression() (
     : >"${errorLog}"
 
     statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     progressCard() { return 0; }
     handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; return 0; }
