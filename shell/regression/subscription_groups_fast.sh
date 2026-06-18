@@ -843,9 +843,6 @@ runPortHoppingWithoutPersistentRegression() (
     statusCard() {
         printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"${warnLog}"
     }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
     autoRead() {
         printf -v "$3" '%s' '33000-33005'
     }
@@ -1104,7 +1101,6 @@ runMenuSmokeLightRegression() {
     menuItem() { output+="$2 $3"$'\n'; }
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
-    menuClose() { return 0; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     autoRead() {
         local targetVar=$3
@@ -2989,7 +2985,6 @@ runSingBoxServiceMainPidTemplateRegression() {
         }
         bootStartup() { return 0; }
         commitGeneratedFile() { cp "$1" "${TMP_DIR}/sing-box.service" && return 0; }
-        progressCard() { return 0; }
         padmCreateTempPath() { printf -v "$1" '%s' "$(mktemp "$2")"; }
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/cores.sh"
@@ -3120,7 +3115,6 @@ runFail2banProfileRegression() {
         refreshSubscriptionWireGuardNginxControl() { return 0; }
         serviceQueueApply() { return 0; }
         errorCard() { return 1; }
-        successCard() { return 0; }
 
         [[ "$(fail2banRecommendedProfileName)" == "sshd+control" ]]
         [[ "$(fail2banProfileLabel "$(fail2banRecommendedProfileName)")" == "SSH + 控制面防护" ]]
@@ -3211,8 +3205,6 @@ runFail2banMenuRegression() {
         menuItem() { output+="$2 $3"$'\n'; }
         menuDangerItem() { output+="$2 $3"$'\n'; }
         menuReturnItem() { output+="$2 $3"$'\n'; }
-        menuClose() { return 0; }
-        echoContent() { return 0; }
         uiStyle() { shift; printf '%s' "$*"; }
         autoRead() {
             local targetVar=$3
