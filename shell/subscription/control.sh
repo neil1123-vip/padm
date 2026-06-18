@@ -701,30 +701,22 @@ subscriptionControlRestoreServiceInstall() {
     local serviceName="padm-subscription-control.service"
     local rollbackFailed=false
 
-    if ! checkLogBackupRestore "${backupDir}"; then
-        rollbackFailed=true
-    fi
-    if ! systemctl daemon-reload >/dev/null 2>&1; then
-        rollbackFailed=true
-    fi
+    subscriptionControlMarkRollbackFailure() {
+        "$@" >/dev/null 2>&1 || rollbackFailed=true
+    }
+
+    subscriptionControlMarkRollbackFailure checkLogBackupRestore "${backupDir}"
+    subscriptionControlMarkRollbackFailure systemctl daemon-reload
     if [[ "${serviceWasActive}" == "true" ]]; then
-        if ! systemctl restart "${serviceName}" >/dev/null 2>&1; then
-            rollbackFailed=true
-        fi
+        subscriptionControlMarkRollbackFailure systemctl restart "${serviceName}"
     else
         if systemctl is-active --quiet "${serviceName}" >/dev/null 2>&1; then
-            if ! systemctl stop "${serviceName}" >/dev/null 2>&1; then
-                rollbackFailed=true
-            fi
+            subscriptionControlMarkRollbackFailure systemctl stop "${serviceName}"
         fi
         if [[ "${serviceWasEnabled}" == "true" ]]; then
-            if ! systemctl enable "${serviceName}" >/dev/null 2>&1; then
-                rollbackFailed=true
-            fi
+            subscriptionControlMarkRollbackFailure systemctl enable "${serviceName}"
         elif systemctl is-enabled --quiet "${serviceName}" >/dev/null 2>&1; then
-            if ! systemctl disable "${serviceName}" >/dev/null 2>&1; then
-                rollbackFailed=true
-            fi
+            subscriptionControlMarkRollbackFailure systemctl disable "${serviceName}"
         fi
     fi
     [[ "${rollbackFailed}" != "true" ]]
