@@ -215,7 +215,6 @@ JSON
         resetCurrentBackup="${resetGroupsDir}/backups/groups-current.json"
 
         showSubscriptionGroupsStateSummary() { return 0; }
-        statusCard() { return 0; }
         autoRead() {
             local targetVar=$3
             printf -v "${targetVar}" '%s' "yes"
