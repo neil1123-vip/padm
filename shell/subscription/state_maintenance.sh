@@ -152,11 +152,13 @@ resetSubscriptionGroupsStateMenu() {
     fi
     padmRemoveCleanupPath "${stageFile}"
     if ! migrateSubscriptionGroupsState; then
+        local restoreMessage
         if ! subscriptionGroupsStateReplace "${currentBackup}" "${stateFile}"; then
             rollbackFailed=true
         fi
         if [[ "${rollbackFailed}" == "true" ]]; then
-            errorCard "订阅状态重建失败，且旧状态恢复失败" "当前状态备份：${currentBackup}"
+            subscriptionSyncSetSingleRestoreResultMessage restoreMessage "订阅状态重建失败" false "" "旧状态" "" false || true
+            errorCard "${restoreMessage}" "当前状态备份：${currentBackup}"
             return 1
         fi
         local rollbackMessage

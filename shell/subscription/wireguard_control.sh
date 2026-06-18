@@ -222,14 +222,16 @@ subscriptionWireGuardRestoreGroupsState() {
 
 subscriptionWireGuardReportRestoreFailure() {
     local failureTitle=$1
+    local restoreMessage
     local groupsFile=
+    subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${failureTitle}" false "" "旧状态" "" false || true
     if declare -F subscriptionGroupsFile >/dev/null 2>&1; then
         groupsFile=$(subscriptionGroupsFile)
     fi
     if [[ -n "${groupsFile}" ]]; then
-        errorCard "${failureTitle}，且旧状态恢复失败" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)" "请手动检查订阅组状态文件：${groupsFile}"
+        errorCard "${restoreMessage}" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)" "请手动检查订阅组状态文件：${groupsFile}"
     else
-        errorCard "${failureTitle}，且旧状态恢复失败" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)"
+        errorCard "${restoreMessage}" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)"
     fi
 }
 

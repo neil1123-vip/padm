@@ -63,6 +63,7 @@ restoreLocalSubscribeOutputs() {
     local localBase=$1
     local backupDir=$2
     local reason=$3
+    local restoreMessage
     local previousSubscribeSalt=
 
     if [[ $# -ge 4 ]]; then
@@ -71,14 +72,16 @@ restoreLocalSubscribeOutputs() {
 
     if ! subscriptionSyncRestoreBackupPath "${localBase}" "${backupDir}" local; then
         padmForgetCleanupPath "${backupDir}"
-        errorCard "${reason}，且旧本地订阅恢复失败，请手动检查备份目录：${backupDir}"
+        subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${reason}" false "" "旧本地订阅" "备份目录：${backupDir}" || true
+        errorCard "${restoreMessage}"
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
     if [[ $# -ge 4 ]]; then
         subscribeSalt=${previousSubscribeSalt}
     fi
-    errorCard "${reason}，已恢复旧本地订阅"
+    subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${reason}" true "已恢复旧本地订阅" "旧本地订阅" "备份目录：${backupDir}"
+    errorCard "${restoreMessage}"
     return 1
 }
 

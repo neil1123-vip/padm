@@ -858,6 +858,19 @@ runSubscriptionSyncSingleRestoreResultMessageRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "订阅 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 /tmp/subscribe.conf 和 /tmp/.subscribe.conf.backup.123456" ]]
+
+    set +e
+    subscriptionSyncSetSingleRestoreResultMessage message \
+        "WireGuard 主控服务启动失败" \
+        false \
+        "" \
+        "旧状态" \
+        "" \
+        false
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "WireGuard 主控服务启动失败，且旧状态恢复失败" ]]
 )
 
 runSubscriptionSyncRollbackResultMessageRegression() (

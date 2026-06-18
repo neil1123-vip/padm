@@ -658,6 +658,7 @@ subscriptionSyncSetSingleRestoreResultMessage() {
     local restoredMessage=$4
     local failedLabel=$5
     local failedLocation=$6
+    local includeManualCheck=${7:-true}
     local result=
 
     if [[ "${restored}" == "true" ]]; then
@@ -670,7 +671,10 @@ subscriptionSyncSetSingleRestoreResultMessage() {
         return 0
     fi
 
-    result="${reason}，且${failedLabel}恢复失败，请手动检查${failedLocation}"
+    result="${reason}，且${failedLabel}恢复失败"
+    if [[ "${includeManualCheck}" != "false" ]]; then
+        result="${result}，请手动检查${failedLocation}"
+    fi
     printf -v "${outputVar}" '%s' "${result}"
     return 1
 }
