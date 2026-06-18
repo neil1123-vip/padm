@@ -1987,6 +1987,9 @@ runCoreRollbackResultMessageRegression() (
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "Fail2ban 服务应用失败，且旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
 
+    coreSetRestoreFailureDetail message "旧配置" "/tmp/fail2ban-backup"
+    [[ "${message}" == "旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
+
     set +e
     coreSetSingleRestoreResultMessage message \
         "提交 VLESS Encryption 状态失败" \
@@ -2074,6 +2077,9 @@ runCoreRollbackResultMessageRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "写入 Xray 配置失败，且VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetRestoreFailureDetail message "VLESS Encryption 配置" " /tmp/config.json 和 /tmp/config.json.bak"
+    [[ "${message}" == "VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
 
     set +e
     coreSetDualRestoreResultMessage message \

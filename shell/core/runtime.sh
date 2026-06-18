@@ -309,7 +309,7 @@ coreSetSingleRestoreResultMessage() {
     local restoredMessage=$4
     local failedLabel=$5
     local failedLocation=$6
-    local result
+    local result=
 
     if [[ "${restored}" == "true" ]]; then
         result="${reason}，${restoredMessage}"
@@ -317,9 +317,19 @@ coreSetSingleRestoreResultMessage() {
         return 0
     fi
 
-    result="${reason}，且${failedLabel}恢复失败，请手动检查${failedLocation}"
+    coreSetRestoreFailureDetail result "${failedLabel}" "${failedLocation}"
+    result="${reason}，且${result}"
     printf -v "${outputVar}" '%s' "${result}"
     return 1
+}
+
+coreSetRestoreFailureDetail() {
+    local outputVar=$1
+    local failedLabel=$2
+    local failedLocation=$3
+    local detail="${failedLabel}恢复失败，请手动检查${failedLocation}"
+
+    printf -v "${outputVar}" '%s' "${detail}"
 }
 
 coreSetDualRestoreResultMessage() {
@@ -331,15 +341,17 @@ coreSetDualRestoreResultMessage() {
     local secondRestored=$6
     local secondLabel=$7
     local secondLocation=$8
-    local result
+    local result=
 
     if [[ "${firstRestored}" != "true" ]]; then
-        result="${reason}，且${firstLabel}恢复失败，请手动检查${firstLocation}"
+        coreSetRestoreFailureDetail result "${firstLabel}" "${firstLocation}"
+        result="${reason}，且${result}"
         printf -v "${outputVar}" '%s' "${result}"
         return 1
     fi
     if [[ "${secondRestored}" != "true" ]]; then
-        result="${reason}，且${secondLabel}恢复失败，请手动检查${secondLocation}"
+        coreSetRestoreFailureDetail result "${secondLabel}" "${secondLocation}"
+        result="${reason}，且${result}"
         printf -v "${outputVar}" '%s' "${result}"
         return 1
     fi
