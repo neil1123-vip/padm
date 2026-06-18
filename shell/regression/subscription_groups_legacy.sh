@@ -5419,8 +5419,6 @@ SH
     PATH="${fakeBin}:${PATH}"
     source "${PROJECT_ROOT}/shell/core/protocols.sh"
     source "${PROJECT_ROOT}/shell/core/services.sh"
-    successCard() { return 0; }
-    statusCard() { return 0; }
     errorCard() { return 0; }
     updateSELinuxHTTPPortT() { return 0; }
     protocolSelectionSkipsNginx() { return 1; }
@@ -6018,7 +6016,6 @@ runCleanLastInstallationConfigFailureRegression() (
     }
     readInstallType() { printf 'read-install-type\n' >>"${cleanupLog}"; }
     mkdirTools() { printf 'mkdir-tools\n' >>"${cleanupLog}"; }
-    statusCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() { printf -v "$3" 'n'; }
@@ -9196,8 +9193,6 @@ runAutoInstallRealityRouteRegression() (
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuDangerItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
-    menuClose() { return 0; }
-    progressCard() { return 0; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
