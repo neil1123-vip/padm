@@ -2060,6 +2060,34 @@ runCoreRollbackResultMessageRegression() (
         "sing-box 日志配置重载失败" \
         "/tmp/log.json"
     [[ "${message}" == "sing-box 日志配置重载失败，且新配置清理失败，请手动检查 /tmp/log.json" ]]
+
+    set +e
+    coreSetDualRestoreResultMessage message \
+        "写入 Xray 配置失败" \
+        false \
+        "VLESS Encryption 配置" \
+        " /tmp/config.json 和 /tmp/config.json.bak" \
+        true \
+        "VLESS Encryption 状态" \
+        " /tmp/state.json 和 /tmp/state.json.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "写入 Xray 配置失败，且VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    set +e
+    coreSetDualRestoreResultMessage message \
+        "删除 VLESS Encryption 状态失败" \
+        true \
+        "VLESS Encryption 配置" \
+        " /tmp/config.json 和 /tmp/config.json.bak" \
+        false \
+        "VLESS Encryption 状态" \
+        " /tmp/state.json 和 /tmp/state.json.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "删除 VLESS Encryption 状态失败，且VLESS Encryption 状态恢复失败，请手动检查 /tmp/state.json 和 /tmp/state.json.bak" ]]
 )
 
 runCorePortFileTransactionRegression() {

@@ -322,6 +322,32 @@ coreSetSingleRestoreResultMessage() {
     return 1
 }
 
+coreSetDualRestoreResultMessage() {
+    local outputVar=$1
+    local reason=$2
+    local firstRestored=$3
+    local firstLabel=$4
+    local firstLocation=$5
+    local secondRestored=$6
+    local secondLabel=$7
+    local secondLocation=$8
+    local result
+
+    if [[ "${firstRestored}" != "true" ]]; then
+        result="${reason}，且${firstLabel}恢复失败，请手动检查${firstLocation}"
+        printf -v "${outputVar}" '%s' "${result}"
+        return 1
+    fi
+    if [[ "${secondRestored}" != "true" ]]; then
+        result="${reason}，且${secondLabel}恢复失败，请手动检查${secondLocation}"
+        printf -v "${outputVar}" '%s' "${result}"
+        return 1
+    fi
+
+    printf -v "${outputVar}" '%s' ''
+    return 0
+}
+
 coreSetRollbackFailureMessage() {
     local outputVar=$1
     local reason=$2

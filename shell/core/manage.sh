@@ -123,9 +123,18 @@ restoreVlessEncryptionBackup() {
     local hadStateBackup=$5
     local stateMode=$6
     local reason=$7
+    local restoreMessage
     local restoreFailed=false
     if ! restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
-        errorCard "${reason}，且 VLESS Encryption 配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
+        coreSetDualRestoreResultMessage restoreMessage \
+            "${reason}" \
+            false \
+            "VLESS Encryption 配置" \
+            " ${configFile} 和 ${backupFile}" \
+            true \
+            "VLESS Encryption 状态" \
+            " ${stateFile} 和 ${stateBackupFile}" || true
+        errorCard "${restoreMessage}"
         return 1
     fi
     removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
@@ -141,7 +150,15 @@ restoreVlessEncryptionBackup() {
         fi
     fi
     if [[ "${restoreFailed}" == "true" ]]; then
-        errorCard "${reason}，且 VLESS Encryption 状态恢复失败，请手动检查 ${stateFile} 和 ${stateBackupFile}"
+        coreSetDualRestoreResultMessage restoreMessage \
+            "${reason}" \
+            true \
+            "VLESS Encryption 配置" \
+            " ${configFile} 和 ${backupFile}" \
+            false \
+            "VLESS Encryption 状态" \
+            " ${stateFile} 和 ${stateBackupFile}" || true
+        errorCard "${restoreMessage}"
         return 1
     fi
 }
