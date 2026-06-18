@@ -1785,14 +1785,18 @@ JSON
 }
 
 runPortAndPanelHelperRegression() {
+    local -a extraPorts btPanelDomains onePanelDomains
+
     parsedCorePorts=$(corePortParseList '2053, 2083,2053')
     [[ "${parsedCorePorts}" == $'2053\n2083' ]]
     ! corePortParseList '0,70000,abc' >/dev/null
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-newPort-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_hysteria_2053.json" 2053 9443 udp dokodemo-door-newPort-hysteria-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2083_default.json" 2083 443 tcp dokodemo-door-newPort-2083
-    corePortListExtra | grep -qx '1:2053'
-    corePortListExtra | grep -qx '2:2083 默认'
+    mapfile -t extraPorts < <(corePortListExtra)
+    [[ "${#extraPorts[@]}" == "2" ]]
+    [[ "${extraPorts[0]}" == "1:2053" ]]
+    [[ "${extraPorts[1]}" == "2:2083 默认" ]]
     [[ "$(corePortResolveByIndex 2)" == "2083" ]]
     [[ "$(basename "$(corePortDefaultFile)")" == "02_dokodemodoor_inbounds_2083_default.json" ]]
     corePortRemove 2053
@@ -1803,8 +1807,12 @@ runPortAndPanelHelperRegression() {
     mkdir -p "${TMP_DIR}/bt-panel/example.com" "${TMP_DIR}/one-panel/example.org/ssl"
     printf 'cert' >"${TMP_DIR}/bt-panel/example.com/fullchain.pem"
     printf 'cert' >"${TMP_DIR}/one-panel/example.org/ssl/fullchain.pem"
-    panelCertDomainList "${TMP_DIR}/bt-panel/*/fullchain.pem" 1 | grep -qx '1:example.com'
-    panelCertDomainList "${TMP_DIR}/one-panel/*/ssl/fullchain.pem" 2 | grep -qx '1:example.org'
+    mapfile -t btPanelDomains < <(panelCertDomainList "${TMP_DIR}/bt-panel/*/fullchain.pem" 1)
+    [[ "${#btPanelDomains[@]}" == "1" ]]
+    [[ "${btPanelDomains[0]}" == "1:example.com" ]]
+    mapfile -t onePanelDomains < <(panelCertDomainList "${TMP_DIR}/one-panel/*/ssl/fullchain.pem" 2)
+    [[ "${#onePanelDomains[@]}" == "1" ]]
+    [[ "${onePanelDomains[0]}" == "1:example.org" ]]
     rm -rf "${configPath}"
 }
 
