@@ -3748,7 +3748,6 @@ runNetworkCheckReturnFailureRegression() (
 
     mkdir -p "${root}/nginx"
     statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
@@ -4104,7 +4103,6 @@ runTlsCustomSSLEmailTransactionRegression() (
     printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
     HOME="${homeDir}"
     sslType=zerossl
-    successCard() { return 0; }
     echoContent() { return 0; }
     autoRead() {
         case "$3" in
