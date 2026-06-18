@@ -1109,11 +1109,7 @@ subscriptionControlApplySync() {
         if ! subscriptionSyncReconcileLocalServices; then
             if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-                if subscriptionSyncReconcileLocalServices true; then
-                    SUBSCRIPTION_CONTROL_RESTORE_ERROR="本机服务重建失败，已恢复旧配置"
-                else
-                    SUBSCRIPTION_CONTROL_RESTORE_ERROR="本机服务重建失败，已恢复旧配置；恢复旧配置后服务重建仍失败，请检查核心服务日志"
-                fi
+                subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "本机服务重建失败" subscriptionSyncReconcileLocalServices "恢复旧配置后服务重建仍失败，请检查核心服务日志" true
             else
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
             fi

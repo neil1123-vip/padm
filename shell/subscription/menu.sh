@@ -702,11 +702,9 @@ removeUserSubscriptionMenu() {
         if ! removeUserSubscriptionRollback "${previousGroupsState}" "${configBackupDir}" "核心重载失败"; then
             return 1
         fi
-        if reloadCore; then
-            errorCard "核心重载失败，已恢复旧配置"
-        else
-            errorCard "核心重载失败，已恢复旧配置；恢复旧配置后核心重载仍失败，请检查核心服务日志"
-        fi
+        local rollbackMessage
+        subscriptionSyncSetRollbackRetryMessage rollbackMessage "核心重载失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        errorCard "${rollbackMessage}"
         return 1
     fi
     padmRemoveCleanupPath "${configBackupDir}"

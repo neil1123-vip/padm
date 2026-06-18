@@ -850,8 +850,8 @@ JSON
             set -e
             [[ "${reconcileStatus}" -ne 0 ]]
             [[ "${reconcileCalls}" == "2" ]]
-            grep -qx '<empty>' "${reconcileLog}"
-            grep -qx 'true' "${reconcileLog}"
+            grep -qxm1 '^<empty>$' "${reconcileLog}"
+            grep -qxm1 '^true$' "${reconcileLog}"
             jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("已恢复旧配置")) and ((.error_detail.message | contains("恢复旧配置后服务重建仍失败")) | not)' "${responseFile}" >/dev/null
         )
 
@@ -870,8 +870,8 @@ JSON
             set -e
             [[ "${reconcileStatus}" -ne 0 ]]
             [[ "${reconcileCalls}" == "2" ]]
-            grep -qx '<empty>' "${reconcileLog}"
-            grep -qx 'true' "${reconcileLog}"
+            grep -qxm1 '^<empty>$' "${reconcileLog}"
+            grep -qxm1 '^true$' "${reconcileLog}"
             jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("恢复旧配置后服务重建仍失败"))' "${responseFile}.reconcile-retry-fail" >/dev/null
         )
 

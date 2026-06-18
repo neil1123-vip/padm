@@ -536,19 +536,19 @@ subscriptionSyncCreateSubscribeOutputBackups() {
 subscriptionSyncCreateLocalApplyBackups() {
     local configVar=$1
     local outputVar=$2
-    local configBackupDir=
-    local outputBackupDir=
+    local createdConfigBackupDir=
+    local createdOutputBackupDir=
 
     SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=
-    configBackupDir=$(subscriptionSyncCreateConfigBackups) || return 1
+    createdConfigBackupDir=$(subscriptionSyncCreateConfigBackups) || return 1
     SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=config
-    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
-        padmRemoveCleanupPath "${configBackupDir}"
+    createdOutputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
+        padmRemoveCleanupPath "${createdConfigBackupDir}"
         return 1
     }
     SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=ready
-    printf -v "${configVar}" '%s' "${configBackupDir}"
-    printf -v "${outputVar}" '%s' "${outputBackupDir}"
+    printf -v "${configVar}" '%s' "${createdConfigBackupDir}"
+    printf -v "${outputVar}" '%s' "${createdOutputBackupDir}"
 }
 
 subscriptionSyncReleaseLocalApplyBackups() {
@@ -612,6 +612,22 @@ subscriptionSyncRollbackLocalApply() {
     return 1
 }
 
+subscriptionSyncSetRollbackRetryMessage() {
+    local outputVar=$1
+    local reason=$2
+    local retryFn=$3
+    local retryFailureMessage=$4
+    local message
+    shift 4
+
+    if "${retryFn}" "$@"; then
+        message="${reason}，已恢复旧配置"
+    else
+        message="${reason}，已恢复旧配置；${retryFailureMessage}"
+    fi
+    printf -v "${outputVar}" '%s' "${message}"
+}
+
 subscriptionSyncApplyAccountPlanTransaction() {
     local syncPlan=$1
     local reloadFn=${2:-}
@@ -639,11 +655,7 @@ subscriptionSyncApplyAccountPlanTransaction() {
                 padmForgetCleanupPath "${backupDir}"
                 return 1
             fi
-            if "${reloadFn}"; then
-                SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用后核心重载失败，已恢复旧配置"
-            else
-                SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用后核心重载失败，已恢复旧配置；恢复旧配置后核心重载仍失败，请检查核心服务日志"
-            fi
+            subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_SYNC_TRANSACTION_ERROR "本机同步计划应用后核心重载失败" "${reloadFn}" "恢复旧配置后核心重载仍失败，请检查核心服务日志"
             padmRemoveCleanupPath "${backupDir}"
             return 1
         fi
