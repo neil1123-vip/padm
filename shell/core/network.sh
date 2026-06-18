@@ -204,7 +204,8 @@ EOF
                 fi
             else
                 if ! removeManagedFileIfPresent "${targetPath}"; then
-                    CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败，且新配置清理失败，请手动检查 ${targetPath}"
+                    coreSetNewConfigCleanupFailureMessage restoreMessage "端口检测 Nginx 配置校验失败" "${targetPath}"
+                    CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="${restoreMessage}"
                     return 1
                 fi
             fi

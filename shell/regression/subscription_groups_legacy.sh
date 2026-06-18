@@ -2055,6 +2055,11 @@ runCoreRollbackResultMessageRegression() (
         "/tmp/core-port-backup" \
         ""
     [[ "${message}" == "入口端口配置回滚失败，请手动检查备份目录: /tmp/core-port-backup" ]]
+
+    coreSetNewConfigCleanupFailureMessage message \
+        "sing-box 日志配置重载失败" \
+        "/tmp/log.json"
+    [[ "${message}" == "sing-box 日志配置重载失败，且新配置清理失败，请手动检查 /tmp/log.json" ]]
 )
 
 runCorePortFileTransactionRegression() {

@@ -2426,7 +2426,8 @@ EOF
         backupPath=
     else
         if ! removeManagedPathIfPresent "${targetPath}"; then
-            errorCard "sing-box 日志配置重载失败，且新配置清理失败，请手动检查 ${targetPath}"
+            coreSetNewConfigCleanupFailureMessage restoreMessage "sing-box 日志配置重载失败" "${targetPath}"
+            errorCard "${restoreMessage}"
             return 1
         fi
     fi

@@ -338,6 +338,15 @@ coreSetRollbackFailureMessage() {
     printf -v "${outputVar}" '%s' "${result}"
 }
 
+coreSetNewConfigCleanupFailureMessage() {
+    local outputVar=$1
+    local reason=$2
+    local targetPath=$3
+    local result="${reason}，且新配置清理失败，请手动检查 ${targetPath}"
+
+    printf -v "${outputVar}" '%s' "${result}"
+}
+
 restoreManagedFileFromBackup() {
     local backupFile=$1
     local targetFile=$2
