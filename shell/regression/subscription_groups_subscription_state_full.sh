@@ -187,7 +187,6 @@ runSubscriptionGroupStateStructureMigrationRegression() {
     (
         local summaryOutput
         menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
         summaryOutput=$(showSubscriptionGroupsStateSummary)
         [[ "${summaryOutput}" == *"当前组：Edge Group(edge-group)"* ]]
         [[ "${summaryOutput}" == *"分享订阅：1 个，启用 1 个"* ]]
@@ -319,7 +318,6 @@ runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
     (
         local trafficOutput
         menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
         trafficOutput=$(showAdminSubscriptionTraffic)
         [[ "${trafficOutput}" == *"总上传：2 MB"* ]]
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
@@ -374,7 +372,6 @@ runSubscriptionGroupStateQuotaMenuPreviewFailureRegression() {
         local quotaMenuOutput
         local quotaMenuStatus
         menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
         subscriptionSyncApplyAccountPlanTransaction() {
             return 42
         }
