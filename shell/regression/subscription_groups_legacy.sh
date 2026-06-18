@@ -2075,6 +2075,7 @@ runCorePortFileTransactionRegression() {
     fi
     [[ "${reloadCalls}" == "2" ]]
     [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
+    grep -q "入口端口核心重载失败，已恢复旧配置" "${errorLog}"
     grep -q "恢复后核心重载仍失败" "${errorLog}" && return 1
 
     reloadCalls=0

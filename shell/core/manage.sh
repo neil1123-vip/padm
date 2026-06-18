@@ -1042,7 +1042,9 @@ corePortApplyReloadTransaction() {
         errorCard "入口端口核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
         return 1
     fi
-    reloadCore || errorCard "入口端口核心重载失败，已恢复旧配置；恢复后核心重载仍失败，请检查核心服务日志"
+    local rollbackMessage
+    coreSetRollbackResultMessage rollbackMessage "入口端口核心重载失败" "已恢复旧配置" reloadCore "恢复后核心重载仍失败，请检查核心服务日志"
+    errorCard "${rollbackMessage}"
     padmRemoveCleanupPath "${backupDir}"
     return 1
 }
