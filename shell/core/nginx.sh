@@ -52,12 +52,7 @@ realityStreamSplitNginxConf() {
 
 nginxTmpTemplate() {
     local template=$1
-    if declare -F padmTmpFilePath >/dev/null 2>&1; then
-        padmTmpFilePath "${template}"
-    else
-        local tmpBase="${TMPDIR:-/tmp}"
-        printf '%s\n' "${tmpBase%/}/${template}"
-    fi
+    padmFallbackTmpFilePath "${template}"
 }
 
 realityStreamEnableBackupTemplate() {

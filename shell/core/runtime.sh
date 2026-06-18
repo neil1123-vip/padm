@@ -107,6 +107,16 @@ padmTmpFilePath() {
     printf '%s\n' "${tmpBase%/}/${fileName}"
 }
 
+padmFallbackTmpFilePath() {
+    local fileName=$1
+    if declare -F padmTmpFilePath >/dev/null 2>&1; then
+        padmTmpFilePath "${fileName}"
+        return $?
+    fi
+    local tmpBase="${TMPDIR:-/tmp}"
+    printf '%s\n' "${tmpBase%/}/${fileName}"
+}
+
 padmForgetCleanupPath() {
     local path=$1
     local resolvedPath=

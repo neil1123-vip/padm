@@ -4,12 +4,7 @@ SERVICE_ACTIONS=
 SERVICE_QUEUE_ALLOW_FAILURE=
 
 xrayStartTestLog() {
-    if declare -F padmTmpFilePath >/dev/null 2>&1; then
-        padmTmpFilePath padm-xray-start-test.log
-    else
-        local tmpBase="${TMPDIR:-/tmp}"
-        printf '%s\n' "${tmpBase%/}/padm-xray-start-test.log"
-    fi
+    padmFallbackTmpFilePath padm-xray-start-test.log
 }
 
 waitForServiceState() {

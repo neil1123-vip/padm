@@ -30,12 +30,7 @@ fail2banNginxAccessLogFile() {
 }
 
 fail2banValidateLog() {
-    if declare -F padmTmpFilePath >/dev/null 2>&1; then
-        padmTmpFilePath padm-fail2ban-validate.log
-    else
-        local tmpBase="${TMPDIR:-/tmp}"
-        printf '%s\n' "${tmpBase%/}/padm-fail2ban-validate.log"
-    fi
+    padmFallbackTmpFilePath padm-fail2ban-validate.log
 }
 
 fail2banReloadServiceIfRunning() {

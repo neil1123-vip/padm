@@ -390,21 +390,11 @@ accessControlManagedSingBoxFile() {
 }
 
 accessControlXrayTestLog() {
-    if declare -F padmTmpFilePath >/dev/null 2>&1; then
-        padmTmpFilePath padm-access-xray-test.log
-    else
-        local tmpBase="${TMPDIR:-/tmp}"
-        printf '%s\n' "${tmpBase%/}/padm-access-xray-test.log"
-    fi
+    padmFallbackTmpFilePath padm-access-xray-test.log
 }
 
 accessControlSingBoxTestLog() {
-    if declare -F padmTmpFilePath >/dev/null 2>&1; then
-        padmTmpFilePath padm-access-sing-box-test.log
-    else
-        local tmpBase="${TMPDIR:-/tmp}"
-        printf '%s\n' "${tmpBase%/}/padm-access-sing-box-test.log"
-    fi
+    padmFallbackTmpFilePath padm-access-sing-box-test.log
 }
 
 accessControlBackupCreate() {
