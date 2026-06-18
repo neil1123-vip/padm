@@ -561,20 +561,28 @@ fail2banApplyProfile() {
         if ! fail2banRemoveManagedFiles; then
             if fail2banRestoreManagedFiles "${disabledBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
                 padmRemoveCleanupPath "${disabledBackupDir}"
-                errorCard "Fail2ban 防护停用失败，已恢复旧配置"
+                local restoreMessage
+                coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 防护停用失败" true "已恢复旧配置" "旧配置" "${disabledBackupDir}"
+                errorCard "${restoreMessage}"
             else
                 padmForgetCleanupPath "${disabledBackupDir}"
-                errorCard "Fail2ban 防护停用失败，且旧配置恢复失败"
+                local restoreMessage
+                coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 防护停用失败" false "已恢复旧配置" "旧配置" "${disabledBackupDir}"
+                errorCard "${restoreMessage}"
             fi
             return 1
         fi
         if ! fail2banReloadServiceIfRunning; then
             if fail2banRestoreManagedFiles "${disabledBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
                 padmRemoveCleanupPath "${disabledBackupDir}"
-                errorCard "Fail2ban 防护停用后服务重载失败，已恢复旧配置"
+                local restoreMessage
+                coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 防护停用后服务重载失败" true "已恢复旧配置" "旧配置" "${disabledBackupDir}"
+                errorCard "${restoreMessage}"
             else
                 padmForgetCleanupPath "${disabledBackupDir}"
-                errorCard "Fail2ban 防护停用后服务重载失败，且旧配置恢复失败"
+                local restoreMessage
+                coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 防护停用后服务重载失败" false "已恢复旧配置" "旧配置" "${disabledBackupDir}"
+                errorCard "${restoreMessage}"
             fi
             return 1
         fi
@@ -641,20 +649,28 @@ fail2banApplyProfile() {
         validateLog=$(fail2banValidateLog)
         if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
             padmRemoveCleanupPath "${managedBackupDir}"
-            errorCard "Fail2ban 配置校验失败，已恢复旧配置" "校验日志：${validateLog}"
+            local restoreMessage
+            coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 配置校验失败" true "已恢复旧配置" "旧配置" "${managedBackupDir}"
+            errorCard "${restoreMessage}" "校验日志：${validateLog}"
         else
             padmForgetCleanupPath "${managedBackupDir}"
-            errorCard "Fail2ban 配置校验失败，且旧配置恢复失败" "校验日志：${validateLog}"
+            local restoreMessage
+            coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 配置校验失败" false "已恢复旧配置" "旧配置" "${managedBackupDir}"
+            errorCard "${restoreMessage}" "校验日志：${validateLog}"
         fi
         return 1
     fi
     if ! fail2banStartOrReloadService; then
         if fail2banRestoreManagedFiles "${managedBackupDir}" "${serviceWasActive}" "${serviceWasEnabled}"; then
             padmRemoveCleanupPath "${managedBackupDir}"
-            errorCard "Fail2ban 服务应用失败，已恢复旧配置"
+            local restoreMessage
+            coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 服务应用失败" true "已恢复旧配置" "旧配置" "${managedBackupDir}"
+            errorCard "${restoreMessage}"
         else
             padmForgetCleanupPath "${managedBackupDir}"
-            errorCard "Fail2ban 服务应用失败，且旧配置恢复失败"
+            local restoreMessage
+            coreSetSingleRestoreResultMessage restoreMessage "Fail2ban 服务应用失败" false "已恢复旧配置" "旧配置" "${managedBackupDir}"
+            errorCard "${restoreMessage}"
         fi
         return 1
     fi

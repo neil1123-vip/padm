@@ -1962,6 +1962,30 @@ runCoreRollbackResultMessageRegression() (
         reality
     [[ "${message}" == "核心重载失败，已回滚配置" ]]
     grep -q '^reality$' "${retryLog}"
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "Fail2ban 服务应用失败" \
+        true \
+        "已恢复旧配置" \
+        "旧配置" \
+        "/tmp/fail2ban-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ "${message}" == "Fail2ban 服务应用失败，已恢复旧配置" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "Fail2ban 服务应用失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        "/tmp/fail2ban-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "Fail2ban 服务应用失败，且旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
 )
 
 runCorePortFileTransactionRegression() {

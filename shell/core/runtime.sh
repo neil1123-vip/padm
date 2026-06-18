@@ -302,6 +302,26 @@ coreSetRollbackResultMessage() {
     printf -v "${outputVar}" '%s' "${result}"
 }
 
+coreSetSingleRestoreResultMessage() {
+    local outputVar=$1
+    local reason=$2
+    local restored=$3
+    local restoredMessage=$4
+    local failedLabel=$5
+    local failedLocation=$6
+    local result
+
+    if [[ "${restored}" == "true" ]]; then
+        result="${reason}，${restoredMessage}"
+        printf -v "${outputVar}" '%s' "${result}"
+        return 0
+    fi
+
+    result="${reason}，且${failedLabel}恢复失败，请手动检查${failedLocation}"
+    printf -v "${outputVar}" '%s' "${result}"
+    return 1
+}
+
 restoreManagedFileFromBackup() {
     local backupFile=$1
     local targetFile=$2
