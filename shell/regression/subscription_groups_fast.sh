@@ -792,7 +792,7 @@ runVersionHelpersRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/version.sh"
 
-        local nextVersion versionFile
+        local nextVersion versionFile standaloneVersionFile
         nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'fix(update): harden script refresh rollback')
         [[ "${nextVersion}" == "1.2.1" ]]
         nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'feat(subscription): add new flow')
@@ -807,6 +807,18 @@ SCRIPT_VERSION="1.2.0"
 EOF
         setScriptVersion v1.2.3 "${versionFile}"
         grep -q '^SCRIPT_VERSION="1\.2\.3"$' "${versionFile}"
+
+        standaloneVersionFile="${TMP_DIR}/version-helper-standalone-version.sh"
+        cat >"${standaloneVersionFile}" <<'EOF'
+#!/usr/bin/env bash
+SCRIPT_VERSION="1.2.0"
+EOF
+        bash -c '
+            set -euo pipefail
+            source "$1"
+            setScriptVersion v1.2.4 "$2"
+            grep -q "^SCRIPT_VERSION=\"1\\.2\\.4\"$" "$2"
+        ' _ "${PROJECT_ROOT}/shell/core/version.sh" "${standaloneVersionFile}"
     )
 }
 
