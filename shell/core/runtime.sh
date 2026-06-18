@@ -324,6 +324,7 @@ padmWriteManagedFileBackupManifest() {
 
 padmRestoreManagedFileBackupManifest() {
     local backupDir=$1
+    local validateTargetFn=${2:-}
     local manifest
     local backupPath
     local targetPath
@@ -341,6 +342,10 @@ padmRestoreManagedFileBackupManifest() {
         fi
         [[ -n "${targetPath}" ]] || continue
         targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || return 1
+        if [[ -n "${validateTargetFn}" ]]; then
+            declare -F "${validateTargetFn}" >/dev/null 2>&1 || return 1
+            "${validateTargetFn}" "${targetPath}" || return 1
+        fi
         case "${state}" in
         file)
             backupPath=$(padmRequireSafeAbsolutePath "${backupPath}") || return 1

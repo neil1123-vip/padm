@@ -378,42 +378,27 @@ subscriptionSyncApplyAccountPlan() {
 
 subscriptionSyncRestoreConfigBackups() {
     local backupDir=$1
-    local manifest="${backupDir}/manifest"
-    local backupFile
-    local targetFile
-    local restoreStage
     subscriptionSyncRequireSafeConfigDirs || return 1
-    [[ -f "${manifest}" ]] || return 1
-    while IFS=$'\t' read -r backupFile targetFile; do
-        [[ -n "${backupFile}" && -n "${targetFile}" ]] || continue
-        subscriptionSyncManagedConfigTargetFile "${targetFile}" || return 1
-        padmCreateTempFileForTarget restoreStage "${targetFile}" restore || return 1
-        if ! cp -p "${backupFile}" "${restoreStage}"; then
-            padmRemoveCleanupPath "${restoreStage}"
-            return 1
-        fi
-        commitGeneratedFile "${restoreStage}" "${targetFile}" || { padmRemoveCleanupPath "${restoreStage}"; return 1; }
-    done <"${manifest}"
+    padmRestoreManagedFileBackupManifest "${backupDir}" subscriptionSyncManagedConfigTargetFile
 }
 
 subscriptionSyncCreateConfigBackups() {
     local backupDir
     local file
-    local manifest
-    local backupFile
     local backupIndex=0
+    local -a backupArgs=()
 
     subscriptionSyncRequireSafeConfigDirs || return 1
     padmCreateTmpRootPath backupDir padm-subscription-sync-backup.XXXXXX -d || return 1
-    manifest="${backupDir}/manifest"
-    : >"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
-        printf -v backupFile '%s/%06d.json' "${backupDir}" "${backupIndex}"
+        backupArgs+=("$(printf '%06d.json' "${backupIndex}")" "${file}")
         backupIndex=$((backupIndex + 1))
-        cp -p "${file}" "${backupFile}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
-        printf '%s\t%s\n' "${backupFile}" "${file}" >>"${manifest}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
     done < <(subscriptionSyncConfigFiles)
+    if ! padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    fi
     printf '%s\n' "${backupDir}"
 }
 

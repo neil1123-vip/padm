@@ -1030,6 +1030,38 @@ runManagedFileBackupManifestRegression() (
     [[ ! -e "${root}/targets/two.json" ]]
 )
 
+runManagedFileBackupManifestValidatorRegression() (
+    local rootRel="${TMP_DIR}/managed-file-backup-manifest-validator"
+    local root
+    local backupDir
+    local targetFile
+    local originalContent
+    local status
+
+    mkdir -p "${rootRel}/targets"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    backupDir="${root}/backup"
+    targetFile="${root}/targets/live.json"
+    printf '{"version":"old"}\n' >"${targetFile}"
+    originalContent=$(<"${targetFile}")
+
+    padmWriteManagedFileBackupManifest "${backupDir}" "xray/live.json" "${targetFile}"
+    printf '{"version":"new"}\n' >"${targetFile}"
+
+    onlyRejectRestoreTarget() {
+        [[ "$1" != "${targetFile}" ]]
+    }
+    set +e
+    padmRestoreManagedFileBackupManifest "${backupDir}" onlyRejectRestoreTarget
+    status=$?
+    set -e
+    unset -f onlyRejectRestoreTarget
+
+    [[ "${status}" -ne 0 ]]
+    [[ "$(<"${targetFile}")" == '{"version":"new"}' ]]
+    [[ "${originalContent}" == '{"version":"old"}' ]]
+)
+
 runCheckLogBackupMissingRestoreRegression() (
     local root="${TMP_DIR}/check-log-backup-restore"
     local restoreBackupDir
@@ -2656,6 +2688,37 @@ runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression() {
     )
 }
 
+runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/subscription-sync-config-unmanaged-target"
+        local backupDir
+        local targetFile="${root}/safe-config/custom.json"
+        local originalContent
+        local status
+
+        mkdir -p "${root}/safe-config"
+        printf '{"custom":"keep"}\n' >"${targetFile}"
+        originalContent=$(<"${targetFile}")
+        configPath="${root}/safe-config/"
+        singBoxConfigPath=
+        padmCreateTempPath backupDir -d "${TMP_DIR}/subscription-sync-config-unmanaged-target-backup.XXXXXX"
+        printf '{"inbounds":[]}\n' >"${backupDir}/000000.json"
+        printf '%s\t%s\n' "${backupDir}/000000.json" "${targetFile}" >"${backupDir}/manifest"
+
+        set +e
+        subscriptionSyncRestoreConfigBackups "${backupDir}"
+        status=$?
+        set -e
+
+        [[ "${status}" -ne 0 ]]
+        [[ "$(<"${targetFile}")" == "${originalContent}" ]]
+        padmRemoveCleanupPath "${backupDir}"
+    )
+}
+
 runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression() (
     local root="${TMP_DIR}/restore-managed-file-directory-target"
     local backupFile="${root}/backup.json"
@@ -3406,6 +3469,7 @@ runRegressionPlatform() {
         runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression &&
         runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
         runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression &&
+        runRegressionStep managed-file-backup-manifest-validator runManagedFileBackupManifestValidatorRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
@@ -3467,6 +3531,7 @@ runRegressionFast() {
         runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&
+        runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression &&
         runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
