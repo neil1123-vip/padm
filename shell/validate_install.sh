@@ -3,6 +3,7 @@
 passed=0
 failed=0
 warned=0
+PADM_VALIDATE_TMP_ROOT=
 
 pass() {
     passed=$((passed + 1))
@@ -17,6 +18,31 @@ fail() {
 warn() {
     warned=$((warned + 1))
     printf '\033[33m[WARN]\033[0m %s\n' "$1"
+}
+
+validate_tmp_root() {
+    if [[ -n "${PADM_VALIDATE_TMP_ROOT}" ]]; then
+        printf '%s\n' "${PADM_VALIDATE_TMP_ROOT}"
+        return 0
+    fi
+
+    local baseDir="${TMPDIR:-/tmp}"
+    mkdir -p "${baseDir}" || return 1
+    PADM_VALIDATE_TMP_ROOT=$(mktemp -d "${baseDir%/}/padm-validate.XXXXXX") || return 1
+    printf '%s\n' "${PADM_VALIDATE_TMP_ROOT}"
+}
+
+validate_tmp_file() {
+    local name=$1
+    local root
+    root=$(validate_tmp_root) || return 1
+    printf '%s/%s\n' "${root}" "${name}"
+}
+
+find_has_matches() {
+    local firstMatch
+    firstMatch=$(find "$@" -print -quit) || return 1
+    [[ -n "${firstMatch}" ]]
 }
 
 print_summary_card() {
@@ -102,17 +128,22 @@ check_no_pattern() {
     local path=$1
     local pattern=$2
     local label=$3
+    local grepLog
 
     if [[ ! -e "${path}" ]]; then
         warn "路径缺失，跳过模式检查：${path}"
         return
     fi
 
-    : > /tmp/padm-validate-grep.log
-    find "${path}" -type f \( -name '*.sh' -o -name '*.conf' -o -name '*.list' -o -name '*.service' \) ! -path '*/shell/validate_install.sh' -exec grep -H -E "${pattern}" {} + >/tmp/padm-validate-grep.log 2>/dev/null || true
-    if [[ -s /tmp/padm-validate-grep.log ]]; then
+    grepLog=$(validate_tmp_file padm-validate-grep.log) || {
+        warn "${label}：无法创建临时日志"
+        return
+    }
+    : > "${grepLog}"
+    find "${path}" -type f \( -name '*.sh' -o -name '*.conf' -o -name '*.list' -o -name '*.service' \) ! -path '*/shell/validate_install.sh' -exec grep -H -E "${pattern}" {} + >"${grepLog}" 2>/dev/null || true
+    if [[ -s "${grepLog}" ]]; then
         fail "${label}：发现禁止模式"
-        cat /tmp/padm-validate-grep.log
+        cat "${grepLog}"
     else
         pass "${label}：未发现禁止模式"
     fi
@@ -181,7 +212,7 @@ check_sing_box() {
 }
 
 check_sing_box_compatibility_audit() {
-    local statusFile warnFile summary
+    local statusFile warnFile summary compatLog
 
     if [[ ! -x /etc/padm/sing-box/sing-box ]]; then
         warn "未安装 sing-box，跳过兼容体检摘要"
@@ -191,6 +222,11 @@ check_sing_box_compatibility_audit() {
         warn "缺少核心 bootstrap，跳过兼容体检摘要"
         return
     fi
+
+    compatLog=$(validate_tmp_file padm-validate-sing-box-compat.log) || {
+        warn "sing-box 兼容体检摘要无法创建临时日志，已跳过"
+        return
+    }
 
     # 只读验收只输出摘要，不把历史兼容风险直接升级成 FAIL。
     (
@@ -208,23 +244,23 @@ check_sing_box_compatibility_audit() {
         else
             printf 'PASS:%s\n' "${summary}"
         fi
-    ) >/tmp/padm-validate-sing-box-compat.log 2>&1 || true
+    ) >"${compatLog}" 2>&1 || true
 
-    if grep -q '^PASS:' /tmp/padm-validate-sing-box-compat.log; then
+    if grep -q '^PASS:' "${compatLog}"; then
         pass "sing-box 兼容体检通过"
-    elif grep -q '^WARN:' /tmp/padm-validate-sing-box-compat.log; then
-        warn "sing-box 兼容体检发现需关注项：$(sed -n 's/^WARN://p' /tmp/padm-validate-sing-box-compat.log | head -n 1)"
-        if grep -q '^LOG:' /tmp/padm-validate-sing-box-compat.log; then
-            warn "sing-box 兼容体检日志：$(sed -n 's/^LOG://p' /tmp/padm-validate-sing-box-compat.log | head -n 1)"
+    elif grep -q '^WARN:' "${compatLog}"; then
+        warn "sing-box 兼容体检发现需关注项：$(sed -n 's/^WARN://p' "${compatLog}" | head -n 1)"
+        if grep -q '^LOG:' "${compatLog}"; then
+            warn "sing-box 兼容体检日志：$(sed -n 's/^LOG://p' "${compatLog}" | head -n 1)"
         fi
     else
         warn "sing-box 兼容体检摘要执行失败，已跳过"
-        cat /tmp/padm-validate-sing-box-compat.log 2>/dev/null || true
+        cat "${compatLog}" 2>/dev/null || true
     fi
 }
 
 check_xray_compatibility_audit() {
-    local statusFile warnFile summary strictLog
+    local statusFile warnFile summary strictLog compatLog
 
     if [[ ! -x /etc/padm/xray/xray ]]; then
         warn "未安装 Xray，跳过兼容体检摘要"
@@ -234,6 +270,11 @@ check_xray_compatibility_audit() {
         warn "缺少核心 bootstrap，跳过 Xray 兼容体检摘要"
         return
     fi
+
+    compatLog=$(validate_tmp_file padm-validate-xray-compat.log) || {
+        warn "Xray 兼容体检摘要无法创建临时日志，已跳过"
+        return
+    }
 
     (
         # shellcheck source=/dev/null
@@ -254,21 +295,21 @@ check_xray_compatibility_audit() {
         else
             printf 'PASS:%s\n' "${summary}"
         fi
-    ) >/tmp/padm-validate-xray-compat.log 2>&1 || true
+    ) >"${compatLog}" 2>&1 || true
 
-    if grep -q '^PASS:' /tmp/padm-validate-xray-compat.log; then
+    if grep -q '^PASS:' "${compatLog}"; then
         pass "Xray 兼容体检通过"
-    elif grep -q '^WARN:' /tmp/padm-validate-xray-compat.log; then
-        warn "Xray 兼容体检发现需关注项：$(sed -n 's/^WARN://p' /tmp/padm-validate-xray-compat.log | head -n 1)"
-        if grep -q '^LOG:' /tmp/padm-validate-xray-compat.log; then
-            warn "Xray 兼容体检日志：$(sed -n 's/^LOG://p' /tmp/padm-validate-xray-compat.log | head -n 1)"
+    elif grep -q '^WARN:' "${compatLog}"; then
+        warn "Xray 兼容体检发现需关注项：$(sed -n 's/^WARN://p' "${compatLog}" | head -n 1)"
+        if grep -q '^LOG:' "${compatLog}"; then
+            warn "Xray 兼容体检日志：$(sed -n 's/^LOG://p' "${compatLog}" | head -n 1)"
         fi
-        if grep -q '^WARN:STRICT_FAIL ' /tmp/padm-validate-xray-compat.log; then
-            warn "Xray 严格模式校验失败：$(sed -n 's/^WARN:STRICT_FAIL //p' /tmp/padm-validate-xray-compat.log | head -n 1)"
+        if grep -q '^WARN:STRICT_FAIL ' "${compatLog}"; then
+            warn "Xray 严格模式校验失败：$(sed -n 's/^WARN:STRICT_FAIL //p' "${compatLog}" | head -n 1)"
         fi
     else
         warn "Xray 兼容体检摘要执行失败，已跳过"
-        cat /tmp/padm-validate-xray-compat.log 2>/dev/null || true
+        cat "${compatLog}" 2>/dev/null || true
     fi
 }
 
@@ -353,7 +394,7 @@ check_first_nonempty_dir() {
 
     shift
     for dir in "$@"; do
-        if [[ -d "${dir}" ]] && find "${dir}" -type f -print -quit | grep -q .; then
+        if [[ -d "${dir}" ]] && find_has_matches "${dir}" -type f; then
             pass "${label}：${dir}"
             return
         fi
@@ -378,14 +419,19 @@ check_fail2ban() {
     local nginxScanSectionPresent=false
     local nginxScanEnabled=false
     local nginxScanRuntimeLog=
+    local fail2banLog=
 
     if command -v fail2ban-client >/dev/null 2>&1; then
         pass "fail2ban 命令存在"
-        if fail2ban-client -t >/tmp/padm-validate-fail2ban.log 2>&1; then
+        fail2banLog=$(validate_tmp_file padm-validate-fail2ban.log) || {
+            warn "fail2ban 临时日志创建失败，跳过配置校验"
+            return
+        }
+        if fail2ban-client -t >"${fail2banLog}" 2>&1; then
             pass "fail2ban 配置校验通过"
         else
             warn "fail2ban 配置校验未通过"
-            cat /tmp/padm-validate-fail2ban.log
+            cat "${fail2banLog}"
         fi
         check_service_active_optional fail2ban
         check_service_enabled fail2ban
@@ -474,8 +520,8 @@ check_maintenance_summary() {
         fail "Xray Geo 文件缺失"
     fi
 
-    if find /etc/padm/tls -maxdepth 1 -type f -name '*.crt' -size +0c -print -quit 2>/dev/null | grep -q . &&
-        find /etc/padm/tls -maxdepth 1 -type f -name '*.key' -size +0c -print -quit 2>/dev/null | grep -q .; then
+    if find_has_matches /etc/padm/tls -maxdepth 1 -type f -name '*.crt' -size +0c 2>/dev/null &&
+        find_has_matches /etc/padm/tls -maxdepth 1 -type f -name '*.key' -size +0c 2>/dev/null; then
         pass "TLS 证书文件存在"
     fi
 
@@ -524,6 +570,8 @@ check_tcp_listen() {
 check_domain() {
     local domain=$1
     local http_code=
+    local tlsLog=
+    local certLog=
 
     if dig +short A "${domain}" | grep -E '^[0-9.]+$' >/dev/null 2>&1 || dig +short AAAA "${domain}" | grep ':' >/dev/null 2>&1; then
         pass "域名可解析：${domain}"
@@ -546,12 +594,20 @@ check_domain() {
             warn "HTTPS 不可访问：${domain}"
         fi
 
-        if openssl s_client -servername "${domain}" -connect "${domain}:443" </dev/null 2>/tmp/padm-validate-tls.log | openssl x509 -noout -subject -issuer >/tmp/padm-validate-cert.log 2>/dev/null; then
+        tlsLog=$(validate_tmp_file padm-validate-tls.log) || {
+            warn "TLS 临时日志创建失败：${domain}"
+            return
+        }
+        certLog=$(validate_tmp_file padm-validate-cert.log) || {
+            warn "TLS 证书日志创建失败：${domain}"
+            return
+        }
+        if openssl s_client -servername "${domain}" -connect "${domain}:443" </dev/null 2>"${tlsLog}" | openssl x509 -noout -subject -issuer >"${certLog}" 2>/dev/null; then
             pass "TLS 证书可读取：${domain}"
-            cat /tmp/padm-validate-cert.log
+            cat "${certLog}"
         else
             warn "TLS 证书不可读取：${domain}"
-            cat /tmp/padm-validate-tls.log
+            cat "${tlsLog}"
         fi
     else
         warn "本机未监听 443，跳过 HTTPS/TLS 检查；多端口 sing-box 场景可能正常"
@@ -620,3 +676,8 @@ main() {
 }
 
 main "$@"
+status=$?
+if [[ -n "${PADM_VALIDATE_TMP_ROOT:-}" ]]; then
+    rm -rf -- "${PADM_VALIDATE_TMP_ROOT}"
+fi
+exit "${status}"
