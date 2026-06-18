@@ -519,6 +519,14 @@ restoreServicesAfterTLSRenewal() {
     return "${status}"
 }
 
+failTlsRenewalBeforeInstall() {
+    local reason=$1
+
+    errorCard "${reason}，正在尝试恢复服务"
+    restoreServicesAfterTLSRenewal || errorCard "${reason}，且服务恢复失败"
+    return 1
+}
+
 stopServicesForTLSRenewal() {
     if ! runCoreServiceActionAllowFailure handleNginx stop; then
         errorCard "Nginx 服务停止失败，已取消 TLS 续期"
@@ -602,11 +610,22 @@ renewalTLS() {
                 installDomain="*.${dnsTLSDomain}"
             fi
             local backupDir backupCrt backupKey
-            padmCreateTempPath backupDir -d "${TMPDIR:-/tmp}/padm-tls-renew.XXXXXX" || return 1
+            padmCreateTempPath backupDir -d "${TMPDIR:-/tmp}/padm-tls-renew.XXXXXX" || {
+                failTlsRenewalBeforeInstall "TLS 旧证书备份目录创建失败"
+                return 1
+            }
             backupCrt="${backupDir}/$(basename -- "${crtFile}")"
             backupKey="${backupDir}/$(basename -- "${keyFile}")"
-            cp -p "${crtFile}" "${backupCrt}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
-            cp -p "${keyFile}" "${backupKey}" || { padmRemoveCleanupPath "${backupDir}"; return 1; }
+            cp -p "${crtFile}" "${backupCrt}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                failTlsRenewalBeforeInstall "TLS 旧证书备份失败"
+                return 1
+            }
+            cp -p "${keyFile}" "${backupKey}" || {
+                padmRemoveCleanupPath "${backupDir}"
+                failTlsRenewalBeforeInstall "TLS 旧证书备份失败"
+                return 1
+            }
             sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || {
                 local installStatus=$?
                 errorCard "TLS 证书安装失败，正在尝试恢复服务"

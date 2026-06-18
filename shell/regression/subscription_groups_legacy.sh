@@ -15546,7 +15546,7 @@ EOF
     ! grep -F -q -- '-d example.com' "${commandLog}"
 )
 
-runTlsRenewalExistingCertificateRegression() {
+runTlsRenewalExistingCertificateRegression() (
     local oldHome="${HOME}"
     local oldTlsDir="${PADM_TLS_DIR:-}"
     local oldCurrentHost="${currentHost:-}"
@@ -15638,7 +15638,7 @@ runTlsRenewalExistingCertificateRegression() {
     sslRenewalDays="${oldSslRenewalDays}"
     coreInstallType="${oldCoreInstallType}"
     dnsTLSDomain="${oldDnsTLSDomain}"
-}
+)
 
 runTlsRenewalFailurePropagationRegression() (
     local root="${TMP_DIR}/tls-renew-failure-propagation"
@@ -15851,6 +15851,101 @@ runTlsRenewalInstallRollbackRegression() (
     dnsTLSDomain="${oldDnsTLSDomain}"
 )
 
+runTlsRenewalBackupPreparationRestoresServicesRegression() (
+    local root="${TMP_DIR}/tls-renew-backup-prepare-restore"
+    local tlsDir="${root}/certs"
+    local homeDir="${root}/home"
+    local serviceLog="${root}/services.log"
+    local errorLog="${root}/error.log"
+    local oldHome="${HOME}"
+    local oldTlsDir="${PADM_TLS_DIR:-}"
+    local oldCurrentHost="${currentHost:-}"
+    local oldDomain="${domain:-}"
+    local oldTlsDomain="${tlsDomain:-}"
+    local oldInstalledDNSAPIStatus="${installedDNSAPIStatus:-}"
+    local oldSslRenewalDays="${sslRenewalDays:-}"
+    local oldCoreInstallType="${coreInstallType:-}"
+    local oldDnsTLSDomain="${dnsTLSDomain:-}"
+    local rc
+
+    mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/renew.example.com_ecc"
+    HOME="${homeDir}"
+    PADM_TLS_DIR="${tlsDir}"
+    currentHost=renew.example.com
+    domain=
+    tlsDomain=
+    dnsTLSDomain=
+    installedDNSAPIStatus=
+    coreInstallType=1
+    sslRenewalDays=90
+    export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+
+    printf 'old-cert\n' >"${tlsDir}/renew.example.com.crt"
+    printf 'old-key\n' >"${tlsDir}/renew.example.com.key"
+    printf 'acme-cert\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.cer"
+    printf 'acme-key\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.key"
+    : >"${serviceLog}"
+    : >"${errorLog}"
+
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    progressCard() { return 0; }
+    handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; return 0; }
+    handleXray() { printf 'xray:%s\n' "$1" >>"${serviceLog}"; return 0; }
+    handleSingBox() { printf 'sing-box:%s\n' "$1" >>"${serviceLog}"; return 0; }
+    reloadCore() { printf 'reload\n' >>"${serviceLog}"; return 0; }
+    stat() {
+        if [[ "$1" == "--format=%z" && "${2:-}" == *"/renew.example.com_ecc/renew.example.com.cer" ]]; then
+            date -d '89 days ago' '+%F %T.000000000 %z'
+            return 0
+        fi
+        command stat "$@"
+    }
+    local originalPadmCreateTempPath
+    originalPadmCreateTempPath=$(declare -f padmCreateTempPath)
+    eval "${originalPadmCreateTempPath/padmCreateTempPath/originalPadmCreateTempPath}"
+    padmCreateTempPath() {
+        local __outVar=$1
+        shift
+        if [[ "$*" == *"padm-tls-renew."* ]]; then
+            return 1
+        fi
+        originalPadmCreateTempPath "${__outVar}" "$@"
+    }
+    sudo() {
+        printf 'sudo:%s\n' "$*" >>"${serviceLog}"
+        return 0
+    }
+
+    set +e
+    renewalTLS >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop' "${serviceLog}"
+    grep -qx 'xray:stop' "${serviceLog}"
+    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'nginx:start' "${serviceLog}"
+    ! grep -q '^sudo:' "${serviceLog}"
+    [[ "$(<"${tlsDir}/renew.example.com.crt")" == "old-cert" ]]
+    [[ "$(<"${tlsDir}/renew.example.com.key")" == "old-key" ]]
+
+    if [[ -n "${oldTlsDir}" ]]; then
+        PADM_TLS_DIR="${oldTlsDir}"
+    else
+        unset PADM_TLS_DIR
+    fi
+    HOME="${oldHome}"
+    currentHost="${oldCurrentHost}"
+    domain="${oldDomain}"
+    tlsDomain="${oldTlsDomain}"
+    installedDNSAPIStatus="${oldInstalledDNSAPIStatus}"
+    sslRenewalDays="${oldSslRenewalDays}"
+    coreInstallType="${oldCoreInstallType}"
+    dnsTLSDomain="${oldDnsTLSDomain}"
+)
+
 runTlsReinstallRollbackRegression() (
     local root="${TMP_DIR}/tls-reinstall-rollback"
     local tlsDir="${root}/tls"
@@ -15967,6 +16062,7 @@ runRegressionTls() {
         runRegressionStep tls-custom-email-transaction runTlsCustomSSLEmailTransactionRegression &&
         runRegressionStep tls-ssl-type-write-transaction runTlsSslTypeWriteTransactionRegression &&
         runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
+        runRegressionStep tls-renew-backup-prepare-restore runTlsRenewalBackupPreparationRestoresServicesRegression &&
         runRegressionStep tls-renew-install-rollback runTlsRenewalInstallRollbackRegression &&
         runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackRegression &&
         runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
