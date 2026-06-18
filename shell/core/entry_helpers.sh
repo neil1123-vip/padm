@@ -6,6 +6,18 @@ entryHelperTmpPath() {
     padmFallbackTmpFilePath "${template}"
 }
 
+entryHelperCreateTempPathCompat() {
+    local resultVar=$1
+    shift
+    if declare -F padmCreateTempPath >/dev/null 2>&1; then
+        padmCreateTempPath "${resultVar}" "$@"
+        return $?
+    fi
+    local path
+    path=$(mktemp "$@") || return 1
+    printf -v "${resultVar}" '%s' "${path}"
+}
+
 singBoxVMessHTTPUpgradeNginxTestLog() {
     entryHelperTmpPath padm-sing-box-vmess-httpupgrade-nginx-test.log
 }
@@ -343,17 +355,10 @@ installNginxStaticTemplate() {
     staticParent=$(dirname -- "${resolvedStaticPath}")
     staticName=$(basename -- "${resolvedStaticPath}")
     padmEnsureSafeDirectory "${staticParent}" || { errorCard "静态站点目录异常"; return 1; }
-    if declare -F padmCreateTempPath >/dev/null 2>&1; then
-        padmCreateTempPath stageRoot -d "${staticParent}/.${staticName}.padm-template.XXXXXX" || {
-            errorCard "静态站点模板暂存目录创建失败"
-            return 1
-        }
-    else
-        stageRoot=$(mktemp -d "${staticParent}/.${staticName}.padm-template.XXXXXX") || {
-            errorCard "静态站点模板暂存目录创建失败"
-            return 1
-        }
-    fi
+    entryHelperCreateTempPathCompat stageRoot -d "${staticParent}/.${staticName}.padm-template.XXXXXX" || {
+        errorCard "静态站点模板暂存目录创建失败"
+        return 1
+    }
     stageStaticPath="${stageRoot}/${staticName}"
     mkdir -p "${stageStaticPath}" || {
         cleanupInstallSyncPath "${stageRoot}"
@@ -547,7 +552,6 @@ updatePadm() {
     local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
     local installPath backupPath
     local tmpDir newInstall installStage
-    local tmpBase="${TMPDIR:-/tmp}"
     if ! padmIsSafeAbsolutePath "${installDir}"; then
         errorCard "更新入口目录异常"
         return 1
@@ -564,11 +568,7 @@ updatePadm() {
     fi
     progressCard "$1" "更新管理脚本"
 
-    if declare -F padmCreateTempPath >/dev/null 2>&1; then
-        padmCreateTempPath tmpDir -d "${tmpBase%/}/padm-update.XXXXXX" || { errorCard "更新入口临时目录创建失败"; return 1; }
-    else
-        tmpDir=$(mktemp -d "${tmpBase%/}/padm-update.XXXXXX") || { errorCard "更新入口临时目录创建失败"; return 1; }
-    fi
+    entryHelperCreateTempPathCompat tmpDir -d "$(padmFallbackTmpFilePath padm-update.XXXXXX)" || { errorCard "更新入口临时目录创建失败"; return 1; }
     newInstall="${tmpDir}/install.sh"
 
     if [[ "${release}" == "alpine" ]]; then
@@ -948,14 +948,13 @@ updateRealityShowConfig() {
 checkLogBackupCreate() {
     local resultVar=$1
     shift
-    local tmpBase="${TMPDIR:-/tmp}"
     local backupDir
     local manifest
     local targetPath
     local backupFile
     local backupIndex=0
 
-    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-check-log-backup.XXXXXX" || return 1
+    entryHelperCreateTempPathCompat backupDir -d "$(padmFallbackTmpFilePath padm-check-log-backup.XXXXXX)" || return 1
     manifest="${backupDir}/manifest"
     : >"${manifest}" || {
         padmRemoveCleanupPath "${backupDir}"
@@ -1237,11 +1236,7 @@ syncInstallDirectoryTree() {
     targetName=$(basename -- "${targetDir}")
     padmEnsureSafeDirectory "${targetParent}" || return 1
 
-    if declare -F padmCreateTempPath >/dev/null 2>&1; then
-        padmCreateTempPath stageRoot -d "${targetParent}/.${targetName}.padm-stage.XXXXXX" || return 1
-    else
-        stageRoot=$(mktemp -d "${targetParent}/.${targetName}.padm-stage.XXXXXX") || return 1
-    fi
+    entryHelperCreateTempPathCompat stageRoot -d "${targetParent}/.${targetName}.padm-stage.XXXXXX" || return 1
     stageDir="${stageRoot}/${targetName}"
     if ! cp -R "${sourceDir}" "${stageDir}"; then
         cleanupInstallSyncPath "${stageRoot}"
@@ -1249,17 +1244,10 @@ syncInstallDirectoryTree() {
     fi
 
     if [[ -e "${targetDir}" || -L "${targetDir}" ]]; then
-        if declare -F padmCreateTempPath >/dev/null 2>&1; then
-            padmCreateTempPath backupRoot -d "${targetParent}/.${targetName}.padm-backup.XXXXXX" || {
-                cleanupInstallSyncPath "${stageRoot}"
-                return 1
-            }
-        else
-            backupRoot=$(mktemp -d "${targetParent}/.${targetName}.padm-backup.XXXXXX") || {
-                cleanupInstallSyncPath "${stageRoot}"
-                return 1
-            }
-        fi
+        entryHelperCreateTempPathCompat backupRoot -d "${targetParent}/.${targetName}.padm-backup.XXXXXX" || {
+            cleanupInstallSyncPath "${stageRoot}"
+            return 1
+        }
         backupPath="${backupRoot}/${targetName}"
         if ! mv "${targetDir}" "${backupPath}"; then
             cleanupInstallSyncPath "${stageRoot}"

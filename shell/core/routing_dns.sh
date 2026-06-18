@@ -164,7 +164,7 @@ dnsRoutingSafeBackupDir() {
     if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
         backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
     else
-        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+        backupDir="$(padmFallbackTmpFilePath padm-dns-routing-backup)"
     fi
     padmIsSafeAbsolutePath "${backupDir%/}" || return 1
     printf '%s\n' "${backupDir%/}"
