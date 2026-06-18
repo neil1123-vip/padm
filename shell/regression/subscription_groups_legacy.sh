@@ -4290,8 +4290,6 @@ runSingBoxMergeStartFailureRegression() (
         printf '%s\n' "$*" >"${systemctlMarker}"
         return 0
     }
-    errorCard() { return 0; }
-    menuLine() { return 0; }
     uiStyle() { shift; printf '%s\n' "$*"; }
 
     serviceQueueStart sing-box
@@ -9184,7 +9182,6 @@ runAutoInstallRealityRouteRegression() (
     selectInstallType=
     coreInstallType=
 
-    echoContent() { :; }
     uiStyle() { printf '%s' "$2"; }
     menuLine() { output+="$*"$'\n'; }
     menuMutedLine() { output+="$*"$'\n'; }
