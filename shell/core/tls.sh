@@ -29,13 +29,24 @@ tlsAcmeLogFile() {
 
 # 自定义 Email
 customSSLEmail() {
-    local accountFile accountTmp
+    local accountFile accountTmp accountStage
     accountFile=$(acmeAccountFile)
     accountTmp="${accountFile}_tmp"
     if echo "${1:-}" | grep -q "validate email"; then
         autoRead tls_email_retry "是否重新输入邮箱地址[y/n]:" sslEmailStatus
         if [[ "${sslEmailStatus}" == "y" ]]; then
-            sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountTmp}" && mv "${accountTmp}" "${accountFile}" || return 1
+            sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountTmp}" || return 1
+            padmCreateTempFileForTarget accountStage "${accountFile}" account || {
+                rm -f -- "${accountTmp}" >/dev/null 2>&1 || true
+                return 1
+            }
+            if ! cp "${accountTmp}" "${accountStage}"; then
+                rm -f -- "${accountTmp}" >/dev/null 2>&1 || true
+                padmRemoveCleanupPath "${accountStage}"
+                return 1
+            fi
+            rm -f -- "${accountTmp}" >/dev/null 2>&1 || true
+            commitGeneratedFile "${accountStage}" "${accountFile}" 600 || { padmRemoveCleanupPath "${accountStage}"; return 1; }
         else
             return 1
         fi
@@ -45,7 +56,12 @@ customSSLEmail() {
         if ! grep -q "ACCOUNT_EMAIL" <"${accountFile}" && ! echo "${sslType}" | grep -q "letsencrypt"; then
             autoRead tls_account_email "请输入邮箱地址:" sslEmail
             if echo "${sslEmail}" | grep -q "@"; then
-                echo "ACCOUNT_EMAIL='${sslEmail}'" >>"${accountFile}" || return 1
+                padmCreateTempFileForTarget accountStage "${accountFile}" account || return 1
+                if ! cp "${accountFile}" "${accountStage}" || ! printf "ACCOUNT_EMAIL='%s'\n" "${sslEmail}" >>"${accountStage}"; then
+                    padmRemoveCleanupPath "${accountStage}"
+                    return 1
+                fi
+                commitGeneratedFile "${accountStage}" "${accountFile}" 600 || { padmRemoveCleanupPath "${accountStage}"; return 1; }
                 successCard "添加完毕"
             else
                 echoContent yellow "请重新输入正确的邮箱格式[例: username@example.com]"
@@ -117,7 +133,7 @@ initDNSAPIConfig() {
 # 选择ssl安装类型
 switchSSLType() {
     if [[ -z "${sslType:-}" ]]; then
-        local sslTypeFile
+        local sslTypeFile sslTypeStage
         echoContent title "\n┌─ 证书 CA ──────────────────────────────────────────"
         menuRecommendedItem 1 "letsencrypt" "默认 CA"
         menuItem 2 "zerossl" "ZeroSSL CA"
@@ -141,7 +157,9 @@ switchSSLType() {
         fi
         sslTypeFile=$(tlsSslTypeFile) || return 1
         padmEnsureSafeDirectory "$(dirname -- "${sslTypeFile}")" || return 1
-        echo "${sslType}" >"${sslTypeFile}" || return 1
+        padmCreateTempFileForTarget sslTypeStage "${sslTypeFile}" ssltype || return 1
+        printf '%s\n' "${sslType}" >"${sslTypeStage}" || { padmRemoveCleanupPath "${sslTypeStage}"; return 1; }
+        commitGeneratedFile "${sslTypeStage}" "${sslTypeFile}" 644 || { padmRemoveCleanupPath "${sslTypeStage}"; return 1; }
     fi
 }
 

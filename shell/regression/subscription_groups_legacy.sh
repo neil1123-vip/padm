@@ -4097,6 +4097,94 @@ runTlsCustomSSLEmailUsesHomeAccountFileRegression() (
     HOME="${oldHome}"
 )
 
+runTlsCustomSSLEmailTransactionRegression() (
+    local root="${TMP_DIR}/tls-custom-email-transaction"
+    local homeDir="${root}/home"
+    local accountFile="${homeDir}/.acme.sh/account.conf"
+    local oldHome="${HOME}"
+
+    mkdir -p "$(dirname -- "${accountFile}")"
+    printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
+    HOME="${homeDir}"
+    sslType=zerossl
+    successCard() { return 0; }
+    echoContent() { return 0; }
+    autoRead() {
+        case "$3" in
+        sslEmailStatus) printf -v "$3" 'y' ;;
+        sslEmail) printf -v "$3" 'new@example.com' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${accountFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    customSSLEmail "validate email"
+    local rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    grep -q "ACCOUNT_EMAIL='old@example.com'" "${accountFile}"
+    ! grep -q "new@example.com" "${accountFile}"
+    ! compgen -G "${homeDir}/.acme.sh/.account.conf.*" >/dev/null
+    unset -f commitGeneratedFile originalCommitGeneratedFile
+    HOME="${oldHome}"
+)
+
+runTlsSslTypeWriteTransactionRegression() (
+    local root="${TMP_DIR}/tls-ssl-type-transaction"
+    local tlsDir="${root}/tls"
+    local sslTypeFile="${tlsDir}/ssl_type"
+    local errorLog="${root}/errors.log"
+    local oldTlsDir="${PADM_TLS_DIR:-}"
+
+    mkdir -p "${tlsDir}"
+    printf 'zerossl\n' >"${sslTypeFile}"
+    PADM_TLS_DIR="${tlsDir}"
+    sslType=
+    dnsAPIType=
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; return 0; }
+    echoContent() { return 0; }
+    menuRecommendedItem() { return 0; }
+    menuItem() { return 0; }
+    menuClose() { return 0; }
+    autoRead() {
+        case "$3" in
+        selectSSLType) printf -v "$3" '3' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        if [[ "$2" == "${sslTypeFile}" ]]; then
+            return 1
+        fi
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    switchSSLType
+    local rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${sslTypeFile}")" == "zerossl" ]]
+    [[ "${sslType}" == "buypass" ]]
+    ! compgen -G "${tlsDir}/.ssl_type.*" >/dev/null
+    unset -f commitGeneratedFile originalCommitGeneratedFile
+    if [[ -n "${oldTlsDir}" ]]; then
+        PADM_TLS_DIR="${oldTlsDir}"
+    else
+        unset PADM_TLS_DIR
+    fi
+)
+
 runServiceQueueApplyPropagationRegression() (
     local root="${TMP_DIR}/service-queue-propagation"
     local rcFile="${root}/install.rc"
@@ -15828,6 +15916,8 @@ runTlsReinstallRollbackRegression() (
 runRegressionTls() {
     runRegressionStep tls-dns-api-domain-selection runTlsDnsApiDomainSelectionRegression &&
         runRegressionStep tls-custom-email-home-account runTlsCustomSSLEmailUsesHomeAccountFileRegression &&
+        runRegressionStep tls-custom-email-transaction runTlsCustomSSLEmailTransactionRegression &&
+        runRegressionStep tls-ssl-type-write-transaction runTlsSslTypeWriteTransactionRegression &&
         runRegressionStep tls-renew-existing-certificate runTlsRenewalExistingCertificateRegression &&
         runRegressionStep tls-renew-install-rollback runTlsRenewalInstallRollbackRegression &&
         runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackRegression &&
