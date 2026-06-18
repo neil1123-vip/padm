@@ -625,13 +625,14 @@ subscriptionSyncSetRestorePairFailureMessage() {
     fi
 
     if [[ "${firstRestored}" != "true" && "${secondRestored}" != "true" ]]; then
-        result="${reason}，且${firstLabel}与${secondLabel}恢复失败，请手动检查${combinedLocation}"
+        subscriptionSyncSetManualCheckMessage result "${firstLabel}与${secondLabel}恢复失败" "${combinedLocation}"
     elif [[ "${firstRestored}" != "true" ]]; then
-        result="${reason}，且${firstLabel}恢复失败，请手动检查${firstLocation}"
+        subscriptionSyncSetManualCheckMessage result "${firstLabel}恢复失败" "${firstLocation}"
     else
-        result="${reason}，且${secondLabel}恢复失败，请手动检查${secondLocation}"
+        subscriptionSyncSetManualCheckMessage result "${secondLabel}恢复失败" "${secondLocation}"
     fi
 
+    result="${reason}，且${result}"
     printf -v "${outputVar}" '%s' "${result}"
     return 1
 }
@@ -658,10 +659,19 @@ subscriptionSyncSetRestoreFailureDetail() {
     local result="${failedLabel}恢复失败"
 
     if [[ -n "${failedLocation}" ]]; then
-        result="${result}，请手动检查${failedLocation}"
+        subscriptionSyncSetManualCheckMessage result "${result}" "${failedLocation}"
     fi
 
     printf -v "${outputVar}" '%s' "${result}"
+}
+
+subscriptionSyncSetManualCheckMessage() {
+    local outputVar=$1
+    local reason=$2
+    local checkTarget=$3
+    local message="${reason}，请手动检查${checkTarget}"
+
+    printf -v "${outputVar}" '%s' "${message}"
 }
 
 subscriptionSyncSetSingleRestoreResultMessage() {
@@ -686,7 +696,7 @@ subscriptionSyncSetSingleRestoreResultMessage() {
 
     result="${reason}，且${failedLabel}恢复失败"
     if [[ "${includeManualCheck}" != "false" ]]; then
-        result="${result}，请手动检查${failedLocation}"
+        subscriptionSyncSetManualCheckMessage result "${result}" "${failedLocation}"
     fi
     printf -v "${outputVar}" '%s' "${result}"
     return 1

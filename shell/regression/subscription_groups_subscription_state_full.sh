@@ -734,6 +734,7 @@ JSON
 
 runSubscriptionSyncRestorePairFailureMessageRegression() (
     local message=
+    local detail=
     local rc
 
     set +e
@@ -779,6 +780,9 @@ runSubscriptionSyncRestorePairFailureMessageRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "本机同步失败，且配置与订阅输出恢复失败，请手动检查备份目录: /tmp/config 和 /tmp/output" ]]
+
+    subscriptionSyncSetManualCheckMessage detail "配置与订阅输出恢复失败" "备份目录: /tmp/config 和 /tmp/output"
+    [[ "${detail}" == "配置与订阅输出恢复失败，请手动检查备份目录: /tmp/config 和 /tmp/output" ]]
 )
 
 runSubscriptionSyncAppendRestoreFailureDetailRegression() (
@@ -800,6 +804,7 @@ runSubscriptionSyncAppendRestoreFailureDetailRegression() (
 
 runSubscriptionSyncSingleRestoreResultMessageRegression() (
     local message=
+    local detail=
     local rc
 
     set +e
@@ -825,6 +830,9 @@ runSubscriptionSyncSingleRestoreResultMessageRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "限额自动执行失败，且订阅状态恢复失败，请手动检查备份文件: /tmp/groups.json" ]]
+
+    subscriptionSyncSetManualCheckMessage detail "订阅状态恢复失败" "备份文件: /tmp/groups.json"
+    [[ "${detail}" == "订阅状态恢复失败，请手动检查备份文件: /tmp/groups.json" ]]
 
     set +e
     subscriptionSyncSetSingleRestoreResultMessage message \
