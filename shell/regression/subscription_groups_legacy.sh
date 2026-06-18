@@ -2044,6 +2044,17 @@ runCoreRollbackResultMessageRegression() (
         "写入日志配置失败" \
         "已回滚本次日志修改"
     [[ "${message}" == "写入日志配置失败，已回滚本次日志修改" ]]
+
+    coreSetRollbackFailureMessage message \
+        "核心重载失败" \
+        "/tmp/core-backup"
+    [[ "${message}" == "核心重载失败，且回滚失败，请手动检查备份目录: /tmp/core-backup" ]]
+
+    coreSetRollbackFailureMessage message \
+        "入口端口配置回滚失败" \
+        "/tmp/core-port-backup" \
+        ""
+    [[ "${message}" == "入口端口配置回滚失败，请手动检查备份目录: /tmp/core-port-backup" ]]
 )
 
 runCorePortFileTransactionRegression() {

@@ -1000,6 +1000,7 @@ corePortWriteAddFiles() {
 corePortApplyFileTransaction() {
     local action=$1
     local backupDir
+    local rollbackMessage
     padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
     if ! corePortBackupFiles "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
@@ -1012,7 +1013,8 @@ corePortApplyFileTransaction() {
             padmRemoveCleanupPath "${backupDir}"
         else
             padmForgetCleanupPath "${backupDir}"
-            errorCard "入口端口配置回滚失败，请手动检查备份目录: ${backupDir}"
+            coreSetRollbackFailureMessage rollbackMessage "入口端口配置回滚失败" "${backupDir}" ""
+            errorCard "${rollbackMessage}"
         fi
         return 1
     fi
@@ -1022,6 +1024,7 @@ corePortApplyFileTransaction() {
 corePortApplyReloadTransaction() {
     local action=$1
     local backupDir
+    local rollbackFailureMessage
     local restoreMessage
     padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
     if ! corePortBackupFiles "${backupDir}"; then
@@ -1035,7 +1038,8 @@ corePortApplyReloadTransaction() {
             padmRemoveCleanupPath "${backupDir}"
         else
             padmForgetCleanupPath "${backupDir}"
-            errorCard "入口端口配置回滚失败，请手动检查备份目录: ${backupDir}"
+            coreSetRollbackFailureMessage rollbackFailureMessage "入口端口配置回滚失败" "${backupDir}" ""
+            errorCard "${rollbackFailureMessage}"
         fi
         return 1
     fi

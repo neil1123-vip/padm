@@ -94,10 +94,12 @@ showSingBoxAccessRuleFile() {
 }
 
 accessControlAbortChange() {
+    local rollbackMessage
     if accessControlBackupRestore; then
         accessControlBackupCleanup || errorCard "访问控制修改失败，旧配置已恢复，但备份目录清理失败: $(accessControlBackupDir)"
     else
-        errorCard "访问控制修改失败，且回滚失败，请手动检查备份目录: $(accessControlBackupDir)"
+        coreSetRollbackFailureMessage rollbackMessage "访问控制修改失败" "$(accessControlBackupDir)"
+        errorCard "${rollbackMessage}"
     fi
     return 1
 }
@@ -482,19 +484,22 @@ validateAccessControlConfig() {
 
 applyAccessControlConfigChange() {
     local backupDir
+    local rollbackMessage
     backupDir=$(accessControlBackupDir)
     if ! validateAccessControlConfig; then
         if accessControlBackupRestore; then
             accessControlBackupCleanup || true
             reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "访问控制配置未通过校验，已回滚本次修改" "${ACCESS_CONTROL_FAILURE_LOG:-}"
         else
-            reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "访问控制配置未通过校验，且回滚失败，请手动检查备份目录: ${backupDir}" "${ACCESS_CONTROL_FAILURE_LOG:-}"
+            coreSetRollbackFailureMessage rollbackMessage "访问控制配置未通过校验" "${backupDir}"
+            reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "${rollbackMessage}" "${ACCESS_CONTROL_FAILURE_LOG:-}"
         fi
         return 1
     fi
     if ! reloadCore; then
         if ! accessControlBackupRestore; then
-            reportAccessControlApplyFailure "访问控制重载失败" "核心重载失败，且回滚失败，请手动检查备份目录: ${backupDir}"
+            coreSetRollbackFailureMessage rollbackMessage "核心重载失败" "${backupDir}"
+            reportAccessControlApplyFailure "访问控制重载失败" "${rollbackMessage}"
             return 1
         fi
         accessControlBackupCleanup || true

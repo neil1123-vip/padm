@@ -322,6 +322,22 @@ coreSetSingleRestoreResultMessage() {
     return 1
 }
 
+coreSetRollbackFailureMessage() {
+    local outputVar=$1
+    local reason=$2
+    local backupDir=$3
+    local separator=${4-，且}
+    local result
+
+    if [[ -n "${separator}" ]]; then
+        result="${reason}${separator}回滚失败，请手动检查备份目录: ${backupDir}"
+    else
+        result="${reason}，请手动检查备份目录: ${backupDir}"
+    fi
+
+    printf -v "${outputVar}" '%s' "${result}"
+}
+
 restoreManagedFileFromBackup() {
     local backupFile=$1
     local targetFile=$2

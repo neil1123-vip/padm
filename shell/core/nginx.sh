@@ -219,12 +219,14 @@ backupRealityStreamState() {
 realityStreamRollbackAndFail() {
     local backupDir=$1
     local reason=$2
+    local rollbackMessage
     if realityStreamRollback "${backupDir}"; then
         removeRealityStreamBackup "${backupDir}"
         errorCard "${reason}，已自动恢复本次修改"
     else
         padmForgetCleanupPath "${backupDir}"
-        errorCard "${reason}，且回滚失败，请手动检查备份目录: ${backupDir}"
+        coreSetRollbackFailureMessage rollbackMessage "${reason}" "${backupDir}"
+        errorCard "${rollbackMessage}"
     fi
     return 1
 }
@@ -232,6 +234,7 @@ realityStreamRollbackAndFail() {
 realityStreamApplyServicesOrRollback() {
     local backupDir=$1
     local reason=$2
+    local rollbackMessage
     local restoreServiceStatus=0
     if reloadCore; then
         serviceQueueRestart nginx
@@ -242,7 +245,8 @@ realityStreamApplyServicesOrRollback() {
     fi
     if ! realityStreamRollback "${backupDir}"; then
         padmForgetCleanupPath "${backupDir}"
-        errorCard "${reason}，且回滚失败，请手动检查备份目录: ${backupDir}"
+        coreSetRollbackFailureMessage rollbackMessage "${reason}" "${backupDir}"
+        errorCard "${rollbackMessage}"
         return 1
     fi
     reloadCore || restoreServiceStatus=1
