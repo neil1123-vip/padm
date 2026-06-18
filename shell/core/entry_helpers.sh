@@ -620,7 +620,9 @@ updatePadm() {
         if restorePadmEntryBackup "${backupPath}" "${installPath}" >/dev/null 2>&1; then
             errorCard "新版入口执行失败，已恢复旧入口"
         else
-            errorCard "新版入口执行失败，旧入口恢复失败，请手动检查 ${installPath} 和 ${backupPath}"
+            local restoreMessage
+            coreSetPairedFileRestoreFailureMessage restoreMessage "新版入口执行失败" "旧入口" "${installPath}" "${backupPath}"
+            errorCard "${restoreMessage}"
         fi
     else
         errorCard "新版入口执行失败，旧入口备份不存在"

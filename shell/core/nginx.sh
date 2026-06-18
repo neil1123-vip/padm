@@ -720,7 +720,7 @@ restoreAloneNginxConfigBackup() {
     if restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
         return 0
     fi
-    ALONE_NGINX_CONFIG_ERROR="Nginx 配置检测失败，且旧 alone.conf 恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+    coreSetPairedFileRestoreFailureMessage ALONE_NGINX_CONFIG_ERROR "Nginx 配置检测失败" "旧 alone.conf" "${targetPath}" "${backupPath}"
     errorCard "${ALONE_NGINX_CONFIG_ERROR}"
     return 1
 }

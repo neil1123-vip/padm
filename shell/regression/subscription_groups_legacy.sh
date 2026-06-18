@@ -2088,6 +2088,13 @@ runCoreRollbackResultMessageRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "删除 VLESS Encryption 状态失败，且VLESS Encryption 状态恢复失败，请手动检查 /tmp/state.json 和 /tmp/state.json.bak" ]]
+
+    coreSetPairedFileRestoreFailureMessage message \
+        "新版入口执行失败" \
+        "旧入口" \
+        "/tmp/install.sh" \
+        "/tmp/install.sh.bak"
+    [[ "${message}" == "新版入口执行失败，旧入口恢复失败，请手动检查 /tmp/install.sh 和 /tmp/install.sh.bak" ]]
 )
 
 runCorePortFileTransactionRegression() {
@@ -14702,6 +14709,7 @@ regressionEnsureScriptModules() {
 
 runUpdatePadmVersionPromptRegression() {
     local successLog errorLog installDir updateTmpRoot downloadDirLog oldTmpDir
+    local restoreFailureDir restoreFailureErrorLog restoreFailureDownloadLog
     local replaceFailureDir replaceFailureErrorLog replaceFailureDownloadLog
     local stageFailureDir stageFailureErrorLog stageFailureDownloadLog
     successLog="${TMP_DIR}/update-padm-success.log"
@@ -14709,6 +14717,9 @@ runUpdatePadmVersionPromptRegression() {
     installDir="${TMP_DIR}/update-padm-install"
     updateTmpRoot="${TMP_DIR}/update-padm-tmp"
     downloadDirLog="${TMP_DIR}/update-padm-download-dirs.log"
+    restoreFailureDir="${TMP_DIR}/update-padm-restore-failure"
+    restoreFailureErrorLog="${TMP_DIR}/update-padm-restore-failure-error.log"
+    restoreFailureDownloadLog="${TMP_DIR}/update-padm-restore-failure-download.log"
     replaceFailureDir="${TMP_DIR}/update-padm-replace-restore-failure"
     replaceFailureErrorLog="${TMP_DIR}/update-padm-replace-restore-failure-error.log"
     replaceFailureDownloadLog="${TMP_DIR}/update-padm-replace-restore-failure-download.log"
@@ -14716,13 +14727,16 @@ runUpdatePadmVersionPromptRegression() {
     stageFailureErrorLog="${TMP_DIR}/update-padm-stage-failure-error.log"
     stageFailureDownloadLog="${TMP_DIR}/update-padm-stage-failure-download.log"
     oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${installDir}" "${updateTmpRoot}" "${replaceFailureDir}" "${stageFailureDir}"
+    mkdir -p "${installDir}" "${updateTmpRoot}" "${restoreFailureDir}" "${replaceFailureDir}" "${stageFailureDir}"
     installDir=$(cd -- "${installDir}" && pwd -P)
+    restoreFailureDir=$(cd -- "${restoreFailureDir}" && pwd -P)
     replaceFailureDir=$(cd -- "${replaceFailureDir}" && pwd -P)
     stageFailureDir=$(cd -- "${stageFailureDir}" && pwd -P)
     : >"${downloadDirLog}"
     : >"${successLog}"
     : >"${errorLog}"
+    : >"${restoreFailureErrorLog}"
+    : >"${restoreFailureDownloadLog}"
     : >"${replaceFailureErrorLog}"
     : >"${replaceFailureDownloadLog}"
     : >"${stageFailureErrorLog}"
@@ -14806,6 +14820,51 @@ EOF
         return 1
     fi
     "${installDir}/install.sh" | grep -q 'old-entry'
+
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${restoreFailureDir}/install.sh"
+    chmod 700 "${restoreFailureDir}/install.sh"
+    (
+        REGRESSION_ERROR_CARD_LOG="${restoreFailureErrorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${restoreFailureDir}"
+
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    printf '%s\n' "$2" >>"${restoreFailureDownloadLog}"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+printf 'new-entry\n'
+exit 23
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            if [[ "$1" == "${restoreFailureDir}/install.sh.bak" && "$2" == "${restoreFailureDir}/install.sh" ]]; then
+                return 1
+            fi
+            originalCommitGeneratedFile "$@"
+        }
+        sudo() { "$@"; }
+
+        updatePadm 1
+    ) >"${TMP_DIR}/update-padm-restore-failure-run.log" 2>&1 && return 1
+    grep -q "新版入口执行失败，旧入口恢复失败，请手动检查 ${restoreFailureDir}/install.sh 和 ${restoreFailureDir}/install.sh.bak" "${restoreFailureErrorLog}"
+    grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${restoreFailureDownloadLog}"
+    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
+        return 1
+    fi
+    "${restoreFailureDir}/install.sh" | grep -q 'new-entry'
+    "${restoreFailureDir}/install.sh.bak" | grep -q 'old-entry'
 
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${replaceFailureDir}/install.sh"
     chmod 700 "${replaceFailureDir}/install.sh"
