@@ -10160,7 +10160,6 @@ JSON
         resetCurrentBackup="${resetGroupsDir}/backups/groups-current.json"
 
         showSubscriptionGroupsStateSummary() { return 0; }
-        statusCard() { return 0; }
         autoRead() {
             local targetVar=$3
             printf -v "${targetVar}" '%s' "yes"
@@ -10238,7 +10237,6 @@ JSON
     (
         local trafficOutput
         menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
         trafficOutput=$(showAdminSubscriptionTraffic)
         [[ "${trafficOutput}" == *"总上传：2 MB"* ]]
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
@@ -10272,7 +10270,6 @@ JSON
         local quotaMenuOutput
         local quotaMenuStatus
         menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
         subscriptionSyncApplyAccountPlanTransaction() {
             return 42
         }
