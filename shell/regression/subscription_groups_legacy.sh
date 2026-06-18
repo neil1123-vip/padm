@@ -4010,7 +4010,6 @@ runTlsCustomSSLEmailUsesHomeAccountFileRegression() (
     printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
     HOME="${homeDir}"
     sslType=zerossl
-    successCard() { return 0; }
     autoRead() {
         case "$3" in
         sslEmailStatus) printf -v "$3" 'y' ;;
@@ -4077,10 +4076,6 @@ runTlsSslTypeWriteTransactionRegression() (
     sslType=
     dnsAPIType=
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; return 0; }
-    echoContent() { return 0; }
-    menuRecommendedItem() { return 0; }
-    menuItem() { return 0; }
-    menuClose() { return 0; }
     autoRead() {
         case "$3" in
         selectSSLType) printf -v "$3" '3' ;;
@@ -4198,11 +4193,6 @@ runCoreInstallServiceActionFailureRegression() (
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    statusCard() { return 0; }
-    progressCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
     protocolRegistryMenu() { return 0; }
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }
@@ -4610,8 +4600,6 @@ runSingBoxManagedCleanupRegression() (
     : >"${cleanupLog}"
 
     readInstallType() { return 0; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     cleanCoreInstallDirectory() {
         printf 'clean-core:%s:%s\n' "$1" "$2" >>"${cleanupLog}"
         return 0
@@ -5890,7 +5878,6 @@ runFail2banApplyTransactionRegression() (
     fail2banValidateManagedConfig() { return 0; }
     fail2banStartOrReloadService() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    successCard() { return 0; }
 
     eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
     commitGeneratedFile() {
@@ -5943,8 +5930,6 @@ runUninstallServiceStopFailureRegression() (
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     autoRead() { printf -v "$3" 'y'; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     menu() { return 0; }
     pgrep() { return 1; }
@@ -6274,7 +6259,6 @@ runCleanLastInstallationConfigAcmeHomeFailureRegression() (
     cleanDirectoryContent() { return 0; }
     readInstallType() { return 0; }
     mkdirTools() { return 0; }
-    statusCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() {
@@ -6349,8 +6333,6 @@ runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
     cleanDirectoryContent() { return 0; }
     readInstallType() { return 0; }
     mkdirTools() { return 0; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() {
