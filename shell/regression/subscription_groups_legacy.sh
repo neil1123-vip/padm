@@ -3476,7 +3476,6 @@ runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
 
     readInstallType() { return 0; }
     progressCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
     checkVersionNotEmpty() { [[ -n "$1" ]]; }
@@ -3563,7 +3562,6 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
 
     readInstallType() { return 0; }
     progressCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
     checkVersionNotEmpty() { [[ -n "$1" ]]; }
