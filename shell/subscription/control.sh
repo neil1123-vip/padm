@@ -1090,35 +1090,32 @@ subscriptionControlApplySync() {
         subscriptionControlPrepareSyncFailure "${plan}" "同步前订阅状态读取失败"
         return 1
     }
-    configBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+    subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
         subscriptionControlPrepareSyncFailure "${plan}" "同步前配置备份失败"
-        return 1
-    }
-    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
-        padmRemoveCleanupPath "${configBackupDir}"
-        subscriptionControlPrepareSyncFailure "${plan}" "同步前订阅输出备份失败"
+        if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
+            subscriptionControlPrepareSyncFailure "${plan}" "同步前订阅输出备份失败"
+            configBackupDir=
+            outputBackupDir=
+        fi
         return 1
     }
     SUBSCRIPTION_CONTROL_RESTORE_ERROR=
     if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
-        padmRemoveCleanupPath "${configBackupDir}"
-        padmRemoveCleanupPath "${outputBackupDir}"
+        subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
         jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-同步计划应用失败}" '{ok:false, changed:true, dry_run:false, error:"apply_plan_failed", error_detail:{type:"apply_plan_failed", message:$message}, plan:$plan}'
         return 1
     fi
     if [[ "${PADM_CONTROL_SERVER:-}" != "1" ]]; then
         if ! subscriptionSyncReconcileLocalServices; then
             if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
-                padmRemoveCleanupPath "${configBackupDir}"
-                padmRemoveCleanupPath "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
                 if subscriptionSyncReconcileLocalServices true; then
                     SUBSCRIPTION_CONTROL_RESTORE_ERROR="本机服务重建失败，已恢复旧配置"
                 else
                     SUBSCRIPTION_CONTROL_RESTORE_ERROR="本机服务重建失败，已恢复旧配置；恢复旧配置后服务重建仍失败，请检查核心服务日志"
                 fi
             else
-                padmForgetCleanupPath "${configBackupDir}"
-                padmForgetCleanupPath "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
             fi
             jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-本机服务重建失败}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:$message}, plan:$plan}'
             return 1
@@ -1126,18 +1123,15 @@ subscriptionControlApplySync() {
     else
         if ! subscriptionControlRefreshPublishedSubscriptions; then
             if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
-                padmRemoveCleanupPath "${configBackupDir}"
-                padmRemoveCleanupPath "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
             else
-                padmForgetCleanupPath "${configBackupDir}"
-                padmForgetCleanupPath "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
             fi
             jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-订阅发布刷新失败}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:$message}, plan:$plan}'
             return 1
         fi
     fi
-    padmRemoveCleanupPath "${configBackupDir}"
-    padmRemoveCleanupPath "${outputBackupDir}"
+    subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
     jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
 }
 

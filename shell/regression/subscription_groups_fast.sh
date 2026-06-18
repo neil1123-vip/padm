@@ -2751,6 +2751,38 @@ runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression() {
     )
 }
 
+runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/subscription-sync-create-local-apply-backups-rollback"
+        local configBackupDir=
+        local outputBackupDir=
+        local expectedConfigBackup="${root}/created-config-backup"
+        local status
+
+        mkdir -p "${root}"
+        subscriptionSyncCreateConfigBackups() {
+            mkdir -p "${expectedConfigBackup}" || return 1
+            printf '%s\n' "${expectedConfigBackup}"
+        }
+        subscriptionSyncCreateSubscribeOutputBackups() {
+            return 1
+        }
+
+        set +e
+        subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir
+        status=$?
+        set -e
+
+        [[ "${status}" -ne 0 ]]
+        [[ -z "${configBackupDir}" ]]
+        [[ -z "${outputBackupDir}" ]]
+        [[ ! -e "${expectedConfigBackup}" ]]
+    )
+}
+
 runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression() {
     (
         set -euo pipefail
@@ -3596,6 +3628,7 @@ runRegressionFast() {
         runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression &&
         runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
         runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&
+        runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression &&
         runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression &&
         runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&

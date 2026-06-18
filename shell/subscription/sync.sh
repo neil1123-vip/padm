@@ -533,6 +533,46 @@ subscriptionSyncCreateSubscribeOutputBackups() {
     printf '%s\n' "${backupDir}"
 }
 
+subscriptionSyncCreateLocalApplyBackups() {
+    local configVar=$1
+    local outputVar=$2
+    local configBackupDir=
+    local outputBackupDir=
+
+    SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=
+    configBackupDir=$(subscriptionSyncCreateConfigBackups) || return 1
+    SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=config
+    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
+        padmRemoveCleanupPath "${configBackupDir}"
+        return 1
+    }
+    SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=ready
+    printf -v "${configVar}" '%s' "${configBackupDir}"
+    printf -v "${outputVar}" '%s' "${outputBackupDir}"
+}
+
+subscriptionSyncReleaseLocalApplyBackups() {
+    local mode=$1
+    local configBackupDir=${2:-}
+    local outputBackupDir=${3:-}
+
+    [[ -n "${configBackupDir}" ]] || return 0
+    [[ -n "${outputBackupDir}" ]] || return 0
+    case "${mode}" in
+    remove)
+        padmRemoveCleanupPath "${configBackupDir}"
+        padmRemoveCleanupPath "${outputBackupDir}"
+        ;;
+    forget)
+        padmForgetCleanupPath "${configBackupDir}"
+        padmForgetCleanupPath "${outputBackupDir}"
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
 subscriptionSyncRestoreSubscribeOutputBackups() {
     local backupDir=$1
     local localBase
@@ -820,39 +860,33 @@ runSubscriptionGroupSync() {
         subscriptionSyncMarkResult partial "${failures}" || true
         return 1
     }
-    configBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+    subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
         failures=$(jq '. + ["本机同步前配置备份失败"]' <<<"${failures}")
+        if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
+            failures=$(jq '. + ["本机同步前订阅输出备份失败"]' <<<"${failures}")
+            configBackupDir=
+            outputBackupDir=
+        fi
         rc=1
     }
-    if [[ -n "${configBackupDir}" ]]; then
-        outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
-            padmRemoveCleanupPath "${configBackupDir}"
-            configBackupDir=
-            failures=$(jq '. + ["本机同步前订阅输出备份失败"]' <<<"${failures}")
-            rc=1
-        }
-    fi
     if [[ -n "${configBackupDir}" && -n "${outputBackupDir}" ]]; then
         if ! subscriptionSyncApplyAccountPlanTransaction "${syncPlan}"; then
             failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-本机同步计划应用失败}" '. + [$message]' <<<"${failures}")
-            padmRemoveCleanupPath "${configBackupDir}"
-            padmRemoveCleanupPath "${outputBackupDir}"
+            subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
             configBackupDir=
             outputBackupDir=
             rc=1
         elif ! subscriptionSyncReconcileLocalServices "${skipSubscribeRefresh}"; then
             localSyncFailure="本机同步后服务重建失败"
             if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}"; then
-                padmRemoveCleanupPath "${configBackupDir}"
-                padmRemoveCleanupPath "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
                 if subscriptionSyncReconcileLocalServices true; then
                     localSyncFailure="${localSyncFailure}，已恢复旧配置"
                 else
                     localSyncFailure="${localSyncFailure}，已恢复旧配置；恢复旧配置后服务重建仍失败，请检查核心服务日志"
                 fi
             else
-                padmForgetCleanupPath "${configBackupDir}"
-                padmForgetCleanupPath "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
                 localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
             fi
             failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
@@ -860,8 +894,7 @@ runSubscriptionGroupSync() {
             outputBackupDir=
             rc=1
         else
-            padmRemoveCleanupPath "${configBackupDir}"
-            padmRemoveCleanupPath "${outputBackupDir}"
+            subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
             configBackupDir=
             outputBackupDir=
             localSyncReady=true
