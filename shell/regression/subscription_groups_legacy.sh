@@ -4272,7 +4272,6 @@ runCoreInstallServiceActionFailureRegression() (
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     statusCard() { return 0; }
-    successCard() { return 0; }
     progressCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
