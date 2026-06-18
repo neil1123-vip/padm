@@ -90,7 +90,7 @@ backupSubscriptionGroupsStateForMigration() {
     padmEnsureSafeDirectory "${backupDir}" || return 1
     backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S').json"
     if ! cp "${stateFile}" "${backupFile}"; then
-        rm -f -- "${backupFile}" >/dev/null 2>&1 || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         return 1
     fi
     printf '%s\n' "${backupFile}"
@@ -254,7 +254,7 @@ createSubscriptionGroupsBackup() {
     padmEnsureSafeDirectory "${backupDir}" || return 1
     backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S').json"
     if ! cp "$(subscriptionGroupsFile)" "${backupFile}"; then
-        rm -f -- "${backupFile}" >/dev/null 2>&1 || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         return 1
     fi
     echo "${backupFile}"

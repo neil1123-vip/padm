@@ -92,7 +92,7 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
-            removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
             return 1
         fi
         logFile=$(singBoxVMessHTTPUpgradeNginxTestLog)
@@ -104,7 +104,7 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
             fi
             return 1
         fi
-        [[ -f "${backupPath}" ]] && removeManagedFileIfPresent "${backupPath}" || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
     else
         commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || {
             padmRemoveCleanupPath "${tmpPath}"
@@ -602,7 +602,7 @@ updatePadm() {
         return 1
     fi
     if ! commitGeneratedFile "${installStage}" "${installPath}" 700; then
-        removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
         padmRemoveCleanupPath "${installStage}" 2>/dev/null || true
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
         errorCard "更新入口提交失败，已取消更新"
@@ -612,7 +612,7 @@ updatePadm() {
 
     successCard "更新入口已下载，正在重新打开新版脚本"
     if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 "${installPath}" RefreshScriptModules; then
-        removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
         exit 0
     fi
 
@@ -1142,7 +1142,7 @@ cleanupInstallSyncPath() {
     local targetPath=$1
     [[ -n "${targetPath}" ]] || return 0
     if declare -F removeManagedPathIfPresent >/dev/null 2>&1; then
-        removeManagedPathIfPresent "${targetPath}" >/dev/null 2>&1 || true
+        removeManagedPathIfPresentIgnoreFailure "${targetPath}"
         return 0
     fi
     padmRemoveCleanupPath "${targetPath}" 2>/dev/null || rm -rf -- "${targetPath}"

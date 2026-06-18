@@ -193,6 +193,22 @@ removeManagedFilesIfPresent() {
     done
 }
 
+removeManagedFilesIfPresentIgnoreFailure() {
+    local targetFile
+
+    for targetFile in "$@"; do
+        removeManagedFileIfPresent "${targetFile}" >/dev/null 2>&1 || true
+    done
+}
+
+removeManagedPathIfPresentIgnoreFailure() {
+    local targetPath
+
+    for targetPath in "$@"; do
+        removeManagedPathIfPresent "${targetPath}" >/dev/null 2>&1 || true
+    done
+}
+
 removeManagedPathIfPresent() {
     local targetPath=$1
 

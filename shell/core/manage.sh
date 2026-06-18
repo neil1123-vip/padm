@@ -125,12 +125,12 @@ restoreVlessEncryptionBackup() {
         errorCard "${reason}，且 VLESS Encryption 配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
         return 1
     fi
-    removeManagedFileIfPresent "${backupFile}" || true
+    removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
     if [[ "${hadStateBackup}" == "true" ]]; then
         if ! restoreManagedFileFromBackup "${stateBackupFile}" "${stateFile}" 600; then
             restoreFailed=true
         else
-            removeManagedFileIfPresent "${stateBackupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${stateBackupFile}"
         fi
     elif [[ "${stateMode}" == "remove" ]]; then
         if ! removeManagedFileIfPresent "${stateFile}"; then
@@ -164,7 +164,7 @@ setVlessRealityEncryption() {
     stateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
     xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
     configFile=$(padmRequireSafeAbsolutePath "${configFile}") || { errorCard "VLESS Encryption 配置路径异常"; return 1; }
-    stateFile=$(padmResolveManagedAbsolutePath "${stateFile}") || { errorCard "VLESS Encryption 状态路径异常"; return 1; }
+    stateFile=$(padmRequireSafeAbsolutePath "${stateFile}") || { errorCard "VLESS Encryption 状态路径异常"; return 1; }
 
     if [[ "${coreInstallType}" != "1" ]]; then
         errorCard "此实验功能仅支持 Xray-core"
@@ -183,21 +183,24 @@ setVlessRealityEncryption() {
     fi
     if [[ -f "${stateFile}" ]]; then
         if ! backupManagedFileToPath "${stateFile}" "${stateBackupFile}" 600; then
-            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
             errorCard "创建 VLESS Encryption 状态备份失败，请手动检查 ${stateFile}"
             return 1
         fi
         hadStateBackup=true
     else
         if ! removeManagedFileIfPresent "${stateBackupFile}"; then
-            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
             errorCard "清理 VLESS Encryption 旧状态备份失败，请手动检查 ${stateBackupFile}"
             return 1
         fi
     fi
     padmCreateTempFileForTarget configTmpFile "${configFile}" vlessenc || {
-        removeManagedFileIfPresent "${backupFile}" || true
-        [[ "${hadStateBackup}" == "true" ]] && removeManagedFileIfPresent "${stateBackupFile}" || true
+        if [[ "${hadStateBackup}" == "true" ]]; then
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
+        else
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
+        fi
         return 1
     }
 
@@ -206,21 +209,18 @@ setVlessRealityEncryption() {
         if ! xrayVersionAtLeast "${xrayVersion}" "25.9.5"; then
             errorCard "当前 Xray-core ${xrayVersion} 不支持 vlessenc，请先升级到 v25.9.5 或更高版本"
             padmRemoveCleanupPath "${configTmpFile}"
-            removeManagedFileIfPresent "${backupFile}" || true
-            removeManagedFileIfPresent "${stateBackupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
             return 1
         fi
         padmCreateTmpRootPath vlessEncOut padm-vlessenc.out.XXXXXX || {
             padmRemoveCleanupPath "${configTmpFile}"
-            removeManagedFileIfPresent "${backupFile}" || true
-            removeManagedFileIfPresent "${stateBackupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
             return 1
         }
         padmCreateTmpRootPath vlessEncErr padm-vlessenc.err.XXXXXX || {
             padmRemoveCleanupPath "${vlessEncOut}"
             padmRemoveCleanupPath "${configTmpFile}"
-            removeManagedFileIfPresent "${backupFile}" || true
-            removeManagedFileIfPresent "${stateBackupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
             return 1
         }
         if ! "${xrayBinary}" vlessenc >"${vlessEncOut}" 2>"${vlessEncErr}"; then
@@ -228,8 +228,7 @@ setVlessRealityEncryption() {
             padmRemoveCleanupPath "${vlessEncOut}"
             padmRemoveCleanupPath "${vlessEncErr}"
             padmRemoveCleanupPath "${configTmpFile}"
-            removeManagedFileIfPresent "${backupFile}" || true
-            removeManagedFileIfPresent "${stateBackupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
             return 1
         fi
         vlessEncOutput=$(cat "${vlessEncOut}")
@@ -240,8 +239,7 @@ setVlessRealityEncryption() {
         if [[ -z "${encryption}" || -z "${decryption}" ]]; then
             errorCard "无法解析 xray vlessenc 输出，已取消启用"
             padmRemoveCleanupPath "${configTmpFile}"
-            removeManagedFileIfPresent "${backupFile}" || true
-            removeManagedFileIfPresent "${stateBackupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
             return 1
         fi
         if ! jq --arg decryption "${decryption}" '
@@ -339,13 +337,11 @@ setVlessRealityEncryption() {
             errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置；恢复旧配置后核心重载失败，请检查核心服务日志"
             return 1
         fi
-        removeManagedFileIfPresent "${backupFile}" || true
-        removeManagedFileIfPresent "${stateBackupFile}" || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
         errorCard "刷新 VLESS Encryption 订阅失败，已恢复旧配置"
         return 1
     fi
-    removeManagedFileIfPresent "${backupFile}" || true
-    removeManagedFileIfPresent "${stateBackupFile}" || true
+    removeManagedFilesIfPresentIgnoreFailure "${backupFile}" "${stateBackupFile}"
     return 0
 }
 
@@ -610,7 +606,7 @@ restoreTraditionalTlsAlpnBackup() {
     local configFile=$2
     local reason=$3
     if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
-        removeManagedFileIfPresent "${backupFile}" || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         return 0
     fi
     errorCard "${reason}，且旧配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
@@ -768,16 +764,19 @@ applyTraditionalTlsAlpn() {
         return 1
     fi
     backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
-    padmCreateTempFileForTarget tmpFile "${configFile}" alpn || { removeManagedFileIfPresent "${backupFile}" || true; return 1; }
+    padmCreateTempFileForTarget tmpFile "${configFile}" alpn || {
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
+        return 1
+    }
     if ! jq --argjson alpn "${alpnJson}" '.inbounds[0].streamSettings.tlsSettings.alpn = $alpn' "${configFile}" >"${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
-        removeManagedFileIfPresent "${backupFile}" || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
     if ! commitGeneratedJsonFile "${tmpFile}" "${configFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
-        removeManagedFileIfPresent "${backupFile}" || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
@@ -802,7 +801,7 @@ applyTraditionalTlsAlpn() {
         fi
         return 1
     fi
-    removeManagedFileIfPresent "${backupFile}" || true
+    removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
     successCard "ALPN 配置已更新"
 }
 
@@ -2502,13 +2501,13 @@ configTransactionCommit() {
     configFile=$(padmRequireSafeAbsolutePath "${configFile}") || return 1
     backupManagedFileToPath "${configFile}" "${backupFile}" 644 || return 1
     if ! commitGeneratedJsonFile "${stagedFile}" "${configFile}"; then
-        removeManagedFileIfPresent "${backupFile}" || true
+        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
     if ! "${validateFn}"; then
         if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
-            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
             padmRemoveCleanupPath "${stagedFile}"
             "${validateFn}" >/dev/null 2>&1 || true
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
@@ -2524,7 +2523,7 @@ configTransactionCommit() {
     fi
     if ! "${reloadFn}"; then
         if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
-            removeManagedFileIfPresent "${backupFile}" || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
             padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
             if "${reloadFn}" >/dev/null 2>&1; then
@@ -2541,7 +2540,7 @@ configTransactionCommit() {
         fi
         return 1
     fi
-    removeManagedFileIfPresent "${backupFile}" || true
+    removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
     if ! "${refreshFn}"; then
         echoContent title "\n┌─ 订阅刷新失败 ────────────────────────────────"
         menuLine "核心配置已更新，但订阅刷新失败，请手动刷新订阅"

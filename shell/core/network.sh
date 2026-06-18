@@ -190,7 +190,7 @@ EOF
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
-            removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1 || true
+            removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
             CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置提交失败"
             return 1
         fi

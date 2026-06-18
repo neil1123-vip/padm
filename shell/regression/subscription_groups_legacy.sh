@@ -4636,11 +4636,11 @@ JSON
     printf '%s\n' "${originalContent}" >"${alpnConfig}"
     rm -f "${alpnConfig}.alpn.bak"
     (
-        mv() {
-            if [[ "$1" == "${alpnConfig}.alpn.bak" && "$2" == "${alpnConfig}" ]]; then
+        cp() {
+            if [[ "$1" == "-p" && "$2" == "${alpnConfig}.alpn.bak" && "$3" == "${alpnConfig}.tmp" ]]; then
                 return 1
             fi
-            command mv "$@"
+            command cp "$@"
         }
         set +e
         applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
@@ -4700,7 +4700,7 @@ JSON
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
     (
         cp() {
-            if [[ "$1" == "${vlessConfig}" && "$2" == "${vlessConfig}.vlessenc.bak" ]]; then
+            if [[ "$1" == "-p" && "$2" == "${vlessConfig}" && "$3" == "${vlessConfig}.vlessenc.bak.tmp" ]]; then
                 return 1
             fi
             command cp "$@"
@@ -4721,7 +4721,8 @@ JSON
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
     (
         mv() {
-            if [[ "$1" == "${vlessState}.tmp" && "$2" == "${vlessState}" ]]; then
+            if [[ "$1" == "${vlessState}.tmp" && "$2" == "${vlessState}" ]] ||
+                [[ "$1" == "-f" && "$2" == "--" && "$3" == "${vlessState}.tmp" && "$4" == "${vlessState}" ]]; then
                 return 1
             fi
             command mv "$@"
@@ -4743,7 +4744,8 @@ JSON
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
     (
         mv() {
-            if [[ "$1" == "${vlessConfig}.vlessenc.bak" && "$2" == "${vlessConfig}" ]]; then
+            if [[ "$1" == "${vlessConfig}.tmp" && "$2" == "${vlessConfig}" ]] ||
+                [[ "$1" == "-f" && "$2" == "--" && "$3" == "${vlessConfig}.vlessenc" && "$4" == "${vlessConfig}" ]]; then
                 return 1
             fi
             command mv "$@"

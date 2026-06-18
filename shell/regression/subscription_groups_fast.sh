@@ -1074,6 +1074,57 @@ runManagedFileBackupManifestValidatorRegression() (
     [[ "${originalContent}" == '{"version":"old"}' ]]
 )
 
+runRemoveManagedFilesIgnoreFailureRegression() (
+    local rootRel="${TMP_DIR}/remove-managed-files-ignore-failure"
+    local root
+    local fileA
+    local fileB
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    fileA="${root}/a.bak"
+    fileB="${root}/b.bak"
+    printf 'a\n' >"${fileA}"
+    printf 'b\n' >"${fileB}"
+
+    rm() {
+        if [[ "$1" == "-f" && "$2" == "--" && "$3" == "${fileA}" ]]; then
+            return 1
+        fi
+        command rm "$@"
+    }
+    removeManagedFilesIfPresentIgnoreFailure "${fileA}" "${fileB}"
+    unset -f rm
+
+    [[ -f "${fileA}" ]]
+    [[ ! -e "${fileB}" ]]
+)
+
+runRemoveManagedPathIgnoreFailureRegression() (
+    local rootRel="${TMP_DIR}/remove-managed-path-ignore-failure"
+    local root
+    local dirA
+    local dirB
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    dirA="${root}/a"
+    dirB="${root}/b"
+    mkdir -p "${dirA}" "${dirB}"
+
+    rm() {
+        if [[ "$1" == "-rf" && "$2" == "--" && "$3" == "${dirA}" ]]; then
+            return 1
+        fi
+        command rm "$@"
+    }
+    removeManagedPathIfPresentIgnoreFailure "${dirA}" "${dirB}"
+    unset -f rm
+
+    [[ -d "${dirA}" ]]
+    [[ ! -e "${dirB}" ]]
+)
+
 runCheckLogBackupMissingRestoreRegression() (
     local root="${TMP_DIR}/check-log-backup-restore"
     local restoreBackupDir
@@ -3482,6 +3533,8 @@ runRegressionPlatform() {
         runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
         runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression &&
         runRegressionStep managed-file-backup-manifest-validator runManagedFileBackupManifestValidatorRegression &&
+        runRegressionStep remove-managed-files-ignore-failure runRemoveManagedFilesIgnoreFailureRegression &&
+        runRegressionStep remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
         runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&

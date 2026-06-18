@@ -37,15 +37,15 @@ customSSLEmail() {
         if [[ "${sslEmailStatus}" == "y" ]]; then
             sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountTmp}" || return 1
             padmCreateTempFileForTarget accountStage "${accountFile}" account || {
-                rm -f -- "${accountTmp}" >/dev/null 2>&1 || true
+                removeManagedFilesIfPresentIgnoreFailure "${accountTmp}"
                 return 1
             }
             if ! cp "${accountTmp}" "${accountStage}"; then
-                rm -f -- "${accountTmp}" >/dev/null 2>&1 || true
+                removeManagedFilesIfPresentIgnoreFailure "${accountTmp}"
                 padmRemoveCleanupPath "${accountStage}"
                 return 1
             fi
-            rm -f -- "${accountTmp}" >/dev/null 2>&1 || true
+            removeManagedFilesIfPresentIgnoreFailure "${accountTmp}"
             commitGeneratedFile "${accountStage}" "${accountFile}" 600 || { padmRemoveCleanupPath "${accountStage}"; return 1; }
         else
             return 1
