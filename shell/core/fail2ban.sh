@@ -473,27 +473,31 @@ fail2banRestoreManagedFiles() {
     local serviceWasEnabled=${3:-false}
     local rollbackFailed=false
 
-    checkLogBackupRestore "${backupDir}" || rollbackFailed=true
+    fail2banMarkRollbackFailure() {
+        "$@" >/dev/null 2>&1 || rollbackFailed=true
+    }
+
+    fail2banMarkRollbackFailure checkLogBackupRestore "${backupDir}"
     if command -v systemctl >/dev/null 2>&1 && fail2banSystemdServiceInstalled; then
         if [[ "${serviceWasActive}" == "true" ]]; then
-            systemctl restart fail2ban.service >/dev/null 2>&1 || rollbackFailed=true
+            fail2banMarkRollbackFailure systemctl restart fail2ban.service
         elif fail2banServiceActive; then
-            systemctl stop fail2ban.service >/dev/null 2>&1 || rollbackFailed=true
+            fail2banMarkRollbackFailure systemctl stop fail2ban.service
         fi
         if [[ "${serviceWasEnabled}" == "true" ]]; then
-            systemctl enable fail2ban.service >/dev/null 2>&1 || rollbackFailed=true
+            fail2banMarkRollbackFailure systemctl enable fail2ban.service
         else
             systemctl disable fail2ban.service >/dev/null 2>&1 || true
         fi
     elif command -v rc-service >/dev/null 2>&1 && fail2banOpenRcServiceInstalled; then
         if [[ "${serviceWasActive}" == "true" ]]; then
-            rc-service fail2ban restart >/dev/null 2>&1 || rollbackFailed=true
+            fail2banMarkRollbackFailure rc-service fail2ban restart
         elif fail2banServiceActive; then
-            rc-service fail2ban stop >/dev/null 2>&1 || rollbackFailed=true
+            fail2banMarkRollbackFailure rc-service fail2ban stop
         fi
         if command -v rc-update >/dev/null 2>&1; then
             if [[ "${serviceWasEnabled}" == "true" ]]; then
-                rc-update add fail2ban default >/dev/null 2>&1 || rollbackFailed=true
+                fail2banMarkRollbackFailure rc-update add fail2ban default
             else
                 rc-update del fail2ban default >/dev/null 2>&1 || true
             fi
