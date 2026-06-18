@@ -2219,14 +2219,18 @@ renderSubscribeUserOutputs() {
 
     if [[ "${commitFailed}" == "true" ]]; then
         if ! checkLogBackupRestore "${subscribeBackupDir}"; then
+            local restoreMessage
             padmForgetCleanupPath "${subscribeBackupDir}"
             padmRemoveCleanupPath "${stageDir}"
-            SUBSCRIBE_USER_OUTPUT_ERROR="订阅生成失败，且旧订阅输出恢复失败，请手动检查备份目录: ${subscribeBackupDir}"
+            subscriptionSyncSetSingleRestoreResultMessage restoreMessage "订阅生成失败" false "已恢复旧订阅输出" "旧订阅输出" "备份目录: ${subscribeBackupDir}" || true
+            SUBSCRIBE_USER_OUTPUT_ERROR="${restoreMessage}"
             return 1
         fi
+        local restoreMessage
         padmRemoveCleanupPath "${subscribeBackupDir}"
         padmRemoveCleanupPath "${stageDir}"
-        SUBSCRIBE_USER_OUTPUT_ERROR="订阅生成失败，已恢复旧订阅输出"
+        subscriptionSyncSetSingleRestoreResultMessage restoreMessage "订阅生成失败" true "已恢复旧订阅输出" "旧订阅输出" "备份目录: ${subscribeBackupDir}"
+        SUBSCRIBE_USER_OUTPUT_ERROR="${restoreMessage}"
         return 1
     fi
 

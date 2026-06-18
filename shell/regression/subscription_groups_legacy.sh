@@ -7564,6 +7564,19 @@ runSubscribeUserOutputTransactionRegression() {
     writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
     (
+        local helperCalls=0
+        local helperMessage=
+        subscriptionSyncSetSingleRestoreResultMessage() {
+            helperCalls=$((helperCalls + 1))
+            command printf -v "$1" '%s' "${2}|${3}|${4}|${5}|${6}|${7:-true}"
+            [[ "$2" == "订阅生成失败" ]]
+            [[ "$3" == "true" ]]
+            [[ "$4" == "已恢复旧订阅输出" ]]
+            [[ "$5" == "旧订阅输出" ]]
+            [[ "$6" == "备份目录: ${subscribeBackupDir}" ]]
+            helperMessage=${!1}
+            return 0
+        }
         local commitCalls=0
         commitSubscribeUserOutputFile() {
             commitCalls=$((commitCalls + 1))
@@ -7575,7 +7588,8 @@ runSubscribeUserOutputTransactionRegression() {
         if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
             return 1
         fi
-        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "订阅生成失败，已恢复旧订阅输出" ]]
+        [[ "${helperCalls}" == "1" ]]
+        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "${helperMessage}" ]]
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
         [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
         [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
@@ -7584,6 +7598,37 @@ runSubscribeUserOutputTransactionRegression() {
         if regressionFindHasMatches "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
+    )
+
+    writeOldSubscribeOutputs
+    writeLocalSubscribeOutputs
+    (
+        local helperCalls=0
+        local helperMessage=
+        subscriptionSyncSetSingleRestoreResultMessage() {
+            helperCalls=$((helperCalls + 1))
+            command printf -v "$1" '%s' "${2}|${3}|${4}|${5}|${6}|${7:-true}"
+            [[ "$2" == "订阅生成失败" ]]
+            [[ "$3" == "false" ]]
+            [[ "$4" == "已恢复旧订阅输出" ]]
+            [[ "$5" == "旧订阅输出" ]]
+            [[ "$6" == "备份目录: ${subscribeBackupDir}" ]]
+            helperMessage=${!1}
+            return 1
+        }
+        commitSubscribeUserOutputFile() {
+            return 1
+        }
+        checkLogBackupRestore() {
+            return 1
+        }
+        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
+            return 1
+        fi
+        [[ "${helperCalls}" == "1" ]]
+        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "${helperMessage}" ]]
+        regressionFindHasMatches "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'
+        find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' -exec rm -rf {} +
     )
 
     writeLocalSubscribeOutputs
@@ -16033,6 +16078,10 @@ runRegressionTargetedBatchHelpers() {
         runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression
 }
 
+runRegressionTargetedSubscriptionRestore() {
+    runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
+}
+
 runRegressionFastReality() {
     runRegressionFast &&
         runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
@@ -16344,6 +16393,9 @@ transaction-system)
 targeted-batch-helpers)
     regressionRunner=runRegressionTargetedBatchHelpers
     ;;
+targeted-subscription-restore)
+    regressionRunner=runRegressionTargetedSubscriptionRestore
+    ;;
 wireguard-menu-flow)
     regressionRunner=runSubscriptionWireGuardMenuFlowRegression
     ;;
@@ -16357,7 +16409,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac

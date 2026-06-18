@@ -861,6 +861,30 @@ runSubscriptionSyncSingleRestoreResultMessageRegression() (
 
     set +e
     subscriptionSyncSetSingleRestoreResultMessage message \
+        "订阅生成失败" \
+        false \
+        "已恢复旧订阅输出" \
+        "旧订阅输出" \
+        "备份目录: /tmp/subscribe-output-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "订阅生成失败，且旧订阅输出恢复失败，请手动检查备份目录: /tmp/subscribe-output-backup" ]]
+
+    set +e
+    subscriptionSyncSetSingleRestoreResultMessage message \
+        "订阅生成失败" \
+        true \
+        "已恢复旧订阅输出" \
+        "旧订阅输出" \
+        "备份目录: /tmp/subscribe-output-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ "${message}" == "订阅生成失败，已恢复旧订阅输出" ]]
+
+    set +e
+    subscriptionSyncSetSingleRestoreResultMessage message \
         "WireGuard 主控服务启动失败" \
         false \
         "" \
