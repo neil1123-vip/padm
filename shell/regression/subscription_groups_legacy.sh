@@ -1884,7 +1884,7 @@ runRuntimeTempDirRegression() (
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
-    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*' | grep -q .; then
+    if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*'; then
         return 1
     fi
 
@@ -1894,7 +1894,7 @@ runRuntimeTempDirRegression() (
     }
     installUserCrontabContent $'\n15 1 * * * echo ok\n'
     [[ "$(<"${crontabPathMarker}")" == "${tmpRoot}"/padm-crontab.* ]]
-    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-crontab.*' | grep -q .; then
+    if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-crontab.*'; then
         return 1
     fi
 
@@ -1961,7 +1961,7 @@ runCorePortFileTransactionRegression() {
         fi
         [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
         [[ ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
-        if find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' | grep -q .; then
+        if regressionFindHasMatches "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*'; then
             return 1
         fi
     ) || return 1
@@ -2049,7 +2049,7 @@ runCorePortFileTransactionRegression() {
     corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443
     [[ "${reloadCalls}" == "1" ]]
     [[ -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
-    if find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' | grep -q .; then
+    if regressionFindHasMatches "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*'; then
         return 1
     fi
     rm -rf "${configPath}"
@@ -5299,7 +5299,7 @@ runWireGuardKeyTransactionRegression() (
     [[ "${rc}" == "1" ]]
     [[ ! -e "${privateKeyFile}" ]]
     [[ ! -e "${publicKeyFile}" ]]
-    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+    if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
         return 1
     fi
 
@@ -5314,7 +5314,7 @@ runWireGuardKeyTransactionRegression() (
     [[ "${rc}" == "1" ]]
     [[ "$(<"${privateKeyFile}")" == "existing-private-key" ]]
     [[ "$(<"${publicKeyFile}")" == "existing-public-key" ]]
-    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+    if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
         return 1
     fi
 
@@ -5329,7 +5329,7 @@ runWireGuardKeyTransactionRegression() (
     subscriptionWireGuardEnsureKeys >/dev/null 2>&1
     [[ "$(<"${privateKeyFile}")" == "generated-private-key" ]]
     [[ "$(<"${publicKeyFile}")" == "generated-public-key" ]]
-    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+    if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
         return 1
     fi
 )
@@ -5543,7 +5543,7 @@ runFail2banApplyTransactionRegression() (
     ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-control.conf.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-nginx-scan-basic.conf.fail2ban.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 
@@ -5558,7 +5558,7 @@ runFail2banApplyTransactionRegression() (
     ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-control.conf.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-nginx-scan-basic.conf.fail2ban.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 )
@@ -6126,7 +6126,7 @@ JSON
         grep -q 'Reality 日志联动配置写入失败' "${errorLog}"
         jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
         jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
-        if find "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
     )
@@ -6164,7 +6164,7 @@ JSON
         grep -q '恢复旧配置后核心重载仍失败' "${errorLog}"
         jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
         jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
-        if find "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
     )
@@ -6304,7 +6304,7 @@ runSubscribeLocalOutputTransactionRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${defaultFile}")" == "old-default" ]]
-    if find "${localDir}/default" -maxdepth 1 -type f -name '.user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${localDir}/default" -maxdepth 1 -type f -name '.user.subscribe.*'; then
         return 1
     fi
 
@@ -6314,7 +6314,7 @@ runSubscribeLocalOutputTransactionRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${clashFile}")" == "old-clash" ]]
-    if find "${localDir}/clashMeta" -maxdepth 1 -type f -name '.user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${localDir}/clashMeta" -maxdepth 1 -type f -name '.user.subscribe.*'; then
         return 1
     fi
 
@@ -6327,7 +6327,7 @@ EOF
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${clashLinesFile}")" == "old-lines" ]]
-    if find "${localDir}/clashMeta" -maxdepth 1 -type f -name '.xhttp-user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${localDir}/clashMeta" -maxdepth 1 -type f -name '.xhttp-user.subscribe.*'; then
         return 1
     fi
 )
@@ -6425,12 +6425,12 @@ runSingBoxSubscribeWriteRegression() {
         return 1
     fi
     jq -e '.[0].tag == "old"' "${targetPath}" >/dev/null
-    if find "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*'; then
         return 1
     fi
     padmRealAppendSingBoxSubscribeLocalConfig atomic-user '. += [{"tag":"new"}]'
     jq -e 'length == 2 and .[1].tag == "new"' "${targetPath}" >/dev/null
-    if find "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*'; then
         return 1
     fi
 }
@@ -7241,7 +7241,7 @@ runSubscribeUserOutputTransactionRegression() {
     [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
     [[ "$(<"${publicDir}/sing-box_profiles/${emailMd5}")" == "old-sing-profile" ]]
     [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
-    if find "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
 
@@ -7327,7 +7327,7 @@ runSubscribeUserOutputTransactionRegression() {
         [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
         [[ "$(<"${publicDir}/sing-box_profiles/${emailMd5}")" == "old-sing-profile" ]]
         [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
-        if find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
     )
@@ -7338,7 +7338,7 @@ runSubscribeUserOutputTransactionRegression() {
     while IFS= read -r path; do
         [[ -z "${path}" || "${path}" == "${userTmpRoot}"/padm-subscribe-user.* ]] || return 1
     done <"${stageMarker}"
-    if find "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     [[ "$(base64 -d <"${publicDir}/default/${emailMd5}")" == "vless://new-node#atomic-user" ]]
@@ -7504,7 +7504,7 @@ runSubscribeLocalRollbackRegression() (
     [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
     diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
     grep -q '订阅 Salt 初始化失败，已恢复旧本地订阅' "${errorLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -7535,7 +7535,7 @@ runSubscribeLocalRollbackRegression() (
     diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
     grep -q '订阅生成失败：重建本地订阅失败，已恢复旧本地订阅' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -7572,7 +7572,7 @@ runSubscribeLocalRollbackRegression() (
     grep -q '订阅生成失败：生成订阅输出失败，已恢复旧本地订阅' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
     grep -qx 'render' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -7610,7 +7610,7 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -f "${stateFile}" ]]
     [[ "$(jq -r '.version' "${stateFile}")" == "1" ]]
-    if find "${backupsDir}" -maxdepth 1 -type f -name 'groups-pre-migrate-*.json' | grep -q .; then
+    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-pre-migrate-*.json'; then
         return 1
     fi
 
@@ -7695,7 +7695,7 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -z "${backupFile}" ]]
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
-    if find "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json'; then
         return 1
     fi
 
@@ -7782,7 +7782,7 @@ runRefreshLocalSubscriptionsRollbackRegression() (
     diff -u "${beforeSnapshot}" <(captureRefreshLocalSnapshot)
     grep -q '重建本地订阅失败，已恢复旧本地订阅' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -7807,7 +7807,7 @@ runRefreshLocalSubscriptionsRollbackRegression() (
     diff -u "${beforeSnapshot}" <(captureRefreshLocalSnapshot)
     grep -q '清理本地订阅目录失败，已恢复旧本地订阅' "${errorLog}"
     ! grep -q '^showAccounts$' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*'
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -8202,7 +8202,7 @@ EOF
     [[ "$(<"${streamConf}")" == "${originalStreamConf}" ]]
     [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
     ! grep -q '^refresh$' "${serviceLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
     fi
 
@@ -8223,7 +8223,7 @@ EOF
     [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
     grep -q '^restart:nginx:service-fail$' "${serviceLog}"
     ! grep -q '^refresh$' "${serviceLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
     fi
 
@@ -8237,7 +8237,7 @@ EOF
     [[ ! -e "${stateFile}" ]]
     [[ ! -e "${streamConf}" ]]
     ! grep -q 'padm stream include start' "${nginxMainConf}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
     fi
 
@@ -8423,7 +8423,7 @@ EOF
     [[ ! -e "${streamConf}" ]]
     ! grep -q '^refresh$' "${serviceLog}"
     grep -q 'Reality 443 共存分流服务应用失败' "${errorLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
 
@@ -8446,7 +8446,7 @@ EOF
     [[ ! -e "${streamConf}" ]]
     grep -q '^restart:nginx:service-fail$' "${serviceLog}"
     ! grep -q '^refresh$' "${serviceLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
 
@@ -8469,7 +8469,7 @@ EOF
     [[ ! -e "${streamConf}" ]]
     grep -q '已回滚本次修改' "${errorLog}"
     grep -q '恢复旧配置后服务应用仍失败' "${errorLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
     export PADM_FAKE_REALITY_STREAM_CP_MODE=success
@@ -8486,7 +8486,7 @@ EOF
     grep -q 'padm stream include start' "${nginxMainConf}"
     grep -Fq "include ${streamDir}/*.conf;" "${nginxMainConf}"
     [[ ! -e "${streamConf}.tmp" ]]
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
 
@@ -9029,7 +9029,7 @@ JSON
     grep -q "${vlessTmpRoot}/padm-vlessenc.out" "${vlessTmpMarker}"
     grep -q "${vlessTmpRoot}/padm-vlessenc.err" "${vlessTmpMarker}"
     [[ -f "${vlessTmpRoot}/padm-xray-test.log" ]]
-    if find "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) | grep -q .; then
+    if regressionFindHasMatches "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \); then
         return 1
     fi
 
@@ -9062,7 +9062,7 @@ JSON
     setVlessRealityEncryption disable
     jq -e '.inbounds[0].settings.decryption == "none" and (.inbounds[0].settings.fallbacks | not)' "${vlessConfigFile}" >/dev/null
     [[ ! -e "${vlessStateFile}" ]]
-    if find "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) | grep -q .; then
+    if regressionFindHasMatches "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \); then
         return 1
     fi
 
@@ -9195,7 +9195,7 @@ runRealityUnifiedLibraryRollbackRegression() (
     grep -q '^keep.example.com|' "${candidatesFile}"
     ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
     ! compgen -G "${root}/.reality_candidates.tsv.reality.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 
@@ -9209,7 +9209,7 @@ runRealityUnifiedLibraryRollbackRegression() (
     grep -q '^keep.example.com|' "${candidatesFile}"
     ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
     ! compgen -G "${root}/.reality_candidates.tsv.reality.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 
@@ -9881,7 +9881,7 @@ JSON
         [[ "$(<"${resetStateFile}")" == "${resetBeforeSnapshot}" ]]
         grep -q '订阅状态重建失败，已恢复旧状态' "${resetErrorLog}"
         [[ -f "${resetCurrentBackup}" ]]
-        if find "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*' | grep -q .; then
+        if regressionFindHasMatches "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*'; then
             return 1
         fi
 
@@ -9999,7 +9999,7 @@ JSON
         [[ "${quotaTxStatus}" == "1" ]]
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
-        if find "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+        if regressionFindHasMatches "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
             return 1
         fi
     )
@@ -10034,7 +10034,7 @@ JSON
         jq -e '.groups[0].user_groups[] | select(.id == "team-b" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ ! -e "${accountPhaseMarker}" ]]
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"停用超额分享订阅失败"* ]]
-        if find "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+        if regressionFindHasMatches "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
             return 1
         fi
     )
@@ -10178,7 +10178,7 @@ JSON
     [[ -f "${outputBackupDir}/local.exists" && -f "${outputBackupDir}/public.exists" ]]
     padmRemoveCleanupPath "${outputBackupDir}"
 
-    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     configPath="${oldConfigPath}"
@@ -10238,7 +10238,7 @@ JSON
     [[ "${#backupDirs[@]}" == "1" ]]
     [[ -f "${backupDirs[0]}/manifest" ]]
     grep -q "${targetFile}" "${backupDirs[0]}/manifest"
-    if find "${root}/xray" -name '*.sync.*' | grep -q .; then
+    if regressionFindHasMatches "${root}/xray" -name '*.sync.*'; then
         return 1
     fi
 
@@ -10267,7 +10267,7 @@ JSON
         [[ "${restoreStatus}" == "1" ]]
         [[ "$(<"${restoreDirTarget}/default/existing")" == "current default" ]]
         [[ "$(<"${restoreDirTarget}/clashMeta/existing")" == "current clash" ]]
-        if find "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \) | grep -q .; then
+        if regressionFindHasMatches "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \); then
             return 1
         fi
     )
@@ -10306,7 +10306,7 @@ JSON
         [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"核心重载失败"* ]]
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"恢复旧配置后核心重载仍失败"* ]]
-        if find "${reloadRoot}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${reloadRoot}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*'; then
             return 1
         fi
     )
@@ -10384,7 +10384,7 @@ JSON
         grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
         grep -q '本机同步未完全完成' "${statusLog}"
         grep -qx 'partial' "${resultStatus}"
-        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+        if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
             return 1
         fi
     )
@@ -10471,7 +10471,7 @@ JSON
         grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
         grep -q '本机同步未完全完成' "${statusLog}"
         grep -qx 'partial' "${resultStatus}"
-        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+        if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
             return 1
         fi
     )
@@ -10554,7 +10554,7 @@ JSON
         grep -q '被控服务器同步失败' "${resultFailures}"
         grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"
         grep -qx 'partial' "${resultStatus}"
-        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+        if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
             return 1
         fi
     )
@@ -10797,7 +10797,7 @@ runRemoteSubscribeFetchRegression() {
     while IFS= read -r path; do
         [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-stage.* ]] || return 1
     done <"${stageTmpMarker}"
-    if find "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
 
@@ -10852,7 +10852,7 @@ runRemoteSubscribeFetchRegression() {
         [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
         [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
         [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
-        if find "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        if regressionFindHasMatches "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
             return 1
         fi
     )
@@ -11262,7 +11262,7 @@ JSON
     jq -e --slurpfile expected "${rollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
     [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${rollbackFirstBefore}" ]]
     [[ "$(<"${configPath}03_VLESS_WS_inbounds.json")" == "${rollbackSecondBefore}" ]]
-    if find "${rollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' \) | grep -q .; then
+    if regressionFindHasMatches "${rollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' \); then
         return 1
     fi
     configPath="${oldConfigPath}"
@@ -11339,7 +11339,7 @@ JSON
     [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${refreshRollbackFirstBefore}" ]]
     diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
     diff -u "${refreshRollbackPublicExpected}" <(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    if find "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \) | grep -q .; then
+    if regressionFindHasMatches "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \); then
         return 1
     fi
     configPath="${oldConfigPath}"
@@ -11407,9 +11407,9 @@ JSON
     jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed" and (.error_detail.message | contains("订阅输出恢复失败"))' "${responseFile}.restore-failure" >/dev/null
     mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
     [[ "${#restoreFailureBackupDirs[@]}" == "2" ]]
-    find "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*' | grep -q .
+    regressionFindHasMatches "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
     [[ ! -e "${restoreFailureLocalDir}/default/existing" || "$(<"${restoreFailureLocalDir}/default/existing")" != "old local" ]]
-    if find "${restoreFailureRoot}/xray" -name '*.sync.*' | grep -q .; then
+    if regressionFindHasMatches "${restoreFailureRoot}/xray" -name '*.sync.*'; then
         return 1
     fi
     if [[ -n "${restoreFailureOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
@@ -11720,7 +11720,7 @@ runSubscriptionControlSubscribeEnvRestoreRegression() (
     [[ "${renderStatus}" == "1" ]]
     [[ "${PADM_SUBSCRIBE_LOCAL_DIR}" == "${expectedLocal}" ]]
     [[ "${PADM_SUBSCRIBE_DIR}" == "${expectedPublic}" ]]
-    if find "${root}" -maxdepth 1 -type d -name 'padm-control-subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-control-subscribe.*'; then
         return 1
     fi
 )
@@ -12434,7 +12434,7 @@ SH
     fi
     PATH="${oldPath}"
     grep -qxF 'old config' "${nginxTarget}"
-    ! find "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \) | grep -q .
+    ! regressionFindHasMatches "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \)
 
     controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
     resetMenuActions
@@ -13511,7 +13511,7 @@ runInstallToolsAcmeResultFailureRegression() {
         [[ ! -e "${fakeHome}/.acme.sh/acme.sh" ]]
         [[ "$(<"${fakeHome}/.acme.sh/account.conf")" == "legacy-state" ]]
         [[ ! -e "${fakeHome}/.acme.sh/partial.txt" ]]
-        if find "${tmpRoot}" -maxdepth 1 -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${tmpRoot}" -maxdepth 1 -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -13609,7 +13609,7 @@ runInstallToolsAcmeCommitFailureRegression() {
         [[ "${installStatus}" -ne 0 ]]
         grep -q "acme安装脚本提交失败" "${errorLog}"
         [[ ! -e "${runMarker}" ]]
-        if find "${tmpRoot}" -type f -name 'acme.sh.download.*' | grep -q .; then
+        if regressionFindHasMatches "${tmpRoot}" -type f -name 'acme.sh.download.*'; then
             return 1
         fi
 
@@ -14068,7 +14068,7 @@ runNginxAptRepoRefreshRollbackRegression() {
         [[ "$(<"${pinFile}")" == "old-pin" ]]
         grep -q "Nginx apt 源刷新失败" "${errorLog}"
         ! compgen -G "${keyringRoot}/.nginx-archive-keyring.gpg.aptkey.*" >/dev/null
-        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -14117,7 +14117,7 @@ runNginxYumMainlineEnableFailureRegression() {
         [[ "${nginxStatus}" -ne 0 ]]
         grep -q "Nginx yum mainline 源启用失败" "${errorLog}"
         [[ "$(<"${repoDir}/nginx.repo")" == "old-yum-repo" ]]
-        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -14163,7 +14163,7 @@ runNginxAlpineDefaultConfRollbackRegression() {
         [[ "${nginxStatus}" -ne 0 ]]
         [[ "$(<"${defaultConf}")" == "old-default-conf" ]]
         grep -q "Nginx开机自启配置失败" "${errorLog}"
-        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -14507,7 +14507,7 @@ EOF
     grep -q '更新入口已下载，正在重新打开新版脚本' "${successLog}"
     grep -q 'new-entry-ok' "${successLog}" && return 1
     grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${downloadDirLog}"
-    if find "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     [[ ! -e "${installDir}/install.sh.bak" ]]
@@ -14546,7 +14546,7 @@ EOF
     ) >"${TMP_DIR}/update-padm-run-fail.log" 2>&1 && return 1
     grep -q '新版入口执行失败，已恢复旧入口' "${errorLog}"
     grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${downloadDirLog}"
-    if find "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     "${installDir}/install.sh" | grep -q 'old-entry'
@@ -14691,7 +14691,7 @@ runInstallRefreshRestoresBackupRegression() {
     [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
     [[ ! -e "${fixtureDir}/.padm-ref" ]]
     [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
-    if find "${refreshTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${refreshTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
 
@@ -14744,7 +14744,7 @@ runInstallRefreshRestoresBackupRegression() {
     [[ -d "${restoreFailureDir}/.padm-update-backup/documents" ]]
     [[ "$(<"${restoreFailureDir}/.padm-update-backup/documents/marker")" == "old-doc" ]]
     [[ ! -e "${restoreFailureDir}/.padm-ref" ]]
-    if find "${restoreFailureTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${restoreFailureTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -14953,7 +14953,7 @@ runSyncInstallDirectoryTreeRestoreFailureRegression() {
         backupRoot=$(find "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-backup.*' -print -quit)
         [[ -n "${backupRoot}" ]]
         [[ "$(<"${backupRoot}/target/marker")" == "old" ]]
-        if find "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-stage.*' | grep -q .; then
+        if regressionFindHasMatches "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-stage.*'; then
             return 1
         fi
     )

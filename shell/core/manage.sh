@@ -1282,7 +1282,7 @@ cleanupPadmManagedRootOnUninstall() {
             [[ -n "${childPath}" ]] || continue
             removeManagedPathWithinRootIfPresent "${resolvedRoot}" "${childPath}" || failed=true
         done < <(find "${resolvedRoot}" -mindepth 1 -maxdepth 1 \( -name 'tmp.geo.*' -o -name 'tmp.xray.*' -o -name 'tmp.sing-box.*' \) -print)
-        if ! find "${resolvedRoot}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+        if [[ -z "$(find "${resolvedRoot}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
             rmdir "${resolvedRoot}" >/dev/null 2>&1 || {
                 errorCard "PADM配置目录删除失败: ${installRoot}"
                 failed=true
