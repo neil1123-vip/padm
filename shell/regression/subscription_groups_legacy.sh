@@ -6345,7 +6345,6 @@ runCleanLastInstallationConfigAcmeHomeFailureRegression() (
     readInstallType() { return 0; }
     mkdirTools() { return 0; }
     statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() {
