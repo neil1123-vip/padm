@@ -6159,7 +6159,6 @@ runCleanLastInstallationConfigFailureRegression() (
     readInstallType() { printf 'read-install-type\n' >>"${cleanupLog}"; }
     mkdirTools() { printf 'mkdir-tools\n' >>"${cleanupLog}"; }
     statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() { printf -v "$3" 'n'; }
