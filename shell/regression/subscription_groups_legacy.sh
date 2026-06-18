@@ -10316,7 +10316,6 @@ JSON
 
         showSubscriptionGroupsStateSummary() { return 0; }
         statusCard() { return 0; }
-        successCard() { return 0; }
         autoRead() {
             local targetVar=$3
             printf -v "${targetVar}" '%s' "yes"
@@ -15619,7 +15618,6 @@ runTlsRenewalFailurePropagationRegression() (
     export REGRESSION_ERROR_CARD_LOG="${errorLog}"
 
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
-    successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     progressCard() { return 0; }
     handleNginx() {
