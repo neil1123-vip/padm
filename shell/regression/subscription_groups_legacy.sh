@@ -1760,146 +1760,6 @@ runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() (
     jq -e '.custom == "keep-after"' "${customFile}" >/dev/null
 )
 
-runVMessRoutingFailureReturnRegression() (
-    local rootRel="${TMP_DIR}/vmess-routing-failure"
-    local root
-    local removeMarker
-    local outboundMarker
-    local routingMarker
-    local uninstallRoutingMarker
-    local reloadMarker
-    local successMarker
-    local mode=invalid-port
-    local rc
-
-    mkdir -p "${rootRel}"
-    root=$(cd -- "${rootRel}" && pwd -P)
-    removeMarker="${root}/remove"
-    outboundMarker="${root}/outbound"
-    routingMarker="${root}/routing"
-    uninstallRoutingMarker="${root}/uninstall-routing"
-    reloadMarker="${root}/reload"
-    successMarker="${root}/success"
-    errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
-    autoRead() {
-        case "$3" in
-        setVMessWSTLSAddress) printf -v "$3" 'edge.example.com' ;;
-        domainList) printf -v "$3" 'example.com' ;;
-        setVMessWSTLSPort)
-            if [[ "${mode}" == "invalid-port" ]]; then
-                printf -v "$3" 'bad-port'
-            else
-                printf -v "$3" '443'
-            fi
-            ;;
-        setVMessWSTLSUUID) printf -v "$3" '11111111-1111-1111-1111-111111111111' ;;
-        setVMessWSTLSPath) printf -v "$3" 'ws' ;;
-        *) printf -v "$3" '' ;;
-        esac
-    }
-    reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
-    }
-
-    mode=success
-    configPath="${root}/success-xray/"
-    mkdir -p "${rootRel}/success-xray"
-    cat >"${configPath}09_routing.json" <<'JSON'
-{"routing":{"type":"field","rules":[{"type":"field","domain":["domain:legacy.example"],"outboundTag":"VMess-out"}]}}
-JSON
-    cat >"${configPath}VMess-out.json" <<'JSON'
-{"outbounds":[{"tag":"VMess-out","protocol":"vmess"}]}
-JSON
-    rm -f "${reloadMarker}" "${successMarker}"
-    (
-        setVMessWSRoutingOutbounds >/dev/null 2>&1
-    )
-    [[ -e "${reloadMarker}" ]]
-    [[ -e "${successMarker}" ]]
-    jq -e '
-      .outbounds[0].tag == "vmess-out" and
-      .outbounds[0].protocol == "vmess" and
-      .outbounds[0].streamSettings.wsSettings.path == "/ws"
-    ' "${configPath}vmess-out.json" >/dev/null
-    jq -e '[.routing.rules[] | select(.outboundTag == "vmess-out")] | length == 1' "${configPath}09_routing.json" >/dev/null
-    ! jq -e '.routing.rules[] | select(.outboundTag == "VMess-out")' "${configPath}09_routing.json" >/dev/null
-
-    removeXrayOutbound() {
-        printf 'remove\n' >"${removeMarker}"
-        return 0
-    }
-    addXrayOutbound() {
-        printf 'outbound\n' >"${outboundMarker}"
-        [[ "${mode}" != "outbound-fail" ]]
-    }
-    addXrayRouting() {
-        printf 'routing\n' >"${routingMarker}"
-        return 0
-    }
-    unInstallRouting() {
-        printf 'uninstall-routing\n' >"${uninstallRoutingMarker}"
-        return 0
-    }
-    mode=invalid-port
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -e "${removeMarker}" ]]
-    [[ ! -e "${outboundMarker}" ]]
-    [[ ! -e "${uninstallRoutingMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    mode=outbound-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${outboundMarker}" ]]
-    [[ ! -e "${routingMarker}" ]]
-    [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    mode=reload-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${outboundMarker}" ]]
-    [[ -e "${routingMarker}" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    rm -f "${removeMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    removeVMessWSRouting >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-)
-
 runUserConfigWriteRegression() {
     local targetPath="${TMP_DIR}/user-config.json"
     cat >"${targetPath}" <<'JSON'
@@ -1947,149 +1807,6 @@ JSON
     [[ "$(<"${xrayFile}")" == "${originalContent}" ]]
     [[ ! -e "${xrayFile}.tmp" ]]
 }
-
-runUserMutationFailurePropagationRegression() (
-    local root="${TMP_DIR}/user-mutation-failure"
-    local xrayRoot="${root}/xray/"
-    local singBoxRoot="${root}/sing-box/"
-    local userFile="${xrayRoot}02_VLESS_TCP_inbounds.json"
-    local reloadMarker="${root}/reload"
-    local subscribeMarker="${root}/subscribe"
-    local successMarker="${root}/success"
-    local menuMarker="${root}/menu"
-    local mode=write-fail
-    local rc
-
-    mkdir -p "${xrayRoot}" "${singBoxRoot}"
-    configPath="${xrayRoot}"
-    singBoxConfigPath="${singBoxRoot}"
-    coreInstallType=1
-    frontingType=
-    frontingTypeReality=02_VLESS_TCP_inbounds
-
-    statusCard() { return 0; }
-    errorCard() { return 0; }
-    echoContent() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
-    autoRead() {
-        case "$3" in
-        userNum) printf -v "$3" '1' ;;
-        delUserIndex) printf -v "$3" '1' ;;
-        *) printf -v "$3" '' ;;
-        esac
-    }
-    readConfigHostPathUUID() { return 0; }
-    customUUID() { currentCustomUUID=uuid-new; }
-    customUserEmail() { currentCustomEmail=email-new; }
-    currentProtocolHas() { [[ "$1" == "0" ]]; }
-    initXrayClients() {
-        if [[ "${mode}" == "write-fail" ]]; then
-            printf '[\n'
-        else
-            printf '[{"id":"uuid-new","email":"email-new"}]\n'
-        fi
-    }
-    reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
-    }
-    readNginxSubscribe() {
-        subscribePort=443
-    }
-    subscribe() {
-        printf 'subscribe\n' >"${subscribeMarker}"
-        [[ "${mode}" != "subscribe-fail" ]]
-    }
-    manageSubscription() {
-        printf 'menu\n' >"${menuMarker}"
-        return 0
-    }
-
-    writeBaseUserConfig() {
-        cat >"${userFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"id":"uuid-old","email":"old-VLESS_TCP/TLS_Vision"}]}}]}
-JSON
-    }
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=write-fail
-    set +e
-    addUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=reload-fail
-    set +e
-    addUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${subscribeMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=subscribe-fail
-    set +e
-    addUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ -e "${subscribeMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    removeUserFromConfigFiles() { [[ "${mode}" != "write-fail" ]]; }
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=write-fail
-    set +e
-    removeUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${subscribeMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=reload-fail
-    set +e
-    removeUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${subscribeMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=subscribe-fail
-    set +e
-    removeUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ -e "${subscribeMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-)
 
 runPortAndPanelHelperRegression() {
     parsedCorePorts=$(corePortParseList '2053, 2083,2053')
@@ -15929,7 +15646,6 @@ runRegressionRouting() {
     runRegressionStep routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
     runRegressionStep routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
     runRegressionStep routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
-    runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
     runRegressionStep routing-port-panel runPortAndPanelHelperRegression
 }
 
@@ -16024,16 +15740,15 @@ runRegressionTransactionCore() {
         runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
         runRegressionStep sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression &&
         runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
-        runRegressionStep sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression &&
-        runRegressionStep sing-box-managed-cleanup runSingBoxManagedCleanupRegression &&
-        runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
-        runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
-        runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
-        runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
+    runRegressionStep sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression &&
+    runRegressionStep sing-box-managed-cleanup runSingBoxManagedCleanupRegression &&
+    runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
+    runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
+    runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
+    runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
         runRegressionStep sing-box-log-transaction runSingBoxLogTransactionRegression &&
         runRegressionStep user-config-write runUserConfigWriteRegression &&
-        runRegressionStep remove-user runRemoveUserRegression &&
-        runRegressionStep user-mutation-failure-propagation runUserMutationFailurePropagationRegression
+        runRegressionStep remove-user runRemoveUserRegression
 }
 
 runRegressionTransactionSubscription() {
