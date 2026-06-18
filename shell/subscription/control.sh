@@ -878,7 +878,7 @@ subscriptionControlEnsureToken() {
 subscriptionGroupsSecureStateFiles() {
     local groupsDir
     local groupsFile
-    groupsDir=$(subscriptionGroupsDir)
+    groupsDir=$(subscriptionGroupsSafeDir) || return 1
     groupsFile=$(subscriptionGroupsFile)
     padmEnsureSafeDirectory "${groupsDir}" || return 1
     chmod 700 "${groupsDir}" 2>/dev/null || true
@@ -1206,6 +1206,8 @@ subscriptionControlRenderSubscribeAccount() {
     export PADM_SUBSCRIBE_DIR="${subscribeRoot}/subscribe"
     mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box" || {
         padmRemoveCleanupPath "${subscribeRoot}"
+        if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+        if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
         return 1
     }
     if ! showAccounts >/dev/null 2>&1; then

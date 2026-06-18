@@ -8162,6 +8162,8 @@ runSubscriptionGroupsRejectsUnsafeDirRegression() (
     local rc
 
     mkdir -p "${root}"
+    root=$(cd -- "${root}" && pwd -P)
+    rmLog="${root}/rm.log"
     : >"${rmLog}"
     export PADM_SUBSCRIPTION_GROUPS_DIR=relative-groups
 
@@ -8171,7 +8173,10 @@ runSubscriptionGroupsRejectsUnsafeDirRegression() (
     }
 
     set +e
-    ensureSubscriptionGroupsState >/dev/null 2>&1
+    (
+        cd -- "${root}" || exit 1
+        ensureSubscriptionGroupsState >/dev/null 2>&1
+    )
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
@@ -10519,8 +10524,8 @@ JSON
     cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
 {"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
 JSON
-    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a", "sub_team_b"]' >/dev/null
-    subscriptionSyncPlanFromAccounts $'sub_team_a' | jq -e '.create == [] and .remove == ["sub_team_b"]' >/dev/null
+    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
+    subscriptionSyncPlanFromAccounts $'sub_team_a-main' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
     set +e
     subscriptionSyncPlanFromAccounts $'sub_team_a' >/dev/null 2>&1
@@ -10681,7 +10686,7 @@ JSON
         return 1
     }
     cp() {
-        if [[ "$1" == "-p" && "$2" == "${root}/tmp"/padm-subscription-sync-backup.*/*.json && "$3" == "${targetFile}" ]]; then
+        if [[ "$1" == "-p" && "$2" == "${root}/tmp"/padm-subscription-sync-backup.*/*.json && "$3" == "${root}/xray"/.02_VLESS_TCP_inbounds.json.restore.* ]]; then
             return 1
         fi
         command cp "$@"
@@ -12113,6 +12118,10 @@ runSubscriptionControlRejectsUnsafeGroupsDirRegression() (
     local installStatus
 
     mkdir -p "${fakeBin}" "${root}"
+    root=$(cd -- "${root}" && pwd -P)
+    fakeBin="${root}/fake-bin"
+    actionsFile="${root}/actions.log"
+    healthTokensFile="${root}/health.log"
     cat >"${fakeBin}/python3" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -12130,19 +12139,58 @@ SH
     PADM_SUBSCRIPTION_GROUPS_DIR=relative-control
 
     set +e
-    subscriptionControlEnsureToken >/dev/null 2>&1
+    (
+        cd -- "${root}" || exit 1
+        subscriptionControlEnsureToken >/dev/null 2>&1
+    )
     installStatus=$?
     set -e
     [[ "${installStatus}" == "1" ]]
     [[ ! -e "${root}/relative-control" ]]
 
     set +e
-    installSubscriptionControlService >/dev/null 2>&1
+    (
+        cd -- "${root}" || exit 1
+        installSubscriptionControlService >/dev/null 2>&1
+    )
     installStatus=$?
     set -e
     [[ "${installStatus}" == "1" ]]
     [[ ! -s "${actionsFile}" ]]
     [[ ! -e "${root}/relative-control" ]]
+)
+
+runSubscriptionControlSubscribeEnvRestoreRegression() (
+    local rootRel="${TMP_DIR}/remote-control-subscribe-env-restore"
+    local root expectedLocal expectedPublic renderStatus
+
+    mkdir -p "${rootRel}"
+    root=$(cd -- "${rootRel}" && pwd -P)
+    expectedLocal="${root}/persist-local"
+    expectedPublic="${root}/persist-public"
+    export TMPDIR="${root}"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${expectedLocal}"
+    export PADM_SUBSCRIBE_DIR="${expectedPublic}"
+
+    mkdir() {
+        if [[ "$*" == *"/subscribe_local/default"* ]]; then
+            return 1
+        fi
+        command mkdir "$@"
+    }
+
+    set +e
+    subscriptionControlRenderSubscribeAccount team_a >/dev/null 2>&1
+    renderStatus=$?
+    set -e
+    unset -f mkdir
+
+    [[ "${renderStatus}" == "1" ]]
+    [[ "${PADM_SUBSCRIBE_LOCAL_DIR}" == "${expectedLocal}" ]]
+    [[ "${PADM_SUBSCRIBE_DIR}" == "${expectedPublic}" ]]
+    if find "${root}" -maxdepth 1 -type d -name 'padm-control-subscribe.*' | grep -q .; then
+        return 1
+    fi
 )
 
 runSubscriptionControlServerResponseRegression() (
@@ -16115,6 +16163,7 @@ runRegressionRemoteControl() {
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&
         runRegressionStep remote-control-unsafe-groups-dir runSubscriptionControlRejectsUnsafeGroupsDirRegression &&
+        runRegressionStep remote-control-subscribe-env-restore runSubscriptionControlSubscribeEnvRestoreRegression &&
         runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression &&
         runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }

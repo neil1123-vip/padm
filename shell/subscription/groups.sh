@@ -6,23 +6,11 @@ subscriptionGroupsDir() {
 
 subscriptionGroupsSafeDir() {
     local groupsDir
-    local resolvedPath=
     groupsDir=$(subscriptionGroupsDir)
     [[ -n "${groupsDir}" ]] || return 1
-    if [[ "${groupsDir}" == /* ]]; then
-        padmIsSafeAbsolutePath "${groupsDir%/}" || return 1
-        printf '%s\n' "${groupsDir%/}"
-        return 0
-    fi
-    if [[ "${groupsDir}" == "." || "${groupsDir}" == ".." ||
-        "${groupsDir}" == */./* || "${groupsDir}" == */. ||
-        "${groupsDir}" == */../* || "${groupsDir}" == */.. ]]; then
-        return 1
-    fi
-    resolvedPath=$(padmResolveCleanupPath "${groupsDir}" 2>/dev/null || true)
-    [[ -n "${resolvedPath}" ]] || return 1
-    padmIsSafeAbsolutePath "${resolvedPath%/}" || return 1
-    printf '%s\n' "${resolvedPath%/}"
+    [[ "${groupsDir}" == /* ]] || return 1
+    padmIsSafeAbsolutePath "${groupsDir%/}" || return 1
+    printf '%s\n' "${groupsDir%/}"
 }
 
 subscriptionGroupsFile() {

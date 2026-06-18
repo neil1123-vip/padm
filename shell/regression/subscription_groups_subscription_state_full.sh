@@ -520,8 +520,8 @@ JSON
     cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
 {"inbounds":[{"users":[{"name":"sub_team_a-singbox_hysteria2"},{"username":"sub_team_b-singbox_hysteria2"}]}]}
 JSON
-    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a", "sub_team_b"]' >/dev/null
-    subscriptionSyncPlanFromAccounts $'sub_team_a' | jq -e '.create == [] and .remove == ["sub_team_b"]' >/dev/null
+    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
+    subscriptionSyncPlanFromAccounts $'sub_team_a-main' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
     set +e
     subscriptionSyncPlanFromAccounts $'sub_team_a' >/dev/null 2>&1
