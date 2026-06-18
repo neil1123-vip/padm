@@ -71,66 +71,65 @@ sniRouting() {
 dnsRoutingBackupCreate() {
     local backupDir
     local singBoxFile
-    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
-        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
-    else
-        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+    local xrayConfigDir=
+    local singBoxConfigDir=
+    backupDir=$(dnsRoutingSafeBackupDir) || return 1
+    if [[ -n "${configPath:-}" ]]; then
+        xrayConfigDir=$(dnsRoutingSafeXrayConfigDir) || return 1
+    fi
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        singBoxConfigDir=$(dnsRoutingSafeSingBoxConfigDir) || return 1
     fi
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${backupDir}/xray" "${backupDir}/sing-box" >/dev/null 2>&1 || return 1
-    if [[ -n "${configPath:-}" && -f "${configPath}11_dns.json" ]]; then
-        cp "${configPath}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
+    if [[ -n "${xrayConfigDir}" && -f "${xrayConfigDir}11_dns.json" ]]; then
+        cp "${xrayConfigDir}11_dns.json" "${backupDir}/xray/11_dns.json" || return 1
     fi
-    if [[ -n "${singBoxConfigPath:-}" ]]; then
+    if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r singBoxFile; do
-            cp "${singBoxFile}" "${backupDir}/sing-box/$(basename -- "${singBoxFile}")" || return 1
-        done < <(find "${singBoxConfigPath}" -maxdepth 1 -type f -name '*.json' | sort)
+            [[ -f "${singBoxConfigDir}${singBoxFile}" ]] || continue
+            cp "${singBoxConfigDir}${singBoxFile}" "${backupDir}/sing-box/${singBoxFile}" || return 1
+        done < <(dnsRoutingManagedSingBoxFiles)
     fi
     return 0
 }
 
 dnsRoutingBackupRestore() {
     local backupDir
+    local xrayConfigDir=
+    local singBoxConfigDir=
     local status=0
-    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
-        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
-    else
-        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
-    fi
+    backupDir=$(dnsRoutingSafeBackupDir) || return 1
     [[ -d "${backupDir}" ]] || return 1
     if [[ -n "${configPath:-}" ]]; then
-        rm -f "${configPath}11_dns.json" >/dev/null 2>&1 || status=1
+        xrayConfigDir=$(dnsRoutingSafeXrayConfigDir) || return 1
+        rm -f "${xrayConfigDir}11_dns.json" >/dev/null 2>&1 || status=1
         if [[ -f "${backupDir}/xray/11_dns.json" ]]; then
-            cp "${backupDir}/xray/11_dns.json" "${configPath}11_dns.json" || status=1
+            cp "${backupDir}/xray/11_dns.json" "${xrayConfigDir}11_dns.json" || status=1
         fi
     fi
     if [[ -n "${singBoxConfigPath:-}" ]]; then
-        find "${singBoxConfigPath}" -maxdepth 1 -type f -name '*.json' -delete >/dev/null 2>&1 || status=1
-        if compgen -G "${backupDir}/sing-box/*.json" >/dev/null; then
-            cp "${backupDir}/sing-box/"*.json "${singBoxConfigPath}" || status=1
-        fi
+        singBoxConfigDir=$(dnsRoutingSafeSingBoxConfigDir) || return 1
+        while IFS= read -r singBoxFile; do
+            rm -f "${singBoxConfigDir}${singBoxFile}" >/dev/null 2>&1 || status=1
+            if [[ -f "${backupDir}/sing-box/${singBoxFile}" ]]; then
+                cp "${backupDir}/sing-box/${singBoxFile}" "${singBoxConfigDir}${singBoxFile}" || status=1
+            fi
+        done < <(dnsRoutingManagedSingBoxFiles)
     fi
     return "${status}"
 }
 
 dnsRoutingBackupCleanup() {
     local backupDir
-    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
-        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
-    else
-        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
-    fi
+    backupDir=$(dnsRoutingSafeBackupDir) || return 1
     rm -rf "${backupDir}" >/dev/null 2>&1 || return 1
 }
 
 dnsRoutingAbortChange() {
     local reason=$1
     local backupDir
-    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
-        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
-    else
-        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
-    fi
+    backupDir=$(dnsRoutingSafeBackupDir) || return 1
     if dnsRoutingBackupRestore; then
         dnsRoutingBackupCleanup || errorCard "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}"
     else
@@ -142,11 +141,7 @@ dnsRoutingAbortChange() {
 dnsRoutingReloadOrRollback() {
     local title=$1
     local backupDir
-    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
-        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
-    else
-        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
-    fi
+    backupDir=$(dnsRoutingSafeBackupDir) || return 1
     if reloadCore; then
         dnsRoutingBackupCleanup || errorCard "${title}已应用，但备份目录清理失败: ${backupDir}"
         return 0
@@ -162,6 +157,33 @@ dnsRoutingReloadOrRollback() {
         errorCard "${title}核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
     fi
     return 1
+}
+
+dnsRoutingSafeBackupDir() {
+    local backupDir
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
+    else
+        backupDir="${TMPDIR:-/tmp}/padm-dns-routing-backup"
+    fi
+    padmIsSafeAbsolutePath "${backupDir%/}" || return 1
+    printf '%s\n' "${backupDir%/}"
+}
+
+dnsRoutingSafeXrayConfigDir() {
+    [[ -n "${configPath:-}" ]] || return 1
+    padmIsSafeAbsolutePath "${configPath%/}" || return 1
+    printf '%s\n' "${configPath%/}/"
+}
+
+dnsRoutingSafeSingBoxConfigDir() {
+    [[ -n "${singBoxConfigPath:-}" ]] || return 1
+    padmIsSafeAbsolutePath "${singBoxConfigPath%/}" || return 1
+    printf '%s\n' "${singBoxConfigPath%/}/"
+}
+
+dnsRoutingManagedSingBoxFiles() {
+    printf '%s\n' "dns.json" "01_direct_outbound.json"
 }
 
 # DNS/hosts 配置写入
