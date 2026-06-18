@@ -13,7 +13,7 @@ vlessEncryptionConfigFile() {
 validateVlessEncryptionConfig() {
     local xrayBinary
     xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
-    "${xrayBinary}" -test -confdir "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}" >"${TMPDIR:-/tmp}/padm-xray-test.log" 2>&1
+    "${xrayBinary}" -test -confdir "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}" >"$(padmFallbackTmpFilePath padm-xray-test.log)" 2>&1
 }
 
 xrayVersionAtLeast() {
@@ -86,10 +86,9 @@ refreshLocalSubscriptions() {
     local featureName=$1
     local successMessage=$2
     local localBase backupDir
-    local tmpBase="${TMPDIR:-/tmp}"
 
     localBase=$(subscribeLocalBaseDir)
-    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-refresh-local-subscriptions.XXXXXX" || {
+    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-refresh-local-subscriptions.XXXXXX)" || {
         errorCard "刷新 ${featureName} 本地订阅失败：创建备份目录失败"
         return 1
     }
@@ -317,7 +316,7 @@ setVlessRealityEncryption() {
         fi
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
         menuLine "已回滚本次 VLESS Encryption 修改"
-        menuLine "排查日志：${TMPDIR:-/tmp}/padm-xray-test.log"
+        menuLine "排查日志：$(padmFallbackTmpFilePath padm-xray-test.log)"
         menuClose
         return 1
     fi
@@ -603,8 +602,7 @@ traditionalTlsHasH2Fallback() {
 }
 
 traditionalTlsAlpnTestLog() {
-    local tmpBase="${TMPDIR:-/tmp}"
-    printf '%s\n' "${tmpBase%/}/padm-alpn-xray-test.log"
+    padmFallbackTmpFilePath padm-alpn-xray-test.log
 }
 
 restoreTraditionalTlsAlpnBackup() {
@@ -1003,8 +1001,7 @@ corePortWriteAddFiles() {
 corePortApplyFileTransaction() {
     local action=$1
     local backupDir
-    local tmpBase="${TMPDIR:-/tmp}"
-    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-core-port.XXXXXX" || return 1
+    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-core-port.XXXXXX)" || return 1
     if ! corePortBackupFiles "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
         errorCard "入口端口配置备份失败"
@@ -1026,8 +1023,7 @@ corePortApplyFileTransaction() {
 corePortApplyReloadTransaction() {
     local action=$1
     local backupDir
-    local tmpBase="${TMPDIR:-/tmp}"
-    padmCreateTempPath backupDir -d "${tmpBase%/}/padm-core-port.XXXXXX" || return 1
+    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-core-port.XXXXXX)" || return 1
     if ! corePortBackupFiles "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
         errorCard "入口端口配置备份失败"
@@ -2085,12 +2081,11 @@ renderSubscribeUserOutputs() {
     local showStatus=$5
     local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath subscribeBackupDir clashSourcePath clashContentPath
     local commitFailed=false
-    local tmpBase="${TMPDIR:-/tmp}"
 
     SUBSCRIBE_USER_OUTPUT_ERROR=
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
-    padmCreateTempPath stageDir -d "${tmpBase%/}/padm-subscribe-user.XXXXXX" || return 1
+    padmCreateTempPath stageDir -d "$(padmFallbackTmpFilePath padm-subscribe-user.XXXXXX)" || return 1
     mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/clashMetaProfiles" "${stageDir}/sing-box" "${stageDir}/sing-box_profiles" || {
         padmRemoveCleanupPath "${stageDir}"
         return 1
@@ -2232,11 +2227,10 @@ subscribe() {
         menuClose
 
         local localBase subscribeSaltFile backupDir previousSubscribeSalt
-        local tmpBase="${TMPDIR:-/tmp}"
         localBase=$(subscribeLocalBaseDir)
         subscribeSaltFile="${localBase}/subscribeSalt"
         previousSubscribeSalt=$(readSubscribeSalt "${subscribeSaltFile}")
-        padmCreateTempPath backupDir -d "${tmpBase%/}/padm-subscribe-local-backup.XXXXXX" || {
+        padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-subscribe-local-backup.XXXXXX)" || {
             errorCard "订阅生成失败：创建本地订阅备份目录失败"
             return 1
         }
@@ -2563,8 +2557,7 @@ validateXHTTPConfigUpdate() {
 }
 
 xhttpConfigTestLog() {
-    local tmpBase="${TMPDIR:-/tmp}"
-    printf '%s\n' "${tmpBase%/}/padm-xhttp-test.log"
+    padmFallbackTmpFilePath padm-xhttp-test.log
 }
 
 commitXHTTPConfigUpdate() {
@@ -3059,8 +3052,7 @@ validateTuicConfigUpdate() {
 }
 
 tuicConfigTestLog() {
-    local tmpBase="${TMPDIR:-/tmp}"
-    printf '%s\n' "${tmpBase%/}/padm-tuic-test.log"
+    padmFallbackTmpFilePath padm-tuic-test.log
 }
 
 commitTuicConfigUpdate() {

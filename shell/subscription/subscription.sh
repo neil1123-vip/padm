@@ -138,8 +138,8 @@ writeSubscribeNginxConfig() {
     fi
     local tmpPath
     local backupPath=
-    local tmpBase="${TMPDIR:-/tmp}"
-    local nginxTestLog="${tmpBase%/}/padm-subscribe-nginx-test.log"
+    local nginxTestLog
+    nginxTestLog="$(padmFallbackTmpFilePath padm-subscribe-nginx-test.log)"
     SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR=
     padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
     if ! cat >"${tmpPath}"; then
@@ -382,10 +382,9 @@ updateRemoteSubscribe() {
     local sourceLines=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
     local commitFailed=false
-    local tmpBase="${TMPDIR:-/tmp}"
 
-    padmCreateTempPath tmpDir -d "${tmpBase%/}/padm-remote-subscribe-fetch.XXXXXX" || return 1
-    padmCreateTempPath stageDir -d "${tmpBase%/}/padm-remote-subscribe-stage.XXXXXX" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    padmCreateTempPath tmpDir -d "$(padmFallbackTmpFilePath padm-remote-subscribe-fetch.XXXXXX)" || return 1
+    padmCreateTempPath stageDir -d "$(padmFallbackTmpFilePath padm-remote-subscribe-stage.XXXXXX)" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     publicBase=$(subscribePublicBaseDir)
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(padmResolveManagedAbsolutePath "${publicBase}") || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
