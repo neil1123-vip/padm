@@ -26,7 +26,7 @@ validate_tmp_root() {
         return 0
     fi
 
-    padmCreateTempPathCompat PADM_VALIDATE_TMP_ROOT -d "$(padmFallbackTmpFilePath padm-validate.XXXXXX)" || return 1
+    padmCreateTmpRootPath PADM_VALIDATE_TMP_ROOT padm-validate.XXXXXX -d || return 1
     printf '%s\n' "${PADM_VALIDATE_TMP_ROOT}"
 }
 

@@ -101,6 +101,13 @@ padmCreateTempPathCompat() {
     printf -v "${resultVar}" '%s' "${path}"
 }
 
+padmCreateTmpRootPath() {
+    local resultVar=$1
+    local template=$2
+    shift 2
+    padmCreateTempPathCompat "${resultVar}" "$@" "$(padmFallbackTmpFilePath "${template}")"
+}
+
 padmCreateTempFileForTarget() {
     local resultVar=$1
     local targetFile=$2

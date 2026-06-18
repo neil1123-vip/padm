@@ -556,7 +556,7 @@ updatePadm() {
     fi
     progressCard "$1" "更新管理脚本"
 
-    padmCreateTempPathCompat tmpDir -d "$(padmFallbackTmpFilePath padm-update.XXXXXX)" || { errorCard "更新入口临时目录创建失败"; return 1; }
+    padmCreateTmpRootPath tmpDir padm-update.XXXXXX -d || { errorCard "更新入口临时目录创建失败"; return 1; }
     newInstall="${tmpDir}/install.sh"
 
     if [[ "${release}" == "alpine" ]]; then
@@ -942,7 +942,7 @@ checkLogBackupCreate() {
     local backupFile
     local backupIndex=0
 
-    padmCreateTempPathCompat backupDir -d "$(padmFallbackTmpFilePath padm-check-log-backup.XXXXXX)" || return 1
+    padmCreateTmpRootPath backupDir padm-check-log-backup.XXXXXX -d || return 1
     manifest="${backupDir}/manifest"
     : >"${manifest}" || {
         padmRemoveCleanupPath "${backupDir}"

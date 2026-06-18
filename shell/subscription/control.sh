@@ -360,7 +360,7 @@ subscriptionRemoteControlHealthAll() {
     local index=0
     local pids=()
     sources=$(subscriptionRemoteControlSources)
-    padmCreateTempPath tmpDir -d "$(padmFallbackTmpFilePath padm-remote-health.XXXXXX)" || return 1
+    padmCreateTmpRootPath tmpDir padm-remote-health.XXXXXX -d || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         subscriptionRemoteWriteCheckedResult "${source}" health "${outputFile}" &
@@ -409,7 +409,7 @@ subscriptionRemoteSyncPlan() {
     local index=0
     local pids=()
     sources=$(subscriptionRemoteControlSources)
-    padmCreateTempPath tmpDir -d "$(padmFallbackTmpFilePath padm-remote-plan.XXXXXX)" || return 1
+    padmCreateTmpRootPath tmpDir padm-remote-plan.XXXXXX -d || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         subscriptionRemoteWriteCheckedResult "${source}" plan "${outputFile}" &
@@ -1198,7 +1198,7 @@ subscriptionControlRenderSubscribeAccount() {
     local singBoxContent='[]'
 
     [[ -n "${account}" ]] || return 1
-    padmCreateTempPath subscribeRoot -d "$(padmFallbackTmpFilePath padm-control-subscribe.XXXXXX)" || return 1
+    padmCreateTmpRootPath subscribeRoot padm-control-subscribe.XXXXXX -d || return 1
     export PADM_SUBSCRIBE_LOCAL_DIR="${subscribeRoot}/subscribe_local"
     export PADM_SUBSCRIBE_DIR="${subscribeRoot}/subscribe"
     mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box" || {

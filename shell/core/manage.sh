@@ -88,7 +88,7 @@ refreshLocalSubscriptions() {
     local localBase backupDir
 
     localBase=$(subscribeLocalBaseDir)
-    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-refresh-local-subscriptions.XXXXXX)" || {
+    padmCreateTmpRootPath backupDir padm-refresh-local-subscriptions.XXXXXX -d || {
         errorCard "刷新 ${featureName} 本地订阅失败：创建备份目录失败"
         return 1
     }
@@ -210,13 +210,13 @@ setVlessRealityEncryption() {
             removeManagedFileIfPresent "${stateBackupFile}" || true
             return 1
         fi
-        padmCreateTempPath vlessEncOut "$(padmTmpFilePath "padm-vlessenc.out.XXXXXX")" || {
+        padmCreateTmpRootPath vlessEncOut padm-vlessenc.out.XXXXXX || {
             padmRemoveCleanupPath "${configTmpFile}"
             removeManagedFileIfPresent "${backupFile}" || true
             removeManagedFileIfPresent "${stateBackupFile}" || true
             return 1
         }
-        padmCreateTempPath vlessEncErr "$(padmTmpFilePath "padm-vlessenc.err.XXXXXX")" || {
+        padmCreateTmpRootPath vlessEncErr padm-vlessenc.err.XXXXXX || {
             padmRemoveCleanupPath "${vlessEncOut}"
             padmRemoveCleanupPath "${configTmpFile}"
             removeManagedFileIfPresent "${backupFile}" || true
@@ -1001,7 +1001,7 @@ corePortWriteAddFiles() {
 corePortApplyFileTransaction() {
     local action=$1
     local backupDir
-    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-core-port.XXXXXX)" || return 1
+    padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
     if ! corePortBackupFiles "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
         errorCard "入口端口配置备份失败"
@@ -1023,7 +1023,7 @@ corePortApplyFileTransaction() {
 corePortApplyReloadTransaction() {
     local action=$1
     local backupDir
-    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-core-port.XXXXXX)" || return 1
+    padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
     if ! corePortBackupFiles "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
         errorCard "入口端口配置备份失败"
@@ -2085,7 +2085,7 @@ renderSubscribeUserOutputs() {
     SUBSCRIBE_USER_OUTPUT_ERROR=
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
-    padmCreateTempPath stageDir -d "$(padmFallbackTmpFilePath padm-subscribe-user.XXXXXX)" || return 1
+    padmCreateTmpRootPath stageDir padm-subscribe-user.XXXXXX -d || return 1
     mkdir -p "${stageDir}/default" "${stageDir}/clashMeta" "${stageDir}/clashMetaProfiles" "${stageDir}/sing-box" "${stageDir}/sing-box_profiles" || {
         padmRemoveCleanupPath "${stageDir}"
         return 1
@@ -2230,7 +2230,7 @@ subscribe() {
         localBase=$(subscribeLocalBaseDir)
         subscribeSaltFile="${localBase}/subscribeSalt"
         previousSubscribeSalt=$(readSubscribeSalt "${subscribeSaltFile}")
-        padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-subscribe-local-backup.XXXXXX)" || {
+        padmCreateTmpRootPath backupDir padm-subscribe-local-backup.XXXXXX -d || {
             errorCard "订阅生成失败：创建本地订阅备份目录失败"
             return 1
         }

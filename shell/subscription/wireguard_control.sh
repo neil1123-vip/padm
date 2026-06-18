@@ -302,7 +302,7 @@ subscriptionWireGuardEnsureKeys() {
             return 1
         fi
         [[ -s "${publicStage}" ]] || { padmRemoveCleanupPath "${publicStage}"; padmRemoveCleanupPath "${privateStage}"; return 1; }
-        padmCreateTempPath rollbackDir -d "$(padmFallbackTmpFilePath padm-wireguard-keys.XXXXXX)" || {
+        padmCreateTmpRootPath rollbackDir padm-wireguard-keys.XXXXXX -d || {
             padmRemoveCleanupPath "${publicStage}"
             padmRemoveCleanupPath "${privateStage}"
             return 1

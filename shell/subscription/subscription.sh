@@ -383,8 +383,8 @@ updateRemoteSubscribe() {
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
     local commitFailed=false
 
-    padmCreateTempPath tmpDir -d "$(padmFallbackTmpFilePath padm-remote-subscribe-fetch.XXXXXX)" || return 1
-    padmCreateTempPath stageDir -d "$(padmFallbackTmpFilePath padm-remote-subscribe-stage.XXXXXX)" || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    padmCreateTmpRootPath tmpDir padm-remote-subscribe-fetch.XXXXXX -d || return 1
+    padmCreateTmpRootPath stageDir padm-remote-subscribe-stage.XXXXXX -d || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     publicBase=$(subscribePublicBaseDir)
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(padmResolveManagedAbsolutePath "${publicBase}") || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
