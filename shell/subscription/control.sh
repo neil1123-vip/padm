@@ -1025,18 +1025,22 @@ subscriptionControlRestoreAppliedPlan() {
     local configBackupDir=$2
     local outputBackupDir=${3:-}
     local restoreError=
+    local restoreDetail=
     SUBSCRIPTION_CONTROL_RESTORE_ERROR=
     if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
-        subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "状态恢复失败"
+        subscriptionSyncSetRestoreFailureDetail restoreDetail "状态"
+        subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "${restoreDetail}"
     fi
     if [[ -n "${configBackupDir}" ]]; then
         if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
-            subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "配置恢复失败，请手动检查备份目录: ${configBackupDir}"
+            subscriptionSyncSetRestoreFailureDetail restoreDetail "配置" "备份目录: ${configBackupDir}"
+            subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "${restoreDetail}"
         fi
     fi
     if [[ -n "${outputBackupDir}" ]]; then
         if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
-            subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "订阅输出恢复失败，请手动检查备份目录: ${outputBackupDir}"
+            subscriptionSyncSetRestoreFailureDetail restoreDetail "订阅输出" "备份目录: ${outputBackupDir}"
+            subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "${restoreDetail}"
         fi
     fi
     if [[ -n "${restoreError}" ]]; then

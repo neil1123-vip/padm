@@ -551,6 +551,7 @@ JSON
                 local restoreOrderLog="${TMP_DIR}/remote-control-restore-order.log"
                 local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config"
                 local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output"
+                local helperCalls=0
                 mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
                 subscriptionGroupsStateWrite() {
                     printf 'state\n' >>"${restoreOrderLog}"
@@ -564,6 +565,18 @@ JSON
                     printf 'output\n' >>"${restoreOrderLog}"
                     return 0
                 }
+                subscriptionSyncSetRestoreFailureDetail() {
+                    local location=${3:-}
+                    helperCalls=$((helperCalls + 1))
+                    if [[ -n "${location}" ]]; then
+                        command printf -v "$1" '%s' "${2}恢复失败，请手动检查${location}"
+                    else
+                        command printf -v "$1" '%s' "${2}恢复失败"
+                    fi
+                    [[ "$2" == "配置" ]]
+                    [[ "${location}" == "备份目录: ${restoreOrderConfig}" ]]
+                    return 0
+                }
                 SUBSCRIPTION_CONTROL_RESTORE_ERROR=
                 rm -f "${restoreOrderLog}"
                 set +e
@@ -571,16 +584,18 @@ JSON
                 local restoreOrderStatus=$?
                 set -e
                 [[ "${restoreOrderStatus}" -eq 1 ]]
+                [[ "${helperCalls}" == "1" ]] || return 1
                 grep -qx 'state' "${restoreOrderLog}"
                 grep -qx 'config' "${restoreOrderLog}"
                 grep -qx 'output' "${restoreOrderLog}"
-                [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == *"配置恢复失败"* ]]
+                [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == "控制面同步失败后配置恢复失败，请手动检查备份目录: ${restoreOrderConfig}" ]]
             )
 
             (
                 local restoreOrderLog="${TMP_DIR}/remote-control-restore-order-state.log"
                 local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config-state"
                 local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output-state"
+                local helperCalls=0
                 mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
                 subscriptionGroupsStateWrite() {
                     printf 'state\n' >>"${restoreOrderLog}"
@@ -594,6 +609,18 @@ JSON
                     printf 'output\n' >>"${restoreOrderLog}"
                     return 0
                 }
+                subscriptionSyncSetRestoreFailureDetail() {
+                    local location=${3:-}
+                    helperCalls=$((helperCalls + 1))
+                    if [[ -n "${location}" ]]; then
+                        command printf -v "$1" '%s' "${2}恢复失败，请手动检查${location}"
+                    else
+                        command printf -v "$1" '%s' "${2}恢复失败"
+                    fi
+                    [[ "$2" == "状态" ]]
+                    [[ -z "${location}" ]]
+                    return 0
+                }
                 SUBSCRIPTION_CONTROL_RESTORE_ERROR=
                 rm -f "${restoreOrderLog}"
                 set +e
@@ -601,10 +628,55 @@ JSON
                 local restoreOrderStatus=$?
                 set -e
                 [[ "${restoreOrderStatus}" -eq 1 ]]
+                [[ "${helperCalls}" == "1" ]] || return 1
                 grep -qx 'state' "${restoreOrderLog}"
                 grep -qx 'config' "${restoreOrderLog}"
                 grep -qx 'output' "${restoreOrderLog}"
                 [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == *"状态恢复失败"* ]]
+            )
+
+            (
+                local restoreOrderLog="${TMP_DIR}/remote-control-restore-order-output.log"
+                local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config-output"
+                local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output-output"
+                local helperCalls=0
+                mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
+                subscriptionGroupsStateWrite() {
+                    printf 'state\n' >>"${restoreOrderLog}"
+                    return 0
+                }
+                subscriptionSyncRestoreConfigBackups() {
+                    printf 'config\n' >>"${restoreOrderLog}"
+                    return 0
+                }
+                subscriptionSyncRestoreSubscribeOutputBackups() {
+                    printf 'output\n' >>"${restoreOrderLog}"
+                    return 1
+                }
+                subscriptionSyncSetRestoreFailureDetail() {
+                    local location=${3:-}
+                    helperCalls=$((helperCalls + 1))
+                    if [[ -n "${location}" ]]; then
+                        command printf -v "$1" '%s' "${2}恢复失败，请手动检查${location}"
+                    else
+                        command printf -v "$1" '%s' "${2}恢复失败"
+                    fi
+                    [[ "$2" == "订阅输出" ]]
+                    [[ "${location}" == "备份目录: ${restoreOrderOutput}" ]]
+                    return 0
+                }
+                SUBSCRIPTION_CONTROL_RESTORE_ERROR=
+                rm -f "${restoreOrderLog}"
+                set +e
+                subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
+                local restoreOrderStatus=$?
+                set -e
+                [[ "${restoreOrderStatus}" -eq 1 ]]
+                [[ "${helperCalls}" == "1" ]] || return 1
+                grep -qx 'state' "${restoreOrderLog}"
+                grep -qx 'config' "${restoreOrderLog}"
+                grep -qx 'output' "${restoreOrderLog}"
+                [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == "控制面同步失败后订阅输出恢复失败，请手动检查备份目录: ${restoreOrderOutput}" ]]
             )
         fi
     fi

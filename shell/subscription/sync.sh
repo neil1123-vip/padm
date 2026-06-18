@@ -651,6 +651,19 @@ subscriptionSyncAppendRestoreFailureDetail() {
     printf -v "${outputVar}" '%s' "${result}"
 }
 
+subscriptionSyncSetRestoreFailureDetail() {
+    local outputVar=$1
+    local failedLabel=$2
+    local failedLocation=${3:-}
+    local result="${failedLabel}恢复失败"
+
+    if [[ -n "${failedLocation}" ]]; then
+        result="${result}，请手动检查${failedLocation}"
+    fi
+
+    printf -v "${outputVar}" '%s' "${result}"
+}
+
 subscriptionSyncSetSingleRestoreResultMessage() {
     local outputVar=$1
     local reason=$2

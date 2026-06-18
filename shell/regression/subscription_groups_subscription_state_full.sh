@@ -783,15 +783,18 @@ runSubscriptionSyncRestorePairFailureMessageRegression() (
 
 runSubscriptionSyncAppendRestoreFailureDetailRegression() (
     local message=
+    local detail=
 
     subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "状态恢复失败"
     [[ "${message}" == "控制面同步失败后状态恢复失败" ]]
 
-    subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "配置恢复失败，请手动检查备份目录: /tmp/config"
+    subscriptionSyncSetRestoreFailureDetail detail "配置" "备份目录: /tmp/config"
+    subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "${detail}"
     [[ "${message}" == "控制面同步失败后状态恢复失败；配置恢复失败，请手动检查备份目录: /tmp/config" ]]
 
     message=
-    subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "订阅输出恢复失败，请手动检查备份目录: /tmp/output"
+    subscriptionSyncSetRestoreFailureDetail detail "订阅输出" "备份目录: /tmp/output"
+    subscriptionSyncAppendRestoreFailureDetail message "控制面同步失败后" "${detail}"
     [[ "${message}" == "控制面同步失败后订阅输出恢复失败，请手动检查备份目录: /tmp/output" ]]
 )
 
