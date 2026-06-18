@@ -781,7 +781,9 @@ EOF
     if ! sysctl -p "${PADM_BBR_SYSCTL_CONF}" >"${logFile}" 2>&1; then
         if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
             restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
-            statusCard "BBR 启用失败" "sysctl 应用失败，且本次写入清理失败，请手动检查 ${PADM_BBR_SYSCTL_CONF} 和 ${PADM_BBR_STATE_FILE}" "日志：${logFile}"
+            local applyCleanupFailureMessage
+            coreSetPairedFileManualCheckMessage applyCleanupFailureMessage "sysctl 应用失败，且本次写入清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
+            statusCard "BBR 启用失败" "${applyCleanupFailureMessage}" "日志：${logFile}"
             bbrInstall
             return
         fi
@@ -796,7 +798,9 @@ EOF
     else
         if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
             restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
-            statusCard "BBR 启用失败" "配置已应用但当前状态未完全匹配，且本次写入清理失败，请手动检查 ${PADM_BBR_SYSCTL_CONF} 和 ${PADM_BBR_STATE_FILE}" "请查看下方状态和 ${logFile}"
+            local stateMismatchCleanupFailureMessage
+            coreSetPairedFileManualCheckMessage stateMismatchCleanupFailureMessage "配置已应用但当前状态未完全匹配，且本次写入清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
+            statusCard "BBR 启用失败" "${stateMismatchCleanupFailureMessage}" "请查看下方状态和 ${logFile}"
             printNetworkOptimizationStatus
             bbrInstall
             return
@@ -823,7 +827,9 @@ disablePadmBbr() {
     fi
 
     if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
-        statusCard "padm BBR 关闭失败" "配置文件清理失败，请手动检查 ${PADM_BBR_SYSCTL_CONF} 和 ${PADM_BBR_STATE_FILE}"
+        local disableCleanupFailureMessage
+        coreSetPairedFileManualCheckMessage disableCleanupFailureMessage "配置文件清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
+        statusCard "padm BBR 关闭失败" "${disableCleanupFailureMessage}"
         printNetworkOptimizationStatus
         bbrInstall
         return

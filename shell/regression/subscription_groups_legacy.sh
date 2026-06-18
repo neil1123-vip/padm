@@ -2095,6 +2095,12 @@ runCoreRollbackResultMessageRegression() (
         "/tmp/install.sh" \
         "/tmp/install.sh.bak"
     [[ "${message}" == "新版入口执行失败，旧入口恢复失败，请手动检查 /tmp/install.sh 和 /tmp/install.sh.bak" ]]
+
+    coreSetPairedFileManualCheckMessage message \
+        "核心重载失败，且回滚配置失败" \
+        "/tmp/config.json" \
+        "/tmp/config.json.bak"
+    [[ "${message}" == "核心重载失败，且回滚配置失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
 )
 
 runCorePortFileTransactionRegression() {
@@ -5117,6 +5123,30 @@ JSON
     ) || return 1
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
+    rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
+    local validateFailureLog="${tmpRoot}/transaction-validate-failure.log"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
+    validateMode=fail
+    (
+        menuLine() { printf '%s\n' "$*" >>"${validateFailureLog}"; }
+        echoContent() { :; }
+        menuClose() { :; }
+        cp() {
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${tmpRoot}"/.transaction.json.restore.* ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -qx "配置校验失败，且回滚配置失败，请手动检查 ${targetFile} 和 ${backupFile}" "${validateFailureLog}"
+    ) || return 1
+
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
     rm -f "${backupFile}"
     padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
     jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
@@ -5145,6 +5175,31 @@ JSON
     [[ ! -e "${backupFile}" ]]
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "2" ]]
     [[ ! -e "${refreshCountFile}" ]]
+
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
+    rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
+    local reloadFailureLog="${tmpRoot}/transaction-reload-failure.log"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
+    reloadMode=fail
+    refreshMode=success
+    (
+        menuLine() { printf '%s\n' "$*" >>"${reloadFailureLog}"; }
+        echoContent() { :; }
+        menuClose() { :; }
+        cp() {
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${tmpRoot}"/.transaction.json.restore.* ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -qx "核心重载失败，且回滚配置失败，请手动检查 ${targetFile} 和 ${backupFile}" "${reloadFailureLog}"
+    ) || return 1
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
     rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
@@ -12386,6 +12441,48 @@ runPadmBbrManagedCleanupRegression() (
     grep -q 'restore:cubic:fq_codel' "${applyFailHelper}" || return 1
     grep -q 'BBR 启用失败|sysctl 应用失败，已删除本次写入并尝试恢复原运行值' "${applyFailStatus}" || return 1
 
+    bash -c '
+        set -e
+        export TMPDIR="$1"
+        export PADM_BBR_SYSCTL_CONF="$1/apply-cleanup-fail-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/apply-cleanup-fail.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        createCount=0
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        padmBbrAvailable() { return 0; }
+        readSysctlValue() {
+            case "$1" in
+            net.ipv4.tcp_congestion_control) printf "cubic\n" ;;
+            net.core.default_qdisc) printf "fq_codel\n" ;;
+            *) return 0 ;;
+            esac
+        }
+        padmEnsureSafeDirectory() { return 0; }
+        padmCreateTempPath() {
+            local resultVar=$1
+            createCount=$((createCount + 1))
+            local path="$TMPDIR/stage-${createCount}"
+            : >"${path}"
+            printf -v "${resultVar}" "%s" "${path}"
+        }
+        commitGeneratedFile() { printf "commit:%s\n" "$2" >>"${helperLog}"; return 0; }
+        removeManagedFilesIfPresent() { printf "remove-files:%s|%s\n" "$1" "$2" >>"${helperLog}"; return 1; }
+        restorePadmBbrRuntime() { printf "restore:%s:%s\n" "$1" "$2" >>"${helperLog}"; }
+        sysctl() {
+            if [[ "$1" == "-p" ]]; then
+                return 1
+            fi
+            printf "sysctl:%s\n" "$*" >>"${helperLog}"
+            return 0
+        }
+        enableOfficialBbrFq
+    ' _ "${root}" "${PROJECT_ROOT}" "${applyFailStatus}" "${applyFailHelper}"
+    grep -q 'BBR 启用失败|sysctl 应用失败，且本次写入清理失败，请手动检查 '"${root}"'/apply-cleanup-fail-sysctl.conf 和 '"${root}"'/apply-cleanup-fail.state' "${applyFailStatus}" || return 1
+
     printf 'net.core.default_qdisc = fq\n' >"${root}/disable-sysctl.conf" || return 1
     printf 'previous_congestion=reno\nprevious_qdisc=cake\n' >"${root}/disable.state" || return 1
     bash -c '
@@ -12406,6 +12503,25 @@ runPadmBbrManagedCleanupRegression() (
     grep -q "remove-files:${root}/disable-sysctl.conf|${root}/disable.state" "${disableHelper}" || return 1
     grep -q 'sysctl:--system' "${disableHelper}" || return 1
     grep -q 'padm BBR 已关闭|已删除 '"${root}"'/disable-sysctl.conf' "${disableStatus}" || return 1
+
+    printf 'net.core.default_qdisc = fq\n' >"${root}/disable-cleanup-fail-sysctl.conf" || return 1
+    printf 'previous_congestion=reno\nprevious_qdisc=cake\n' >"${root}/disable-cleanup-fail.state" || return 1
+    bash -c '
+        set -e
+        export PADM_BBR_SYSCTL_CONF="$1/disable-cleanup-fail-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/disable-cleanup-fail.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        printNetworkOptimizationStatus() { printf "print-status\n" >>"${helperLog}"; }
+        removeManagedFilesIfPresent() { printf "remove-files:%s|%s\n" "$1" "$2" >>"${helperLog}"; return 1; }
+        sysctl() { printf "sysctl:%s\n" "$*" >>"${helperLog}"; return 0; }
+        disablePadmBbr
+    ' _ "${root}" "${PROJECT_ROOT}" "${disableStatus}" "${disableHelper}"
+    grep -q 'padm BBR 关闭失败|配置文件清理失败，请手动检查 '"${root}"'/disable-cleanup-fail-sysctl.conf 和 '"${root}"'/disable-cleanup-fail.state' "${disableStatus}" || return 1
 )
 
 runCheckLogBackupRejectsUnsafeTargetRegression() (
@@ -15911,6 +16027,12 @@ runRegressionFast() {
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }
 
+runRegressionTargetedBatchHelpers() {
+    runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
+        runRegressionStep config-transaction runConfigTransactionRegression &&
+        runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression
+}
+
 runRegressionFastReality() {
     runRegressionFast &&
         runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
@@ -16219,6 +16341,9 @@ transaction-subscription)
 transaction-system)
     regressionRunner=runRegressionTransactionSystem
     ;;
+targeted-batch-helpers)
+    regressionRunner=runRegressionTargetedBatchHelpers
+    ;;
 wireguard-menu-flow)
     regressionRunner=runSubscriptionWireGuardMenuFlowRegression
     ;;
@@ -16232,7 +16357,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac

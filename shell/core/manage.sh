@@ -303,7 +303,9 @@ setVlessRealityEncryption() {
     fi
 
     if ! commitGeneratedJsonFile "${configTmpFile}" "${configFile}"; then
-        errorCard "提交 VLESS Encryption 配置失败，请手动检查 ${configFile} 和 ${backupFile}"
+        local commitFailureMessage
+        coreSetPairedFileManualCheckMessage commitFailureMessage "提交 VLESS Encryption 配置失败" "${configFile}" "${backupFile}"
+        errorCard "${commitFailureMessage}"
         [[ -n "${stateStageFile:-}" ]] && padmRemoveCleanupPath "${stateStageFile}"
         return 1
     fi
@@ -2544,7 +2546,9 @@ configTransactionCommit() {
         else
             padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ ${failureTitle} ────────────────────────────────"
-            menuLine "配置校验失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
+            local validateFailureMessage
+            coreSetPairedFileManualCheckMessage validateFailureMessage "配置校验失败，且回滚配置失败" "${configFile}" "${backupFile}"
+            menuLine "${validateFailureMessage}"
             menuClose
         fi
         return 1
@@ -2561,7 +2565,9 @@ configTransactionCommit() {
         else
             padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
-            menuLine "核心重载失败，且回滚配置失败，请手动检查 ${configFile} 和 ${backupFile}"
+            local reloadFailureMessage
+            coreSetPairedFileManualCheckMessage reloadFailureMessage "核心重载失败，且回滚配置失败" "${configFile}" "${backupFile}"
+            menuLine "${reloadFailureMessage}"
             menuClose
         fi
         return 1

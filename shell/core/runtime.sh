@@ -348,15 +348,23 @@ coreSetDualRestoreResultMessage() {
     return 0
 }
 
+coreSetPairedFileManualCheckMessage() {
+    local outputVar=$1
+    local reason=$2
+    local targetPath=$3
+    local backupPath=$4
+    local result="${reason}，请手动检查 ${targetPath} 和 ${backupPath}"
+
+    printf -v "${outputVar}" '%s' "${result}"
+}
+
 coreSetPairedFileRestoreFailureMessage() {
     local outputVar=$1
     local reason=$2
     local failedLabel=$3
     local targetPath=$4
     local backupPath=$5
-    local result="${reason}，${failedLabel}恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
-
-    printf -v "${outputVar}" '%s' "${result}"
+    coreSetPairedFileManualCheckMessage "${outputVar}" "${reason}，${failedLabel}恢复失败" "${targetPath}" "${backupPath}"
 }
 
 coreSetRollbackFailureMessage() {
