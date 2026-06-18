@@ -12,8 +12,9 @@ If this is your first time using the script, start with the simplest path:
 2. **Direct / with a domain**: choose `Install & reinstall` -> `Recommended direct Reality Vision`; use your domain as the entry address when available.
 3. **CDN required**: choose `Install & reinstall` -> `Recommended CDN Reality XHTTP`; the script enables XHTTP XMUX, while traditional TLS/WS/gRPC/HTTPUpgrade should only be used for legacy client compatibility.
 4. **Without a domain**: choose `Install & reinstall` -> `No-domain Reality`.
-5. **After installation**: open `Subscriptions & users` -> `Subscription service` to install/update publishing, then `My Subscription` to view personal links.
-6. **Validation**: run `bash shell/validate_install.sh [domain]` on the server for a read-only check.
+5. **Need TLS fingerprint resistance**: choose `Install & reinstall` -> `TLS fingerprint resistance NaiveProxy`; prepare a real domain and trusted certificate.
+6. **After installation**: open `Subscriptions & users`. If the server is not initialized yet, choose `This server is the controller` or `This server is controlled`; controllers continue with `Publish subscriptions` / `Multi-server coordination`, while controlled servers continue with `Join controller` / `View local status`.
+7. **Validation**: run `bash shell/validate_install.sh [domain]` on the server for a read-only check.
 
 Avoid advanced entries such as custom protocol combinations, CDN node management, and multi-server synchronization until you know which protocol and network shape your client needs.
 
@@ -24,7 +25,7 @@ The main menu is grouped by task object. Each feature has one primary home:
 | Menu | When to use |
 | --- | --- |
 | Install & reinstall | Includes new-user choice guidance; create or rebuild nodes: recommended direct, recommended CDN, no-domain Reality, custom install, and traditional TLS compatibility. |
-| Subscriptions & users | Subscription service, personal links, creating subscriptions for others, multi-server sync, traffic/quota, and automatic sync. |
+| Subscriptions & users | Role-based entry. Uninitialized servers choose controller or controlled first; controllers then use publish / coordination / maintenance, while controlled servers use join / local status / maintenance. |
 | Protocols & entry | Manage REALITY, XHTTP, Hysteria2, Tuic, extra entry ports, and CDN entry addresses. |
 | Sites & certificates | Maintain traditional TLS fallback sites, 302 redirects, ALPN diagnostics/repair, and TLS certificates. |
 | Routing & access control | Manage server-side outbound routing, BT blocking, domain/IP blocking, direct exceptions, and regional blocking. |
@@ -115,11 +116,43 @@ Install or update the subscription publishing service with the dedicated subcomm
 bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
 ```
 
+This subcommand only installs or updates the client-facing HTTPS subscription publishing service. It is useful after protocol installation or for automation checks, and does not replace controller/controlled role initialization.
+
 Subscription publishing options can also be appended to protocol installation when needed:
 
 ```bash
 --subscribe-port 39778 --install-nginx yes
 ```
+
+For the full subcommand and parameter list, treat `bash install.sh --help` as the source of truth.
+
+## Parameter reference
+
+| Flag | Accepted values | Default / omitted behavior | Notes |
+| --- | --- | --- | --- |
+| `--install-type` | `install`, `custom`, `reality` | Opens the interactive menu when no automation flags are passed; defaults to `custom` when other install flags are provided | `install` is for traditional TLS compatibility, `custom` is for arbitrary protocol combinations, and `reality` is the fast no-domain Reality path. |
+| `--core` | `xray`, `sing-box`, `1`, `2` | `xray` | `1` maps to `xray`, `2` maps to `sing-box`. |
+| `--protocols` | Protocol IDs, comma-separated | No fixed default | Used by custom installs such as `0,1,7`. Xray supports `0,1,3,4,7,12`; sing-box supports `0,1,3,4,6,7,8,9,10,11,13`. |
+| `--domain` | Domain | No fixed default; required for TLS installs unless entered interactively | TLS certificate domain and default client entry address; not the Reality camouflage target. |
+| `--entry-host` | Domain or IP | Reality prefers `--domain` when present, otherwise the public IP | Address clients actually connect to; subscription `server/address/@host` uses this value. |
+| `--reality-target` | `host[:port]` | Opens the target selector when omitted; falls back to `www.ibm.com:443` if no measured result is available | Reality camouflage target, written to Xray `realitySettings.target` or sing-box `tls.reality.handshake`. |
+| `--reality-server-name` | SNI hostname | Defaults to the `--reality-target` host or selected candidate SNI | Reality SNI, written to Xray `serverNames` or sing-box `tls.server_name`. |
+| `--port` | Port number | `443`; some panel-domain paths may randomize to `10000-30000` when you press Enter interactively | TLS entry port. |
+| `--tls-ca` | `letsencrypt`, `zerossl`, `buypass` | `letsencrypt` | Certificate authority for TLS issuance. |
+| `--dns-api` | `yes`, `no`, `y`, `n` | `no` | Whether to use DNS API certificate issuance. |
+| `--dns-api-type` | `cloudflare`, `aliyun`, `1`, `2` | `cloudflare` | DNS API provider. |
+| `--dns-api-wildcard` | `yes`, `no`, `y`, `n` | `no` | Whether to request a `*.root-domain` wildcard certificate. |
+| `--cloudflare-api-token` | Cloudflare API token | Required for Cloudflare DNS API unless passed via `PADM_CLOUDFLARE_API_TOKEN` | Restrict it to the target zone and grant at least `Zone:DNS:Edit`. |
+| `--cloudflare-zone-id` | Cloudflare Zone ID | Optional; can also come from `PADM_CLOUDFLARE_ZONE_ID` | Sets `CF_Zone_ID` to reduce zone lookup requirements. |
+| `--aliyun-api-key` | Aliyun AccessKey ID | Required for Aliyun DNS API unless passed via `PADM_ALIYUN_API_KEY` | Used by `dns_ali`. |
+| `--aliyun-api-secret` | Aliyun AccessKey Secret | Required for Aliyun DNS API unless passed via `PADM_ALIYUN_API_SECRET` | Used by `dns_ali`. |
+| `--reuse-last` | `yes`, `no`, `y`, `n` | `no` | Whether to reuse the previous installation state. |
+| `--clean-acme` | `yes`, `no`, `y`, `n` | `no` | Whether to also remove the acme certificate directory when clearing the last install state. |
+| `--reality-domain` | `yes`, `no`, `y`, `n` | `no` | When only Reality is installed, whether entry should use your own domain; new installs should generally express the entry with `--entry-host` instead. |
+| `--subscribe-port` | Port number | No fixed default | Subscription publishing service port. |
+| `--install-nginx` | `yes`, `no`, `y`, `n` | `no` | Whether to auto-install Nginx when subscription publishing or reverse proxying needs it. |
+| `--uuid` | UUID | Randomly generated | Initial user UUID. |
+| `--user` | Username | Randomly generated | Initial username. |
 
 ## Protocol capability matrix
 
@@ -230,31 +263,40 @@ Before writing, it checks whether `bbr` is available; if it is missing, it tries
 
 ## Subscription management
 
-Open `Subscriptions & users` in the main menu. It is organized by user task flow:
+`Subscriptions & users` is now organized by server role instead of a flat task list:
 
-1. **Subscription service**: install/update subscription publishing and check publishing status. This menu now handles client-facing HTTPS publishing only; it no longer exposes the server-to-server control plane.
-2. **My Subscription**: view/refresh personal subscription links, available servers, and personal traffic.
-3. **Create subscriptions for others**: create and sync user subscriptions; managed accounts use the `sub_<ID>` prefix.
-4. **Multi-server subscriptions**: use a WireGuard control plane to manage remote controlled servers, join credentials, health checks, and sync results. The first release supports a star topology only: one controller manages multiple controlled servers.
-5. **Traffic & quotas**: refresh traffic explicitly, view traffic without implicit refresh, and preview/execute quota plans.
-6. **Automatic sync & backups**: automatic sync, manual sync, sync plans, and state backup/restore.
+1. **Uninitialized**: only `This server is the controller`, `This server is controlled`, and `Back to main menu` are shown.
+2. **Controller home**: shows `Publish subscriptions`, `Multi-server coordination`, `Controller maintenance & troubleshooting`, and `Back to main menu`.
+3. **Controlled home**: shows `Join controller`, `View local status`, `Controlled maintenance & troubleshooting`, and `Back to main menu`.
 
-Recommended user subscription flow:
+Controller-side structure:
 
-1. `Create subscriptions for others` -> `Create and sync subscription`, using an ID such as `team-a`.
+1. `Publish subscriptions`: install/update the subscription service, refresh personal subscriptions, create shared subscriptions, maintain existing subscriptions, and view available servers and personal traffic.
+2. `Multi-server coordination`: initialize the controller control plane, add/remove controlled servers, update controlled credentials, and inspect coordination state.
+3. `Controller maintenance & troubleshooting`: refresh the runtime overview, run sync immediately, inspect runtime state, handle traffic/quota actions, manage automatic sync, back up or restore state, inspect control-plane details, and clear sync errors.
+
+Controlled-side structure:
+
+1. `Join controller`: run the join wizard, initialize this server as controlled, import controller credentials, and output the local controlled join credential.
+2. `View local status`: show the role summary, local controlled join credential, WireGuard status, and recent sync results in one pass.
+3. `Controlled maintenance & troubleshooting`: import/update controller credentials, inspect control-plane and peer details, rewrite config and restart the controlled control plane, or disable the controlled control plane.
+
+Recommended shared-subscription flow:
+
+1. On the controller server, open `Publish subscriptions` -> `Create and publish subscription`, using an ID such as `team-a`.
 2. Follow the wizard to set allowed servers (`main` by default) and traffic limit.
-3. Confirm the summary and run sync so `sub_<ID>` is written to the core config.
-4. View or refresh the user subscription links.
+3. Confirm the summary and run sync so the managed account `sub_<ID>` is written to the core config.
+4. After sync completes, copy the published subscription link; if you skipped service installation, return later to `Publish subscriptions` -> `View and handle existing subscriptions` to refresh and view the links.
 
 Recommended multi-server flow:
 
-1. On the controller server, open `Multi-server subscriptions` -> `WireGuard control plane`, initialize this server as the controller, and copy the local controller join credential.
-2. On the controlled server, open `Multi-server subscriptions` -> `WireGuard control plane`, initialize this server as controlled, import the controller join credential, then copy the local controlled join credential.
-3. Back on the controller server, open `Multi-server subscriptions` -> `Add/remove controlled server`, paste the controlled join credential, and set a local alias.
-4. Test the controlled connection, then view the sync plan or run sync.
+1. On the controller server, open `Multi-server coordination` -> `Controller setup wizard`, initialize this server as the controller, and copy the local controller join credential.
+2. On the controlled server, open `Join controller`, initialize this server as controlled, import the controller join credential, then copy the local controlled join credential.
+3. Back on the controller server, open `Multi-server coordination` -> `Add/remove controlled server`, paste the controlled join credential, and set a local alias.
+4. Open `Multi-server coordination` -> `View coordination status` to confirm credentials, server sources, health checks, and recent sync results, then continue with `Controller maintenance & troubleshooting` -> `View runtime status` or run sync immediately.
 5. Client subscriptions continue to be published over public HTTPS. The server-to-server control API is only reachable inside the WireGuard network as `http://<wg-ip>:<control-port>/s/control/...`.
 
-Subscription and management output now uses card-style presentation: subscription links show the account, URL, and online QR code; user subscriptions, server sources, health checks, sync plans, quota plans, and traffic statistics are shown as result or plan cards. HTTPS subscription publishing, Reality target warnings, XHTTP advanced parameters, DNS/port/Nginx troubleshooting, and other action-required messages are shown as risk or troubleshooting cards so normal status messages are easier to distinguish from items that need attention.
+Management output uses card-style presentation: subscription links show the account, URL, and online QR code; subscriptions, server sources, health checks, sync plans, quota plans, and traffic statistics are shown as result or plan cards. HTTPS publishing, Reality target warnings, XHTTP advanced parameters, DNS/port/Nginx troubleshooting, and other action-required items are shown as risk or troubleshooting cards so normal status is easier to distinguish from items that need attention.
 
 ## Validation
 

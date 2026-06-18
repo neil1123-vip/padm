@@ -121,11 +121,15 @@ bash install.sh --install-type custom --core xray --protocols 7 --entry-host nod
 bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
 ```
 
+该子命令只安装或更新面向客户端的 HTTPS 订阅发布服务，适合已有核心协议配置后的补装或自动化验收；不会替代主控/被控初始化。
+
 也可以在协议安装时追加订阅发布选项：
 
 ```bash
 --subscribe-port 39778 --install-nginx yes
 ```
+
+完整正式子命令与参数以 `bash install.sh --help` 为准。
 
 ## 参数说明
 
@@ -152,6 +156,8 @@ bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
 | `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 仅选择 Reality 协议时入口是否使用自有域名；新安装推荐直接使用 `--entry-host` 表达入口地址。 |
 | `--subscribe-port` | 端口号 | 无固定默认；未传时由端口选择逻辑交互输入或生成可用端口 | 订阅发布服务端口。 |
 | `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅发布或反代需要 Nginx 时，是否自动安装 Nginx。 |
+| `--uuid` | UUID | 默认随机生成 | 初始用户 UUID；未传时脚本自动生成。 |
+| `--user` | 用户名 | 默认随机生成 | 初始用户名；未传时脚本自动生成。 |
 
 ## 协议编号
 
