@@ -17,14 +17,14 @@ failXrayTrafficStatsConfigChange() {
     fi
     padmRemoveCleanupPath "${backupDir}"
     if [[ "${retryReload}" == "true" ]]; then
-        if reloadCore; then
-            errorCard "${reason}，已回滚流量统计配置"
-        else
-            errorCard "${reason}，已回滚流量统计配置；恢复旧配置后核心重载仍失败，请检查核心服务日志"
-        fi
+        local rollbackMessage
+        subscriptionSyncSetRollbackResultMessage rollbackMessage "${reason}" "已回滚流量统计配置" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
+        errorCard "${rollbackMessage}"
         return 1
     fi
-    errorCard "${reason}，已回滚流量统计配置"
+    local rollbackMessage
+    subscriptionSyncSetRollbackResultMessage rollbackMessage "${reason}" "已回滚流量统计配置"
+    errorCard "${rollbackMessage}"
     return 1
 }
 

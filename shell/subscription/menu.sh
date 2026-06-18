@@ -693,7 +693,9 @@ removeUserSubscriptionMenu() {
         if ! removeUserSubscriptionRollback "${previousGroupsState}" "${configBackupDir}" "托管账号配置移除失败"; then
             return 1
         fi
-        errorCard "托管账号配置移除失败，已恢复旧配置"
+        local rollbackMessage
+        subscriptionSyncSetRollbackResultMessage rollbackMessage "托管账号配置移除失败" "已恢复旧配置"
+        errorCard "${rollbackMessage}"
         return 1
     fi
     if ! reloadCore; then

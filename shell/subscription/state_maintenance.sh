@@ -159,7 +159,9 @@ resetSubscriptionGroupsStateMenu() {
             errorCard "订阅状态重建失败，且旧状态恢复失败" "当前状态备份：${currentBackup}"
             return 1
         fi
-        errorCard "订阅状态重建失败，已恢复旧状态" "当前状态备份：${currentBackup}"
+        local rollbackMessage
+        subscriptionSyncSetRollbackResultMessage rollbackMessage "订阅状态重建失败" "已恢复旧状态"
+        errorCard "${rollbackMessage}" "当前状态备份：${currentBackup}"
         return 1
     fi
     subscriptionGroupsSecureStateFiles 2>/dev/null || true

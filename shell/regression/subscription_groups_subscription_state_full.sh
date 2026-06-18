@@ -836,6 +836,49 @@ runSubscriptionSyncSingleRestoreResultMessageRegression() (
     [[ "${message}" == "控制面同步期望用户状态写入失败" ]]
 )
 
+runSubscriptionSyncRollbackResultMessageRegression() (
+    local message=
+    local retryLog="${TMP_DIR}/subscription-sync-rollback-result.log"
+
+    subscriptionSyncSetRollbackResultMessage message \
+        "托管账号配置移除失败" \
+        "已恢复旧配置"
+    [[ "${message}" == "托管账号配置移除失败，已恢复旧配置" ]]
+
+    subscriptionSyncSetRollbackResultMessage message \
+        "订阅状态重建失败" \
+        "已恢复旧状态"
+    [[ "${message}" == "订阅状态重建失败，已恢复旧状态" ]]
+
+    : >"${retryLog}"
+    rollbackRetrySuccess() {
+        printf '%s\n' "$*" >>"${retryLog}"
+        return 0
+    }
+    subscriptionSyncSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚流量统计配置" \
+        rollbackRetrySuccess \
+        "恢复旧配置后核心重载仍失败，请检查核心服务日志" \
+        stats
+    [[ "${message}" == "核心重载失败，已回滚流量统计配置" ]]
+    grep -q '^stats$' "${retryLog}"
+
+    : >"${retryLog}"
+    rollbackRetryFail() {
+        printf '%s\n' "$*" >>"${retryLog}"
+        return 1
+    }
+    subscriptionSyncSetRollbackResultMessage message \
+        "本机同步后服务重建失败" \
+        "已恢复旧配置" \
+        rollbackRetryFail \
+        "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
+        true
+    [[ "${message}" == "本机同步后服务重建失败，已恢复旧配置；恢复旧配置后服务重建仍失败，请检查核心服务日志" ]]
+    grep -q '^true$' "${retryLog}"
+)
+
 runSubscriptionSyncRollbackConfigRestoreFailureRegression() (
     local rootRel="${TMP_DIR}/subscription-sync-rollback-failure"
     local root
@@ -1718,6 +1761,7 @@ runRegressionSubscriptionStateSupport() {
         runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression &&
         runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression &&
         runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression &&
+        runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression &&
         runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression &&
         runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
 }
@@ -1736,6 +1780,10 @@ runRegressionSubscriptionSyncAppendRestoreFailureDetail() {
 
 runRegressionSubscriptionSyncSingleRestoreResultMessage() {
     runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
+}
+
+runRegressionSubscriptionSyncRollbackResultMessage() {
+    runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
 }
 
 runRegressionSubscriptionStateSyncRollback() {
@@ -1792,6 +1840,7 @@ runRegressionSubscriptionStateSerial() {
         runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression &&
         runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression &&
         runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression &&
+        runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression &&
         runRegressionStep subscription-sync-rollback-failure-serial runSubscriptionSyncRollbackFailureSerialRegression &&
         runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression &&
         runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
@@ -1951,6 +2000,9 @@ subscription-sync-append-restore-failure-detail)
 subscription-sync-single-restore-result-message)
     regressionRunner=runRegressionSubscriptionSyncSingleRestoreResultMessage
     ;;
+subscription-sync-rollback-result-message)
+    regressionRunner=runRegressionSubscriptionSyncRollbackResultMessage
+    ;;
 subscription-sync-rollback-failure)
     regressionRunner=runRegressionSubscriptionStateSyncRollback
     ;;
@@ -1988,7 +2040,7 @@ subscription-groups-restore-failure)
     regressionRunner=runRegressionSubscriptionGroupsRestoreFailure
     ;;
 *)
-    printf 'usage: %s [subscription-state|subscription-state-serial|subscription-state-core|subscription-state-structure|subscription-state-structure-foundation|subscription-state-structure-foundation-add-remove|subscription-state-structure-foundation-credential|subscription-state-structure-foundation-normalize|subscription-state-structure-foundation-serial|subscription-state-structure-source|subscription-state-structure-source-credential|subscription-state-structure-source-status|subscription-state-structure-source-remove|subscription-state-structure-source-serial|subscription-state-quota|subscription-state-quota-traffic|subscription-state-quota-traffic-summary|subscription-state-quota-traffic-invalid-input|subscription-state-quota-traffic-apply|subscription-state-quota-traffic-serial|subscription-state-quota-menu-tx|subscription-state-quota-menu-preview-fail|subscription-state-quota-menu-tx-rollback|subscription-state-quota-menu-tx-serial|subscription-state-quota-partial-sync|subscription-state-quota-partial-sync-apply-failure|subscription-state-quota-partial-sync-plan|subscription-state-quota-partial-sync-config|subscription-state-quota-partial-sync-serial|subscription-state-remote-restore|subscription-state-remote-restore-self-reference|subscription-state-remote-restore-self-reference-plan|subscription-state-remote-restore-self-reference-sync|subscription-state-remote-restore-self-reference-serial|subscription-state-remote-restore-state-write|subscription-state-remote-restore-legacy-menu|subscription-state-remote-restore-serial|subscription-state-support|subscription-state-sync-rollback|subscription-state-sync-rollback-serial|subscription-sync-tempdir|subscription-sync-restore-pair-failure-message|subscription-sync-append-restore-failure-detail|subscription-sync-single-restore-result-message|subscription-sync-rollback-failure|subscription-sync-rollback-failure-serial|subscription-sync-rollback-config-restore-failure|subscription-sync-restore-dir-failure|subscription-sync-reload-rollback|subscription-group-sync-rollback|subscription-group-sync-rollback-serial|subscription-group-sync-apply-failure|subscription-group-sync-reconcile-rollback|subscription-group-sync-remote-failure|subscription-sync-reconcile-early-exit|subscription-groups-restore-failure]\n' "$0" >&2
+    printf 'usage: %s [subscription-state|subscription-state-serial|subscription-state-core|subscription-state-structure|subscription-state-structure-foundation|subscription-state-structure-foundation-add-remove|subscription-state-structure-foundation-credential|subscription-state-structure-foundation-normalize|subscription-state-structure-foundation-serial|subscription-state-structure-source|subscription-state-structure-source-credential|subscription-state-structure-source-status|subscription-state-structure-source-remove|subscription-state-structure-source-serial|subscription-state-quota|subscription-state-quota-traffic|subscription-state-quota-traffic-summary|subscription-state-quota-traffic-invalid-input|subscription-state-quota-traffic-apply|subscription-state-quota-traffic-serial|subscription-state-quota-menu-tx|subscription-state-quota-menu-preview-fail|subscription-state-quota-menu-tx-rollback|subscription-state-quota-menu-tx-serial|subscription-state-quota-partial-sync|subscription-state-quota-partial-sync-apply-failure|subscription-state-quota-partial-sync-plan|subscription-state-quota-partial-sync-config|subscription-state-quota-partial-sync-serial|subscription-state-remote-restore|subscription-state-remote-restore-self-reference|subscription-state-remote-restore-self-reference-plan|subscription-state-remote-restore-self-reference-sync|subscription-state-remote-restore-self-reference-serial|subscription-state-remote-restore-state-write|subscription-state-remote-restore-legacy-menu|subscription-state-remote-restore-serial|subscription-state-support|subscription-state-sync-rollback|subscription-state-sync-rollback-serial|subscription-sync-tempdir|subscription-sync-restore-pair-failure-message|subscription-sync-append-restore-failure-detail|subscription-sync-single-restore-result-message|subscription-sync-rollback-result-message|subscription-sync-rollback-failure|subscription-sync-rollback-failure-serial|subscription-sync-rollback-config-restore-failure|subscription-sync-restore-dir-failure|subscription-sync-reload-rollback|subscription-group-sync-rollback|subscription-group-sync-rollback-serial|subscription-group-sync-apply-failure|subscription-group-sync-reconcile-rollback|subscription-group-sync-remote-failure|subscription-sync-reconcile-early-exit|subscription-groups-restore-failure]\n' "$0" >&2
     exit 2
     ;;
 esac

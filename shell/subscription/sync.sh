@@ -675,20 +675,41 @@ subscriptionSyncSetSingleRestoreResultMessage() {
     return 1
 }
 
+subscriptionSyncSetRollbackResultMessage() {
+    local outputVar=$1
+    local reason=$2
+    local restoredMessage=$3
+    local retryFn=${4:-}
+    local retryFailureMessage=${5:-}
+    local result
+
+    if [[ -n "${retryFn}" ]]; then
+        shift 5
+        if "${retryFn}" "$@"; then
+            result="${reason}，${restoredMessage}"
+        else
+            result="${reason}，${restoredMessage}；${retryFailureMessage}"
+        fi
+    else
+        result="${reason}，${restoredMessage}"
+    fi
+
+    printf -v "${outputVar}" '%s' "${result}"
+}
+
 subscriptionSyncSetRollbackRetryMessage() {
     local outputVar=$1
     local reason=$2
     local retryFn=$3
     local retryFailureMessage=$4
-    local message
-    shift 4
 
-    if "${retryFn}" "$@"; then
-        message="${reason}，已恢复旧配置"
-    else
-        message="${reason}，已恢复旧配置；${retryFailureMessage}"
-    fi
-    printf -v "${outputVar}" '%s' "${message}"
+    subscriptionSyncSetRollbackResultMessage \
+        "${outputVar}" \
+        "${reason}" \
+        "已恢复旧配置" \
+        "${retryFn}" \
+        "${retryFailureMessage}" \
+        "${@:5}"
 }
 
 subscriptionSyncApplyAccountPlanTransaction() {
@@ -979,11 +1000,13 @@ runSubscriptionGroupSync() {
             localSyncFailure="本机同步后服务重建失败"
             if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}"; then
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-                if subscriptionSyncReconcileLocalServices true; then
-                    localSyncFailure="${localSyncFailure}，已恢复旧配置"
-                else
-                    localSyncFailure="${localSyncFailure}，已恢复旧配置；恢复旧配置后服务重建仍失败，请检查核心服务日志"
-                fi
+                subscriptionSyncSetRollbackResultMessage \
+                    localSyncFailure \
+                    "${localSyncFailure}" \
+                    "已恢复旧配置" \
+                    subscriptionSyncReconcileLocalServices \
+                    "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
+                    true
             else
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
                 localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
