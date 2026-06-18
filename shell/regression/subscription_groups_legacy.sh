@@ -1413,9 +1413,6 @@ runDNSRoutingFailureReturnRegression() (
         printf '%s\n' "$*" >>"${errorLog}"
         return 0
     }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
     getDLCMatchedRuleValue() { printf 'domain:%s\n' "$1"; }
     reloadCore() {
         printf 'reload\n' >>"${reloadMarker}"
@@ -5440,7 +5437,6 @@ SH
     PATH="${fakeBin}:${PATH}"
     source "${PROJECT_ROOT}/shell/core/protocols.sh"
     source "${PROJECT_ROOT}/shell/core/services.sh"
-    echoContent() { return 0; }
     successCard() { return 0; }
     statusCard() { return 0; }
     errorCard() { return 0; }
@@ -8342,12 +8338,6 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf 'toggle:%s\n' "$1" >>"${callLog}"
         [[ "${mode}" != "toggle-fail" ]]
     }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     userResultCard() { return 0; }
     successCard() {
         printf '%s\n' "$*" >>"${successLog}"
