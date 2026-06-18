@@ -12989,7 +12989,6 @@ runMenuSmokeLightRegression() {
     menuItem() { output+="$2 $3"$'\n'; }
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
-    menuClose() { return 0; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
