@@ -487,12 +487,6 @@ runAccessControlFailureReturnCase() {
     mkdir -p "${configPath}"
 
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     autoRead() {
         case "$1" in
         access_block_domains) printf -v "$3" 'example.com' ;;
@@ -809,11 +803,6 @@ runBTRoutingFailureReturnRegression() (
     singBoxConfigPath=
     coreInstallType=1
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     showBTBlockStatus() { return 0; }
     readInstallType() { coreInstallType=1; }
 
@@ -901,13 +890,6 @@ runIPv6RoutingFailureReturnRegression() (
 
     errorCard() { return 0; }
     warnCard() { return 0; }
-    echoContent() { return 0; }
-    progressCard() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     hasIPv6Connectivity() { return 0; }
     autoConfirm() {
         printf -v "$4" 'y'
@@ -1046,13 +1028,6 @@ runWARPRoutingFailureReturnRegression() (
 
     errorCard() { return 0; }
     warnCard() { return 0; }
-    echoContent() { return 0; }
-    progressCard() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     installWarpReg() {
         printf 'install\n' >"${installMarker}"
         [[ "${mode}" != "install-fail" ]]
@@ -1205,12 +1180,6 @@ runSocks5RoutingFailureReturnRegression() (
 
     errorCard() { return 0; }
     warnCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     autoConfirm() {
         printf -v "$4" 'y'
         return 0
