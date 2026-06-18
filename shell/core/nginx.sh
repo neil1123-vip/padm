@@ -249,11 +249,13 @@ realityStreamApplyServicesOrRollback() {
     serviceQueueRestart nginx
     serviceQueueApply || restoreServiceStatus=1
     removeRealityStreamBackup "${backupDir}"
+    local rollbackMessage
     if [[ "${restoreServiceStatus}" -eq 0 ]]; then
-        errorCard "${reason}，已回滚本次修改"
+        coreSetRollbackResultMessage rollbackMessage "${reason}" "已回滚本次修改"
     else
-        errorCard "${reason}，已回滚本次修改；恢复旧配置后服务应用仍失败，请检查核心和 Nginx 服务日志"
+        coreSetRollbackResultMessage rollbackMessage "${reason}" "已回滚本次修改；恢复旧配置后服务应用仍失败，请检查核心和 Nginx 服务日志"
     fi
+    errorCard "${rollbackMessage}"
     return 1
 }
 

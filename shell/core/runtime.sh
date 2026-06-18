@@ -280,6 +280,28 @@ commitGeneratedJsonFile() {
     jq empty "${tmpFile}" >/dev/null 2>&1 && commitGeneratedFile "${tmpFile}" "${targetFile}" "${mode}"
 }
 
+coreSetRollbackResultMessage() {
+    local outputVar=$1
+    local reason=$2
+    local restoredMessage=$3
+    local retryFn=${4:-}
+    local retryFailureMessage=${5:-}
+    local result
+
+    if [[ -n "${retryFn}" ]]; then
+        shift 5
+        if "${retryFn}" "$@"; then
+            result="${reason}，${restoredMessage}"
+        else
+            result="${reason}，${restoredMessage}；${retryFailureMessage}"
+        fi
+    else
+        result="${reason}，${restoredMessage}"
+    fi
+
+    printf -v "${outputVar}" '%s' "${result}"
+}
+
 restoreManagedFileFromBackup() {
     local backupFile=$1
     local targetFile=$2

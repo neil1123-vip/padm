@@ -498,11 +498,9 @@ applyAccessControlConfigChange() {
             return 1
         fi
         accessControlBackupCleanup || true
-        if reloadCore; then
-            reportAccessControlApplyFailure "访问控制重载失败" "核心重载失败，已回滚本次修改"
-        else
-            reportAccessControlApplyFailure "访问控制重载失败" "核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
-        fi
+        local rollbackMessage
+        coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚本次修改" reloadCore "恢复旧配置后重载仍失败，请检查核心服务日志"
+        reportAccessControlApplyFailure "访问控制重载失败" "${rollbackMessage}"
         return 1
     fi
     if ! accessControlBackupCleanup; then

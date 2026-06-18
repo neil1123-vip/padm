@@ -2526,11 +2526,9 @@ configTransactionCommit() {
             removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
             padmRemoveCleanupPath "${stagedFile}"
             echoContent title "\n┌─ 核心重载失败 ────────────────────────────────"
-            if "${reloadFn}" >/dev/null 2>&1; then
-                menuLine "已回滚本次修改"
-            else
-                menuLine "已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
-            fi
+            local rollbackMessage
+            coreSetRollbackResultMessage rollbackMessage "核心重载失败" "已回滚本次修改" "${reloadFn}" "恢复旧配置后重载仍失败，请检查核心服务日志"
+            menuLine "${rollbackMessage#核心重载失败，}"
             menuClose
         else
             padmRemoveCleanupPath "${stagedFile}"

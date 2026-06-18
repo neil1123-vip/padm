@@ -143,11 +143,9 @@ dnsRoutingReloadOrRollback() {
         return 1
     fi
     dnsRoutingBackupCleanup || true
-    if reloadCore; then
-        errorCard "${title}核心重载失败，已回滚本次修改"
-    else
-        errorCard "${title}核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志"
-    fi
+    local rollbackMessage
+    coreSetRollbackResultMessage rollbackMessage "${title}核心重载失败" "已回滚本次修改" reloadCore "恢复旧配置后重载仍失败，请检查核心服务日志"
+    errorCard "${rollbackMessage}"
     return 1
 }
 

@@ -1901,6 +1901,44 @@ runRuntimeTempDirRegression() (
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runCoreRollbackResultMessageRegression() (
+    local message=
+    local retryLog="${TMP_DIR}/core-rollback-result.log"
+
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚本次修改"
+    [[ "${message}" == "核心重载失败，已回滚本次修改" ]]
+
+    : >"${retryLog}"
+    coreRollbackRetrySuccess() {
+        printf '%s\n' "$*" >>"${retryLog}"
+        return 0
+    }
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚本次修改" \
+        coreRollbackRetrySuccess \
+        "恢复旧配置后重载仍失败，请检查核心服务日志" \
+        dns
+    [[ "${message}" == "核心重载失败，已回滚本次修改" ]]
+    grep -q '^dns$' "${retryLog}"
+
+    : >"${retryLog}"
+    coreRollbackRetryFail() {
+        printf '%s\n' "$*" >>"${retryLog}"
+        return 1
+    }
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚本次修改" \
+        coreRollbackRetryFail \
+        "恢复旧配置后重载仍失败，请检查核心服务日志" \
+        dns
+    [[ "${message}" == "核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志" ]]
+    grep -q '^dns$' "${retryLog}"
+)
+
 runCorePortFileTransactionRegression() {
     local oldTmpDir="${TMPDIR:-}"
     local configRoot
@@ -15732,7 +15770,8 @@ runRegressionRuntime() {
 }
 
 runRegressionTransactionCore() {
-    runRegressionStep config-transaction runConfigTransactionRegression &&
+    runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
+        runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
         runRegressionStep core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression &&
         runRegressionStep entry-helper-config runEntryHelperConfigRegression &&
@@ -15923,6 +15962,9 @@ reality-config)
 reality-stream)
     regressionRunner=runRegressionRealityStream
     ;;
+core-rollback-result-message)
+    regressionRunner=runCoreRollbackResultMessageRegression
+    ;;
 transaction)
     regressionRunner=runRegressionTransaction
     ;;
@@ -15942,7 +15984,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
