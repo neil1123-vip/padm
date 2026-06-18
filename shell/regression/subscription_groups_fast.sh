@@ -218,9 +218,6 @@ runCleanDirectoryContentSafetyRegression() {
         unsafeDir="${root}/unsafe"
         printf 'keep\n' >"${unsafeDir}/sentinel"
         printf 'remove\n' >"${safeDir}/child"
-        echoContent() { :; }
-        menuLine() { :; }
-        menuClose() { :; }
         padmIsSafeAbsolutePath() { [[ "$1" == "${safeDir}" ]]; }
         (
             cd "${unsafeDir}"
@@ -2797,8 +2794,6 @@ EOF
         subscribeSectionTitle() { return 0; }
         subscribeAccountTitle() { return 0; }
         subscribeOutputTitle() { return 0; }
-        echoContent() { return 0; }
-        menuClose() { return 0; }
         realityEntryHost() { printf 'entry.example.com'; }
         appendDefaultSubscribeLine() {
             printf 'default:%s:%s\n' "$1" "$2" >>"${captureLog}"
