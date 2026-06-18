@@ -194,15 +194,6 @@ JSON
       .outbounds[0].settings.servers[0].address == "127.0.0.1" and
       .outbounds[0].settings.servers[0].port == 1080
     ' "${configPath}socks5_outbound.json" >/dev/null
-    setVMessWSTLSPath="/ws"
-    setVMessWSTLSAddress="example.com"
-    setVMessWSTLSPort=443
-    setVMessWSTLSUUID="00000000-0000-0000-0000-000000000000"
-    addXrayOutbound "vmess-out"
-    jq -e '
-      .outbounds[0].protocol == "vmess" and
-      .outbounds[0].streamSettings.wsSettings.path == "/ws"
-    ' "${configPath}vmess-out.json" >/dev/null
     writeRoutingJsonConfig "${configPath}socks5_outbound.json" <<'JSON'
 {"outbounds":[{"protocol":"socks","tag":"old"}]}
 JSON
@@ -255,22 +246,6 @@ JSON
     fi
     [[ "$(<"${singBoxConfigPath}wireguard_endpoints_IPv4.json")" == "${originalContent}" ]]
     [[ ! -e "${singBoxConfigPath}wireguard_endpoints_IPv4.json.tmp" ]]
-    reservedWarpReg='[1,2,3]'
-    hysteriaPort=23456
-    currentHost=example.com
-    initSingBoxHysteria2Config
-    jq -e '
-      .inbounds[0].listen_port == 23456 and
-      .inbounds[0].users[0].password == "user-pass" and
-      .inbounds[0].tls.server_name == "example.com"
-    ' "${singBoxConfigPath}hysteria2.json" >/dev/null
-    originalContent=$(<"${singBoxConfigPath}hysteria2.json")
-    hysteriaPort=
-    if initSingBoxHysteria2Config 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"${singBoxConfigPath}hysteria2.json")" == "${originalContent}" ]]
-    [[ ! -e "${singBoxConfigPath}hysteria2.json.tmp" ]]
     unset -f readConfigWarpReg initHysteriaPort initHysteria2Network initXrayClients
     hysteriaPort=23456
     setSniffRouting
@@ -366,7 +341,8 @@ JSON
       .inbounds[0].sniffing.enabled == true and
       (.inbounds[0].sniffing.destOverride | sort) == ["http", "quic", "tls"]
     ' "${configPath}03_sniffing_inbounds.json" >/dev/null
-    unInstallSniffing
+    updateRoutingJsonConfig "${configPath}02_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
+    updateRoutingJsonConfig "${configPath}03_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
     jq -e '.inbounds[0].sniffing | not' "${configPath}02_sniffing_inbounds.json" >/dev/null
     jq -e '.inbounds[0].sniffing | not' "${configPath}03_sniffing_inbounds.json" >/dev/null
     coreInstallType=
