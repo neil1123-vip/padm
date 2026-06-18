@@ -656,7 +656,7 @@ JSON
         jq -e --slurpfile expected "${rollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
         [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${rollbackFirstBefore}" ]]
         [[ "$(<"${configPath}03_VLESS_WS_inbounds.json")" == "${rollbackSecondBefore}" ]]
-        if find "${rollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' \) | grep -q .; then
+        if regressionFindHasMatches "${rollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' \); then
             return 1
         fi
         configPath="${oldConfigPath}"
@@ -733,7 +733,7 @@ JSON
         [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${refreshRollbackFirstBefore}" ]]
         diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
         diff -u "${refreshRollbackPublicExpected}" <(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-        if find "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \) | grep -q .; then
+        if regressionFindHasMatches "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \); then
             return 1
         fi
         configPath="${oldConfigPath}"
@@ -801,9 +801,9 @@ JSON
         jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed" and (.error_detail.message | contains("订阅输出恢复失败"))' "${responseFile}.restore-failure" >/dev/null
         mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
         [[ "${#restoreFailureBackupDirs[@]}" == "2" ]]
-        find "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*' | grep -q .
+        regressionFindHasMatches "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
         [[ ! -e "${restoreFailureLocalDir}/default/existing" || "$(<"${restoreFailureLocalDir}/default/existing")" != "old local" ]]
-        if find "${restoreFailureRoot}/xray" -name '*.sync.*' | grep -q .; then
+        if regressionFindHasMatches "${restoreFailureRoot}/xray" -name '*.sync.*'; then
             return 1
         fi
         if [[ -n "${restoreFailureOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
@@ -963,7 +963,7 @@ SH
 
     [[ "${tokenStatus}" == "1" ]]
     [[ ! -e "${tokenFile}" ]]
-    if find "${tokenRoot}" -maxdepth 2 -type f -name '.control.token.token.*' | grep -q .; then
+    if regressionFindHasMatches "${tokenRoot}" -maxdepth 2 -type f -name '.control.token.token.*'; then
         return 1
     fi
 )

@@ -147,7 +147,7 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
 
     [[ "${initStatus}" == "1" ]]
     [[ ! -e "${initStateFile}" ]]
-    if find "${initGroupsDir}" -maxdepth 1 -type f -name '.groups.json.init.*' | grep -q .; then
+    if regressionFindHasMatches "${initGroupsDir}" -maxdepth 1 -type f -name '.groups.json.init.*'; then
         return 1
     fi
 
@@ -243,7 +243,7 @@ JSON
         [[ "$(<"${resetStateFile}")" == "${resetBeforeSnapshot}" ]]
         grep -q '订阅状态重建失败，已恢复旧状态' "${resetErrorLog}"
         [[ -f "${resetCurrentBackup}" ]]
-        if find "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*' | grep -q .; then
+        if regressionFindHasMatches "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*'; then
             return 1
         fi
 
@@ -425,7 +425,7 @@ JSON
         [[ "${quotaTxStatus}" == "1" ]]
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
-        if find "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+        if regressionFindHasMatches "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
             return 1
         fi
     )
@@ -487,7 +487,7 @@ JSON
         jq -e '.groups[0].user_groups[] | select(.id == "team-b" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ ! -e "${accountPhaseMarker}" ]]
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"停用超额分享订阅失败"* ]]
-        if find "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+        if regressionFindHasMatches "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
             return 1
         fi
     )
@@ -722,7 +722,7 @@ JSON
     [[ -f "${outputBackupDir}/local.exists" && -f "${outputBackupDir}/public.exists" ]]
     padmRemoveCleanupPath "${outputBackupDir}"
 
-    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     configPath="${oldConfigPath}"
@@ -782,7 +782,7 @@ JSON
     [[ "${#backupDirs[@]}" == "1" ]]
     [[ -f "${backupDirs[0]}/manifest" ]]
     grep -q "${targetFile}" "${backupDirs[0]}/manifest"
-    if find "${root}/xray" -name '*.sync.*' | grep -q .; then
+    if regressionFindHasMatches "${root}/xray" -name '*.sync.*'; then
         return 1
     fi
 )
@@ -813,7 +813,7 @@ runSubscriptionSyncRollbackRestoreDirFailureRegression() (
     [[ "${restoreStatus}" == "1" ]]
     [[ "$(<"${restoreDirTarget}/default/existing")" == "current default" ]]
     [[ "$(<"${restoreDirTarget}/clashMeta/existing")" == "current clash" ]]
-    if find "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \) | grep -q .; then
+    if regressionFindHasMatches "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \); then
         return 1
     fi
 )
@@ -853,7 +853,7 @@ JSON
     [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
     [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"核心重载失败"* ]]
     [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"恢复旧配置后核心重载仍失败"* ]]
-    if find "${reloadRoot}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${reloadRoot}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*'; then
         return 1
     fi
 )
@@ -931,7 +931,7 @@ JSON
     grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
     grep -q '本机同步未完全完成' "${statusLog}"
     grep -qx 'partial' "${resultStatus}"
-    if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+    if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
     fi
 )
@@ -1018,7 +1018,7 @@ JSON
     grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
     grep -q '本机同步未完全完成' "${statusLog}"
     grep -qx 'partial' "${resultStatus}"
-    if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+    if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
     fi
 )
@@ -1101,7 +1101,7 @@ JSON
     grep -q '被控服务器同步失败' "${resultFailures}"
     grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"
     grep -qx 'partial' "${resultStatus}"
-    if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+    if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
     fi
 )
@@ -1201,7 +1201,7 @@ PY
     [[ "$(<"${resultFailures}")" == "[]" ]]
     grep -qx 'success' "${resultStatus}"
     grep -q '自动同步完成' "${statusLog}"
-    if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
+    if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
     fi
 )
