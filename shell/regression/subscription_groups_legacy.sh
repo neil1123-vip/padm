@@ -2010,6 +2010,35 @@ runCoreRollbackResultMessageRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${message}" == "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: /tmp/check-log-backup" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "Xray 配置校验失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        " /tmp/xray-fallback.json 和 /tmp/xray-fallback.json.alpn.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "Xray 配置校验失败，且旧配置恢复失败，请手动检查 /tmp/xray-fallback.json 和 /tmp/xray-fallback.json.alpn.bak" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "sing-box 日志配置重载失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        " /tmp/log.json，备份文件：/tmp/log.json.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "sing-box 日志配置重载失败，且旧配置恢复失败，请手动检查 /tmp/log.json，备份文件：/tmp/log.json.bak" ]]
+
+    coreSetRollbackResultMessage message \
+        "sing-box 日志配置重载失败" \
+        "已回滚日志配置"
+    [[ "${message}" == "sing-box 日志配置重载失败，已回滚日志配置" ]]
 )
 
 runCorePortFileTransactionRegression() {

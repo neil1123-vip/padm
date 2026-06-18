@@ -2379,6 +2379,7 @@ singBoxLogConfigFile() {
 singBoxLog() {
     local targetPath
     local tmpPath backupPath hadBackup=false
+    local restoreMessage rollbackMessage
     targetPath=$(singBoxLogConfigFile)
     targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || { errorCard "sing-box 日志配置路径异常"; return 1; }
     padmEnsureSafeDirectory "$(dirname "${targetPath}")" || { errorCard "sing-box 日志目录创建失败"; return 1; }
@@ -2416,7 +2417,8 @@ EOF
     fi
     if [[ "${hadBackup}" == "true" ]]; then
         if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
-            errorCard "sing-box 日志配置重载失败，且旧配置恢复失败，请手动检查 ${targetPath}，备份文件：${backupPath}"
+            coreSetSingleRestoreResultMessage restoreMessage "sing-box 日志配置重载失败" false "已恢复旧配置" "旧配置" " ${targetPath}，备份文件：${backupPath}" || true
+            errorCard "${restoreMessage}"
             backupPath=
             return 1
         fi
@@ -2431,6 +2433,7 @@ EOF
     if [[ -n "${backupPath}" ]]; then
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
     fi
-    errorCard "sing-box 日志配置重载失败，已回滚日志配置"
+    coreSetRollbackResultMessage rollbackMessage "sing-box 日志配置重载失败" "已回滚日志配置"
+    errorCard "${rollbackMessage}"
     return 1
 }

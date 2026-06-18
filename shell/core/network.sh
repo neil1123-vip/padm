@@ -147,6 +147,7 @@ writeCheckPortOpenNginxConfig() {
     local domain=$2
     local listenIPv6PortConfig=$3
     local targetPath
+    local restoreMessage
     if ! targetPath=$(nginxConfigFilePath checkPortOpen.conf); then
         CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置路径异常"
         return 1
@@ -197,7 +198,8 @@ EOF
         if ! nginx -t >"${nginxTestLog}" 2>&1; then
             if [[ -f "${backupPath}" ]]; then
                 if ! restoreManagedFileFromBackup "${backupPath}" "${targetPath}" 644; then
-                    CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+                    coreSetSingleRestoreResultMessage restoreMessage "端口检测 Nginx 配置校验失败" false "已恢复旧配置" "旧配置" " ${targetPath} 和 ${backupPath}" || true
+                    CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="${restoreMessage}"
                     return 1
                 fi
             else

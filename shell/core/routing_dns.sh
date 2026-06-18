@@ -121,11 +121,13 @@ dnsRoutingBackupCleanup() {
 dnsRoutingAbortChange() {
     local reason=$1
     local backupDir
+    local restoreMessage
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
     if dnsRoutingBackupRestore; then
         dnsRoutingBackupCleanup || errorCard "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}"
     else
-        errorCard "${reason}，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+        coreSetSingleRestoreResultMessage restoreMessage "${reason}" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
+        errorCard "${restoreMessage}"
     fi
     return 1
 }
@@ -133,13 +135,15 @@ dnsRoutingAbortChange() {
 dnsRoutingReloadOrRollback() {
     local title=$1
     local backupDir
+    local restoreMessage
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
     if reloadCore; then
         dnsRoutingBackupCleanup || errorCard "${title}已应用，但备份目录清理失败: ${backupDir}"
         return 0
     fi
     if ! dnsRoutingBackupRestore; then
-        errorCard "${title}核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+        coreSetSingleRestoreResultMessage restoreMessage "${title}核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
+        errorCard "${restoreMessage}"
         return 1
     fi
     dnsRoutingBackupCleanup || true

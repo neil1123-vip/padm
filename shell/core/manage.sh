@@ -605,11 +605,13 @@ restoreTraditionalTlsAlpnBackup() {
     local backupFile=$1
     local configFile=$2
     local reason=$3
+    local restoreMessage
     if restoreManagedFileFromBackup "${backupFile}" "${configFile}" 644; then
         removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         return 0
     fi
-    errorCard "${reason}，且旧配置恢复失败，请手动检查 ${configFile} 和 ${backupFile}"
+    coreSetSingleRestoreResultMessage restoreMessage "${reason}" false "已恢复旧配置" "旧配置" " ${configFile} 和 ${backupFile}" || true
+    errorCard "${restoreMessage}"
     return 1
 }
 
@@ -1020,6 +1022,7 @@ corePortApplyFileTransaction() {
 corePortApplyReloadTransaction() {
     local action=$1
     local backupDir
+    local restoreMessage
     padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
     if ! corePortBackupFiles "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
@@ -1043,7 +1046,8 @@ corePortApplyReloadTransaction() {
 
     if ! corePortRollbackFiles "${backupDir}"; then
         padmForgetCleanupPath "${backupDir}"
-        errorCard "入口端口核心重载失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+        coreSetSingleRestoreResultMessage restoreMessage "入口端口核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
+        errorCard "${restoreMessage}"
         return 1
     fi
     local rollbackMessage
