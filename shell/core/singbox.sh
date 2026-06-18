@@ -277,45 +277,6 @@ EOF
 }
 EOF
     fi
-    if [[ "${tag}" == *vmess-out* ]]; then
-        writeRoutingJsonConfig "${xrayConfigPath}${tag}.json" <<EOF || return 1
-{
-  "outbounds": [
-    {
-      "tag": "${tag}",
-      "protocol": "vmess",
-      "streamSettings": {
-        "network": "ws",
-        "security": "tls",
-        "tlsSettings": {},
-        "wsSettings": {
-          "path": "${setVMessWSTLSPath}"
-        }
-      },
-      "mux": {
-        "enabled": true,
-        "concurrency": 8
-      },
-      "settings": {
-        "vnext": [
-          {
-            "address": "${setVMessWSTLSAddress}",
-            "port": "${setVMessWSTLSPort}",
-            "users": [
-              {
-                "id": "${setVMessWSTLSUUID}",
-                "security": "auto",
-                "alterId": 0
-              }
-            ]
-          }
-        ]
-      }
-    }
-  ]
-}
-EOF
-    fi
 }
 
 
@@ -379,40 +340,6 @@ addSingBoxWireGuardEndpoints() {
                   "allowed_ips": ["0.0.0.0/0","::/0"]
                 }
             ]
-        }
-    ]
-}
-EOF
-}
-
-
-# 初始化 sing-box Hysteria2 配置
-initSingBoxHysteria2Config() {
-    progressCard "${1:-}" "初始化 Hysteria2 配置"
-
-    initHysteriaPort
-    initHysteria2Network
-
-    local targetPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}hysteria2.json"
-    writeRoutingJsonConfig "${targetPath}" <<EOF || return 1
-{
-    "inbounds": [
-        {
-            "type": "hysteria2",
-            "listen": "::",
-            "listen_port": ${hysteriaPort},
-            "users": $(initXrayClients 6),
-            "up_mbps":${hysteria2ClientDownloadSpeed},
-            "down_mbps":${hysteria2ClientUploadSpeed},
-            "tls": {
-                "enabled": true,
-                "server_name":"${currentHost}",
-                "alpn": [
-                    "h3"
-                ],
-                "certificate_path": "/etc/padm/tls/${currentHost}.crt",
-                "key_path": "/etc/padm/tls/${currentHost}.key"
-            }
         }
     ]
 }

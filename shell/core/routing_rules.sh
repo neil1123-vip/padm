@@ -26,29 +26,6 @@ downloadDLCPlainYAML() {
     mv "${tmpFilePath}" "${dlcFilePath}" >/dev/null 2>&1
 }
 
-# 转义 grep/regex 匹配字符
-escapeDLCRegexPattern() {
-    # shellcheck disable=SC2016
-    # shellcheck disable=SC2001
-    echo "$1" | sed -e 's/[.[\*^$()+?{|]/\\&/g'
-}
-
-# 根据规则行号向上回溯对应 name
-getDLCNameByRuleLine() {
-    local ruleLine=$1
-    local dlcFilePath=$2
-    awk -v targetLine="${ruleLine}" '
-    /^[[:space:]]*-[[:space:]]*name:[[:space:]]*/ {
-        line = $0
-        sub(/^[[:space:]]*-[[:space:]]*name:[[:space:]]*/, "", line)
-        currentName = line
-    }
-    NR == targetLine {
-        print currentName
-        exit
-    }' "${dlcFilePath}"
-}
-
 isDomainFormat() {
     local target=$1
     [[ "${target}" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9-]{2,63}$ ]]
@@ -86,7 +63,8 @@ getDLCGeositeName() {
     fi
 
     local escapedInput=
-    escapedInput=$(escapeDLCRegexPattern "${normalizedInput}")
+    # shellcheck disable=SC2016
+    escapedInput=$(echo "${normalizedInput}" | sed -e 's/[.[\*^$()+?{|]/\\&/g')
 
     local matchedLine=
     matchedLine=$(grep -n -m1 -E "^[[:space:]]*-[[:space:]]*name:[[:space:]]*${escapedInput}[[:space:]]*$" "${dlcFilePath}")
@@ -349,17 +327,6 @@ unInstallRouting() {
             updateRoutingJsonConfig "${configPath}09_routing.json" 'del(.routing.rules[] | select(.[$type] == $tag and (.protocol == null)))' --arg type "${type}" --arg tag "${tag}" || return 1
         fi
     fi
-}
-
-# 卸载嗅探配置
-unInstallSniffing() {
-    local inbound
-    while IFS= read -r inbound; do
-        if grep -q "destOverride" <"${inbound}"; then
-            updateRoutingJsonConfig "${inbound}" 'del(.inbounds[0].sniffing)' || return 1
-        fi
-    done < <(find "${configPath}" -name "*inbounds.json")
-
 }
 
 # 安装嗅探配置

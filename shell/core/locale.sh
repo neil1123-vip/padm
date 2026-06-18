@@ -58,10 +58,6 @@ uiPrintLine() {
     printf '%b\n' "$1"
 }
 
-menuTitle() {
-    echoContent title "$1"
-}
-
 menuSection() {
     echoContent title "$1"
 }
@@ -141,10 +137,6 @@ errorCard() {
 
 warnCard() {
     PADM_STATUS_CARD_COLOR=warn statusCard "警告" "$@"
-}
-
-infoCard() {
-    PADM_STATUS_CARD_COLOR=title statusCard "说明" "$@"
 }
 
 progressCard() {

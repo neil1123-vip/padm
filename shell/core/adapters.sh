@@ -10,22 +10,6 @@ adapterTmpPath() {
     fi
 }
 
-adapterPackagesTempTemplate() {
-    adapterTmpPath padm-packages.XXXXXX
-}
-
-adapterAcmeTmpDir() {
-    adapterTmpPath padm-tls
-}
-
-adapterAcmeInstallScriptPath() {
-    printf '%s\n' "$(adapterAcmeTmpDir)/acme.sh"
-}
-
-adapterAcmeDownloadTemplate() {
-    printf '%s\n' "$(adapterAcmeTmpDir)/acme.sh.download.XXXXXX"
-}
-
 adapterNginxRepoTemplate() {
     adapterTmpPath padm-nginx-repo.XXXXXX
 }
@@ -36,14 +20,6 @@ adapterNginxPinTemplate() {
 
 adapterNginxYumRepoTemplate() {
     adapterTmpPath padm-nginx-yum-repo.XXXXXX
-}
-
-adapterWarpRepoTemplate() {
-    adapterTmpPath padm-warp-repo.XXXXXX
-}
-
-adapterWarpYumRepoTemplate() {
-    adapterTmpPath padm-warp-yum-repo.XXXXXX
 }
 
 adapterManagedRollbackTemplate() {
@@ -75,19 +51,6 @@ adapterNginxAptPinFile() {
 adapterNginxYumRepoFile() {
     local yumReposDir=$1
     printf '%s\n' "${yumReposDir%/}/nginx.repo"
-}
-
-adapterWarpAptKeyringFile() {
-    printf '%s\n' "${PADM_WARP_APT_KEYRING_FILE:-/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg}"
-}
-
-adapterWarpAptRepoFile() {
-    printf '%s\n' "${PADM_WARP_APT_REPO_FILE:-/etc/apt/sources.list.d/cloudflare-client.list}"
-}
-
-adapterWarpYumRepoFile() {
-    local yumReposDir=$1
-    printf '%s\n' "${yumReposDir%/}/cloudflare-client.repo"
 }
 
 PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
@@ -613,7 +576,7 @@ installPackageTracked() {
 
     installLog=$(adapterInstallLogPath) || failPackageInstallTransaction "${displayName}安装日志路径异常"
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || failPackageInstallTransaction "${displayName}安装日志目录创建失败"
-    padmCreateTempPath missingPackagesFile "$(adapterPackagesTempTemplate)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
+    padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
@@ -640,7 +603,7 @@ installOptionalPackageTracked() {
 
     installLog=$(adapterInstallLogPath) || return 1
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || return 1
-    padmCreateTempPath missingPackagesFile "$(adapterPackagesTempTemplate)" || return 1
+    padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || return 1
     writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
@@ -798,12 +761,12 @@ installTools() {
             local acmeDownloadScript
             local acmeHomeDirPath
             local acmeBackupDir
-            acmeInstallScript=$(adapterAcmeInstallScriptPath)
+            acmeInstallScript="$(adapterTmpPath padm-tls)/acme.sh"
             acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
             adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
             adapterRegisterPackageManagedRollback "${acmeBackupDir}"
-            padmEnsureSafeDirectory "$(adapterAcmeTmpDir)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
-            padmCreateTempPath acmeDownloadScript "$(adapterAcmeDownloadTemplate)" || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
+            padmEnsureSafeDirectory "$(adapterTmpPath padm-tls)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
+            padmCreateTempPath acmeDownloadScript "$(adapterTmpPath padm-tls/acme.sh.download.XXXXXX)" || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
             if curl -fsSL -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
                 if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then
                     padmRemoveCleanupPath "${acmeDownloadScript}"
@@ -942,167 +905,4 @@ EOF
         statusCard "Nginx 开机自启" "未发现 nginx systemd unit，跳过开机自启配置"
     fi
     endPackageInstallTransaction "${packageTransactionOwner}"
-}
-
-
-warpCliHelpContains() {
-    warp-cli --help 2>/dev/null | grep -q -- "$1"
-}
-
-warpRegister() {
-    if warpCliHelpContains 'registration'; then
-        warp-cli --accept-tos registration new
-    else
-        warp-cli --accept-tos register
-    fi
-}
-
-warpSetProxyMode() {
-    if warp-cli mode --help 2>/dev/null | grep -q 'proxy'; then
-        warp-cli --accept-tos mode proxy
-    else
-        warp-cli --accept-tos set-mode proxy
-    fi
-}
-
-warpSetProxyPort() {
-    if warpCliHelpContains 'proxy'; then
-        warp-cli --accept-tos proxy port 31303
-    else
-        warp-cli --accept-tos set-proxy-port 31303
-    fi
-}
-
-warpEnableAlwaysOn() {
-    if warpCliHelpContains 'enable-always-on'; then
-        warp-cli --accept-tos enable-always-on
-    fi
-}
-
-warpRollbackProxy() {
-    if warpCliHelpContains 'disable-always-on'; then
-        warp-cli --accept-tos disable-always-on >/dev/null 2>&1 || true
-    fi
-    warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
-    systemctl disable --now warp-svc >/dev/null 2>&1 || true
-}
-
-enableWarpProxy() {
-    if ! systemctl enable warp-svc || ! systemctl start warp-svc; then
-        errorCard "WARP 服务启用失败"
-        return 1
-    fi
-    if ! warpRegister; then
-        systemctl disable --now warp-svc >/dev/null 2>&1 || true
-        errorCard "WARP 注册失败，已尝试禁用服务"
-        return 1
-    fi
-    if ! warpSetProxyMode || ! warpSetProxyPort || ! warp-cli --accept-tos connect || ! warpEnableAlwaysOn; then
-        warpRollbackProxy
-        errorCard "WARP 代理启用失败，已尝试断开连接并禁用服务"
-        return 1
-    fi
-}
-
-checkWarpProxyTrace() {
-    local attempt
-    local warpStatus
-
-    for attempt in 1 2 3 4 5 6; do
-        warpStatus=$(curl -s --socks5 127.0.0.1:31303 --connect-timeout 5 --max-time 15 https://www.cloudflare.com/cdn-cgi/trace | grep "warp" | cut -d "=" -f 2)
-        if [[ "${warpStatus}" == "on" ]]; then
-            return 0
-        fi
-        sleep 5
-    done
-    return 1
-}
-
-# 安装 WARP
-installWarp() {
-    if [[ "${cpuVendor}" == "arm" ]]; then
-        errorCard "官方WARP客户端不支持ARM架构"
-        exit 0
-    fi
-
-    beginPackageInstallTransaction
-    local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
-
-    installPackageTracked "gnupg2" gnupg2
-    if [[ "${release}" == "debian" ]]; then
-        local warpRepoCodename
-        local warpKeyringFile warpRepoTarget repoBackupDir
-        warpRepoCodename=$(lsb_release -cs)
-        if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
-            warpKeyringFile=$(adapterWarpAptKeyringFile)
-            warpRepoTarget=$(adapterWarpAptRepoFile)
-            adapterCreateManagedRollbackBackup repoBackupDir "${warpKeyringFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源备份失败"
-            adapterRegisterPackageManagedRollback "${repoBackupDir}"
-            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg "${warpKeyringFile}" WARP
-            local repoFile
-            padmCreateTempPath repoFile "$(adapterWarpRepoTemplate)" || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
-            printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
-            commitRepoFile "${repoFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源提交失败"
-            refreshAptAfterRepoChange || failPackageInstallTransaction "WARP apt 源刷新失败"
-        else
-            errorCard "当前Debian版本暂不支持官方WARP客户端"
-            endPackageInstallTransaction "${packageTransactionOwner}"
-            exit 0
-        fi
-
-    elif [[ "${release}" == "ubuntu" ]]; then
-        local warpRepoCodename="focal"
-        local warpKeyringFile warpRepoTarget repoBackupDir
-        if curl -fsSL "https://pkg.cloudflareclient.com/dists/${warpRepoCodename}/Release" >/dev/null 2>&1; then
-            warpKeyringFile=$(adapterWarpAptKeyringFile)
-            warpRepoTarget=$(adapterWarpAptRepoFile)
-            adapterCreateManagedRollbackBackup repoBackupDir "${warpKeyringFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源备份失败"
-            adapterRegisterPackageManagedRollback "${repoBackupDir}"
-            installAptKeyringFromUrl https://pkg.cloudflareclient.com/pubkey.gpg "${warpKeyringFile}" WARP
-            local repoFile
-            padmCreateTempPath repoFile "$(adapterWarpRepoTemplate)" || failPackageInstallTransaction "WARP apt 源临时文件创建失败"
-            printf 'deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ %s main\n' "${warpRepoCodename}" >"${repoFile}"
-            commitRepoFile "${repoFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP apt 源提交失败"
-            refreshAptAfterRepoChange || failPackageInstallTransaction "WARP apt 源刷新失败"
-        else
-            errorCard "当前Ubuntu版本暂不支持官方WARP客户端"
-            endPackageInstallTransaction "${packageTransactionOwner}"
-            exit 0
-        fi
-
-    elif [[ "${release}" == "centos" || "${release}" == "fedora" ]]; then
-        installPackageTracked "yum-utils" yum-utils
-        local yumReposDir=${PADM_YUM_REPOS_DIR:-/etc/yum.repos.d}
-        local repoFile repoBackupDir warpRepoTarget
-        warpRepoTarget=$(adapterWarpYumRepoFile "${yumReposDir}")
-        adapterCreateManagedRollbackBackup repoBackupDir "${warpRepoTarget}" || failPackageInstallTransaction "WARP yum 源备份失败"
-        adapterRegisterPackageManagedRollback "${repoBackupDir}"
-        padmCreateTempPath repoFile "$(adapterWarpYumRepoTemplate)" || failPackageInstallTransaction "WARP yum 源临时文件创建失败"
-        cat <<EOF >"${repoFile}"
-[cloudflare-warp]
-name=Cloudflare WARP
-baseurl=https://pkg.cloudflareclient.com/rpm
-enabled=1
-gpgcheck=1
-gpgkey=https://pkg.cloudflareclient.com/pubkey.gpg
-EOF
-        mkdir -p "${yumReposDir}" || failPackageInstallTransaction "WARP yum 源目录创建失败"
-        commitRepoFile "${repoFile}" "${warpRepoTarget}" || failPackageInstallTransaction "WARP yum 源提交失败"
-    fi
-
-    installPackageTracked "cloudflare-warp" cloudflare-warp
-    if [[ -z $(which warp-cli) ]]; then
-        failPackageInstallTransaction "安装WARP失败"
-    fi
-    if ! enableWarpProxy; then
-        failPackageInstallTransaction "WARP代理启用失败"
-    fi
-
-    if checkWarpProxyTrace; then
-        successCard "WARP启动成功"
-        endPackageInstallTransaction "${packageTransactionOwner}"
-    else
-        warpRollbackProxy
-        failPackageInstallTransaction "WARP 连通性检测失败"
-    fi
 }

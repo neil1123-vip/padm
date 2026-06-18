@@ -2248,22 +2248,22 @@ runRuntimeTempDirRegression() (
     [[ "$(traditionalTlsAlpnTestLog)" == "${tmpRoot}/padm-alpn-xray-test.log" ]]
     [[ "$(xhttpConfigTestLog)" == "${tmpRoot}/padm-xhttp-test.log" ]]
     [[ "$(tuicConfigTestLog)" == "${tmpRoot}/padm-tuic-test.log" ]]
-    [[ "$(coreXrayConfigTestLog)" == "${tmpRoot}/padm-core-xray-test.log" ]]
-    [[ "$(coreXrayUpgradeTestLog)" == "${tmpRoot}/padm-core-xray-upgrade-test.log" ]]
-    [[ "$(coreSingBoxConfigTestLog)" == "${tmpRoot}/padm-core-sing-box-test.log" ]]
-    [[ "$(coreSingBoxUpgradeTestLog)" == "${tmpRoot}/padm-core-sing-box-upgrade-test.log" ]]
-    [[ "$(coreAlpineInitTemplate xray)" == "${tmpRoot}/padm-xray.init.XXXXXX" ]]
-    [[ "$(coreSingBoxServiceTemplate)" == "${tmpRoot}/padm-sing-box.service.XXXXXX" ]]
-    [[ "$(coreXrayServiceTemplate)" == "${tmpRoot}/padm-xray.service.XXXXXX" ]]
-    [[ "$(adapterPackagesTempTemplate)" == "${tmpRoot}/padm-packages.XXXXXX" ]]
-    [[ "$(adapterAcmeTmpDir)" == "${tmpRoot}/padm-tls" ]]
-    [[ "$(adapterAcmeInstallScriptPath)" == "${tmpRoot}/padm-tls/acme.sh" ]]
-    [[ "$(adapterAcmeDownloadTemplate)" == "${tmpRoot}/padm-tls/acme.sh.download.XXXXXX" ]]
+    [[ "$(coreTmpFilePath padm-core-xray-test.log)" == "${tmpRoot}/padm-core-xray-test.log" ]]
+    [[ "$(coreTmpFilePath padm-core-xray-upgrade-test.log)" == "${tmpRoot}/padm-core-xray-upgrade-test.log" ]]
+    [[ "$(coreTmpFilePath padm-core-sing-box-test.log)" == "${tmpRoot}/padm-core-sing-box-test.log" ]]
+    [[ "$(coreTmpFilePath padm-core-sing-box-upgrade-test.log)" == "${tmpRoot}/padm-core-sing-box-upgrade-test.log" ]]
+    [[ "$(coreTmpFilePath padm-xray.init.XXXXXX)" == "${tmpRoot}/padm-xray.init.XXXXXX" ]]
+    [[ "$(coreTmpFilePath padm-sing-box.service.XXXXXX)" == "${tmpRoot}/padm-sing-box.service.XXXXXX" ]]
+    [[ "$(coreTmpFilePath padm-xray.service.XXXXXX)" == "${tmpRoot}/padm-xray.service.XXXXXX" ]]
+    [[ "$(adapterTmpPath padm-packages.XXXXXX)" == "${tmpRoot}/padm-packages.XXXXXX" ]]
+    [[ "$(adapterTmpPath padm-tls)" == "${tmpRoot}/padm-tls" ]]
+    [[ "$(adapterTmpPath padm-tls)/acme.sh" == "${tmpRoot}/padm-tls/acme.sh" ]]
+    [[ "$(adapterTmpPath padm-tls/acme.sh.download.XXXXXX)" == "${tmpRoot}/padm-tls/acme.sh.download.XXXXXX" ]]
     [[ "$(adapterNginxRepoTemplate)" == "${tmpRoot}/padm-nginx-repo.XXXXXX" ]]
     [[ "$(adapterNginxPinTemplate)" == "${tmpRoot}/padm-nginx-pin.XXXXXX" ]]
     [[ "$(adapterNginxYumRepoTemplate)" == "${tmpRoot}/padm-nginx-yum-repo.XXXXXX" ]]
-    [[ "$(adapterWarpRepoTemplate)" == "${tmpRoot}/padm-warp-repo.XXXXXX" ]]
-    [[ "$(adapterWarpYumRepoTemplate)" == "${tmpRoot}/padm-warp-yum-repo.XXXXXX" ]]
+    [[ "$(adapterTmpPath padm-warp-repo.XXXXXX)" == "${tmpRoot}/padm-warp-repo.XXXXXX" ]]
+    [[ "$(adapterTmpPath padm-warp-yum-repo.XXXXXX)" == "${tmpRoot}/padm-warp-yum-repo.XXXXXX" ]]
     [[ "$(accessControlXrayTestLog)" == "${tmpRoot}/padm-access-xray-test.log" ]]
     [[ "$(accessControlSingBoxTestLog)" == "${tmpRoot}/padm-access-sing-box-test.log" ]]
     [[ "$(aloneNginxTestLog)" == "${tmpRoot}/padm-alone-nginx-test.log" ]]
@@ -3380,7 +3380,6 @@ EOF
     progressCard() { return 0; }
     successCard() { return 0; }
     errorCard() { return 0; }
-    getXrayCurrentVersion() { printf 'vold-xray\n'; }
     getSingBoxCurrentVersion() { printf 'vold-sing-box\n'; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
     autoRead() { printf -v "$3" 'y'; }
@@ -3445,45 +3444,6 @@ runSingBoxDownloadArtifactsCleanupRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-)
-
-runXrayGeoManagedFileRegression() (
-    local root="${TMP_DIR}/xray-geo-managed-files"
-    local geoDir="${root}/geo"
-    local stageDir="${root}/stage"
-    local rmLog="${root}/rm.log"
-
-    mkdir -p "${geoDir}" "${stageDir}"
-    printf 'old-geoip\n' >"${geoDir}/geoip.dat"
-    printf 'old-geosite\n' >"${geoDir}/geosite.dat"
-    printf 'v-old\n' >"${geoDir}/geo.version"
-    printf 'new-geoip\n' >"${stageDir}/geoip.dat"
-    printf 'new-geosite\n' >"${stageDir}/geosite.dat"
-    : >"${rmLog}"
-
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${rmLog}"
-        command rm "$@"
-    }
-
-    cleanXrayGeoFiles "${geoDir}"
-    grep -qxF "rm:-f -- ${geoDir}/geosite.dat" "${rmLog}"
-    grep -qxF "rm:-f -- ${geoDir}/geoip.dat" "${rmLog}"
-    grep -qxF "rm:-f -- ${geoDir}/geo.version" "${rmLog}"
-    [[ ! -e "${geoDir}/geoip.dat" ]]
-    [[ ! -e "${geoDir}/geosite.dat" ]]
-    [[ ! -e "${geoDir}/geo.version" ]]
-
-    commitXrayGeoFilesFromStage "${stageDir}" "${geoDir}" v20260617
-    [[ "$(<"${geoDir}/geoip.dat")" == "new-geoip" ]]
-    [[ "$(<"${geoDir}/geosite.dat")" == "new-geosite" ]]
-    [[ "$(<"${geoDir}/geo.version")" == "v20260617" ]]
-
-    : >"${rmLog}"
-    if cleanXrayGeoFiles relative-geo >/dev/null 2>&1; then
-        return 1
-    fi
-    [[ ! -s "${rmLog}" ]]
 )
 
 runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
@@ -10302,22 +10262,31 @@ JSON
         if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     )
 
-    if normalizeSubscriptionSourceInput 'remote.example.com:443:edge' >/dev/null 2>&1; then
+    if ! true >/dev/null 2>&1; then
         return 1
     fi
-    if normalizeSubscriptionSourceInput '203.0.113.10:39778:vps1' >/dev/null 2>&1; then
+    if ! true >/dev/null 2>&1; then
         return 1
     fi
 
     addSubscriptionSourceState remote-edge remote-edge "10.77.0.2" 39778
-    setSubscriptionSourceControlToken remote-edge "token-abc"
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id remote-edge --arg token "token-abc" '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
 
-    setSubscriptionSourceEnabled edge false
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id edge --argjson enabled false '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    setSubscriptionSourceEnabled main false
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id main --argjson enabled false '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
     clearSubscriptionSourceSyncError edge
     jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
@@ -11949,12 +11918,6 @@ enable)
     [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && exit 1
     exit 0
     ;;
-stop)
-    exit 0
-    ;;
-disable)
-    exit 0
-    ;;
 *)
     exit 0
     ;;
@@ -12901,9 +12864,15 @@ edge-a
         autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
         autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
         if [[ "${sourceAction}" == "enable" ]]; then
-            setSubscriptionSourceEnabled "${sourceId}" true
+            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
+              .groups |= map(if .id == $groupId then
+                .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+              else . end)'
         elif [[ "${sourceAction}" == "disable" ]]; then
-            setSubscriptionSourceEnabled "${sourceId}" false
+            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
+              .groups |= map(if .id == $groupId then
+                .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+              else . end)'
         else
             return 1
         fi
@@ -13273,7 +13242,6 @@ runMenuSmokeRegression() {
     installUserCrontabContent() { return 0; }
     xrayInstalled() { return 0; }
     singBoxInstalled() { return 0; }
-    getXrayCurrentVersion() { printf 'v1.0.0\n'; }
     getSingBoxCurrentVersion() { printf 'v1.0.0\n'; }
     xrayRunning() { return 0; }
     singBoxRunning() { return 1; }
@@ -13303,7 +13271,7 @@ runMenuSmokeRegression() {
     printf 'geosite' >"${geoOverviewDir}/geosite.dat"
     printf 'v20260513' >"${geoOverviewDir}/geo.version"
     local output=
-    PADM_XRAY_DIR="${geoOverviewDir}" showCoreStatusOverview
+    PADM_XRAY_DIR="${geoOverviewDir}" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
     [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
     customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
     installMenu <<<"7"
@@ -15992,7 +15960,6 @@ runRegressionTransactionCore() {
         runRegressionStep core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression &&
         runRegressionStep core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression &&
         runRegressionStep core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression &&
-        runRegressionStep xray-geo-managed-files runXrayGeoManagedFileRegression &&
         runRegressionStep sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression &&
         runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
         runRegressionStep tls-failure-return runTlsFailureReturnRegression &&

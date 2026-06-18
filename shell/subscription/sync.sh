@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-# 订阅组本机账号同步
-subscriptionSyncAccountPrefix() {
-    echo "sub_"
-}
-
 subscriptionSyncAccountEscapeId() {
     local id=$1
     local escaped=${id//_/$'\001'}
@@ -23,7 +18,7 @@ subscriptionSyncAccountUnescapeId() {
 
 subscriptionSyncAccountName() {
     local id=$1
-    echo "$(subscriptionSyncAccountPrefix)$(subscriptionSyncAccountEscapeId "${id}")"
+    echo "sub_$(subscriptionSyncAccountEscapeId "${id}")"
 }
 
 subscriptionSyncFindUserByAccountName() {
@@ -53,7 +48,7 @@ subscriptionSyncAccountId() {
         jq -r '.id' <<<"${userJson}"
         return 0
     fi
-    prefix=$(subscriptionSyncAccountPrefix)
+    prefix="sub_"
     [[ "${accountName}" == "${prefix}"* ]] || return 1
     escapedId=${accountName#"${prefix}"}
     subscriptionSyncAccountUnescapeId "${escapedId}"

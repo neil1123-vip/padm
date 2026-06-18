@@ -1,20 +1,8 @@
 #!/usr/bin/env bash
 
-warpConfigDir() {
-    printf '%s\n' "${PADM_WARP_DIR:-/etc/padm/warp}"
-}
-
-warpRegBinaryPath() {
-    printf '%s\n' "$(warpConfigDir)/warp-reg"
-}
-
-warpRegConfigPath() {
-    printf '%s\n' "$(warpConfigDir)/config"
-}
-
 warpConfigSafeDir() {
     local warpDir
-    warpDir=$(warpConfigDir)
+    warpDir="${PADM_WARP_DIR:-/etc/padm/warp}"
     padmIsSafeAbsolutePath "${warpDir%/}" || return 1
     printf '%s\n' "${warpDir%/}"
 }
@@ -33,8 +21,8 @@ readConfigWarpReg() {
     local configFile warpBinary tmpFile
     local warpDir
     warpDir=$(warpConfigSafeDir) || return 1
-    configFile=$(warpRegConfigPath)
-    warpBinary=$(warpRegBinaryPath)
+    configFile="${warpDir}/config"
+    warpBinary="${warpDir}/warp-reg"
 
     if ! warpRegConfigLooksValid "${configFile}"; then
         mkdir -p "${warpDir}" || return 1
@@ -69,7 +57,7 @@ readConfigWarpReg() {
 installWarpReg() {
     local warpDir warpBinary
     warpDir=$(warpConfigSafeDir) || return 1
-    warpBinary=$(warpRegBinaryPath)
+    warpBinary="${warpDir}/warp-reg"
     if [[ ! -f "${warpBinary}" ]]; then
         echo
         echoContent title "\n┌─ warp-reg 第三方工具 ──────────────────────────────"
@@ -158,7 +146,7 @@ unInstallWireGuard() {
     local warpDir
     local warpConfig
     warpDir=$(warpConfigSafeDir) || return 1
-    warpConfig=$(warpRegConfigPath)
+    warpConfig="${warpDir}/config"
     if [[ "${coreInstallType}" == "1" ]]; then
 
         if [[ "${type}" == "IPv4" ]]; then

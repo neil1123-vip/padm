@@ -657,18 +657,6 @@ runAutoInstallGeneratedIdentityRegression() {
     )
 }
 
-runDefaultRandomUserNameRegression() {
-    (
-        set -euo pipefail
-        # shellcheck source=/dev/null
-        source "${PROJECT_ROOT}/shell/core/runtime.sh"
-        local uuid name
-        uuid='ABCDEF12-3456-7890-ABCD-EF1234567890'
-        name=$(defaultRandomUserNameFromUuid "${uuid}")
-        [[ "${name}" == "padm-abcdef12" ]]
-    )
-}
-
 runAutoInstallAllowsEmptyDefaultRegression() {
     (
         set -euo pipefail
@@ -723,12 +711,61 @@ resolveReleaseWorkflowVersionForRegression() {
     local latestTag=$3
     local commits=$4
     local releaseVersion needsBump
+    local baseVersion major minor patch bump commitMessage
+
+    releaseWorkflowCommitRequiresMajorBump() {
+        local commitMessage=$1
+        echo "${commitMessage}" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:|BREAKING CHANGE:'
+    }
+
+    releaseWorkflowCommitRequiresMinorBump() {
+        local commitMessage=$1
+        echo "${commitMessage}" | grep -qE '^feat(\([^)]*\))?:'
+    }
+
+    releaseWorkflowCommitRequiresPatchBump() {
+        local commitMessage=$1
+        echo "${commitMessage}" | grep -qE '^(fix|perf|refactor|docs|test|build|ci|chore)(\([^)]*\))?:'
+    }
 
     if [[ "${isReleaseCommit}" == "true" ]]; then
         releaseVersion="${currentVersion}"
         needsBump=false
     else
-        releaseVersion="v$(nextScriptVersionFromCommits "${latestTag}" "${commits}")"
+        baseVersion=${latestTag#v}
+        major=${baseVersion%%.*}
+        minor=${baseVersion#*.}
+        minor=${minor%%.*}
+        patch=${baseVersion##*.}
+        bump=none
+
+        while IFS= read -r commitMessage; do
+            if releaseWorkflowCommitRequiresMajorBump "${commitMessage}"; then
+                bump=major
+                break
+            elif [[ "${bump}" != "minor" ]] && releaseWorkflowCommitRequiresMinorBump "${commitMessage}"; then
+                bump=minor
+            elif [[ "${bump}" == "none" ]] && releaseWorkflowCommitRequiresPatchBump "${commitMessage}"; then
+                bump=patch
+            fi
+        done <<<"${commits}"
+
+        case "${bump}" in
+        major)
+            major=$((major + 1))
+            minor=0
+            patch=0
+            ;;
+        minor)
+            minor=$((minor + 1))
+            patch=0
+            ;;
+        patch)
+            patch=$((patch + 1))
+            ;;
+        esac
+
+        releaseVersion="v${major}.${minor}.${patch}"
         if [[ "${releaseVersion}" != "${currentVersion}" ]]; then
             needsBump=true
         else
@@ -750,6 +787,30 @@ runReleaseWorkflowVersionRegression() {
     [[ "${result}" == "v0.1.0 true" ]]
     result=$(resolveReleaseWorkflowVersionForRegression true v1.3.0 v1.2.0 $'chore(release): v1.3.0')
     [[ "${result}" == "v1.3.0 false" ]]
+}
+
+runVersionHelpersRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/version.sh"
+
+        local nextVersion versionFile
+        nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'fix(update): harden script refresh rollback')
+        [[ "${nextVersion}" == "1.2.1" ]]
+        nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'feat(subscription): add new flow')
+        [[ "${nextVersion}" == "1.3.0" ]]
+        nextVersion=$(nextScriptVersionFromCommits v1.2.0 $'style: whitespace only')
+        [[ "${nextVersion}" == "1.2.0" ]]
+
+        versionFile="${TMP_DIR}/version-helper-version.sh"
+        cat >"${versionFile}" <<'EOF'
+#!/usr/bin/env bash
+SCRIPT_VERSION="1.2.0"
+EOF
+        setScriptVersion v1.2.3 "${versionFile}"
+        grep -q '^SCRIPT_VERSION="1\.2\.3"$' "${versionFile}"
+    )
 }
 
 runNginxBlogAutoInstallRegression() {
@@ -1047,9 +1108,7 @@ runMenuSmokeLightRegression() {
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
     menuClose() { return 0; }
-    statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
-    successCard() { recordMenuAction "successCard:$1"; }
     autoRead() {
         local targetVar=$3
         local input=
@@ -1057,11 +1116,6 @@ runMenuSmokeLightRegression() {
         printf -v "${targetVar}" '%s' "${input}"
     }
     selectCoreInstall() { recordMenuAction selectCoreInstall; }
-    manageXHTTP() { recordMenuAction manageXHTTP; }
-    manageHysteria() { recordMenuAction manageHysteria; }
-    manageTuic() { recordMenuAction manageTuic; }
-    addCorePort() { recordMenuAction addCorePort; }
-    manageCDN() { recordMenuAction manageCDN; }
     manageFail2ban() { recordMenuAction manageFail2ban; }
     updatePadm() { recordMenuAction "updatePadm:$*"; }
     showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
@@ -1914,6 +1968,166 @@ runInstallRefreshRestoresBackupRegression() {
     [[ "$(<"${restoreFailureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
     [[ -d "${restoreFailureDir}/.padm-update-backup" ]]
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
+runInstallRefreshSingleArchiveGuardRegression() {
+    local archiveGuardCount
+    archiveGuardCount=$(awk '
+        /^refreshScriptModules\(\)/ { capture = 1 }
+        /^ensureScriptModules\(\)/ { capture = 0 }
+        capture && /\[\[ ! -d "\$\{archiveDir\}\/shell" \]\]/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/install.sh")
+    [[ "${archiveGuardCount}" == "1" ]]
+}
+
+runRegressionDispatcherSingleLegacyFallbackRegression() {
+    local legacyDispatchCount
+    legacyDispatchCount=$(awk '
+        /exec bash "\$\{SCRIPT_DIR\}\/regression\/subscription_groups_legacy\.sh" "\$@"/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/subscription_groups_regression.sh")
+    [[ "${legacyDispatchCount}" == "1" ]]
+}
+
+runRemoteControlSystemctlStubDefaultStopDisableRegression() {
+    local explicitStopDisableCount
+    explicitStopDisableCount=$(awk '
+        /runSubscriptionControlServiceInstallRegression\(\) \(/ { capture = 1 }
+        capture && /cat >"\$\{fakeBin\}\/systemctl" <<\x27SH\x27/ { in_stub = 1 }
+        in_stub && /^stop\)$/ { count++ }
+        in_stub && /^disable\)$/ { count++ }
+        in_stub && /^SH$/ { in_stub = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh")
+    [[ "${explicitStopDisableCount}" == "0" ]]
+}
+
+runRemoteControlFunctionStubDefaultStopDisableRegression() {
+    local explicitStopDisableCount
+    explicitStopDisableCount=$(awk '
+        /systemctl\(\) \{/ { capture = 1 }
+        capture && /stop \| disable\)/ { count++ }
+        capture && /^    }$/ { capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh")
+    [[ "${explicitStopDisableCount}" == "0" ]]
+}
+
+runTuicProtocolSingleDefaultBranchRegression() {
+    local explicitCubicCount
+    explicitCubicCount=$(awk '
+        /initTuicProtocol\(\) \{/ { capture = 1 }
+        capture && /case \$\{selectTuicAlgorithm\} in/ { in_case = 1 }
+        in_case && /tuicAlgorithm="cubic"/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh")
+    [[ "${explicitCubicCount}" == "1" ]]
+}
+
+runTlsDnsApiSingleDefaultBranchRegression() {
+    local explicitCloudflareCount
+    explicitCloudflareCount=$(awk '
+        /switchDNSAPI\(\) \{/ { capture = 1 }
+        capture && /case \$\{selectDNSAPIType\} in/ { in_case = 1 }
+        in_case && /dnsAPIType="cloudflare"/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/tls.sh")
+    [[ "${explicitCloudflareCount}" == "1" ]]
+}
+
+runTlsCaSingleDefaultBranchRegression() {
+    local explicitLetsEncryptCount
+    explicitLetsEncryptCount=$(awk '
+        /switchSSLType\(\) \{/ { capture = 1 }
+        capture && /case \$\{selectSSLType\} in/ { in_case = 1 }
+        in_case && /sslType="letsencrypt"/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/tls.sh")
+    [[ "${explicitLetsEncryptCount}" == "1" ]]
+}
+
+runRealityTargetSingleDefaultBranchRegression() {
+    local explicitDefaultTargetCount
+    explicitDefaultTargetCount=$(awk '
+        /collectRealityProfile\(\) \{/ { capture = 1 }
+        capture && /case "\$\{selectRealityTargetMode\}" in/ { in_case = 1 }
+        in_case && /^[[:space:]]*selectDefaultRealityTarget$/ { count++ }
+        in_case && /^    esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh")
+    [[ "${explicitDefaultTargetCount}" == "3" ]]
+}
+
+runAutoInstallTypeSingleCustomBranchRegression() {
+    local explicitCustomMenuCount
+    explicitCustomMenuCount=$(awk '
+        /autoValueForKey\(\) \{/ { capture = 1 }
+        capture && /case "\$\{AUTO_INSTALL_TYPE\}" in/ { in_case = 1 }
+        in_case && /printf '\''5'\''/ { count++ }
+        in_case && /^        esac$/ { in_case = 0; capture = 0 }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/core/runtime.sh")
+    [[ "${explicitCustomMenuCount}" == "1" ]]
+}
+
+runSubscriptionMenuWrapperCountRegression() {
+    local wrapperCount
+    wrapperCount=$(awk '
+        /^(manageSubscriptionQuickStart|manageSubscriptionMultiServerQuickStart|showUserSubscriptionLinksMenu|showSubscriptionControlPlaneDetails|manageLocalSubscription|manageSharedSubscriptions|createUserSubscription|manageMainControllerSubscriptions|manageControlledSubscription|manageSubscriptionMainControlMenu|manageSubscriptionDiagnostics)\(\) \{/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/subscription/menu.sh")
+    [[ "${wrapperCount}" == "0" ]]
+}
+
+runSubscriptionMenuDeadEntryCountRegression() {
+    local deadEntryCount
+    deadEntryCount=$(awk '
+        /^(manageAdminSubscription|manageUserSubscription|manageSubscriptionWireGuardControlMenu|showSubscriptionDiagnosticsOverview)\(\) \{/ { count++ }
+        END { print count + 0 }
+    ' "${PROJECT_ROOT}/shell/subscription/menu.sh")
+    [[ "${deadEntryCount}" == "0" ]]
+}
+
+runUnusedHelperFunctionCountRegression() {
+    local helperCount
+    helperCount=$(
+        {
+            awk '/^(check_apt_update)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/validate_install.sh"
+            awk '/^(check_nginx)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/validate_install.sh"
+            awk '/^(subscriptionRequireMainFeatures)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
+            awk '/^(subscriptionMainFeaturesAvailable|remoteSubscribeFile|toggleSubscriptionSourceMenu|showSubscriptionMultiServerStatus|showSubscriptionOperationsStatus|showSubscriptionControlledStatusOverview|showSubscriptionControlledControlDetails|subscriptionServiceConfigured|syncAndShowUserSubscriptionLinks|removeSubscriptionGroupSyncCron|subscriptionGroupSyncCronStatus|userJsonCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
+            awk '/^(showUserSubscriptionQuota)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/traffic.sh"
+            awk '/^(xrayRealityXHTTPConfigFile)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/output.sh"
+            awk '/^(testSubscriptionWireGuardControl|subscriptionWireGuardDefaultMainAddress|subscriptionWireGuardDefaultNetwork|subscriptionWireGuardInstalled)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+            awk '/^(subscriptionControlHealthRetryCount|subscriptionControlHealthRetryDelay)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/control.sh"
+            awk '/^(subscriptionSyncAccountPrefix)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/sync.sh"
+            awk '/^(protocolSelectionNeedsNginx|protocolSelectionNeedsReality|protocolSelectionNeedsUdp|protocolSelectionTransportHas|protocolSelectionSecurityHas|xrayProtocolFilename|xrayProtocolMenuLine|currentProtocolHasAll|protocolSelectionNeedsTLS|xrayProtocolIdByFilename|xrayProtocolEnabled|xrayProtocolDisplayName|xrayEnabledProtocolDisplayList|xrayProtocolCapability|protocolSelectionHasAll)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/protocols.sh"
+            awk '/^(getDLCNameByRuleLine)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_rules.sh"
+            awk '/^(unInstallSniffing)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_rules.sh"
+            awk '/^(cleanXrayGeoFiles|coreSingBoxCompatTempDirTemplate|coreXrayCompatTempDirTemplate|singBoxCompatibilityConfigFiles|xrayCompatibilityConfigFiles|coreAlpineInitTemplate|coreSingBoxServiceTemplate|coreXrayServiceTemplate|coreXrayConfigTestLog|coreXrayStrictConfigTestLog|coreXrayUpgradeTestLog|coreXrayPrereleaseAuditLog|coreSingBoxConfigTestLog|coreSingBoxUpgradeTestLog|coreSingBoxPrereleaseAuditLog|getXrayCurrentVersion|updateXray)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/cores.sh"
+            awk '/^(disableRunningService|handleFirewall)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/services.sh"
+            awk '/^(singBoxDnsHostsTag|singBoxDnsRoutingTag|singBoxDnsResolverTag)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/routing_dns.sh"
+            awk '/^(checkRealityDest|initTCPBrutal)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
+            awk '/^(realityTargetBlockedCandidateCount|realityTargetBlockedCandidateLineByIndex|realityTargetScanFile|realityTargetRecentlyFailed|realityTargetScanResultCount|realityTargetScanLineByIndex|realityTargetScanField|showRealityTargetCandidates|selectRealityTargetFromCandidates|realityScannerDir|realityTargetBlockedCandidatesFile|realityTargetResultsFile)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
+            awk '/^(realityTargetImportScannerCandidates|writeRealityTargetScanLine|realityAsnPrefixTotalAddressCount|filterRealityAsnPrefixesByMask|realityTargetCachedLine|selectRealityAsnPrefixSet|realityTargetXrayTestLog|realityTargetSingBoxTestLog)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
+            awk '/^(realityTargetCandidateExists|writeRealityTargetCandidateLine|realityTargetCacheFile|realityTargetResultLineByIndex|realityTargetResultLineByTargetIp|realityAsnPrefixAddressCount|realityTargetApplyLog|realityTargetBackupTemplate)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
+            awk '/^(realityAsnPrefixMask)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/reality_targets.sh"
+            awk '/^(normalizeSubscriptionSourceInput)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/subscription/menu.sh"
+            awk '/^(initSingBoxHysteria2Config)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/singbox.sh"
+            awk '/^(menuTitle|infoCard)\(\) \{/ { count++ } END { print count + 0 }' "${PROJECT_ROOT}/shell/core/locale.sh"
+        } | awk '{ sum += $1 } END { print sum + 0 }'
+    )
+    [[ "${helperCount}" == "0" ]]
+}
+
+runLegacyUsersModuleRemovedRegression() {
+    [[ ! -e "${PROJECT_ROOT}/shell/core/users.sh" ]]
+    ! grep -q 'source "${CORE_DIR}/users.sh"' "${PROJECT_ROOT}/shell/core/bootstrap.sh"
+    ! grep -q 'source "${PROJECT_ROOT}/shell/core/users.sh"' "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
 }
 
 runInstallEnsureModulesRegression() {
@@ -2781,8 +2995,6 @@ runSingBoxServiceMainPidTemplateRegression() {
         bootStartup() { return 0; }
         commitGeneratedFile() { cp "$1" "${TMP_DIR}/sing-box.service" && return 0; }
         progressCard() { return 0; }
-        errorCard() { return 1; }
-        coreSingBoxServiceTemplate() { printf '%s\n' "${TMP_DIR}/sing-box.service.XXXXXX"; }
         padmCreateTempPath() { printf -v "$1" '%s' "$(mktemp "$2")"; }
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/cores.sh"
@@ -2813,8 +3025,8 @@ runSingBoxRunningIgnoresClientProcessRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/services.sh"
         singBoxMergedConfigFile() { printf '%s\n' "/etc/padm/sing-box/conf/config.json"; }
-        singBoxSystemdServiceFile() { printf '%s\n' "${TMP_DIR}/sing-box.service"; }
-        singBoxOpenRcServiceFile() { printf '%s\n' "${TMP_DIR}/sing-box.openrc"; }
+        PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${TMP_DIR}/sing-box.service"
+        PADM_SINGBOX_OPENRC_SERVICE_FILE="${TMP_DIR}/sing-box.openrc"
         : >"${TMP_DIR}/sing-box.service"
         pgrep() { printf '2001\n2002\n'; }
         padmReadProcExe() { printf '/etc/padm/sing-box/sing-box\n'; }
@@ -2865,26 +3077,6 @@ runWarpConfigGenerationFailureRegression() {
         coreInstallType=2
         warpRegCoreCPUVendor="main-linux-amd64"
         address="172.16.0.2/32"
-
-        autoRead() {
-            if [[ "$1" == "warp_reg_install" ]]; then
-                printf -v "$3" '%s' 'n'
-            else
-                printf -v "$3" '%s' ''
-            fi
-        }
-        downloadGitHubReleaseAsset() { return 1; }
-        errorCard() { return 0; }
-        statusCard() { return 0; }
-        successCard() { return 0; }
-        progressCard() { return 0; }
-        echoContent() { return 0; }
-        menuLine() { return 0; }
-        menuItem() { return 0; }
-        menuDangerItem() { return 0; }
-        menuReturnItem() { return 0; }
-        menuClose() { return 0; }
-        reloadCore() { return 0; }
 
         cat >"${warpDir}/warp-reg" <<'EOF'
 #!/usr/bin/env bash
@@ -3037,13 +3229,7 @@ runFail2banMenuRegression() {
         fail2banControlSurfaceText() { printf '已检测到 /s/control/'; }
         fail2banCurrentProfileLabel() { printf 'SSH + 控制面防护'; }
         fail2banNginxScanStatusText() { printf '默认关闭'; }
-        showFail2banRuntimeStatus() { recordMenuAction showFail2banRuntimeStatus; }
-        fail2banRecommendedProfileName() { printf 'sshd+control\n'; }
-        fail2banApplyProfile() { recordMenuAction "fail2banApplyProfile:$1:${2:-}"; }
         fail2banApplyNginxScanExtension() { recordMenuAction "fail2banApplyNginxScanExtension:$1"; }
-        showFail2banBans() { recordMenuAction showFail2banBans; }
-        systemScriptMenu() { recordMenuAction systemScriptMenu; }
-        errorCard() { recordMenuAction "errorCard:$1"; }
 
         manageFail2ban <<<"5"
         grep -q "启用站点扫描扩展防护" <<<"${output}"
@@ -3070,9 +3256,9 @@ runSingBoxCompatibilityAuditRegression() {
 {"dns":{"servers":[{"address":"local","strategy":"ipv4_only"}],"rules":[{"outbound":"legacy-out"}]},"outbounds":[{"type":"wireguard","tag":"legacy-wg"},{"type":"block","tag":"legacy-block"}],"endpoints":[{"type":"wireguard","tag":"new-endpoint"}]}
 JSON
         local statusFile warnFile logFile
-        statusFile=$(singBoxCompatibilityAuditStatusFile)
-        warnFile=$(singBoxCompatibilityAuditWarnFile)
-        logFile=$(singBoxCompatibilityAuditLog)
+        statusFile=$(coreTmpFilePath padm-sing-box-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
+        logFile=$(coreTmpFilePath padm-sing-box-compat-audit.log)
         collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
         grep -q '^fail:' "${statusFile}"
         grep -q 'old WireGuard outbound' "${logFile}"
@@ -3152,9 +3338,9 @@ JSON
 {"reverse":{"bridges":[]}}
 JSON
         local statusFile warnFile logFile
-        statusFile=$(xrayCompatibilityAuditStatusFile)
-        warnFile=$(xrayCompatibilityAuditWarnFile)
-        logFile=$(xrayCompatibilityAuditLog)
+        statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
+        logFile=$(coreTmpFilePath padm-xray-compat-audit.log)
         collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
         grep -q '^fail:' "${statusFile}"
         grep -q '旧 users schema' "${logFile}"
@@ -3204,6 +3390,7 @@ runXrayPrereleaseDryRunRegression() {
 
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
+        runRegressionStep version-helpers runVersionHelpersRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
         runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression &&
         runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
@@ -3215,6 +3402,19 @@ runRegressionPlatform() {
         runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
         runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
+        runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression &&
+        runRegressionStep regression-dispatcher-single-legacy-fallback runRegressionDispatcherSingleLegacyFallbackRegression &&
+        runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
+        runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
+        runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
+        runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression &&
+        runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression &&
+        runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
+        runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression &&
+        runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression &&
+        runRegressionStep subscription-menu-dead-entry-count runSubscriptionMenuDeadEntryCountRegression &&
+        runRegressionStep unused-helper-function-count runUnusedHelperFunctionCountRegression &&
+        runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&

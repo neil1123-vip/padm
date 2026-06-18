@@ -928,7 +928,7 @@ updateRedirectNginxConf() {
     }
 EOF
 
-        if protocolSelectionHasAll "${selectCustomInstallType}" 2 5 || [[ -z "${selectCustomInstallType}" ]]; then
+        if { protocolSelectionHasAny "${selectCustomInstallType}" 2 && protocolSelectionHasAny "${selectCustomInstallType}" 5; } || [[ -z "${selectCustomInstallType}" ]]; then
             cat <<EOF
 server {
 	${nginxH2Conf}

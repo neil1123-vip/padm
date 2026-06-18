@@ -184,7 +184,7 @@ readInstallProtocolType() {
 
     while read -r row; do
         local protocolId=
-        protocolId=$(xrayProtocolIdByFilename "${row}.json")
+        protocolId=$(xray_protocol_registry | awk -F'|' -v file="${row##*/}.json" '$2 == file { print $1 }')
         protocolStateAdd "${protocolId}"
         if [[ "${row}" == *VLESS_TCP_inbounds* ]]; then
             frontingType=02_VLESS_TCP_inbounds
@@ -404,7 +404,28 @@ showLastInstallationConfig() {
 
     if [[ -n "${currentInstallProtocolType}" ]]; then
         local protocolList=
-        protocolList=$(xrayEnabledProtocolDisplayList)
+        while IFS='|' read -r protocolId _ _ _; do
+            if [[ " ${currentInstallProtocolType} " == *",${protocolId},"* ]]; then
+                case "${protocolId}" in
+                0) protocolList="${protocolList} VLESS+TCP/TLS_Vision" ;;
+                1) protocolList="${protocolList} VLESS+WS/TLS" ;;
+                2) protocolList="${protocolList} Trojan+gRPC/TLS" ;;
+                3) protocolList="${protocolList} VMess+WS/TLS" ;;
+                4) protocolList="${protocolList} Trojan+TCP/TLS" ;;
+                5) protocolList="${protocolList} VLESS+gRPC/TLS" ;;
+                6) protocolList="${protocolList} Hysteria2" ;;
+                7) protocolList="${protocolList} VLESS+Reality+Vision" ;;
+                8) protocolList="${protocolList} VLESS+Reality+gRPC" ;;
+                9) protocolList="${protocolList} Tuic" ;;
+                10) protocolList="${protocolList} Naive" ;;
+                11) protocolList="${protocolList} VMess+HTTPUpgrade" ;;
+                12) protocolList="${protocolList} VLESS+Reality+XHTTP" ;;
+                13) protocolList="${protocolList} AnyTLS" ;;
+                20) protocolList="${protocolList} Socks5" ;;
+                *) protocolList="${protocolList} $(xrayProtocolName "${protocolId}")" ;;
+                esac
+            fi
+        done < <(xray_protocol_registry)
         menuLine "协议：${protocolList}"
     fi
 

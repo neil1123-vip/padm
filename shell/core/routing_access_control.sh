@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-# 访问控制
-blacklist() {
-    accessControlMenu "$@"
-}
-
 accessControlMenu() {
     if [[ -z "${configPath}" ]]; then
         errorCard "未安装，请使用脚本安装"

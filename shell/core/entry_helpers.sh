@@ -648,35 +648,6 @@ updatePadm() {
     return 1
 }
 
-disableRunningService() {
-    local serviceName=$1
-    local displayName=$2
-    local wasActive=false
-
-    systemctl is-active --quiet "${serviceName}" || return 0
-    wasActive=true
-    if ! systemctl stop "${serviceName}" >/dev/null 2>&1; then
-        errorCard "${displayName}关闭失败"
-        return 1
-    fi
-    if ! systemctl disable "${serviceName}" >/dev/null 2>&1; then
-        if [[ "${wasActive}" == "true" ]]; then
-            systemctl start "${serviceName}" >/dev/null 2>&1 || true
-        fi
-        errorCard "${displayName}禁用失败，已尝试恢复原运行状态"
-        return 1
-    fi
-    successCard "${displayName}关闭成功"
-}
-
-# 防火墙
-handleFirewall() {
-    if [[ "$1" == "stop" ]]; then
-        disableRunningService ufw ufw
-        disableRunningService firewalld firewalld
-    fi
-}
-
 # 网络优化
 if ! declare -p PADM_BBR_SYSCTL_CONF >/dev/null 2>&1; then
     readonly PADM_BBR_SYSCTL_CONF="/etc/sysctl.d/99-padm-bbr.conf"

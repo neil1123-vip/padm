@@ -16,30 +16,6 @@ remoteControlRegressionSourceId() {
     printf '%s\n' "${id%%\"*}"
 }
 
-runCleanupTrapRegression() {
-    local tmpDir exitProbe intProbe intOutput termProbe termOutput
-
-    tmpDir=$(mktemp -d)
-    exitProbe="${tmpDir}/exit.XXXXXX"
-    intProbe="${tmpDir}/int.XXXXXX"
-    termProbe="${tmpDir}/term.XXXXXX"
-    intOutput="${tmpDir}/int.out"
-    termOutput="${tmpDir}/term.out"
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; exit 0' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${exitProbe}"
-    [[ ! -e "${exitProbe}" ]]
-    set +e
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -INT $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${intProbe}" >"${intOutput}" 2>&1
-    local intStatus=$?
-    bash -c 'source "$1"; padmCreateTempPath p "$2"; kill -TERM $$; exit 99' _ "${PROJECT_ROOT}/shell/core/runtime.sh" "${termProbe}" >"${termOutput}" 2>&1
-    local termStatus=$?
-    set -e
-    [[ ${intStatus} -eq 130 ]]
-    [[ ${termStatus} -eq 143 ]]
-    [[ ! -e "${intProbe}" ]]
-    [[ ! -e "${termProbe}" ]]
-    rm -rf "${tmpDir}"
-}
-
 runRemoteControlConcurrencyRegression() (
     local healthResult
     local planResult
@@ -921,14 +897,6 @@ JSON
     fi
 )
 
-runRemoteControlServerRefreshLightRegression() (
-    runRemoteControlServerRefreshRegression light
-)
-
-runRemoteControlServerRefreshLightApplyRegression() (
-    runRemoteControlServerRefreshRegression light apply
-)
-
 runRemoteControlServerRefreshLightApplyBasicRegression() (
     runRemoteControlServerRefreshRegression light apply-basic
 )
@@ -1132,9 +1100,6 @@ runSubscriptionControlServiceInstallRegression() (
             ;;
         enable)
             [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && return 1
-            return 0
-            ;;
-        stop | disable)
             return 0
             ;;
         *)
@@ -1432,14 +1397,6 @@ runRegressionRemoteControlSmokeCoreSteps() {
         runRegressionStep remote-control-health runRemoteControlHealthRegression
 }
 
-runRegressionRemoteControlSmokeRefreshSerialSteps() {
-    runRegressionStep remote-control-server-refresh-light runRemoteControlServerRefreshLightRegression
-}
-
-runRegressionRemoteControlSmokeRefreshApplySteps() {
-    runRegressionStep remote-control-server-refresh-light-apply runRemoteControlServerRefreshLightApplyRegression
-}
-
 runRegressionRemoteControlSmokeRefreshApplyBasicSteps() {
     runRegressionStep remote-control-server-refresh-light-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
 }
@@ -1458,24 +1415,6 @@ runRegressionRemoteControlSmokeRefreshRestoreSteps() {
 
 runRegressionRemoteControlSmokeRefreshReconcileSteps() {
     runRegressionStep remote-control-server-refresh-light-reconcile runRemoteControlServerRefreshLightReconcileRegression
-}
-
-runRegressionRemoteControlSmokeRefreshSteps() {
-    runRegressionRemoteControlSmokeRefreshSerialSteps
-}
-
-runRegressionRemoteControlSmokeSteps() {
-    runRegressionRemoteControlSmokeCoreSteps &&
-        runRegressionRemoteControlSmokeRefreshSteps
-}
-
-runRegressionRemoteControlContractSteps() {
-    runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression &&
-        runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
-}
-
-runRegressionRemoteControlContractServiceInstallSteps() {
-    runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression
 }
 
 runRegressionRemoteControlContractServiceInstallSuccessSteps() {

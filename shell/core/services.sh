@@ -195,8 +195,8 @@ singBoxRunning() {
     local systemdServiceFile
     local openRcServiceFile
     mergedConfig=$(singBoxMergedConfigFile 2>/dev/null || true)
-    systemdServiceFile=$(singBoxSystemdServiceFile 2>/dev/null || true)
-    openRcServiceFile=$(singBoxOpenRcServiceFile 2>/dev/null || true)
+    systemdServiceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
+    openRcServiceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
@@ -214,14 +214,6 @@ singBoxRunning() {
     return 1
 }
 
-singBoxSystemdServiceFile() {
-    printf '%s\n' "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}"
-}
-
-singBoxOpenRcServiceFile() {
-    printf '%s\n' "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}"
-}
-
 handleSingBoxMergeFailure() {
     errorCard "sing-box配置合并失败"
     menuLine "$(uiStyle warn "请手动执行以下命令查看 merge 错误日志：")"
@@ -232,7 +224,7 @@ handleSingBoxMergeFailure() {
 
 # 操作 sing-box
 handleSingBox() {
-    if [[ -f "$(singBoxSystemdServiceFile)" ]]; then
+    if [[ -f "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}" ]]; then
         if ! singBoxRunning && [[ "$1" == "start" ]]; then
             if ! singBoxMergeConfig; then
                 handleSingBoxMergeFailure
@@ -242,7 +234,7 @@ handleSingBox() {
         elif singBoxRunning && [[ "$1" == "stop" ]]; then
             systemctl stop sing-box.service
         fi
-    elif [[ -f "$(singBoxOpenRcServiceFile)" ]]; then
+    elif [[ -f "${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}" ]]; then
         if ! singBoxRunning && [[ "$1" == "start" ]]; then
             if ! singBoxMergeConfig; then
                 handleSingBoxMergeFailure

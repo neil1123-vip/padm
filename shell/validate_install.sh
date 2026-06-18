@@ -156,26 +156,6 @@ check_fail2ban_jail_has_section() {
     grep -Eq "^\\[${jailName//./\\.}\\]$" "${jailFile}" 2>/dev/null
 }
 
-check_apt_update() {
-    warn "校验阶段跳过 apt update；只读验证不刷新在线状态"
-}
-
-check_nginx() {
-    if command -v nginx >/dev/null 2>&1; then
-        pass "nginx 存在：$(nginx -v 2>&1)"
-        if nginx -t >/tmp/padm-validate-nginx.log 2>&1; then
-            pass "nginx 配置测试通过"
-        else
-            fail "nginx 配置测试失败"
-            cat /tmp/padm-validate-nginx.log
-        fi
-        check_service_active nginx
-        check_service_enabled nginx
-    else
-        warn "nginx 缺失，跳过 nginx 检查"
-    fi
-}
-
 check_xray() {
     if [[ -x /etc/padm/xray/xray ]]; then
         pass "xray 二进制可执行"
@@ -216,13 +196,13 @@ check_sing_box_compatibility_audit() {
     (
         # shellcheck source=/dev/null
         source /etc/padm/shell/core/bootstrap.sh
-        statusFile=$(singBoxCompatibilityAuditStatusFile)
-        warnFile=$(singBoxCompatibilityAuditWarnFile)
-        collectSingBoxCompatibilityFindings "${statusFile}" "$(singBoxCompatibilityAuditLog)" "${warnFile}"
+        statusFile=$(coreTmpFilePath padm-sing-box-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
+        collectSingBoxCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-sing-box-compat-audit.log)" "${warnFile}"
         summary=$(summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}")
         if singBoxCompatibilityAuditHasFailures "${statusFile}"; then
             printf 'WARN:%s\n' "${summary}"
-            printf 'LOG:%s\n' "$(singBoxCompatibilityAuditLog)"
+            printf 'LOG:%s\n' "$(coreTmpFilePath padm-sing-box-compat-audit.log)"
         elif [[ -s "${warnFile}" ]]; then
             printf 'WARN:%s\n' "${summary}"
         else
@@ -258,17 +238,17 @@ check_xray_compatibility_audit() {
     (
         # shellcheck source=/dev/null
         source /etc/padm/shell/core/bootstrap.sh
-        statusFile=$(xrayCompatibilityAuditStatusFile)
-        warnFile=$(xrayCompatibilityAuditWarnFile)
-        collectXrayCompatibilityFindings "${statusFile}" "$(xrayCompatibilityAuditLog)" "${warnFile}"
+        statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
+        warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
+        collectXrayCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-xray-compat-audit.log)" "${warnFile}"
         summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
-        strictLog=$(coreXrayStrictConfigTestLog)
+        strictLog=$(coreTmpFilePath padm-core-xray-strict-test.log)
         if ! validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}"; then
             printf 'WARN:STRICT_FAIL %s\n' "${strictLog}"
         fi
         if xrayCompatibilityAuditHasFailures "${statusFile}"; then
             printf 'WARN:%s\n' "${summary}"
-            printf 'LOG:%s\n' "$(xrayCompatibilityAuditLog)"
+            printf 'LOG:%s\n' "$(coreTmpFilePath padm-xray-compat-audit.log)"
         elif [[ -s "${warnFile}" ]]; then
             printf 'WARN:%s\n' "${summary}"
         else

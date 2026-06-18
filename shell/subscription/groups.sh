@@ -398,13 +398,6 @@ subscriptionGroupQuotaAutoApplyEnabled() {
     subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
 }
 
-setSubscriptionSources() {
-    local sources=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson sources "${sources}" '.groups |= map(if .id == $groupId then .sources = $sources else . end)'
-}
-
 addSubscriptionSourceState() {
     local id=$1
     local name=$2
@@ -432,17 +425,6 @@ removeSubscriptionSourceState() {
           .traffic.admin.sources |= (del(.[$id]) // {}) |
           .traffic.user_groups |= with_entries(.value.sources |= (del(.[$id]) // {}))
         end
-      else . end)'
-}
-
-setSubscriptionSourceControlToken() {
-    local id=$1
-    local token=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg token "${token}" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)
       else . end)'
 }
 
@@ -493,17 +475,6 @@ setSubscriptionSourceSyncFailure() {
     subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" '
       .groups |= map(if .id == $groupId then
         .sources |= map(if .id == $id then .sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | del(.last_sync_plan) else . end)
-      else . end)'
-}
-
-setSubscriptionSourceEnabled() {
-    local id=$1
-    local enabled=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --argjson enabled "${enabled}" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
       else . end)'
 }
 

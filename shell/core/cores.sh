@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # 清理 Xray geo 数据文件
-cleanXrayGeoFiles() {
+removeXrayGeoManagedFiles() {
     local targetDir=$1
     local geoipFile
     local geositeFile
@@ -311,14 +311,14 @@ installXray() {
         fi
         if ! ensureXrayGeoFiles "${targetDir}" force; then
             removeManagedFileIfPresent "${targetBinary}" || true
-            cleanXrayGeoFiles "${targetDir}"
+            removeXrayGeoManagedFiles "${targetDir}"
             padmRemoveCleanupPath "${tmpDir}"
             exit 1
         fi
         padmRemoveCleanupPath "${tmpDir}"
     else
         if [[ -z "${lastInstallationConfig:-}" ]]; then
-            successCard "Xray-core版本:$(getXrayCurrentVersion)"
+            successCard "Xray-core版本:$(coreXrayCurrentVersion)"
             if ! ensureXrayGeoFiles "$(coreXrayInstallDir)"; then
                 exit 1
             fi
@@ -426,7 +426,7 @@ xrayConfigInstalled() {
     return 1
 }
 
-getXrayCurrentVersion() {
+coreXrayCurrentVersion() {
     if xrayInstalled; then
         "$(coreXrayBinaryPath)" --version 2>/dev/null | awk 'NR==1 {print "v"$2}'
     else
@@ -456,7 +456,7 @@ coreServiceState() {
 
 validateXrayConfigWithBinary() {
     local binary=${1:-/etc/padm/xray/xray}
-    local logFile=${2:-$(coreXrayConfigTestLog)}
+    local logFile=${2:-$(coreTmpFilePath padm-core-xray-test.log)}
     local configDir
     configDir=$(coreXrayConfigDir)
     [[ -x "${binary}" ]] || return 1
@@ -466,7 +466,7 @@ validateXrayConfigWithBinary() {
 
 validateXrayConfigStrictWithBinary() {
     local binary=${1:-/etc/padm/xray/xray}
-    local logFile=${2:-$(coreXrayStrictConfigTestLog)}
+    local logFile=${2:-$(coreTmpFilePath padm-core-xray-strict-test.log)}
     local configDir
     configDir=$(coreXrayConfigDir)
     [[ -x "${binary}" ]] || return 1
@@ -484,43 +484,6 @@ coreTmpFilePath() {
     fi
 }
 
-coreXrayConfigTestLog() {
-    coreTmpFilePath padm-core-xray-test.log
-}
-
-coreXrayStrictConfigTestLog() {
-    coreTmpFilePath padm-core-xray-strict-test.log
-}
-
-coreXrayUpgradeTestLog() {
-    coreTmpFilePath padm-core-xray-upgrade-test.log
-}
-
-coreXrayPrereleaseAuditLog() {
-    coreTmpFilePath padm-core-xray-prerelease-audit.log
-}
-
-coreSingBoxConfigTestLog() {
-    coreTmpFilePath padm-core-sing-box-test.log
-}
-
-coreSingBoxUpgradeTestLog() {
-    coreTmpFilePath padm-core-sing-box-upgrade-test.log
-}
-
-coreAlpineInitTemplate() {
-    local serviceName=$1
-    coreTmpFilePath "padm-${serviceName}.init.XXXXXX"
-}
-
-coreSingBoxServiceTemplate() {
-    coreTmpFilePath padm-sing-box.service.XXXXXX
-}
-
-coreXrayServiceTemplate() {
-    coreTmpFilePath padm-xray.service.XXXXXX
-}
-
 singBoxConfigInstalled() {
     local mergedFile shardDir
     mergedFile=$(singBoxMergedConfigFile)
@@ -530,7 +493,7 @@ singBoxConfigInstalled() {
 
 validateSingBoxConfigWithBinary() {
     local binary=${1:-/etc/padm/sing-box/sing-box}
-    local logFile=${2:-$(coreSingBoxConfigTestLog)}
+    local logFile=${2:-$(coreTmpFilePath padm-core-sing-box-test.log)}
     [[ -x "${binary}" ]] || return 1
     singBoxConfigInstalled || return 2
     singBoxMergeConfigForValidation "${binary}" "${logFile}" check || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
@@ -540,31 +503,12 @@ singBoxCompatibilityAuditLog() {
     coreTmpFilePath padm-sing-box-compat-audit.log
 }
 
-coreSingBoxPrereleaseAuditLog() {
-    coreTmpFilePath padm-core-sing-box-prerelease-audit.log
-}
-
 singBoxCompatibilityAuditStatusFile() {
     coreTmpFilePath padm-sing-box-compat-audit.status
 }
 
 singBoxCompatibilityAuditWarnFile() {
     coreTmpFilePath padm-sing-box-compat-audit.warn
-}
-
-coreSingBoxCompatTempDirTemplate() {
-    coreTmpFilePath padm-sing-box-compat-download.XXXXXX
-}
-
-singBoxCompatibilityConfigFiles() {
-    local mergedFile shardDir file
-    mergedFile=$(singBoxMergedConfigFile)
-    shardDir=$(singBoxConfigShardDir)
-    [[ -f "${mergedFile}" ]] && printf '%s\n' "${mergedFile}"
-    for file in "${shardDir}"*.json; do
-        [[ -f "${file}" ]] || continue
-        printf '%s\n' "${file}"
-    done
 }
 
 singBoxCompatibilityAuditReset() {
@@ -646,7 +590,7 @@ collectSingBoxCompatibilityFindings() {
     local statusFile=$1
     local logFile=$2
     local warnFile=$3
-    local file foundJson=false
+    local file foundJson=false mergedFile shardDir
 
     singBoxCompatibilityAuditReset "${statusFile}"
     singBoxCompatibilityAuditReset "${warnFile}"
@@ -662,11 +606,19 @@ collectSingBoxCompatibilityFindings() {
         return 0
     fi
 
+    mergedFile=$(singBoxMergedConfigFile)
+    shardDir=$(singBoxConfigShardDir)
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
         foundJson=true
         singBoxCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}"
-    done < <(singBoxCompatibilityConfigFiles)
+    done < <(
+        [[ -f "${mergedFile}" ]] && printf '%s\n' "${mergedFile}"
+        for file in "${shardDir}"*.json; do
+            [[ -f "${file}" ]] || continue
+            printf '%s\n' "${file}"
+        done
+    )
 
     if [[ "${foundJson}" != "true" ]]; then
         singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件"
@@ -724,7 +676,7 @@ downloadSingBoxReleaseBinaryToTemp() {
     local tmpDirVar=${3:-}
     local tmpDir extractedDir binary
 
-    padmCreateTempPath tmpDir -d "$(coreSingBoxCompatTempDirTemplate)" || return 1
+    padmCreateTempPath tmpDir -d "$(coreTmpFilePath padm-sing-box-compat-download.XXXXXX)" || return 1
     downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
     local rc=$?
     if [[ "${rc}" -ne 0 ]]; then
@@ -745,7 +697,7 @@ downloadSingBoxReleaseBinaryToTemp() {
 
 checkSingBoxPrereleaseCompatibility() {
     local version=${1:-}
-    local logFile=${2:-$(coreSingBoxPrereleaseAuditLog)}
+    local logFile=${2:-$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)}
     local downloadedBinary=
     local downloadTmpDir=
     local resolvedVersion=
@@ -797,16 +749,6 @@ xrayCompatibilityAuditStatusFile() {
 
 xrayCompatibilityAuditWarnFile() {
     coreTmpFilePath padm-xray-compat-audit.warn
-}
-
-coreXrayCompatTempDirTemplate() {
-    coreTmpFilePath padm-xray-compat-download.XXXXXX
-}
-
-xrayCompatibilityConfigFiles() {
-    local configDir
-    configDir=$(coreXrayConfigDir)
-    find "${configDir}" -maxdepth 1 -type f -name '*.json' | sort
 }
 
 xrayCompatibilityAuditReset() {
@@ -893,7 +835,7 @@ collectXrayCompatibilityFindings() {
     local statusFile=$1
     local logFile=$2
     local warnFile=$3
-    local file foundJson=false
+    local file foundJson=false configDir
 
     xrayCompatibilityAuditReset "${statusFile}"
     xrayCompatibilityAuditReset "${warnFile}"
@@ -909,11 +851,12 @@ collectXrayCompatibilityFindings() {
         return 0
     fi
 
+    configDir=$(coreXrayConfigDir)
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
         foundJson=true
         xrayCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" "${warnFile}"
-    done < <(xrayCompatibilityConfigFiles)
+    done < <(find "${configDir}" -maxdepth 1 -type f -name '*.json' | sort)
 
     if [[ "${foundJson}" != "true" ]]; then
         xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 Xray JSON 配置文件"
@@ -971,7 +914,7 @@ downloadXrayReleaseBinaryToTemp() {
     local tmpDirVar=${3:-}
     local tmpDir binary
 
-    padmCreateTempPath tmpDir -d "$(coreXrayCompatTempDirTemplate)" || return 1
+    padmCreateTempPath tmpDir -d "$(coreTmpFilePath padm-xray-compat-download.XXXXXX)" || return 1
     downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
     local rc=$?
     if [[ "${rc}" -ne 0 ]]; then
@@ -990,7 +933,7 @@ downloadXrayReleaseBinaryToTemp() {
 }
 
 showXrayStrictValidation() {
-    local logFile=${1:-$(coreXrayStrictConfigTestLog)}
+    local logFile=${1:-$(coreTmpFilePath padm-core-xray-strict-test.log)}
 
     if ! xrayInstalled; then
         statusCard "Xray 严格模式校验" "跳过" "未检测到 Xray 二进制"
@@ -1011,7 +954,7 @@ showXrayStrictValidation() {
 
 checkXrayPrereleaseCompatibility() {
     local version=${1:-}
-    local logFile=${2:-$(coreXrayPrereleaseAuditLog)}
+    local logFile=${2:-$(coreTmpFilePath padm-core-xray-prerelease-audit.log)}
     local downloadedBinary=
     local downloadTmpDir=
     local resolvedVersion=
@@ -1097,14 +1040,14 @@ coreValidationState() {
     local core=$1
     local logFile
     if [[ "${core}" == "xray" ]]; then
-        logFile=$(coreXrayConfigTestLog)
+        logFile=$(coreTmpFilePath padm-core-xray-test.log)
         if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
             echo "通过"
         else
             echo "失败，查看 ${logFile}"
         fi
     elif [[ "${core}" == "sing-box" ]]; then
-        logFile=$(coreSingBoxConfigTestLog)
+        logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
             echo "通过"
         else
@@ -1155,7 +1098,7 @@ showCoreStatusOverview() {
     menuLine "Xray-core: $(coreDisplayState "${xrayVersion}")"
     menuLine "Xray 服务: $(coreDisplayState "$(coreServiceState xray xrayRunning)")"
     if [[ -x "${xrayBinary}" ]]; then
-        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" "$(coreXrayConfigTestLog)")")"
+        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" "$(coreTmpFilePath padm-core-xray-test.log)")")"
         if xrayConfigInstalled; then
             menuLine "Xray 兼容: $(coreDisplayState "$(xrayCompatibilityAuditOverviewSummary)")"
         fi
@@ -1267,7 +1210,7 @@ installDownloadedXrayBinary() {
     local version=$1
     local tmpDir oldBinary backupBinary newBinary logFile
     local rc
-    logFile=$(coreXrayUpgradeTestLog)
+    logFile=$(coreTmpFilePath padm-core-xray-upgrade-test.log)
     padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.XXXXXX || return 1
     downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
     rc=$?
@@ -1325,7 +1268,7 @@ installDownloadedSingBoxBinary() {
     local version=$1
     local tmpDir oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup
     local rc
-    logFile=$(coreSingBoxUpgradeTestLog)
+    logFile=$(coreTmpFilePath padm-core-sing-box-upgrade-test.log)
     padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
     downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
     rc=$?
@@ -1414,7 +1357,7 @@ upgradeXrayCore() {
     version=${version:-$(coreLatestReleaseTag XTLS/Xray-core "${prerelease}")}
     checkVersionNotEmpty "${version}"
     if [[ "${prerelease}" == "true" ]]; then
-        if ! checkXrayPrereleaseCompatibility "${version}" "$(coreXrayPrereleaseAuditLog)"; then
+        if ! checkXrayPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-xray-prerelease-audit.log)"; then
             return 1
         fi
     fi
@@ -1430,7 +1373,7 @@ upgradeSingBoxCore() {
     version=${version:-$(coreLatestReleaseTag SagerNet/sing-box "${prerelease}")}
     checkVersionNotEmpty "${version}"
     if [[ "${prerelease}" == "true" ]]; then
-        if ! checkSingBoxPrereleaseCompatibility "${version}" "$(coreSingBoxPrereleaseAuditLog)"; then
+        if ! checkSingBoxPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)"; then
             return 1
         fi
     fi
@@ -1479,7 +1422,7 @@ xrayVersionManageMenu() {
         ;;
     5)
         local logFile
-        logFile=$(coreXrayConfigTestLog)
+        logFile=$(coreTmpFilePath padm-core-xray-test.log)
         if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
@@ -1516,18 +1459,6 @@ updateGeoSite() {
     statusCard "Geo 数据" "更新完毕" "当前版本：${newVersion}"
 }
 
-updateXray() {
-    readInstallType
-    local targetVersion=$1
-    local targetPrerelease=${prereleaseStatus:-false}
-    if xrayInstalled; then
-        upgradeXrayCore "${targetPrerelease}" "${targetVersion}"
-    else
-        installXray 1 "${targetPrerelease}"
-    fi
-}
-
-
 # 验证整个服务是否可用
 checkGFWStatue() {
     readInstallType
@@ -1547,7 +1478,7 @@ checkGFWStatue() {
 installAlpineStartup() {
     local serviceName=$1
     local tmpFile
-    padmCreateTempPath tmpFile "$(coreAlpineInitTemplate "${serviceName}")" || return 1
+    padmCreateTempPath tmpFile "$(coreTmpFilePath "padm-${serviceName}.init.XXXXXX")" || return 1
 
     if [[ "${serviceName}" == "sing-box" ]]; then
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
@@ -1591,7 +1522,7 @@ installSingBoxService() {
     if [[ -n $(find /bin /usr/bin -name "systemctl") && "${release}" != "alpine" ]]; then
         local serviceFile=/etc/systemd/system/sing-box.service
         local tmpFile
-        padmCreateTempPath tmpFile "$(coreSingBoxServiceTemplate)" || exit 1
+        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-sing-box.service.XXXXXX)" || exit 1
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
 [Unit]
 Description=Sing-Box Service
@@ -1643,7 +1574,7 @@ installXrayService() {
     if [[ -n $(find /bin /usr/bin -name "systemctl") ]]; then
         local serviceFile=/etc/systemd/system/xray.service
         local tmpFile
-        padmCreateTempPath tmpFile "$(coreXrayServiceTemplate)" || exit 1
+        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-xray.service.XXXXXX)" || exit 1
         cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
 [Unit]
 Description=Xray Service
@@ -2299,7 +2230,7 @@ coreConfigMaintenanceMenu() {
     case "${selectMaintenance}" in
     1)
         local logFile
-        logFile=$(coreXrayConfigTestLog)
+        logFile=$(coreTmpFilePath padm-core-xray-test.log)
         if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
             statusCard "Xray 配置校验" "通过"
         else
@@ -2311,7 +2242,7 @@ coreConfigMaintenanceMenu() {
     4) checkXrayPrereleaseCompatibility ;;
     5)
         local logFile
-        logFile=$(coreSingBoxConfigTestLog)
+        logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
             statusCard "sing-box 配置校验" "通过"
         else
@@ -2422,7 +2353,7 @@ singBoxVersionManageMenu() {
         ;;
     5)
         local logFile
-        logFile=$(coreSingBoxConfigTestLog)
+        logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
             statusCard "sing-box 配置校验" "通过"
         else

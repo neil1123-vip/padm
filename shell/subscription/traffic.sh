@@ -338,28 +338,6 @@ showUserSubscriptionQuotaStatus() {
       end'
 }
 
-showUserSubscriptionQuota() {
-    local userSubscriptionId=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    ensureSubscriptionGroupsState
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" --arg id "${userSubscriptionId}" '
-      .groups[] | select(.id == $groupId) |
-      (.user_groups[]? | select(.id == $id)) as $userGroup |
-      (.traffic.user_groups[$id] // {upload:0, download:0, sources:{}}) as $traffic |
-      (((($traffic.upload // 0) + ($traffic.download // 0)) / 1024 / 1024) | floor) as $usedMb |
-      "ID: \($userGroup.id)\n名称: \($userGroup.name)\n已用: \($usedMb) MB\n上限: \(if ($userGroup.traffic_limit_gb // 0) <= 0 then "不限" else (($userGroup.traffic_limit_gb | tostring) + " GB") end)\n状态: " +
-      (if ($userGroup.traffic_limit_gb // 0) <= 0 then
-        "不限额"
-      else
-        ((($userGroup.traffic_limit_gb * 1024 * 1024 * 1024) | floor) as $limitBytes |
-         (((($traffic.upload // 0) + ($traffic.download // 0)) * 100 / $limitBytes) | floor) as $percent |
-         if $percent >= 100 then "已超限(" + ($percent | tostring) + "%)"
-         elif $percent >= 80 then "接近上限(" + ($percent | tostring) + "%)"
-         else "正常(" + ($percent | tostring) + "%)" end)
-      end)'
-}
-
 showAdminSubscriptionTraffic() {
     local groupId
     local traffic

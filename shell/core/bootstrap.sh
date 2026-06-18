@@ -45,8 +45,6 @@ source "${CORE_DIR}/routing_warp.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/routing_socks.sh"
 # shellcheck source=/dev/null
-source "${CORE_DIR}/routing_vmess.sh"
-# shellcheck source=/dev/null
 source "${CORE_DIR}/routing.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/routing_access_control.sh"
@@ -60,8 +58,6 @@ source "${CORE_DIR}/cores.sh"
 source "${CORE_DIR}/core_templates.sh"
 # shellcheck source=/dev/null
 source "${CORE_DIR}/protocol_runtime.sh"
-# shellcheck source=/dev/null
-source "${CORE_DIR}/users.sh"
 # shellcheck source=/dev/null
 source "${SUB_DIR}/groups.sh"
 # shellcheck source=/dev/null

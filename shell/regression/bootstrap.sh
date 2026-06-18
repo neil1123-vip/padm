@@ -95,8 +95,6 @@ source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing_socks.sh"
 # shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/routing_vmess.sh"
-# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/routing_access_control.sh"
@@ -114,8 +112,6 @@ source "${PROJECT_ROOT}/shell/core/network.sh"
 source "${PROJECT_ROOT}/shell/core/fail2ban.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
-# shellcheck source=/dev/null
-source "${PROJECT_ROOT}/shell/core/users.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/subscription/groups.sh"
 # shellcheck source=/dev/null

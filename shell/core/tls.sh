@@ -66,9 +66,6 @@ switchDNSAPI() {
         menuClose
         autoRead dns_api_type "请选择[回车]使用默认:" selectDNSAPIType
         case ${selectDNSAPIType} in
-        1)
-            dnsAPIType="cloudflare"
-            ;;
         2)
             dnsAPIType="aliyun"
             ;;
@@ -128,9 +125,6 @@ switchSSLType() {
         menuClose
         autoRead tls_ca "请选择[回车]使用默认:" selectSSLType
         case ${selectSSLType} in
-        1)
-            sslType="letsencrypt"
-            ;;
         2)
             sslType="zerossl"
             ;;

@@ -696,14 +696,6 @@ sys.exit(0 if payload.get("ok") is True else 1)
 PY
 }
 
-subscriptionControlHealthRetryCount() {
-    printf '%s\n' "${PADM_CONTROL_HEALTH_RETRIES:-20}"
-}
-
-subscriptionControlHealthRetryDelay() {
-    printf '%s\n' "${PADM_CONTROL_HEALTH_RETRY_DELAY:-0.25}"
-}
-
 subscriptionControlRestoreServiceInstall() {
     local backupDir=$1
     local serviceWasActive=${2:-false}
@@ -832,8 +824,8 @@ EOF
             return 1
         fi
     fi
-    retryCount=$(subscriptionControlHealthRetryCount)
-    retryDelay=$(subscriptionControlHealthRetryDelay)
+    retryCount=${PADM_CONTROL_HEALTH_RETRIES:-20}
+    retryDelay=${PADM_CONTROL_HEALTH_RETRY_DELAY:-0.25}
     for ((i = 0; i < retryCount; i++)); do
         if subscriptionControlHealthCheck "${token}" >/dev/null 2>&1; then
             padmRemoveCleanupPath "${serviceBackupDir}"

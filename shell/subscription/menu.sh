@@ -33,30 +33,6 @@ subscriptionCurrentRoleNormalized() {
     esac
 }
 
-subscriptionMainFeaturesAvailable() {
-    [[ "$(subscriptionCurrentRoleNormalized)" != "controlled" ]]
-}
-
-subscriptionRequireMainFeatures() {
-    if subscriptionMainFeaturesAvailable; then
-        return 0
-    fi
-    errorCard "当前机器已初始化为被控" "分享订阅、同步执行和用量治理请在主控服务器处理"
-    return 1
-}
-
-manageSubscriptionQuickStart() {
-    manageSubscription
-}
-
-manageSubscriptionMultiServerQuickStart() {
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main) runSubscriptionMainControllerWizard ;;
-    controlled) runSubscriptionControlledWizard ;;
-    *) manageSubscriptionRoleSelection ;;
-    esac
-}
-
 runSubscriptionMainControllerWizard() {
     initSubscriptionWireGuardMain || return 1
     showSubscriptionWireGuardMainCredential
@@ -72,17 +48,13 @@ runSubscriptionControlledWizard() {
     showSubscriptionWireGuardStatus
 }
 
-subscriptionServiceConfigured() {
+ensureSubscriptionServiceForSharedLinks() {
+    local confirm=
     subscribePort=
     subscribeDomain=
     subscribeType=
     readNginxSubscribe
-    [[ -n "${subscribePort:-}" ]]
-}
-
-ensureSubscriptionServiceForSharedLinks() {
-    local confirm=
-    if subscriptionServiceConfigured; then
+    if [[ -n "${subscribePort:-}" ]]; then
         return 0
     fi
 
@@ -102,18 +74,6 @@ ensureSubscriptionServiceForSharedLinks() {
     return 1
 }
 
-syncAndShowUserSubscriptionLinks() {
-    local userSubscriptionId=$1
-    runSubscriptionGroupSync skip-subscribe-refresh || return 1
-    showUserSubscriptionLinks "${userSubscriptionId}"
-}
-
-showUserSubscriptionLinksMenu() {
-    local userSubscriptionId
-    userSubscriptionId=$(selectUserSubscriptionId) || return 1
-    showUserSubscriptionLinks "${userSubscriptionId}"
-}
-
 showSubscriptionCurrentRoleCredential() {
     local state
     local role
@@ -131,15 +91,6 @@ showSubscriptionCurrentRoleCredential() {
         return 1
         ;;
     esac
-}
-
-showSubscriptionControlPlaneDetails() {
-    local role
-    role=$(subscriptionCurrentRoleNormalized)
-    showSubscriptionWireGuardStatus
-    if [[ "${role}" != "controlled" ]]; then
-        showSubscriptionSourceControlUrls
-    fi
 }
 
 subscriptionRequireMainRole() {
@@ -232,7 +183,13 @@ manageSubscriptionControlledHome() {
         autoRead subscription_controlled_home_menu "请选择:" controlledHomeStatus
         case "${controlledHomeStatus}" in
         1) runSubscriptionControlledWizard ;;
-        2) showSubscriptionControlledStatusOverview ;;
+        2)
+            echoContent title "\n┌─ 本机状态 ─────────────────────────────────────────"
+            showSubscriptionServerRoleSummary
+            showSubscriptionCurrentRoleCredential || true
+            showSubscriptionWireGuardStatus
+            showSubscriptionSourceSyncResults
+            ;;
         3) manageSubscriptionControlledMaintenance ;;
         4) menu; return ;;
         *) errorCard "选择错误，请重新选择" ;;
@@ -268,26 +225,6 @@ manageSubscriptionPublishSubscriptions() {
     done
 }
 
-showSubscriptionMultiServerStatus() {
-    showSubscriptionCurrentRoleCredential || true
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main)
-        showSubscriptionSources
-        showSubscriptionRemoteHealthPlan
-        showSubscriptionSourceSyncResults
-        ;;
-    controlled)
-        showSubscriptionWireGuardStatus
-        showSubscriptionSourceSyncResults
-        ;;
-    *)
-        showSubscriptionSources
-        showSubscriptionRemoteHealthPlan
-        showSubscriptionSourceSyncResults
-        ;;
-    esac
-}
-
 manageSubscriptionMultiServer() {
     subscriptionRequireMainRole || return 1
     while true; do
@@ -306,18 +243,29 @@ manageSubscriptionMultiServer() {
         1) runSubscriptionMainControllerWizard ;;
         2) addSubscribeMenu ;;
         3) setSubscriptionSourceControlTokenMenu ;;
-        4) showSubscriptionMultiServerStatus ;;
+        4)
+            showSubscriptionCurrentRoleCredential || true
+            case "$(subscriptionCurrentRoleNormalized)" in
+            main)
+                showSubscriptionSources
+                showSubscriptionRemoteHealthPlan
+                showSubscriptionSourceSyncResults
+                ;;
+            controlled)
+                showSubscriptionWireGuardStatus
+                showSubscriptionSourceSyncResults
+                ;;
+            *)
+                showSubscriptionSources
+                showSubscriptionRemoteHealthPlan
+                showSubscriptionSourceSyncResults
+                ;;
+            esac
+            ;;
         5) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
-}
-
-showSubscriptionOperationsStatus() {
-    showSubscriptionGroupsStateSummary
-    showSubscriptionLocalSyncPlan
-    showSubscriptionRemoteSyncPlan
-    showSubscriptionSourceSyncResults
 }
 
 manageSubscriptionMainControlDetails() {
@@ -369,7 +317,12 @@ manageSubscriptionMainMaintenance() {
         case "${mainMaintenanceStatus}" in
         1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
         2) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
-        3) showSubscriptionOperationsStatus ;;
+        3)
+            showSubscriptionGroupsStateSummary
+            showSubscriptionLocalSyncPlan
+            showSubscriptionRemoteSyncPlan
+            showSubscriptionSourceSyncResults
+            ;;
         4) manageTrafficAndQuota ;;
         5) manageSubscriptionSyncSettings ;;
         6) manageSubscriptionStateBackups ;;
@@ -379,22 +332,6 @@ manageSubscriptionMainMaintenance() {
         *) errorCard "选择错误，请重新选择" ;;
         esac
     done
-}
-
-showSubscriptionControlledStatusOverview() {
-    subscriptionRequireControlledRole || return 1
-    echoContent title "\n┌─ 本机状态 ─────────────────────────────────────────"
-    showSubscriptionServerRoleSummary
-    showSubscriptionCurrentRoleCredential || true
-    showSubscriptionWireGuardStatus
-    showSubscriptionSourceSyncResults
-}
-
-showSubscriptionControlledControlDetails() {
-    subscriptionRequireControlledRole || return 1
-    echoContent title "\n┌─ 控制面与 Peer 细节 ───────────────────────────────"
-    showSubscriptionWireGuardStatus
-    showSubscriptionWireGuardPeers
 }
 
 manageSubscriptionControlledMaintenance() {
@@ -412,7 +349,11 @@ manageSubscriptionControlledMaintenance() {
         autoRead subscription_controlled_maintenance_menu "请选择:" controlledMaintenanceStatus
         case "${controlledMaintenanceStatus}" in
         1) importSubscriptionWireGuardMainCredential ;;
-        2) showSubscriptionControlledControlDetails ;;
+        2)
+            echoContent title "\n┌─ 控制面与 Peer 细节 ───────────────────────────────"
+            showSubscriptionWireGuardStatus
+            showSubscriptionWireGuardPeers
+            ;;
         3) restartSubscriptionWireGuardControl ;;
         4) disableSubscriptionWireGuardControl ;;
         5) return ;;
@@ -446,10 +387,6 @@ manageSubscription() {
     done
 }
 
-manageLocalSubscription() {
-    manageSubscriptionPublishSubscriptions
-}
-
 showSubscriptionServiceStatus() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" ]]; then
@@ -459,29 +396,9 @@ showSubscriptionServiceStatus() {
     fi
 }
 
-manageAdminSubscription() {
-    manageSubscriptionPublishSubscriptions
-}
-
-manageSharedSubscriptions() {
-    manageSubscriptionPublishSubscriptions
-}
-
-manageUserSubscription() {
-    manageSubscriptionPublishSubscriptions
-}
-
 userResultCard() {
     local title=$1
     echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
-}
-
-userJsonCard() {
-    local title=$1
-    local json=$2
-    userResultCard "${title}"
-    printf '%s\n' "${json}" | jq .
-    menuClose
 }
 
 showSubscriptionJsonWithSummary() {
@@ -607,19 +524,6 @@ showUserSubscriptions() {
         esac
     done <<<"${output}"
     menuClose
-}
-
-createUserSubscription() {
-    local id=
-    local name=
-    autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
-    autoRead user_subscription_name "请输入显示名称[例 家人A/团队A]:" name
-    if [[ -z "${id}" || -z "${name}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
-        errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线，名称不能为空"
-        return 1
-    fi
-    addUserSubscriptionState "${id}" "${name}"
-    successCard "用户订阅已创建"
 }
 
 createAndSyncUserSubscriptionWizard() {
@@ -829,7 +733,10 @@ manageUserSubscriptionItem() {
         menuClose
         autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus
         case "${userSubscriptionItemStatus}" in
-        1) syncAndShowUserSubscriptionLinks "${userSubscriptionId}" ;;
+        1)
+            runSubscriptionGroupSync skip-subscribe-refresh || return 1
+            showUserSubscriptionLinks "${userSubscriptionId}"
+            ;;
         2) showUserSubscriptionLinks "${userSubscriptionId}" ;;
         3) showUserSubscriptionTraffic "${userSubscriptionId}" ;;
         4) setUserSubscriptionSourcesMenu "${userSubscriptionId}" ;;
@@ -894,15 +801,6 @@ setUserSubscriptionTrafficLimitMenu() {
 }
 
 
-
-# 服务器源管理
-normalizeSubscriptionSourceInput() {
-    return 1
-}
-
-remoteSubscribeFile() {
-    subscriptionGroupsFile
-}
 
 listRemoteSubscribeSources() {
     listSubscriptionSources | awk -F ':' '$3 != "main" && $4 != "wireguard" {print $5":"$6":"$2":"$4}'
@@ -1034,26 +932,6 @@ showSubscriptionSourceSyncResults() {
       "\n---"'
 }
 
-manageMainControllerSubscriptions() {
-    manageSubscriptionMainMaintenance
-}
-
-manageControlledSubscription() {
-    manageSubscriptionControlledMaintenance
-}
-
-manageSubscriptionMainControlMenu() {
-    manageSubscriptionMainControlDetails
-}
-
-manageSubscriptionWireGuardControlMenu() {
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main) manageSubscriptionMainControlDetails ;;
-    controlled) manageSubscriptionControlledMaintenance ;;
-    *) manageSubscriptionRoleSelection ;;
-    esac
-}
-
 setSubscriptionSourceControlTokenMenu() {
     subscriptionRequireMainRole || return 1
     local credential=
@@ -1124,29 +1002,6 @@ setSubscriptionSourceControlTokenMenu() {
     successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Peer 公钥和 Token 已保存，可继续测试被控连接"
 }
 
-toggleSubscriptionSourceMenu() {
-    subscriptionRequireMainRole || return 1
-    local sourceId=
-    local sourceAction=
-    listSubscriptionSources | awk -F ':' '$3 != "main" {print $1":"$2":启用="$7}'
-    autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
-    if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
-        errorCard "服务器源 ID 无效"
-        return 1
-    fi
-    autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
-    if [[ "${sourceAction}" == "enable" ]]; then
-        setSubscriptionSourceEnabled "${sourceId}" true
-        successCard "被控服务器已启用"
-    elif [[ "${sourceAction}" == "disable" ]]; then
-        setSubscriptionSourceEnabled "${sourceId}" false
-        successCard "被控服务器已停用"
-    else
-        errorCard "操作无效"
-        return 1
-    fi
-}
-
 clearSubscriptionSourceSyncErrorMenu() {
     subscriptionRequireMainRole || return 1
     local sourceId=
@@ -1160,50 +1015,18 @@ clearSubscriptionSourceSyncErrorMenu() {
     successCard "同步错误已清除"
 }
 
-showSubscriptionDiagnosticsOverview() {
-    local role
-    role=$(subscriptionCurrentRoleNormalized)
-    if [[ "${role}" == "controlled" ]]; then
-        showSubscriptionWireGuardStatus
-        showSubscriptionCurrentRoleCredential || true
-        showSubscriptionSourceSyncResults
-        return
-    fi
-    showSubscriptionServiceStatus
-    showSubscriptionWireGuardStatus
-    showSubscriptionGroupsStateSummary
-    showSubscriptionRemoteHealthPlan
-    showSubscriptionSourceSyncResults
-}
-
-manageSubscriptionDiagnostics() {
-    case "$(subscriptionCurrentRoleNormalized)" in
-    main) manageSubscriptionMainMaintenance ;;
-    controlled) manageSubscriptionControlledMaintenance ;;
-    *) manageSubscriptionRoleSelection ;;
-    esac
-}
-
-removeSubscriptionGroupSyncCron() {
-    local cronFile
-    local currentCron
-    cronFile=$(subscriptionGroupSyncCronFile)
-    mkdir -p "$(dirname "${cronFile}")"
-    currentCron=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
-    installUserCrontabContent "${currentCron}"
-}
-
 refreshSubscriptionGroupSyncCron() {
     ensureSubscriptionGroupsState
     if subscriptionGroupSyncEnabled; then
         installSubscriptionGroupSyncCron
     else
-        removeSubscriptionGroupSyncCron
+        local cronFile
+        local currentCron
+        cronFile=$(subscriptionGroupSyncCronFile)
+        mkdir -p "$(dirname "${cronFile}")"
+        currentCron=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
+        installUserCrontabContent "${currentCron}"
     fi
-}
-
-subscriptionGroupSyncCronStatus() {
-    crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true
 }
 
 manageSubscriptionSyncSettings() {
@@ -1216,7 +1039,9 @@ manageSubscriptionSyncSettings() {
         echoContent title "\n┌─ 自动同步 ─────────────────────────────────────────"
         menuLine "这里处理自动同步和超限策略。"
         menuLine "建议先查看同步计划，再决定是否开启自动同步、调整间隔或执行超限处理。"
-        userJsonCard "自动同步当前状态" "${syncStatus}"
+        userResultCard "自动同步当前状态"
+        printf '%s\n' "${syncStatus}" | jq .
+        menuClose
         echoContent title "\n┌─ 自动同步操作 ─────────────────────────────────────"
         menuItem 1 "开启/关闭自动同步" "切换定时同步状态"
         menuItem 2 "设置自动同步间隔" "设置 1-59 分钟间隔"
@@ -1261,7 +1086,7 @@ manageSubscriptionSyncSettings() {
             subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.quota_auto_apply = ((.sync.quota_auto_apply // false) | not) else . end)'
             successCard "限额自动执行状态已切换"
             ;;
-        10) subscriptionGroupSyncCronStatus ;;
+        10) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
         11) return ;;
         *) errorCard "选择错误，请重新选择" ;;
         esac

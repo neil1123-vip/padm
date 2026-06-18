@@ -51,12 +51,6 @@ protocolMeta() {
     return 1
 }
 
-xrayProtocolCapability() {
-    local protocolId=$1
-    local key=$2
-    [[ "$(protocolMeta "${protocolId}" "${key}" 2>/dev/null)" == "1" ]]
-}
-
 protocolSelectionIncludes() {
     local selection=$1
     local protocolId=$2
@@ -71,7 +65,7 @@ protocolSelectionHasCapability() {
     selection=",${selection// /},"
     selection=${selection//,,/,}
     while IFS='|' read -r protocolId _ _ _; do
-        if [[ "${selection}" == *",${protocolId},"* ]] && xrayProtocolCapability "${protocolId}" "${key}"; then
+        if [[ "${selection}" == *",${protocolId},"* ]] && [[ "$(protocolMeta "${protocolId}" "${key}" 2>/dev/null)" == "1" ]]; then
             return 0
         fi
     done < <(xray_protocol_registry)
@@ -98,18 +92,6 @@ protocolSelectionHasAny() {
     return 1
 }
 
-protocolSelectionHasAll() {
-    local selection=$1
-    shift
-    local normalized protocolId
-    normalized=",${selection// /},"
-    normalized=${normalized//,,/,}
-    for protocolId in "$@"; do
-        [[ "${normalized}" == *",${protocolId},"* ]] || return 1
-    done
-    return 0
-}
-
 currentProtocolHas() {
     local protocolId=$1
     protocolSelectionHasAny "${currentInstallProtocolType}" "${protocolId}"
@@ -119,33 +101,14 @@ currentProtocolHasAny() {
     protocolSelectionHasAny "${currentInstallProtocolType}" "$@"
 }
 
-currentProtocolHasAll() {
-    protocolSelectionHasAll "${currentInstallProtocolType}" "$@"
-}
-
 protocolSelectionSkipsNginx() {
     local selection=$1
     protocolSelectionOnlyRealityNoDomain "${selection}" && [[ -z "${realityOnlyWithDomain}" ]]
 }
 
-protocolSelectionNeedsTLS() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_tls"
-}
-
-protocolSelectionNeedsNginx() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_nginx"
-}
-
 protocolSelectionNeedsPath() {
     local selection=$1
     protocolSelectionHasCapability "${selection}" "needs_path"
-}
-
-protocolSelectionNeedsReality() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_reality"
 }
 
 protocolSelectionNeedsCertificate() {
@@ -158,47 +121,6 @@ protocolSelectionNeedsLocalCertificate() {
     protocolSelectionNeedsCertificate "${selection}" || [[ -n "${realityOnlyWithDomain:-}" ]]
 }
 
-protocolSelectionNeedsUdp() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_udp"
-}
-
-protocolSelectionTransportHas() {
-    local selection=$1
-    local transport=$2
-    local protocolId
-    selection=",${selection// /},"
-    selection=${selection//,,/,}
-    while IFS='|' read -r protocolId _ _ _; do
-        if [[ "${selection}" == *",${protocolId},"* && "$(protocolMeta "${protocolId}" transport 2>/dev/null)" == "${transport}" ]]; then
-            return 0
-        fi
-    done < <(xray_protocol_registry)
-    return 1
-}
-
-protocolSelectionSecurityHas() {
-    local selection=$1
-    local security=$2
-    local protocolId
-    selection=",${selection// /},"
-    selection=${selection//,,/,}
-    while IFS='|' read -r protocolId _ _ _; do
-        if [[ "${selection}" == *",${protocolId},"* && "$(protocolMeta "${protocolId}" security 2>/dev/null)" == "${security}" ]]; then
-            return 0
-        fi
-    done < <(xray_protocol_registry)
-    return 1
-}
-
-xrayProtocolIdByFilename() {
-    local filename=$1
-    filename=${filename##*/}
-    filename=${filename%.json}
-    filename="${filename}.json"
-    xray_protocol_registry | awk -F'|' -v file="$filename" '$2 == file { print $1 }'
-}
-
 protocolStateAdd() {
     local protocolId=$1
     [[ -n "${protocolId}" ]] || return
@@ -207,62 +129,9 @@ protocolStateAdd() {
     fi
 }
 
-xrayProtocolFilename() {
-    local protocolId=$1
-    xray_protocol_registry | awk -F'|' -v id="$protocolId" '$1 == id { print $2 }'
-}
-
 xrayProtocolName() {
     local protocolId=$1
     xray_protocol_registry | awk -F'|' -v id="$protocolId" '$1 == id { print $3 }'
-}
-
-xrayProtocolEnabled() {
-    local protocolId=$1
-    [[ " ${currentInstallProtocolType} " == *",${protocolId},"* ]]
-}
-
-xrayProtocolDisplayName() {
-    local protocolId=$1
-    case "${protocolId}" in
-    0) echo "VLESS+TCP/TLS_Vision" ;;
-    1) echo "VLESS+WS/TLS" ;;
-    2) echo "Trojan+gRPC/TLS" ;;
-    3) echo "VMess+WS/TLS" ;;
-    4) echo "Trojan+TCP/TLS" ;;
-    5) echo "VLESS+gRPC/TLS" ;;
-    6) echo "Hysteria2" ;;
-    7) echo "VLESS+Reality+Vision" ;;
-    8) echo "VLESS+Reality+gRPC" ;;
-    9) echo "Tuic" ;;
-    10) echo "Naive" ;;
-    11) echo "VMess+HTTPUpgrade" ;;
-    12) echo "VLESS+Reality+XHTTP" ;;
-    13) echo "AnyTLS" ;;
-    20) echo "Socks5" ;;
-    *) xrayProtocolName "${protocolId}" ;;
-    esac
-}
-
-xrayEnabledProtocolDisplayList() {
-    local protocolId name protocolList=
-    while IFS='|' read -r protocolId _ _ _; do
-        if xrayProtocolEnabled "${protocolId}"; then
-            name=$(xrayProtocolDisplayName "${protocolId}")
-            protocolList="${protocolList} ${name}"
-        fi
-    done < <(xray_protocol_registry)
-    echo "${protocolList}"
-}
-
-xrayProtocolMenuLine() {
-    local protocolId=$1
-    local entry
-    entry=$(xray_protocol_registry | awk -F'|' -v id="$protocolId" '$1 == id { print }')
-    [[ -n "$entry" ]] || return 1
-    local name
-    name=$(printf '%s' "$entry" | awk -F'|' '{print $3}')
-    echo "${protocolId}|${name}"
 }
 
 protocolMenuDescription() {

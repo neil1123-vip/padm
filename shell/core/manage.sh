@@ -1,44 +1,19 @@
 #!/usr/bin/env bash
 
-vlessEncryptionStateFile() {
-    echo "${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
-}
-
-vlessEncryptionXrayBinary() {
-    echo "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
-}
-
-vlessEncryptionXrayConfDir() {
-    echo "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}"
-}
-
-vlessEncryptionVisionConfigFile() {
-    echo "${PADM_VLESS_REALITY_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/07_VLESS_vision_reality_inbounds.json}"
-}
-
-vlessEncryptionXHTTPConfigFile() {
-    echo "${PADM_VLESS_XHTTP_CONFIG_FILE:-$(vlessEncryptionXrayConfDir)/12_VLESS_XHTTP_inbounds.json}"
-}
-
 vlessEncryptionConfigFile() {
     local xhttpConfig
-    xhttpConfig=$(vlessEncryptionXHTTPConfigFile)
+    xhttpConfig="${PADM_VLESS_XHTTP_CONFIG_FILE:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}/12_VLESS_XHTTP_inbounds.json}"
     if [[ -f "${xhttpConfig}" ]]; then
         echo "${xhttpConfig}"
     else
-        vlessEncryptionVisionConfigFile
+        echo "${PADM_VLESS_REALITY_CONFIG_FILE:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}/07_VLESS_vision_reality_inbounds.json}"
     fi
 }
 
 validateVlessEncryptionConfig() {
     local xrayBinary
-    xrayBinary=$(vlessEncryptionXrayBinary)
-    "${xrayBinary}" -test -confdir "$(vlessEncryptionXrayConfDir)" >"$(vlessEncryptionXrayTestLog)" 2>&1
-}
-
-vlessEncryptionXrayTestLog() {
-    local tmpBase="${TMPDIR:-/tmp}"
-    printf '%s\n' "${tmpBase%/}/padm-xray-test.log"
+    xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+    "${xrayBinary}" -test -confdir "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}" >"${TMPDIR:-/tmp}/padm-xray-test.log" 2>&1
 }
 
 xrayVersionAtLeast() {
@@ -58,7 +33,7 @@ vlessEncryptionStateSummary() {
     local stateFile
     local xrayVersion="未安装"
     local encryptionPrefix="none"
-    stateFile=$(vlessEncryptionStateFile)
+    stateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
     if [[ -x /etc/padm/xray/xray ]]; then
         xrayVersion=$(/etc/padm/xray/xray --version | awk 'NR==1 {print $2}')
     fi
@@ -187,8 +162,8 @@ setVlessRealityEncryption() {
     local decryption
     local hadStateBackup=false
     configFile=$(vlessEncryptionConfigFile)
-    stateFile=$(vlessEncryptionStateFile)
-    xrayBinary=$(vlessEncryptionXrayBinary)
+    stateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
+    xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
     configFile=$(padmRequireSafeAbsolutePath "${configFile}") || { errorCard "VLESS Encryption 配置路径异常"; return 1; }
     stateFile=$(padmResolveManagedAbsolutePath "${stateFile}") || { errorCard "VLESS Encryption 状态路径异常"; return 1; }
 
@@ -342,7 +317,7 @@ setVlessRealityEncryption() {
         fi
         echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
         menuLine "已回滚本次 VLESS Encryption 修改"
-        menuLine "排查日志：$(vlessEncryptionXrayTestLog)"
+        menuLine "排查日志：${TMPDIR:-/tmp}/padm-xray-test.log"
         menuClose
         return 1
     fi
@@ -2323,11 +2298,6 @@ initRandomSalt() {
     echo "${initCustomPath}"
 }
 
-switchAlpn() {
-    manageTraditionalTlsFallback "$@"
-}
-
-
 manageRealityTarget() {
     local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary
     while true; do
@@ -3249,38 +3219,5 @@ manageTuic() {
     else
         errorCard "选择错误，请重新选择"
         manageTuic
-    fi
-}
-
-# 操作 Hysteria
-handleHysteria() {
-    # shellcheck disable=SC2010
-    if find /bin /usr/bin | grep -q systemctl && ls /etc/systemd/system/ | grep -q hysteria.service; then
-        if [[ -z $(pgrep -f "hysteria/hysteria") ]] && [[ "$1" == "start" ]]; then
-            systemctl start hysteria.service
-        elif [[ -n $(pgrep -f "hysteria/hysteria") ]] && [[ "$1" == "stop" ]]; then
-            systemctl stop hysteria.service
-        fi
-    fi
-    sleep 0.8
-
-    if [[ "$1" == "start" ]]; then
-        if [[ -n $(pgrep -f "hysteria/hysteria") ]]; then
-            successCard "Hysteria启动成功"
-        else
-            errorCard "Hysteria启动失败"
-            menuLine "$(uiStyle warn "请手动执行以下命令查看错误日志：")"
-            menuLine "$(uiStyle value "/etc/padm/hysteria/hysteria --log-level debug -c /etc/padm/hysteria/conf/config.json server")"
-            exit 0
-        fi
-    elif [[ "$1" == "stop" ]]; then
-        if [[ -z $(pgrep -f "hysteria/hysteria") ]]; then
-            successCard "Hysteria关闭成功"
-        else
-            errorCard "Hysteria关闭失败"
-            menuLine "$(uiStyle warn "请手动执行以下命令清理残留进程：")"
-            menuLine "$(uiStyle value "ps -ef|grep -v grep|grep hysteria|awk '{print \$2}'|xargs kill -9")"
-            exit 0
-        fi
     fi
 }

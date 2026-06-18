@@ -27,14 +27,6 @@ subscriptionWireGuardConfigFile() {
     echo "/etc/wireguard/$(subscriptionWireGuardInterface).conf"
 }
 
-subscriptionWireGuardDefaultNetwork() {
-    echo "10.77.0.0/24"
-}
-
-subscriptionWireGuardDefaultMainAddress() {
-    echo "10.77.0.1/24"
-}
-
 subscriptionWireGuardDefaultListenPort() {
     echo 51820
 }
@@ -160,7 +152,7 @@ subscriptionWireGuardReadState() {
     if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
         jq -n \
           --arg interface "$(subscriptionWireGuardInterface)" \
-          --arg network "$(subscriptionWireGuardDefaultNetwork)" \
+          --arg network "10.77.0.0/24" \
           --argjson listenPort "$(subscriptionWireGuardDefaultListenPort)" \
           --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
           '{enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, address:"", endpoint_host:"", public_key:"", peers:[]}'
@@ -168,7 +160,7 @@ subscriptionWireGuardReadState() {
     fi
     jq -c \
       --arg interface "$(subscriptionWireGuardInterface)" \
-      --arg network "$(subscriptionWireGuardDefaultNetwork)" \
+      --arg network "10.77.0.0/24" \
       --argjson listenPort "$(subscriptionWireGuardDefaultListenPort)" \
       --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
       '({enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, address:"", endpoint_host:"", public_key:"", peers:[]} + .) |
@@ -263,12 +255,8 @@ subscriptionWireGuardRole() {
     subscriptionWireGuardReadState | jq -r '.role'
 }
 
-subscriptionWireGuardInstalled() {
-    command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1
-}
-
 installSubscriptionWireGuardTools() {
-    subscriptionWireGuardInstalled && return 0
+    command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1 && return 0
     if [[ "${packageManager:-}" == "apt" ]]; then
         installOptionalPackageTracked "WireGuard" wireguard-tools || return 1
     elif [[ "${packageManager:-}" == "yum" ]]; then
@@ -278,7 +266,7 @@ installSubscriptionWireGuardTools() {
     else
         return 1
     fi
-    subscriptionWireGuardInstalled
+    command -v wg >/dev/null 2>&1 && command -v wg-quick >/dev/null 2>&1
 }
 
 subscriptionWireGuardEnsureKeys() {
@@ -584,7 +572,7 @@ initSubscriptionWireGuardMain() {
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     listenPort=$(subscriptionWireGuardDefaultListenPort)
     controlPort=$(subscriptionWireGuardDefaultControlPort)
-    address=$(subscriptionWireGuardDefaultMainAddress)
+    address="10.77.0.1/24"
     autoRead wg_main_endpoint_host "请输入主控公网地址或域名[用于被控连接 WireGuard]:" endpointHost
     [[ -n "${endpointHost}" ]] || endpointHost=${currentHost:-}
     if ! subscriptionWireGuardValidEndpointHost "${endpointHost}"; then
@@ -905,10 +893,6 @@ showSubscriptionWireGuardStatus() {
 
 showSubscriptionWireGuardPeers() {
     subscriptionWireGuardReadState | jq -r '.peers[]? | "ID:\(.id)\n名称:\(.name)\n内网地址:\(.address)\n启用:\(.enabled)\n---"'
-}
-
-testSubscriptionWireGuardControl() {
-    showSubscriptionRemoteHealthPlan
 }
 
 restartSubscriptionWireGuardControl() {

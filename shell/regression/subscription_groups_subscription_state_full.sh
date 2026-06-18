@@ -258,7 +258,10 @@ JSON
 runSubscriptionGroupStateStructureSourceCredentialRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceCredentialFixture
-    setSubscriptionSourceControlToken remote-edge "token-abc"
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id remote-edge --arg token "token-abc" '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
     setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
     jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
@@ -267,9 +270,15 @@ runSubscriptionGroupStateStructureSourceCredentialRegression() {
 runSubscriptionGroupStateStructureSourceStatusRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceStatusFixture
-    setSubscriptionSourceEnabled edge false
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id edge --argjson enabled false '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    setSubscriptionSourceEnabled main false
+    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id main --argjson enabled false '
+      .groups |= map(if .id == $groupId then
+        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+      else . end)'
     jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
     clearSubscriptionSourceSyncError edge
     jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null

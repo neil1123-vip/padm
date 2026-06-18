@@ -42,10 +42,6 @@ realityTargetTmpPath() {
     fi
 }
 
-realityScannerDir() {
-    realityTargetTmpPath RealiTLScanner
-}
-
 realityScannerOutputPath() {
     local stamp=$1
     local suffix=${2:-}
@@ -54,22 +50,6 @@ realityScannerOutputPath() {
     else
         realityTargetTmpPath "padm-realitlscanner-${stamp}.csv"
     fi
-}
-
-realityTargetXrayTestLog() {
-    realityTargetTmpPath padm-reality-target-xray-test.log
-}
-
-realityTargetSingBoxTestLog() {
-    realityTargetTmpPath padm-reality-target-sing-box-test.log
-}
-
-realityTargetApplyLog() {
-    realityTargetTmpPath padm-reality-target-apply.log
-}
-
-realityTargetBackupTemplate() {
-    realityTargetTmpPath 'padm-reality-target.XXXXXX'
 }
 
 realityTargetScoreStyle() {
@@ -291,16 +271,12 @@ cloudflare.com|cloudflare.com|Cloudflare Root|global|cdn|yes|32|no|CDN 目标可
 EOF
 }
 
-realityTargetBlockedCandidatesFile() {
-    printf '%s\n' "${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
-}
-
 realityTargetManagedBlockedCandidatesFile() {
-    padmResolveManagedAbsolutePath "$(realityTargetBlockedCandidatesFile)"
+    padmResolveManagedAbsolutePath "${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
 }
 
 realityTargetManagedResultsFile() {
-    padmResolveManagedAbsolutePath "$(realityTargetResultsFile)"
+    padmResolveManagedAbsolutePath "${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
 }
 
 realityTargetManagedCandidatesFile() {
@@ -328,7 +304,7 @@ www.akamai.com|Akamai|cdn|CDN 目标可能带来转发滥用风险
 cloudflare.com|Cloudflare Root|cdn|CDN 目标可能带来转发滥用风险
 EOF
     local customBlockedFile
-    customBlockedFile=$(realityTargetBlockedCandidatesFile)
+    customBlockedFile="${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
     [[ -f "${customBlockedFile}" ]] && cat "${customBlockedFile}"
 }
 
@@ -387,41 +363,6 @@ realityTargetCandidates() {
     done < <(realityTargetCandidatePool)
 }
 
-realityTargetBlockedCandidateCount() {
-    realityTargetBlockedCandidates | wc -l | tr -d ' '
-}
-
-realityTargetBlockedCandidateLineByIndex() {
-    local wanted=$1
-    local line index=1
-    while IFS= read -r line; do
-        if [[ "${index}" == "${wanted}" ]]; then
-            printf '%s\n' "${line}"
-            return 0
-        fi
-        index=$((index + 1))
-    done < <(realityTargetBlockedCandidates)
-    return 1
-}
-
-realityTargetCandidateExists() {
-    local host=$1
-    realityTargetCandidatePool | awk -F'|' -v host="${host}" '$1 == host {found=1} END{exit !found}'
-}
-
-writeRealityTargetCandidateLine() {
-    local host=$1
-    local sni=$2
-    local name=$3
-    local region=$4
-    local category=$5
-    local cdn=$6
-    local rank=$7
-    local recommended=$8
-    local note=$9
-    printf '%s|%s|%s|%s|%s|%s|%s|%s|%s\n' "${host}" "${sni}" "${name}" "${region}" "${category}" "${cdn}" "${rank}" "${recommended}" "${note}"
-}
-
 realityTargetScannerRecordAllowed() {
     local domain=$1
     local lowerDomain
@@ -442,26 +383,6 @@ realityTargetScannerRecordAllowed() {
     return 0
 }
 
-realityTargetImportScannerCandidates() {
-    local sourceFile=$1
-    local added=0 skipped=0 ip origin domain issuer geo
-    [[ -f "${sourceFile}" ]] || return 1
-    while IFS=, read -r ip origin domain issuer geo; do
-        [[ "${ip}" == "IP" ]] && continue
-        domain=${domain#\"}
-        domain=${domain%\"}
-        issuer=${issuer#\"}
-        issuer=${issuer%\"}
-        if ! realityTargetScannerRecordAllowed "${domain}" || realityTargetCandidateExists "${domain}"; then
-            skipped=$((skipped + 1))
-            continue
-        fi
-        writeRealityTargetCandidateLine "${domain}" "${domain}" "${domain}" "global" "scanner" "unknown" "39" "no" "imported from RealiTLScanner: ${issuer} ${geo}" >/dev/null
-        added=$((added + 1))
-    done < "${sourceFile}"
-    printf '%s\n' "${added}"
-}
-
 showRealityTargetBlockedCandidates() {
     local line index=1 host name reason note
     echoContent title "\n┌─ REALITY 目标站黑名单 ─────────────────────────────"
@@ -477,44 +398,14 @@ showRealityTargetBlockedCandidates() {
     menuClose
 }
 
-realityTargetResultsFile() {
-    printf '%s\n' "${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
-}
-
-realityTargetCacheFile() {
-    realityTargetResultsFile
-}
-
-realityTargetScanFile() {
-    realityTargetResultsFile
-}
-
 realityTargetResultCount() {
     local resultsFile
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     [[ -f "${resultsFile}" ]] || {
         printf '0\n'
         return 0
     }
     awk -F'\t' '$10 == "A" || $10 == "B" {count++} END{print count + 0}' "${resultsFile}"
-}
-
-realityTargetResultLineByIndex() {
-    local wanted=$1
-    local resultsFile
-    resultsFile=$(realityTargetResultsFile)
-    [[ -f "${resultsFile}" ]] || return 1
-    sortedRealityTargetResults | awk -F'\t' -v wanted="${wanted}" '
-      $10 == "A" || $10 == "B" {
-        itemIndex++
-        if (itemIndex == wanted) {
-          print $0
-          found=1
-          exit
-        }
-      }
-      END{if (!found) exit 1}
-    '
 }
 
 realityTargetResultField() {
@@ -541,15 +432,6 @@ realityTargetResultField() {
     *) value= ;;
     esac
     printf '%s\n' "${value}"
-}
-
-realityTargetResultLineByTargetIp() {
-    local target=$1
-    local ip=$2
-    local resultsFile
-    resultsFile=$(realityTargetResultsFile)
-    [[ -f "${resultsFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" -v ip="${ip}" '$1 == target && $6 == ip {print; found=1; exit} END{if (!found) exit 1}' "${resultsFile}"
 }
 
 removeRealityTargetResultLine() {
@@ -583,18 +465,6 @@ removeRealityTargetFromUnifiedLibrary() {
     local status=$?
     padmRemoveCleanupPath "${targetsFile}"
     return "${status}"
-}
-
-realityTargetRecentlyFailed() {
-    local target=$1
-    local ip=$2
-    local now=$3
-    local line checkedAt
-    line=$(realityTargetResultLineByTargetIp "${target}" "${ip}") || return 1
-    checkedAt=$(realityTargetResultField "${line}" 14)
-    [[ "$(realityTargetResultField "${line}" 10)" == "FAIL" ]] || return 1
-    [[ "${checkedAt}" =~ ^[0-9]+$ ]] || return 1
-    [[ $((now - checkedAt)) -lt 86400 ]]
 }
 
 formatRealityTargetResultLine() {
@@ -743,7 +613,7 @@ removeRealityTargetsFromUnifiedLibrary() {
 
 sortedRealityTargetResults() {
     local resultsFile
-    resultsFile=$(realityTargetResultsFile)
+    resultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
     [[ -f "${resultsFile}" ]] || return 1
     awk -F'\t' '
       {
@@ -755,34 +625,6 @@ sortedRealityTargetResults() {
         printf "%d\t%d\t%d\t%d\t%d\t%s\n", scoreRank, networkRank, cdnRank, certRank, checked, $0
       }
     ' "${resultsFile}" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3nr -k4,4nr -k5,5nr | cut -f6-
-}
-
-realityTargetScanResultCount() {
-    realityTargetResultCount
-}
-
-realityTargetScanLineByIndex() {
-    realityTargetResultLineByIndex "$1"
-}
-
-realityTargetScanField() {
-    realityTargetResultField "$1" "$2"
-}
-
-writeRealityTargetScanLine() {
-    local target=$1
-    local sni=$2
-    local ip=$3
-    local asn=$4
-    local asOrg=$5
-    local networkMatch=$6
-    local score=$7
-    local pqc=$8
-    local certLength=$9
-    local tls13=${10}
-    local checkedAt=${11}
-    local note=${12}
-    writeRealityTargetResultLine "${target}" "${sni}" "${target%%:*}" "unknown" "unknown" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
 }
 
 bestScannedRealityTargetLine() {
@@ -891,20 +733,6 @@ normalizeRealityAsn() {
     printf 'AS%s\n' "${asn}"
 }
 
-realityAsnPrefixMask() {
-    local prefix=$1
-    [[ "${prefix}" =~ /([0-9]+)$ ]] || return 1
-    printf '%s\n' "${BASH_REMATCH[1]}"
-}
-
-realityAsnPrefixAddressCount() {
-    local prefix=$1
-    local mask
-    mask=$(realityAsnPrefixMask "${prefix}") || return 1
-    [[ "${mask}" =~ ^[0-9]+$ && "${mask}" -le 32 ]] || return 1
-    printf '%s\n' "$((1 << (32 - mask)))"
-}
-
 fetchRealityAsnPrefixes() {
     local asn=$1
     local response
@@ -913,26 +741,6 @@ fetchRealityAsnPrefixes() {
     command -v jq >/dev/null 2>&1 || return 1
     response=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://stat.ripe.net/data/announced-prefixes/data.json?resource=${asn}" 2>/dev/null) || return 1
     printf '%s\n' "${response}" | jq -r '.data.prefixes[]?.prefix | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$"))' 2>/dev/null
-}
-
-realityAsnPrefixTotalAddressCount() {
-    local prefix count total=0
-    while IFS= read -r prefix; do
-        count=$(realityAsnPrefixAddressCount "${prefix}" || printf 0)
-        [[ "${count}" =~ ^[0-9]+$ ]] || count=0
-        total=$((total + count))
-    done
-    printf '%s\n' "${total}"
-}
-
-filterRealityAsnPrefixesByMask() {
-    local minMask=$1
-    local maxMask=${2:-32}
-    local prefix mask
-    while IFS= read -r prefix; do
-        mask=$(realityAsnPrefixMask "${prefix}") || continue
-        [[ "${mask}" -ge "${minMask}" && "${mask}" -le "${maxMask}" ]] && printf '%s\n' "${prefix}"
-    done
 }
 
 realityIpv4ToInt() {
@@ -1194,10 +1002,6 @@ selectRealityAsnScanPlan() {
     done
 }
 
-selectRealityAsnPrefixSet() {
-    selectRealityAsnScanPlan "$@"
-}
-
 realityTargetProviderMatches() {
     local currentOrg=$1
     local candidateOrg=$2
@@ -1425,23 +1229,6 @@ selectRealityTargetCandidateInteractive() {
     done
 }
 
-showRealityTargetCandidates() {
-    local page=1
-    local pageSize=${REALITY_TARGET_PAGE_SIZE:-12}
-    local total maxPage
-    total=$(realityTargetFilteredCandidateCount all)
-    maxPage=$(( (total + pageSize - 1) / pageSize ))
-    (( maxPage < 1 )) && maxPage=1
-    while (( page <= maxPage )); do
-        showRealityTargetCandidatePage all "${page}" "${pageSize}"
-        page=$((page + 1))
-    done
-}
-
-selectRealityTargetFromCandidates() {
-    selectRealityTargetCandidateInteractive recommended
-}
-
 selectAutoRecommendedRealityTarget() {
     local detector line host sni name category cdn target tlsPingResult result score pqc certLength tls13 note checkedAt
     local probeLimit probed=0 bestRank=0 bestCert=0 bestHost= bestPort=443 bestSni= bestTarget= bestScore= bestPqc= bestCertLength=
@@ -1538,14 +1325,6 @@ parseRealityTargetInput() {
     realityTargetHost=${targetHost}
     realityTargetPort=${targetPort}
     realitySNI=${AUTO_REALITY_SERVER_NAME:-${realityTargetHost}}
-}
-
-realityTargetCachedLine() {
-    local target=$1
-    local cacheFile
-    cacheFile=$(realityTargetCacheFile)
-    [[ -f "${cacheFile}" ]] || return 1
-    awk -F'\t' -v target="${target}" '$1 == target {printf "%s\t%s\t%s\t%s\t%s\t%s\n", $10, $11, $12, $13, $14, $15; found=1} END{if (!found) exit 1}' "${cacheFile}"
 }
 
 writeRealityTargetCacheLine() {
@@ -1844,7 +1623,7 @@ runRealityScannerRange() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "扫描范围为空"
         return 1
     }
-    scannerDir=$(realityScannerDir)
+    scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     outputFile=$(realityScannerOutputPath "$(date +%s)")
@@ -1879,7 +1658,7 @@ runRealityScannerTargetFile() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "目标列表为空"
         return 1
     }
-    scannerDir=$(realityScannerDir)
+    scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     total=$(wc -l <"${targetFile}" | tr -d ' ')
@@ -1941,7 +1720,7 @@ runRealityScannerPrefixFile() {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "prefix 列表为空"
         return 1
     }
-    scannerDir=$(realityScannerDir)
+    scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
     total=$(wc -l <"${prefixFile}" | tr -d ' ')
@@ -2000,7 +1779,7 @@ runRealityScannerSameAsnPrefixes() {
         realityTargetStatusBlock red "同 ASN 前缀扫描" "未获取到 ${currentAsn} 的 IPv4 前缀"
         return 1
     fi
-    if ! selectRealityAsnPrefixSet "${currentAsn}" "${allPrefixFile}"; then
+    if ! selectRealityAsnScanPlan "${currentAsn}" "${allPrefixFile}"; then
         padmRemoveCleanupPath "${allPrefixFile}"
         return 1
     fi
@@ -2372,7 +2151,7 @@ scanLocalAsnRealityTargets() {
     local rest=${networkProfile#*$'\t'}
     currentAsn=${rest%%$'\t'*}
     currentOrg=${rest#*$'\t'}
-    realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "正在复测统一目标库并写入结果表: $(realityTargetResultsFile)"
+    realityTargetStatusBlock yellow "REALITY 目标库质量刷新" "本机公网网络: ${currentIp} ${currentAsn} ${currentOrg}" "正在复测统一目标库并写入结果表: ${PADM_REALITY_TARGET_RESULTS_FILE:-/etc/padm/reality_targets_results.tsv}"
 
     while IFS= read -r line; do
         IFS='|' read -r host sni name _region category cdnRisk _rank _recommended _note <<<"${line}"
@@ -2479,7 +2258,7 @@ applyRealityTargetToInstalledConfigs() {
     xrayXhttpConfigPath=$(realityXrayXhttpConfigPath)
     singBoxRealityConfigPath=$(realitySingBoxVisionConfigPath)
     singBoxGrpcConfigPath=$(realitySingBoxGrpcConfigPath)
-    applyLog=$(realityTargetApplyLog)
+    applyLog=$(realityTargetTmpPath padm-reality-target-apply.log)
     rm -f "${applyLog}" >/dev/null 2>&1 || true
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
@@ -2572,13 +2351,13 @@ validateRealityTargetConfigAfterChange() {
     local logFile
     if [[ -f "$(realityXrayVisionConfigPath)" || -f "$(realityXrayXhttpConfigPath)" ]]; then
         if [[ -x "/etc/padm/xray/xray" ]]; then
-            logFile=$(realityTargetXrayTestLog)
+            logFile=$(realityTargetTmpPath padm-reality-target-xray-test.log)
             /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1 || return 1
         fi
     fi
     if [[ -f "$(realitySingBoxVisionConfigPath)" || -f "$(realitySingBoxGrpcConfigPath)" ]]; then
         if [[ -x "/etc/padm/sing-box/sing-box" ]]; then
-            logFile=$(realityTargetSingBoxTestLog)
+            logFile=$(realityTargetTmpPath padm-reality-target-sing-box-test.log)
             singBoxMergeConfigForValidation /etc/padm/sing-box/sing-box "${logFile}" || return 1
         fi
     fi
@@ -2651,7 +2430,7 @@ changeInstalledRealityTarget() {
     local previousXrayVLESSRealityXHTTPSNI="${xrayVLESSRealityXHTTPSNI:-}"
     local previousSingBoxVLESSRealityVisionSNI="${singBoxVLESSRealityVisionSNI:-}"
     local previousSingBoxVLESSRealityGRPCSNI="${singBoxVLESSRealityGRPCSNI:-}"
-    padmCreateTempPath backupDir -d "$(realityTargetBackupTemplate)" || return 1
+    padmCreateTempPath backupDir -d "$(realityTargetTmpPath 'padm-reality-target.XXXXXX')" || return 1
     if ! backupRealityTargetConfigs "${backupDir}"; then
         padmRemoveCleanupPath "${backupDir}"
         realityTargetStatusBlock red "REALITY 目标站" "配置备份失败，已取消切换"
@@ -2683,7 +2462,7 @@ changeInstalledRealityTarget() {
         fi
         restoreRealityTargetRuntimeState "${previousRealityTargetHost}" "${previousRealityTargetPort}" "${previousRealitySNI}" "${previousXrayVLESSRealitySNI}" "${previousXrayVLESSRealityXHTTPSNI}" "${previousSingBoxVLESSRealityVisionSNI}" "${previousSingBoxVLESSRealityGRPCSNI}"
         padmRemoveCleanupPath "${backupDir}"
-        realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetXrayTestLog)" "sing-box 日志: $(realityTargetSingBoxTestLog)"
+        realityTargetStatusBlock red "REALITY 目标站" "配置校验失败，已回滚" "Xray 日志: $(realityTargetTmpPath padm-reality-target-xray-test.log)" "sing-box 日志: $(realityTargetTmpPath padm-reality-target-sing-box-test.log)"
         return 1
     fi
     if ! reloadCore; then

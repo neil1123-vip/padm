@@ -3,7 +3,6 @@
 realityKeyFile() {
     printf '%s\n' "${PADM_SINGBOX_REALITY_KEY_FILE:-/etc/padm/sing-box/conf/config/reality_key}"
 }
-
 # 初始化 Hysteria2 端口
 initHysteriaPort() {
     readSingBoxConfig
@@ -377,9 +376,6 @@ initTuicProtocol() {
         menuClose
         autoRead tuic_algorithm_menu "请选择:" selectTuicAlgorithm
         case ${selectTuicAlgorithm} in
-        1)
-            tuicAlgorithm="cubic"
-            ;;
         2)
             tuicAlgorithm="bbr"
             ;;
@@ -476,21 +472,6 @@ initRealityMldsa65() {
     fi
 }
 
-# 检查reality域名是否符合
-checkRealityDest() {
-    local traceResult=
-    traceResult=$(curl -s "https://$(echo "${realityDestDomain}" | cut -d ':' -f 1)/cdn-cgi/trace" | grep "visit_scheme=https")
-    if [[ -n "${traceResult}" ]]; then
-        statusCard "Reality 目标站风险" "检测到目标域名托管在 Cloudflare 且已开启代理" "使用此类型域名可能导致 VPS 流量被其他人使用" "不建议继续使用该目标站"
-        autoRead reality_cloudflare_target_confirm "是否继续？[y/n]" setRealityDestStatus
-        if [[ "${setRealityDestStatus}" != 'y' ]]; then
-            exit 0
-        fi
-        statusCard "Reality 目标站风险确认" "已忽略风险，继续使用"
-    fi
-}
-
-
 parseHostPort() {
     local input=$1
     local defaultPort=${2:-443}
@@ -576,11 +557,8 @@ collectRealityProfile() {
     selectRealityTargetMode=${selectRealityTargetMode:-1}
 
     case "${selectRealityTargetMode}" in
-    1)
-        selectDefaultRealityTarget
-        ;;
     2)
-        if ! selectRealityTargetFromCandidates; then
+        if ! selectRealityTargetCandidateInteractive recommended; then
             statusCard "Reality 目标站" "候选编号无效，改用默认目标 www.ibm.com:443"
             selectDefaultRealityTarget
         fi
@@ -708,25 +686,5 @@ initXrayXHTTPort() {
         allowPort "${xHTTPort}" || return 1
         allowPort "${xHTTPort}" "udp" || return 1
         statusCard "Reality XHTTP 端口" "${xHTTPort}"
-    fi
-}
-
-
-# 初始化TCP Brutal
-initTCPBrutal() {
-    echoContent title "\n┌─ 初始化 TCP Brutal ────────────────────────────────"
-    menuLine "进度 $2/${totalProgress}"
-    menuClose
-    autoRead tcp_brutal_enable "是否使用TCP_Brutal？[y/n]:" tcpBrutalStatus
-    if [[ "${tcpBrutalStatus}" == "y" ]]; then
-        autoRead tcp_brutal_download_speed "请输入本地带宽峰值的下行速度（默认：100，单位：Mbps）:" tcpBrutalClientDownloadSpeed
-        if [[ -z "${tcpBrutalClientDownloadSpeed}" ]]; then
-            tcpBrutalClientDownloadSpeed=100
-        fi
-
-        autoRead tcp_brutal_upload_speed "请输入本地带宽峰值的上行速度（默认：50，单位：Mbps）:" tcpBrutalClientUploadSpeed
-        if [[ -z "${tcpBrutalClientUploadSpeed}" ]]; then
-            tcpBrutalClientUploadSpeed=50
-        fi
     fi
 }
