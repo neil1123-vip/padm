@@ -132,6 +132,7 @@ subscribeNginxConfigWriteError() {
 
 writeSubscribeNginxConfig() {
     local targetPath
+    local restoreMessage
     if ! targetPath=$(nginxConfigFilePath subscribe.conf); then
         subscribeNginxConfigWriteError "订阅 Nginx 配置路径异常"
         return 1
@@ -160,7 +161,8 @@ writeSubscribeNginxConfig() {
             if [[ -n "${backupPath}" && -f "${backupPath}" ]]; then
                 commitGeneratedFile "${backupPath}" "${targetPath}" 644 || {
                     padmForgetCleanupPath "${backupPath}"
-                    subscribeNginxConfigWriteError "订阅 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 ${targetPath} 和 ${backupPath}"
+                    subscriptionSyncSetSingleRestoreResultMessage restoreMessage "订阅 Nginx 配置校验失败" false "已恢复旧配置" "旧配置" " ${targetPath} 和 ${backupPath}" || true
+                    subscribeNginxConfigWriteError "${restoreMessage}"
                     return 1
                 }
             else

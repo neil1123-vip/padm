@@ -9,20 +9,21 @@ failXrayTrafficStatsConfigChange() {
     local backupDir=$1
     local reason=$2
     local retryReload=${3:-false}
+    local restoreMessage
+    local rollbackMessage
 
     if ! restoreXrayTrafficStatsConfigBackup "${backupDir}"; then
         padmForgetCleanupPath "${backupDir}"
-        errorCard "${reason}，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+        subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${reason}" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
+        errorCard "${restoreMessage}"
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
     if [[ "${retryReload}" == "true" ]]; then
-        local rollbackMessage
         subscriptionSyncSetRollbackResultMessage rollbackMessage "${reason}" "已回滚流量统计配置" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志"
         errorCard "${rollbackMessage}"
         return 1
     fi
-    local rollbackMessage
     subscriptionSyncSetRollbackResultMessage rollbackMessage "${reason}" "已回滚流量统计配置"
     errorCard "${rollbackMessage}"
     return 1

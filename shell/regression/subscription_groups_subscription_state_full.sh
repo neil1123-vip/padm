@@ -834,6 +834,30 @@ runSubscriptionSyncSingleRestoreResultMessageRegression() (
     set -e
     [[ "${rc}" == "0" ]]
     [[ "${message}" == "控制面同步期望用户状态写入失败" ]]
+
+    set +e
+    subscriptionSyncSetSingleRestoreResultMessage message \
+        "Xray 流量统计策略配置写入失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        "备份目录: /tmp/stats-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "Xray 流量统计策略配置写入失败，且旧配置恢复失败，请手动检查备份目录: /tmp/stats-backup" ]]
+
+    set +e
+    subscriptionSyncSetSingleRestoreResultMessage message \
+        "订阅 Nginx 配置校验失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        " /tmp/subscribe.conf 和 /tmp/.subscribe.conf.backup.123456"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "订阅 Nginx 配置校验失败，且旧配置恢复失败，请手动检查 /tmp/subscribe.conf 和 /tmp/.subscribe.conf.backup.123456" ]]
 )
 
 runSubscriptionSyncRollbackResultMessageRegression() (
