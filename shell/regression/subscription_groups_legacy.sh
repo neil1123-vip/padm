@@ -15788,6 +15788,28 @@ runRegressionTransaction() {
         runRegressionTransactionSystem
 }
 
+runRegressionAllCompositionRegression() (
+    local callLog="${TMP_DIR}/regression-all-composition.log"
+    local actualOrder
+
+    : >"${callLog}"
+
+    runRegressionRouting() { printf 'routing\n' >>"${callLog}"; }
+    runRegressionSubscription() { printf 'subscription\n' >>"${callLog}"; }
+    runRegressionRuntime() { printf 'runtime\n' >>"${callLog}"; }
+    runRegressionTransaction() { printf 'transaction\n' >>"${callLog}"; }
+    runRegressionTransactionCore() { printf 'transaction-core\n' >>"${callLog}"; }
+    runRegressionTransactionSystem() { printf 'transaction-system\n' >>"${callLog}"; }
+    runRegressionRemoteControl() { printf 'remote-control\n' >>"${callLog}"; }
+    runRegressionUi() { printf 'ui\n' >>"${callLog}"; }
+
+    runRegressionAll
+
+    actualOrder=$(tr '\n' ',' <"${callLog}" | sed 's/,$//')
+    [[ "${actualOrder}" == "routing,subscription,runtime,transaction-core,transaction-system,remote-control,ui" ]]
+    ! grep -qx 'transaction' "${callLog}"
+)
+
 runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
@@ -15803,7 +15825,8 @@ runRegressionAll() {
     runRegressionRouting &&
         runRegressionSubscription &&
         runRegressionRuntime &&
-        runRegressionTransaction &&
+        runRegressionTransactionCore &&
+        runRegressionTransactionSystem &&
         runRegressionRemoteControl &&
         runRegressionUi
 }
