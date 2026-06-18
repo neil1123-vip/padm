@@ -3641,12 +3641,7 @@ runNetworkCheckReturnFailureRegression() (
     local dnsShellRc ipShellRc portShellRc templateShellRc
 
     mkdir -p "${root}/nginx"
-    statusCard() { return 0; }
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    progressCard() { return 0; }
     sleep() { return 0; }
     dig() { return 1; }
     getPublicIP() { printf '203.0.113.10\n'; }
@@ -3894,14 +3889,7 @@ runTlsFailureReturnRegression() (
 
     mkdir -p "${root}/home"
     HOME="${root}/home"
-    statusCard() { return 0; }
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    menuItem() { return 0; }
-    menuRecommendedItem() { return 0; }
-    progressCard() { return 0; }
     autoRead() {
         case "$3" in
         sslEmailStatus) printf -v "$3" 'n' ;;
