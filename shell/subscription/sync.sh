@@ -21,10 +21,30 @@ subscriptionSyncAccountName() {
     echo "sub_$(subscriptionSyncAccountEscapeId "${id}")"
 }
 
+subscriptionSyncAccountIdFromName() {
+    local accountName=$1
+    local prefix="sub_"
+    local escapedId
+    [[ "${accountName}" == "${prefix}"* ]] || return 1
+    escapedId=${accountName#"${prefix}"}
+    subscriptionSyncAccountUnescapeId "${escapedId}"
+}
+
 subscriptionSyncFindUserByAccountName() {
     local accountName=$1
     local groupId=${2:-$(activeSubscriptionGroupId)}
     local id
+    local userJson
+    if id=$(subscriptionSyncAccountIdFromName "${accountName}" 2>/dev/null); then
+        userJson=$(subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg id "${id}" '
+          .groups[] | select(.id == $groupId) |
+          .user_groups[]? |
+          select(.id == $id)
+        ') || return 1
+        [[ -n "${userJson}" ]] || return 1
+        printf '%s\n' "${userJson}"
+        return 0
+    fi
     while IFS= read -r id; do
         [[ -n "${id}" ]] || continue
         if [[ "$(subscriptionSyncAccountName "${id}")" == "${accountName}" ]]; then
@@ -42,16 +62,17 @@ subscriptionSyncFindUserByAccountName() {
 subscriptionSyncAccountId() {
     local accountName=$1
     local userJson
-    local prefix escapedId
+    local id
+    if id=$(subscriptionSyncAccountIdFromName "${accountName}" 2>/dev/null); then
+        printf '%s\n' "${id}"
+        return 0
+    fi
     userJson=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null || true)
     if [[ -n "${userJson}" ]]; then
         jq -r '.id' <<<"${userJson}"
         return 0
     fi
-    prefix="sub_"
-    [[ "${accountName}" == "${prefix}"* ]] || return 1
-    escapedId=${accountName#"${prefix}"}
-    subscriptionSyncAccountUnescapeId "${escapedId}"
+    return 1
 }
 
 subscriptionSyncGenerateUUID() {

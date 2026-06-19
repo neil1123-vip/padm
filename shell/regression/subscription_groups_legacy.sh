@@ -11072,6 +11072,26 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionSyncAccountFastPathRegression() (
+    local root="${TMP_DIR}/subscription-sync-account-fast-path"
+    local stateReadCalls=0
+
+    mkdir -p "${root}"
+    PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    ensureSubscriptionGroupsState
+
+    eval "$(declare -f subscriptionGroupsStateRead | sed '1s/^subscriptionGroupsStateRead/originalSubscriptionGroupsStateRead/')"
+    subscriptionGroupsStateRead() {
+        stateReadCalls=$((stateReadCalls + 1))
+        originalSubscriptionGroupsStateRead "$@"
+    }
+
+    [[ "$(subscriptionSyncAccountId 'sub_team-a')" == "team-a" ]]
+    [[ "${stateReadCalls}" == "0" ]]
+
+    unset -f subscriptionGroupsStateRead
+)
+
 runSubscriptionSyncReconcileEarlyExitRegression() (
     local root="${TMP_DIR}/subscription-sync-reconcile-early-exit"
     local callLog="${root}/calls.log"
@@ -11560,8 +11580,15 @@ runRemoteControlServerRefreshRegression() (
     subscriptionSyncPlanFromAccounts() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
+    createUsersProbe=
+    eval "$(declare -f subscriptionControlCreateUsersFromPlan | sed '1s/^subscriptionControlCreateUsersFromPlan/originalSubscriptionControlCreateUsersFromPlan/')"
+    subscriptionControlCreateUsersFromPlan() {
+        createUsersProbe=$(originalSubscriptionControlCreateUsersFromPlan "$1" "$2")
+        printf '%s\n' "${createUsersProbe}"
+    }
     PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
     jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
+    jq -e 'length == 1 and .[0].id == "team-a" and .[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${createUsersProbe}" >/dev/null
     [[ "${subscribeCalls}" == "1" ]]
     [[ "${subscribeArgs}" == "false false" ]]
     [[ "${reconcileCalls}" == "0" ]]

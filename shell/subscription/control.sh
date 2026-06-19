@@ -12,21 +12,15 @@ subscriptionRemoteDesiredUsers() {
     local sourceId=$1
     local groupId
     local users
-    local id
     groupId=$(activeSubscriptionGroupId)
     users=$(subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg sourceId "${sourceId}" '
       .groups[] | select(.id == $groupId) |
       [.user_groups[]?
         | select(.enabled == true)
         | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
-        | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0)}]'
+        | . + {account: ("sub_" + ((.id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))}
+        | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0), account}]'
     ) || return 1
-    while IFS= read -r id; do
-        [[ -n "${id}" ]] || continue
-        users=$(jq --arg id "${id}" --arg account "$(subscriptionSyncAccountName "${id}")" '
-          map(if .id == $id then . + {account: $account} else . end)
-        ' <<<"${users}") || return 1
-    done < <(jq -r '.[].id' <<<"${users}")
     printf '%s\n' "${users}"
 }
 
@@ -925,6 +919,27 @@ subscriptionControlDesiredUsers() {
     jq '[.desired_users[]? | {id, uuid: (.uuid // "")}]' <<<"${payload}"
 }
 
+subscriptionControlCreateUsersFromPlan() {
+    local desiredUsers=$1
+    local createAccounts=$2
+    jq -c -n \
+      --argjson desiredUsers "${desiredUsers}" \
+      --argjson createAccounts "${createAccounts}" '
+      def decode_account_id:
+        sub("^sub_"; "")
+        | gsub("_"; "\u0001")
+        | gsub("-"; "_")
+        | gsub("\u0001"; "-");
+      ($desiredUsers | map({key: .id, value: (.uuid // "")}) | from_entries) as $uuidById |
+      [ $createAccounts[]?
+        | select(type == "string" and startswith("sub_"))
+        | decode_account_id as $id
+        | ($uuidById[$id] // "") as $uuid
+        | select($uuid != "")
+        | {id: $id, uuid: $uuid}
+      ]'
+}
+
 subscriptionControlSyncPlan() {
     local desiredUsers=$1
     local ids
@@ -940,19 +955,7 @@ subscriptionControlUpdateDesiredUserState() {
     local desiredUsers=$1
     local createAccounts=$2
     local createUsers
-    local accountNames
-    local accountName
-    local id
-    local uuid
-    createUsers='[]'
-    accountNames=$(jq -r '.[]' <<<"${createAccounts}") || return 1
-    while IFS= read -r accountName; do
-        [[ -n "${accountName}" ]] || continue
-        id=$(subscriptionSyncAccountId "${accountName}")
-        uuid=$(jq -r --arg id "${id}" '.[] | select(.id == $id) | .uuid // empty' <<<"${desiredUsers}") || return 1
-        [[ -n "${uuid}" ]] || continue
-        createUsers=$(jq --arg id "${id}" --arg uuid "${uuid}" '. + [{id:$id, uuid:$uuid}]' <<<"${createUsers}") || return 1
-    done <<<"${accountNames}"
+    createUsers=$(subscriptionControlCreateUsersFromPlan "${desiredUsers}" "${createAccounts}") || return 1
     if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1; then
         subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --argjson users "${createUsers}" '
           .groups |= map(if .id == $groupId then
