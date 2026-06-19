@@ -3,8 +3,7 @@
 subscriptionRemoteControlSources() {
     local groupId
     groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) |
+    subscriptionGroupRead "${groupId}" '
       [.sources[]? | select(.role != "main" and .enabled == true)]'
 }
 
@@ -18,8 +17,7 @@ subscriptionRemoteDesiredUsers() {
         return 0
     fi
     groupId=$(activeSubscriptionGroupId)
-    users=$(subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg sourceId "${sourceId}" '
-      .groups[] | select(.id == $groupId) |
+    users=$(subscriptionGroupRead "${groupId}" -c --arg sourceId "${sourceId}" '
       [.user_groups[]?
         | select(.enabled == true)
         | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
@@ -35,10 +33,10 @@ subscriptionRemoteDesiredUsersBySource() {
     local sourceIds
     groupId=$(activeSubscriptionGroupId)
     sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
-    subscriptionGroupsStateRead -c --arg groupId "${groupId}" --argjson sourceIds "${sourceIds}" '
+    subscriptionGroupRead "${groupId}" -c --argjson sourceIds "${sourceIds}" '
       def account_name:
         "sub_" + (((. | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
-      .groups[] | select(.id == $groupId) as $group |
+      . as $group |
       ($group.user_groups // []) as $users |
       reduce $sourceIds[]? as $sourceId ({};
         .[$sourceId] = [
@@ -987,15 +985,14 @@ subscriptionControlUpdateDesiredUserState() {
     local createUsers
     createUsers=$(subscriptionControlCreateUsersFromPlan "${desiredUsers}" "${createAccounts}") || return 1
     if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1; then
-        subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --argjson users "${createUsers}" '
-          .groups |= map(if .id == $groupId then
-            reduce $users[] as $user (.;
-              if any(.user_groups[]?; .id == $user.id) then
-                .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
-              else
-                .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, token:"", uuid:$user.uuid}]
-              end)
-          else . end)'
+        subscriptionActiveGroupWrite --argjson users "${createUsers}" '
+          reduce $users[] as $user (.;
+            if any(.user_groups[]?; .id == $user.id) then
+              .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
+            else
+              .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, token:"", uuid:$user.uuid}]
+            end)
+        '
     fi
 }
 

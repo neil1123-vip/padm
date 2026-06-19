@@ -4,8 +4,7 @@ subscriptionGroupsStateSummaryJson() {
     local groupId
     groupId=$(activeSubscriptionGroupId)
     ensureSubscriptionGroupsState
-    subscriptionGroupsStateRead --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) |
+    subscriptionGroupRead "${groupId}" '
       {
         group_id: .id,
         group_name: .name,

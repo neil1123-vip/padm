@@ -73,8 +73,8 @@ subscriptionRemoteSubscribeSourcesForAccount() {
         return 0
     fi
     allowedSources=$(jq -c '.allowed_sources // []' <<<"${userJson}") || return 1
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" --argjson allowed "${allowedSources}" '
-      .groups[] | select(.id == $groupId) as $group |
+    subscriptionGroupRead "${groupId}" -r --argjson allowed "${allowedSources}" '
+      . as $group |
       if ($allowed | length) == 0 then
         empty
       elif ($allowed | index("*")) then
@@ -410,7 +410,7 @@ updateRemoteSubscribe() {
 
         IFS=':' read -r remoteHost remotePort serverAlias subscribeType <<<"${line}"
         remoteUrl="${remoteHost}:${remotePort}"
-        source=$(subscriptionGroupsStateRead -c --arg groupId "$(activeSubscriptionGroupId)" --arg id "${serverAlias}" '.groups[] | select(.id == $groupId) | .sources[]? | select(.id == $id)' 2>/dev/null) || source=
+        source=$(subscriptionActiveGroupRead -c --arg id "${serverAlias}" '.sources[]? | select(.id == $id)' 2>/dev/null) || source=
         if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
             controlledResponse=$(fetchRemoteControlledSubscribePayload "${source}" "${email}" 2>/dev/null || true)
             if [[ -n "${controlledResponse}" ]] && jq -e '.ok == true' <<<"${controlledResponse}" >/dev/null 2>&1; then

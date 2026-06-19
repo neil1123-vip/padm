@@ -294,13 +294,13 @@ activeSubscriptionGroupId() {
     subscriptionGroupsStateRead -r '.active_group'
 }
 
-subscriptionActiveGroupRead() {
+subscriptionGroupRead() {
+    local groupId=$1
+    shift
     local query
-    local groupId
     local argCount=0
     local -a jqArgs=()
     query=${!#}
-    groupId=$(activeSubscriptionGroupId)
     if (($# > 1)); then
         argCount=$(($# - 1))
         jqArgs=("${@:1:${argCount}}")
@@ -308,13 +308,13 @@ subscriptionActiveGroupRead() {
     subscriptionGroupsStateRead "${jqArgs[@]}" --arg groupId "${groupId}" ".groups[] | select(.id == \$groupId) | ${query}"
 }
 
-subscriptionActiveGroupWrite() {
+subscriptionGroupWrite() {
+    local groupId=$1
+    shift
     local update
-    local groupId
     local argCount=0
     local -a jqArgs=()
     update=${!#}
-    groupId=$(activeSubscriptionGroupId)
     if (($# > 1)); then
         argCount=$(($# - 1))
         jqArgs=("${@:1:${argCount}}")
@@ -322,16 +322,24 @@ subscriptionActiveGroupWrite() {
     subscriptionGroupsStateWrite "${jqArgs[@]}" --arg groupId "${groupId}" ".groups |= map(if .id == \$groupId then ${update} else . end)"
 }
 
+subscriptionActiveGroupRead() {
+    subscriptionGroupRead "$(activeSubscriptionGroupId)" "$@"
+}
+
+subscriptionActiveGroupWrite() {
+    subscriptionGroupWrite "$(activeSubscriptionGroupId)" "$@"
+}
+
 listSubscriptionSources() {
     local groupId
     groupId=${1:-$(activeSubscriptionGroupId)}
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
+    subscriptionGroupRead "${groupId}" -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
 }
 
 listUserSubscriptions() {
     local groupId
     groupId=${1:-$(activeSubscriptionGroupId)}
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .user_groups[]? | "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb)"'
+    subscriptionGroupRead "${groupId}" -r '.user_groups[]? | "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb)"'
 }
 
 addUserSubscriptionState() {

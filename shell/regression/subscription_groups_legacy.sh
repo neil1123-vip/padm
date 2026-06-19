@@ -10409,6 +10409,21 @@ JSON
         [[ "${output}" == *"menu:订阅额度GB：1"* ]]
         [[ "${output}" == *"menu:限额状态：正常(0%)"* ]]
     )
+    subscriptionGroupsStateWrite '
+      .groups += [(.groups[0]
+        | .id = "shadow-group"
+        | .name = "Shadow Group"
+        | .user_groups = []
+        | .sources = [{id:"main", name:"Shadow Main", role:"main", transport:"local", scheme:"local", host:"127.0.0.2", port:0, enabled:true, sync_status:"local"}]
+        | .sync.last_status = "pending"
+        | .sync.last_run = ""
+        | .traffic = {global:{upload:0, download:0}, admin:{upload:0, download:0, sources:{}}, user_groups:{}, sources:{}}
+      )]
+    '
+    [[ "$(subscriptionGroupRead shadow-group -r '.name')" == "Shadow Group" ]]
+    subscriptionGroupWrite shadow-group --arg status "success" '.sync.last_status = $status'
+    jq -e '.groups[] | select(.id == "shadow-group") | .sync.last_status == "success"' "$(subscriptionGroupsFile)" >/dev/null
+    [[ "$(subscriptionGroupRead edge-group -r '.name')" == "Edge Group" ]]
 
     (
         local resetRoot="${TMP_DIR}/subscription-groups-reset-failure"
