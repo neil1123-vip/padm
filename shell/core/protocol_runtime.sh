@@ -3,6 +3,18 @@
 realityKeyFile() {
     printf '%s\n' "${PADM_SINGBOX_REALITY_KEY_FILE:-/etc/padm/sing-box/conf/config/reality_key}"
 }
+
+protocolPortInputStatusCard() {
+    statusCard "端口输入" "$@"
+}
+
+protocolPortHoppingStatusCard() {
+    statusCard "端口跳跃" "$@"
+}
+
+protocolPortHoppingRangeStatusCard() {
+    statusCard "端口跳跃范围" "$@"
+}
 # 初始化 Hysteria2 端口
 initHysteriaPort() {
     readSingBoxConfig
@@ -23,10 +35,10 @@ initHysteriaPort() {
         fi
     fi
     if [[ -z ${hysteriaPort} ]]; then
-        statusCard "端口输入" "端口不可为空"
+        protocolPortInputStatusCard "端口不可为空"
         initHysteriaPort "$2"
     elif ((hysteriaPort < 1 || hysteriaPort > 65535)); then
-        statusCard "端口输入" "端口不合法"
+        protocolPortInputStatusCard "端口不合法"
         initHysteriaPort "$2"
     fi
     allowPort "${hysteriaPort}" || return 1
@@ -108,12 +120,12 @@ addPortHopping() {
         currentPortHoppingEnd=${tuicPortHoppingEnd:-}
     fi
     if [[ -n "${currentPortHoppingStart}" || -n "${currentPortHoppingEnd}" ]]; then
-        statusCard "端口跳跃" "已添加不可重复添加，可删除后重新添加"
+        protocolPortHoppingStatusCard "已添加不可重复添加，可删除后重新添加"
         exit 0
     fi
     if [[ "${rhelLike:-}" == "true" ]]; then
         if ! systemctl status firewalld 2>/dev/null | grep -q "active (running)"; then
-            statusCard "端口跳跃" "未启动 firewalld 防火墙，无法设置端口跳跃"
+            protocolPortHoppingStatusCard "未启动 firewalld 防火墙，无法设置端口跳跃"
             exit 0
         fi
     fi
@@ -129,7 +141,7 @@ addPortHopping() {
 
     autoRead port_hopping_range "范围:" portHoppingRange
     if [[ -z "${portHoppingRange}" ]]; then
-        statusCard "端口跳跃范围" "范围不可为空"
+        protocolPortHoppingRangeStatusCard "范围不可为空"
         addPortHopping "${type}" "${targetPort}"
     elif [[ "${portHoppingRange}" == *-* ]]; then
 
@@ -139,13 +151,13 @@ addPortHopping() {
         portEnd=${portHoppingRange#*-}
 
         if [[ -z "${portStart}" || -z "${portEnd}" ]]; then
-            statusCard "端口跳跃范围" "范围不合法"
+            protocolPortHoppingRangeStatusCard "范围不合法"
             addPortHopping "${type}" "${targetPort}"
         elif ((portStart < 30000 || portStart > 40000 || portEnd < 30000 || portEnd > 40000 || portEnd < portStart)); then
-            statusCard "端口跳跃范围" "范围不合法"
+            protocolPortHoppingRangeStatusCard "范围不合法"
             addPortHopping "${type}" "${targetPort}"
         else
-            statusCard "端口跳跃范围" "${portHoppingRange}"
+            protocolPortHoppingRangeStatusCard "${portHoppingRange}"
             if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
                 local addedMasquerade=
                 if ! sudo firewall-cmd --query-masquerade --permanent >/dev/null 2>&1; then
@@ -159,7 +171,7 @@ addPortHopping() {
                         sudo firewall-cmd --permanent --remove-masquerade >/dev/null 2>&1 || true
                     fi
                     sudo firewall-cmd --reload >/dev/null 2>&1 || true
-                    statusCard "端口跳跃" "端口跳跃添加失败，已尝试回滚本次 firewalld 规则"
+                    protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 firewalld 规则"
                     exit 1
                 fi
                 if ! ( allowPort "${portStart}:${portEnd}" udp ); then
@@ -170,13 +182,13 @@ addPortHopping() {
                         sudo firewall-cmd --permanent --remove-masquerade >/dev/null 2>&1 || true
                     fi
                     sudo firewall-cmd --reload >/dev/null 2>&1 || true
-                    statusCard "端口跳跃" "端口跳跃开放端口失败，已尝试回滚本次 firewalld 规则"
+                    protocolPortHoppingStatusCard "端口跳跃开放端口失败，已尝试回滚本次 firewalld 规则"
                     exit 1
                 fi
             else
                 if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}"; then
                     iptables -t nat -D PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" >/dev/null 2>&1 || true
-                    statusCard "端口跳跃" "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
+                    protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
                     exit 1
                 fi
                 local persistStatus=0
@@ -188,11 +200,11 @@ addPortHopping() {
                 if [[ "${persistStatus}" == "1" ]]; then
                     iptables -t nat -D PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" >/dev/null 2>&1 || true
                     portHoppingPersistIptablesRules >/dev/null 2>&1 || true
-                    statusCard "端口跳跃" "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
+                    protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
                     exit 1
                 fi
                 if ! iptables-save | grep -q "neil1123-vip_${type}_portHopping"; then
-                    statusCard "端口跳跃" "端口跳跃添加失败"
+                    protocolPortHoppingStatusCard "端口跳跃添加失败"
                     exit 0
                 fi
                 allowPort "${portStart}:${portEnd}" udp || return 1
@@ -200,7 +212,7 @@ addPortHopping() {
                     portHoppingWarnIptablesNotPersistent
                 fi
             fi
-            statusCard "端口跳跃" "端口跳跃添加成功"
+            protocolPortHoppingStatusCard "端口跳跃添加成功"
         fi
     fi
 }
@@ -279,7 +291,7 @@ portHoppingMenu() {
     local type=$1
     # 判断iptables是否存在
     if ! find /usr/bin /usr/sbin | grep -q -w iptables; then
-        statusCard "端口跳跃" "无法识别 iptables 工具，无法使用端口跳跃，退出安装"
+        protocolPortHoppingStatusCard "无法识别 iptables 工具，无法使用端口跳跃，退出安装"
         exit 0
     fi
 
@@ -309,12 +321,12 @@ portHoppingMenu() {
         addPortHopping "${type}" "${targetPort}"
     elif [[ "${selectPortHoppingStatus}" == "2" ]]; then
         deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${targetPort}"
-        statusCard "端口跳跃" "删除成功"
+        protocolPortHoppingStatusCard "删除成功"
     elif [[ "${selectPortHoppingStatus}" == "3" ]]; then
         if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
-            statusCard "端口跳跃" "当前端口跳跃范围为: ${portHoppingStart}-${portHoppingEnd}"
+            protocolPortHoppingStatusCard "当前端口跳跃范围为: ${portHoppingStart}-${portHoppingEnd}"
         else
-            statusCard "端口跳跃" "未设置端口跳跃"
+            protocolPortHoppingStatusCard "未设置端口跳跃"
         fi
     else
         portHoppingMenu
@@ -342,10 +354,10 @@ initTuicPort() {
         fi
     fi
     if [[ -z ${tuicPort} ]]; then
-        statusCard "端口输入" "端口不可为空"
+        protocolPortInputStatusCard "端口不可为空"
         initTuicPort "$2"
     elif ((tuicPort < 1 || tuicPort > 65535)); then
-        statusCard "端口输入" "端口不合法"
+        protocolPortInputStatusCard "端口不合法"
         initTuicPort "$2"
     fi
     statusCard "Tuic 端口" "${tuicPort}"

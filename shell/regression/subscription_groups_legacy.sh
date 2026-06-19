@@ -13535,6 +13535,15 @@ runMenuSmokeRegression() {
     singBoxConfigValidationCard "通过"
     assertMenuAction 'statusCard:sing-box 配置校验'
     resetMenuActions
+    protocolPortInputStatusCard "端口不合法"
+    assertMenuAction 'statusCard:端口输入'
+    resetMenuActions
+    protocolPortHoppingRangeStatusCard "范围不合法"
+    assertMenuAction 'statusCard:端口跳跃范围'
+    resetMenuActions
+    protocolPortHoppingStatusCard "删除成功"
+    assertMenuAction 'statusCard:端口跳跃'
+    resetMenuActions
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }
