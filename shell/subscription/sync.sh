@@ -881,7 +881,7 @@ subscriptionQuotaDryRunPlan() {
         ($group.traffic.user_groups[.id] // {upload:0, download:0}) as $traffic |
         (($traffic.upload // 0) + ($traffic.download // 0)) as $usedBytes |
         (($limitGb * 1024 * 1024 * 1024) | floor) as $limitBytes |
-        select((.enabled // true) == true and $limitGb > 0 and $usedBytes >= $limitBytes) |
+        select((if has("enabled") then .enabled else true end) == true and $limitGb > 0 and $usedBytes >= $limitBytes) |
         {
           id: .id,
           name: .name,

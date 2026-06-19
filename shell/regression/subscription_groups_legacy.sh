@@ -10482,6 +10482,22 @@ JSON
         .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
       else . end)'
     jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
+    toggleSubscriptionGroupSyncEnabled
+    [[ "$(subscriptionGroupSyncEnabled && echo yes || echo no)" == "no" ]]
+    toggleSubscriptionGroupSyncEnabled
+    [[ "$(subscriptionGroupSyncEnabled && echo yes || echo no)" == "yes" ]]
+    setSubscriptionGroupSyncInterval 17
+    jq -e '.groups[0].sync.interval_minutes == 17' "$(subscriptionGroupsFile)" >/dev/null
+    [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "yes" ]]
+    toggleSubscriptionGroupRemoteSyncEnabled
+    [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "no" ]]
+    toggleSubscriptionGroupRemoteSyncEnabled
+    [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "yes" ]]
+    [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "no" ]]
+    toggleSubscriptionGroupQuotaAutoApplyEnabled
+    [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "yes" ]]
+    toggleSubscriptionGroupQuotaAutoApplyEnabled
+    [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "no" ]]
     clearSubscriptionSourceSyncError edge
     jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
     removeSubscriptionSourceState edge
@@ -10507,6 +10523,10 @@ JSON
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
         [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
     )
+    subscriptionGroupsStateWrite '
+      .groups[0].user_groups += [{"id":"team-b","name":"Team B","enabled":false,"allowed_sources":["main"],"traffic_limit_gb":1,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}] |
+      .groups[0].traffic.user_groups["team-b"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
+    '
     subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
     if applySubscriptionQuotaPlan '{bad-json' 2>/dev/null; then
         return 1

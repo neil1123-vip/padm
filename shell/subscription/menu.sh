@@ -582,7 +582,7 @@ createAndSyncUserSubscriptionWizard() {
         autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync
         enableSync=${enableSync:-yes}
         if [[ "${enableSync}" == "yes" || "${enableSync}" == "y" ]]; then
-            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" '.groups |= map(if .id == $groupId then .sync.enabled = true else . end)'
+            setSubscriptionGroupSyncEnabled true
             refreshSubscriptionGroupSyncCron
             successCard "自动同步已开启" "后续会按当前间隔自动同步；可在 主控维护与排障 -> 自动同步设置 中调整间隔"
         else
@@ -1067,7 +1067,7 @@ manageSubscriptionSyncSettings() {
         autoRead sync_settings_menu "请选择:" syncSettingsStatus
         case "${syncSettingsStatus}" in
         1)
-            subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.enabled = (.sync.enabled | not) else . end)'
+            toggleSubscriptionGroupSyncEnabled
             refreshSubscriptionGroupSyncCron
             successCard "自动同步状态已切换"
             ;;
@@ -1078,7 +1078,7 @@ manageSubscriptionSyncSettings() {
                 errorCard "输入有误，同步间隔需为 1-59 分钟"
                 continue
             fi
-            subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson interval "${interval}" '.groups |= map(if .id == $groupId then .sync.interval_minutes = $interval else . end)'
+            setSubscriptionGroupSyncInterval "${interval}"
             refreshSubscriptionGroupSyncCron
             successCard "自动同步间隔已更新"
             ;;
@@ -1088,11 +1088,11 @@ manageSubscriptionSyncSettings() {
         6) showSubscriptionQuotaPlan ;;
         7) executeSubscriptionQuotaPlanMenu ;;
         8)
-            subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.remote_enabled = ((.sync.remote_enabled // true) | not) else . end)'
+            toggleSubscriptionGroupRemoteSyncEnabled
             successCard "远程同步状态已切换"
             ;;
         9)
-            subscriptionGroupsStateWrite --arg groupId "${groupId}" '.groups |= map(if .id == $groupId then .sync.quota_auto_apply = ((.sync.quota_auto_apply // false) | not) else . end)'
+            toggleSubscriptionGroupQuotaAutoApplyEnabled
             successCard "限额自动执行状态已切换"
             ;;
         10) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;

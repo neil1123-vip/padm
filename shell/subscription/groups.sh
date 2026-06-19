@@ -294,6 +294,34 @@ activeSubscriptionGroupId() {
     subscriptionGroupsStateRead -r '.active_group'
 }
 
+subscriptionActiveGroupRead() {
+    local query
+    local groupId
+    local argCount=0
+    local -a jqArgs=()
+    query=${!#}
+    groupId=$(activeSubscriptionGroupId)
+    if (($# > 1)); then
+        argCount=$(($# - 1))
+        jqArgs=("${@:1:${argCount}}")
+    fi
+    subscriptionGroupsStateRead "${jqArgs[@]}" --arg groupId "${groupId}" ".groups[] | select(.id == \$groupId) | ${query}"
+}
+
+subscriptionActiveGroupWrite() {
+    local update
+    local groupId
+    local argCount=0
+    local -a jqArgs=()
+    update=${!#}
+    groupId=$(activeSubscriptionGroupId)
+    if (($# > 1)); then
+        argCount=$(($# - 1))
+        jqArgs=("${@:1:${argCount}}")
+    fi
+    subscriptionGroupsStateWrite "${jqArgs[@]}" --arg groupId "${groupId}" ".groups |= map(if .id == \$groupId then ${update} else . end)"
+}
+
 listSubscriptionSources() {
     local groupId
     groupId=${1:-$(activeSubscriptionGroupId)}
@@ -309,81 +337,85 @@ listUserSubscriptions() {
 addUserSubscriptionState() {
     local id=$1
     local name=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg name "${name}" '
-      .groups |= map(if .id == $groupId then
+    subscriptionActiveGroupWrite --arg id "${id}" --arg name "${name}" '
         if any(.user_groups[]?; .id == $id) then . else
           .user_groups += [{"id": $id, "name": $name, "enabled": true, "allowed_sources": ["main"], "traffic_limit_gb": 0, "token": ""}]
         end
-      else . end)'
+    '
 }
 
 removeUserSubscriptionState() {
     local id=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" '
-      .groups |= map(if .id == $groupId then
+    subscriptionActiveGroupWrite --arg id "${id}" '
         .user_groups = ([.user_groups[]? | select(.id != $id)]) |
         .traffic.user_groups |= (del(.[$id]) // {})
-      else . end)'
+    '
 }
 
 toggleUserSubscriptionState() {
     local id=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .enabled = (.enabled | not) else . end) else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" '.user_groups |= map(if .id == $id then .enabled = (.enabled | not) else . end)'
 }
 
 setUserSubscriptionSources() {
     local id=$1
     local sources=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --argjson sources "${sources}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .allowed_sources = $sources else . end) else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson sources "${sources}" '.user_groups |= map(if .id == $id then .allowed_sources = $sources else . end)'
 }
 
 setUserSubscriptionTrafficLimit() {
     local id=$1
     local limit=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --argjson limit "${limit}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .traffic_limit_gb = $limit else . end) else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson limit "${limit}" '.user_groups |= map(if .id == $id then .traffic_limit_gb = $limit else . end)'
 }
 
 setUserSubscriptionEnabled() {
     local id=$1
     local enabled=$2
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --argjson enabled "${enabled}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .enabled = $enabled else . end) else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson enabled "${enabled}" '.user_groups |= map(if .id == $id then .enabled = $enabled else . end)'
 }
 
 userSubscriptionExists() {
     local id=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" --arg id "${id}" '.groups[] | select(.id == $groupId) | any(.user_groups[]?; .id == $id)' >/dev/null 2>&1
+    subscriptionActiveGroupRead -e --arg id "${id}" 'any(.user_groups[]?; .id == $id)' >/dev/null 2>&1
 }
 
 subscriptionGroupSyncEnabled() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .sync.enabled == true' >/dev/null 2>&1
+    subscriptionActiveGroupRead -e '.sync.enabled == true' >/dev/null 2>&1
+}
+
+setSubscriptionGroupSyncEnabled() {
+    local enabled=$1
+    subscriptionActiveGroupWrite --argjson enabled "${enabled}" '.sync.enabled = $enabled'
+}
+
+toggleSubscriptionGroupSyncEnabled() {
+    if subscriptionGroupSyncEnabled; then
+        setSubscriptionGroupSyncEnabled false
+    else
+        setSubscriptionGroupSyncEnabled true
+    fi
 }
 
 subscriptionGroupRemoteSyncEnabled() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.remote_enabled // true) == true' >/dev/null 2>&1
+    subscriptionActiveGroupRead -e '(if .sync | has("remote_enabled") then .sync.remote_enabled else true end) == true' >/dev/null 2>&1
+}
+
+toggleSubscriptionGroupRemoteSyncEnabled() {
+    subscriptionActiveGroupWrite '.sync.remote_enabled = (if .sync | has("remote_enabled") then (.sync.remote_enabled | not) else false end)'
 }
 
 subscriptionGroupQuotaAutoApplyEnabled() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | (.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
+    subscriptionActiveGroupRead -e '(.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
+}
+
+toggleSubscriptionGroupQuotaAutoApplyEnabled() {
+    subscriptionActiveGroupWrite '.sync.quota_auto_apply = ((.sync.quota_auto_apply // false) | not)'
+}
+
+setSubscriptionGroupSyncInterval() {
+    local interval=$1
+    subscriptionActiveGroupWrite --argjson interval "${interval}" '.sync.interval_minutes = $interval'
 }
 
 addSubscriptionSourceState() {
@@ -391,29 +423,23 @@ addSubscriptionSourceState() {
     local name=$2
     local host=$3
     local port=$4
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg name "${name}" --arg host "${host}" --argjson port "${port}" '
-      .groups |= map(if .id == $groupId then
+    subscriptionActiveGroupWrite --arg id "${id}" --arg name "${name}" --arg host "${host}" --argjson port "${port}" '
         if any(.sources[]?; .id == $id) then . else
           .sources += [{"id": $id, "name": $name, "role": "secondary", "scheme": "wireguard", "transport": "wireguard", "host": $host, "port": $port, "enabled": true, "sync_status": "pending"}]
         end
-      else . end)'
+    '
 }
 
 removeSubscriptionSourceState() {
     local id=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" '
-      .groups |= map(if .id == $groupId then
+    subscriptionActiveGroupWrite --arg id "${id}" '
         if any(.sources[]?; .id == $id and .role == "main") then . else
           .sources = ([.sources[]? | select(.id != $id)]) |
           .traffic.sources |= (del(.[$id]) // {}) |
           .traffic.admin.sources |= (del(.[$id]) // {}) |
           .traffic.user_groups |= with_entries(.value.sources |= (del(.[$id]) // {}))
         end
-      else . end)'
+    '
 }
 
 setSubscriptionSourceCredential() {
@@ -421,12 +447,7 @@ setSubscriptionSourceCredential() {
     local host=$2
     local port=$3
     local token=$4
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg host "${host}" --argjson port "${port}" --arg token "${token}" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .transport = "wireguard" | .scheme = "wireguard" | .host = $host | .port = $port | .control_token = $token else . end)
-      else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --arg host "${host}" --argjson port "${port}" --arg token "${token}" '.sources |= map(if .id == $id and .role != "main" then .transport = "wireguard" | .scheme = "wireguard" | .host = $host | .port = $port | .control_token = $token else . end)'
 }
 
 setSubscriptionSourceSyncStatus() {
@@ -434,23 +455,12 @@ setSubscriptionSourceSyncStatus() {
     local status=$2
     local changed=${3:-}
     local plan=${4:-}
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
     if [[ -n "${plan}" ]]; then
-        subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" --argjson plan "${plan}" '
-          .groups |= map(if .id == $groupId then
-            .sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | .last_sync_plan = $plan | del(.last_sync_error) else . end)
-          else . end)'
+        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" --argjson plan "${plan}" '.sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | .last_sync_plan = $plan | del(.last_sync_error) else . end)'
     elif [[ -n "${changed}" ]]; then
-        subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" '
-          .groups |= map(if .id == $groupId then
-            .sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | del(.last_sync_error) else . end)
-          else . end)'
+        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" --argjson changed "${changed}" '.sources |= map(if .id == $id then .sync_status = $status | .last_sync_changed = $changed | del(.last_sync_error) else . end)'
     else
-        subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg status "${status}" '
-          .groups |= map(if .id == $groupId then
-            .sources |= map(if .id == $id then .sync_status = $status else . end)
-          else . end)'
+        subscriptionActiveGroupWrite --arg id "${id}" --arg status "${status}" '.sources |= map(if .id == $id then .sync_status = $status else . end)'
     fi
 }
 
@@ -458,34 +468,20 @@ setSubscriptionSourceSyncFailure() {
     local id=$1
     local errorType=$2
     local errorMessage=$3
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id then .sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | del(.last_sync_plan) else . end)
-      else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" --arg errorType "${errorType}" --arg errorMessage "${errorMessage}" '.sources |= map(if .id == $id then .sync_status = "failed" | .last_sync_changed = false | .last_sync_error = {type:$errorType, message:$errorMessage} | del(.last_sync_plan) else . end)'
 }
 
 subscriptionSourceExists() {
     local id=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" --arg id "${id}" '.groups[] | select(.id == $groupId) | any(.sources[]?; .id == $id)' >/dev/null 2>&1
+    subscriptionActiveGroupRead -e --arg id "${id}" 'any(.sources[]?; .id == $id)' >/dev/null 2>&1
 }
 
 subscriptionSourceIsMain() {
     local id=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" --arg id "${id}" '.groups[] | select(.id == $groupId) | any(.sources[]?; .id == $id and .role == "main")' >/dev/null 2>&1
+    subscriptionActiveGroupRead -e --arg id "${id}" 'any(.sources[]?; .id == $id and .role == "main")' >/dev/null 2>&1
 }
 
 clearSubscriptionSourceSyncError() {
     local id=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id then del(.last_sync_error) else . end)
-      else . end)'
+    subscriptionActiveGroupWrite --arg id "${id}" '.sources |= map(if .id == $id then del(.last_sync_error) else . end)'
 }
