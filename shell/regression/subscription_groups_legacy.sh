@@ -13514,6 +13514,18 @@ runMenuSmokeRegression() {
     coreCancelledStatusCard "操作未执行"
     assertMenuAction 'statusCard:已取消'
     resetMenuActions
+    xrayPrereleaseCompatibilityCard "通过"
+    assertMenuAction 'statusCard:Xray 预发布兼容检查'
+    resetMenuActions
+    singBoxPrereleaseCompatibilityCard "通过"
+    assertMenuAction 'statusCard:sing-box 预发布兼容检查'
+    resetMenuActions
+    xrayConfigValidationCard "通过"
+    assertMenuAction 'statusCard:Xray 配置校验'
+    resetMenuActions
+    singBoxConfigValidationCard "通过"
+    assertMenuAction 'statusCard:sing-box 配置校验'
+    resetMenuActions
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }

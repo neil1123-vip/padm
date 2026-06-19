@@ -498,6 +498,34 @@ validateSingBoxConfigWithBinary() {
     singBoxMergeConfigForValidation "${binary}" "${logFile}" check || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
 }
 
+singBoxCompatibilityAuditCard() {
+    statusCard "sing-box 兼容体检" "$@"
+}
+
+singBoxPrereleaseCompatibilityCard() {
+    statusCard "sing-box 预发布兼容检查" "$@"
+}
+
+xrayCompatibilityAuditCard() {
+    statusCard "Xray 兼容体检" "$@"
+}
+
+xrayStrictValidationCard() {
+    statusCard "Xray 严格模式校验" "$@"
+}
+
+xrayPrereleaseCompatibilityCard() {
+    statusCard "Xray 预发布兼容检查" "$@"
+}
+
+xrayConfigValidationCard() {
+    statusCard "Xray 配置校验" "$@"
+}
+
+singBoxConfigValidationCard() {
+    statusCard "sing-box 配置校验" "$@"
+}
+
 singBoxCompatibilityAuditLog() {
     coreTmpFilePath padm-sing-box-compat-audit.log
 }
@@ -661,11 +689,11 @@ showSingBoxCompatibilityAudit() {
 
     collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
     if singBoxCompatibilityAuditHasFailures "${statusFile}"; then
-        statusCard "sing-box 兼容体检" "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 legacy DNS / WireGuard / special outbounds / domain_strategy"
+        singBoxCompatibilityAuditCard "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 legacy DNS / WireGuard / special outbounds / domain_strategy"
     elif [[ -s "${warnFile}" ]]; then
-        statusCard "sing-box 兼容体检" "未发现明确风险" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
+        singBoxCompatibilityAuditCard "未发现明确风险" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
     else
-        statusCard "sing-box 兼容体检" "通过" "未发现 1.13/1.14 已知兼容风险"
+        singBoxCompatibilityAuditCard "通过" "未发现 1.13/1.14 已知兼容风险"
     fi
 }
 
@@ -704,23 +732,23 @@ checkSingBoxPrereleaseCompatibility() {
     resolvedVersion=${version:-$(coreLatestReleaseTag SagerNet/sing-box true)}
     checkVersionNotEmpty "${resolvedVersion}"
     if ! singBoxInstalled; then
-        statusCard "sing-box 预发布兼容检查" "跳过" "未检测到 sing-box 二进制"
+        singBoxPrereleaseCompatibilityCard "跳过" "未检测到 sing-box 二进制"
         return 0
     fi
     if ! singBoxConfigInstalled; then
-        statusCard "sing-box 预发布兼容检查" "跳过" "未检测到 sing-box 配置"
+        singBoxPrereleaseCompatibilityCard "跳过" "未检测到 sing-box 配置"
         return 0
     fi
     if ! downloadSingBoxReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
-        statusCard "sing-box 预发布兼容检查" "失败" "预发布二进制下载失败"
+        singBoxPrereleaseCompatibilityCard "失败" "预发布二进制下载失败"
         return 1
     fi
     if validateSingBoxConfigWithBinary "${downloadedBinary}" "${logFile}"; then
-        statusCard "sing-box 预发布兼容检查" "通过" "目标版本: ${resolvedVersion}" "仅执行 dry-run，未替换本机二进制"
+        singBoxPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "仅执行 dry-run，未替换本机二进制"
         [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
         return 0
     fi
-    statusCard "sing-box 预发布兼容检查" "失败" "目标版本: ${resolvedVersion}" "排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
+    singBoxPrereleaseCompatibilityCard "失败" "目标版本: ${resolvedVersion}" "排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
     [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
     return 1
 }
@@ -899,11 +927,11 @@ showXrayCompatibilityAudit() {
 
     collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
     if xrayCompatibilityAuditHasFailures "${statusFile}"; then
-        statusCard "Xray 兼容体检" "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 users schema / echForceQuery / legacy reverse"
+        xrayCompatibilityAuditCard "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 users schema / echForceQuery / legacy reverse"
     elif [[ -s "${warnFile}" ]]; then
-        statusCard "Xray 兼容体检" "发现需关注项" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
+        xrayCompatibilityAuditCard "发现需关注项" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
     else
-        statusCard "Xray 兼容体检" "通过" "未检测到当前预发布已知兼容风险"
+        xrayCompatibilityAuditCard "通过" "未检测到当前预发布已知兼容风险"
     fi
 }
 
@@ -935,19 +963,19 @@ showXrayStrictValidation() {
     local logFile=${1:-$(coreTmpFilePath padm-core-xray-strict-test.log)}
 
     if ! xrayInstalled; then
-        statusCard "Xray 严格模式校验" "跳过" "未检测到 Xray 二进制"
+        xrayStrictValidationCard "跳过" "未检测到 Xray 二进制"
         return 0
     fi
     if ! xrayConfigInstalled; then
-        statusCard "Xray 严格模式校验" "跳过" "未检测到 Xray 配置"
+        xrayStrictValidationCard "跳过" "未检测到 Xray 配置"
         return 0
     fi
     if validateXrayConfigStrictWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
-        statusCard "Xray 严格模式校验" "通过"
+        xrayStrictValidationCard "通过"
         return 0
     fi
     appendXrayCompatibilityHints "${logFile}"
-    statusCard "Xray 严格模式校验" "失败" "排查日志: ${logFile}"
+    xrayStrictValidationCard "失败" "排查日志: ${logFile}"
     return 1
 }
 
@@ -962,15 +990,15 @@ checkXrayPrereleaseCompatibility() {
     resolvedVersion=${version:-$(coreLatestReleaseTag XTLS/Xray-core true)}
     checkVersionNotEmpty "${resolvedVersion}"
     if ! xrayInstalled; then
-        statusCard "Xray 预发布兼容检查" "跳过" "未检测到 Xray 二进制"
+        xrayPrereleaseCompatibilityCard "跳过" "未检测到 Xray 二进制"
         return 0
     fi
     if ! xrayConfigInstalled; then
-        statusCard "Xray 预发布兼容检查" "跳过" "未检测到 Xray 配置"
+        xrayPrereleaseCompatibilityCard "跳过" "未检测到 Xray 配置"
         return 0
     fi
     if ! downloadXrayReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
-        statusCard "Xray 预发布兼容检查" "失败" "预发布二进制下载失败"
+        xrayPrereleaseCompatibilityCard "失败" "预发布二进制下载失败"
         return 1
     fi
 
@@ -979,7 +1007,7 @@ checkXrayPrereleaseCompatibility() {
     if ! validateXrayConfigWithBinary "${downloadedBinary}" "${validateLog}"; then
         cat "${validateLog}" >"${logFile}"
         appendXrayCompatibilityHints "${logFile}"
-        statusCard "Xray 预发布兼容检查" "失败" "目标版本: ${resolvedVersion}" "普通校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
+        xrayPrereleaseCompatibilityCard "失败" "目标版本: ${resolvedVersion}" "普通校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
         [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
         return 1
     fi
@@ -991,7 +1019,7 @@ checkXrayPrereleaseCompatibility() {
             cat "${strictLog}"
         } >"${logFile}"
         appendXrayCompatibilityHints "${logFile}"
-        statusCard "Xray 预发布兼容检查" "失败" "目标版本: ${resolvedVersion}" "严格模式校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
+        xrayPrereleaseCompatibilityCard "失败" "目标版本: ${resolvedVersion}" "严格模式校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
         [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
         return 1
     fi
@@ -1001,7 +1029,7 @@ checkXrayPrereleaseCompatibility() {
         printf '\n[严格模式校验]\n'
         cat "${strictLog}"
     } >"${logFile}"
-    statusCard "Xray 预发布兼容检查" "通过" "目标版本: ${resolvedVersion}" "已通过普通校验和严格模式校验" "仅执行 dry-run，未替换本机二进制"
+    xrayPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "已通过普通校验和严格模式校验" "仅执行 dry-run，未替换本机二进制"
     [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
     return 0
 }
@@ -1425,9 +1453,9 @@ xrayVersionManageMenu() {
         local logFile
         logFile=$(coreTmpFilePath padm-core-xray-test.log)
         if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
-            statusCard "Xray 配置校验" "通过"
+            xrayConfigValidationCard "通过"
         else
-            statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
+            xrayConfigValidationCard "失败" "排查日志: ${logFile}"
         fi
         ;;
     6) showXrayStrictValidation ;;
@@ -2233,9 +2261,9 @@ coreConfigMaintenanceMenu() {
         local logFile
         logFile=$(coreTmpFilePath padm-core-xray-test.log)
         if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
-            statusCard "Xray 配置校验" "通过"
+            xrayConfigValidationCard "通过"
         else
-            statusCard "Xray 配置校验" "失败" "排查日志: ${logFile}"
+            xrayConfigValidationCard "失败" "排查日志: ${logFile}"
         fi
         ;;
     2) showXrayStrictValidation ;;
@@ -2245,9 +2273,9 @@ coreConfigMaintenanceMenu() {
         local logFile
         logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
-            statusCard "sing-box 配置校验" "通过"
+            singBoxConfigValidationCard "通过"
         else
-            statusCard "sing-box 配置校验" "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
+            singBoxConfigValidationCard "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
     6) showSingBoxCompatibilityAudit ;;
@@ -2356,9 +2384,9 @@ singBoxVersionManageMenu() {
         local logFile
         logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
         if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
-            statusCard "sing-box 配置校验" "通过"
+            singBoxConfigValidationCard "通过"
         else
-            statusCard "sing-box 配置校验" "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
+            singBoxConfigValidationCard "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
         fi
         ;;
     6) showSingBoxCompatibilityAudit ;;
