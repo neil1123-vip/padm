@@ -10568,6 +10568,29 @@ JSON
         unset -f originalSubscriptionSyncApplyAccountPlanTransaction
     )
     (
+        local trafficRoot="${TMP_DIR}/subscription-traffic-usermap-batch"
+        local trafficSnapshot='{"ok":true,"items":[{"account":"sub_team_a","upload":1,"download":2},{"account":"sub_team_b","upload":3,"download":4}]}'
+        mkdir -p "${trafficRoot}/groups"
+        export PADM_SUBSCRIPTION_GROUPS_DIR="${trafficRoot}/groups"
+        cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+        jq() {
+            if [[ "$1" == "--arg" && "$2" == "account" && "$4" == "--arg" && "$5" == "id" && "$7" == ". + {(\$account): \$id}" ]]; then
+                return 94
+            fi
+            command jq "$@"
+        }
+        writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
+        jq -e '
+          .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
+          .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.download == 2 and
+          .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
+          .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
+        ' "$(subscriptionGroupsFile)" >/dev/null
+        unset -f jq
+    )
+    (
         subscriptionSyncPlanFromAccounts() {
             jq -n '{create:[], remove:["sub_team_a"]}'
         }
@@ -11688,6 +11711,17 @@ runRemoteControlServerRefreshRegression() (
     [[ "${subscribeCalls}" == "1" ]]
     [[ "${subscribeArgs}" == "false false" ]]
     [[ "${reconcileCalls}" == "0" ]]
+    (
+        jq() {
+            if [[ "$1" == "-c" && "$2" == "-n" && "$5" == "--argjson" && "$8" == *"def decode_account_id:"* ]]; then
+                return 95
+            fi
+            command jq "$@"
+        }
+        subscriptionControlCreateUsersFromPlan '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' '["sub_team_a"]' |
+            jq -e '. == [{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' >/dev/null
+        unset -f jq
+    )
 
     PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
     jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null

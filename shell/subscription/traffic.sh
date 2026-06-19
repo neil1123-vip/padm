@@ -256,9 +256,8 @@ collectLocalTrafficSnapshot() {
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
     local groupId
-    local userMap='{}'
+    local userMap
     local userIds
-    local userId
     if ! jq -e '.ok == true' <<<"${snapshot}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
@@ -268,10 +267,7 @@ writeSubscriptionTrafficSnapshot() {
       .groups[] | select(.id == $groupId) |
       .user_groups[]?.id
     ') || return 1
-    while IFS= read -r userId; do
-        [[ -n "${userId}" ]] || continue
-        userMap=$(jq --arg account "$(subscriptionSyncAccountName "${userId}")" --arg id "${userId}" '. + {($account): $id}' <<<"${userMap}") || return 1
-    done <<<"${userIds}"
+    userMap=$(subscriptionSyncAccountIdMapJsonFromIds <<<"${userIds}") || return 1
     subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson snapshot "${snapshot}" --argjson userMap "${userMap}" '
       def addTraffic($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
       def sourceTotal($prev; $current):

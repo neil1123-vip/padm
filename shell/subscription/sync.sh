@@ -86,6 +86,27 @@ subscriptionSyncAccountNamesJsonFromIds() {
     subscriptionSyncAccountNamesFromIds | jq -R -s 'split("\n") | map(select(length > 0))'
 }
 
+subscriptionSyncAccountIdMapJsonFromIds() {
+    local id
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        printf '%s\t%s\n' "${id}" "$(subscriptionSyncAccountName "${id}")"
+    done | jq -R -s '
+      split("\n")
+      | map(select(length > 0))
+      | map(split("\t") | select(length == 2) | {key: .[1], value: .[0]})
+      | from_entries
+    '
+}
+
+subscriptionSyncAccountIdsJsonFromNames() {
+    local accountName
+    while IFS= read -r accountName; do
+        [[ -n "${accountName}" ]] || continue
+        subscriptionSyncAccountIdFromName "${accountName}" || return 1
+    done | jq -R -s 'split("\n") | map(select(length > 0))'
+}
+
 subscriptionSyncGenerateUUID() {
     if [[ "${coreInstallType}" == "1" && -x "${ctlPath}" ]]; then
         ${ctlPath} uuid
