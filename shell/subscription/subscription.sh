@@ -166,7 +166,8 @@ writeSubscribeNginxConfig() {
                     return 1
                 }
             else
-                rm -f "${targetPath}" || subscribeNginxConfigWriteError "订阅 Nginx 配置校验失败，且新配置清理失败，请手动检查 ${targetPath}" || return 1
+                subscriptionSyncSetManualCheckMessage restoreMessage "订阅 Nginx 配置校验失败，且新配置清理失败" " ${targetPath}"
+                rm -f "${targetPath}" || subscribeNginxConfigWriteError "${restoreMessage}" || return 1
             fi
             return 1
         fi

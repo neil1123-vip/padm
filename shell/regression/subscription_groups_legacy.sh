@@ -6771,11 +6771,13 @@ runSubscribeNginxConfigWriteRegression() {
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
     local nginxTmpRoot="${TMP_DIR}/nginx-subscribe-tmp"
+    local helperLog="${TMP_DIR}/nginx-subscribe-helper.log"
     mkdir -p "${TMP_DIR}/fake-bin" "${nginxRootRel}" "${nginxTmpRoot}"
     nginxRoot=$(cd -- "${nginxRootRel}" && pwd -P)
     targetPath="${nginxRoot}/subscribe.conf"
     TMPDIR="${nginxTmpRoot}"
     nginxConfigPath="${nginxRoot}/"
+    : >"${helperLog}"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
@@ -6834,6 +6836,10 @@ EOF
     ) || return 1
     rm -f "${targetPath}"
     (
+        subscriptionSyncSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
         rm() {
             if [[ "$1" == "-f" && "$2" == "${targetPath}" ]]; then
                 return 1
@@ -6848,6 +6854,7 @@ EOF
         fi
         [[ "$(<"${targetPath}")" == "cleanup fail config" ]]
         [[ "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR}" == *"新配置清理失败"* ]]
+        grep -q "manual-check:订阅 Nginx 配置校验失败，且新配置清理失败| ${targetPath}" "${helperLog}"
     ) || return 1
     rm -f "${targetPath}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
