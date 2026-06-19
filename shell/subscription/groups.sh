@@ -331,15 +331,11 @@ subscriptionActiveGroupWrite() {
 }
 
 listSubscriptionSources() {
-    local groupId
-    groupId=${1:-$(activeSubscriptionGroupId)}
-    subscriptionGroupRead "${groupId}" -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
+    subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
 }
 
 listUserSubscriptions() {
-    local groupId
-    groupId=${1:-$(activeSubscriptionGroupId)}
-    subscriptionGroupRead "${groupId}" -r '.user_groups[]? | "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb)"'
+    subscriptionActiveGroupRead -r '.user_groups[]? | "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb)"'
 }
 
 addUserSubscriptionState() {

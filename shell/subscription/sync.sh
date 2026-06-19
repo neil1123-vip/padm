@@ -32,11 +32,10 @@ subscriptionSyncAccountIdFromName() {
 
 subscriptionSyncFindUserByAccountName() {
     local accountName=$1
-    local groupId=${2:-$(activeSubscriptionGroupId)}
     local id
     local userJson
     if id=$(subscriptionSyncAccountIdFromName "${accountName}" 2>/dev/null); then
-        userJson=$(subscriptionGroupRead "${groupId}" -c --arg id "${id}" '.user_groups[]? | select(.id == $id)') || return 1
+        userJson=$(subscriptionActiveGroupRead -c --arg id "${id}" '.user_groups[]? | select(.id == $id)') || return 1
         [[ -n "${userJson}" ]] || return 1
         printf '%s\n' "${userJson}"
         return 0
@@ -44,10 +43,10 @@ subscriptionSyncFindUserByAccountName() {
     while IFS= read -r id; do
         [[ -n "${id}" ]] || continue
         if [[ "$(subscriptionSyncAccountName "${id}")" == "${accountName}" ]]; then
-            subscriptionGroupRead "${groupId}" -c --arg id "${id}" '.user_groups[]? | select(.id == $id)'
+            subscriptionActiveGroupRead -c --arg id "${id}" '.user_groups[]? | select(.id == $id)'
             return 0
         fi
-    done < <(subscriptionGroupRead "${groupId}" -r '.user_groups[]?.id')
+    done < <(subscriptionActiveGroupRead -r '.user_groups[]?.id')
     return 1
 }
 
