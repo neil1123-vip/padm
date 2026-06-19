@@ -198,20 +198,26 @@ setVlessRealityEncryption() {
     backupFile="${configFile}.vlessenc.bak"
     stateBackupFile="${stateFile}.bak"
     if ! backupManagedFileToPath "${configFile}" "${backupFile}" 644; then
-        errorCard "创建 VLESS Encryption 配置备份失败，请手动检查 ${configFile}"
+        local manualCheckMessage
+        coreSetManualCheckMessage manualCheckMessage "创建 VLESS Encryption 配置备份失败" " ${configFile}"
+        errorCard "${manualCheckMessage}"
         return 1
     fi
     if [[ -f "${stateFile}" ]]; then
         if ! backupManagedFileToPath "${stateFile}" "${stateBackupFile}" 600; then
             removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
-            errorCard "创建 VLESS Encryption 状态备份失败，请手动检查 ${stateFile}"
+            local manualCheckMessage
+            coreSetManualCheckMessage manualCheckMessage "创建 VLESS Encryption 状态备份失败" " ${stateFile}"
+            errorCard "${manualCheckMessage}"
             return 1
         fi
         hadStateBackup=true
     else
         if ! removeManagedFileIfPresent "${stateBackupFile}"; then
             removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
-            errorCard "清理 VLESS Encryption 旧状态备份失败，请手动检查 ${stateBackupFile}"
+            local manualCheckMessage
+            coreSetManualCheckMessage manualCheckMessage "清理 VLESS Encryption 旧状态备份失败" " ${stateBackupFile}"
+            errorCard "${manualCheckMessage}"
             return 1
         fi
     fi

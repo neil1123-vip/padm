@@ -9367,6 +9367,27 @@ JSON
         return 1
     fi
 
+    (
+        local helperLog="${TMP_DIR}/vlessenc-config-backup-helper.log"
+        : >"${helperLog}"
+        backupManagedFileToPath() {
+            if [[ "$1" == "${vlessConfigFile}" ]]; then
+                return 1
+            fi
+            command cp -p "$1" "$2"
+        }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
+        if setVlessRealityEncryption enable >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "$(<"${vlessConfigFile}")" == "${vlessOriginalConfig}" ]]
+        [[ "$(<"${vlessStateFile}")" == "${vlessOriginalState}" ]]
+        grep -q "manual-check:创建 VLESS Encryption 配置备份失败| ${vlessConfigFile}" "${helperLog}"
+    ) || return 1
+
     export PADM_FAKE_XRAY_VALIDATE_MODE="success"
     setVlessRealityEncryption enable
     jq -e '.inbounds[0].settings.decryption == "mlkem768x25519plus.native.0rtt.test" and (.inbounds[0].settings.fallbacks | not) and .inbounds[0].settings.clients[0].flow == "xtls-rprx-vision"' "${vlessConfigFile}" >/dev/null
