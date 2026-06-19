@@ -91,7 +91,7 @@ subscriptionPublishHasRemoteSources() {
             return 0
         fi
     done <<<"${accounts}"
-    [[ -n "$(listRemoteSubscribeSources 2>/dev/null)" ]]
+    subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .transport != "wireguard")' >/dev/null 2>&1
 }
 
 ensureSubscriptionControlNginxLocation() {
@@ -387,7 +387,10 @@ updateRemoteSubscribe() {
 
     sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount "${email}" 2>/dev/null) || sourceLines=
     if [[ -z "${sourceLines}" ]]; then
-        sourceLines=$(listRemoteSubscribeSources)
+        sourceLines=$(subscriptionActiveGroupRead -r '
+          .sources[]?
+          | select(.role != "main" and .transport != "wireguard")
+          | "\(.host):\(.port):\(.id):\(.scheme)"')
     fi
 
     while IFS= read -r line; do
