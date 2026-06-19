@@ -13514,6 +13514,9 @@ runMenuSmokeRegression() {
     coreCancelledStatusCard "操作未执行"
     assertMenuAction 'statusCard:已取消'
     resetMenuActions
+    coreRuleExistsStatusCard "example.com 已存在，跳过"
+    assertMenuAction 'statusCard:规则已存在'
+    resetMenuActions
     coreNotInstalledErrorCard
     assertMenuAction 'errorCard:未安装，请使用脚本安装'
     resetMenuActions

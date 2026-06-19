@@ -156,7 +156,7 @@ EOF
     local newRules=()
     while read -r line; do
         if echo "${routingRule}" | grep -q "${line}"; then
-            statusCard "规则已存在" "${line} 已存在，跳过"
+            coreRuleExistsStatusCard "${line} 已存在，跳过"
         else
             local matchedRuleValue
             matchedRuleValue=$(getDLCMatchedRuleValue "${line}" "/etc/padm/xray")
@@ -225,7 +225,7 @@ EOF
         fi
 
         if echo "${routingRule}" | grep -q "${ipRuleValue}"; then
-            statusCard "规则已存在" "${ipRuleValue} 已存在，跳过"
+            coreRuleExistsStatusCard "${ipRuleValue} 已存在，跳过"
         else
             newRules+=("${ipRuleValue}")
         fi

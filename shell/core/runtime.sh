@@ -352,6 +352,10 @@ coreCancelledStatusCard() {
     statusCard "已取消" "$@"
 }
 
+coreRuleExistsStatusCard() {
+    statusCard "规则已存在" "$@"
+}
+
 coreNotInstalledErrorCard() {
     errorCard "未安装，请使用脚本安装"
 }
