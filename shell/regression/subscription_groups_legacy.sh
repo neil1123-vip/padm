@@ -2114,6 +2114,12 @@ runCoreRollbackResultMessageRegression() (
 
     coreSetManualCheckMessage detailMessage "核心重载失败，且回滚配置失败" " /tmp/config.json 和 /tmp/config.json.bak"
     [[ "${detailMessage}" == "核心重载失败，且回滚配置失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetManualCheckMessage detailMessage "Nginx 配置目标异常" " /tmp/alone.conf"
+    [[ "${detailMessage}" == "Nginx 配置目标异常，请手动检查 /tmp/alone.conf" ]]
+
+    coreSetManualCheckMessage detailMessage "端口检测 Nginx 配置备份清理失败" " /tmp/check-port-open.conf.bak"
+    [[ "${detailMessage}" == "端口检测 Nginx 配置备份清理失败，请手动检查 /tmp/check-port-open.conf.bak" ]]
 )
 
 runCorePortFileTransactionRegression() {
@@ -7370,7 +7376,7 @@ SH
         fi
         [[ -d "${targetPath}" ]]
         [[ ! -e "${targetPath}/checkPortOpen.conf.tmp" ]]
-        [[ "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR}" == *"配置目标异常"* ]]
+        [[ "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR}" == "端口检测 Nginx 配置目标异常，请手动检查 ${targetPath}" ]]
 
         PATH="${oldPath}"
     )
@@ -7412,7 +7418,7 @@ SH
         fi
         [[ -d "${targetPath}" ]]
         [[ ! -e "${targetPath}/alone.conf.tmp" ]]
-        grep -q 'Nginx 配置目标异常' "${errorLog}"
+        grep -qx "Nginx 配置目标异常，请手动检查 ${targetPath}" "${errorLog}"
 
         PATH="${oldPath}"
     )

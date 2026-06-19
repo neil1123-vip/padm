@@ -731,6 +731,14 @@ aloneNginxConfigWriteError() {
     return 1
 }
 
+aloneNginxConfigWriteManualCheckError() {
+    local reason=$1
+    local checkTarget=$2
+    coreSetManualCheckMessage ALONE_NGINX_CONFIG_ERROR "${reason}" "${checkTarget}"
+    errorCard "${ALONE_NGINX_CONFIG_ERROR}"
+    return 1
+}
+
 writeAloneNginxConfig() {
     local targetPath
     if ! targetPath=$(nginxConfigFilePath alone.conf); then
@@ -743,23 +751,23 @@ writeAloneNginxConfig() {
     local logFile
     ALONE_NGINX_CONFIG_ERROR=
     if ! padmCommitTargetIsFileLike "${targetPath}"; then
-        aloneNginxConfigWriteError "Nginx 配置目标异常，请手动检查 ${targetPath}"
+        aloneNginxConfigWriteManualCheckError "Nginx 配置目标异常" " ${targetPath}"
         return 1
     fi
     targetDir=$(dirname -- "${targetPath}")
-    padmEnsureSafeDirectory "${targetDir}" || { aloneNginxConfigWriteError "Nginx 配置目录创建失败，请手动检查 ${targetPath}"; return 1; }
-    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || { aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"; return 1; }
-    cat >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 配置临时文件写入失败，请手动检查 ${tmpPath}"; return 1; }
+    padmEnsureSafeDirectory "${targetDir}" || { aloneNginxConfigWriteManualCheckError "Nginx 配置目录创建失败" " ${targetPath}"; return 1; }
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || { aloneNginxConfigWriteManualCheckError "Nginx 配置临时文件创建失败" " ${targetPath}"; return 1; }
+    cat >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteManualCheckError "Nginx 配置临时文件写入失败" " ${tmpPath}"; return 1; }
     if command -v nginx >/dev/null 2>&1; then
         if [[ -f "${targetPath}" ]] && ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
-            aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
+            aloneNginxConfigWriteManualCheckError "Nginx 配置备份失败" " ${targetPath}"
             return 1
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
             [[ -f "${backupPath}" ]] && removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1
-            aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
+            aloneNginxConfigWriteManualCheckError "Nginx 配置提交失败" " ${targetPath}"
             return 1
         fi
         logFile=$(aloneNginxTestLog)
@@ -767,14 +775,14 @@ writeAloneNginxConfig() {
             if [[ -f "${backupPath}" ]]; then
                 restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             else
-                removeManagedFileIfPresent "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置检测失败，且新 alone.conf 清理失败，请手动检查 ${targetPath}"; return 1; }
+                removeManagedFileIfPresent "${targetPath}" || { aloneNginxConfigWriteManualCheckError "Nginx 配置检测失败，且新 alone.conf 清理失败" " ${targetPath}"; return 1; }
                 aloneNginxConfigWriteError "Nginx 配置检测失败，已删除新 alone.conf"
             fi
             return 1
         fi
-        removeManagedFileIfPresent "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
+        removeManagedFileIfPresent "${backupPath}" || { aloneNginxConfigWriteManualCheckError "Nginx 配置备份清理失败" " ${backupPath}"; return 1; }
     else
-        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteManualCheckError "Nginx 配置提交失败" " ${targetPath}"; return 1; }
     fi
 }
 
@@ -789,11 +797,11 @@ updateAloneNginxConfig() {
     local logFile
     ALONE_NGINX_CONFIG_ERROR=
     [[ -f "${targetPath}" ]] || { aloneNginxConfigWriteError "未检测到传统 TLS fallback 配置，请先重建 alone.conf"; return 1; }
-    padmCommitTargetIsFileLike "${targetPath}" || { aloneNginxConfigWriteError "Nginx 配置目标异常，请手动检查 ${targetPath}"; return 1; }
-    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || { aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"; return 1; }
+    padmCommitTargetIsFileLike "${targetPath}" || { aloneNginxConfigWriteManualCheckError "Nginx 配置目标异常" " ${targetPath}"; return 1; }
+    padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || { aloneNginxConfigWriteManualCheckError "Nginx 配置临时文件创建失败" " ${targetPath}"; return 1; }
     if ! cp "${targetPath}" "${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"
-        aloneNginxConfigWriteError "Nginx 配置临时文件创建失败，请手动检查 ${targetPath}"
+        aloneNginxConfigWriteManualCheckError "Nginx 配置临时文件创建失败" " ${targetPath}"
         return 1
     fi
     "$@" "${tmpPath}" || {
@@ -803,13 +811,13 @@ updateAloneNginxConfig() {
     if command -v nginx >/dev/null 2>&1; then
         if ! backupManagedFileToPath "${targetPath}" "${backupPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
-            aloneNginxConfigWriteError "Nginx 配置备份失败，请手动检查 ${targetPath}"
+            aloneNginxConfigWriteManualCheckError "Nginx 配置备份失败" " ${targetPath}"
             return 1
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
             removeManagedFileIfPresent "${backupPath}" >/dev/null 2>&1
-            aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"
+            aloneNginxConfigWriteManualCheckError "Nginx 配置提交失败" " ${targetPath}"
             return 1
         fi
         logFile=$(aloneNginxTestLog)
@@ -817,9 +825,9 @@ updateAloneNginxConfig() {
             restoreAloneNginxConfigBackup "${backupPath}" "${targetPath}" || return 1
             return 1
         fi
-        removeManagedFileIfPresent "${backupPath}" || { aloneNginxConfigWriteError "Nginx 配置备份清理失败，请手动检查 ${backupPath}"; return 1; }
+        removeManagedFileIfPresent "${backupPath}" || { aloneNginxConfigWriteManualCheckError "Nginx 配置备份清理失败" " ${backupPath}"; return 1; }
     else
-        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+        commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteManualCheckError "Nginx 配置提交失败" " ${targetPath}"; return 1; }
     fi
 }
 
@@ -903,8 +911,8 @@ ensureTraditionalTlsFallbackNginxConfig() {
 removeNginx302FromFile() {
     local targetPath=$1
     local tmpPath="${targetPath}.rewrite"
-    awk '!(/return 302/ && $0 !~ /request_uri/)' "${targetPath}" >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 302 配置编辑失败，请手动检查 ${targetPath}"; return 1; }
-    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteError "Nginx 302 配置提交失败，请手动检查 ${targetPath}"; return 1; }
+    awk '!(/return 302/ && $0 !~ /request_uri/)' "${targetPath}" >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteManualCheckError "Nginx 302 配置编辑失败" " ${targetPath}"; return 1; }
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; aloneNginxConfigWriteManualCheckError "Nginx 302 配置提交失败" " ${targetPath}"; return 1; }
 }
 
 # 修改 Nginx 重定向配置

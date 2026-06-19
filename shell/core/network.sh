@@ -159,7 +159,7 @@ writeCheckPortOpenNginxConfig() {
     nginxTestLog="$(padmFallbackTmpFilePath padm-check-port-open-nginx-test.log)"
     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
     if ! padmCommitTargetIsFileLike "${targetPath}"; then
-        CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置目标异常，请手动检查 ${targetPath}"
+        coreSetManualCheckMessage CHECK_PORT_OPEN_NGINX_CONFIG_ERROR "端口检测 Nginx 配置目标异常" " ${targetPath}"
         return 1
     fi
     targetDir=$(dirname -- "${targetPath}")
@@ -213,7 +213,7 @@ EOF
             return 1
         fi
         if [[ -f "${backupPath}" ]] && ! removeManagedFileIfPresent "${backupPath}"; then
-            CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 配置备份清理失败，请手动检查 ${backupPath}"
+            coreSetManualCheckMessage CHECK_PORT_OPEN_NGINX_CONFIG_ERROR "端口检测 Nginx 配置备份清理失败" " ${backupPath}"
             return 1
         fi
     else
