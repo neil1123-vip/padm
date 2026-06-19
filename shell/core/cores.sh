@@ -526,6 +526,10 @@ singBoxConfigValidationCard() {
     statusCard "sing-box 配置校验" "$@"
 }
 
+skipTlsCertificateStatusCard() {
+    statusCard "跳过 TLS 证书" "$@"
+}
+
 singBoxCompatibilityAuditLog() {
     coreTmpFilePath padm-sing-box-compat-audit.log
 }
@@ -1961,7 +1965,7 @@ customXrayInstall() {
         totalProgress=12
         installTools 1
         if [[ -n "${btDomain}" ]]; then
-            statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
+            skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
             coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
             if [[ "${selectCustomInstallType}" != ",7," || -n "${realityOnlyWithDomain}" ]]; then
                 customPortFunction || return 1
@@ -1975,7 +1979,7 @@ customXrayInstall() {
                 initTLSNginxConfig 2 || return 1
                 installTLS 3 || return 1
             else
-                statusCard "跳过 TLS 证书" "仅安装无域名 Reality"
+                skipTlsCertificateStatusCard "仅安装无域名 Reality"
             fi
         fi
 
@@ -2119,7 +2123,7 @@ xrayCoreInstall() {
     totalProgress=12
     installTools 2
     if [[ -n "${btDomain}" ]]; then
-        statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
+        skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
         coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
         customPortFunction || return 1
     else
@@ -2164,7 +2168,7 @@ singBoxInstall() {
     installTools 2
 
     if [[ -n "${btDomain}" ]]; then
-        statusCard "跳过 TLS 证书" "检测到宝塔面板/1Panel"
+        skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
         coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
         customPortFunction || return 1
     else

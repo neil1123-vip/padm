@@ -13535,6 +13535,9 @@ runMenuSmokeRegression() {
     singBoxConfigValidationCard "通过"
     assertMenuAction 'statusCard:sing-box 配置校验'
     resetMenuActions
+    skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
+    assertMenuAction 'statusCard:跳过 TLS 证书'
+    resetMenuActions
     protocolPortInputStatusCard "端口不合法"
     assertMenuAction 'statusCard:端口输入'
     resetMenuActions
