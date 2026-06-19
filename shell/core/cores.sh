@@ -1418,7 +1418,7 @@ xrayVersionManageMenu() {
     2) checkXrayPrereleaseCompatibility ;;
     3) upgradeXrayCore true ;;
     4)
-        version=$(selectRollbackVersion XTLS/Xray-core "Xray-core") || { errorCard "输入有误，请重新输入"; xrayVersionManageMenu; return; }
+        version=$(selectRollbackVersion XTLS/Xray-core "Xray-core") || { coreInvalidInputErrorCard; xrayVersionManageMenu; return; }
         upgradeXrayCore false "${version}"
         ;;
     5)
@@ -1438,7 +1438,7 @@ xrayVersionManageMenu() {
     11) coreServiceControlMenu xray ;;
     12) checkLog 1 ;;
     13) coreVersionManageMenu ;;
-    *) errorCard "输入有误，请重新输入"; xrayVersionManageMenu ;;
+    *) coreInvalidInputErrorCard; xrayVersionManageMenu ;;
     esac
 }
 
@@ -2181,7 +2181,7 @@ coreServiceControlMenu() {
     2) coreServiceControlAction "${serviceName}" stop ;;
     3) coreServiceControlAction "${serviceName}" restart ;;
     4) coreVersionManageMenu ;;
-    *) errorCard "输入有误，请重新输入"; coreServiceControlMenu "${core}" ;;
+    *) coreInvalidInputErrorCard; coreServiceControlMenu "${core}" ;;
     esac
 }
 
@@ -2256,7 +2256,7 @@ coreConfigMaintenanceMenu() {
     9) showXrayGeoStatus ;;
     10) installCronUpdateGeo ;;
     11) coreVersionManageMenu ;;
-    *) errorCard "输入有误，请重新输入"; coreConfigMaintenanceMenu ;;
+    *) coreInvalidInputErrorCard; coreConfigMaintenanceMenu ;;
     esac
 }
 
@@ -2275,7 +2275,7 @@ coreLogsMenu() {
         tail -f /etc/padm/sing-box/conf/box.log
         ;;
     3) coreVersionManageMenu ;;
-    *) errorCard "输入有误，请重新输入"; coreLogsMenu ;;
+    *) coreInvalidInputErrorCard; coreLogsMenu ;;
     esac
 }
 
@@ -2290,7 +2290,7 @@ coreAllServicesMenu() {
     1) coreServiceControlMenu xray ;;
     2) coreServiceControlMenu sing-box ;;
     3) coreVersionManageMenu ;;
-    *) errorCard "输入有误，请重新输入"; coreAllServicesMenu ;;
+    *) coreInvalidInputErrorCard; coreAllServicesMenu ;;
     esac
 }
 
@@ -2320,7 +2320,7 @@ coreVersionManageMenu() {
     4) coreAllServicesMenu ;;
     5) coreLogsMenu ;;
     6) menu ;;
-    *) errorCard "输入有误，请重新输入"; coreVersionManageMenu ;;
+    *) coreInvalidInputErrorCard; coreVersionManageMenu ;;
     esac
 }
 
@@ -2349,7 +2349,7 @@ singBoxVersionManageMenu() {
     2) checkSingBoxPrereleaseCompatibility ;;
     3) upgradeSingBoxCore true ;;
     4)
-        version=$(selectRollbackVersion SagerNet/sing-box "sing-box") || { errorCard "输入有误，请重新输入"; singBoxVersionManageMenu; return; }
+        version=$(selectRollbackVersion SagerNet/sing-box "sing-box") || { coreInvalidInputErrorCard; singBoxVersionManageMenu; return; }
         upgradeSingBoxCore false "${version}"
         ;;
     5)
@@ -2372,7 +2372,7 @@ singBoxVersionManageMenu() {
         tail -f /etc/padm/sing-box/conf/box.log
         ;;
     9) coreVersionManageMenu ;;
-    *) errorCard "输入有误，请重新输入"; singBoxVersionManageMenu ;;
+    *) coreInvalidInputErrorCard; singBoxVersionManageMenu ;;
     esac
 }
 

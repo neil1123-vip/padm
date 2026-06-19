@@ -344,6 +344,10 @@ coreSelectionErrorCard() {
     errorCard "${message}"
 }
 
+coreInvalidInputErrorCard() {
+    errorCard "输入有误，请重新输入"
+}
+
 coreSetDualRestoreResultMessage() {
     local outputVar=$1
     local reason=$2

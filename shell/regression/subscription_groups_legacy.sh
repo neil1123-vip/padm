@@ -13508,6 +13508,9 @@ runMenuSmokeRegression() {
     coreSelectionErrorCard
     assertMenuAction 'errorCard:选择错误，请重新选择'
     resetMenuActions
+    coreInvalidInputErrorCard
+    assertMenuAction 'errorCard:输入有误，请重新输入'
+    resetMenuActions
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }
