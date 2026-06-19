@@ -862,7 +862,7 @@ runThirdPartyTcpAccelerationScript() {
         "默认推荐仍是官方内核自带 BBR + fq"
     autoConfirm third_party_tcp_confirm "确认下载并运行第三方 TCP 加速脚本？" n confirmThirdPartyTcp
     if [[ "${confirmThirdPartyTcp}" != "y" ]]; then
-        statusCard "已取消" "未运行第三方 TCP 加速脚本"
+        coreCancelledStatusCard "未运行第三方 TCP 加速脚本"
         bbrInstall
         return
     fi

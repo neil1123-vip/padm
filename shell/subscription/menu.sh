@@ -673,7 +673,7 @@ removeUserSubscriptionMenu() {
     local manualCheckMessage
     autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应托管账号。确认请输入 yes：" confirm
     if [[ "${confirm}" != "yes" ]]; then
-        statusCard "已取消" "操作未执行"
+        coreCancelledStatusCard "操作未执行"
         return 1
     fi
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {

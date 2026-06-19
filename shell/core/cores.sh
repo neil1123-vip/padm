@@ -1362,7 +1362,7 @@ upgradeXrayCore() {
             return 1
         fi
     fi
-    confirmCoreUpgrade "Xray-core" "${version}" "${channel}" || { statusCard "已取消" "未更新 Xray-core"; return 0; }
+    confirmCoreUpgrade "Xray-core" "${version}" "${channel}" || { coreCancelledStatusCard "未更新 Xray-core"; return 0; }
     installDownloadedXrayBinary "${version}"
 }
 
@@ -1378,7 +1378,7 @@ upgradeSingBoxCore() {
             return 1
         fi
     fi
-    confirmCoreUpgrade "sing-box" "${version}" "${channel}" || { statusCard "已取消" "未更新 sing-box"; return 0; }
+    confirmCoreUpgrade "sing-box" "${version}" "${channel}" || { coreCancelledStatusCard "未更新 sing-box"; return 0; }
     installDownloadedSingBoxBinary "${version}"
 }
 

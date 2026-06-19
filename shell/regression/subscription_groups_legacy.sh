@@ -13511,6 +13511,9 @@ runMenuSmokeRegression() {
     coreInvalidInputErrorCard
     assertMenuAction 'errorCard:输入有误，请重新输入'
     resetMenuActions
+    coreCancelledStatusCard "操作未执行"
+    assertMenuAction 'statusCard:已取消'
+    resetMenuActions
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }

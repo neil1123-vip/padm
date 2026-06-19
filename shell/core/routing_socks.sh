@@ -169,7 +169,7 @@ setSocks5OutboundRoutingAll() {
             removeSingBoxConfig 01_direct_outbound || return 1
         fi
     else
-        statusCard "已取消" "未设置 Socks5 全局出站"
+        coreCancelledStatusCard "未设置 Socks5 全局出站"
         return 1
     fi
 }

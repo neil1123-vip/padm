@@ -176,7 +176,7 @@ ipv6Routing() {
 
 
 
-            statusCard "已取消" "未设置 IPv6 全局出站"
+            coreCancelledStatusCard "未设置 IPv6 全局出站"
 
             ipv6Routing
 

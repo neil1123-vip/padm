@@ -944,7 +944,7 @@ executeSubscriptionQuotaPlanMenu() {
     fi
     autoRead subscription_quota_apply_confirm "执行后会停用超额订阅并移除本机托管账号。确认请输入 yes:" confirm
     if [[ "${confirm}" != "yes" ]]; then
-        statusCard "已取消" "超限处理未执行"
+        coreCancelledStatusCard "超限处理未执行"
         return 0
     fi
     if ! applySubscriptionQuotaPlanTransaction "${quotaPlan}"; then

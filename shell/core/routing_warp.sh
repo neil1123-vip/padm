@@ -82,7 +82,7 @@ installWarpReg() {
             chmod 655 "${warpBinary}"
 
         else
-            statusCard "已取消" "放弃安装"
+            coreCancelledStatusCard "放弃安装"
             exit 0
         fi
     fi
@@ -284,7 +284,7 @@ warpRoutingReg() {
 
             successMessage="WARP全局出站设置完毕"
         else
-            statusCard "已取消" "未设置 WARP 全局出站"
+            coreCancelledStatusCard "未设置 WARP 全局出站"
             warpRoutingReg "$1" "${type}"
             return 0
         fi

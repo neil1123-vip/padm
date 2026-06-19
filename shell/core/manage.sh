@@ -397,7 +397,7 @@ manageVlessEncryptionExperiment() {
         if [[ "${confirmVlessEncryption}" == "y" ]]; then
             setVlessRealityEncryption enable && successCard "VLESS Encryption 实验开关已启用"
         else
-            statusCard "已取消" "操作未执行"
+            coreCancelledStatusCard "操作未执行"
         fi
         ;;
     2)
@@ -1475,7 +1475,7 @@ setCDNEntryAddress() {
     menuClose
     autoRead custom_cdn_domain "请输入 CDN 入口 IP 或域名[回车取消]:" input
     if [[ -z "${input}" ]]; then
-        statusCard "已取消" "未修改 CDN 入口地址"
+        coreCancelledStatusCard "未修改 CDN 入口地址"
         return 0
     fi
     cdnWriteAddress "${input}"

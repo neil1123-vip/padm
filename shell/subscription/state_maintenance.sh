@@ -107,7 +107,7 @@ restoreSubscriptionGroupsBackupMenu() {
     statusCard "即将恢复订阅状态" "目标备份：${backupFile}" "当前状态已先备份到：${currentBackup}"
     autoRead subscription_restore_confirm "恢复会覆盖当前 groups.json。确认请输入 yes:" confirm
     if [[ "${confirm}" != "yes" ]]; then
-        statusCard "已取消" "状态恢复未执行"
+        coreCancelledStatusCard "状态恢复未执行"
         return 1
     fi
     restoreSubscriptionGroupsBackup "${backupFile}" || {
@@ -132,7 +132,7 @@ resetSubscriptionGroupsStateMenu() {
     statusCard "即将重建订阅状态" "这会把 groups.json 重置为默认空状态" "当前状态已先备份到：${currentBackup}" "升级或打开菜单不会自动执行此操作"
     autoRead subscription_reset_confirm "确认重建请输入 yes:" confirm
     if [[ "${confirm}" != "yes" ]]; then
-        statusCard "已取消" "订阅状态未重建"
+        coreCancelledStatusCard "订阅状态未重建"
         return 1
     fi
     stateFile=$(subscriptionGroupsFile)
