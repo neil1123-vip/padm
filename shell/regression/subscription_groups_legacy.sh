@@ -10540,6 +10540,8 @@ JSON
     subscriptionGroupsStateWrite '
       .groups[0].user_groups[0].enabled = true |
       .groups[0].user_groups[0].traffic_limit_gb = 1 |
+      .groups[0].sync.last_run = "2026-06-10 10:01:00" |
+      .groups[0].traffic.global = {upload:3145728, download:1048576} |
       .groups[0].traffic.admin = {upload:2097152, download:1048576, sources:{main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}}} |
       .groups[0].traffic.sources = {main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}, "remote-edge":{upload:1048576, download:0, updated_at:"2026-06-10 10:01:00"}} |
       .groups[0].traffic.user_groups["team-a"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
@@ -10556,6 +10558,30 @@ JSON
         [[ "${trafficOutput}" == *"总上传：3 MB"* ]]
         [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
         [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
+    )
+    (
+        local trafficOutput
+        menuLine() { printf 'menu:%s\n' "$*"; }
+        menuClose() { return 0; }
+        userResultCard() { printf 'card:%s\n' "$*"; }
+        trafficOutput=$(showUserSubscriptionTraffic team-a)
+        [[ "${trafficOutput}" == *"card:用户订阅流量"* ]]
+        [[ "${trafficOutput}" == *"menu:用户订阅：team-a"* ]]
+        [[ "${trafficOutput}" == *"menu:限额状态：已超限(100%)"* ]]
+        [[ "${trafficOutput}" == *'"upload": 1073741824'* ]]
+        [[ "${trafficOutput}" == *'"download": 1'* ]]
+    )
+    (
+        local trafficOutput
+        menuLine() { printf 'menu:%s\n' "$*"; }
+        menuClose() { return 0; }
+        userResultCard() { printf 'card:%s\n' "$*"; }
+        trafficOutput=$(showSubscriptionTrafficOverview)
+        [[ "${trafficOutput}" == *"card:用量与限额总览"* ]]
+        [[ "${trafficOutput}" == *"menu:全局累计：上传 3 MB / 下载 1 MB"* ]]
+        [[ "${trafficOutput}" == *"menu:分享订阅：共 1 个，启用 1 个"* ]]
+        [[ "${trafficOutput}" == *"menu:限额状态：超限 1 个，接近上限 0 个"* ]]
+        [[ "${trafficOutput}" == *"menu:最近同步：状态 pending，时间 2026-06-10 10:01:00"* ]]
     )
     subscriptionGroupsStateWrite '
       .groups[0].user_groups += [{"id":"team-b","name":"Team B","enabled":false,"allowed_sources":["main"],"traffic_limit_gb":1,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}] |

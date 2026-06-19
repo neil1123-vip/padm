@@ -255,20 +255,15 @@ collectLocalTrafficSnapshot() {
 
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
-    local groupId
     local userMap
     local userIds
     if ! jq -e '.ok == true' <<<"${snapshot}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
-    groupId=$(activeSubscriptionGroupId)
-    userIds=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) |
-      .user_groups[]?.id
-    ') || return 1
+    userIds=$(subscriptionActiveGroupRead -r '.user_groups[]?.id') || return 1
     userMap=$(subscriptionSyncAccountIdMapJsonFromIds <<<"${userIds}") || return 1
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --argjson snapshot "${snapshot}" --argjson userMap "${userMap}" '
+    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson userMap "${userMap}" '
       def addTraffic($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
@@ -281,22 +276,21 @@ writeSubscriptionTrafficSnapshot() {
           .download += (if ($oldCounters | has($item.account)) and $downloadDelta > 0 then $downloadDelta else 0 end) |
           .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
         {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
-      .groups |= map(if .id == $groupId then
-        . as $group |
-        ($snapshot.items | map(. + {id: ($userMap[.account] // .account)})) as $items |
-        ($items | map(select(.account | startswith("sub_")))) as $userItems |
-        ($items | map(select((.account | startswith("sub_")) | not))) as $adminItems |
-        (sourceTotal($group.traffic.sources.main; $items)) as $mainTraffic |
-        (sourceTotal($group.traffic.admin.sources.main; $adminItems)) as $adminTraffic |
-        (($group.traffic.sources // {}) | to_entries | map(select(.key != "main") | .value) | addTraffic(.)) as $remoteTraffic |
-        .traffic.global = {upload: (($mainTraffic.upload // 0) + ($remoteTraffic.upload // 0)), download: (($mainTraffic.download // 0) + ($remoteTraffic.download // 0))} |
-        .traffic.admin = (($group.traffic.admin // {}) + {upload: ($adminTraffic.upload // 0), download: ($adminTraffic.download // 0), sources: ((($group.traffic.admin.sources // {}) + {main: $adminTraffic}))}) |
-        .traffic.user_groups = (reduce $group.user_groups[]? as $userGroup ({};
-          ($userItems | map(select(.id == $userGroup.id))) as $groupItems |
-          sourceTotal(($group.traffic.user_groups[$userGroup.id].sources.main // {}); $groupItems) as $groupTraffic |
-          .[$userGroup.id] = (($group.traffic.user_groups[$userGroup.id] // {}) + {upload: ($groupTraffic.upload // 0), download: ($groupTraffic.download // 0), sources: ((($group.traffic.user_groups[$userGroup.id].sources // {}) + {main: $groupTraffic}))}))) |
-        .traffic.sources = (($group.traffic.sources // {}) + {main: $mainTraffic})
-      else . end)'
+      . as $group |
+      ($snapshot.items | map(. + {id: ($userMap[.account] // .account)})) as $items |
+      ($items | map(select(.account | startswith("sub_")))) as $userItems |
+      ($items | map(select((.account | startswith("sub_")) | not))) as $adminItems |
+      (sourceTotal($group.traffic.sources.main; $items)) as $mainTraffic |
+      (sourceTotal($group.traffic.admin.sources.main; $adminItems)) as $adminTraffic |
+      (($group.traffic.sources // {}) | to_entries | map(select(.key != "main") | .value) | addTraffic(.)) as $remoteTraffic |
+      .traffic.global = {upload: (($mainTraffic.upload // 0) + ($remoteTraffic.upload // 0)), download: (($mainTraffic.download // 0) + ($remoteTraffic.download // 0))} |
+      .traffic.admin = (($group.traffic.admin // {}) + {upload: ($adminTraffic.upload // 0), download: ($adminTraffic.download // 0), sources: ((($group.traffic.admin.sources // {}) + {main: $adminTraffic}))}) |
+      .traffic.user_groups = (reduce $group.user_groups[]? as $userGroup ({};
+        ($userItems | map(select(.id == $userGroup.id))) as $groupItems |
+        sourceTotal(($group.traffic.user_groups[$userGroup.id].sources.main // {}); $groupItems) as $groupTraffic |
+        .[$userGroup.id] = (($group.traffic.user_groups[$userGroup.id] // {}) + {upload: ($groupTraffic.upload // 0), download: ($groupTraffic.download // 0), sources: ((($group.traffic.user_groups[$userGroup.id].sources // {}) + {main: $groupTraffic}))}))) |
+      .traffic.sources = (($group.traffic.sources // {}) + {main: $mainTraffic})
+    '
 }
 
 collectSubscriptionTraffic() {
@@ -317,11 +311,8 @@ collectSubscriptionTraffic() {
 
 showUserSubscriptionQuotaStatus() {
     local userSubscriptionId=$1
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
     ensureSubscriptionGroupsState
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" --arg id "${userSubscriptionId}" '
-      .groups[] | select(.id == $groupId) |
+    subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" '
       (.user_groups[]? | select(.id == $id)) as $userGroup |
       (.traffic.user_groups[$id] // {upload:0, download:0}) as $traffic |
       if ($userGroup.traffic_limit_gb // 0) <= 0 then
@@ -336,11 +327,9 @@ showUserSubscriptionQuotaStatus() {
 }
 
 showAdminSubscriptionTraffic() {
-    local groupId
     local traffic
     local summary
-    groupId=$(activeSubscriptionGroupId)
-    traffic=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .traffic.admin')
+    traffic=$(subscriptionActiveGroupRead -r '.traffic.admin')
     summary=$(jq -r '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       "总上传：" + mb(.upload) + "\n" +
@@ -353,24 +342,20 @@ showAdminSubscriptionTraffic() {
 
 showUserSubscriptionTraffic() {
     local userSubscriptionId=$1
-    local groupId
     local traffic
-    groupId=$(activeSubscriptionGroupId)
     ensureSubscriptionGroupsState
     userResultCard "用户订阅流量"
     menuLine "用户订阅：${userSubscriptionId}"
     menuLine "限额状态：$(showUserSubscriptionQuotaStatus "${userSubscriptionId}")"
-    traffic=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" --arg id "${userSubscriptionId}" '.groups[] | select(.id == $groupId) | .traffic.user_groups[$id] // {upload:0, download:0, sources:{}}')
+    traffic=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" '.traffic.user_groups[$id] // {upload:0, download:0, sources:{}}')
     printf '%s\n' "${traffic}" | jq .
     menuClose
 }
 
 showSubscriptionTrafficOverview() {
-    local groupId
     local output
-    groupId=$(activeSubscriptionGroupId)
     ensureSubscriptionGroupsState
-    output=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
+    output=$(subscriptionActiveGroupRead -r '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       def used($traffic): (($traffic.upload // 0) + ($traffic.download // 0));
       def quota_status($user; $traffic):
@@ -383,7 +368,6 @@ showSubscriptionTrafficOverview() {
           elif $percent >= 80 then "接近上限"
           else "正常" end
         end;
-      .groups[] | select(.id == $groupId) |
       . as $group |
       ($group.user_groups // []) as $users |
       [($users[]? | select(.enabled == true))] as $enabledUsers |
@@ -445,11 +429,9 @@ selectUserSubscriptionTrafficMenu() {
 }
 
 showSubscriptionSourcesTraffic() {
-    local groupId
     local traffic
     local summary
-    groupId=$(activeSubscriptionGroupId)
-    traffic=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .traffic.sources')
+    traffic=$(subscriptionActiveGroupRead -r '.traffic.sources')
     summary=$(jq -r '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
       def total($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
