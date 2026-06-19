@@ -6,7 +6,7 @@ ipv6Routing() {
 
     if [[ -z "${configPath}" ]]; then
 
-        errorCard "未安装，请使用脚本安装"
+        coreNotInstalledErrorCard
 
         menu
 
@@ -60,7 +60,7 @@ ipv6Routing() {
         autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
 
         if [[ -z "${domainList}" ]]; then
-            errorCard "域名不可为空"
+            coreDomainRequiredErrorCard
             return 1
         fi
 

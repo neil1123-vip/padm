@@ -4,7 +4,7 @@
 dnsRouting() {
 
     if [[ -z "${configPath}" ]]; then
-        errorCard "未安装，请使用脚本安装"
+        coreNotInstalledErrorCard
         menu
         exit 0
     fi
@@ -38,7 +38,7 @@ dnsRouting() {
 sniRouting() {
 
     if [[ -z "${configPath}" ]]; then
-        errorCard "未安装，请使用脚本安装"
+        coreNotInstalledErrorCard
         menu
         exit 0
     fi
@@ -223,7 +223,7 @@ EOF
         dnsRoutingReloadOrRollback "DNS/hosts 覆盖" || return 1
         statusCard "DNS/hosts 覆盖" "规则写入成功"
     else
-        errorCard "IP不可为空"
+        coreIPRequiredErrorCard
     fi
     exit 0
 }

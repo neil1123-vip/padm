@@ -379,7 +379,7 @@ setSocks5InboundRouting() {
         autoRead socks5_inbound_source_ips "IP:" socks5InboundRoutingIPs
 
         if [[ -z "${socks5InboundRoutingIPs}" ]]; then
-            errorCard "IP不可为空"
+            coreIPRequiredErrorCard
             return 1
         fi
         socks5InboundRoutingIPs=$(echo "\"${socks5InboundRoutingIPs}"\" | jq -c '.|split(",")') || return 1
@@ -401,7 +401,7 @@ setSocks5InboundRouting() {
         echoContent yellow "录入示例:netflix,openai,example.com\n"
         autoRead socks5_inbound_domains "域名:" socks5InboundRoutingDomain
         if [[ -z "${socks5InboundRoutingDomain}" ]]; then
-            errorCard "域名不可为空"
+            coreDomainRequiredErrorCard
             return 1
         fi
         addSingBoxRouteRule "01_direct_outbound" "${socks5InboundRoutingDomain}" "socks5_02_inbound_route" || return 1
@@ -422,7 +422,7 @@ setSocks5Outbound() {
     echo
     autoRead socks5_outbound_ip "请输入落地机IP地址:" socks5RoutingOutboundIP
     if [[ -z "${socks5RoutingOutboundIP}" ]]; then
-        errorCard "IP不可为空"
+        coreIPRequiredErrorCard
         return 1
     fi
     echo
@@ -483,7 +483,7 @@ setSocks5OutboundRouting() {
     echoContent yellow "录入示例:netflix,openai,example.com\n"
     autoRead socks5_outbound_domains "域名:" socks5RoutingOutboundDomain
     if [[ -z "${socks5RoutingOutboundDomain}" ]]; then
-        errorCard "域名不可为空"
+        coreDomainRequiredErrorCard
         return 1
     fi
     if [[ -n "${singBoxConfigPath}" ]]; then

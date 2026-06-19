@@ -2,7 +2,7 @@
 
 accessControlMenu() {
     if [[ -z "${configPath}" ]]; then
-        errorCard "未安装，请使用脚本安装"
+        coreNotInstalledErrorCard
         return 1
     fi
 
@@ -113,7 +113,7 @@ addBlockedDomains() {
     menuClose
     autoRead access_block_domains "请录入要阻断的域名或规则:" domainList
     if [[ -z "${domainList}" ]]; then
-        errorCard "域名不可为空"
+        coreDomainRequiredErrorCard
         return 1
     fi
 
@@ -162,7 +162,7 @@ addDirectAllowDomains() {
     menuClose
     autoRead access_allow_domains "请录入直连例外域名:" allowDomainList
     if [[ -z "${allowDomainList}" ]]; then
-        errorCard "域名不可为空"
+        coreDomainRequiredErrorCard
         return 1
     fi
 

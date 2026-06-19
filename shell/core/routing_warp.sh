@@ -227,7 +227,7 @@ warpRoutingReg() {
 
         autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
         if [[ -z "${domainList}" ]]; then
-            errorCard "域名不可为空"
+            coreDomainRequiredErrorCard
             return 1
         fi
         addWireGuardRoute "${type}" outboundTag "${domainList}" || return 1

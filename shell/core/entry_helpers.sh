@@ -50,7 +50,7 @@ initTLSNginxConfig() {
     fi
 
     if [[ -z ${domain} ]]; then
-        errorCard "域名不可为空"
+        coreDomainRequiredErrorCard
         initTLSNginxConfig 3
     else
         dnsTLSDomain=$(echo "${domain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')

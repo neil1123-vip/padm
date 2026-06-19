@@ -352,6 +352,18 @@ coreCancelledStatusCard() {
     statusCard "已取消" "$@"
 }
 
+coreNotInstalledErrorCard() {
+    errorCard "未安装，请使用脚本安装"
+}
+
+coreDomainRequiredErrorCard() {
+    errorCard "域名不可为空"
+}
+
+coreIPRequiredErrorCard() {
+    errorCard "IP不可为空"
+}
+
 coreSetDualRestoreResultMessage() {
     local outputVar=$1
     local reason=$2

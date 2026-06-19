@@ -13514,6 +13514,15 @@ runMenuSmokeRegression() {
     coreCancelledStatusCard "操作未执行"
     assertMenuAction 'statusCard:已取消'
     resetMenuActions
+    coreNotInstalledErrorCard
+    assertMenuAction 'errorCard:未安装，请使用脚本安装'
+    resetMenuActions
+    coreDomainRequiredErrorCard
+    assertMenuAction 'errorCard:域名不可为空'
+    resetMenuActions
+    coreIPRequiredErrorCard
+    assertMenuAction 'errorCard:IP不可为空'
+    resetMenuActions
     xrayPrereleaseCompatibilityCard "通过"
     assertMenuAction 'statusCard:Xray 预发布兼容检查'
     resetMenuActions
