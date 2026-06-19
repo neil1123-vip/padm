@@ -8169,6 +8169,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     local callLog="${root}/calls.log"
     local successLog="${root}/success.log"
     local errorLog="${root}/error.log"
+    local helperLog="${root}/helper.log"
     local backupDir="${root}/backup"
     local mode rc
 
@@ -8176,6 +8177,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     : >"${callLog}"
     : >"${successLog}"
     : >"${errorLog}"
+    : >"${helperLog}"
 
     autoRead() {
         printf -v "$3" 'yes'
@@ -8184,10 +8186,12 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         printf '%s\n' "${root}/groups.json"
     }
     subscriptionGroupsStateRead() {
+        [[ "${mode}" != "groups-read-fail" ]] || return 1
         printf '{"version":2,"active_group":"default","groups":[{"id":"default","user_groups":[{"id":"team-a","enabled":true}]}]}\n'
     }
     subscriptionSyncCreateConfigBackups() {
         printf 'backup-create\n' >>"${callLog}"
+        [[ "${mode}" != "backup-fail" ]] || return 1
         mkdir -p "${backupDir}"
         printf '%s\n' "${backupDir}"
     }
@@ -8226,16 +8230,36 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
     }
+    subscriptionSyncSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
     runRemoveCase() {
         mode=$1
         : >"${callLog}"
         : >"${successLog}"
         : >"${errorLog}"
+        : >"${helperLog}"
         set +e
         removeUserSubscriptionMenu team-a >/dev/null 2>&1
         rc=$?
         set -e
     }
+
+    runRemoveCase groups-read-fail
+    [[ "${rc}" == "1" ]]
+    ! grep -q '^backup-create$' "${callLog}"
+    grep -q "manual-check:读取当前订阅状态失败| ${root}/groups.json" "${helperLog}"
+    grep -q "读取当前订阅状态失败，请手动检查 ${root}/groups.json" "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase backup-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'backup-create' "${callLog}"
+    ! grep -q '^state:' "${callLog}"
+    grep -q "manual-check:删除订阅前托管账号配置备份失败|本机配置" "${helperLog}"
+    grep -q "删除订阅前托管账号配置备份失败，请手动检查本机配置" "${errorLog}"
+    [[ ! -s "${successLog}" ]]
 
     runRemoveCase state-fail
     [[ "${rc}" == "1" ]]

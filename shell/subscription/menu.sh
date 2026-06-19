@@ -670,17 +670,20 @@ removeUserSubscriptionMenu() {
     local previousGroupsState
     local configBackupDir
     local accountName
+    local manualCheckMessage
     autoRead remove_user_subscription_confirm "删除订阅 ${userSubscriptionId} 会移除状态；同步后会删除对应托管账号。确认请输入 yes：" confirm
     if [[ "${confirm}" != "yes" ]]; then
         statusCard "已取消" "操作未执行"
         return 1
     fi
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
-        errorCard "读取当前订阅状态失败，请手动检查 $(subscriptionGroupsFile)"
+        subscriptionSyncSetManualCheckMessage manualCheckMessage "读取当前订阅状态失败" " $(subscriptionGroupsFile)"
+        errorCard "${manualCheckMessage}"
         return 1
     }
     configBackupDir=$(subscriptionSyncCreateConfigBackups) || {
-        errorCard "删除订阅前托管账号配置备份失败，请手动检查本机配置"
+        subscriptionSyncSetManualCheckMessage manualCheckMessage "删除订阅前托管账号配置备份失败" "本机配置"
+        errorCard "${manualCheckMessage}"
         return 1
     }
     accountName=$(subscriptionSyncAccountName "${userSubscriptionId}")
