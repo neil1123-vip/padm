@@ -15,6 +15,10 @@ protocolPortHoppingStatusCard() {
 protocolPortHoppingRangeStatusCard() {
     statusCard "端口跳跃范围" "$@"
 }
+
+tuicAlgorithmStatusCard() {
+    statusCard "Tuic 算法" "$@"
+}
 # 初始化 Hysteria2 端口
 initHysteriaPort() {
     readSingBoxConfig
@@ -373,10 +377,10 @@ initTuicProtocol() {
         if [[ "${historyTuicAlgorithm}" != "y" ]]; then
             tuicAlgorithm=
         else
-            statusCard "Tuic 算法" "${tuicAlgorithm}"
+            tuicAlgorithmStatusCard "${tuicAlgorithm}"
         fi
     elif [[ -n "${tuicAlgorithm}" && -n "${lastInstallationConfig}" ]]; then
-        statusCard "Tuic 算法" "${tuicAlgorithm}"
+        tuicAlgorithmStatusCard "${tuicAlgorithm}"
     fi
 
     if [[ -z "${tuicAlgorithm}" ]]; then
@@ -398,7 +402,7 @@ initTuicProtocol() {
             tuicAlgorithm="cubic"
             ;;
         esac
-        statusCard "Tuic 算法" "${tuicAlgorithm}"
+        tuicAlgorithmStatusCard "${tuicAlgorithm}"
     fi
 }
 

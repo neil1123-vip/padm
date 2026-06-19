@@ -13544,6 +13544,9 @@ runMenuSmokeRegression() {
     protocolPortHoppingStatusCard "删除成功"
     assertMenuAction 'statusCard:端口跳跃'
     resetMenuActions
+    tuicAlgorithmStatusCard "cubic"
+    assertMenuAction 'statusCard:Tuic 算法'
+    resetMenuActions
     tlsCertificateStatusCard "未检测到本机 TLS 证书"
     assertMenuAction 'statusCard:TLS 证书状态'
     resetMenuActions
