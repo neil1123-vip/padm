@@ -1491,6 +1491,12 @@ EOF
         REGRESSION_ERROR_CARD_LOG="${dirTargetErrorLog}"
         release=debian
         PADM_INSTALL_DIR="${dirTargetRoot}"
+        helperLog="${dirTargetRoot}/manual-check.log"
+        : >"${helperLog}"
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
         downloadFile() {
             while [[ $# -gt 0 ]]; do
                 case "$1" in
@@ -1515,6 +1521,7 @@ EOF
         [[ ! -e "${dirTargetRoot}/install.sh/install.sh" ]]
         [[ ! -e "${dirTargetRoot}/install.sh.bak" ]]
         [[ ! -s "${dirTargetDownloadLog}" ]]
+        grep -q "manual-check:更新入口目标异常| ${dirTargetRoot}/install.sh" "${helperLog}"
         grep -q "更新入口目标异常，请手动检查 ${dirTargetRoot}/install.sh" "${dirTargetErrorLog}"
     )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi

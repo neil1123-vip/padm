@@ -551,7 +551,9 @@ updatePadm() {
         return 1
     fi
     if [[ -d "${installPath}" ]]; then
-        errorCard "更新入口目标异常，请手动检查 ${installPath}"
+        local manualCheckMessage
+        coreSetManualCheckMessage manualCheckMessage "更新入口目标异常" " ${installPath}"
+        errorCard "${manualCheckMessage}"
         return 1
     fi
     progressCard "$1" "更新管理脚本"
@@ -756,7 +758,9 @@ EOF
 
     if ! padmCreateTempPath sysctlTmp "$(bbrSysctlTempTemplate)"; then
         if ! removeManagedFileIfPresent "${PADM_BBR_STATE_FILE}"; then
-            statusCard "BBR 启用失败" "无法创建 sysctl 临时文件，且状态文件清理失败，请手动检查 ${PADM_BBR_STATE_FILE}"
+            local cleanupFailureMessage
+            coreSetManualCheckMessage cleanupFailureMessage "无法创建 sysctl 临时文件，且状态文件清理失败" " ${PADM_BBR_STATE_FILE}"
+            statusCard "BBR 启用失败" "${cleanupFailureMessage}"
         else
             statusCard "BBR 启用失败" "无法创建 sysctl 临时文件，已删除本次状态记录"
         fi
@@ -770,7 +774,9 @@ EOF
     if ! commitPadmBbrFile "${sysctlTmp}" "${PADM_BBR_SYSCTL_CONF}"; then
         padmRemoveCleanupPath "${sysctlTmp}"
         if ! removeManagedFileIfPresent "${PADM_BBR_STATE_FILE}"; then
-            statusCard "BBR 启用失败" "sysctl 配置提交失败，且状态文件清理失败，请手动检查 ${PADM_BBR_STATE_FILE}"
+            local cleanupFailureMessage
+            coreSetManualCheckMessage cleanupFailureMessage "sysctl 配置提交失败，且状态文件清理失败" " ${PADM_BBR_STATE_FILE}"
+            statusCard "BBR 启用失败" "${cleanupFailureMessage}"
         else
             statusCard "BBR 启用失败" "sysctl 配置提交失败，已删除本次状态记录"
         fi

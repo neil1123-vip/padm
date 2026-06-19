@@ -12504,6 +12504,10 @@ runPadmBbrManagedCleanupRegression() (
         statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
         bbrInstall() { printf "menu\n" >>"${helperLog}"; }
         padmBbrAvailable() { return 0; }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
         readSysctlValue() {
             case "$1" in
             net.ipv4.tcp_congestion_control) printf "cubic\n" ;;
@@ -12587,6 +12591,10 @@ runPadmBbrManagedCleanupRegression() (
         statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
         bbrInstall() { printf "menu\n" >>"${helperLog}"; }
         padmBbrAvailable() { return 0; }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
         readSysctlValue() {
             case "$1" in
             net.ipv4.tcp_congestion_control) printf "cubic\n" ;;
@@ -12614,6 +12622,7 @@ runPadmBbrManagedCleanupRegression() (
         }
         enableOfficialBbrFq
     ' _ "${root}" "${PROJECT_ROOT}" "${applyFailStatus}" "${applyFailHelper}"
+    grep -q "manual-check:sysctl 应用失败，且本次写入清理失败| ${root}/apply-cleanup-fail-sysctl.conf 和 ${root}/apply-cleanup-fail.state" "${applyFailHelper}" || return 1
     grep -q 'BBR 启用失败|sysctl 应用失败，且本次写入清理失败，请手动检查 '"${root}"'/apply-cleanup-fail-sysctl.conf 和 '"${root}"'/apply-cleanup-fail.state' "${applyFailStatus}" || return 1
 
     printf 'net.core.default_qdisc = fq\n' >"${root}/disable-sysctl.conf" || return 1
