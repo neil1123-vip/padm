@@ -945,18 +945,19 @@ subscriptionControlDesiredUsers() {
 subscriptionControlCreateUsersFromPlan() {
     local desiredUsers=$1
     local createAccounts=$2
-    local createIds
-    createIds=$(jq -r '.[]?' <<<"${createAccounts}" | subscriptionSyncAccountIdsJsonFromNames) || return 1
     jq -c -n \
       --argjson desiredUsers "${desiredUsers}" \
-      --argjson createIds "${createIds}" '
-      ($desiredUsers | map({key: .id, value: (.uuid // "")}) | from_entries) as $uuidById |
-      [ $createIds[]?
-        | select(type == "string" and length > 0)
-        | . as $id
-        | ($uuidById[$id] // "") as $uuid
+      --argjson createAccounts "${createAccounts}" '
+      def account_name($id):
+        "sub_" + ((($id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
+      [ $desiredUsers[]?
+        | select((.id // "") != "")
+        | . as $user
+        | account_name($user.id) as $account
+        | select(any($createAccounts[]?; . == $account))
+        | ($user.uuid // "") as $uuid
         | select($uuid != "")
-        | {id: $id, uuid: $uuid}
+        | {id: $user.id, uuid: $uuid}
       ]'
 }
 

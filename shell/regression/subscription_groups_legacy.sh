@@ -11745,6 +11745,21 @@ runRemoteControlDesiredUsersSingleSourceReuseRegression() (
     jq -e '. == [{id:"edge-a"}]' "${capturedSourcesFile}" >/dev/null
 )
 
+runRemoteControlCreateUsersAvoidReverseDecodeRegression() (
+    local output
+
+    subscriptionSyncAccountIdsJsonFromNames() {
+        return 96
+    }
+
+    output=$(subscriptionControlCreateUsersFromPlan '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' '["sub_team_a"]')
+    jq -e '
+      . == [
+        {id:"team-a", uuid:"11111111-1111-1111-1111-111111111111"}
+      ]
+    ' <<<"${output}" >/dev/null
+)
+
 runRemoteControlAggregationFailureRegression() (
     mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
@@ -11872,18 +11887,16 @@ runRemoteControlServerRefreshRegression() (
     subscriptionSyncPlanFromAccounts() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
-    createUsersProbe=
-    eval "$(declare -f subscriptionControlCreateUsersFromPlan | sed '1s/^subscriptionControlCreateUsersFromPlan/originalSubscriptionControlCreateUsersFromPlan/')"
-    subscriptionControlCreateUsersFromPlan() {
-        createUsersProbe=$(originalSubscriptionControlCreateUsersFromPlan "$1" "$2")
-        printf '%s\n' "${createUsersProbe}"
-    }
     PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
     jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
-    jq -e 'length == 1 and .[0].id == "team-a" and .[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${createUsersProbe}" >/dev/null
     [[ "${subscribeCalls}" == "1" ]]
     [[ "${subscribeArgs}" == "false false" ]]
     [[ "${reconcileCalls}" == "0" ]]
+    (
+        local createUsersProbe
+        createUsersProbe=$(subscriptionControlCreateUsersFromPlan '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' '["sub_team_a"]')
+        jq -e 'length == 1 and .[0].id == "team-a" and .[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${createUsersProbe}" >/dev/null
+    )
     (
         jq() {
             if [[ "$1" == "-c" && "$2" == "-n" && "$5" == "--argjson" && "$8" == *"def decode_account_id:"* ]]; then
@@ -17061,6 +17074,7 @@ runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-desired-users-batch runRemoteControlDesiredUsersBatchRegression &&
         runRegressionStep remote-control-desired-users-single-source runRemoteControlDesiredUsersSingleSourceReuseRegression &&
+        runRegressionStep remote-control-create-users-no-reverse-decode runRemoteControlCreateUsersAvoidReverseDecodeRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&

@@ -90,14 +90,6 @@ subscriptionSyncAccountIdMapJsonFromIds() {
     '
 }
 
-subscriptionSyncAccountIdsJsonFromNames() {
-    local accountName
-    while IFS= read -r accountName; do
-        [[ -n "${accountName}" ]] || continue
-        subscriptionSyncAccountIdFromName "${accountName}" || return 1
-    done | jq -R -s 'split("\n") | map(select(length > 0))'
-}
-
 subscriptionSyncGenerateUUID() {
     if [[ "${coreInstallType}" == "1" && -x "${ctlPath}" ]]; then
         ${ctlPath} uuid
