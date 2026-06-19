@@ -3151,6 +3151,10 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
     singBoxRunning() { return 1; }
     validateXrayConfigWithBinary() { return 0; }
     validateSingBoxConfigWithBinary() { return 0; }
+    coreSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${serviceLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
 
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     set +e
@@ -3170,6 +3174,8 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
     [[ ! -e "${xrayBinary}/xray" ]]
     [[ ! -e "${singBoxBinary}/sing-box" ]]
     [[ ! -e "${singBoxBinary}/libcronet.so" ]]
+    grep -q "manual-check:Xray-core安装目标异常| ${xrayBinary}" "${serviceLog}"
+    grep -q "manual-check:sing-box安装目标异常| ${singBoxBinary}" "${serviceLog}"
     grep -q "Xray-core安装目标异常，请手动检查 ${xrayBinary}" "${errorLog}"
     grep -q "sing-box安装目标异常，请手动检查 ${singBoxBinary}" "${errorLog}"
     ! grep -q '^xray:' "${serviceLog}"

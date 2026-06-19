@@ -395,11 +395,15 @@ validateCoreInstallTargetPath() {
         return 1
     fi
     if [[ -e "${targetDir}" && ! -d "${targetDir}" ]]; then
-        errorCard "${description}安装目录异常，请手动检查 ${targetDir}"
+        local manualCheckMessage
+        coreSetManualCheckMessage manualCheckMessage "${description}安装目录异常" " ${targetDir}"
+        errorCard "${manualCheckMessage}"
         return 1
     fi
     if ! padmCommitTargetIsFileLike "${targetFile}"; then
-        errorCard "${description}安装目标异常，请手动检查 ${targetFile}"
+        local manualCheckMessage
+        coreSetManualCheckMessage manualCheckMessage "${description}安装目标异常" " ${targetFile}"
+        errorCard "${manualCheckMessage}"
         return 1
     fi
 }
