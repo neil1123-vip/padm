@@ -14846,17 +14846,28 @@ runBasePackageBatchRegression() {
 runPackageRollbackFailureRegression() {
     (
         local removedFile="${TMP_DIR}/package-rollback-removed.log"
+        local errorLog="${TMP_DIR}/package-rollback-error.log"
+        local helperLog="${TMP_DIR}/package-rollback-helper.log"
         local oldInstalled="${PADM_INSTALLED_PACKAGES:-}"
         local oldFailures="${PADM_PACKAGE_ROLLBACK_FAILURES:-}"
+        local oldManagedFailures="${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES:-}"
         local oldRemoveType="${removeType:-}"
+        local rc
 
         removePackageForRegression() {
             printf '%s\n' "$1" >>"${removedFile}"
             [[ "$1" != "bad-package" ]]
         }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
 
         removeType=removePackageForRegression
         PADM_INSTALLED_PACKAGES="ok-package bad-package"
+        : >"${errorLog}"
+        : >"${helperLog}"
         if rollbackPackageInstallTransaction; then
             return 1
         fi
@@ -14864,6 +14875,54 @@ runPackageRollbackFailureRegression() {
         grep -qxF "bad-package" "${removedFile}"
         [[ "${PADM_INSTALLED_PACKAGES}" == "" ]]
         [[ "${PADM_PACKAGE_ROLLBACK_FAILURES}" == "bad-package" ]]
+
+        PADM_INSTALLED_PACKAGES="ok-package bad-package"
+        PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
+        : >"${errorLog}"
+        : >"${helperLog}"
+        set +e
+        (
+            failPackageInstallTransaction "软件包安装失败" >/dev/null 2>&1
+        )
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -q 'manual-check:回滚部分软件包失败|bad-package' "${helperLog}"
+        grep -q '回滚部分软件包失败，请手动检查bad-package' "${errorLog}"
+
+        adapterRollbackPackageManagedFiles() { return 0; }
+        rollbackPackageInstallTransaction() {
+            PADM_PACKAGE_ROLLBACK_FAILURES='bad-package'
+            return 1
+        }
+        PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=('/tmp/repo-backup')
+        : >"${errorLog}"
+        : >"${helperLog}"
+        set +e
+        (
+            failPackageInstallTransaction "软件包安装失败" >/dev/null 2>&1
+        )
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -q 'manual-check:已尝试回滚系统源改动，但部分软件包回滚失败|bad-package' "${helperLog}"
+        grep -q '已尝试回滚系统源改动，但部分软件包回滚失败，请手动检查bad-package' "${errorLog}"
+
+        adapterRollbackPackageManagedFiles() { return 1; }
+        rollbackPackageInstallTransaction() { return 0; }
+        PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=('/tmp/repo-backup')
+        PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES='repo-backup-a repo-backup-b'
+        : >"${errorLog}"
+        : >"${helperLog}"
+        set +e
+        (
+            failPackageInstallTransaction "系统软件源刷新失败" >/dev/null 2>&1
+        )
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -q 'manual-check:已回滚本次新增软件包，但系统源改动恢复失败|repo-backup-a repo-backup-b' "${helperLog}"
+        grep -q '已回滚本次新增软件包，但系统源改动恢复失败，请手动检查repo-backup-a repo-backup-b' "${errorLog}"
 
         if [[ -n "${oldInstalled}" ]]; then
             PADM_INSTALLED_PACKAGES="${oldInstalled}"
@@ -14875,8 +14934,16 @@ runPackageRollbackFailureRegression() {
         else
             unset PADM_PACKAGE_ROLLBACK_FAILURES
         fi
+        if [[ -n "${oldManagedFailures}" ]]; then
+            PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES="${oldManagedFailures}"
+        else
+            unset PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES
+        fi
         removeType="${oldRemoveType}"
         unset -f removePackageForRegression
+        unset -f adapterRollbackPackageManagedFiles
+        unset -f errorCard
+        unset -f coreSetManualCheckMessage
     )
 }
 

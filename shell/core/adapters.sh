@@ -367,6 +367,7 @@ failPackageInstallTransaction() {
     local managedRollbackStatus=0
     local rollbackStatus=0
     local managedRollbackCount=${#PADM_PACKAGE_MANAGED_ROLLBACK_DIRS[@]}
+    local manualCheckMessage
     if [[ "${managedRollbackCount}" -gt 0 ]]; then
         adapterRollbackPackageManagedFiles || managedRollbackStatus=$?
     fi
@@ -374,13 +375,16 @@ failPackageInstallTransaction() {
     if [[ "${managedRollbackCount}" -eq 0 && "${rollbackStatus}" -eq 0 ]]; then
         errorCard "$1，已尝试回滚本次新增软件包"
     elif [[ "${managedRollbackCount}" -eq 0 ]]; then
-        errorCard "$1，回滚部分软件包失败" "请手动检查：${PADM_PACKAGE_ROLLBACK_FAILURES}"
+        coreSetManualCheckMessage manualCheckMessage "回滚部分软件包失败" "${PADM_PACKAGE_ROLLBACK_FAILURES}"
+        errorCard "$1，${manualCheckMessage}"
     elif [[ "${managedRollbackStatus}" -eq 0 && "${rollbackStatus}" -eq 0 ]]; then
         errorCard "$1，已尝试回滚本次新增软件包和系统源改动"
     elif [[ "${managedRollbackStatus}" -eq 0 ]]; then
-        errorCard "$1，已尝试回滚系统源改动，但部分软件包回滚失败" "请手动检查：${PADM_PACKAGE_ROLLBACK_FAILURES}"
+        coreSetManualCheckMessage manualCheckMessage "已尝试回滚系统源改动，但部分软件包回滚失败" "${PADM_PACKAGE_ROLLBACK_FAILURES}"
+        errorCard "$1，${manualCheckMessage}"
     elif [[ "${rollbackStatus}" -eq 0 ]]; then
-        errorCard "$1，已回滚本次新增软件包，但系统源改动恢复失败" "请手动检查：${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES}"
+        coreSetManualCheckMessage manualCheckMessage "已回滚本次新增软件包，但系统源改动恢复失败" "${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES}"
+        errorCard "$1，${manualCheckMessage}"
     else
         errorCard "$1，系统源改动和软件包回滚均存在失败" "软件包：${PADM_PACKAGE_ROLLBACK_FAILURES}" "系统源备份：${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES}"
     fi
