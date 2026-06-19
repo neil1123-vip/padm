@@ -13231,11 +13231,17 @@ enable"
 
 runSubscriptionWireGuardRestoreRunnerRegression() (
     local errorLog="${TMP_DIR}/subscription-wireguard-restore-runner-error.log"
+    local helperLog="${TMP_DIR}/subscription-wireguard-restore-runner-helper.log"
     : >"${errorLog}"
+    : >"${helperLog}"
     errorCard() { printf '%s\n' "$@" >>"${errorLog}"; }
     subscriptionWireGuardStateFile() { printf '%s\n' "/tmp/wg-state.json"; }
     subscriptionWireGuardConfigFile() { printf '%s\n' "/tmp/wg.conf"; }
     subscriptionGroupsFile() { printf '%s\n' "/tmp/groups.json"; }
+    subscriptionWireGuardAppendManualCheckLine() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+        printf -v "$1" '%s' "${2}：${3}"
+    }
 
     subscriptionWireGuardRestoreStateAndConfig() { return 1; }
     set +e
@@ -13246,8 +13252,11 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
     grep -q '^WireGuard 主控服务启动失败，且旧状态恢复失败$' "${errorLog}"
     grep -q 'WireGuard 状态文件' "${errorLog}"
     grep -q 'WireGuard 配置文件' "${errorLog}"
+    grep -q 'manual-check:请手动检查 WireGuard 状态文件|/tmp/wg-state.json' "${helperLog}"
+    grep -q 'manual-check:请手动检查 WireGuard 配置文件|/tmp/wg.conf' "${helperLog}"
 
     : >"${errorLog}"
+    : >"${helperLog}"
     subscriptionWireGuardRestoreStateAndConfig() { return 0; }
     subscriptionWireGuardRestoreGroupsState() { return 1; }
     set +e
@@ -13257,6 +13266,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
     [[ "${rc}" == "1" ]]
     grep -q '^订阅来源凭据写入失败，且旧状态恢复失败$' "${errorLog}"
     grep -q '订阅组状态文件' "${errorLog}"
+    grep -q 'manual-check:请手动检查订阅组状态文件|/tmp/groups.json' "${helperLog}"
 )
 
 runMenuSmokeLightRegression() {

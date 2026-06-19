@@ -224,15 +224,28 @@ subscriptionWireGuardReportRestoreFailure() {
     local failureTitle=$1
     local restoreMessage
     local groupsFile=
+    local stateCheckLine
+    local configCheckLine
+    local groupsCheckLine
     subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${failureTitle}" false "" "旧状态" "" false || true
+    subscriptionWireGuardAppendManualCheckLine stateCheckLine "请手动检查 WireGuard 状态文件" "$(subscriptionWireGuardStateFile)"
+    subscriptionWireGuardAppendManualCheckLine configCheckLine "请手动检查 WireGuard 配置文件" "$(subscriptionWireGuardConfigFile)"
     if declare -F subscriptionGroupsFile >/dev/null 2>&1; then
         groupsFile=$(subscriptionGroupsFile)
     fi
     if [[ -n "${groupsFile}" ]]; then
-        errorCard "${restoreMessage}" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)" "请手动检查订阅组状态文件：${groupsFile}"
+        subscriptionWireGuardAppendManualCheckLine groupsCheckLine "请手动检查订阅组状态文件" "${groupsFile}"
+        errorCard "${restoreMessage}" "${stateCheckLine}" "${configCheckLine}" "${groupsCheckLine}"
     else
-        errorCard "${restoreMessage}" "请手动检查 WireGuard 状态文件：$(subscriptionWireGuardStateFile)" "请手动检查 WireGuard 配置文件：$(subscriptionWireGuardConfigFile)"
+        errorCard "${restoreMessage}" "${stateCheckLine}" "${configCheckLine}"
     fi
+}
+
+subscriptionWireGuardAppendManualCheckLine() {
+    local outputVar=$1
+    local label=$2
+    local path=$3
+    printf -v "${outputVar}" '%s：%s' "${label}" "${path}"
 }
 
 subscriptionWireGuardRunRestoreSteps() {
