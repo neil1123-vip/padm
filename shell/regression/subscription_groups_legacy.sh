@@ -7659,9 +7659,6 @@ runSubscribeUserOutputTransactionRegression() {
         currentHost=example.com
         subscribePort=
         currentDefaultPort=443
-        listRemoteSubscribeSources() {
-            return 0
-        }
         renderSubscribeUserOutputs() {
             return 1
         }
@@ -8483,10 +8480,6 @@ runUserSubscriptionMenuMutationFailureRegression() (
     subscribe() {
         printf 'subscribe:%s|%s|%s|%s\n' "${1:-}" "${2:-}" "${3:-}" "${4:-}" >>"${callLog}"
         [[ "${mode}" != "subscribe-fail" ]]
-    }
-    listSubscriptionSources() {
-        printf 'main:本机:main:https:127.0.0.1:443:true:ok\n'
-        printf 'remote-a:远端:remote:https:10.0.0.2:39778:true:ok\n'
     }
     setUserSubscriptionSources() {
         printf 'sources:%s:%s\n' "$1" "$2" >>"${callLog}"
@@ -11495,10 +11488,6 @@ runRemoteSubscribeFetchRegression() {
 
     eval "$(declare -f appendUniqueLines | sed '1s/^appendUniqueLines/originalAppendUniqueLines/')"
     eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
-
-    listRemoteSubscribeSources() {
-        printf '%s\n' 'remote1.example:443:r1:https' 'remote2.example:443:r2:https' 'remote3.example:443:r3:https'
-    }
 
     printf '%s\n' old same >"${uniqueFile}"
     appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"

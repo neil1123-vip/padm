@@ -801,16 +801,6 @@ setUserSubscriptionTrafficLimitMenu() {
     fi
     successCard "订阅额度已更新" "超限停用和批量处理请到 主控维护与排障 -> 用量与限额 执行"
 }
-
-
-
-listRemoteSubscribeSources() {
-    subscriptionActiveGroupRead -r '
-      .sources[]?
-      | select(.role != "main" and .transport != "wireguard")
-      | "\(.host):\(.port):\(.id):\(.scheme)"'
-}
-
 # 添加服务器源
 addSubscribeMenu() {
     subscriptionRequireMainRole || return 1
