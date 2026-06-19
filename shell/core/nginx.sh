@@ -1083,7 +1083,7 @@ checkNginx302() {
         return 0
     fi
     errorCard "302重定向设置失败，请仔细检查是否和示例相同"
-    backupNginxConfig restoreBackup || errorCard "Nginx 配置恢复备份失败，请手动检查 $(aloneNginxBackupFile)"
+    backupNginxConfig restoreBackup || return 1
     return 1
 }
 
@@ -1094,20 +1094,32 @@ aloneNginxBackupFile() {
 
 # 备份恢复nginx文件
 backupNginxConfig() {
-    local backupFile targetFile
+    local backupFile targetFile manualCheckMessage
     backupFile=$(aloneNginxBackupFile)
     backupFile=$(padmResolveManagedAbsolutePath "${backupFile}") || { errorCard "nginx配置备份路径异常"; return 1; }
     targetFile=$(padmResolveManagedAbsolutePath "${nginxConfigPath}alone.conf") || { errorCard "nginx配置路径异常"; return 1; }
     if [[ "$1" == "backup" ]]; then
-        backupManagedFileToPath "${targetFile}" "${backupFile}" 644 || { errorCard "nginx配置文件备份失败"; return 1; }
+        if ! backupManagedFileToPath "${targetFile}" "${backupFile}" 644; then
+            coreSetManualCheckMessage manualCheckMessage "nginx配置文件备份失败" " ${targetFile}"
+            errorCard "${manualCheckMessage}"
+            return 1
+        fi
         successCard "nginx配置文件备份成功"
         return 0
     fi
 
     if [[ "$1" == "restoreBackup" ]] && [[ -f "${backupFile}" ]]; then
-        restoreManagedFileFromBackup "${backupFile}" "${targetFile}" 644 || { errorCard "nginx配置文件恢复备份失败"; return 1; }
+        if ! restoreManagedFileFromBackup "${backupFile}" "${targetFile}" 644; then
+            coreSetPairedFileManualCheckMessage manualCheckMessage "nginx配置文件恢复备份失败" "${targetFile}" "${backupFile}"
+            errorCard "${manualCheckMessage}"
+            return 1
+        fi
         successCard "nginx配置文件恢复备份成功"
-        removeManagedFileIfPresent "${backupFile}" || { errorCard "nginx配置备份文件删除失败: ${backupFile}"; return 1; }
+        if ! removeManagedFileIfPresent "${backupFile}"; then
+            coreSetManualCheckMessage manualCheckMessage "nginx配置备份文件删除失败" " ${backupFile}"
+            errorCard "${manualCheckMessage}"
+            return 1
+        fi
         return 0
     fi
 

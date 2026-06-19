@@ -7393,6 +7393,71 @@ SH
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
+runNginxBackupManualCheckRegression() {
+    (
+        set -euo pipefail
+        local rootRel="${TMP_DIR}/nginx-backup-manual-check"
+        local root targetPath backupPath
+        local helperLog="${TMP_DIR}/nginx-backup-helper.log"
+        local errorLog="${TMP_DIR}/nginx-backup-error.log"
+
+        mkdir -p "${rootRel}"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        targetPath="${root}/alone.conf"
+        backupPath="${root}/alone_backup.conf"
+        nginxConfigPath="${root}/"
+        PADM_ALONE_NGINX_BACKUP_FILE="${backupPath}"
+        : >"${helperLog}"
+        : >"${errorLog}"
+        printf 'source config\n' >"${targetPath}"
+
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
+        coreSetPairedFileManualCheckMessage() {
+            coreSetManualCheckMessage "$1" "$2" " ${3} 和 ${4}"
+        }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        successCard() { return 0; }
+
+        backupManagedFileToPath() { return 1; }
+        if backupNginxConfig backup >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q "manual-check:nginx配置文件备份失败| ${targetPath}" "${helperLog}"
+        grep -q "nginx配置文件备份失败，请手动检查 ${targetPath}" "${errorLog}"
+
+        : >"${helperLog}"
+        : >"${errorLog}"
+        printf 'backup config\n' >"${backupPath}"
+        restoreManagedFileFromBackup() { return 1; }
+        if backupNginxConfig restoreBackup >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q "manual-check:nginx配置文件恢复备份失败| ${targetPath} 和 ${backupPath}" "${helperLog}"
+        grep -q "nginx配置文件恢复备份失败，请手动检查 ${targetPath} 和 ${backupPath}" "${errorLog}"
+
+        : >"${helperLog}"
+        : >"${errorLog}"
+        printf 'backup config\n' >"${backupPath}"
+        restoreManagedFileFromBackup() {
+            command cp -p "$1" "$2"
+        }
+        removeManagedFileIfPresent() {
+            if [[ "$1" == "${backupPath}" ]]; then
+                return 1
+            fi
+            command rm -f -- "$1"
+        }
+        if backupNginxConfig restoreBackup >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q "manual-check:nginx配置备份文件删除失败| ${backupPath}" "${helperLog}"
+        grep -q "nginx配置备份文件删除失败，请手动检查 ${backupPath}" "${errorLog}"
+    )
+}
+
 runCheckPortOpenNginxRejectsDirectoryTargetRegression() {
     (
         set -euo pipefail
@@ -16336,7 +16401,8 @@ runRegressionFast() {
 runRegressionTargetedBatchHelpers() {
     runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
         runRegressionStep config-transaction runConfigTransactionRegression &&
-        runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression
+        runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&
+        runRegressionStep alone-nginx-backup-manual-check runNginxBackupManualCheckRegression
 }
 
 runRegressionTargetedSubscriptionRestore() {
