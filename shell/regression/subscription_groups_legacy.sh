@@ -10228,6 +10228,26 @@ configPath="${oldConfigPath}"
     [[ "$(<"${mainCheckFile}")" == "1" ]]
 )
 
+(
+    local sourceLines
+    subscriptionSyncFindUserByAccountName() {
+        return 97
+    }
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'--arg id team-a'* && "$*" == *'.allowed_sources // []'* ]]; then
+            printf '["edge"]\n'
+            return 0
+        fi
+        if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'.id as $sid | $allowed | index($sid)'* ]]; then
+            printf 'example.com:443:edge:https\n'
+            return 0
+        fi
+        return 1
+    }
+    sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
+    [[ "${sourceLines}" == "example.com:443:edge:https" ]]
+)
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vlesstcp 443 tls-user uuid-tls "" ""
