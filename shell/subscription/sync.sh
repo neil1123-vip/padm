@@ -666,12 +666,7 @@ subscriptionSyncSetRestoreFailureDetail() {
 }
 
 subscriptionSyncSetManualCheckMessage() {
-    local outputVar=$1
-    local reason=$2
-    local checkTarget=$3
-    local message="${reason}，请手动检查${checkTarget}"
-
-    printf -v "${outputVar}" '%s' "${message}"
+    coreSetManualCheckMessage "$@"
 }
 
 subscriptionSyncSetSingleRestoreResultMessage() {

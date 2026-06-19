@@ -2120,6 +2120,9 @@ runCoreRollbackResultMessageRegression() (
 
     coreSetManualCheckMessage detailMessage "端口检测 Nginx 配置备份清理失败" " /tmp/check-port-open.conf.bak"
     [[ "${detailMessage}" == "端口检测 Nginx 配置备份清理失败，请手动检查 /tmp/check-port-open.conf.bak" ]]
+
+    subscriptionSyncSetManualCheckMessage detailMessage "订阅配置恢复失败" " /tmp/subscribe.json"
+    [[ "${detailMessage}" == "订阅配置恢复失败，请手动检查 /tmp/subscribe.json" ]]
 )
 
 runCorePortFileTransactionRegression() {
