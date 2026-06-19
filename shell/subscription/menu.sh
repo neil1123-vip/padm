@@ -901,16 +901,24 @@ addOtherSubscribe() {
 
 
 
+subscriptionSourceSyncSummaryJq() {
+    cat <<'EOF'
+(if has("last_sync_changed") then "\n上次同步变更:" + (if .last_sync_changed then "是" else "否" end) else "" end) +
+(if .last_sync_plan? then "\n上次同步计划: 创建\((.last_sync_plan.create // []) | length)，删除\((.last_sync_plan.remove // []) | length)" else "" end) +
+(if .last_sync_error? then "\n上次同步错误:\(.last_sync_error.type) \(.last_sync_error.message)" else "" end)
+EOF
+}
+
 showSubscriptionSources() {
     local groupId
+    local syncSummary
     groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) | .sources[]? |
-      "ID:\(.id)\n名称:\(.name)\n角色:\(.role)\n地址:\(.scheme)://\(.host):\(.port)\n启用:\(.enabled)\n同步状态:\(.sync_status)" +
-      (if has("last_sync_changed") then "\n上次同步变更:" + (if .last_sync_changed then "是" else "否" end) else "" end) +
-      (if .last_sync_plan? then "\n上次同步计划: 创建\((.last_sync_plan.create // []) | length)，删除\((.last_sync_plan.remove // []) | length)" else "" end) +
-      (if .last_sync_error? then "\n上次同步错误:\(.last_sync_error.type) \(.last_sync_error.message)" else "" end) +
-      "\n---"'
+    syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" "
+      .groups[] | select(.id == \$groupId) | .sources[]? |
+      \"ID:\\(.id)\\n名称:\\(.name)\\n角色:\\(.role)\\n地址:\\(.scheme)://\\(.host):\\(.port)\\n启用:\\(.enabled)\\n同步状态:\\(.sync_status)\" +
+      ${syncSummary} +
+      \"\\n---\""
 }
 
 showSubscriptionSourceControlUrls() {
@@ -923,14 +931,14 @@ showSubscriptionSourceControlUrls() {
 
 showSubscriptionSourceSyncResults() {
     local groupId
+    local syncSummary
     groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) | .sources[]? |
-      "ID:\(.id)\n名称:\(.name)\n同步状态:\(.sync_status)" +
-      (if has("last_sync_changed") then "\n上次同步变更:" + (if .last_sync_changed then "是" else "否" end) else "" end) +
-      (if .last_sync_plan? then "\n上次同步计划: 创建\((.last_sync_plan.create // []) | length)，删除\((.last_sync_plan.remove // []) | length)" else "" end) +
-      (if .last_sync_error? then "\n上次同步错误:\(.last_sync_error.type) \(.last_sync_error.message)" else "" end) +
-      "\n---"'
+    syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
+    subscriptionGroupsStateRead -r --arg groupId "${groupId}" "
+      .groups[] | select(.id == \$groupId) | .sources[]? |
+      \"ID:\\(.id)\\n名称:\\(.name)\\n同步状态:\\(.sync_status)\" +
+      ${syncSummary} +
+      \"\\n---\""
 }
 
 setSubscriptionSourceControlTokenMenu() {
