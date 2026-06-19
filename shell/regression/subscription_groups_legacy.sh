@@ -11092,8 +11092,8 @@ runSubscriptionSyncAccountFastPathRegression() (
     unset -f subscriptionGroupsStateRead
 )
 
-runSubscriptionSyncAppendProtocolUserAvoidsUnusedReadRegression() (
-    local root="${TMP_DIR}/subscription-sync-append-unused-read"
+runSubscriptionSyncAppendProtocolUserPreservesExistingClientsRegression() (
+    local root="${TMP_DIR}/subscription-sync-append-preserve-clients"
     local oldConfigPath="${configPath:-}"
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"
     local oldTmpDir="${TMPDIR:-}"
@@ -11109,26 +11109,17 @@ runSubscriptionSyncAppendProtocolUserAvoidsUnusedReadRegression() (
     ensureSubscriptionGroupsState
 
     cat >"${targetFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
+{"inbounds":[{"settings":{"clients":[{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","flow":"xtls-rprx-vision","email":"existing-VLESS_TCP/TLS_Vision"}]}}]}
 JSON
 
-    eval "$(declare -f initXrayClients | sed '1s/^initXrayClients/originalInitXrayClients/')"
-    jq() {
-        if [[ "$1" == "-r" && "$2" == '.inbounds[0].settings.clients // []' && "$3" == "${targetFile}" ]]; then
-            return 91
-        fi
-        command jq "$@"
-    }
-    initXrayClients() {
-        originalInitXrayClients "$@"
-    }
-
-    currentClients='[]'
     subscriptionSyncAppendProtocolUser 0 "${targetFile}" '.inbounds[0].settings.clients' "11111111-1111-1111-1111-111111111111" "sub_team-a"
 
-    jq -e '.inbounds[0].settings.clients[0].email == "sub_team-a-VLESS_TCP/TLS_Vision"' "${targetFile}" >/dev/null
+    jq -e '
+      (.inbounds[0].settings.clients | length) == 2 and
+      .inbounds[0].settings.clients[0].email == "existing-VLESS_TCP/TLS_Vision" and
+      .inbounds[0].settings.clients[1].email == "sub_team-a-VLESS_TCP/TLS_Vision"
+    ' "${targetFile}" >/dev/null
 
-    unset -f jq initXrayClients
     configPath="${oldConfigPath}"
     singBoxConfigPath="${oldSingBoxConfigPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -11493,6 +11484,48 @@ JSON
 
     subscriptionRemoteControlHealthAll | jq -e 'length == 3 and .[0].id == "src0" and .[1].id == "src2" and .[2].id == "src10"' >/dev/null
     subscriptionRemoteSyncPlan | jq -e 'length == 3 and .[0].source_id == "src0" and .[1].source_id == "src2" and .[2].source_id == "src10" and all(.[]; .status == "success")' >/dev/null
+)
+
+runRemoteControlDesiredUsersBatchRegression() (
+    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"a.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"https","host":"b.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["edge-b"],"traffic_limit_gb":2,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
+JSON
+
+    eval "$(declare -f subscriptionGroupsStateRead | sed '1s/^subscriptionGroupsStateRead/originalSubscriptionGroupsStateRead/')"
+    subscriptionGroupsStateRead() {
+        if [[ "$1" == "-c" && "$2" == "--arg" && "$3" == "groupId" && "$4" == "default" &&
+            "$5" == "--arg" && "$6" == "sourceId" ]]; then
+            if [[ "$7" == "edge-a" ]]; then
+                printf '[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]\n'
+                return 0
+            fi
+            return 92
+        fi
+        originalSubscriptionGroupsStateRead "$@"
+    }
+
+    subscriptionRemoteSyncPlanForSource() {
+        local source=$1
+        local desiredUsersBySource=${2:-}
+        local payload
+        payload=$(subscriptionRemoteControlPayload "${source}" true "${desiredUsersBySource}") || return 1
+        jq -n --argjson payload "${payload}" '{source_id:$payload.source_id, status:"success", dry_run:true, request:$payload, response:{ok:true, changed:false, plan:{create:[], remove:[]}}}'
+    }
+
+    subscriptionRemoteSyncPlan | jq -e '
+      length == 2 and
+      .[0].source_id == "edge-a" and
+      .[0].request.desired_users == [
+        {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"}
+      ] and
+      .[1].source_id == "edge-b" and
+      .[1].request.desired_users == [
+        {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"},
+        {id:"team-b", name:"Team B", uuid:"22222222-2222-2222-2222-222222222222", traffic_limit_gb:2, account:"sub_team_b"}
+      ]
+    ' >/dev/null
+    unset -f subscriptionGroupsStateRead subscriptionRemoteSyncPlanForSource
 )
 
 runRemoteControlAggregationFailureRegression() (
@@ -16642,7 +16675,7 @@ runRegressionSubscriptionState() {
     runRegressionStep subscription-state runSubscriptionGroupStateRegression
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
     runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
-    runRegressionStep subscription-sync-append-unused-read runSubscriptionSyncAppendProtocolUserAvoidsUnusedReadRegression
+    runRegressionStep subscription-sync-append-preserve-clients runSubscriptionSyncAppendProtocolUserPreservesExistingClientsRegression
     runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
     runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
     runRegressionStep subscription-groups-unsafe-dir runSubscriptionGroupsRejectsUnsafeDirRegression
@@ -16799,6 +16832,7 @@ runRegressionAllCompositionRegression() (
 
 runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
+        runRegressionStep remote-control-desired-users-batch runRemoteControlDesiredUsersBatchRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&

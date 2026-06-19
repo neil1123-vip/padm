@@ -10,8 +10,13 @@ subscriptionRemoteControlSources() {
 
 subscriptionRemoteDesiredUsers() {
     local sourceId=$1
+    local desiredUsersBySource=${2:-}
     local groupId
     local users
+    if [[ -n "${desiredUsersBySource}" ]]; then
+        jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []' <<<"${desiredUsersBySource}" || return 1
+        return 0
+    fi
     groupId=$(activeSubscriptionGroupId)
     users=$(subscriptionGroupsStateRead -c --arg groupId "${groupId}" --arg sourceId "${sourceId}" '
       .groups[] | select(.id == $groupId) |
@@ -22,6 +27,27 @@ subscriptionRemoteDesiredUsers() {
         | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0), account}]'
     ) || return 1
     printf '%s\n' "${users}"
+}
+
+subscriptionRemoteDesiredUsersBySource() {
+    local sources=$1
+    local groupId
+    local sourceIds
+    groupId=$(activeSubscriptionGroupId)
+    sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
+    subscriptionGroupsStateRead -c --arg groupId "${groupId}" --argjson sourceIds "${sourceIds}" '
+      def account_name:
+        "sub_" + (((. | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
+      .groups[] | select(.id == $groupId) as $group |
+      ($group.user_groups // []) as $users |
+      reduce $sourceIds[]? as $sourceId ({};
+        .[$sourceId] = [
+          $users[]?
+          | select(.enabled == true)
+          | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
+          | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0), account: (.id | account_name)}
+        ])
+    ' || return 1
 }
 
 subscriptionRemoteControlUrl() {
@@ -213,10 +239,11 @@ subscriptionRemoteControlRequest() {
 subscriptionRemoteControlPayload() {
     local source=$1
     local dryRun=$2
+    local desiredUsersBySource=${3:-}
     local sourceId
     local users
     sourceId=$(jq -r '.id' <<<"${source}")
-    users=$(subscriptionRemoteDesiredUsers "${sourceId}")
+    users=$(subscriptionRemoteDesiredUsers "${sourceId}" "${desiredUsersBySource}") || return 1
     jq -n --arg sourceId "${sourceId}" --arg groupId "$(activeSubscriptionGroupId)" --argjson dryRun "${dryRun}" --argjson users "${users}" '{version:1, group_id:$groupId, source_id:$sourceId, dry_run:$dryRun, desired_users:$users}'
 }
 
@@ -305,11 +332,12 @@ subscriptionRemoteWriteCheckedResult() {
     local source=$1
     local mode=$2
     local outputFile=$3
+    local desiredUsersBySource=${4:-}
     local result
     if [[ "${mode}" == "health" ]]; then
         result=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null) || result=
     else
-        result=$(subscriptionRemoteSyncPlanForSource "${source}" 2>/dev/null) || result=
+        result=$(subscriptionRemoteSyncPlanForSource "${source}" "${desiredUsersBySource}" 2>/dev/null) || result=
     fi
     if [[ -n "${result}" ]] && jq -e . <<<"${result}" >/dev/null 2>&1; then
         printf '%s\n' "${result}" >"${outputFile}"
@@ -370,6 +398,7 @@ subscriptionRemoteControlHealthAll() {
 
 subscriptionRemoteSyncPlanForSource() {
     local source=$1
+    local desiredUsersBySource=${2:-}
     local sourceId
     local payload
     local response
@@ -377,7 +406,7 @@ subscriptionRemoteSyncPlanForSource() {
     local errorMessage
 
     sourceId=$(jq -r '.id' <<<"${source}")
-    payload=$(subscriptionRemoteControlPayload "${source}" true)
+    payload=$(subscriptionRemoteControlPayload "${source}" true "${desiredUsersBySource}") || return 1
     token=$(subscriptionRemoteControlToken "${source}")
     if subscriptionRemoteSourceSelfReference "${source}"; then
         jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归同步"}, dry_run:true, request:$payload}'
@@ -398,15 +427,19 @@ subscriptionRemoteSyncPlanForSource() {
 subscriptionRemoteSyncPlan() {
     local source
     local sources
+    local desiredUsersBySource='{}'
     local tmpDir
     local outputFile
     local index=0
     local pids=()
     sources=$(subscriptionRemoteControlSources)
+    if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
+        desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+    fi
     padmCreateTmpRootPath tmpDir padm-remote-plan.XXXXXX -d || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
-        subscriptionRemoteWriteCheckedResult "${source}" plan "${outputFile}" &
+        subscriptionRemoteWriteCheckedResult "${source}" plan "${outputFile}" "${desiredUsersBySource}" &
         pids+=("$!")
         index=$((index + 1))
     done < <(jq -c '.[]' <<<"${sources}")
@@ -420,6 +453,7 @@ subscriptionRemoteSyncPlan() {
 runSubscriptionRemoteSync() {
     local source
     local sources
+    local desiredUsersBySource='{}'
     local sourceId
     local payload
     local response
@@ -427,6 +461,9 @@ runSubscriptionRemoteSync() {
     local errorMessage
     local failures='[]'
     sources=$(subscriptionRemoteControlSources)
+    if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
+        desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
+    fi
     while IFS= read -r source; do
         sourceId=$(jq -r '.id' <<<"${source}")
         if subscriptionRemoteSourceSelfReference "${source}"; then
@@ -443,7 +480,7 @@ runSubscriptionRemoteSync() {
         if subscriptionRemoteSourceUsesWireGuard "${source}"; then
             subscriptionRemoteControlWarmup "${source}" >/dev/null 2>&1 || true
         fi
-        payload=$(subscriptionRemoteControlPayload "${source}" false)
+        payload=$(subscriptionRemoteControlPayload "${source}" false "${desiredUsersBySource}") || return 1
         if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
             if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
                 setSubscriptionSourceSyncStatus "${sourceId}" success "$(jq -r 'if has("changed") then .changed else true end' <<<"${response}")" "$(jq -c '.plan // {create: [], remove: []}' <<<"${response}")"
