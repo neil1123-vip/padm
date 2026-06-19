@@ -213,7 +213,7 @@ customPortFunction() {
                     checkPortOpen "${port}" "${domain}" || return 1
                 fi
             else
-                errorCard "端口输入错误"
+                corePortInputErrorCard
                 return 1
             fi
         else

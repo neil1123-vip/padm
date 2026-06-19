@@ -13517,6 +13517,9 @@ runMenuSmokeRegression() {
     coreRuleExistsStatusCard "example.com 已存在，跳过"
     assertMenuAction 'statusCard:规则已存在'
     resetMenuActions
+    corePortInputErrorCard
+    assertMenuAction 'errorCard:端口输入错误'
+    resetMenuActions
     coreNotInstalledErrorCard
     assertMenuAction 'errorCard:未安装，请使用脚本安装'
     resetMenuActions

@@ -458,7 +458,7 @@ initSingBoxPort() {
             echo "${port}"
             return
         else
-            errorCard "端口输入错误"
+            corePortInputErrorCard
             return 1
         fi
     fi
@@ -482,7 +482,7 @@ initSingBoxPort() {
             allowPort "${port}" "udp" || return 1
             echo "${port}"
         else
-            errorCard "端口输入错误"
+            corePortInputErrorCard
             return 1
         fi
     fi

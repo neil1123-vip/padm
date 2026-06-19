@@ -368,6 +368,10 @@ coreIPRequiredErrorCard() {
     errorCard "IP不可为空"
 }
 
+corePortInputErrorCard() {
+    errorCard "端口输入错误"
+}
+
 xrayConfigValidationFailureTitle() {
     printf '%s\n' "Xray 配置校验失败"
 }
