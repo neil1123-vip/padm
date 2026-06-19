@@ -11092,6 +11092,48 @@ runSubscriptionSyncAccountFastPathRegression() (
     unset -f subscriptionGroupsStateRead
 )
 
+runSubscriptionSyncAppendProtocolUserAvoidsUnusedReadRegression() (
+    local root="${TMP_DIR}/subscription-sync-append-unused-read"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local oldTmpDir="${TMPDIR:-}"
+    local targetFile="${root}/xray/02_VLESS_TCP_inbounds.json"
+
+    mkdir -p "${root}/xray" "${root}/tmp" "${root}/groups"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/xray/"
+    TMPDIR="${root}/tmp"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    coreInstallType=1
+    ctlPath=
+    ensureSubscriptionGroupsState
+
+    cat >"${targetFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+
+    eval "$(declare -f initXrayClients | sed '1s/^initXrayClients/originalInitXrayClients/')"
+    jq() {
+        if [[ "$1" == "-r" && "$2" == '.inbounds[0].settings.clients // []' && "$3" == "${targetFile}" ]]; then
+            return 91
+        fi
+        command jq "$@"
+    }
+    initXrayClients() {
+        originalInitXrayClients "$@"
+    }
+
+    currentClients='[]'
+    subscriptionSyncAppendProtocolUser 0 "${targetFile}" '.inbounds[0].settings.clients' "11111111-1111-1111-1111-111111111111" "sub_team-a"
+
+    jq -e '.inbounds[0].settings.clients[0].email == "sub_team-a-VLESS_TCP/TLS_Vision"' "${targetFile}" >/dev/null
+
+    unset -f jq initXrayClients
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runSubscriptionSyncReconcileEarlyExitRegression() (
     local root="${TMP_DIR}/subscription-sync-reconcile-early-exit"
     local callLog="${root}/calls.log"
@@ -16600,6 +16642,7 @@ runRegressionSubscriptionState() {
     runRegressionStep subscription-state runSubscriptionGroupStateRegression
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
     runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
+    runRegressionStep subscription-sync-append-unused-read runSubscriptionSyncAppendProtocolUserAvoidsUnusedReadRegression
     runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
     runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
     runRegressionStep subscription-groups-unsafe-dir runSubscriptionGroupsRejectsUnsafeDirRegression

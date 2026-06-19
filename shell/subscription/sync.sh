@@ -309,7 +309,6 @@ subscriptionSyncAppendProtocolUser() {
     if jq -e --arg accountName "${accountName}" "${userPath}[]? | select(((.email // .name // .username // \"\") | sub(\"-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$\"; \"\")) == \$accountName)" "${file}" >/dev/null 2>&1; then
         return
     fi
-    currentClients=$(jq -r "${userPath} // []" "${file}")
     if [[ "${coreInstallType}" == "2" ]]; then
         clients=$(initSingBoxClients "${protocolId}" "${uuid}" "${accountName}")
     else
