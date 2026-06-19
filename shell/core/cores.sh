@@ -1167,7 +1167,7 @@ finalizeFailedCoreBinaryInstall() {
         if runCoreServiceActionAllowFailure "${startFunction}" start >/dev/null 2>&1; then
             serviceRestoreMessage="旧服务已尝试恢复启动"
         else
-            serviceRestoreMessage="旧服务恢复启动失败，请手动检查服务状态"
+            coreSetManualCheckMessage serviceRestoreMessage "旧服务恢复启动失败" "服务状态"
         fi
     elif [[ -f "${backupBinary}" ]]; then
         serviceRestoreMessage="旧二进制未恢复，已跳过服务启动"

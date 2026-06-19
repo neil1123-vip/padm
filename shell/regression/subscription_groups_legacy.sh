@@ -2857,6 +2857,10 @@ runCoreBinaryInstallCopyFailureRegression() (
     printf 'new-xray\n' >"${xrayBinary}"
     printf 'old-xray\n' >"${xrayBinary}.bak.service-fail"
     xrayStartShouldFail=true
+    coreSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${serviceLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
     set +e
     finalizeFailedCoreBinaryInstall "Xray-core" "${xrayBinary}.bak.service-fail" "${xrayBinary}" handleXray "/tmp/xray.log" >/dev/null 2>&1
     xrayRc=$?
@@ -2866,6 +2870,7 @@ runCoreBinaryInstallCopyFailureRegression() (
     [[ "$(<"${xrayBinary}")" == "old-xray" ]]
     [[ ! -e "${xrayBinary}.bak.service-fail" ]]
     grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
+    grep -q 'manual-check:旧服务恢复启动失败|服务状态' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
 
     : >"${statusLog}"
@@ -3060,6 +3065,7 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
     [[ ! -e "${singBoxBinary}.bak" ]]
     [[ ! -e "${singBoxCronet}.bak" ]]
     grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
+    grep -q 'manual-check:旧服务恢复启动失败|服务状态' "${serviceLog}"
     grep -qx 'sing-box:start:true' "${serviceLog}"
 
     : >"${statusLog}"
