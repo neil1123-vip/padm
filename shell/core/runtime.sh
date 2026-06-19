@@ -376,6 +376,10 @@ aloneNginxConfigRecoveredErrorCard() {
     errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
 }
 
+nginxStartFailureCard() {
+    statusCard "Nginx 启动失败" "$@"
+}
+
 xrayConfigValidationFailureTitle() {
     printf '%s\n' "Xray 配置校验失败"
 }

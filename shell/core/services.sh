@@ -144,7 +144,7 @@ handleNginx() {
         sleep 0.5
 
         if ! nginxRunning; then
-            statusCard "Nginx 启动失败" "请查看下方日志" "如无法处理，请将日志反馈给开发者"
+            nginxStartFailureCard "请查看下方日志" "如无法处理，请将日志反馈给开发者"
             nginx -t 2>&1 || true
             if grep -q "journalctl -xe" <"${nginxErrorLog}"; then
                 updateSELinuxHTTPPortT

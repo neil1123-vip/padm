@@ -269,12 +269,12 @@ checkPortOpen() {
             return 1
         fi
         if ! runCoreServiceActionAllowFailure handleNginx start; then
-            statusCard "Nginx 启动失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
+            nginxStartFailureCard "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
             removeCheckPortOpenNginxConfig || true
             return 1
         fi
         if [[ -z $(pgrep -f "nginx") ]]; then
-            statusCard "Nginx 启动失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
+            nginxStartFailureCard "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
             removeCheckPortOpenNginxConfig || true
             return 1
         fi

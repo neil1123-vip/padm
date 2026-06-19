@@ -13523,6 +13523,9 @@ runMenuSmokeRegression() {
     aloneNginxConfigRecoveredErrorCard
     assertMenuAction 'errorCard:Nginx 配置检测失败，已恢复旧 alone.conf'
     resetMenuActions
+    nginxStartFailureCard "请查看下方日志"
+    assertMenuAction 'statusCard:Nginx 启动失败'
+    resetMenuActions
     coreNotInstalledErrorCard
     assertMenuAction 'errorCard:未安装，请使用脚本安装'
     resetMenuActions
