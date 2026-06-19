@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
 
 subscriptionRemoteControlSources() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupRead "${groupId}" '
+    subscriptionActiveGroupRead '
       [.sources[]? | select(.role != "main" and .enabled == true)]'
 }
 
 subscriptionRemoteDesiredUsers() {
     local sourceId=$1
     local desiredUsersBySource=${2:-}
-    local groupId
     local users
     if [[ -n "${desiredUsersBySource}" ]]; then
         jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []' <<<"${desiredUsersBySource}" || return 1
         return 0
     fi
-    groupId=$(activeSubscriptionGroupId)
-    users=$(subscriptionGroupRead "${groupId}" -c --arg sourceId "${sourceId}" '
+    users=$(subscriptionActiveGroupRead -c --arg sourceId "${sourceId}" '
       [.user_groups[]?
         | select(.enabled == true)
         | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
@@ -29,11 +25,9 @@ subscriptionRemoteDesiredUsers() {
 
 subscriptionRemoteDesiredUsersBySource() {
     local sources=$1
-    local groupId
     local sourceIds
-    groupId=$(activeSubscriptionGroupId)
     sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
-    subscriptionGroupRead "${groupId}" -c --argjson sourceIds "${sourceIds}" '
+    subscriptionActiveGroupRead -c --argjson sourceIds "${sourceIds}" '
       def account_name:
         "sub_" + (((. | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
       . as $group |

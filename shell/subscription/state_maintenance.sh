@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 
 subscriptionGroupsStateSummaryJson() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
     ensureSubscriptionGroupsState
-    subscriptionGroupRead "${groupId}" '
+    subscriptionActiveGroupRead '
       {
         group_id: .id,
         group_name: .name,

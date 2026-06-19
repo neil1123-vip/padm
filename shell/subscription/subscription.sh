@@ -63,17 +63,15 @@ resolveSubscribeNginxAccessLogFile() {
 
 subscriptionRemoteSubscribeSourcesForAccount() {
     local email=$1
-    local groupId
     local userJson
     local allowedSources
-    groupId=$(activeSubscriptionGroupId)
-    userJson=$(subscriptionSyncFindUserByAccountName "${email}" "${groupId}" 2>/dev/null) || return 0
+    userJson=$(subscriptionSyncFindUserByAccountName "${email}" 2>/dev/null) || return 0
     [[ -n "${userJson}" ]] || return 0
     if ! jq -e '.enabled == true' <<<"${userJson}" >/dev/null 2>&1; then
         return 0
     fi
     allowedSources=$(jq -c '.allowed_sources // []' <<<"${userJson}") || return 1
-    subscriptionGroupRead "${groupId}" -r --argjson allowed "${allowedSources}" '
+    subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" '
       . as $group |
       if ($allowed | length) == 0 then
         empty
