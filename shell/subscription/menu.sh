@@ -489,21 +489,15 @@ showUserSubscriptions() {
     local sources
     local limit
     local quota
+    local jqProgram
+    local quotaStatusJq
+    quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     ensureSubscriptionGroupsState
-    output=$(subscriptionActiveGroupRead -r '
-      def quotaStatus($userGroup; $traffic):
-        if ($userGroup.traffic_limit_gb // 0) <= 0 then
-          "不限额"
-        else
-          ((($userGroup.traffic_limit_gb * 1024 * 1024 * 1024) | floor) as $limitBytes |
-           (((($traffic.upload // 0) + ($traffic.download // 0)) * 100 / $limitBytes) | floor) as $percent |
-           if $percent >= 100 then "已超限(" + ($percent | tostring) + "%)"
-           elif $percent >= 80 then "接近上限(" + ($percent | tostring) + "%)"
-           else "正常(" + ($percent | tostring) + "%)" end)
-        end;
+    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
       . as $group |
       .user_groups[]? |
-      "\(.id)\u001f\(.name)\u001f\(.enabled)\u001f\(.allowed_sources | join(","))\u001f\(.traffic_limit_gb)\u001f\(quotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}))"')
+      "\(.id)\u001f\(.name)\u001f\(.enabled)\u001f\(.allowed_sources | join(","))\u001f\(.traffic_limit_gb)\u001f\(subscriptionUserQuotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}; true))"')
+    output=$(subscriptionActiveGroupRead -r "${jqProgram}")
     if [[ -z "${output}" ]]; then
         statusCard "用户订阅" "暂无用户订阅"
         return

@@ -309,21 +309,33 @@ collectSubscriptionTraffic() {
     fi
 }
 
+subscriptionUserQuotaStatusJq() {
+    cat <<'EOF'
+def subscriptionUserQuotaStatus($user; $traffic; $showPercent):
+  (($user.traffic_limit_gb // 0) | tonumber? // 0) as $limitGb |
+  if $limitGb <= 0 then "不限额"
+  else
+    (($limitGb * 1024 * 1024 * 1024) | floor) as $limitBytes |
+    (((($traffic.upload // 0) + ($traffic.download // 0)) * 100 / $limitBytes) | floor) as $percent |
+    if $percent >= 100 then "已超限"
+    elif $percent >= 80 then "接近上限"
+    else "正常" end
+    + (if $showPercent then "(" + ($percent | tostring) + "%)" else "" end)
+  end;
+EOF
+}
+
 showUserSubscriptionQuotaStatus() {
     local userSubscriptionId=$1
+    local jqProgram
+    local quotaStatusJq
+    quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     ensureSubscriptionGroupsState
-    subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" '
+    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
       (.user_groups[]? | select(.id == $id)) as $userGroup |
       (.traffic.user_groups[$id] // {upload:0, download:0}) as $traffic |
-      if ($userGroup.traffic_limit_gb // 0) <= 0 then
-        "不限额"
-      else
-        ((($userGroup.traffic_limit_gb * 1024 * 1024 * 1024) | floor) as $limitBytes |
-         (((($traffic.upload // 0) + ($traffic.download // 0)) * 100 / $limitBytes) | floor) as $percent |
-         if $percent >= 100 then "已超限(" + ($percent | tostring) + "%)"
-         elif $percent >= 80 then "接近上限(" + ($percent | tostring) + "%)"
-         else "正常(" + ($percent | tostring) + "%)" end)
-      end'
+      subscriptionUserQuotaStatus($userGroup; $traffic; true)')
+    subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}"
 }
 
 showAdminSubscriptionTraffic() {
@@ -354,31 +366,24 @@ showUserSubscriptionTraffic() {
 
 showSubscriptionTrafficOverview() {
     local output
+    local jqProgram
+    local quotaStatusJq
+    quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
     ensureSubscriptionGroupsState
-    output=$(subscriptionActiveGroupRead -r '
+    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
       def mb($v): (((($v // 0) / 1024 / 1024) | floor) | tostring) + " MB";
-      def used($traffic): (($traffic.upload // 0) + ($traffic.download // 0));
-      def quota_status($user; $traffic):
-        (($user.traffic_limit_gb // 0) | tonumber? // 0) as $limitGb |
-        if $limitGb <= 0 then "不限额"
-        else
-          (($limitGb * 1024 * 1024 * 1024) | floor) as $limitBytes |
-          ((used($traffic) * 100 / $limitBytes) | floor) as $percent |
-          if $percent >= 100 then "已超限"
-          elif $percent >= 80 then "接近上限"
-          else "正常" end
-        end;
       . as $group |
       ($group.user_groups // []) as $users |
       [($users[]? | select(.enabled == true))] as $enabledUsers |
-      [($users[]? | select(quota_status(.; $group.traffic.user_groups[.id] // {}) == "已超限"))] as $overLimit |
-      [($users[]? | select(quota_status(.; $group.traffic.user_groups[.id] // {}) == "接近上限"))] as $nearLimit |
+      [($users[]? | select(subscriptionUserQuotaStatus(.; $group.traffic.user_groups[.id] // {}; false) == "已超限"))] as $overLimit |
+      [($users[]? | select(subscriptionUserQuotaStatus(.; $group.traffic.user_groups[.id] // {}; false) == "接近上限"))] as $nearLimit |
       "全局累计：上传 " + mb($group.traffic.global.upload) + " / 下载 " + mb($group.traffic.global.download) + "\n" +
       "分享订阅：共 " + (($users | length) | tostring) + " 个，启用 " + (($enabledUsers | length) | tostring) + " 个\n" +
       "限额状态：超限 " + (($overLimit | length) | tostring) + " 个，接近上限 " + (($nearLimit | length) | tostring) + " 个\n" +
       "服务器源：共 " + (($group.sources | length) | tostring) + " 个，启用远端 " + (([$group.sources[]? | select(.role != "main" and .enabled == true)] | length) | tostring) + " 个\n" +
       "最近同步：状态 " + (($group.sync.last_status // "pending") | tostring) + "，时间 " + (($group.sync.last_run // "未运行") | tostring) + "\n" +
       "流量更新时间：" + (($group.traffic.sources.main.updated_at // $group.traffic.admin.sources.main.updated_at // "未知") | tostring)')
+    output=$(subscriptionActiveGroupRead -r "${jqProgram}")
     userResultCard "用量与限额总览"
     while IFS= read -r line; do
         menuLine "${line}"
