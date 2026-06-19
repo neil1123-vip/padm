@@ -1198,7 +1198,9 @@ finalizeFailedSingBoxBinaryInstall() {
 
     finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" || restoreStatus=$?
     if ! restoreCoreOptionalFileBackup "${cronetBackup}" "${cronetPath}" 644; then
-        statusCard "sing-box 更新失败" "libcronet.so 恢复失败，请手动检查 ${cronetPath}" "排查日志: ${logFile}"
+        local manualCheckMessage
+        coreSetManualCheckMessage manualCheckMessage "libcronet.so 恢复失败" " ${cronetPath}"
+        statusCard "sing-box 更新失败" "${manualCheckMessage}" "排查日志: ${logFile}"
         return 1
     fi
     [[ -e "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"

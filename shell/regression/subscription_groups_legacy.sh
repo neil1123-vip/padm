@@ -3034,6 +3034,10 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
 
     REGRESSION_STATUS_CARD_LOG="${statusLog}"
     padmIsSafeAbsolutePath() { return 0; }
+    coreSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${serviceLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
@@ -3054,6 +3058,22 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
     [[ ! -e "${singBoxCronet}.bak" ]]
     grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
     grep -qx 'sing-box:start:true' "${serviceLog}"
+
+    : >"${statusLog}"
+    : >"${serviceLog}"
+    rm -f "${singBoxCronet}.bak"
+    rm -f "${singBoxCronet}"
+    mkdir -p "${singBoxCronet}"
+    set +e
+    finalizeFailedSingBoxBinaryInstall "${singBoxBinary}.bak" "${singBoxBinary}" "${singBoxCronet}.bak" "${singBoxCronet}" "/tmp/sing-box.log" >/dev/null 2>&1
+    singBoxRc=$?
+    set -e
+
+    [[ "${singBoxRc}" == "1" ]]
+    [[ -d "${singBoxCronet}" ]]
+    grep -q "manual-check:libcronet.so 恢复失败| ${singBoxCronet}" "${serviceLog}"
+    grep -q "libcronet.so 恢复失败，请手动检查 ${singBoxCronet}" "${statusLog}"
+    ! grep -qx 'sing-box:start:true' "${serviceLog}"
 )
 
 runCoreUpgradeRejectsDirectoryTargetRegression() (
