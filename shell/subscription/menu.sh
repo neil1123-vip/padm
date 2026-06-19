@@ -560,7 +560,7 @@ createAndSyncUserSubscriptionWizard() {
     userResultCard "这个订阅可使用的服务器"
     menuLine "这里设置这个订阅的服务器范围。"
     menuLine "建议先确保远端服务器已接入，再输入 main、远端服务器 ID 或 *；多个服务器用英文逗号分隔，例如 main,remote-a。"
-    listSubscriptionSources
+    subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
     menuClose
     autoRead user_subscription_sources "请输入服务器范围[回车默认 main]:" sourceIds
     sourceIds=${sourceIds:-main}
@@ -773,7 +773,7 @@ setUserSubscriptionSourcesMenu() {
     menuLine "建议先确保远端服务器已添加凭据，再输入 main、远端服务器 ID 或 *；多个服务器用英文逗号分隔，例如 main,remote-a。"
     while IFS= read -r line; do
         menuLine "${line}"
-    done < <(listSubscriptionSources)
+    done < <(subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"')
     menuClose
     autoRead user_subscription_sources "请输入服务器范围，多个用逗号分隔:" sourceIds
     if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
@@ -805,7 +805,10 @@ setUserSubscriptionTrafficLimitMenu() {
 
 
 listRemoteSubscribeSources() {
-    listSubscriptionSources | awk -F ':' '$3 != "main" && $4 != "wireguard" {print $5":"$6":"$2":"$4}'
+    subscriptionActiveGroupRead -r '
+      .sources[]?
+      | select(.role != "main" and .transport != "wireguard")
+      | "\(.host):\(.port):\(.id):\(.scheme)"'
 }
 
 # 添加服务器源
@@ -828,7 +831,10 @@ addSubscribeMenu() {
             sourceId=
             echoContent title "\n┌─ 移除被控服务器 ───────────────────────────────────"
             menuLine "这里列出当前可移除的被控服务器。"
-            listSubscriptionSources | awk -F ':' '$3 != "main" {print "│ " NR ". " $0}'
+            subscriptionActiveGroupRead -r '
+              [.sources[]? | select(.role != "main")] |
+              to_entries[] |
+              "│ \(.key + 1). \(.value.id):\(.value.name):\(.value.role):\(.value.scheme):\(.value.host):\(.value.port):\(.value.enabled):\(.value.sync_status)"'
             menuClose
             autoRead delete_subscription_source "请输入要删除的被控服务器源ID:" sourceId
             if [[ -z "${sourceId}" ]]; then
@@ -971,11 +977,17 @@ setSubscriptionSourceControlTokenMenu() {
     host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
     port=$(jq -r '.control_port' <<<"${credentialJson}")
     token=$(jq -r '.token' <<<"${credentialJson}")
-    matches=$(listSubscriptionSources | awk -F ':' -v host="${host}" -v port="${port}" '$3 != "main" && $5 == host && $6 == port {print $1}')
+    matches=$(subscriptionActiveGroupRead -r --arg host "${host}" --argjson port "${port}" '
+      .sources[]?
+      | select(.role != "main" and .host == $host and .port == $port)
+      | .id')
     if [[ -n "${matches}" ]] && [[ "$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')" == "1" ]]; then
         sourceId=${matches}
     else
-        listSubscriptionSources | awk -F ':' '$3 != "main" {print $1":"$2":"$4":"$5":"$6":"$8}'
+        subscriptionActiveGroupRead -r '
+          .sources[]?
+          | select(.role != "main")
+          | "\(.id):\(.name):\(.scheme):\(.host):\(.port):\(.sync_status)"'
         autoRead subscription_source_id "请输入要更新的被控服务器别名:" sourceId
     fi
     if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then

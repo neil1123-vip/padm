@@ -330,10 +330,6 @@ subscriptionActiveGroupWrite() {
     subscriptionGroupWrite "$(activeSubscriptionGroupId)" "$@"
 }
 
-listSubscriptionSources() {
-    subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
-}
-
 addUserSubscriptionState() {
     local id=$1
     local name=$2
