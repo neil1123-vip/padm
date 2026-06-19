@@ -96,15 +96,6 @@ subscriptionPublishHasRemoteSources() {
     [[ -n "$(listRemoteSubscribeSources 2>/dev/null)" ]]
 }
 
-subscriptionMainPublishSourceAvailable() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -e --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) |
-      any(.sources[]?; .id == "main" and ((.enabled // true) == true))
-    ' >/dev/null 2>&1
-}
-
 subscriptionAccountHasPublishSource() {
     local accountName=$1
     local groupId
@@ -114,7 +105,10 @@ subscriptionAccountHasPublishSource() {
     [[ -n "${userJson}" ]] || return 1
     jq -e '.enabled == true' <<<"${userJson}" >/dev/null 2>&1 || return 1
     if jq -e '((.allowed_sources // []) | index("*") or index("main"))' <<<"${userJson}" >/dev/null 2>&1; then
-        if subscriptionMainPublishSourceAvailable; then
+        if subscriptionGroupsStateRead -e --arg groupId "${groupId}" '
+          .groups[] | select(.id == $groupId) |
+          any(.sources[]?; .id == "main" and ((.enabled // true) == true))
+        ' >/dev/null 2>&1; then
             return 0
         fi
     fi
