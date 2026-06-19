@@ -13523,6 +13523,9 @@ runMenuSmokeRegression() {
     coreIPRequiredErrorCard
     assertMenuAction 'errorCard:IP不可为空'
     resetMenuActions
+    xrayConfigValidationFailureCard "已取消启动"
+    assertMenuAction 'statusCard:Xray 配置校验失败'
+    resetMenuActions
     xrayPrereleaseCompatibilityCard "通过"
     assertMenuAction 'statusCard:Xray 预发布兼容检查'
     resetMenuActions

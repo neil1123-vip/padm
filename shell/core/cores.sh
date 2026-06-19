@@ -1258,7 +1258,7 @@ installDownloadedXrayBinary() {
     newBinary="${tmpDir}/xray"
     if xrayConfigInstalled && ! validateXrayConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
-        statusCard "Xray 配置校验失败" "已取消升级" "排查日志: ${logFile}"
+        xrayConfigValidationFailureCard "已取消升级" "排查日志: ${logFile}"
         return 1
     fi
 

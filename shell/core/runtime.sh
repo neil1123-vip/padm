@@ -364,6 +364,14 @@ coreIPRequiredErrorCard() {
     errorCard "IP不可为空"
 }
 
+xrayConfigValidationFailureTitle() {
+    printf '%s\n' "Xray 配置校验失败"
+}
+
+xrayConfigValidationFailureCard() {
+    statusCard "$(xrayConfigValidationFailureTitle)" "$@"
+}
+
 coreSetDualRestoreResultMessage() {
     local outputVar=$1
     local reason=$2

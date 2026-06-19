@@ -289,7 +289,7 @@ handleXray() {
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
             if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
-                statusCard "Xray 配置校验失败" "已取消启动" "排查日志: ${logFile}"
+                xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
                 exit 0
             fi
@@ -301,7 +301,7 @@ handleXray() {
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
             if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
-                statusCard "Xray 配置校验失败" "已取消启动" "排查日志: ${logFile}"
+                xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
                 exit 0
             fi

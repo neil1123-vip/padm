@@ -341,10 +341,10 @@ setVlessRealityEncryption() {
     fi
 
     if ! validateVlessEncryptionConfig; then
-        if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "Xray 配置校验失败"; then
+        if ! restoreVlessEncryptionBackup "${backupFile}" "${configFile}" "${stateBackupFile}" "${stateFile}" "${hadStateBackup}" remove "$(xrayConfigValidationFailureTitle)"; then
             return 1
         fi
-        echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
+        echoContent title "\n┌─ $(xrayConfigValidationFailureTitle) ─────────────────────────────────"
         menuLine "已回滚本次 VLESS Encryption 修改"
         menuLine "排查日志：$(padmFallbackTmpFilePath padm-xray-test.log)"
         menuClose
@@ -811,10 +811,10 @@ applyTraditionalTlsAlpn() {
         return 1
     fi
     if [[ -x /etc/padm/xray/xray ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"$(traditionalTlsAlpnTestLog)" 2>&1; then
-        if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "Xray 配置校验失败"; then
+        if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "$(xrayConfigValidationFailureTitle)"; then
             return 1
         fi
-        echoContent title "\n┌─ Xray 配置校验失败 ─────────────────────────────────"
+        echoContent title "\n┌─ $(xrayConfigValidationFailureTitle) ─────────────────────────────────"
         menuLine "已回滚本次 ALPN 修改"
         menuLine "排查日志：$(traditionalTlsAlpnTestLog)"
         menuClose
