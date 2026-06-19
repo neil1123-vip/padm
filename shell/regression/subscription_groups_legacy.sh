@@ -10547,6 +10547,27 @@ JSON
         fi
     )
     (
+        local quotaBatchPlan='[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"team-b","action":"disable-and-remove-local-account"}]'
+        local capturedAccountPlan="${TMP_DIR}/subscription-quota-account-plan.json"
+        local oldSubscriptionSyncApplyAccountPlanTransaction
+        eval "$(declare -f subscriptionSyncApplyAccountPlanTransaction | sed '1s/^subscriptionSyncApplyAccountPlanTransaction/originalSubscriptionSyncApplyAccountPlanTransaction/')"
+        jq() {
+            if [[ "$1" == "--arg" && "$2" == "accountName" && "$4" == ". + [\$accountName]" ]]; then
+                return 91
+            fi
+            command jq "$@"
+        }
+        subscriptionSyncApplyAccountPlanTransaction() {
+            printf '%s\n' "$1" >"${capturedAccountPlan}"
+            return 0
+        }
+        applySubscriptionQuotaPlanAccounts "${quotaBatchPlan}"
+        jq -e '.create == [] and .remove == ["sub_team_a", "sub_team_b"]' "${capturedAccountPlan}" >/dev/null
+        unset -f jq subscriptionSyncApplyAccountPlanTransaction
+        eval "$(declare -f originalSubscriptionSyncApplyAccountPlanTransaction | sed '1s/^originalSubscriptionSyncApplyAccountPlanTransaction/subscriptionSyncApplyAccountPlanTransaction/')"
+        unset -f originalSubscriptionSyncApplyAccountPlanTransaction
+    )
+    (
         subscriptionSyncPlanFromAccounts() {
             jq -n '{create:[], remove:["sub_team_a"]}'
         }

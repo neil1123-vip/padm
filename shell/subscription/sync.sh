@@ -75,6 +75,17 @@ subscriptionSyncAccountId() {
     return 1
 }
 
+subscriptionSyncAccountNamesFromIds() {
+    local id
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"
+    done
+}
+
+subscriptionSyncAccountNamesJsonFromIds() {
+    subscriptionSyncAccountNamesFromIds | jq -R -s 'split("\n") | map(select(length > 0))'
+}
+
 subscriptionSyncGenerateUUID() {
     if [[ "${coreInstallType}" == "1" && -x "${ctlPath}" ]]; then
         ${ctlPath} uuid
@@ -231,7 +242,7 @@ subscriptionSyncPlanFromAccounts() {
 
 subscriptionSyncPlan() {
     local desiredAccounts
-    desiredAccounts=$(while IFS= read -r id; do subscriptionSyncAccountName "${id}"; done < <(subscriptionSyncDesiredLocalUsers) | sort -u)
+    desiredAccounts=$(subscriptionSyncAccountNamesFromIds < <(subscriptionSyncDesiredLocalUsers) | sort -u) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccounts}"
 }
 
@@ -891,16 +902,13 @@ applySubscriptionQuotaPlan() {
 applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
-    local removeAccounts='[]'
+    local removeAccounts
     local id
     local rc=0
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
-    while IFS= read -r id; do
-        [[ -n "${id}" ]] || continue
-        removeAccounts=$(jq --arg accountName "$(subscriptionSyncAccountName "${id}")" '. + [$accountName]' <<<"${removeAccounts}") || return 1
-    done < <(jq -r '.[].id' <<<"${quotaPlan}")
+    removeAccounts=$(subscriptionSyncAccountNamesJsonFromIds < <(jq -r '.[].id' <<<"${quotaPlan}")) || return 1
     accountPlan=$(jq -n --argjson remove "${removeAccounts}" '{create: [], remove: $remove}') || return 1
-    if [[ "$(jq '.remove | length' <<<"${accountPlan}")" != "0" ]]; then
+    if jq -e '.remove | length > 0' <<<"${accountPlan}" >/dev/null 2>&1; then
         if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
             rc=1
         fi
