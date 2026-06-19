@@ -2093,7 +2093,7 @@ subscriptionPublishAccounts() {
         if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
             stagedAccounts+="${account}"$'\n'
         fi
-    done < <(listUserSubscriptions | awk -F ':' '$3 == "true" {print $1}' | while IFS= read -r id; do [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"; done)
+    done < <(subscriptionActiveGroupRead -r '.user_groups[]? | select(.enabled == true) | .id' | while IFS= read -r id; do [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"; done)
     publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++')
     printf '%s\n' "${publishAccounts}" | sed '/^$/d'
 }

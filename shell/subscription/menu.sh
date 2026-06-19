@@ -483,6 +483,12 @@ showSubscriptionQuotaPlan() {
 
 showUserSubscriptions() {
     local output
+    local id
+    local name
+    local enabled
+    local sources
+    local limit
+    local quota
     ensureSubscriptionGroupsState
     output=$(subscriptionActiveGroupRead -r '
       def quotaStatus($userGroup; $traffic):
@@ -497,13 +503,13 @@ showUserSubscriptions() {
         end;
       . as $group |
       .user_groups[]? |
-      "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb):\(quotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}))"')
+      "\(.id)\u001f\(.name)\u001f\(.enabled)\u001f\(.allowed_sources | join(","))\u001f\(.traffic_limit_gb)\u001f\(quotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}))"')
     if [[ -z "${output}" ]]; then
         statusCard "用户订阅" "暂无用户订阅"
         return
     fi
     userResultCard "用户订阅列表"
-    while IFS=: read -r id name enabled sources limit quota; do
+    while IFS=$'\037' read -r id name enabled sources limit quota; do
         menuLine "ID：$(uiStyle value "${id}")"
         menuLine "名称：$(uiStyle value "${name}")"
         if [[ "${enabled}" == "true" ]]; then
@@ -603,10 +609,8 @@ createAndSyncUserSubscriptionWizard() {
 
 selectUserSubscriptionId() {
     local id=
-    local subscriptions=
     ensureSubscriptionGroupsState
-    subscriptions=$(listUserSubscriptions)
-    if [[ -z "${subscriptions}" ]]; then
+    if ! subscriptionActiveGroupRead -e 'any(.user_groups[]?; true)' >/dev/null 2>&1; then
         statusCard "用户订阅" "暂无用户订阅" "先到 发布订阅 -> 新建并发布订阅 创建一个"
         return 1
     fi

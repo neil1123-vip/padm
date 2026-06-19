@@ -334,10 +334,6 @@ listSubscriptionSources() {
     subscriptionActiveGroupRead -r '.sources[] | "\(.id):\(.name):\(.role):\(.scheme):\(.host):\(.port):\(.enabled):\(.sync_status)"'
 }
 
-listUserSubscriptions() {
-    subscriptionActiveGroupRead -r '.user_groups[]? | "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb)"'
-}
-
 addUserSubscriptionState() {
     local id=$1
     local name=$2

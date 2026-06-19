@@ -10205,8 +10205,16 @@ configPath="${oldConfigPath}"
         fi
         return 1
     }
-    listUserSubscriptions() {
-        printf 'team-a:Team A:true:*:0\nteam-b:Team B:true:main:0\nteam-c:Team C:false:main:0\n'
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
+            printf '%s\n' "$(( $(<"${mainCheckFile}") + 1 ))" >"${mainCheckFile}"
+            return 0
+        fi
+        if [[ "$*" == *".user_groups[]? | select(.enabled == true) | .id"* ]]; then
+            printf 'team-a\nteam-b\n'
+            return 0
+        fi
+        return 1
     }
     subscriptionSyncFindUserByAccountName() {
         case "$1" in
@@ -10366,7 +10374,7 @@ runSubscriptionGroupStateRegression() {
         {"id": "edge", "name": "Edge", "scheme": "https", "host": "example.com", "port": "443", "enabled": true, "sync_status": "failed", "last_sync_error": {"type": "unreachable", "message": "old"}}
       ],
       "user_groups": [
-        {"id": "team-a", "name": "Team A", "enabled": true, "allowed_sources": ["edge"], "traffic_limit_gb": "1", "uuid": "11111111-1111-1111-1111-111111111111"}
+        {"id": "team-a", "name": "Team:A", "enabled": true, "allowed_sources": ["edge"], "traffic_limit_gb": "1", "uuid": "11111111-1111-1111-1111-111111111111"}
       ],
       "sync": {"enabled": true},
       "traffic": {"user_groups": {"team-a": {"upload": 1, "download": 2, "sources": {"edge": {"upload": 1, "download": 2}}}}, "sources": {"edge": {"upload": 1, "download": 2}}, "admin": {"sources": {"edge": {"upload": 0, "download": 0}}}}
@@ -10404,7 +10412,7 @@ JSON
         output=$(showUserSubscriptions)
         [[ "${output}" == *"card:用户订阅列表"* ]]
         [[ "${output}" == *"menu:ID：team-a"* ]]
-        [[ "${output}" == *"menu:名称：Team A"* ]]
+        [[ "${output}" == *"menu:名称：Team:A"* ]]
         [[ "${output}" == *"menu:可用服务器：edge"* ]]
         [[ "${output}" == *"menu:订阅额度GB：1"* ]]
         [[ "${output}" == *"menu:限额状态：正常(0%)"* ]]
