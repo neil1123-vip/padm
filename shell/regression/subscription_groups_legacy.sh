@@ -13520,6 +13520,9 @@ runMenuSmokeRegression() {
     corePortInputErrorCard
     assertMenuAction 'errorCard:端口输入错误'
     resetMenuActions
+    aloneNginxConfigRecoveredErrorCard
+    assertMenuAction 'errorCard:Nginx 配置检测失败，已恢复旧 alone.conf'
+    resetMenuActions
     coreNotInstalledErrorCard
     assertMenuAction 'errorCard:未安装，请使用脚本安装'
     resetMenuActions

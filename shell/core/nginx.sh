@@ -1056,7 +1056,7 @@ server {
 }
 EOF
     ); then
-        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
+        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || aloneNginxConfigRecoveredErrorCard
         return 1
     fi
     if ! runCoreServiceActionAllowFailure handleNginx stop; then
@@ -1068,7 +1068,7 @@ EOF
 # 移除 Nginx 302 配置
 removeNginx302() {
     if ! updateAloneNginxConfig removeNginx302FromFile; then
-        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
+        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || aloneNginxConfigRecoveredErrorCard
         return 1
     fi
 }

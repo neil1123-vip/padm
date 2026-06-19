@@ -372,6 +372,10 @@ corePortInputErrorCard() {
     errorCard "端口输入错误"
 }
 
+aloneNginxConfigRecoveredErrorCard() {
+    errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
+}
+
 xrayConfigValidationFailureTitle() {
     printf '%s\n' "Xray 配置校验失败"
 }

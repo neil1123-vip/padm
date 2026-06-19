@@ -492,7 +492,7 @@ addNginx302ToFile() {
 addNginx302() {
     local redirectTarget=$1
     if ! updateAloneNginxConfig addNginx302ToFile "${redirectTarget}"; then
-        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || errorCard "Nginx 配置检测失败，已恢复旧 alone.conf"
+        [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || aloneNginxConfigRecoveredErrorCard
         return 1
     fi
 }
