@@ -13553,6 +13553,9 @@ runMenuSmokeRegression() {
     tuicAlgorithmStatusCard "cubic"
     assertMenuAction 'statusCard:Tuic 算法'
     resetMenuActions
+    tlsCertificateCard "重新生成证书"
+    assertMenuAction 'statusCard:TLS 证书'
+    resetMenuActions
     tlsCertificateStatusCard "未检测到本机 TLS 证书"
     assertMenuAction 'statusCard:TLS 证书状态'
     resetMenuActions

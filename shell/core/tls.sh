@@ -300,7 +300,7 @@ installTLS() {
         else
             if [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 if [[ -z "${lastInstallationConfig}" ]]; then
-                    statusCard "TLS 证书" "如未过期或者自定义证书请选择 [n]"
+                    tlsCertificateCard "如未过期或者自定义证书请选择 [n]"
                     autoRead tls_reinstall "是否重新安装？[y/n]:" reInstallStatus
                     if [[ "${reInstallStatus}" == "y" ]]; then
                         padmCreateTmpRootPath reinstallBackupDir padm-tls-reinstall.XXXXXX -d || return 1
@@ -471,6 +471,10 @@ tlsCertificateStatusCard() {
     statusCard "TLS 证书状态" "$@"
 }
 
+tlsCertificateCard() {
+    statusCard "TLS 证书" "$@"
+}
+
 showTLSCertificateStatus() {
     local statusJson
     statusJson=$(tlsCertificateStatusJson) || {
@@ -607,7 +611,7 @@ renewalTLS() {
             local installDomain="${domain}"
             local crtFile="${tlsDir}/${domain}.crt"
             local keyFile="${tlsDir}/${domain}.key"
-            statusCard "TLS 证书" "重新生成证书"
+            tlsCertificateCard "重新生成证书"
             stopServicesForTLSRenewal || return 1
 
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
@@ -648,7 +652,7 @@ renewalTLS() {
             successCard "证书有效"
         fi
     elif [[ -n "${domain}" && -s "${tlsDir}/${domain}.crt" && -s "${tlsDir}/${domain}.key" ]]; then
-        statusCard "TLS 证书" "检测到使用自定义证书，无法执行 renew 操作"
+        tlsCertificateCard "检测到使用自定义证书，无法执行 renew 操作"
     else
         errorCard "未安装本机 TLS 证书；无域名 Reality 不需要这里，域名 Reality 或传统 TLS 请检查 acme 与 /etc/padm/tls"
     fi
