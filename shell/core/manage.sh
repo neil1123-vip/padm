@@ -2063,10 +2063,13 @@ renderAllSubscribeUserOutputs() {
 
 subscriptionPublishAccounts() {
     local localBase=$1
+    local groupId
     local localAccounts=
     local stagedAccounts=
     local publishAccounts=
     local account=
+    local userJson
+    local mainPublishSourceAvailable=false
 
     localBase=${localBase:-$(subscribeLocalBaseDir)}
     if [[ -d "${localBase}/default" ]]; then
@@ -2075,9 +2078,24 @@ subscriptionPublishAccounts() {
             localAccounts+="${defaultFile##*/}"$'\n'
         done < <(find "${localBase}/default" -mindepth 1 -maxdepth 1 -type f | sort)
     fi
+    groupId=$(activeSubscriptionGroupId)
+    if subscriptionGroupsStateRead -e --arg groupId "${groupId}" '
+      .groups[] | select(.id == $groupId) |
+      any(.sources[]?; .id == "main" and ((.enabled // true) == true))
+    ' >/dev/null 2>&1; then
+        mainPublishSourceAvailable=true
+    fi
     while IFS= read -r account; do
         [[ -n "${account}" ]] || continue
-        if subscriptionAccountHasPublishSource "${account}"; then
+        userJson=$(subscriptionSyncFindUserByAccountName "${account}" "${groupId}" 2>/dev/null) || continue
+        [[ -n "${userJson}" ]] || continue
+        jq -e '.enabled == true' <<<"${userJson}" >/dev/null 2>&1 || continue
+        if jq -e '((.allowed_sources // []) | index("*") or index("main"))' <<<"${userJson}" >/dev/null 2>&1 &&
+            [[ "${mainPublishSourceAvailable}" == "true" ]]; then
+            stagedAccounts+="${account}"$'\n'
+            continue
+        fi
+        if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
             stagedAccounts+="${account}"$'\n'
         fi
     done < <(listUserSubscriptions | awk -F ':' '$3 == "true" {print $1}' | while IFS= read -r id; do [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"; done)
