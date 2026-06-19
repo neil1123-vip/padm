@@ -822,7 +822,7 @@ manageFail2ban() {
         systemScriptMenu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         manageFail2ban
         ;;
     esac

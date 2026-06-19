@@ -507,7 +507,7 @@ manageTLSCertificates() {
         2) renewalTLS 1 ;;
         3) statusCard "TLS 定时续签" "状态：$(tlsRenewCronState)" ;;
         4) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }

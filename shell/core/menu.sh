@@ -48,7 +48,7 @@ installMenu() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         installMenu
         ;;
     esac
@@ -90,7 +90,7 @@ protocolEntryMenu() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         protocolEntryMenu
         ;;
     esac
@@ -117,7 +117,7 @@ siteCertificateMenu() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         siteCertificateMenu
         ;;
     esac
@@ -147,7 +147,7 @@ routingAccessMenu() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         routingAccessMenu
         ;;
     esac
@@ -181,7 +181,7 @@ systemScriptMenu() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         systemScriptMenu
         ;;
     esac
@@ -206,7 +206,7 @@ advancedDangerMenu() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         advancedDangerMenu
         ;;
     esac
@@ -264,7 +264,7 @@ menu() {
         advancedDangerMenu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         menu
         ;;
     esac

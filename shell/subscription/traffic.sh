@@ -432,7 +432,7 @@ manageTrafficAndQuota() {
         6) showSubscriptionQuotaPlan ;;
         7) executeSubscriptionQuotaPlanMenu ;;
         8) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }

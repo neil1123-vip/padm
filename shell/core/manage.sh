@@ -407,7 +407,7 @@ manageVlessEncryptionExperiment() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         manageVlessEncryptionExperiment
         ;;
     esac
@@ -470,7 +470,7 @@ checkBTPanel() {
             fi
             nginxConfigPath="/www/server/panel/vhost/nginx/"
         elif [[ -d '/www/server/panel/vhost/cert/' ]]; then
-            errorCard "选择错误，请重新选择"
+            coreSelectionErrorCard
             checkBTPanel
         fi
     fi
@@ -487,7 +487,7 @@ check1Panel() {
 
             nginxStaticPath="/opt/1panel/apps/openresty/openresty/www/sites/${btDomain}/index/"
         elif [[ -d '/opt/1panel/apps/openresty/openresty/www/sites/' ]]; then
-            errorCard "选择错误，请重新选择"
+            coreSelectionErrorCard
             check1Panel
         fi
     fi
@@ -609,7 +609,7 @@ manageTraditionalTlsFallback() {
         siteCertificateMenu
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageTraditionalTlsFallback "$@"
         ;;
     esac
@@ -685,7 +685,7 @@ manageTraditionalTlsStaticSite() {
     elif [[ "${selectInstallNginxBlogType}" == "21" ]]; then
         manageTraditionalTlsFallback
     else
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageTraditionalTlsStaticSite
     fi
 }
@@ -735,7 +735,7 @@ manageTraditionalTlsRedirect() {
     elif [[ "${redirectStatus}" == "3" ]]; then
         manageTraditionalTlsFallback
     else
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageTraditionalTlsRedirect
     fi
 }
@@ -864,7 +864,7 @@ setTraditionalTlsAlpnManual() {
         manageTraditionalTlsFallback
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         setTraditionalTlsAlpnManual
         ;;
     esac
@@ -1526,7 +1526,7 @@ manageCDN() {
         protocolEntryMenu
         ;;
     *)
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         manageCDN 1
         ;;
     esac
@@ -2408,7 +2408,7 @@ manageRealityTarget() {
         return 0
         ;;
     *)
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         ;;
     esac
     done
@@ -2472,7 +2472,7 @@ manageReality() {
         disableRealityStreamSplit
         ;;
     *)
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         ;;
     esac
 }
@@ -2838,7 +2838,7 @@ manageXHTTPPresets() {
     3) setXHTTPPreset stream ;;
     4) setXHTTPPreset single ;;
     5) manageXHTTP ;;
-    *) errorCard "选择错误，请重新选择"; manageXHTTPPresets ;;
+    *) coreSelectionErrorCard; manageXHTTPPresets ;;
     esac
 }
 
@@ -2855,7 +2855,7 @@ manageXHTTPMode() {
     2) setXHTTPMode packet-up ;;
     3) setXHTTPMode stream-up ;;
     4) manageXHTTP ;;
-    *) errorCard "选择错误，请重新选择"; manageXHTTPMode ;;
+    *) coreSelectionErrorCard; manageXHTTPMode ;;
     esac
 }
 
@@ -2872,7 +2872,7 @@ manageXHTTPXmux() {
     2) setXHTTPPreset single ;;
     3) setXHTTPCustomXmux ;;
     4) manageXHTTP ;;
-    *) errorCard "选择错误，请重新选择"; manageXHTTPXmux ;;
+    *) coreSelectionErrorCard; manageXHTTPXmux ;;
     esac
 }
 
@@ -2903,7 +2903,7 @@ manageXHTTPNormal() {
         manageXHTTP
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageXHTTPNormal
         ;;
     esac
@@ -2936,7 +2936,7 @@ manageXHTTPAdvanced() {
         manageXHTTP
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageXHTTPAdvanced
         ;;
     esac
@@ -2961,7 +2961,7 @@ manageXHTTPExperiment() {
         manageXHTTP
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageXHTTPExperiment
         ;;
     esac
@@ -3014,7 +3014,7 @@ manageXHTTP() {
         protocolEntryMenu
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageXHTTP
         ;;
     esac
@@ -3049,7 +3049,7 @@ manageHysteria() {
     elif [[ ( "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ) || ( "${installHysteria2Status}" == "2" && "${hysteria2Status}" != "true" ) ]]; then
         protocolEntryMenu
     else
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageHysteria
     fi
 }
@@ -3193,7 +3193,7 @@ manageTuicCongestionControl() {
     2) setTuicCongestionControl bbr ;;
     3) setTuicCongestionControl new_reno ;;
     4) manageTuic ;;
-    *) errorCard "选择错误，请重新选择"; manageTuicCongestionControl ;;
+    *) coreSelectionErrorCard; manageTuicCongestionControl ;;
     esac
 }
 
@@ -3213,7 +3213,7 @@ manageTuicAdvanced() {
     3) setTuicZeroRtt false ;;
     4) setTuicRecommendedDefaults ;;
     5) manageTuic ;;
-    *) errorCard "选择错误，请重新选择"; manageTuicAdvanced ;;
+    *) coreSelectionErrorCard; manageTuicAdvanced ;;
     esac
 }
 
@@ -3256,7 +3256,7 @@ manageTuic() {
     elif [[ ( "${installTuicStatus}" == "7" && "${tuicStatus}" == "true" ) || ( "${installTuicStatus}" == "2" && "${tuicStatus}" != "true" ) ]]; then
         protocolEntryMenu
     else
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageTuic
     fi
 }

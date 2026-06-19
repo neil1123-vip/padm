@@ -43,7 +43,7 @@ accessControlMenu() {
         routingAccessMenu
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         accessControlMenu
         return
         ;;
@@ -193,7 +193,7 @@ manageRegionalBlockPolicy() {
     autoRead access_region_policy "请选择:" policyStatus
     [[ "${policyStatus}" == "4" ]] && { accessControlMenu; return; }
     if [[ ! "${policyStatus}" =~ ^[1-3]$ ]]; then
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         manageRegionalBlockPolicy
         return
     fi
@@ -242,7 +242,7 @@ removeAccessControlMenu() {
     case "${removeStatus}" in
     1|2|3|4|5) ;;
     6) accessControlMenu; return ;;
-    *) errorCard "选择错误，请重新选择"; removeAccessControlMenu; return ;;
+    *) coreSelectionErrorCard; removeAccessControlMenu; return ;;
     esac
     accessControlBackupCreate || return 1
     case "${removeStatus}" in

@@ -190,7 +190,7 @@ manageSubscriptionStateBackups() {
         4) restoreSubscriptionGroupsBackupMenu ;;
         5) resetSubscriptionGroupsStateMenu ;;
         6) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }

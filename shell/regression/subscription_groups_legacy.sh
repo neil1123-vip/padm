@@ -13505,6 +13505,9 @@ runMenuSmokeRegression() {
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
+    coreSelectionErrorCard
+    assertMenuAction 'errorCard:选择错误，请重新选择'
+    resetMenuActions
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }
@@ -13638,7 +13641,20 @@ runMenuSmokeRegression() {
     validateXrayConfigWithBinary() { return 0; }
     singBoxConfigInstalled() { return 1; }
     crontab() { return 1; }
-    coreReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; return 1; }
+    coreReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; printf 'v1.2.3\n'; }
+    downloadXrayReleaseBinaryToTemp() {
+        local version=$1
+        local outVar=$2
+        local tmpDirVar=${3:-}
+        local releaseDir="${TMP_DIR}/menu-smoke-xray-release-${version#v}"
+        mkdir -p "${releaseDir}" || return 1
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${releaseDir}/xray"
+        chmod +x "${releaseDir}/xray"
+        printf -v "${outVar}" '%s' "${releaseDir}/xray"
+        if [[ -n "${tmpDirVar}" ]]; then
+            printf -v "${tmpDirVar}" '%s' "${releaseDir}"
+        fi
+    }
     serviceQueueStart() { recordMenuAction "serviceQueueStart:$*"; }
     serviceQueueStop() { recordMenuAction "serviceQueueStop:$*"; }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
@@ -13661,7 +13677,7 @@ runMenuSmokeRegression() {
     printf 'geosite' >"${geoOverviewDir}/geosite.dat"
     printf 'v20260513' >"${geoOverviewDir}/geo.version"
     local output=
-    PADM_XRAY_DIR="${geoOverviewDir}" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
+    PADM_XRAY_DIR="${geoOverviewDir}" PADM_XRAY_BINARY="${geoOverviewDir}/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
     [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
     customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
     installMenu <<<"7"
@@ -14018,11 +14034,11 @@ main-credential
     assertMenuAction 'errorCard:当前机器已初始化为主控'
     resetMenuActions
     output=
-    manageAdminSubscription <<<"7"
+    manageSubscriptionPublishSubscriptions <<<"7"
     grep -q "安装/更新订阅服务" <<<"${output}"
     resetMenuActions
     output=
-    manageUserSubscription <<<"7"
+    manageSubscriptionPublishSubscriptions <<<"7"
     grep -q "查看并处理已有订阅" <<<"${output}"
     resetMenuActions
     output=

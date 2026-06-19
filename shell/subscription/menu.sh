@@ -140,7 +140,7 @@ manageSubscriptionRoleSelection() {
         1) runSubscriptionMainControllerWizard && return 0 ;;
         2) runSubscriptionControlledWizard && return 0 ;;
         3) menu; return 1 ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -163,7 +163,7 @@ manageSubscriptionMainHome() {
         2) manageSubscriptionMultiServer ;;
         3) manageSubscriptionMainMaintenance ;;
         4) menu; return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -192,7 +192,7 @@ manageSubscriptionControlledHome() {
             ;;
         3) manageSubscriptionControlledMaintenance ;;
         4) menu; return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -220,7 +220,7 @@ manageSubscriptionPublishSubscriptions() {
         5) showSubscriptionSources ;;
         6) showAdminSubscriptionTraffic ;;
         7) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -263,7 +263,7 @@ manageSubscriptionMultiServer() {
             esac
             ;;
         5) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -292,7 +292,7 @@ manageSubscriptionMainControlDetails() {
         5) restartSubscriptionWireGuardControl ;;
         6) disableSubscriptionWireGuardControl ;;
         7) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -329,7 +329,7 @@ manageSubscriptionMainMaintenance() {
         7) manageSubscriptionMainControlDetails ;;
         8) clearSubscriptionSourceSyncErrorMenu ;;
         9) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -357,7 +357,7 @@ manageSubscriptionControlledMaintenance() {
         3) restartSubscriptionWireGuardControl ;;
         4) disableSubscriptionWireGuardControl ;;
         5) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -752,7 +752,7 @@ manageUserSubscriptionItem() {
         7) showSubscriptionLocalSyncPlan ;;
         8) removeUserSubscriptionMenu "${userSubscriptionId}" && return ;;
         9) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -845,7 +845,7 @@ addSubscribeMenu() {
             successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除" "如需应用订阅变更，请到 主控维护与排障 -> 立即执行同步"
             ;;
         3) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }
@@ -1089,7 +1089,7 @@ manageSubscriptionSyncSettings() {
             ;;
         10) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
         11) return ;;
-        *) errorCard "选择错误，请重新选择" ;;
+        *) coreSelectionErrorCard ;;
         esac
     done
 }

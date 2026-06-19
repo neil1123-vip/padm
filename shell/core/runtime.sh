@@ -339,6 +339,11 @@ coreSetManualCheckMessage() {
     printf -v "${outputVar}" '%s' "${formatted}"
 }
 
+coreSelectionErrorCard() {
+    local message=${1:-选择错误，请重新选择}
+    errorCard "${message}"
+}
+
 coreSetDualRestoreResultMessage() {
     local outputVar=$1
     local reason=$2

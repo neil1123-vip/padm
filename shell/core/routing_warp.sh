@@ -302,7 +302,7 @@ warpRoutingReg() {
         return 0
     else
 
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         warpRoutingReg "$1" "${type}"
         return 0
     fi
@@ -332,7 +332,7 @@ warpRoutingMenu() {
         routingToolsMenu
         ;;
     *)
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         warpRoutingMenu
         ;;
     esac

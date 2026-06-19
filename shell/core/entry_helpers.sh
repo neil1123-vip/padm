@@ -909,7 +909,7 @@ bbrInstall() {
         menu
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         bbrInstall
         ;;
     esac

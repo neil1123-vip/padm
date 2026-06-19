@@ -72,7 +72,7 @@ btTools() {
 
     else
 
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
 
         btTools
 

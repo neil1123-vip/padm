@@ -72,7 +72,7 @@ routingToolsMenu() {
 
     *)
 
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
 
         routingToolsMenu
 

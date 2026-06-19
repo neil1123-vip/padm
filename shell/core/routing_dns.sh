@@ -28,7 +28,7 @@ dnsRouting() {
         routingToolsMenu
         ;;
     *)
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         dnsRouting "$1"
         ;;
     esac
@@ -62,7 +62,7 @@ sniRouting() {
         routingToolsMenu
         ;;
     *)
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         sniRouting "$1"
         ;;
     esac

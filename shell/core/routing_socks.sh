@@ -30,7 +30,7 @@ socks5Routing() {
         routingToolsMenu
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         socks5Routing
         ;;
     esac
@@ -82,7 +82,7 @@ socks5InboundRoutingMenu() {
         socks5Routing
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         socks5InboundRoutingMenu
         ;;
     esac
@@ -127,7 +127,7 @@ socks5OutboundRoutingMenu() {
         socks5Routing
         ;;
     *)
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         socks5OutboundRoutingMenu
         ;;
     esac
@@ -275,7 +275,7 @@ removeSocks5Routing() {
         socks5Routing
         return
     else
-        errorCard "选择错误，请重新选择"
+        coreSelectionErrorCard
         removeSocks5Routing
         return
     fi

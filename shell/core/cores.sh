@@ -1908,7 +1908,7 @@ customXrayInstall() {
                 if [[ "${realityOnlyInstallType}" == "2" ]]; then
                     realityOnlyWithDomain=true
                 elif [[ -n "${realityOnlyInstallType}" && "${realityOnlyInstallType}" != "1" ]]; then
-                    errorCard "选择错误"
+                    coreSelectionErrorCard "选择错误"
                     customXrayInstall
                     return
                 fi
@@ -2074,7 +2074,7 @@ selectCoreInstall() {
         fi
         ;;
     *)
-        errorCard "选择错误，重新选择"
+        coreSelectionErrorCard
         selectCoreInstall
         ;;
     esac

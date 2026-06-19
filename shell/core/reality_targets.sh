@@ -1917,7 +1917,7 @@ showRealityTargetQualityActions() {
         return 0
         ;;
     *)
-        errorCard "选择错误"
+        coreSelectionErrorCard "选择错误"
         ;;
     esac
 }
