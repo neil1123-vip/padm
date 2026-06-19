@@ -976,12 +976,8 @@ subscriptionControlCreateUsersFromPlan() {
 
 subscriptionControlSyncPlan() {
     local desiredUsers=$1
-    local ids
     local desiredAccounts
-    ids=$(jq -r '.[].id' <<<"${desiredUsers}") || return 1
-    desiredAccounts=$(while IFS= read -r id; do
-        [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"
-    done <<<"${ids}" | sort -u) || return 1
+    desiredAccounts=$(subscriptionSyncAccountNamesFromIds < <(jq -r '.[].id' <<<"${desiredUsers}") | sort -u) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccounts}"
 }
 

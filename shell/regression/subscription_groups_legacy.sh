@@ -11722,7 +11722,6 @@ runRemoteControlServerRefreshRegression() (
             jq -e '. == [{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' >/dev/null
         unset -f jq
     )
-
     PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
     jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
     [[ "${subscribeCalls}" == "1" ]]
