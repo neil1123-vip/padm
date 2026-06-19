@@ -73,10 +73,6 @@ subscriptionSyncAccountNamesFromIds() {
     done
 }
 
-subscriptionSyncAccountNamesJsonFromIds() {
-    subscriptionSyncAccountNamesFromIds | jq -R -s 'split("\n") | map(select(length > 0))'
-}
-
 subscriptionSyncAccountIdMapJsonFromIds() {
     local id
     while IFS= read -r id; do
@@ -897,12 +893,20 @@ applySubscriptionQuotaPlan() {
 applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
-    local removeAccounts
     local id
     local rc=0
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
-    removeAccounts=$(subscriptionSyncAccountNamesJsonFromIds < <(jq -r '.[].id' <<<"${quotaPlan}")) || return 1
-    accountPlan=$(jq -n --argjson remove "${removeAccounts}" '{create: [], remove: $remove}') || return 1
+    accountPlan=$(jq -n --argjson quotaPlan "${quotaPlan}" '
+      def account_name($id):
+        "sub_" + ((($id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
+      {
+        create: [],
+        remove: [
+          $quotaPlan[]?.id
+          | select(type == "string" and length > 0)
+          | account_name(.)
+        ]
+      }') || return 1
     if jq -e '.remove | length > 0' <<<"${accountPlan}" >/dev/null 2>&1; then
         if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
             rc=1

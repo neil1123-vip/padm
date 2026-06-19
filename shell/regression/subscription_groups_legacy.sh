@@ -10726,6 +10726,9 @@ JSON
         local capturedAccountPlan="${TMP_DIR}/subscription-quota-account-plan.json"
         local oldSubscriptionSyncApplyAccountPlanTransaction
         eval "$(declare -f subscriptionSyncApplyAccountPlanTransaction | sed '1s/^subscriptionSyncApplyAccountPlanTransaction/originalSubscriptionSyncApplyAccountPlanTransaction/')"
+        subscriptionSyncAccountNamesJsonFromIds() {
+            return 98
+        }
         jq() {
             if [[ "$1" == "--arg" && "$2" == "accountName" && "$4" == ". + [\$accountName]" ]]; then
                 return 91
