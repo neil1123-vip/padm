@@ -671,6 +671,10 @@ padmBbrAvailable() {
     [[ " ${available} " == *" bbr "* ]]
 }
 
+bbrEnableFailureCard() {
+    statusCard "BBR 启用失败" "$@"
+}
+
 printNetworkOptimizationStatus() {
     local kernel currentCongestion availableCongestion currentQdisc bbrStatus padmStatus
     kernel="$(uname -r 2>/dev/null || echo unknown)"
@@ -743,15 +747,15 @@ enableOfficialBbrFq() {
     previousCongestion=${previousCongestion:-cubic}
     previousQdisc=${previousQdisc:-fq_codel}
 
-    padmEnsureSafeDirectory "$(dirname "${PADM_BBR_STATE_FILE}")" || { statusCard "BBR 启用失败" "状态目录创建失败"; bbrInstall; return; }
-    padmCreateTempPath stateTmp "$(bbrStateTempTemplate)" || { statusCard "BBR 启用失败" "无法创建状态临时文件"; bbrInstall; return; }
+    padmEnsureSafeDirectory "$(dirname "${PADM_BBR_STATE_FILE}")" || { bbrEnableFailureCard "状态目录创建失败"; bbrInstall; return; }
+    padmCreateTempPath stateTmp "$(bbrStateTempTemplate)" || { bbrEnableFailureCard "无法创建状态临时文件"; bbrInstall; return; }
     cat >"${stateTmp}" <<EOF
 previous_congestion=${previousCongestion}
 previous_qdisc=${previousQdisc}
 EOF
     if ! commitPadmBbrFile "${stateTmp}" "${PADM_BBR_STATE_FILE}"; then
         padmRemoveCleanupPath "${stateTmp}"
-        statusCard "BBR 启用失败" "状态文件提交失败，未改动 sysctl 配置"
+        bbrEnableFailureCard "状态文件提交失败，未改动 sysctl 配置"
         bbrInstall
         return
     fi
@@ -760,9 +764,9 @@ EOF
         if ! removeManagedFileIfPresent "${PADM_BBR_STATE_FILE}"; then
             local cleanupFailureMessage
             coreSetManualCheckMessage cleanupFailureMessage "无法创建 sysctl 临时文件，且状态文件清理失败" " ${PADM_BBR_STATE_FILE}"
-            statusCard "BBR 启用失败" "${cleanupFailureMessage}"
+            bbrEnableFailureCard "${cleanupFailureMessage}"
         else
-            statusCard "BBR 启用失败" "无法创建 sysctl 临时文件，已删除本次状态记录"
+            bbrEnableFailureCard "无法创建 sysctl 临时文件，已删除本次状态记录"
         fi
         bbrInstall
         return
@@ -776,9 +780,9 @@ EOF
         if ! removeManagedFileIfPresent "${PADM_BBR_STATE_FILE}"; then
             local cleanupFailureMessage
             coreSetManualCheckMessage cleanupFailureMessage "sysctl 配置提交失败，且状态文件清理失败" " ${PADM_BBR_STATE_FILE}"
-            statusCard "BBR 启用失败" "${cleanupFailureMessage}"
+            bbrEnableFailureCard "${cleanupFailureMessage}"
         else
-            statusCard "BBR 启用失败" "sysctl 配置提交失败，已删除本次状态记录"
+            bbrEnableFailureCard "sysctl 配置提交失败，已删除本次状态记录"
         fi
         bbrInstall
         return
@@ -789,12 +793,12 @@ EOF
             restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
             local applyCleanupFailureMessage
             coreSetPairedFileManualCheckMessage applyCleanupFailureMessage "sysctl 应用失败，且本次写入清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
-            statusCard "BBR 启用失败" "${applyCleanupFailureMessage}" "日志：${logFile}"
+            bbrEnableFailureCard "${applyCleanupFailureMessage}" "日志：${logFile}"
             bbrInstall
             return
         fi
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
-        statusCard "BBR 启用失败" "sysctl 应用失败，已删除本次写入并尝试恢复原运行值" "日志：${logFile}"
+        bbrEnableFailureCard "sysctl 应用失败，已删除本次写入并尝试恢复原运行值" "日志：${logFile}"
         bbrInstall
         return
     fi
@@ -806,13 +810,13 @@ EOF
             restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
             local stateMismatchCleanupFailureMessage
             coreSetPairedFileManualCheckMessage stateMismatchCleanupFailureMessage "配置已应用但当前状态未完全匹配，且本次写入清理失败" "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"
-            statusCard "BBR 启用失败" "${stateMismatchCleanupFailureMessage}" "请查看下方状态和 ${logFile}"
+            bbrEnableFailureCard "${stateMismatchCleanupFailureMessage}" "请查看下方状态和 ${logFile}"
             printNetworkOptimizationStatus
             bbrInstall
             return
         fi
         restorePadmBbrRuntime "${previousCongestion}" "${previousQdisc}"
-        statusCard "BBR 启用失败" "配置已应用但当前状态未完全匹配，已删除本次写入并尝试恢复原运行值" "请查看下方状态和 ${logFile}"
+        bbrEnableFailureCard "配置已应用但当前状态未完全匹配，已删除本次写入并尝试恢复原运行值" "请查看下方状态和 ${logFile}"
     fi
     printNetworkOptimizationStatus
     bbrInstall
