@@ -8,19 +8,13 @@ subscriptionRemoteControlSources() {
 subscriptionRemoteDesiredUsers() {
     local sourceId=$1
     local desiredUsersBySource=${2:-}
-    local users
+    local sources
     if [[ -n "${desiredUsersBySource}" ]]; then
         jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []' <<<"${desiredUsersBySource}" || return 1
         return 0
     fi
-    users=$(subscriptionActiveGroupRead -c --arg sourceId "${sourceId}" '
-      [.user_groups[]?
-        | select(.enabled == true)
-        | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
-        | . + {account: ("sub_" + ((.id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))}
-        | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0), account}]'
-    ) || return 1
-    printf '%s\n' "${users}"
+    sources=$(jq -c -n --arg sourceId "${sourceId}" '[{id:$sourceId}]') || return 1
+    subscriptionRemoteDesiredUsersBySource "${sources}" | jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []'
 }
 
 subscriptionRemoteDesiredUsersBySource() {

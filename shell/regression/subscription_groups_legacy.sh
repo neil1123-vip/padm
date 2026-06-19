@@ -11723,6 +11723,28 @@ JSON
     unset -f subscriptionGroupsStateRead subscriptionRemoteSyncPlanForSource
 )
 
+runRemoteControlDesiredUsersSingleSourceReuseRegression() (
+    local capturedSourcesFile="${TMP_DIR}/remote-control-desired-users-single-source.json"
+    local output
+
+    subscriptionRemoteDesiredUsersBySource() {
+        printf '%s\n' "$1" >"${capturedSourcesFile}"
+        printf '{"edge-a":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}\n'
+    }
+
+    subscriptionActiveGroupRead() {
+        return 91
+    }
+
+    output=$(subscriptionRemoteDesiredUsers edge-a)
+    jq -e '
+      . == [
+        {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"}
+      ]
+    ' <<<"${output}" >/dev/null
+    jq -e '. == [{id:"edge-a"}]' "${capturedSourcesFile}" >/dev/null
+)
+
 runRemoteControlAggregationFailureRegression() (
     mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
@@ -17038,6 +17060,7 @@ runRegressionAllCompositionRegression() (
 runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-desired-users-batch runRemoteControlDesiredUsersBatchRegression &&
+        runRegressionStep remote-control-desired-users-single-source runRemoteControlDesiredUsersSingleSourceReuseRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&
