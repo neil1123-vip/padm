@@ -123,22 +123,18 @@ subscriptionSyncGenerateUUID() {
 
 ensureUserSubscriptionUUID() {
     local id=$1
-    local groupId
     local userUUID
-    groupId=$(activeSubscriptionGroupId)
-    userUUID=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" --arg id "${id}" '.groups[] | select(.id == $groupId) | .user_groups[]? | select(.id == $id) | .uuid // empty')
+    userUUID=$(subscriptionActiveGroupRead -r --arg id "${id}" '.user_groups[]? | select(.id == $id) | .uuid // empty')
     if [[ -z "${userUUID}" ]]; then
         userUUID=$(subscriptionSyncGenerateUUID)
-        subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg id "${id}" --arg uuid "${userUUID}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .uuid = $uuid else . end) else . end)' || return 1
+        subscriptionActiveGroupWrite --arg id "${id}" --arg uuid "${userUUID}" '.user_groups |= map(if .id == $id then .uuid = $uuid else . end)' || return 1
     fi
     echo "${userUUID}"
 }
 
 subscriptionSyncDesiredLocalUsers() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) | .user_groups[]?
+    subscriptionActiveGroupRead -r '
+      .user_groups[]?
       | select(.enabled == true)
       | select((.allowed_sources | index("main")) or (.allowed_sources | index("*")))
       | .id'
@@ -862,19 +858,14 @@ subscriptionSyncRefreshPublishedSubscriptions() {
 subscriptionSyncMarkResult() {
     local status=$1
     local failures=$2
-    local groupId
     local now
-    groupId=$(activeSubscriptionGroupId)
     now=$(date '+%Y-%m-%d %H:%M:%S')
-    subscriptionGroupsStateWrite --arg groupId "${groupId}" --arg now "${now}" --arg status "${status}" --argjson failures "${failures}" '.groups |= map(if .id == $groupId then .sync.last_run = $now | .sync.last_status = $status | .sync.failures = $failures else . end)'
+    subscriptionActiveGroupWrite --arg now "${now}" --arg status "${status}" --argjson failures "${failures}" '.sync.last_run = $now | .sync.last_status = $status | .sync.failures = $failures'
 }
 
 subscriptionQuotaDryRunPlan() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
     ensureSubscriptionGroupsState
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) |
+    subscriptionActiveGroupRead -r '
       . as $group |
       [($group.user_groups[]? |
         (.traffic_limit_gb // 0 | tonumber? // 0) as $limitGb |

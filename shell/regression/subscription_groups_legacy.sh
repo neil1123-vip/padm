@@ -10397,6 +10397,20 @@ JSON
     )
 
     (
+        local output
+        menuLine() { printf 'menu:%s\n' "$*"; }
+        menuClose() { return 0; }
+        userResultCard() { printf 'card:%s\n' "$*"; }
+        output=$(showUserSubscriptions)
+        [[ "${output}" == *"card:用户订阅列表"* ]]
+        [[ "${output}" == *"menu:ID：team-a"* ]]
+        [[ "${output}" == *"menu:名称：Team A"* ]]
+        [[ "${output}" == *"menu:可用服务器：edge"* ]]
+        [[ "${output}" == *"menu:订阅额度GB：1"* ]]
+        [[ "${output}" == *"menu:限额状态：正常(0%)"* ]]
+    )
+
+    (
         local resetRoot="${TMP_DIR}/subscription-groups-reset-failure"
         local resetGroupsDir="${resetRoot}/groups"
         local resetStateFile="${resetGroupsDir}/groups.json"
@@ -10482,6 +10496,26 @@ JSON
         .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
       else . end)'
     jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
+    (
+        local output
+        output=$(showSubscriptionSources)
+        [[ "${output}" == *$'ID:main\n名称:本机\n角色:main'* ]]
+        [[ "${output}" == *$'ID:edge\n名称:Edge\n角色:secondary'* ]]
+        [[ "${output}" == *"上次同步错误:unreachable old"* ]]
+    )
+    (
+        local output
+        output=$(showSubscriptionSourceControlUrls)
+        [[ "${output}" == *$'ID:edge\n名称:Edge\n控制面:WireGuard'* ]]
+        [[ "${output}" == *"Health:http://example.com:443/s/control/health"* ]]
+        [[ "${output}" == *"Sync:http://example.com:443/s/control/sync"* ]]
+    )
+    (
+        local output
+        output=$(showSubscriptionSourceSyncResults)
+        [[ "${output}" == *$'ID:edge\n名称:Edge\n同步状态:failed'* ]]
+        [[ "${output}" == *"上次同步错误:unreachable old"* ]]
+    )
     toggleSubscriptionGroupSyncEnabled
     [[ "$(subscriptionGroupSyncEnabled && echo yes || echo no)" == "no" ]]
     toggleSubscriptionGroupSyncEnabled

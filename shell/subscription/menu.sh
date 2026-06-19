@@ -482,11 +482,9 @@ showSubscriptionQuotaPlan() {
 }
 
 showUserSubscriptions() {
-    local groupId
     local output
-    groupId=$(activeSubscriptionGroupId)
     ensureSubscriptionGroupsState
-    output=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
+    output=$(subscriptionActiveGroupRead -r '
       def quotaStatus($userGroup; $traffic):
         if ($userGroup.traffic_limit_gb // 0) <= 0 then
           "不限额"
@@ -497,7 +495,6 @@ showUserSubscriptions() {
            elif $percent >= 80 then "接近上限(" + ($percent | tostring) + "%)"
            else "正常(" + ($percent | tostring) + "%)" end)
         end;
-      .groups[] | select(.id == $groupId) |
       . as $group |
       .user_groups[]? |
       "\(.id):\(.name):\(.enabled):\(.allowed_sources | join(",")):\(.traffic_limit_gb):\(quotaStatus(.; $group.traffic.user_groups[.id] // {upload:0, download:0}))"')
@@ -910,32 +907,26 @@ EOF
 }
 
 showSubscriptionSources() {
-    local groupId
     local syncSummary
-    groupId=$(activeSubscriptionGroupId)
     syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" "
-      .groups[] | select(.id == \$groupId) | .sources[]? |
+    subscriptionActiveGroupRead -r "
+      .sources[]? |
       \"ID:\\(.id)\\n名称:\\(.name)\\n角色:\\(.role)\\n地址:\\(.scheme)://\\(.host):\\(.port)\\n启用:\\(.enabled)\\n同步状态:\\(.sync_status)\" +
       ${syncSummary} +
       \"\\n---\""
 }
 
 showSubscriptionSourceControlUrls() {
-    local groupId
-    groupId=$(activeSubscriptionGroupId)
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" '
-      .groups[] | select(.id == $groupId) | .sources[]? | select(.role != "main") |
+    subscriptionActiveGroupRead -r '
+      .sources[]? | select(.role != "main") |
       "ID:\(.id)\n名称:\(.name)\n控制面:WireGuard\n内网地址:\(.host):\(.port)\nHealth:http://\(.host):\(.port)/s/control/health\nSync:http://\(.host):\(.port)/s/control/sync\n---"'
 }
 
 showSubscriptionSourceSyncResults() {
-    local groupId
     local syncSummary
-    groupId=$(activeSubscriptionGroupId)
     syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
-    subscriptionGroupsStateRead -r --arg groupId "${groupId}" "
-      .groups[] | select(.id == \$groupId) | .sources[]? |
+    subscriptionActiveGroupRead -r "
+      .sources[]? |
       \"ID:\\(.id)\\n名称:\\(.name)\\n同步状态:\\(.sync_status)\" +
       ${syncSummary} +
       \"\\n---\""
@@ -1040,11 +1031,9 @@ refreshSubscriptionGroupSyncCron() {
 
 manageSubscriptionSyncSettings() {
     subscriptionRequireMainRole || return 1
-    local groupId
     local syncStatus
     while true; do
-        groupId=$(activeSubscriptionGroupId)
-        syncStatus=$(subscriptionGroupsStateRead -r --arg groupId "${groupId}" '.groups[] | select(.id == $groupId) | .sync')
+        syncStatus=$(subscriptionActiveGroupRead -r '.sync')
         echoContent title "\n┌─ 自动同步 ─────────────────────────────────────────"
         menuLine "这里处理自动同步和超限策略。"
         menuLine "建议先查看同步计划，再决定是否开启自动同步、调整间隔或执行超限处理。"
