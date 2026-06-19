@@ -526,6 +526,11 @@ showUserSubscriptions() {
     menuClose
 }
 
+parseUserSubscriptionSources() {
+    local sourceIds=$1
+    printf '%s' "${sourceIds}" | jq -R -e -c 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0)) | select(length > 0)'
+}
+
 createAndSyncUserSubscriptionWizard() {
     local id=
     local name=
@@ -556,8 +561,7 @@ createAndSyncUserSubscriptionWizard() {
     menuClose
     autoRead user_subscription_sources "请输入服务器范围[回车默认 main]:" sourceIds
     sourceIds=${sourceIds:-main}
-    sourceJson=$(printf '%s' "${sourceIds}" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))')
-    if [[ "$(jq 'length' <<<"${sourceJson}")" == "0" ]]; then
+    if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
         errorCard "服务器范围不能为空；直接回车使用本机 main"
         return 1
     fi
@@ -771,12 +775,8 @@ setUserSubscriptionSourcesMenu() {
     done < <(listSubscriptionSources)
     menuClose
     autoRead user_subscription_sources "请输入服务器范围，多个用逗号分隔:" sourceIds
-    if [[ -z "${sourceIds}" ]]; then
+    if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
         errorCard "服务器范围不能为空；直接回车使用本机 main"
-        return 1
-    fi
-    if ! sourceJson=$(printf '%s' "${sourceIds}" | jq -R 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0))'); then
-        errorCard "服务器范围解析失败"
         return 1
     fi
     if ! setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"; then

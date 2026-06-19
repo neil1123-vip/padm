@@ -8458,7 +8458,13 @@ runUserSubscriptionMenuMutationFailureRegression() (
         local key=$1
         local targetVar=$3
         case "${key}" in
-        user_subscription_sources) printf -v "${targetVar}" 'main,remote-a' ;;
+        user_subscription_sources)
+            if [[ "${mode}" == "empty-sources" ]]; then
+                printf -v "${targetVar}" ', ,'
+            else
+                printf -v "${targetVar}" 'main,remote-a'
+            fi
+            ;;
         user_subscription_traffic_limit) printf -v "${targetVar}" '100' ;;
         user_subscription_item_menu)
             menuStep=$((menuStep + 1))
@@ -8522,6 +8528,17 @@ runUserSubscriptionMenuMutationFailureRegression() (
     grep -qx 'subscribe:false||sub_team-a|true' "${callLog}"
     grep -q '订阅输出刷新失败' "${errorLog}"
     [[ ! -s "${statusLog}" ]]
+
+    mode=empty-sources
+    resetLogs
+    set +e
+    setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    ! grep -q '^sources:team-a:' "${callLog}"
+    grep -q '服务器范围不能为空' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
 
     mode=sources-fail
     resetLogs
