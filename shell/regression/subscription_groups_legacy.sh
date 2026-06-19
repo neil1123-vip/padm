@@ -13544,6 +13544,9 @@ runMenuSmokeRegression() {
     protocolPortHoppingStatusCard "删除成功"
     assertMenuAction 'statusCard:端口跳跃'
     resetMenuActions
+    tlsCertificateStatusCard "未检测到本机 TLS 证书"
+    assertMenuAction 'statusCard:TLS 证书状态'
+    resetMenuActions
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }

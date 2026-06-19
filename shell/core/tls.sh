@@ -467,6 +467,10 @@ tlsCertificateStatusJson() {
     jq -n --arg status "missing" --arg cron "$(tlsRenewCronState)" '{status:$status, cron:$cron}'
 }
 
+tlsCertificateStatusCard() {
+    statusCard "TLS 证书状态" "$@"
+}
+
 showTLSCertificateStatus() {
     local statusJson
     statusJson=$(tlsCertificateStatusJson) || {
@@ -482,14 +486,14 @@ showTLSCertificateStatus() {
     remainingDays=$(jq -r '.remaining_days // ""' <<<"${statusJson}")
 
     if [[ "${status}" == "missing" ]]; then
-        statusCard "TLS 证书状态" "未检测到本机 TLS 证书" "定时续签：${cron}" "无域名 Reality 不需要这里；域名 Reality 或传统 TLS 请检查证书"
+        tlsCertificateStatusCard "未检测到本机 TLS 证书" "定时续签：${cron}" "无域名 Reality 不需要这里；域名 Reality 或传统 TLS 请检查证书"
         return 0
     fi
     if [[ "${source}" == "custom" ]]; then
-        statusCard "TLS 证书状态" "域名：${domain}" "来源：自定义证书" "定时续签：${cron}" "说明：自定义证书可读，但不支持 renew 自动续签"
+        tlsCertificateStatusCard "域名：${domain}" "来源：自定义证书" "定时续签：${cron}" "说明：自定义证书可读，但不支持 renew 自动续签"
         return 0
     fi
-    statusCard "TLS 证书状态" "域名：${domain}" "来源：${source}" "签发时间：${issuedAt}" "剩余天数：${remainingDays}" "定时续签：${cron}"
+    tlsCertificateStatusCard "域名：${domain}" "来源：${source}" "签发时间：${issuedAt}" "剩余天数：${remainingDays}" "定时续签：${cron}"
 }
 
 manageTLSCertificates() {
@@ -592,7 +596,7 @@ renewalTLS() {
             tlsStatus="已过期"
         fi
 
-        statusCard "TLS 证书状态" \
+        tlsCertificateStatusCard \
             "证书检查日期:$(date "+%F %H:%M:%S")" \
             "证书生成日期:$(date -d @"${modifyTime}" +"%F %H:%M:%S")" \
             "证书生成天数:${days}" \
