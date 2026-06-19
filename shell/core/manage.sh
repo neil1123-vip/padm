@@ -992,6 +992,20 @@ corePortRollbackFiles() {
     return "${status}"
 }
 
+corePortReportBackupFailure() {
+    local backupDir=$1
+    padmRemoveCleanupPath "${backupDir}"
+    errorCard "入口端口配置备份失败"
+}
+
+corePortReportRollbackFailure() {
+    local backupDir=$1
+    local rollbackMessage
+    padmForgetCleanupPath "${backupDir}"
+    coreSetRollbackFailureMessage rollbackMessage "入口端口配置回滚失败" "${backupDir}" ""
+    errorCard "${rollbackMessage}"
+}
+
 corePortValidateFiles() {
     local file
     while IFS= read -r file; do
@@ -1028,11 +1042,9 @@ corePortWriteAddFiles() {
 corePortApplyFileTransaction() {
     local action=$1
     local backupDir
-    local rollbackMessage
     padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
     if ! corePortBackupFiles "${backupDir}"; then
-        padmRemoveCleanupPath "${backupDir}"
-        errorCard "入口端口配置备份失败"
+        corePortReportBackupFailure "${backupDir}"
         return 1
     fi
     shift
@@ -1040,9 +1052,7 @@ corePortApplyFileTransaction() {
         if corePortRollbackFiles "${backupDir}"; then
             padmRemoveCleanupPath "${backupDir}"
         else
-            padmForgetCleanupPath "${backupDir}"
-            coreSetRollbackFailureMessage rollbackMessage "入口端口配置回滚失败" "${backupDir}" ""
-            errorCard "${rollbackMessage}"
+            corePortReportRollbackFailure "${backupDir}"
         fi
         return 1
     fi
@@ -1052,12 +1062,10 @@ corePortApplyFileTransaction() {
 corePortApplyReloadTransaction() {
     local action=$1
     local backupDir
-    local rollbackFailureMessage
     local restoreMessage
     padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
     if ! corePortBackupFiles "${backupDir}"; then
-        padmRemoveCleanupPath "${backupDir}"
-        errorCard "入口端口配置备份失败"
+        corePortReportBackupFailure "${backupDir}"
         return 1
     fi
     shift
@@ -1065,9 +1073,7 @@ corePortApplyReloadTransaction() {
         if corePortRollbackFiles "${backupDir}"; then
             padmRemoveCleanupPath "${backupDir}"
         else
-            padmForgetCleanupPath "${backupDir}"
-            coreSetRollbackFailureMessage rollbackFailureMessage "入口端口配置回滚失败" "${backupDir}" ""
-            errorCard "${rollbackFailureMessage}"
+            corePortReportRollbackFailure "${backupDir}"
         fi
         return 1
     fi

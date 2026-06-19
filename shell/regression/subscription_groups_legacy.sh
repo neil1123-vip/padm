@@ -2165,9 +2165,21 @@ runCorePortFileTransactionRegression() {
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
 
     local reloadCalls=0 errorLog="${TMP_DIR}/core-port-reload-error.log"
+    local helperLog="${TMP_DIR}/core-port-helper.log"
     : >"${errorLog}"
+    : >"${helperLog}"
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
+    }
+    eval "$(declare -f corePortReportBackupFailure | sed '1s/^corePortReportBackupFailure/originalCorePortReportBackupFailure/')"
+    corePortReportBackupFailure() {
+        printf 'backup\n' >>"${helperLog}"
+        originalCorePortReportBackupFailure "$@"
+    }
+    eval "$(declare -f corePortReportRollbackFailure | sed '1s/^corePortReportRollbackFailure/originalCorePortReportRollbackFailure/')"
+    corePortReportRollbackFailure() {
+        printf 'rollback\n' >>"${helperLog}"
+        originalCorePortReportRollbackFailure "$@"
     }
 
     : >"${errorLog}"
@@ -2190,8 +2202,23 @@ runCorePortFileTransactionRegression() {
         fi
     ) || return 1
     grep -q "入口端口配置备份失败" "${errorLog}"
+    [[ "$(grep -c '^backup$' "${helperLog}")" == "1" ]]
 
     : >"${errorLog}"
+    : >"${helperLog}"
+    (
+        corePortBackupFiles() {
+            return 1
+        }
+        if corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443 2>/dev/null; then
+            return 1
+        fi
+    ) || return 1
+    grep -q "入口端口配置备份失败" "${errorLog}"
+    [[ "$(grep -c '^backup$' "${helperLog}")" == "1" ]]
+
+    : >"${errorLog}"
+    : >"${helperLog}"
     (
         cp() {
             local args=("$@")
@@ -2206,6 +2233,7 @@ runCorePortFileTransactionRegression() {
         fi
     ) || return 1
     grep -q "入口端口配置回滚失败" "${errorLog}"
+    [[ "$(grep -c '^rollback$' "${helperLog}")" == "1" ]]
     keptBackup=$(find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' -print -quit)
     [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
     [[ -f "${keptBackup}/02_dokodemodoor_inbounds_2053_default.json" ]]
@@ -11566,11 +11594,17 @@ JSON
         local prepareRoot="${TMP_DIR}/remote-control-prepare-output-failure"
         local prepareResponse="${TMP_DIR}/remote-control-prepare-output-failure.json"
         local expectedBackupDir="${prepareRoot}/created-backup"
+        local prepareCalls=0
         mkdir -p "${prepareRoot}/groups"
         export PADM_SUBSCRIPTION_GROUPS_DIR="${prepareRoot}/groups"
         cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
+        eval "$(declare -f subscriptionControlPrepareSyncFailure | sed '1s/^subscriptionControlPrepareSyncFailure/originalSubscriptionControlPrepareSyncFailure/')"
+        subscriptionControlPrepareSyncFailure() {
+            prepareCalls=$((prepareCalls + 1))
+            originalSubscriptionControlPrepareSyncFailure "$@"
+        }
         subscriptionSyncCreateConfigBackups() {
             local backupPath="${expectedBackupDir}"
             mkdir -p "${backupPath}" || return 1
@@ -11585,6 +11619,7 @@ JSON
         set -e
         [[ "${prepareStatus}" -ne 0 ]]
         jq -e '.ok == false and .changed == false and .dry_run == false and .error == "prepare_failed" and .error_detail.type == "prepare_failed" and (.error_detail.message | contains("订阅输出备份失败")) and .plan.create == ["sub_team_a"] and .plan.remove == []' "${prepareResponse}" >/dev/null
+        [[ "${prepareCalls}" == "1" ]]
         [[ ! -e "${expectedBackupDir}" ]]
     )
 
@@ -11662,14 +11697,15 @@ JSON
             return 0
         }
         subscriptionSyncSetRestoreFailureDetail() {
+            local failedLocation=${3:-}
             helperCalls=$((helperCalls + 1))
-            if [[ -n "$3" ]]; then
-                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${3}"
+            if [[ -n "${failedLocation}" ]]; then
+                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${failedLocation}"
             else
                 command printf -v "$1" '%s' "${2}恢复失败"
             fi
             [[ "$2" == "配置" ]]
-            [[ "$3" == "备份目录: ${restoreOrderConfig}" ]]
+            [[ "${failedLocation}" == "备份目录: ${restoreOrderConfig}" ]]
             return 0
         }
         SUBSCRIPTION_CONTROL_RESTORE_ERROR=
@@ -11705,14 +11741,15 @@ JSON
             return 0
         }
         subscriptionSyncSetRestoreFailureDetail() {
+            local failedLocation=${3:-}
             helperCalls=$((helperCalls + 1))
-            if [[ -n "$3" ]]; then
-                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${3}"
+            if [[ -n "${failedLocation}" ]]; then
+                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${failedLocation}"
             else
                 command printf -v "$1" '%s' "${2}恢复失败"
             fi
             [[ "$2" == "状态" ]]
-            [[ -z "$3" ]]
+            [[ -z "${failedLocation}" ]]
             return 0
         }
         SUBSCRIPTION_CONTROL_RESTORE_ERROR=
@@ -11748,14 +11785,15 @@ JSON
             return 1
         }
         subscriptionSyncSetRestoreFailureDetail() {
+            local failedLocation=${3:-}
             helperCalls=$((helperCalls + 1))
-            if [[ -n "$3" ]]; then
-                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${3}"
+            if [[ -n "${failedLocation}" ]]; then
+                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${failedLocation}"
             else
                 command printf -v "$1" '%s' "${2}恢复失败"
             fi
             [[ "$2" == "订阅输出" ]]
-            [[ "$3" == "备份目录: ${restoreOrderOutput}" ]]
+            [[ "${failedLocation}" == "备份目录: ${restoreOrderOutput}" ]]
             return 0
         }
         SUBSCRIPTION_CONTROL_RESTORE_ERROR=
