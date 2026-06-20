@@ -159,20 +159,7 @@ EOF
 }
 
 collectLocalTrafficAccounts() {
-    local file
-    local files=()
-    while IFS= read -r file; do
-        [[ -f "${file}" ]] && files+=("${file}")
-    done < <(subscriptionSyncConfigFiles)
-    [[ "${#files[@]}" -gt 0 ]] || {
-        printf '[]\n'
-        return 0
-    }
-    jq -c -s '
-      [.[] | [.inbounds[]?.settings.clients[]?, .inbounds[]?.users[]?][]?
-       | '"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"'
-       | select(length > 0)]
-      | unique' "${files[@]}" 2>/dev/null
+    subscriptionSyncConfiguredAccountNamesJson 2>/dev/null
 }
 
 collectXrayTrafficStatsSnapshot() {
@@ -253,11 +240,13 @@ collectLocalTrafficSnapshot() {
 
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
+    local accountIdMap
     if ! jq -e '.ok == true' <<<"${snapshot}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
-    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" '
+    accountIdMap=$(subscriptionActiveGroupRead -r '.user_groups[]?.id' | subscriptionSyncAccountIdMapJsonFromIds) || return 1
+    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson accountIdMap "${accountIdMap}" '
       def addTraffic($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
@@ -270,9 +259,8 @@ writeSubscriptionTrafficSnapshot() {
           .download += (if ($oldCounters | has($item.account)) and $downloadDelta > 0 then $downloadDelta else 0 end) |
           .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
         {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
-      (.user_groups // [] | map({key: (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value: .id}) | from_entries) as $userMap |
       . as $group |
-      ($snapshot.items | map(. + {id: ($userMap[.account] // .account)})) as $items |
+      ($snapshot.items | map(. + {id: ($accountIdMap[.account] // .account)})) as $items |
       ($items | map(select(.account | startswith("sub_")))) as $userItems |
       ($items | map(select((.account | startswith("sub_")) | not))) as $adminItems |
       (sourceTotal($group.traffic.sources.main; $items)) as $mainTraffic |

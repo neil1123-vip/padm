@@ -47,12 +47,18 @@ subscriptionSyncGenerateUUID() {
     fi
 }
 
-subscriptionSyncCurrentManagedUsers() {
+subscriptionSyncConfiguredAccountNamesJson() {
     local file
     local validFiles=()
-    for file in "$@"; do
-        [[ -f "${file}" ]] && validFiles+=("${file}")
-    done
+    if (($# > 0)); then
+        for file in "$@"; do
+            [[ -f "${file}" ]] && validFiles+=("${file}")
+        done
+    else
+        while IFS= read -r file; do
+            [[ -f "${file}" ]] && validFiles+=("${file}")
+        done < <(subscriptionSyncConfigFiles)
+    fi
     [[ "${#validFiles[@]}" -gt 0 ]] || {
         printf '[]\n'
         return 0
@@ -60,8 +66,18 @@ subscriptionSyncCurrentManagedUsers() {
     jq -c -s '
       [.[] | [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
        | '"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"'
-       | select(startswith("sub_"))]
+       | select(length > 0)]
       | unique' "${validFiles[@]}"
+}
+
+subscriptionSyncConfiguredManagedUsers() {
+    local accountsJson
+    accountsJson=$(subscriptionSyncConfiguredAccountNamesJson "$@") || return 1
+    jq -c '[.[]? | select(startswith("sub_"))] | unique' <<<"${accountsJson}"
+}
+
+subscriptionSyncCurrentManagedUsers() {
+    subscriptionSyncConfiguredManagedUsers "$@"
 }
 
 subscriptionSyncResolveManagedConfigDir() {
@@ -156,6 +172,16 @@ subscriptionSyncAccountNamesJsonFromIds() {
           | ($id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"')
         )
       | unique
+    '
+}
+
+subscriptionSyncAccountIdMapJsonFromIds() {
+    jq -R -s '
+      split("\n")
+      | map(select(length > 0))
+      | unique
+      | map({key: (. | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value: .})
+      | from_entries
     '
 }
 

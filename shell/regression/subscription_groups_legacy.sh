@@ -10885,13 +10885,15 @@ JSON
     (
         local trafficRoot="${TMP_DIR}/subscription-traffic-usermap-batch"
         local trafficSnapshot='{"ok":true,"items":[{"account":"sub_team_a","upload":1,"download":2},{"account":"sub_team_b","upload":3,"download":4}]}'
+        local capturedTrafficAccountIds="${TMP_DIR}/subscription-traffic-account-ids.txt"
         mkdir -p "${trafficRoot}/groups"
         export PADM_SUBSCRIPTION_GROUPS_DIR="${trafficRoot}/groups"
         cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
         subscriptionSyncAccountIdMapJsonFromIds() {
-            return 94
+            cat >"${capturedTrafficAccountIds}"
+            printf '{"sub_team_a":"team-a","sub_team_b":"team-b"}\n'
         }
         writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
         jq -e '
@@ -10900,6 +10902,8 @@ JSON
           .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
           .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
         ' "$(subscriptionGroupsFile)" >/dev/null
+        grep -qx 'team-a' "${capturedTrafficAccountIds}"
+        grep -qx 'team-b' "${capturedTrafficAccountIds}"
         unset -f subscriptionSyncAccountIdMapJsonFromIds
     )
     (
@@ -10957,11 +10961,15 @@ JSON
 {"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
 JSON
     (
-        subscriptionSyncConfiguredManagedUsers() {
-            return 97
+        local capturedConfiguredAccountFiles="${TMP_DIR}/subscription-sync-configured-account-files.txt"
+        subscriptionSyncConfiguredAccountNamesJson() {
+            printf '%s\n' "$@" >"${capturedConfiguredAccountFiles}"
+            printf '["sub_team_a-main","sub_team_b-main"]\n'
         }
         subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
-        unset -f subscriptionSyncConfiguredManagedUsers
+        grep -qx "${configPath}02_VLESS_TCP_inbounds.json" "${capturedConfiguredAccountFiles}"
+        grep -qx "${singBoxConfigPath}06_hysteria2_inbounds.json" "${capturedConfiguredAccountFiles}"
+        unset -f subscriptionSyncConfiguredAccountNamesJson
     )
     subscriptionSyncCurrentManagedUsers \
         "${configPath}02_VLESS_TCP_inbounds.json" \
@@ -14165,6 +14173,118 @@ runCoreSelectionRetryActionRegression() (
     done
 )
 
+runSyncConfiguredManagedUsersHelperRegression() (
+    local syncConfigRoot="${TMP_DIR}/sync-configured-managed-users-helper"
+    local helperLog="${syncConfigRoot}/helper.log"
+    local currentManaged
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+
+    mkdir -p "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box"
+    configPath="${syncConfigRoot}/xray/"
+    singBoxConfigPath="${syncConfigRoot}/sing-box/"
+    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"admin-root"}]}}]}
+JSON
+    cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
+{"inbounds":[{"users":[{"name":"sub_team_b-main"},{"username":"ops"}]}]}
+JSON
+
+    subscriptionSyncConfiguredManagedUsers() {
+        printf '%s\n' "$#" >"${helperLog}"
+        printf '["sub_team_a-main","sub_team_b-main","ops"]\n'
+    }
+
+    currentManaged=$(subscriptionSyncCurrentManagedUsers \
+        "${configPath}02_VLESS_TCP_inbounds.json" \
+        "${singBoxConfigPath}06_hysteria2_inbounds.json")
+    jq -e '. == ["sub_team_a-main","sub_team_b-main"]' <<<"${currentManaged}" >/dev/null
+    [[ -f "${helperLog}" ]] || return 1
+    grep -qx '2' "${helperLog}" || return 1
+
+    unset -f subscriptionSyncConfiguredManagedUsers
+    if [[ -n "${oldConfigPath}" ]]; then
+        configPath="${oldConfigPath}"
+    else
+        unset configPath
+    fi
+    if [[ -n "${oldSingBoxConfigPath}" ]]; then
+        singBoxConfigPath="${oldSingBoxConfigPath}"
+    else
+        unset singBoxConfigPath
+    fi
+)
+
+runTrafficConfiguredAccountsHelperRegression() (
+    local trafficRoot="${TMP_DIR}/traffic-configured-accounts-helper"
+    local helperLog="${trafficRoot}/helper.log"
+    local accounts
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+
+    mkdir -p "${trafficRoot}/xray" "${trafficRoot}/sing-box"
+    configPath="${trafficRoot}/xray/"
+    singBoxConfigPath="${trafficRoot}/sing-box/"
+    cat >"${configPath}01_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-vless"},{"email":"admin-root"}]}}]}
+JSON
+    cat >"${singBoxConfigPath}02_inbounds.json" <<'JSON'
+{"inbounds":[{"users":[{"name":"sub_team_b-hysteria2"},{"username":"ops"}]}]}
+JSON
+
+    subscriptionSyncConfiguredAccountNamesJson() {
+        printf '%s\n' "$#" >"${helperLog}"
+        printf '["admin","ops","sub_team_a","sub_team_b"]\n'
+    }
+
+    accounts=$(collectLocalTrafficAccounts)
+    jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
+    [[ -f "${helperLog}" ]] || return 1
+    grep -qx '0' "${helperLog}" || return 1
+
+    unset -f subscriptionSyncConfiguredAccountNamesJson
+    if [[ -n "${oldConfigPath}" ]]; then
+        configPath="${oldConfigPath}"
+    else
+        unset configPath
+    fi
+    if [[ -n "${oldSingBoxConfigPath}" ]]; then
+        singBoxConfigPath="${oldSingBoxConfigPath}"
+    else
+        unset singBoxConfigPath
+    fi
+)
+
+runTrafficAccountIdMapHelperRegression() (
+    local trafficRoot="${TMP_DIR}/traffic-account-id-map-helper"
+    local helperLog="${trafficRoot}/helper.log"
+    local trafficSnapshot='{"ok":true,"items":[{"account":"sub_team_a","upload":1,"download":2},{"account":"sub_team_b","upload":3,"download":4}]}'
+
+    mkdir -p "${trafficRoot}/groups"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${trafficRoot}/groups"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+
+    subscriptionSyncAccountIdMapJsonFromIds() {
+        cat >"${helperLog}"
+        printf '{"sub_team_a":"team-a","sub_team_b":"team-b"}\n'
+    }
+
+    writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
+    jq -e '
+      .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
+      .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.download == 2 and
+      .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
+      .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
+    ' "$(subscriptionGroupsFile)" >/dev/null
+    [[ -f "${helperLog}" ]] || return 1
+    grep -qx 'team-a' "${helperLog}" || return 1
+    grep -qx 'team-b' "${helperLog}" || return 1
+
+    unset -f subscriptionSyncAccountIdMapJsonFromIds
+)
+
 runMenuSmokeLightRegression() {
     local actions=
     local output=
@@ -17302,6 +17422,9 @@ runRegressionFast() {
 runRegressionTargetedBatchHelpers() {
     runRegressionStep core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression &&
         runRegressionStep core-selection-retry-action runCoreSelectionRetryActionRegression &&
+        runRegressionStep sync-configured-managed-users-helper runSyncConfiguredManagedUsersHelperRegression &&
+        runRegressionStep traffic-configured-accounts-helper runTrafficConfiguredAccountsHelperRegression &&
+        runRegressionStep traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression &&
         runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression &&
         runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
         runRegressionStep config-transaction runConfigTransactionRegression &&
