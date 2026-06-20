@@ -2120,7 +2120,7 @@ selectCoreInstall() {
         if [[ "${selectInstallType}" == "1" ]]; then
             xrayCoreInstall
         elif [[ "${selectInstallType}" == "2" ]]; then
-            customXrayInstall
+            customXrayInstall || return $?
         elif [[ "${selectInstallType}" == "3" ]]; then
             installXrayReality
         fi
@@ -2129,7 +2129,7 @@ selectCoreInstall() {
         if [[ "${selectInstallType}" == "1" ]]; then
             singBoxInstall
         elif [[ "${selectInstallType}" == "2" ]]; then
-            customSingBoxInstall
+            customSingBoxInstall || return $?
         elif [[ "${selectInstallType}" == "3" ]]; then
             installSingBoxReality
         fi

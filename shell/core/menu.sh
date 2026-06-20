@@ -234,7 +234,7 @@ menu() {
     autoRead main_menu "请选择:" selectMainMenuType
     case ${selectMainMenuType} in
     1)
-        installMenu
+        installMenu || return $?
         ;;
     2)
         manageSubscription 1

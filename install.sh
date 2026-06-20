@@ -637,3 +637,4 @@ installHandleEarlyCapabilityListArgs "$@"
 loadScriptModules
 initScriptRuntime "$@"
 runMainMenu "$@"
+exit $?
