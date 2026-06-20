@@ -884,7 +884,9 @@ EOF
         echo
         readSingBoxPortResult result "${singBoxHysteria2Port}" || return 1
         statusCard "Hysteria2端口" "${result[-1]}"
-        initHysteria2Network
+        initHysteria2Network || return 1
+        local hysteria2MasqueradeConfig
+        hysteria2MasqueradeConfig=$(hysteria2MasqueradeJson "${hysteria2Masquerade:-}") || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/06_hysteria2_inbounds.json padm-sing-box-hysteria2 <<EOF || { errorCard "sing-box Hysteria2 入站模板提交失败"; return 1; }
 {
     "inbounds": [
@@ -893,8 +895,8 @@ EOF
             "listen": "::",
             "listen_port": ${result[-1]},
             "users": $(initSingBoxClients 3),
-            "up_mbps":${hysteria2ClientDownloadSpeed},
-            "down_mbps":${hysteria2ClientUploadSpeed},
+            "up_mbps":${hysteria2ClientUploadSpeed},
+            "down_mbps":${hysteria2ClientDownloadSpeed},
             "tls": {
                 "enabled": true,
                 "server_name":"${sslDomain}",
@@ -903,7 +905,8 @@ EOF
                 ],
                 "certificate_path": "/etc/padm/tls/${sslDomain}.crt",
                 "key_path": "/etc/padm/tls/${sslDomain}.key"
-            }
+            },
+            "masquerade": ${hysteria2MasqueradeConfig}
         }
     ]
 }

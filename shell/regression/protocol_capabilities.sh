@@ -236,8 +236,64 @@ runProtocolCapabilityTemplateRegression() {
     fi
 }
 
+runHysteria2CapabilityRegression() {
+    local coreTemplate="${PROJECT_ROOT}/shell/core/core_templates.sh"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local configDir="${TMP_DIR}/hysteria2-conf/"
+    local oldUpload="${hysteria2ClientUploadSpeed:-}"
+    local oldDownload="${hysteria2ClientDownloadSpeed:-}"
+
+    if ! grep -Fq '"up_mbps":${hysteria2ClientUploadSpeed}' "${coreTemplate}"; then
+        printf 'assert-fail:hysteria2 template up_mbps should use upload speed\n' >&2
+        return 1
+    fi
+    if ! grep -Fq '"down_mbps":${hysteria2ClientDownloadSpeed}' "${coreTemplate}"; then
+        printf 'assert-fail:hysteria2 template down_mbps should use download speed\n' >&2
+        return 1
+    fi
+    if ! grep -Fq '"masquerade":' "${coreTemplate}"; then
+        printf 'assert-fail:hysteria2 template should emit masquerade config\n' >&2
+        return 1
+    fi
+
+    mkdir -p "${configDir}"
+    cat >"${configDir}06_hysteria2_inbounds.json" <<'EOF'
+{"inbounds":[{"type":"hysteria2","listen_port":2443,"up_mbps":75,"down_mbps":150,"users":[],"tls":{"enabled":true}}]}
+EOF
+    singBoxConfigPath="${configDir}"
+    readSingBoxConfig
+    assertEquals 75 "${hysteria2ClientUploadSpeed}" "hysteria2-read-upload"
+    assertEquals 150 "${hysteria2ClientDownloadSpeed}" "hysteria2-read-download"
+
+    if ! declare -F singBoxVersionAtLeast >/dev/null; then
+        printf 'assert-fail:missing singBoxVersionAtLeast\n' >&2
+        return 1
+    fi
+    singBoxVersionAtLeast v1.11.0 1.11.0 || { printf 'assert-fail:sing-box 1.11 should satisfy 1.11 gate\n' >&2; return 1; }
+    singBoxVersionAtLeast v1.14.0-alpha.32 1.14.0 || { printf 'assert-fail:sing-box 1.14 prerelease should satisfy 1.14 gate\n' >&2; return 1; }
+    if singBoxVersionAtLeast v1.10.7 1.11.0; then
+        printf 'assert-fail:sing-box 1.10 should not satisfy 1.11 gate\n' >&2
+        return 1
+    fi
+    if ! declare -F hysteria2SingBoxFieldSupported >/dev/null; then
+        printf 'assert-fail:missing hysteria2SingBoxFieldSupported\n' >&2
+        return 1
+    fi
+    hysteria2SingBoxFieldSupported masquerade v1.11.0 || { printf 'assert-fail:hysteria2 masquerade should be available on sing-box 1.11\n' >&2; return 1; }
+    hysteria2SingBoxFieldSupported obfs_gecko v1.14.0-alpha.32 || { printf 'assert-fail:hysteria2 gecko obfs should be available on sing-box 1.14 prerelease\n' >&2; return 1; }
+    if hysteria2SingBoxFieldSupported bbr_profile v1.13.13; then
+        printf 'assert-fail:hysteria2 bbr_profile should require sing-box 1.14\n' >&2
+        return 1
+    fi
+
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    hysteria2ClientUploadSpeed="${oldUpload}"
+    hysteria2ClientDownloadSpeed="${oldDownload}"
+}
+
 runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
 runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression
 runRegressionStep protocol-capability-nginx-topology runProtocolCapabilityNginxTopologyRegression
 runRegressionStep protocol-capability-templates runProtocolCapabilityTemplateRegression
+runRegressionStep hysteria2-capability runHysteria2CapabilityRegression
 echo "protocol-capabilities-regression-ok"
