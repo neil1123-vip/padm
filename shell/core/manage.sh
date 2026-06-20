@@ -2077,6 +2077,7 @@ renderAllSubscribeUserOutputs() {
 
 subscriptionPublishAccounts() {
     local localBase=$1
+    local enabledUsers
     local localAccounts=
     local stagedAccounts=
     local publishAccounts=
@@ -2097,6 +2098,7 @@ subscriptionPublishAccounts() {
     if subscriptionActiveGroupRead -e 'any(.sources[]?; .id == "main" and ((.enabled // true) == true))' >/dev/null 2>&1; then
         mainPublishSourceAvailable=true
     fi
+    enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
     while IFS=$'\t' read -r account allowsMain hasRemote; do
         [[ -n "${account}" ]] || continue
         if [[ "${allowsMain}" == "true" && "${mainPublishSourceAvailable}" == "true" ]]; then
@@ -2107,13 +2109,12 @@ subscriptionPublishAccounts() {
             SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
             stagedAccounts+="${account}"$'\n'
         fi
-    done < <(subscriptionActiveGroupRead -r '
+    done < <(subscriptionActiveGroupRead -r --argjson enabledUsers "${enabledUsers}" '
       . as $group |
-      .user_groups[]?
-      | select(.enabled == true)
+      $enabledUsers[]?
       | (.allowed_sources // []) as $allowed
       | [
-          (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'),
+          (.account // ""),
           (if ($allowed | index("*") or index("main")) then "true" else "false" end),
           (if ($allowed | length) == 0 then
              "false"

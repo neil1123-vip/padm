@@ -10227,11 +10227,14 @@ configPath="${oldConfigPath}"
             printf '%s\n' "$(( $(<"${mainCheckFile}") + 1 ))" >"${mainCheckFile}"
             return 0
         fi
-        if [[ "$*" == *".user_groups[]?"* && "$*" == *"select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
+        if [[ "$*" == *'--argjson enabledUsers '* && "$*" == *'.account // ""'* && "$*" == *'@tsv'* ]]; then
             printf 'sub_team_a\ttrue\tfalse\nsub_team_b\ttrue\tfalse\n'
             return 0
         fi
         return 1
+    }
+    subscriptionActiveEnabledUsersJson() {
+        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["main"]},{"id":"team-b","account":"sub_team_b","allowed_sources":["main"]}]\n'
     }
     subscriptionSyncFindUserByAccountName() {
         return 99
@@ -10277,11 +10280,14 @@ configPath="${oldConfigPath}"
         if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
             return 1
         fi
-        if [[ "$*" == *".user_groups[]?"* && "$*" == *"select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
+        if [[ "$*" == *'--argjson enabledUsers '* && "$*" == *'.role != "main" and .enabled == true'* && "$*" == *'@tsv'* ]]; then
             printf 'sub_team_a\tfalse\ttrue\n'
             return 0
         fi
         return 1
+    }
+    subscriptionActiveEnabledUsersJson() {
+        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}]\n'
     }
     subscriptionPublishHasRemoteSources() {
         return 99
