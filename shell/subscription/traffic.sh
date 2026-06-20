@@ -164,12 +164,15 @@ collectLocalTrafficAccounts() {
     while IFS= read -r file; do
         [[ -f "${file}" ]] && files+=("${file}")
     done < <(subscriptionSyncConfigFiles)
-    [[ "${#files[@]}" -gt 0 ]] || return 0
-    jq -r -s '
+    [[ "${#files[@]}" -gt 0 ]] || {
+        printf '[]\n'
+        return 0
+    }
+    jq -c -s '
       [.[] | [.inbounds[]?.settings.clients[]?, .inbounds[]?.users[]?][]?
        | (.email // .name // .username // empty | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))
        | select(length > 0)]
-      | unique[]' "${files[@]}" 2>/dev/null
+      | unique' "${files[@]}" 2>/dev/null
 }
 
 collectXrayTrafficStatsSnapshot() {
@@ -232,16 +235,11 @@ collectXrayTrafficStatsSnapshot() {
 
 collectLocalTrafficSnapshot() {
     local accounts
-    local accountLines
     local items
-    if ! accountLines=$(collectLocalTrafficAccounts); then
+    if ! accounts=$(collectLocalTrafficAccounts); then
         jq -n '{ok:false, items: []}'
         return
     fi
-    accounts=$(jq -R -s 'split("\n") | map(select(length > 0))' <<<"${accountLines}") || {
-        jq -n '{ok:false, items: []}'
-        return
-    }
     if [[ "$(jq 'length' <<<"${accounts}")" == "0" ]]; then
         jq -n '{ok:true, items: []}'
         return
