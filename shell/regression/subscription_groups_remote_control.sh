@@ -269,6 +269,111 @@ runRemoteControlInlineRequestHelpersRegression() (
     [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
 )
 
+runRemoteControlInlineWireGuardPeerHelpersRegression() (
+    local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
+    local requestResponse
+    local healthResponse
+    local endpointLog="${TMP_DIR}/remote-control-inline-wireguard-peer-endpoints.log"
+    local handshakeLog="${TMP_DIR}/remote-control-inline-wireguard-peer-handshakes.log"
+    local curlLog="${TMP_DIR}/remote-control-inline-wireguard-peer-curl.log"
+
+    : >"${endpointLog}"
+    : >"${handshakeLog}"
+    : >"${curlLog}"
+
+    subscriptionRemoteWireGuardPeerPublicKeyFromSource() {
+        return 96
+    }
+    subscriptionRemoteWireGuardPeerEndpoint() {
+        return 97
+    }
+    subscriptionRemoteWireGuardPeerLatestHandshake() {
+        return 98
+    }
+    subscriptionRemoteWireGuardPeerReadyState() {
+        return 99
+    }
+    subscriptionRemoteSourceUsesWireGuard() {
+        return 0
+    }
+    subscriptionWireGuardReadState() {
+        printf '{"peers":[{"id":"edge-remote","public_key":"pub-edge"}]}\n'
+    }
+    subscriptionWireGuardInterface() {
+        printf 'wg-padm\n'
+    }
+    subscriptionWireGuardControlUrl() {
+        printf 'https://control.example/%s\n' "$2"
+    }
+    wg() {
+        [[ "$1" == "show" && "$2" == "wg-padm" ]] || return 1
+        case "$3" in
+        endpoints)
+            printf '1\n' >>"${endpointLog}"
+            if [[ "$(wc -l <"${endpointLog}")" == "1" ]]; then
+                printf 'pub-edge (none)\n'
+            else
+                printf 'pub-edge 203.0.113.10:51820\n'
+            fi
+            ;;
+        latest-handshakes)
+            printf '1\n' >>"${handshakeLog}"
+            if [[ "$(wc -l <"${handshakeLog}")" == "1" ]]; then
+                printf 'pub-edge 0\n'
+            else
+                printf 'pub-edge 123\n'
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    }
+    curl() {
+        printf '1\n' >>"${curlLog}"
+        if (( $(wc -l <"${endpointLog}") < 2 || $(wc -l <"${handshakeLog}") < 2 )); then
+            return 1
+        fi
+        case "$*" in
+        *'https://control.example/sync'*)
+            printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
+            ;;
+        *'https://control.example/health'*)
+            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    }
+
+    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[]}' 2>/dev/null || true)
+    [[ -n "${requestResponse}" ]] || return 1
+    requestResponse=$(jq -c . <<<"${requestResponse}") || return 1
+    [[ "${requestResponse}" == *'"ok":true'* ]] || return 1
+    [[ "${requestResponse}" == *'"changed":false'* ]] || return 1
+    [[ "${requestResponse}" == *'"create":[]'*'"remove":[]'* ]] || return 1
+    [[ "$(wc -l <"${endpointLog}")" == "2" ]] || return 1
+    [[ "$(wc -l <"${handshakeLog}")" == "2" ]] || return 1
+    [[ "$(wc -l <"${curlLog}")" == "2" ]] || return 1
+
+    : >"${endpointLog}"
+    : >"${handshakeLog}"
+    : >"${curlLog}"
+
+    healthResponse=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null || true)
+    [[ -n "${healthResponse}" ]] || return 1
+    healthResponse=$(jq -c . <<<"${healthResponse}") || return 1
+    [[ "${healthResponse}" == *'"ok":true'* ]] || return 1
+    [[ "${healthResponse}" == *'"version":"test"'* ]] || return 1
+    [[ "${healthResponse}" == *'"capabilities":["health","sync"]'* ]] || return 1
+    [[ "${healthResponse}" == *'"id":"edge-remote"'* ]] || return 1
+    [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
+    [[ "$(wc -l <"${endpointLog}")" == "2" ]] || return 1
+    [[ "$(wc -l <"${handshakeLog}")" == "2" ]] || return 1
+    [[ "$(wc -l <"${curlLog}")" == "2" ]] || return 1
+)
+
 runRemoteControlInlineTokenConsumersRegression() (
     local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
     local desiredUsersBySourceJson='{"edge-remote":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
@@ -1715,6 +1820,7 @@ runRegressionRemoteControlSmokeCoreSteps() {
         runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression &&
+        runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression &&
         runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression &&
         runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
 }

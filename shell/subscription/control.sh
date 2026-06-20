@@ -59,49 +59,24 @@ subscriptionRemoteControlWarmup() {
     return 1
 }
 
-subscriptionRemoteWireGuardPeerPublicKeyFromSource() {
+subscriptionRemoteWireGuardPeerStateFromSource() {
     local source=$1
     local sourceId
+    local publicKey
+    local interface
+    local endpoint=
+    local handshake=0
     sourceId=$(jq -r '.id // empty' <<<"${source}") || return 1
     [[ -n "${sourceId}" ]] || return 1
-    subscriptionWireGuardReadState | jq -r --arg id "${sourceId}" '.peers[]? | select(.id == $id) | .public_key // empty' | head -n 1
-}
-
-subscriptionRemoteWireGuardPeerEndpoint() {
-    local publicKey=$1
-    local interface
+    publicKey=$(subscriptionWireGuardReadState | jq -r --arg id "${sourceId}" '.peers[]? | select(.id == $id) | .public_key // empty' | head -n 1)
     [[ -n "${publicKey}" ]] || return 1
     command -v wg >/dev/null 2>&1 || return 1
     interface=$(subscriptionWireGuardInterface 2>/dev/null) || return 1
     [[ -n "${interface}" ]] || return 1
-    wg show "${interface}" endpoints 2>/dev/null | awk -v publicKey="${publicKey}" '$1 == publicKey { print $2; exit }'
-}
-
-subscriptionRemoteWireGuardPeerLatestHandshake() {
-    local publicKey=$1
-    local interface
-    [[ -n "${publicKey}" ]] || return 1
-    command -v wg >/dev/null 2>&1 || return 1
-    interface=$(subscriptionWireGuardInterface 2>/dev/null) || return 1
-    [[ -n "${interface}" ]] || return 1
-    wg show "${interface}" latest-handshakes 2>/dev/null | awk -v publicKey="${publicKey}" '$1 == publicKey { print $2; exit }'
-}
-
-subscriptionRemoteWireGuardPeerReadyState() {
-    local endpoint=$1
-    local baselineEndpoint=$2
-    local handshake=$3
-    local baselineHandshake=$4
-    [[ -n "${endpoint}" && "${endpoint}" != "(none)" ]] || return 1
-    if [[ -z "${baselineEndpoint}" || "${baselineEndpoint}" == "(none)" ]]; then
-        return 0
-    fi
-    if [[ "${endpoint}" != "${baselineEndpoint}" ]]; then
-        return 0
-    fi
-    [[ "${handshake}" =~ ^[0-9]+$ ]] || return 1
-    [[ "${baselineHandshake}" =~ ^[0-9]+$ ]] || baselineHandshake=0
-    ((handshake > baselineHandshake))
+    endpoint=$(wg show "${interface}" endpoints 2>/dev/null | awk -v publicKey="${publicKey}" '$1 == publicKey { print $2; exit }')
+    handshake=$(wg show "${interface}" latest-handshakes 2>/dev/null | awk -v publicKey="${publicKey}" '$1 == publicKey { print $2; exit }')
+    [[ "${handshake}" =~ ^[0-9]+$ ]] || handshake=0
+    printf '%s\t%s\t%s\n' "${publicKey}" "${endpoint}" "${handshake}"
 }
 
 subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
@@ -110,23 +85,36 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
     local delay=${3:-${PADM_REMOTE_WG_ENDPOINT_DELAY:-0.25}}
     local baselineEndpoint=${4:-}
     local baselineHandshake=${5:-0}
-    local publicKey
+    local peerState
+    local publicKey=
     local endpoint=
     local handshake=0
     local tryIndex
     subscriptionRemoteSourceUsesWireGuard "${source}" || return 0
-    publicKey=$(subscriptionRemoteWireGuardPeerPublicKeyFromSource "${source}" 2>/dev/null || true)
-    [[ -n "${publicKey}" ]] || return 0
-    endpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
-    handshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
-    if subscriptionRemoteWireGuardPeerReadyState "${endpoint}" "${baselineEndpoint}" "${handshake}" "${baselineHandshake}"; then
-        return 0
+    peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+    [[ -n "${peerState}" ]] || return 0
+    [[ "${baselineHandshake}" =~ ^[0-9]+$ ]] || baselineHandshake=0
+    IFS=$'\t' read -r publicKey endpoint handshake <<<"${peerState}"
+    if [[ -n "${endpoint}" && "${endpoint}" != "(none)" ]]; then
+        if [[ -z "${baselineEndpoint}" || "${baselineEndpoint}" == "(none)" || "${endpoint}" != "${baselineEndpoint}" ]]; then
+            return 0
+        fi
+        if [[ "${handshake}" =~ ^[0-9]+$ ]] && ((handshake > baselineHandshake)); then
+            return 0
+        fi
     fi
     for ((tryIndex = 0; tryIndex < attempts; tryIndex++)); do
-        endpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
-        handshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
-        if subscriptionRemoteWireGuardPeerReadyState "${endpoint}" "${baselineEndpoint}" "${handshake}" "${baselineHandshake}"; then
-            return 0
+        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+        if [[ -n "${peerState}" ]]; then
+            IFS=$'\t' read -r publicKey endpoint handshake <<<"${peerState}"
+            if [[ -n "${endpoint}" && "${endpoint}" != "(none)" ]]; then
+                if [[ -z "${baselineEndpoint}" || "${baselineEndpoint}" == "(none)" || "${endpoint}" != "${baselineEndpoint}" ]]; then
+                    return 0
+                fi
+                if [[ "${handshake}" =~ ^[0-9]+$ ]] && ((handshake > baselineHandshake)); then
+                    return 0
+                fi
+            fi
         fi
         sleep "${delay}"
     done
@@ -137,7 +125,8 @@ subscriptionRemoteControlRequest() {
     local source=$1
     local endpoint=$2
     local payload=$3
-    local publicKey=
+    local peerState=
+    local peerPublicKey=
     local baselineEndpoint=
     local baselineHandshake=0
     local token
@@ -167,10 +156,9 @@ subscriptionRemoteControlRequest() {
         "${url}"
     )
     if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        publicKey=$(subscriptionRemoteWireGuardPeerPublicKeyFromSource "${source}" 2>/dev/null || true)
-        if [[ -n "${publicKey}" ]]; then
-            baselineEndpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
-            baselineHandshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
+        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+        if [[ -n "${peerState}" ]]; then
+            IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
         fi
     fi
     if ! response=$(curl "${curlArgs[@]}" 2>/dev/null); then
@@ -227,7 +215,8 @@ subscriptionRemoteControlHealth() {
     local source=$1
     local token
     local url
-    local publicKey=
+    local peerState=
+    local peerPublicKey=
     local baselineEndpoint=
     local baselineHandshake=0
     local -a curlArgs=()
@@ -241,10 +230,9 @@ subscriptionRemoteControlHealth() {
         return 0
     fi
     if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        publicKey=$(subscriptionRemoteWireGuardPeerPublicKeyFromSource "${source}" 2>/dev/null || true)
-        if [[ -n "${publicKey}" ]]; then
-            baselineEndpoint=$(subscriptionRemoteWireGuardPeerEndpoint "${publicKey}" 2>/dev/null || true)
-            baselineHandshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
+        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+        if [[ -n "${peerState}" ]]; then
+            IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
         fi
     fi
     url=$(subscriptionWireGuardControlUrl "${source}" health) || return 1
