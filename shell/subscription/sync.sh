@@ -55,14 +55,6 @@ ensureUserSubscriptionUUID() {
     echo "${userUUID}"
 }
 
-subscriptionSyncDesiredLocalUsers() {
-    subscriptionActiveGroupRead -r '
-      .user_groups[]?
-      | select(.enabled == true)
-      | select((.allowed_sources | index("main")) or (.allowed_sources | index("*")))
-      | .id'
-}
-
 subscriptionSyncCurrentManagedUsers() {
     local file
     local validFiles=()
@@ -163,16 +155,6 @@ subscriptionSyncConfigFiles() {
     fi
 }
 
-subscriptionSyncConfiguredManagedUsers() {
-    local file
-    local files=()
-    subscriptionSyncRequireSafeConfigDirs || return 1
-    while IFS= read -r file; do
-        files+=("${file}")
-    done < <(subscriptionSyncConfigFiles)
-    subscriptionSyncCurrentManagedUsers "${files[@]}"
-}
-
 subscriptionSyncAccountNamesJsonFromIds() {
     jq -R -s '
       split("\n")
@@ -187,8 +169,14 @@ subscriptionSyncAccountNamesJsonFromIds() {
 
 subscriptionSyncPlanFromAccounts() {
     local desiredAccountsJson=$1
+    local file
+    local files=()
     local currentAccounts
-    currentAccounts=$(subscriptionSyncConfiguredManagedUsers) || return 1
+    subscriptionSyncRequireSafeConfigDirs || return 1
+    while IFS= read -r file; do
+        files+=("${file}")
+    done < <(subscriptionSyncConfigFiles)
+    currentAccounts=$(subscriptionSyncCurrentManagedUsers "${files[@]}") || return 1
     jq -n \
       --argjson desired "${desiredAccountsJson}" \
       --argjson current "${currentAccounts}" \
@@ -197,7 +185,13 @@ subscriptionSyncPlanFromAccounts() {
 
 subscriptionSyncPlan() {
     local desiredAccountsJson
-    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(subscriptionSyncDesiredLocalUsers)) || return 1
+    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(
+        subscriptionActiveGroupRead -r '
+          .user_groups[]?
+          | select(.enabled == true)
+          | select((.allowed_sources | index("main")) or (.allowed_sources | index("*")))
+          | .id'
+    )) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }
 

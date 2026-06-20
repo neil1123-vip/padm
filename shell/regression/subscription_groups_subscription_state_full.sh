@@ -495,10 +495,26 @@ JSON
 
 runSubscriptionGroupStateQuotaPartialSyncPlanRegression() {
     (
+        local capturedDesiredAccounts="${TMP_DIR}/subscription-state-quota-partial-sync-plan-accounts.json"
+        subscriptionSyncDesiredLocalUsers() {
+            return 96
+        }
+        subscriptionActiveGroupRead() {
+            if [[ "$*" == *".user_groups[]?"* && "$*" == *'select(.enabled == true)'* && "$*" == *'index("main")'* ]]; then
+                printf 'team-a\n'
+                return 0
+            fi
+            return 1
+        }
+        subscriptionSyncAccountNamesJsonFromIds() {
+            printf '%s' '["sub_team_a"]'
+        }
         subscriptionSyncPlanFromAccounts() {
-            jq -n '{create:[], remove:["sub_team_a"]}'
+            printf '%s\n' "$1" >"${capturedDesiredAccounts}"
+            jq -n --argjson desired "$1" '{create:[], remove:$desired}'
         }
         subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
+        jq -e '. == ["sub_team_a"]' "${capturedDesiredAccounts}" >/dev/null
     )
 }
 
@@ -515,7 +531,12 @@ JSON
     cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
 {"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
 JSON
-    subscriptionSyncConfiguredManagedUsers | jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
+    (
+        subscriptionSyncConfiguredManagedUsers() {
+            return 97
+        }
+        subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
+    )
     subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
     set +e

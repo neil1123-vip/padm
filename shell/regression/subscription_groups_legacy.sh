@@ -10862,7 +10862,14 @@ JSON
         local capturedSyncPlanIds="${TMP_DIR}/subscription-sync-plan-ids.txt"
         local capturedSyncPlanAccounts="${TMP_DIR}/subscription-sync-plan-accounts.json"
         subscriptionSyncDesiredLocalUsers() {
-            printf 'team-a\n'
+            return 96
+        }
+        subscriptionActiveGroupRead() {
+            if [[ "$*" == *".user_groups[]?"* && "$*" == *'select(.enabled == true)'* && "$*" == *'index("main")'* ]]; then
+                printf 'team-a\n'
+                return 0
+            fi
+            return 1
         }
         subscriptionSyncAccountNamesJsonFromIds() {
             cat >"${capturedSyncPlanIds}"
@@ -10875,7 +10882,7 @@ JSON
         subscriptionSyncPlan | jq -e '.remove == ["plan_team_a"]' >/dev/null
         grep -qx 'team-a' "${capturedSyncPlanIds}"
         jq -e '. == ["plan_team_a"]' "${capturedSyncPlanAccounts}" >/dev/null
-        unset -f subscriptionSyncDesiredLocalUsers subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
+        unset -f subscriptionSyncDesiredLocalUsers subscriptionActiveGroupRead subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
     )
     (
         local capturedControlSyncPlanIds="${TMP_DIR}/subscription-control-sync-plan-ids.txt"
@@ -10909,6 +10916,13 @@ JSON
     cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
 {"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
 JSON
+    (
+        subscriptionSyncConfiguredManagedUsers() {
+            return 97
+        }
+        subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
+        unset -f subscriptionSyncConfiguredManagedUsers
+    )
     subscriptionSyncConfiguredManagedUsers | jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
     subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
