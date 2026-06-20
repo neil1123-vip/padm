@@ -802,8 +802,20 @@ readConfigHostPathUUID() {
 
 
 # 状态展示
+protocolCapabilityStatusLabel() {
+    local protocolId=$1
+    local name lifecycle nginxMode risk
+    name=$(protocolCapabilityMeta "${protocolId}" name 2>/dev/null) || return 1
+    lifecycle=$(protocolCapabilityMeta "${protocolId}" lifecycle 2>/dev/null) || return 1
+    nginxMode=$(protocolCapabilityMeta "${protocolId}" nginx_mode 2>/dev/null) || return 1
+    risk=$(protocolCapabilityMeta "${protocolId}" risk_note 2>/dev/null || true)
+    printf '%s [%s, nginx:%s]' "${name}" "${lifecycle}" "${nginxMode}"
+    [[ -n "${risk}" ]] && printf ' 风险:%s' "${risk}"
+}
+
 showInstallStatus() {
     if [[ -n "${coreInstallType}" ]]; then
+        local protocolId statusLabel
         if [[ "${coreInstallType}" == 1 ]]; then
             if [[ -n $(pgrep -f "xray/xray") ]]; then
                 echoContent yellow "\n核心: Xray-core[运行中]"
@@ -824,53 +836,12 @@ showInstallStatus() {
         if [[ -n ${currentInstallProtocolType} ]]; then
             echoContent yellow "已安装协议: \c"
         fi
-        if currentProtocolHas 27; then
-            echoContent yellow "VLESS+TCP[TLS_Vision] \c"
-        fi
-
-        if currentProtocolHas 21; then
-            echoContent yellow "VLESS+WS[TLS] \c"
-        fi
-
-        if currentProtocolHas 25; then
-            echoContent yellow "Trojan+gRPC[TLS] \c"
-        fi
-
-        if currentProtocolHas 22; then
-            echoContent yellow "VMess+WS[TLS] \c"
-        fi
-
-        if currentProtocolHasAny 28 29; then
-            echoContent yellow "Trojan+TCP[TLS] \c"
-        fi
-
-        if currentProtocolHas 24; then
-            echoContent yellow "VLESS+gRPC[TLS] \c"
-        fi
-        if currentProtocolHas 3; then
-            echoContent yellow "Hysteria2 \c"
-        fi
-        if currentProtocolHas 1; then
-            echoContent yellow "VLESS+Reality+Vision \c"
-        fi
-        if currentProtocolHas 26; then
-            echoContent yellow "VLESS+Reality+gRPC \c"
-        fi
-        if currentProtocolHas 31; then
-            echoContent yellow "Tuic \c"
-        fi
-        if currentProtocolHas 5; then
-            echoContent yellow "Naive \c"
-        fi
-        if currentProtocolHas 23; then
-            echoContent yellow "VMess+TLS+HTTPUpgrade \c"
-        fi
-        if currentProtocolHas 2; then
-            echoContent yellow "VLESS+Reality+XHTTP \c"
-        fi
-        if currentProtocolHas 4; then
-            echoContent yellow "AnyTLS \c"
-        fi
+        while IFS='|' read -r protocolId _; do
+            currentProtocolHas "${protocolId}" || continue
+            statusLabel=$(protocolCapabilityStatusLabel "${protocolId}" 2>/dev/null || true)
+            [[ -n "${statusLabel}" ]] || continue
+            echoContent yellow "${statusLabel} \c"
+        done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
         if [[ -n ${currentInstallProtocolType} ]]; then
             echo
         fi

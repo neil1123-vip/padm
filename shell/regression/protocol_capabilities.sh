@@ -291,9 +291,44 @@ EOF
     hysteria2ClientDownloadSpeed="${oldDownload}"
 }
 
+runSubscriptionCapabilityDispatchRegression() {
+    local accountsFile="${PROJECT_ROOT}/shell/subscription/accounts.sh"
+    local stateFile="${PROJECT_ROOT}/shell/core/state.sh"
+
+    if ! declare -F subscriptionAccountDisplayFunction >/dev/null; then
+        printf 'assert-fail:missing subscriptionAccountDisplayFunction\n' >&2
+        return 1
+    fi
+    assertEquals showVlessRealityAccounts "$(subscriptionAccountDisplayFunction 1)" "account-display-fn:1"
+    assertEquals showHysteriaAccounts "$(subscriptionAccountDisplayFunction 3)" "account-display-fn:3"
+    assertEquals showVmessHTTPUpgradeAccounts "$(subscriptionAccountDisplayFunction 23)" "account-display-fn:23"
+    assertEquals showTuicAccounts "$(subscriptionAccountDisplayFunction 31)" "account-display-fn:31"
+
+    if grep -Eq '^[[:space:]]*show(Vless|Trojan|Vmess|Hysteria|Tuic|Naive|AnyTls)' "${accountsFile}"; then
+        printf 'assert-fail:showAccounts should dispatch account display functions through capability ids\n' >&2
+        return 1
+    fi
+    if ! grep -Fq 'protocolCapabilityRegistry' "${accountsFile}"; then
+        printf 'assert-fail:showAccounts should iterate protocolCapabilityRegistry\n' >&2
+        return 1
+    fi
+
+    if ! declare -F protocolCapabilityStatusLabel >/dev/null; then
+        printf 'assert-fail:missing protocolCapabilityStatusLabel\n' >&2
+        return 1
+    fi
+    assertEquals 'VLESS Reality Vision [recommended, nginx:none]' "$(protocolCapabilityStatusLabel 1)" "status-label:1"
+    assertEquals 'VMess HTTPUpgrade TLS [advanced, nginx:http_front] 风险:HTTPUpgrade 属高级方案，新装优先 XHTTP' "$(protocolCapabilityStatusLabel 23)" "status-label:23"
+    if grep -Fq 'VLESS+Reality+Vision' "${stateFile}" || grep -Fq 'VMess+TLS+HTTPUpgrade' "${stateFile}"; then
+        printf 'assert-fail:showInstallStatus should use capability status labels instead of hard-coded names\n' >&2
+        return 1
+    fi
+}
+
 runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
 runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression
 runRegressionStep protocol-capability-nginx-topology runProtocolCapabilityNginxTopologyRegression
 runRegressionStep protocol-capability-templates runProtocolCapabilityTemplateRegression
 runRegressionStep hysteria2-capability runHysteria2CapabilityRegression
+runRegressionStep subscription-capability-dispatch runSubscriptionCapabilityDispatchRegression
 echo "protocol-capabilities-regression-ok"
