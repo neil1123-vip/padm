@@ -10967,15 +10967,14 @@ JSON
 {"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
 JSON
     (
-        local capturedConfiguredAccountFiles="${TMP_DIR}/subscription-sync-configured-account-files.txt"
-        subscriptionSyncConfiguredAccountNamesJson() {
-            printf '%s\n' "$@" >"${capturedConfiguredAccountFiles}"
+        local capturedConfiguredAccountArgc="${TMP_DIR}/subscription-sync-configured-account-argc.txt"
+        subscriptionSyncConfiguredManagedUsers() {
+            printf '%s\n' "$#" >"${capturedConfiguredAccountArgc}"
             printf '["sub_team_a-main","sub_team_b-main"]\n'
         }
         subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
-        grep -qx "${configPath}02_VLESS_TCP_inbounds.json" "${capturedConfiguredAccountFiles}"
-        grep -qx "${singBoxConfigPath}06_hysteria2_inbounds.json" "${capturedConfiguredAccountFiles}"
-        unset -f subscriptionSyncConfiguredAccountNamesJson
+        grep -qx '0' "${capturedConfiguredAccountArgc}"
+        unset -f subscriptionSyncConfiguredManagedUsers
     )
     subscriptionSyncCurrentManagedUsers \
         "${configPath}02_VLESS_TCP_inbounds.json" \

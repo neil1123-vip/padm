@@ -187,14 +187,9 @@ subscriptionSyncAccountIdMapJsonFromIds() {
 
 subscriptionSyncPlanFromAccounts() {
     local desiredAccountsJson=$1
-    local file
-    local files=()
     local currentAccounts
     subscriptionSyncRequireSafeConfigDirs || return 1
-    while IFS= read -r file; do
-        files+=("${file}")
-    done < <(subscriptionSyncConfigFiles)
-    currentAccounts=$(subscriptionSyncCurrentManagedUsers "${files[@]}") || return 1
+    currentAccounts=$(subscriptionSyncCurrentManagedUsers) || return 1
     jq -n \
       --argjson desired "${desiredAccountsJson}" \
       --argjson current "${currentAccounts}" \
