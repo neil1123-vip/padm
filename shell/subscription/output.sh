@@ -1,21 +1,9 @@
 #!/usr/bin/env bash
 
-# 初始化 sing-box订阅配置
-subscribeLocalOutputFilePath() {
-    local category=$1
-    local user=$2
-    printf '%s/%s/%s\n' "$(subscribeLocalBaseDir)" "${category}" "${user}"
-}
-
-subscribeLocalOutputCategoryDir() {
-    local category=$1
-    printf '%s/%s\n' "$(subscribeLocalBaseDir)" "${category}"
-}
-
 subscribeLocalOutputSafeCategoryDir() {
     local category=$1
     local targetDir
-    targetDir=$(subscribeLocalOutputCategoryDir "${category}")
+    targetDir="$(subscribeLocalBaseDir)/${category}"
     targetDir=$(padmResolveManagedAbsolutePath "${targetDir}") || return 1
     padmEnsureSafeDirectory "${targetDir}" || return 1
     printf '%s\n' "${targetDir}"
@@ -32,16 +20,6 @@ subscribeLocalOutputAppendLine() {
     fi
     printf '%s\n' "${line}" >>"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-}
-
-ensureSubscribeLocalSingBoxConfig() {
-    local targetPath=$1
-    local tmpPath
-
-    [[ -f "${targetPath}" ]] && return 0
-    padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe-init || return 1
-    printf '[]\n' >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-    commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 initSubscribeLocalConfig() {
@@ -141,7 +119,11 @@ appendSingBoxSubscribeLocalConfig() {
 
     singBoxDir=$(subscribeLocalOutputSafeCategoryDir sing-box) || return 1
     targetPath="${singBoxDir}/${user}"
-    ensureSubscribeLocalSingBoxConfig "${targetPath}" || return 1
+    if [[ ! -f "${targetPath}" ]]; then
+        padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe-init || return 1
+        printf '[]\n' >"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+        commitGeneratedJsonFile "${tmpPath}" "${targetPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    fi
     padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
     if ! jq -r "${jqFilter}" "${targetPath}" | jq . >"${tmpPath}"; then
         padmRemoveCleanupPath "${tmpPath}"

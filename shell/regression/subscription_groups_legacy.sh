@@ -6666,6 +6666,30 @@ EOF
     if regressionFindHasMatches "${localDir}/clashMeta" -maxdepth 1 -type f -name '.xhttp-user.subscribe.*'; then
         return 1
     fi
+
+    (
+        local inlineRootRel="${TMP_DIR}/subscribe-local-output-inline-helpers"
+        local inlineRoot inlineLocalDir
+
+        mkdir -p "${inlineRootRel}"
+        inlineRoot=$(cd -- "${inlineRootRel}" && pwd -P)
+        inlineLocalDir="${inlineRoot}/subscribe_local"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${inlineLocalDir}"
+        subscribeLocalOutputCategoryDir() {
+            return 91
+        }
+        ensureSubscribeLocalSingBoxConfig() {
+            return 92
+        }
+
+        padmRealAppendDefaultSubscribeLine user 'new-default-inline'
+        padmRealAppendClashMetaSubscribeBlock user 'new-clash-inline'
+        padmRealAppendSingBoxSubscribeLocalConfig user '. += [{"tag":"inline-user"}]'
+
+        [[ "$(<"${inlineLocalDir}/default/user")" == "new-default-inline" ]]
+        [[ "$(<"${inlineLocalDir}/clashMeta/user")" == "new-clash-inline" ]]
+        jq -e '.[0].tag == "inline-user"' "${inlineLocalDir}/sing-box/user" >/dev/null
+    )
 )
 
 runSubscribeSaltWriteTransactionRegression() (
