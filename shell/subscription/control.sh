@@ -1156,10 +1156,8 @@ handleSubscriptionControl() {
     fi
 }
 
-subscriptionControlRenderSubscribeAccount() {
+subscriptionControlRenderSubscribeAccount() (
     local account=$1
-    local oldLocalDir=${PADM_SUBSCRIBE_LOCAL_DIR:-}
-    local oldPublicDir=${PADM_SUBSCRIBE_DIR:-}
     local subscribeRoot=
     local localBase=
     local defaultFile=
@@ -1175,14 +1173,10 @@ subscriptionControlRenderSubscribeAccount() {
     export PADM_SUBSCRIBE_DIR="${subscribeRoot}/subscribe"
     mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box" || {
         padmRemoveCleanupPath "${subscribeRoot}"
-        if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-        if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
         return 1
     }
     if ! showAccounts >/dev/null 2>&1; then
         padmRemoveCleanupPath "${subscribeRoot}"
-        if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-        if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
         return 1
     fi
 
@@ -1193,8 +1187,6 @@ subscriptionControlRenderSubscribeAccount() {
 
     if [[ ! -f "${defaultFile}" && ! -f "${clashFile}" && ! -f "${singBoxFile}" ]]; then
         padmRemoveCleanupPath "${subscribeRoot}"
-        if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-        if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
         jq -n --arg account "${account}" '{ok:false, error:"not_found", error_detail:{type:"not_found", message:"远端账号订阅输出不存在"}, account:$account}'
         return 1
     fi
@@ -1202,8 +1194,6 @@ subscriptionControlRenderSubscribeAccount() {
     if [[ -f "${defaultFile}" ]]; then
         defaultContent=$(base64 <"${defaultFile}" | tr -d '\n') || {
             padmRemoveCleanupPath "${subscribeRoot}"
-            if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-            if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
             jq -n --arg account "${account}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端默认订阅输出编码失败"}, account:$account}'
             return 1
         }
@@ -1212,20 +1202,16 @@ subscriptionControlRenderSubscribeAccount() {
     if [[ -f "${singBoxFile}" ]]; then
         singBoxContent=$(jq -c . "${singBoxFile}" 2>/dev/null) || {
             padmRemoveCleanupPath "${subscribeRoot}"
-            if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-            if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
             jq -n --arg account "${account}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端 sing-box 订阅输出损坏"}, account:$account}'
             return 1
         }
     fi
 
     padmRemoveCleanupPath "${subscribeRoot}"
-    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
     jq -n \
         --arg account "${account}" \
         --arg default "${defaultContent}" \
         --arg clashMeta "${clashContent}" \
         --argjson singBox "${singBoxContent}" \
         '{ok:true, account:$account, default:$default, clash_meta:$clashMeta, sing_box:$singBox}'
-}
+)
