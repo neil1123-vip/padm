@@ -60,13 +60,13 @@ bash install.sh --help
 Recommended direct Reality Vision:
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 7 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
 ```
 
 Recommended CDN Reality XHTTP:
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
 ```
 
 No-domain Reality:
@@ -78,8 +78,10 @@ bash install.sh --install-type reality --core xray --reality-target www.ibm.com:
 NaiveProxy:
 
 ```bash
-bash install.sh --install-type custom --core sing-box --protocols 10 --domain naive.example.com --port 443 --reuse-last no
+bash install.sh --install-type custom --core sing-box --protocols 5 --domain naive.example.com --port 443 --reuse-last no
 ```
+
+Multiple protocols can be comma-separated, for example `--protocols 1,2,21`. The current public IDs are the only install inputs; the old `0..13/20` numbering is deprecated, so existing old setups should be reselected with current public IDs before reinstalling or adjusting.
 
 Traditional TLS compatibility install with Cloudflare DNS-01 automation:
 
@@ -181,34 +183,62 @@ Choose protocols by goal, not by the number of features they appear to expose:
 
 | Goal | Recommended protocol | Notes |
 | --- | --- | --- |
-| New direct setup, own domain, or personal use | `7. VLESS Reality Vision` | Current default recommendation; does not depend on a local fallback website. |
-| CDN / reverse proxy | `12. VLESS Reality XHTTP` | Preferred for new CDN nodes; uses XHTTP and XMUX. |
+| New direct setup, own domain, or personal use | `1` VLESS Reality Vision | Current default recommendation; does not depend on a local fallback website. |
+| CDN / reverse proxy | `2` VLESS Reality XHTTP | Preferred for new CDN nodes; uses XHTTP and XMUX. In this project XHTTP is Xray-only, and sing-box currently has no XHTTP transport. |
 | No domain | no-domain Reality | The menu uses the Reality fast path. |
-| TLS fingerprint resistance | `10. Naive` | Requires a real domain and certificate; depends on sing-box. |
-| UDP, mobile, or lossy network | `6. Hysteria2` or `9. Tuic` | Choose based on client support and network behavior. |
-| Compatibility or migration | traditional TLS protocols | Use only for legacy clients, existing CDN setups, or migration windows. |
-| Explicit AnyTLS need | `13. AnyTLS` | Use only after confirming client support. |
+| TLS fingerprint resistance | `5` NaiveProxy | Requires a real domain and certificate; depends on sing-box. |
+| UDP, mobile, or lossy network | `3` Hysteria2 | Hysteria2 node traffic does not go through CDN/Nginx; reachable UDP is required, and port hopping can be enabled when needed. |
+| Explicit AnyTLS need | `4` AnyTLS | Use only after confirming client support. |
+| Compatibility or migration | Advanced protocols `21..31` | Use only for legacy clients, existing CDN setups, traditional TLS, or migration windows. |
 
-Recommended protocol capability matrix, keeping the pre-refactor table shape and updating the recommendations:
+The capability registry is the single source of truth for protocol selection, core support, Nginx topology, and subscription output. Only public IDs with `category=node` are accepted by `--protocols`; old public IDs are deprecated and are no longer accepted by the CLI, menus, or subscription sync.
 
-| Script protocol name | Recommendation status | Solves TLS in TLS | Solves fingerprint issue | Built-in multiplexing | CDN support | Recommended use |
+### Recommended Public Node Capabilities
+
+| ID | Capability | Project core | Nginx mode | UDP | CDN | Recommended use |
 | --- | --- | --- | --- | --- | --- | --- |
-| `7. VLESS Reality Vision` | Preferred | ✅ | ✅ | ❌ | ❌ | Default direct-connection choice, with or without a domain; the advanced VLESS Encryption switch can be layered on top. |
-| `12. VLESS Reality XHTTP` | Preferred for CDN/reverse proxy | ✅ | ✅ | ✅ XMUX | ✅ | Preferred for new CDN / reverse-proxy nodes; replaces new WS/gRPC/HTTPUpgrade CDN deployments; the advanced VLESS Encryption switch can be layered on top. |
-| `10. NaiveProxy` | Scenario pick | ❌ | ✅ | depends on client | ❌ | Prefer when TLS fingerprint resistance is explicitly needed and a real domain plus trusted certificate are available. |
-| `6. Hysteria2` | Scenario pick | n/a | ❌ | QUIC | ❌ | Mobile, UDP, lossy-network, or port-hopping scenarios; requires reachable UDP. |
-| `9. Tuic` | Scenario pick | n/a | ❌ | QUIC | ❌ | UDP/mobile-network scenarios; depends on client support and UDP reachability quality. |
-| `13. AnyTLS` | Niche/on demand | ❌ | protocol-side mitigation | new multiplexing | ❌ | Use only when sing-box AnyTLS is explicitly needed and clients support it. |
-| `0. VLESS TCP TLS Vision` | Compatibility | ✅ | ❌ | ❌ | ❌ | Traditional TLS + Vision migration path; requires a domain and certificate, and new direct deployments should prefer `7`. |
-| `4. Trojan TCP TLS` | Compatibility | ❌ | ❌ | ❌ | ❌ | Trojan ecosystem or legacy-client compatibility; requires a domain and certificate, and is not recommended by default for new deployments. |
-| `8. VLESS Reality gRPC` | Advanced/compatibility | ❌ | ✅ | ✅ HTTP/2 | ❌ | Keep only when Reality + gRPC/HTTP/2 is explicitly needed without CDN; prefer `7` or `12` for new deployments. |
-| `1. VLESS WS TLS` | No new deployments | ❌ | ❌ | ❌ | ✅ | Legacy CDN/WS client compatibility; prefer `12` for new CDN nodes. |
-| `3. VMess WS TLS` | No new deployments | ❌ | ❌ | ❌ | ✅ | Legacy VMess client compatibility; use only for existing-node migration. |
-| `11. VMess HTTPUpgrade TLS` | No new deployments | ❌ | ❌ | ❌ | ✅ | Traditional HTTPUpgrade/TLS compatibility; prefer `12` for new CDN nodes. |
-| `2. Trojan gRPC TLS` | Historical/hidden | ❌ | ❌ | ✅ HTTP/2 | limited/not recommended | Not exposed by current install menus; do not restore it as a normal entry, and migrate existing nodes toward `12` when possible. |
-| `5. VLESS gRPC TLS` | Historical/hidden | ❌ | ❌ | ✅ HTTP/2 | limited/not recommended | Not exposed by current install menus; do not restore it as a normal entry, and migrate existing nodes toward `12` when possible. |
+| `1` | VLESS Reality Vision | Xray / sing-box | `none` | no | no | Default direct-connection choice, with or without a domain. |
+| `2` | VLESS Reality XHTTP | Xray | `none` | no | conditional | Preferred for new CDN / reverse-proxy nodes; XHTTP is Xray-only in this project. |
+| `3` | Hysteria2 | sing-box | `none` | yes | no | Mobile, UDP, lossy-network, and port-hopping scenarios; node traffic does not pass through CDN/Nginx. |
+| `4` | AnyTLS | sing-box | `none` | no | no | Use when sing-box AnyTLS is explicitly needed and clients support it. |
+| `5` | NaiveProxy | sing-box | `none` | no | no | Use when TLS fingerprint resistance is explicitly needed and a real domain plus trusted certificate are available. |
 
-The Xray custom menu currently allows `0,1,3,4,7,12`; the sing-box custom menu currently allows `0,1,3,4,6,7,8,9,10,11,13`. Treat `bash install.sh --help` and the live menu as the source of truth.
+### Advanced Public Node Capabilities
+
+gRPC, WebSocket, and HTTPUpgrade are advanced protocols, not removed protocols. They remain available for explicit selection, but new deployments should prefer the recommended capabilities, especially direct Reality Vision or CDN/reverse-proxy Reality XHTTP.
+
+| ID | Capability | Project core | Nginx mode | Boundary |
+| --- | --- | --- | --- | --- |
+| `21` | VLESS WS TLS | Xray | `http_front` | WebSocket is an advanced compatibility path; prefer `2` for new CDN nodes. |
+| `22` | VMess WS TLS | Xray | `http_front` | VMess and WS are both advanced compatibility paths; prefer `1` or `2` for new deployments. |
+| `23` | VMess HTTPUpgrade TLS | Xray / sing-box | `http_front` | HTTPUpgrade is an advanced compatibility path; prefer `2` for new CDN nodes. |
+| `24` | VLESS gRPC TLS | Xray | `grpc_front` | gRPC has active-probing and fallback limitations; prefer `2` for new deployments. |
+| `25` | Trojan gRPC TLS | Xray | `grpc_front` | Use only when Trojan + gRPC is explicitly required; consider `4` or `2`. |
+| `26` | VLESS Reality gRPC | Xray / sing-box | `none` | Reality gRPC is an advanced direct path; prefer `1` or `2` for new deployments. |
+| `27` | VLESS TCP TLS Vision | Xray | `fallback_backend` | Traditional TLS/fallback migration path; prefer `1` for new direct deployments. |
+| `28` | Trojan TCP TLS direct | Xray / sing-box | `none` | Traditional TLS protocol for legacy clients or explicit requirements. |
+| `29` | Trojan TCP TLS fallback | Xray | `fallback_backend` | fallback is only valid for TCP+TLS; consider `4` or `1` for new deployments. |
+| `30` | Shadowsocks | sing-box | `none` | Advanced compatibility item; not recommended as a default public node. |
+| `31` | TUIC | sing-box | `none` | UDP/lossy-network advanced item; new installs are guided toward `3`. |
+
+### Internal Server Capabilities
+
+Internal capabilities only appear in routing, relay, transparent-proxy, access-control, or management menus. They are not public node install inputs: `201` Socks relay, `202` HTTP relay, `203` WireGuard, `204` TUN, `205` Redirect/TProxy, `206` DNS/Direct/Block, and `207` Tunnel/dokodemo-door.
+
+### Known Upstream Capabilities Not Generated By This Project
+
+`301..309` are only shown by `--list-capabilities` and in documentation. They do not create install entries. This group includes Xray Hysteria2 inbound, Hysteria v1, ShadowTLS, mKCP combinations, Cloudflared inbound, Selector, URLTest, Tor outbound, SSH outbound, and pure transport/security description entries.
+
+### Nginx Topology
+
+| `nginx_mode` | Meaning | Applicable capabilities |
+| --- | --- | --- |
+| `none` | The core listens on the public port directly; node traffic does not install or start Nginx. | Reality Vision, Reality XHTTP, Hysteria2, AnyTLS, NaiveProxy, Reality gRPC, Trojan direct, Shadowsocks, TUIC. |
+| `http_front` | Nginx HTTP/1.1 reverse proxy with explicit `Upgrade` / `Connection` handling. | WS / HTTPUpgrade capabilities `21..23`. |
+| `grpc_front` | Nginx HTTP/2 + `grpc_pass` reverse proxy. | gRPC TLS capabilities `24..25`. |
+| `xhttp_front` | Reserved for explicit XHTTP TLS/CDN/reverse-proxy capabilities; not applied to Reality XHTTP by default. | No default public node currently uses it. |
+| `fallback_backend` | Xray fallback backend; only valid for TCP+TLS capabilities. | `27`, `29`. |
+| `acme_only` | Nginx may serve certificate issuance or subscription publishing; it does not mean node traffic passes through Nginx. | Certificate and subscription services. |
 
 `utls.fingerprint=chrome` in sing-box subscription output is a compatibility/simulation option, not a censorship-resistance guarantee. Prefer Reality Vision, Reality XHTTP, or NaiveProxy when TLS fingerprint resistance is the goal.
 
@@ -230,7 +260,7 @@ When `--reality-target` is omitted, the script opens the target selector. Automa
 
 ## XHTTP and CDN
 
-After installing `12. VLESS Reality XHTTP`, tune protocol behavior under `Protocols & entry` -> `XHTTP management`:
+After installing `2. VLESS Reality XHTTP`, tune protocol behavior under `Protocols & entry` -> `XHTTP management`:
 
 | Level | Contents |
 | --- | --- |
@@ -239,6 +269,8 @@ After installing `12. VLESS Reality XHTTP`, tune protocol behavior under `Protoc
 | ⚠️ Experimental features | Enable or disable split upload/download `downloadSettings`. |
 
 Daily/CDN defaults are `mode=auto`, `xmux.maxConcurrency=16-32`, `hMaxRequestTimes=600-900`, and `hMaxReusableSecs=1800-3000`. Each change is written to a temporary config and validated with Xray first; failed validation rolls back and prints the log path.
+
+XHTTP is generated by Xray in this project. sing-box currently has no XHTTP transport, so the project does not emit sing-box XHTTP client configuration.
 
 `Protocols & entry` -> `CDN entry management` only overrides client-facing subscription entry addresses, such as CDN CNAMEs, preferred IPs, or multiple entry addresses. XHTTP mode, XMUX, path/host, and other protocol parameters stay under `XHTTP management`.
 
@@ -343,7 +375,7 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 | --- | --- | --- | --- |
 | `--install-type` | `install`, `custom`, `reality` | Opens the interactive menu when no automation flags are passed; defaults to `custom` when other install flags are passed | Installation type. |
 | `--core` | `xray`, `sing-box`, `1`, `2` | `xray` | `1` maps to `xray`, `2` maps to `sing-box`. |
-| `--protocols` | comma-separated protocol IDs | No fixed default | Custom install protocols, such as `7` or `0,1,7`. |
+| `--protocols` | comma-separated current public protocol IDs | No fixed default | Custom install protocols, such as `1` or `1,2,21`; old `0..13/20` IDs are deprecated. |
 | `--domain` | domain | Required or prompted for TLS installs | TLS certificate domain and default client entry; not the Reality target. |
 | `--entry-host` | domain or IP | Reality prefers `--domain`, otherwise public IP | Address clients actually connect to. |
 | `--reality-target` | `host[:port]` | Opens selector when omitted; fallback `www.ibm.com:443` | Reality camouflage target. |

@@ -491,7 +491,7 @@ configureRealityStreamSplit() {
         statusCard "Reality 443 共存不可用" "443 共存分流当前仅支持 Xray Reality Vision/XHTTP"
         return 1
     fi
-    if ! currentProtocolHasAny 7 12; then
+    if ! currentProtocolHasAny 1 2; then
         statusCard "Reality 443 共存不可用" "未检测到 Xray Reality Vision 或 Reality XHTTP"
         return 1
     fi
@@ -539,7 +539,7 @@ configureRealityStreamSplit() {
         return 1
     fi
 
-    if currentProtocolHas 7 && currentProtocolHas 12; then
+    if currentProtocolHas 1 && currentProtocolHas 2; then
         echoContent title "\n┌─ 默认 Reality 后端 ───────────────────────────────"
         menuLine "SNI stream 的 default 只能转给一个 Reality 后端"
         menuRecommendedItem 1 "Reality Vision" "公网 443 默认转发到 Vision"
@@ -551,7 +551,7 @@ configureRealityStreamSplit() {
         else
             defaultProtocol=vision
         fi
-    elif currentProtocolHas 12; then
+    elif currentProtocolHas 2; then
         defaultProtocol=xhttp
     else
         defaultProtocol=vision
@@ -833,10 +833,10 @@ updateAloneNginxConfig() {
 
 traditionalTlsFallbackSelection() {
     local selection=
-    if currentProtocolHas 2; then
+    if currentProtocolHas 25; then
         selection="2"
     fi
-    if currentProtocolHas 5; then
+    if currentProtocolHas 24; then
         if [[ -n "${selection}" ]]; then
             selection="${selection},5"
         else
@@ -845,7 +845,7 @@ traditionalTlsFallbackSelection() {
     fi
     if [[ -z "${selection}" ]]; then
         selection="0"
-    elif currentProtocolHas 0; then
+    elif currentProtocolHas 27; then
         selection="0,${selection}"
     fi
     printf '%s\n' "${selection}"
@@ -866,7 +866,7 @@ ensureTraditionalTlsFallbackNginxConfig() {
     if [[ -z "${currentPort:-}" ]]; then
         readCustomPort
     fi
-    if ! currentProtocolHas 0; then
+    if ! currentProtocolHas 27; then
         errorCard "未检测到传统 TLS fallback 入站配置"
         return 1
     fi
@@ -937,7 +937,7 @@ updateRedirectNginxConf() {
     }
 EOF
 
-        if { protocolSelectionHasAny "${selectCustomInstallType}" 2 && protocolSelectionHasAny "${selectCustomInstallType}" 5; } || [[ -z "${selectCustomInstallType}" ]]; then
+        if { protocolSelectionHasAny "${selectCustomInstallType}" 25 && protocolSelectionHasAny "${selectCustomInstallType}" 24; } || [[ -z "${selectCustomInstallType}" ]]; then
             cat <<EOF
 server {
 	${nginxH2Conf}
@@ -975,7 +975,7 @@ server {
     }
 }
 EOF
-        elif protocolSelectionHasAny "${selectCustomInstallType}" 5 || [[ -z "${selectCustomInstallType}" ]]; then
+        elif protocolSelectionHasAny "${selectCustomInstallType}" 24 || [[ -z "${selectCustomInstallType}" ]]; then
             cat <<EOF
 server {
 	${nginxH2Conf}
@@ -1000,7 +1000,7 @@ server {
     }
 }
 EOF
-        elif protocolSelectionHasAny "${selectCustomInstallType}" 2 || [[ -z "${selectCustomInstallType}" ]]; then
+        elif protocolSelectionHasAny "${selectCustomInstallType}" 25 || [[ -z "${selectCustomInstallType}" ]]; then
             cat <<EOF
 server {
 	${nginxH2Conf}

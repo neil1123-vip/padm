@@ -13,8 +13,29 @@ subscribeAccountTitle() {
 }
 
 # 订阅账号展示
+subscriptionAccountDisplayFunction() {
+    case "$1" in
+    1) printf 'showVlessRealityAccounts' ;;
+    2) printf 'showVlessRealityXHTTPAccounts' ;;
+    3) printf 'showHysteriaAccounts' ;;
+    4) printf 'showAnyTlsAccounts' ;;
+    5) printf 'showNaiveAccounts' ;;
+    21) printf 'showVlessWsAccounts' ;;
+    22) printf 'showVmessWsAccounts' ;;
+    23) printf 'showVmessHTTPUpgradeAccounts' ;;
+    24) printf 'showVlessGrpcAccounts' ;;
+    25) printf 'showTrojanGrpcAccounts' ;;
+    26) printf 'showVlessRealityGrpcAccounts' ;;
+    27) printf 'showVlessTcpAccounts' ;;
+    28 | 29) printf 'showTrojanAccounts' ;;
+    31) printf 'showTuicAccounts' ;;
+    *) return 1 ;;
+    esac
+}
+
 showAccounts() {
     local step=${1:-}
+    local protocolId displayFn
     readInstallType
     readInstallProtocolType
     readConfigHostPathUUID
@@ -24,18 +45,10 @@ showAccounts() {
     progressCard "${step}" "账号"
 
     initSubscribeLocalConfig
-    showVlessTcpAccounts
-    showVlessWsAccounts
-    showTrojanGrpcAccounts
-    showVmessWsAccounts
-    showTrojanAccounts
-    showVlessGrpcAccounts
-    showHysteriaAccounts
-    showVlessRealityAccounts
-    showVlessRealityGrpcAccounts
-    showTuicAccounts
-    showNaiveAccounts
-    showVmessHTTPUpgradeAccounts
-    showVlessRealityXHTTPAccounts
-    showAnyTlsAccounts
+    while IFS='|' read -r protocolId _; do
+        currentProtocolHas "${protocolId}" || continue
+        displayFn=$(subscriptionAccountDisplayFunction "${protocolId}" 2>/dev/null || true)
+        [[ -n "${displayFn}" ]] || continue
+        "${displayFn}"
+    done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
 }

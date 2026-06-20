@@ -346,35 +346,19 @@ subscriptionSyncAppendProtocolBatch() {
     while IFS=$'\t' read -r protocolId fileName; do
         [[ -n "${protocolId}" && -n "${fileName}" ]] || continue
         subscriptionSyncAppendProtocolUser "${protocolId}" "${configDir}${fileName}" '' "${uuid}" "${accountName}" || rc=1
-    done <<EOF
-$(case "${mode}" in
-    xray)
-        cat <<'LIST'
-0	02_VLESS_TCP_inbounds.json
-1	03_VLESS_WS_inbounds.json
-2	04_trojan_gRPC_inbounds.json
-3	05_VMess_WS_inbounds.json
-4	04_trojan_TCP_inbounds.json
-5	06_VLESS_gRPC_inbounds.json
-7	07_VLESS_vision_reality_inbounds.json
-8	08_VLESS_vision_gRPC_inbounds.json
-11	11_VMess_HTTPUpgrade_inbounds.json
-12	12_VLESS_XHTTP_inbounds.json
-13	13_anytls_inbounds.json
-LIST
-        ;;
-    singbox)
-        cat <<'LIST'
-6	06_hysteria2_inbounds.json
-9	09_tuic_inbounds.json
-10	10_naive_inbounds.json
-LIST
-        ;;
-    *)
-        return 1
-        ;;
-esac)
-EOF
+    done < <(
+        case "${mode}" in
+        xray)
+            protocolCapabilityRegistry | awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",xray," && $19 != "" { print $1 "\t" $19 }'
+            ;;
+        singbox)
+            protocolCapabilityRegistry | awk -F'|' '$3 == "node" && ("," $6 ",") ~ ",sing-box," && $19 != "" { print $1 "\t" $19 }'
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    )
     return "${rc}"
 }
 

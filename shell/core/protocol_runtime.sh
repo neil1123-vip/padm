@@ -19,6 +19,65 @@ protocolPortHoppingRangeStatusCard() {
 tuicAlgorithmStatusCard() {
     statusCard "Tuic 算法" "$@"
 }
+
+singBoxVersionAtLeast() {
+    local current=$1
+    local required=$2
+    local currentBase requiredBase
+    current=${current#v}
+    required=${required#v}
+    currentBase=${current%%-*}
+    requiredBase=${required%%-*}
+    [[ -n "${currentBase}" && -n "${requiredBase}" ]] || return 1
+    [[ "$(printf '%s\n%s\n' "${requiredBase}" "${currentBase}" | sort -V | head -n 1)" == "${requiredBase}" ]]
+}
+
+hysteria2SingBoxFieldSupported() {
+    local field=$1
+    local version=${2:-}
+    local required=1.11.0
+    case "${field}" in
+    masquerade|ignore_client_bandwidth)
+        required=1.11.0
+        ;;
+    obfs|obfs_gecko|bbr_profile|realm)
+        required=1.14.0
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+    if [[ -z "${version}" ]]; then
+        if declare -F getSingBoxCurrentVersion >/dev/null 2>&1; then
+            version=$(getSingBoxCurrentVersion)
+        else
+            return 1
+        fi
+    fi
+    singBoxVersionAtLeast "${version}" "${required}"
+}
+
+hysteria2RequireSingBoxField() {
+    local field=$1
+    local required=$2
+    local version=
+    if declare -F getSingBoxCurrentVersion >/dev/null 2>&1; then
+        version=$(getSingBoxCurrentVersion)
+    fi
+    if [[ -n "${version}" && "${version}" != "未安装" ]] && ! hysteria2SingBoxFieldSupported "${field}" "${version}"; then
+        errorCard "当前 sing-box ${version} 不支持 Hysteria2 ${field}，请升级到 ${required} 或更高版本"
+        return 1
+    fi
+}
+
+hysteria2MasqueradeJson() {
+    local value=${1:-}
+    if [[ -n "${value}" ]]; then
+        jq -n --arg value "${value}" '$value'
+        return
+    fi
+    jq -n '{type:"string",status_code:404,headers:{"content-type":["text/plain; charset=utf-8"]},content:"Not Found"}'
+}
 # 初始化 Hysteria2 端口
 initHysteriaPort() {
     readSingBoxConfig
@@ -66,6 +125,15 @@ initHysteria2Network() {
         hysteria2ClientUploadSpeed=50
         statusCard "Hysteria2 上行速度" "${hysteria2ClientUploadSpeed} Mbps"
     fi
+
+    hysteria2RequireSingBoxField masquerade 1.11.0 || return 1
+    echoContent yellow "请输入 Hysteria2 认证失败伪装 URL[http/https/file，回车使用固定404响应]"
+    autoRead hysteria_masquerade "伪装URL:" hysteria2Masquerade
+    if [[ -n "${hysteria2Masquerade}" && ! "${hysteria2Masquerade}" =~ ^(https?|file):// ]]; then
+        errorCard "Hysteria2 masquerade 仅支持 http://、https:// 或 file:// URL"
+        return 1
+    fi
+    statusCard "Hysteria2 masquerade" "${hysteria2Masquerade:-固定404响应}"
 }
 
 
@@ -659,6 +727,47 @@ initXrayRealityPort() {
         statusCard "Reality 端口" "${realityPort}"
     fi
 
+}
+
+initXrayRealityGrpcPort() {
+    if [[ -n "${xrayVLESSRealityGRPCPort:-}" && -z "${lastInstallationConfig}" ]]; then
+        autoRead reality_grpc_history_port "读取到上次安装记录，Reality gRPC端口为 [${xrayVLESSRealityGRPCPort}]，是否使用？[y/n]:" historyRealityGrpcPortStatus
+        if [[ "${historyRealityGrpcPortStatus}" == "y" ]]; then
+            realityGrpcPort=${xrayVLESSRealityGRPCPort}
+        fi
+    elif [[ -n "${xrayVLESSRealityGRPCPort:-}" && -n "${lastInstallationConfig}" ]]; then
+        realityGrpcPort=${xrayVLESSRealityGRPCPort}
+    fi
+
+    if [[ -z "${realityGrpcPort:-}" ]]; then
+        echoContent yellow "请输入端口[回车随机10000-30000]"
+        autoRead reality_port "端口:" realityGrpcPort
+        if [[ -z "${realityGrpcPort}" ]]; then
+            realityGrpcPort=$((RANDOM % 20001 + 10000))
+        fi
+        if ! validPortNumber "${realityGrpcPort}"; then
+            errorCard "Reality gRPC 端口输入错误"
+            return 1
+        fi
+        if [[ -n "${realityGrpcPort}" && "${xrayVLESSRealityGRPCPort:-}" == "${realityGrpcPort}" ]]; then
+            if ! runCoreServiceActionAllowFailure handleXray stop; then
+                errorCard "Xray 服务停止失败，无法复用当前 Reality gRPC 端口"
+                return 1
+            fi
+        else
+            checkPort "${realityGrpcPort}" || return 1
+        fi
+    fi
+    if [[ -z "${realityGrpcPort}" ]]; then
+        initXrayRealityGrpcPort || return 1
+    else
+        if ! validPortNumber "${realityGrpcPort}"; then
+            errorCard "Reality gRPC 端口输入错误"
+            return 1
+        fi
+        allowPort "${realityGrpcPort}" || return 1
+        statusCard "Reality gRPC 端口" "${realityGrpcPort}"
+    fi
 }
 
 # 初始化XHTTP端口

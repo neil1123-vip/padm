@@ -133,6 +133,7 @@ initVar() {
     singBoxVLESSRealityGRPCPort=
     singBoxHysteria2Port=
     singBoxTrojanPort=
+    singBoxShadowsocksPort=
     singBoxTuicPort=
     singBoxNaivePort=
     singBoxVMessWSPort=

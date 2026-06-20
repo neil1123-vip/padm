@@ -128,7 +128,7 @@ singBoxNginxConfig() {
         nginxH2Conf="listen ${port} so_keepalive=on ssl;http2 on;"
     fi
 
-    if protocolSelectionIncludes "${selectCustomInstallType}" 11 "$1"; then
+    if protocolSelectionIncludes "${selectCustomInstallType}" 23 "$1"; then
         writeSingBoxVMessHTTPUpgradeNginxConfig <<EOF || return 1
 server {
 	${nginxH2Conf}

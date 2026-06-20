@@ -148,6 +148,8 @@ readInstallProtocolType() {
 
     xrayVLESSRealityXHTTPort=
     xrayVLESSRealityXHTTPSNI=
+    xrayVLESSRealityGRPCPort=
+    xrayVLESSRealityGRPCSNI=
 
     currentRealityXHTTPPublicKey=
 
@@ -161,6 +163,7 @@ readInstallProtocolType() {
     singBoxVLESSVisionPort=
     singBoxHysteria2Port=
     singBoxTrojanPort=
+    singBoxShadowsocksPort=
 
     frontingTypeReality=
     singBoxVLESSRealityVisionPort=
@@ -184,7 +187,7 @@ readInstallProtocolType() {
 
     while read -r row; do
         local protocolId=
-        protocolId=$(xray_protocol_registry | awk -F'|' -v file="${row##*/}.json" '$2 == file { print $1 }')
+        protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}.json" 2>/dev/null || true)
         protocolStateAdd "${protocolId}"
         if [[ "${row}" == *VLESS_TCP_inbounds* ]]; then
             frontingType=02_VLESS_TCP_inbounds
@@ -212,7 +215,16 @@ readInstallProtocolType() {
                 singBoxVMessWSPort=$(jq .inbounds[0].listen_port "${row}.json")
             fi
         fi
-        if [[ "${row}" == *trojan_TCP_inbounds* ]]; then
+        if [[ "${row}" == *28_trojan_TCP_direct_inbounds* ]]; then
+            if [[ "${coreInstallType}" == "2" ]]; then
+                frontingType=28_trojan_TCP_direct_inbounds
+                singBoxTrojanPort=$(jq .inbounds[0].listen_port "${row}.json")
+            elif [[ "${coreInstallType}" == "1" ]]; then
+                frontingType=28_trojan_TCP_direct_inbounds
+                currentPort=$(jq .inbounds[0].port "${row}.json")
+            fi
+        fi
+        if [[ "${row}" == *04_trojan_TCP_inbounds* ]]; then
             if [[ "${coreInstallType}" == "2" ]]; then
                 frontingType=04_trojan_TCP_inbounds
                 singBoxTrojanPort=$(jq .inbounds[0].listen_port "${row}.json")
@@ -260,7 +272,18 @@ readInstallProtocolType() {
             fi
         fi
         if [[ "${row}" == *VLESS_vision_gRPC_inbounds* ]]; then
-            if [[ "${coreInstallType}" == "2" ]]; then
+            if [[ "${coreInstallType}" == "1" ]]; then
+                frontingTypeReality=08_VLESS_vision_gRPC_inbounds
+                xrayVLESSRealityGRPCPort=$(jq -r .inbounds[0].port "${row}.json")
+                xrayVLESSRealityGRPCSNI=$(jq -r .inbounds[0].streamSettings.realitySettings.serverNames[0] "${row}.json")
+                realitySNI=${xrayVLESSRealityGRPCSNI}
+                local realityGrpcTarget
+                realityGrpcTarget=$(jq -r .inbounds[0].streamSettings.realitySettings.target "${row}.json")
+                realityTargetHost=${realityGrpcTarget%%:*}
+                realityTargetPort=${realityGrpcTarget#*:}
+                currentRealityPublicKey=$(jq -r .inbounds[0].streamSettings.realitySettings.publicKey "${row}.json")
+                currentRealityPrivateKey=$(jq -r .inbounds[0].streamSettings.realitySettings.privateKey "${row}.json")
+            elif [[ "${coreInstallType}" == "2" ]]; then
                 frontingTypeReality=08_VLESS_vision_gRPC_inbounds
                 singBoxVLESSRealityGRPCPort=$(jq -r .inbounds[0].listen_port "${row}.json")
                 singBoxVLESSRealityGRPCSNI=$(jq -r .inbounds[0].tls.server_name "${row}.json")
@@ -281,6 +304,12 @@ readInstallProtocolType() {
             if [[ "${coreInstallType}" == "2" ]]; then
                 frontingType=10_naive_inbounds
                 singBoxNaivePort=$(jq .inbounds[0].listen_port "${row}.json")
+            fi
+        fi
+        if [[ "${row}" == *shadowsocks_inbounds* ]]; then
+            if [[ "${coreInstallType}" == "2" ]]; then
+                frontingType=30_shadowsocks_inbounds
+                singBoxShadowsocksPort=$(jq .inbounds[0].listen_port "${row}.json")
             fi
         fi
         if [[ "${row}" == *anytls_inbounds* ]]; then
@@ -380,8 +409,9 @@ readSingBoxConfig() {
         fi
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
             hysteriaPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}06_hysteria2_inbounds.json")
-            hysteria2ClientUploadSpeed=$(jq -r '.inbounds[0].down_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
-            hysteria2ClientDownloadSpeed=$(jq -r '.inbounds[0].up_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteria2ClientUploadSpeed=$(jq -r '.inbounds[0].up_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteria2ClientDownloadSpeed=$(jq -r '.inbounds[0].down_mbps' "${singBoxConfigPath}06_hysteria2_inbounds.json")
+            hysteria2Masquerade=$(jq -r '.inbounds[0].masquerade // empty | if type == "string" then . else empty end' "${singBoxConfigPath}06_hysteria2_inbounds.json")
         fi
     fi
 }
@@ -404,28 +434,11 @@ showLastInstallationConfig() {
 
     if [[ -n "${currentInstallProtocolType}" ]]; then
         local protocolList=
-        while IFS='|' read -r protocolId _ _ _; do
+        while IFS='|' read -r protocolId _ _; do
             if [[ " ${currentInstallProtocolType} " == *",${protocolId},"* ]]; then
-                case "${protocolId}" in
-                0) protocolList="${protocolList} VLESS+TCP/TLS_Vision" ;;
-                1) protocolList="${protocolList} VLESS+WS/TLS" ;;
-                2) protocolList="${protocolList} Trojan+gRPC/TLS" ;;
-                3) protocolList="${protocolList} VMess+WS/TLS" ;;
-                4) protocolList="${protocolList} Trojan+TCP/TLS" ;;
-                5) protocolList="${protocolList} VLESS+gRPC/TLS" ;;
-                6) protocolList="${protocolList} Hysteria2" ;;
-                7) protocolList="${protocolList} VLESS+Reality+Vision" ;;
-                8) protocolList="${protocolList} VLESS+Reality+gRPC" ;;
-                9) protocolList="${protocolList} Tuic" ;;
-                10) protocolList="${protocolList} Naive" ;;
-                11) protocolList="${protocolList} VMess+HTTPUpgrade" ;;
-                12) protocolList="${protocolList} VLESS+Reality+XHTTP" ;;
-                13) protocolList="${protocolList} AnyTLS" ;;
-                20) protocolList="${protocolList} Socks5" ;;
-                *) protocolList="${protocolList} $(xrayProtocolName "${protocolId}")" ;;
-                esac
+                protocolList="${protocolList} $(xrayProtocolName "${protocolId}")"
             fi
-        done < <(xray_protocol_registry)
+        done < <(protocolCapabilityRegistry)
         menuLine "协议：${protocolList}"
     fi
 
@@ -688,7 +701,7 @@ readConfigHostPathUUID() {
         fi
 
         # reality
-        if currentProtocolHas 7; then
+        if currentProtocolHas 1; then
 
             currentClients=$(jq -r .inbounds[1].settings.clients ${configPath}07_VLESS_vision_reality_inbounds.json)
             currentUUID=$(jq -r .inbounds[1].settings.clients[0].id ${configPath}07_VLESS_vision_reality_inbounds.json)
@@ -698,7 +711,7 @@ readConfigHostPathUUID() {
             fi
         fi
         # reality xhttp
-        if currentProtocolHas 12; then
+        if currentProtocolHas 2; then
 
             currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}12_VLESS_XHTTP_inbounds.json)
             currentUUID=$(jq -r .inbounds[0].settings.clients[0].id ${configPath}12_VLESS_XHTTP_inbounds.json)
@@ -711,7 +724,7 @@ readConfigHostPathUUID() {
     elif [[ "${coreInstallType}" == "2" ]]; then
         if [[ -n "${frontingType}" ]]; then
             currentHost=$(jq -r .inbounds[0].tls.server_name ${configPath}${frontingType}.json)
-            if currentProtocolHas 11 && [[ "${currentHost}" == "null" ]]; then
+            if currentProtocolHas 23 && [[ "${currentHost}" == "null" ]]; then
                 currentHost=$(grep 'server_name' <${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf | awk '{print $2}')
                 currentHost=${currentHost//;/}
             fi
@@ -789,8 +802,20 @@ readConfigHostPathUUID() {
 
 
 # 状态展示
+protocolCapabilityStatusLabel() {
+    local protocolId=$1
+    local name lifecycle nginxMode risk
+    name=$(protocolCapabilityMeta "${protocolId}" name 2>/dev/null) || return 1
+    lifecycle=$(protocolCapabilityMeta "${protocolId}" lifecycle 2>/dev/null) || return 1
+    nginxMode=$(protocolCapabilityMeta "${protocolId}" nginx_mode 2>/dev/null) || return 1
+    risk=$(protocolCapabilityMeta "${protocolId}" risk_note 2>/dev/null || true)
+    printf '%s [%s, nginx:%s]' "${name}" "${lifecycle}" "${nginxMode}"
+    [[ -n "${risk}" ]] && printf ' 风险:%s' "${risk}"
+}
+
 showInstallStatus() {
     if [[ -n "${coreInstallType}" ]]; then
+        local protocolId statusLabel
         if [[ "${coreInstallType}" == 1 ]]; then
             if [[ -n $(pgrep -f "xray/xray") ]]; then
                 echoContent yellow "\n核心: Xray-core[运行中]"
@@ -811,53 +836,12 @@ showInstallStatus() {
         if [[ -n ${currentInstallProtocolType} ]]; then
             echoContent yellow "已安装协议: \c"
         fi
-        if currentProtocolHas 0; then
-            echoContent yellow "VLESS+TCP[TLS_Vision] \c"
-        fi
-
-        if currentProtocolHas 1; then
-            echoContent yellow "VLESS+WS[TLS] \c"
-        fi
-
-        if currentProtocolHas 2; then
-            echoContent yellow "Trojan+gRPC[TLS] \c"
-        fi
-
-        if currentProtocolHas 3; then
-            echoContent yellow "VMess+WS[TLS] \c"
-        fi
-
-        if currentProtocolHas 4; then
-            echoContent yellow "Trojan+TCP[TLS] \c"
-        fi
-
-        if currentProtocolHas 5; then
-            echoContent yellow "VLESS+gRPC[TLS] \c"
-        fi
-        if currentProtocolHas 6; then
-            echoContent yellow "Hysteria2 \c"
-        fi
-        if currentProtocolHas 7; then
-            echoContent yellow "VLESS+Reality+Vision \c"
-        fi
-        if currentProtocolHas 8; then
-            echoContent yellow "VLESS+Reality+gRPC \c"
-        fi
-        if currentProtocolHas 9; then
-            echoContent yellow "Tuic \c"
-        fi
-        if currentProtocolHas 10; then
-            echoContent yellow "Naive \c"
-        fi
-        if currentProtocolHas 11; then
-            echoContent yellow "VMess+TLS+HTTPUpgrade \c"
-        fi
-        if currentProtocolHas 12; then
-            echoContent yellow "VLESS+Reality+XHTTP \c"
-        fi
-        if currentProtocolHas 13; then
-            echoContent yellow "AnyTLS \c"
-        fi
+        while IFS='|' read -r protocolId _; do
+            currentProtocolHas "${protocolId}" || continue
+            statusLabel=$(protocolCapabilityStatusLabel "${protocolId}" 2>/dev/null || true)
+            [[ -n "${statusLabel}" ]] || continue
+            echoContent yellow "${statusLabel} \c"
+        done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
         if [[ -n ${currentInstallProtocolType} ]]; then
             echo
         fi
