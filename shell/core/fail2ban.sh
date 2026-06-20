@@ -822,8 +822,7 @@ manageFail2ban() {
         systemScriptMenu
         ;;
     *)
-        coreSelectionErrorCard
-        manageFail2ban
+        coreSelectionRetryAction manageFail2ban
         ;;
     esac
 }

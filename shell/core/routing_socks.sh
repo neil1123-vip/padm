@@ -30,8 +30,7 @@ socks5Routing() {
         routingToolsMenu
         ;;
     *)
-        coreSelectionErrorCard
-        socks5Routing
+        coreSelectionRetryAction socks5Routing
         ;;
     esac
 }
@@ -82,8 +81,7 @@ socks5InboundRoutingMenu() {
         socks5Routing
         ;;
     *)
-        coreSelectionErrorCard
-        socks5InboundRoutingMenu
+        coreSelectionRetryAction socks5InboundRoutingMenu
         ;;
     esac
 
@@ -127,8 +125,7 @@ socks5OutboundRoutingMenu() {
         socks5Routing
         ;;
     *)
-        coreSelectionErrorCard
-        socks5OutboundRoutingMenu
+        coreSelectionRetryAction socks5OutboundRoutingMenu
         ;;
     esac
 
@@ -275,8 +272,7 @@ removeSocks5Routing() {
         socks5Routing
         return
     else
-        coreSelectionErrorCard
-        removeSocks5Routing
+        coreSelectionRetryAction removeSocks5Routing
         return
     fi
     reloadCore || return 1

@@ -913,8 +913,7 @@ bbrInstall() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        bbrInstall
+        coreSelectionRetryAction bbrInstall
         ;;
     esac
 }

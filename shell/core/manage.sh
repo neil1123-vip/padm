@@ -407,8 +407,7 @@ manageVlessEncryptionExperiment() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        manageVlessEncryptionExperiment
+        coreSelectionRetryAction manageVlessEncryptionExperiment
         ;;
     esac
 }
@@ -470,8 +469,7 @@ checkBTPanel() {
             fi
             nginxConfigPath="/www/server/panel/vhost/nginx/"
         elif [[ -d '/www/server/panel/vhost/cert/' ]]; then
-            coreSelectionErrorCard
-            checkBTPanel
+            coreSelectionRetryAction checkBTPanel
         fi
     fi
 }
@@ -487,8 +485,7 @@ check1Panel() {
 
             nginxStaticPath="/opt/1panel/apps/openresty/openresty/www/sites/${btDomain}/index/"
         elif [[ -d '/opt/1panel/apps/openresty/openresty/www/sites/' ]]; then
-            coreSelectionErrorCard
-            check1Panel
+            coreSelectionRetryAction check1Panel
         fi
     fi
 }
@@ -609,8 +606,7 @@ manageTraditionalTlsFallback() {
         siteCertificateMenu
         ;;
     *)
-        coreSelectionErrorCard
-        manageTraditionalTlsFallback "$@"
+        coreSelectionRetryAction manageTraditionalTlsFallback "$@"
         ;;
     esac
 }
@@ -685,8 +681,7 @@ manageTraditionalTlsStaticSite() {
     elif [[ "${selectInstallNginxBlogType}" == "21" ]]; then
         manageTraditionalTlsFallback
     else
-        coreSelectionErrorCard
-        manageTraditionalTlsStaticSite
+        coreSelectionRetryAction manageTraditionalTlsStaticSite
     fi
 }
 
@@ -735,8 +730,7 @@ manageTraditionalTlsRedirect() {
     elif [[ "${redirectStatus}" == "3" ]]; then
         manageTraditionalTlsFallback
     else
-        coreSelectionErrorCard
-        manageTraditionalTlsRedirect
+        coreSelectionRetryAction manageTraditionalTlsRedirect
     fi
 }
 
@@ -864,8 +858,7 @@ setTraditionalTlsAlpnManual() {
         manageTraditionalTlsFallback
         ;;
     *)
-        coreSelectionErrorCard
-        setTraditionalTlsAlpnManual
+        coreSelectionRetryAction setTraditionalTlsAlpnManual
         ;;
     esac
 }
@@ -2889,7 +2882,7 @@ manageXHTTPPresets() {
     3) setXHTTPPreset stream ;;
     4) setXHTTPPreset single ;;
     5) manageXHTTP ;;
-    *) coreSelectionErrorCard; manageXHTTPPresets ;;
+    *) coreSelectionRetryAction manageXHTTPPresets ;;
     esac
 }
 
@@ -2906,7 +2899,7 @@ manageXHTTPMode() {
     2) setXHTTPMode packet-up ;;
     3) setXHTTPMode stream-up ;;
     4) manageXHTTP ;;
-    *) coreSelectionErrorCard; manageXHTTPMode ;;
+    *) coreSelectionRetryAction manageXHTTPMode ;;
     esac
 }
 
@@ -2923,7 +2916,7 @@ manageXHTTPXmux() {
     2) setXHTTPPreset single ;;
     3) setXHTTPCustomXmux ;;
     4) manageXHTTP ;;
-    *) coreSelectionErrorCard; manageXHTTPXmux ;;
+    *) coreSelectionRetryAction manageXHTTPXmux ;;
     esac
 }
 
@@ -2954,8 +2947,7 @@ manageXHTTPNormal() {
         manageXHTTP
         ;;
     *)
-        coreSelectionErrorCard
-        manageXHTTPNormal
+        coreSelectionRetryAction manageXHTTPNormal
         ;;
     esac
 }
@@ -2987,8 +2979,7 @@ manageXHTTPAdvanced() {
         manageXHTTP
         ;;
     *)
-        coreSelectionErrorCard
-        manageXHTTPAdvanced
+        coreSelectionRetryAction manageXHTTPAdvanced
         ;;
     esac
 }
@@ -3012,8 +3003,7 @@ manageXHTTPExperiment() {
         manageXHTTP
         ;;
     *)
-        coreSelectionErrorCard
-        manageXHTTPExperiment
+        coreSelectionRetryAction manageXHTTPExperiment
         ;;
     esac
 }
@@ -3065,8 +3055,7 @@ manageXHTTP() {
         protocolEntryMenu
         ;;
     *)
-        coreSelectionErrorCard
-        manageXHTTP
+        coreSelectionRetryAction manageXHTTP
         ;;
     esac
 }
@@ -3100,8 +3089,7 @@ manageHysteria() {
     elif [[ ( "${installHysteria2Status}" == "4" && "${hysteria2Status}" == "true" ) || ( "${installHysteria2Status}" == "2" && "${hysteria2Status}" != "true" ) ]]; then
         protocolEntryMenu
     else
-        coreSelectionErrorCard
-        manageHysteria
+        coreSelectionRetryAction manageHysteria
     fi
 }
 
@@ -3244,7 +3232,7 @@ manageTuicCongestionControl() {
     2) setTuicCongestionControl bbr ;;
     3) setTuicCongestionControl new_reno ;;
     4) manageTuic ;;
-    *) coreSelectionErrorCard; manageTuicCongestionControl ;;
+    *) coreSelectionRetryAction manageTuicCongestionControl ;;
     esac
 }
 
@@ -3264,7 +3252,7 @@ manageTuicAdvanced() {
     3) setTuicZeroRtt false ;;
     4) setTuicRecommendedDefaults ;;
     5) manageTuic ;;
-    *) coreSelectionErrorCard; manageTuicAdvanced ;;
+    *) coreSelectionRetryAction manageTuicAdvanced ;;
     esac
 }
 
@@ -3307,7 +3295,6 @@ manageTuic() {
     elif [[ ( "${installTuicStatus}" == "7" && "${tuicStatus}" == "true" ) || ( "${installTuicStatus}" == "2" && "${tuicStatus}" != "true" ) ]]; then
         protocolEntryMenu
     else
-        coreSelectionErrorCard
-        manageTuic
+        coreSelectionRetryAction manageTuic
     fi
 }

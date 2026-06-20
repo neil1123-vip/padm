@@ -48,8 +48,7 @@ installMenu() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        installMenu
+        coreSelectionRetryAction installMenu
         ;;
     esac
 }
@@ -90,8 +89,7 @@ protocolEntryMenu() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        protocolEntryMenu
+        coreSelectionRetryAction protocolEntryMenu
         ;;
     esac
 }
@@ -117,8 +115,7 @@ siteCertificateMenu() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        siteCertificateMenu
+        coreSelectionRetryAction siteCertificateMenu
         ;;
     esac
 }
@@ -147,8 +144,7 @@ routingAccessMenu() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        routingAccessMenu
+        coreSelectionRetryAction routingAccessMenu
         ;;
     esac
 }
@@ -181,8 +177,7 @@ systemScriptMenu() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        systemScriptMenu
+        coreSelectionRetryAction systemScriptMenu
         ;;
     esac
 }
@@ -206,8 +201,7 @@ advancedDangerMenu() {
         menu
         ;;
     *)
-        coreSelectionErrorCard
-        advancedDangerMenu
+        coreSelectionRetryAction advancedDangerMenu
         ;;
     esac
 }
@@ -264,8 +258,7 @@ menu() {
         advancedDangerMenu
         ;;
     *)
-        coreSelectionErrorCard
-        menu
+        coreSelectionRetryAction menu
         ;;
     esac
 }

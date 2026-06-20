@@ -344,6 +344,13 @@ coreSelectionErrorCard() {
     errorCard "${message}"
 }
 
+coreSelectionRetryAction() {
+    local actionHandler=$1
+    shift
+    coreSelectionErrorCard
+    "${actionHandler}" "$@"
+}
+
 coreInvalidInputErrorCard() {
     errorCard "输入有误，请重新输入"
 }

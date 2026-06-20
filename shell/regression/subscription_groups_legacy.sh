@@ -14067,6 +14067,88 @@ runCoreInvalidInputRetryMenuRegression() (
     ! grep -qF 'coreInvalidInputErrorCard; coreVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
 )
 
+runCoreSelectionRetryActionRegression() (
+    local actions=
+    local -a expectedCounts=(
+        'shell/core/menu.sh|7'
+        'shell/core/cores.sh|1'
+        'shell/core/routing_access_control.sh|3'
+        'shell/core/manage.sh|18'
+        'shell/core/fail2ban.sh|1'
+        'shell/core/entry_helpers.sh|1'
+        'shell/core/routing_socks.sh|4'
+        'shell/core/routing_ipv6.sh|1'
+    )
+    local -a expectedPatterns=(
+        'shell/core/menu.sh|coreSelectionRetryAction menu'
+        'shell/core/cores.sh|coreSelectionRetryAction selectCoreInstall'
+        'shell/core/routing_access_control.sh|coreSelectionRetryAction removeAccessControlMenu'
+        'shell/core/manage.sh|coreSelectionRetryAction manageTraditionalTlsFallback "$@"'
+        'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
+        'shell/core/manage.sh|coreSelectionRetryAction manageXHTTPPresets'
+        'shell/core/manage.sh|coreSelectionRetryAction manageTuic'
+        'shell/core/fail2ban.sh|coreSelectionRetryAction manageFail2ban'
+        'shell/core/entry_helpers.sh|coreSelectionRetryAction bbrInstall'
+        'shell/core/routing_socks.sh|coreSelectionRetryAction socks5Routing'
+        'shell/core/routing_ipv6.sh|coreSelectionRetryAction ipv6Routing'
+    )
+    local -a removedPatterns=(
+        'shell/core/menu.sh|coreSelectionErrorCard
+        menu'
+        'shell/core/cores.sh|coreSelectionErrorCard
+        selectCoreInstall'
+        'shell/core/routing_access_control.sh|coreSelectionErrorCard; removeAccessControlMenu; return'
+        'shell/core/manage.sh|coreSelectionErrorCard
+        manageTraditionalTlsFallback "$@"'
+        'shell/core/manage.sh|coreSelectionErrorCard
+        checkBTPanel'
+        'shell/core/manage.sh|coreSelectionErrorCard; manageXHTTPPresets'
+        'shell/core/manage.sh|coreSelectionErrorCard
+        manageTuic'
+        'shell/core/fail2ban.sh|coreSelectionErrorCard
+        manageFail2ban'
+        'shell/core/entry_helpers.sh|coreSelectionErrorCard
+        bbrInstall'
+        'shell/core/routing_socks.sh|coreSelectionErrorCard
+        socks5Routing'
+        'shell/core/routing_ipv6.sh|coreSelectionErrorCard
+        ipv6Routing'
+    )
+    local entry file pattern expectedCount actualCount
+
+    recordMenuAction() {
+        actions+="$1"$'\n'
+    }
+    assertMenuAction() {
+        grep -qxF "$1" <<<"${actions}"
+    }
+    errorCard() {
+        recordMenuAction "errorCard:$1"
+    }
+    sampleAction() {
+        recordMenuAction "sampleAction:$*"
+    }
+
+    declare -F coreSelectionRetryAction >/dev/null
+    coreSelectionRetryAction sampleAction alpha beta
+    assertMenuAction 'errorCard:选择错误，请重新选择'
+    assertMenuAction 'sampleAction:alpha beta'
+
+    for entry in "${expectedCounts[@]}"; do
+        IFS='|' read -r file expectedCount <<<"${entry}"
+        actualCount=$(grep -cF 'coreSelectionRetryAction ' "${PROJECT_ROOT}/${file}")
+        [[ "${actualCount}" == "${expectedCount}" ]]
+    done
+    for entry in "${expectedPatterns[@]}"; do
+        IFS='|' read -r file pattern <<<"${entry}"
+        grep -qF "${pattern}" "${PROJECT_ROOT}/${file}"
+    done
+    for entry in "${removedPatterns[@]}"; do
+        IFS='|' read -r file pattern <<<"${entry}"
+        ! grep -qF "${pattern}" "${PROJECT_ROOT}/${file}"
+    done
+)
+
 runMenuSmokeLightRegression() {
     local actions=
     local output=
@@ -17203,6 +17285,7 @@ runRegressionFast() {
 
 runRegressionTargetedBatchHelpers() {
     runRegressionStep core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression &&
+        runRegressionStep core-selection-retry-action runCoreSelectionRetryActionRegression &&
         runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
         runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&

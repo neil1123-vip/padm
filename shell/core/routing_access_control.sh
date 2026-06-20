@@ -43,8 +43,7 @@ accessControlMenu() {
         routingAccessMenu
         ;;
     *)
-        coreSelectionErrorCard
-        accessControlMenu
+        coreSelectionRetryAction accessControlMenu
         return
         ;;
     esac
@@ -193,8 +192,7 @@ manageRegionalBlockPolicy() {
     autoRead access_region_policy "请选择:" policyStatus
     [[ "${policyStatus}" == "4" ]] && { accessControlMenu; return; }
     if [[ ! "${policyStatus}" =~ ^[1-3]$ ]]; then
-        coreSelectionErrorCard
-        manageRegionalBlockPolicy
+        coreSelectionRetryAction manageRegionalBlockPolicy
         return
     fi
     autoRead access_region_extra_allow "追加直连例外域名[可留空，多个用英文逗号]:" extraAllowDomainList
@@ -242,7 +240,7 @@ removeAccessControlMenu() {
     case "${removeStatus}" in
     1|2|3|4|5) ;;
     6) accessControlMenu; return ;;
-    *) coreSelectionErrorCard; removeAccessControlMenu; return ;;
+    *) coreSelectionRetryAction removeAccessControlMenu; return ;;
     esac
     accessControlBackupCreate || return 1
     case "${removeStatus}" in

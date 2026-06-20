@@ -2106,8 +2106,7 @@ selectCoreInstall() {
         fi
         ;;
     *)
-        coreSelectionErrorCard
-        selectCoreInstall
+        coreSelectionRetryAction selectCoreInstall
         ;;
     esac
 }

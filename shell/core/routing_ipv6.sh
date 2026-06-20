@@ -223,10 +223,7 @@ ipv6Routing() {
         return
 
     else
-
-        coreSelectionErrorCard
-
-        ipv6Routing
+        coreSelectionRetryAction ipv6Routing
 
         return
 
