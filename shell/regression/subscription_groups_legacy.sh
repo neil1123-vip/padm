@@ -10947,7 +10947,10 @@ JSON
         subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
         unset -f subscriptionSyncConfiguredManagedUsers
     )
-    subscriptionSyncConfiguredManagedUsers | jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
+    subscriptionSyncCurrentManagedUsers \
+        "${configPath}02_VLESS_TCP_inbounds.json" \
+        "${singBoxConfigPath}06_hysteria2_inbounds.json" |
+        jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
     subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
     set +e

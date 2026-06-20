@@ -44,17 +44,6 @@ subscriptionSyncGenerateUUID() {
     fi
 }
 
-ensureUserSubscriptionUUID() {
-    local id=$1
-    local userUUID
-    userUUID=$(subscriptionActiveGroupRead -r --arg id "${id}" '.user_groups[]? | select(.id == $id) | .uuid // empty')
-    if [[ -z "${userUUID}" ]]; then
-        userUUID=$(subscriptionSyncGenerateUUID)
-        subscriptionActiveGroupWrite --arg id "${id}" --arg uuid "${userUUID}" '.user_groups |= map(if .id == $id then .uuid = $uuid else . end)' || return 1
-    fi
-    echo "${userUUID}"
-}
-
 subscriptionSyncCurrentManagedUsers() {
     local file
     local validFiles=()
@@ -242,20 +231,6 @@ subscriptionSyncSetUsersInFile() {
     commitGeneratedJsonFile "${tmpFile}" "${file}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
-subscriptionSyncUserPath() {
-    local file=$1
-    local preferredPath=$2
-    if [[ -n "${preferredPath}" ]]; then
-        echo "${preferredPath}"
-    elif jq -e '.inbounds[1].settings.clients' "${file}" >/dev/null 2>&1; then
-        echo '.inbounds[1].settings.clients'
-    elif jq -e '.inbounds[0].settings.clients' "${file}" >/dev/null 2>&1; then
-        echo '.inbounds[0].settings.clients'
-    else
-        echo '.inbounds[0].users'
-    fi
-}
-
 subscriptionSyncAppendProtocolUser() {
     local protocolId=$1
     local file=$2
@@ -266,7 +241,15 @@ subscriptionSyncAppendProtocolUser() {
     local userPath=
     local currentClients='[]'
     [[ -f "${file}" ]] || return 0
-    userPath=$(subscriptionSyncUserPath "${file}" "${preferredPath}")
+    if [[ -n "${preferredPath}" ]]; then
+        userPath="${preferredPath}"
+    elif jq -e '.inbounds[1].settings.clients' "${file}" >/dev/null 2>&1; then
+        userPath='.inbounds[1].settings.clients'
+    elif jq -e '.inbounds[0].settings.clients' "${file}" >/dev/null 2>&1; then
+        userPath='.inbounds[0].settings.clients'
+    else
+        userPath='.inbounds[0].users'
+    fi
     if jq -e --arg accountName "${accountName}" "${userPath}[]? | select(((.email // .name // .username // \"\") | sub(\"-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$\"; \"\")) == \$accountName)" "${file}" >/dev/null 2>&1; then
         return
     fi
@@ -287,7 +270,11 @@ subscriptionSyncAppendLocalUser() {
     local singBoxConfigDir=
     local rc=0
     accountName=$(subscriptionSyncAccountName "${id}")
-    uuid=$(ensureUserSubscriptionUUID "${id}") || return 1
+    uuid=$(subscriptionActiveGroupRead -r --arg id "${id}" '.user_groups[]? | select(.id == $id) | .uuid // empty')
+    if [[ -z "${uuid}" ]]; then
+        uuid=$(subscriptionSyncGenerateUUID)
+        subscriptionActiveGroupWrite --arg id "${id}" --arg uuid "${uuid}" '.user_groups |= map(if .id == $id then .uuid = $uuid else . end)' || return 1
+    fi
 
     xrayConfigDir=$(subscriptionSyncSafeConfigDir) || return 1
     if [[ -n "${singBoxConfigPath:-}" ]]; then
@@ -313,15 +300,6 @@ subscriptionSyncAppendLocalUser() {
     return "${rc}"
 }
 
-subscriptionSyncAppendLocalAccount() {
-    local accountName=$1
-    local accountId
-    if ! accountId=$(subscriptionSyncAccountIdFromName "${accountName}"); then
-        return 1
-    fi
-    subscriptionSyncAppendLocalUser "${accountId}"
-}
-
 subscriptionSyncValidateAccountPlan() {
     local syncPlan=$1
     jq -e '
@@ -336,6 +314,7 @@ subscriptionSyncValidateAccountPlan() {
 subscriptionSyncApplyAccountPlan() {
     local syncPlan=$1
     local accountName
+    local accountId
     local createAccounts
     local removeAccounts
     local rc=0
@@ -351,7 +330,11 @@ subscriptionSyncApplyAccountPlan() {
 
     while IFS= read -r accountName; do
         [[ -n "${accountName}" ]] || continue
-        if ! subscriptionSyncAppendLocalAccount "${accountName}"; then
+        if ! accountId=$(subscriptionSyncAccountIdFromName "${accountName}"); then
+            rc=1
+            continue
+        fi
+        if ! subscriptionSyncAppendLocalUser "${accountId}"; then
             rc=1
         fi
     done <<<"${createAccounts}"
