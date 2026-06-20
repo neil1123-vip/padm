@@ -62,14 +62,12 @@ resolveSubscribeNginxAccessLogFile() {
 }
 
 subscriptionRemoteSubscribeSourcesForAccount() {
-    local email=$1
-    local enabledUsers
+    local accountName=$1
+    local user
     local allowedSources
-    enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 0
-    allowedSources=$(jq -c --arg account "${email}" '
-      .[]?
-      | select(.account == $account)
-      | .allowed_sources' <<<"${enabledUsers}" | head -n 1) || return 0
+    user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 0
+    [[ -n "${user}" ]] || return 0
+    allowedSources=$(jq -c '.allowed_sources // []' <<<"${user}") || return 0
     [[ -n "${allowedSources}" ]] || return 0
     subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" '
       . as $group |
@@ -80,6 +78,14 @@ subscriptionRemoteSubscribeSourcesForAccount() {
       else
         $group.sources[]? | select(.role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid))) | "\(.host):\(.port):\(.id):\(.scheme)"
       end'
+}
+
+subscriptionPublishHasRemoteSources() {
+    local accountName=$1
+    local user
+    user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 1
+    [[ -n "${user}" ]] || return 1
+    jq -e '(.has_remote // false) == true' <<<"${user}" >/dev/null 2>&1
 }
 
 ensureSubscriptionControlNginxLocation() {

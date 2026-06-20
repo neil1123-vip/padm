@@ -10326,20 +10326,23 @@ configPath="${oldConfigPath}"
 (
     local renderRoot="${TMP_DIR}/subscription-render-remote-hint-override"
     local localBase="${renderRoot}/local"
-    local remoteChecksFile="${renderRoot}/remote-checks.log"
+    local helperAccountsFile="${renderRoot}/helper-accounts.log"
+    local unexpectedRemoteChecksFile="${renderRoot}/unexpected-remote-checks.log"
     local autoReadCalls=0
     local oldSubscribeSalt="${subscribeSalt:-}"
     local oldCurrentDefaultPort="${currentDefaultPort:-}"
     mkdir -p "${localBase}/default" "${renderRoot}"
-    : >"${remoteChecksFile}"
+    : >"${helperAccountsFile}"
+    : >"${unexpectedRemoteChecksFile}"
     subscribeSalt=test-salt
     currentDefaultPort=443
 
     subscriptionPublishHasRemoteSources() {
-        return 99
+        printf '%s\n' "$1" >"${helperAccountsFile}"
+        return 0
     }
     subscriptionRemoteSubscribeSourcesForAccount() {
-        printf '%s\n' "$1" >>"${remoteChecksFile}"
+        printf '%s\n' "$1" >>"${unexpectedRemoteChecksFile}"
         printf 'example.com:443:edge:https\n'
     }
     autoRead() {
@@ -10355,7 +10358,8 @@ configPath="${oldConfigPath}"
 
     renderAllSubscribeUserOutputs "${localBase}" "" true "sub_team_a" true
     [[ "${autoReadCalls}" == "1" ]]
-    [[ "$(wc -l < "${remoteChecksFile}")" == "1" ]]
+    grep -qx 'sub_team_a' "${helperAccountsFile}"
+    [[ ! -s "${unexpectedRemoteChecksFile}" ]]
 
     if [[ -n "${oldSubscribeSalt}" ]]; then
         subscribeSalt="${oldSubscribeSalt}"
@@ -10470,12 +10474,17 @@ unset REGRESSION_ECHO_LOG
 
 runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
     local sourceLines
+    local helperAccountFile="${TMP_DIR}/subscription-remote-sources-account.log"
 
     subscriptionSyncAccountIdFromName() {
         return 97
     }
+    subscriptionSyncFindUserByAccountName() {
+        printf '%s\n' "$1" >"${helperAccountFile}"
+        printf '{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}\n'
+    }
     subscriptionActiveEnabledUsersJson() {
-        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}]\n'
+        return 98
     }
     subscriptionActiveGroupRead() {
         if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'.id as $sid | $allowed | index($sid)'* ]]; then
@@ -10487,6 +10496,7 @@ runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
 
     sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
     [[ "${sourceLines}" == "example.com:443:edge:https" ]]
+    grep -qx 'sub_team_a' "${helperAccountFile}"
 )
 
 runSubscriptionGroupStateRegression() {

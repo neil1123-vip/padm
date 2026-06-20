@@ -33,6 +33,35 @@ subscriptionSyncAccountIdFromName() {
     subscriptionSyncAccountUnescapeId "${escapedId}"
 }
 
+subscriptionSyncFindUserByAccountName() {
+    local accountName=$1
+    subscriptionActiveGroupRead -ce --arg account "${accountName}" '
+      . as $group |
+      ([
+        .user_groups[]?
+        | select(.enabled == true)
+        | (.allowed_sources // []) as $allowed
+        | {
+            id,
+            name,
+            uuid: (.uuid // ""),
+            traffic_limit_gb: (.traffic_limit_gb // 0),
+            account: (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'),
+            allowed_sources: $allowed,
+            allows_main: (if ($allowed | index("*") or index("main")) then true else false end),
+            has_remote: (if ($allowed | length) == 0 then
+                false
+              elif ($allowed | index("*")) then
+                any($group.sources[]?; .role != "main" and .enabled == true)
+              else
+                any($group.sources[]?; .role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid)))
+              end)
+          }
+        | select(.account == $account)
+      ][0] // empty)
+    '
+}
+
 subscriptionSyncGenerateUUID() {
     if [[ "${coreInstallType}" == "1" && -x "${ctlPath}" ]]; then
         ${ctlPath} uuid

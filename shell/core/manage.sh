@@ -2002,7 +2002,7 @@ renderAllSubscribeUserOutputs() {
         SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=1
         while IFS= read -r account; do
             [[ -n "${account}" ]] || continue
-            if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
+            if subscriptionPublishHasRemoteSources "${account}" 2>/dev/null; then
                 SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
                 break
             fi
