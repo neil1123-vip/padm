@@ -624,13 +624,11 @@ subscriptionSyncSetRestoreFailureDetail() {
     local outputVar=$1
     local failedLabel=$2
     local failedLocation=${3:-}
-    local result="${failedLabel}恢复失败"
-
     if [[ -n "${failedLocation}" ]]; then
-        subscriptionSyncSetManualCheckMessage result "${result}" "${failedLocation}"
+        coreSetRestoreFailureDetail "${outputVar}" "${failedLabel}" "${failedLocation}"
+        return 0
     fi
-
-    printf -v "${outputVar}" '%s' "${result}"
+    printf -v "${outputVar}" '%s' "${failedLabel}恢复失败"
 }
 
 subscriptionSyncSetManualCheckMessage() {
@@ -645,46 +643,27 @@ subscriptionSyncSetSingleRestoreResultMessage() {
     local failedLabel=$5
     local failedLocation=$6
     local includeManualCheck=${7:-true}
-    local result=
-
-    if [[ "${restored}" == "true" ]]; then
-        if [[ -n "${restoredMessage}" ]]; then
-            result="${reason}，${restoredMessage}"
-        else
-            result="${reason}"
-        fi
-        printf -v "${outputVar}" '%s' "${result}"
+    if [[ "${restored}" == "true" && -z "${restoredMessage}" ]]; then
+        printf -v "${outputVar}" '%s' "${reason}"
         return 0
     fi
 
-    result="${reason}，且${failedLabel}恢复失败"
-    if [[ "${includeManualCheck}" != "false" ]]; then
-        subscriptionSyncSetManualCheckMessage result "${result}" "${failedLocation}"
+    if [[ "${includeManualCheck}" == "false" ]]; then
+        printf -v "${outputVar}" '%s' "${reason}，且${failedLabel}恢复失败"
+        return 1
     fi
-    printf -v "${outputVar}" '%s' "${result}"
-    return 1
+
+    coreSetSingleRestoreResultMessage \
+        "${outputVar}" \
+        "${reason}" \
+        "${restored}" \
+        "${restoredMessage}" \
+        "${failedLabel}" \
+        "${failedLocation}"
 }
 
 subscriptionSyncSetRollbackResultMessage() {
-    local outputVar=$1
-    local reason=$2
-    local restoredMessage=$3
-    local retryFn=${4:-}
-    local retryFailureMessage=${5:-}
-    local result
-
-    if [[ -n "${retryFn}" ]]; then
-        shift 5
-        if "${retryFn}" "$@"; then
-            result="${reason}，${restoredMessage}"
-        else
-            result="${reason}，${restoredMessage}；${retryFailureMessage}"
-        fi
-    else
-        result="${reason}，${restoredMessage}"
-    fi
-
-    printf -v "${outputVar}" '%s' "${result}"
+    coreSetRollbackResultMessage "$@"
 }
 
 subscriptionSyncSetRollbackRetryMessage() {
