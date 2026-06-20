@@ -391,9 +391,9 @@ updateRemoteSubscribe() {
         source=$(subscriptionActiveGroupRead -c --arg id "${serverAlias}" '.sources[]? | select(.id == $id)' 2>/dev/null) || source=
         if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
             controlledResponse=
-            if controlledToken=$(subscriptionRemoteControlToken "${source}" 2>/dev/null) &&
+            if controlledToken=$(jq -r '.control_token // empty' <<<"${source}" 2>/dev/null) &&
                 [[ -n "${controlledToken}" ]] &&
-                controlledUrl=$(subscriptionRemoteControlUrl "${source}" subscribe 2>/dev/null) &&
+                controlledUrl=$(subscriptionWireGuardControlUrl "${source}" subscribe 2>/dev/null) &&
                 controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
                 controlledResponse=$(curl -sS --connect-timeout 5 --max-time 30 \
                     -H "Content-Type: application/json" \
