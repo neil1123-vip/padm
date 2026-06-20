@@ -698,6 +698,20 @@ runAutoInstallAllowsEmptyDefaultRegression() {
     )
 }
 
+runAutoInstallDoesNotReadMissingRequiredValueRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        AUTO_INSTALL=true
+        AUTO_INSTALL_TYPE=custom
+        AUTO_DOMAIN=
+        local value=unset
+        autoRead domain "请输入要配置的域名" value <<<"rc=\$?"
+        [[ -z "${value:-}" ]]
+    )
+}
+
 runParseInstallArgsMissingValueRegression() {
     (
         set -euo pipefail
@@ -3708,6 +3722,7 @@ runRegressionFast() {
         runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
+        runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
         runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
         runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&

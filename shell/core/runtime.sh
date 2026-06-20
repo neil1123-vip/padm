@@ -1061,17 +1061,20 @@ autoRead() {
     local key=$1
     local prompt=$2
     local resultVar=$3
-    local value=
+    local autoValue=
 
     prompt=$(formatReadPrompt "${prompt}")
 
     if [[ -n "${AUTO_INSTALL}" && ( "${key}" != "install_type" || -n "${AUTO_INSTALL_TYPE}" ) ]]; then
-        value=$(autoValueForKey "${key}")
-        if [[ -n "${value}" ]]; then
+        autoValue=$(autoValueForKey "${key}")
+        if [[ -n "${autoValue}" ]]; then
             showAutoInstallSummary
-            printf -v "${resultVar}" '%s' "${value}"
+            printf -v "${resultVar}" '%s' "${autoValue}"
             return
         elif autoReadAllowsEmptyValue "${key}"; then
+            printf -v "${resultVar}" '%s' ""
+            return
+        else
             printf -v "${resultVar}" '%s' ""
             return
         fi
