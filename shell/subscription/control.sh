@@ -24,17 +24,6 @@ subscriptionRemoteDesiredUsersBySource() {
     ' || return 1
 }
 
-subscriptionRemoteControlUrl() {
-    local source=$1
-    local endpoint=$2
-    subscriptionWireGuardControlUrl "${source}" "${endpoint}"
-}
-
-subscriptionRemoteControlToken() {
-    local source=$1
-    jq -r '.control_token // empty' <<<"${source}"
-}
-
 subscriptionRemoteSourceSelfReference() {
     local source=$1
     local sourceHost
@@ -144,29 +133,6 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
     return 1
 }
 
-subscriptionRemoteControlCurlOnce() {
-    local source=$1
-    local endpoint=$2
-    local payload=$3
-    local token
-    local url
-    local maxTime
-    local response
-    token=$(subscriptionRemoteControlToken "${source}")
-    [[ -n "${token}" ]] || return 2
-    url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}")
-    if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
-        maxTime=180
-    else
-        maxTime=15
-    fi
-    response=$(curl -sS --connect-timeout 5 --max-time "${maxTime}" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${token}" \
-        -X POST --data "${payload}" -w '\n%{http_code}' "${url}") || return 1
-    printf '%s\n' "${response}"
-}
-
 subscriptionRemoteControlRequest() {
     local source=$1
     local endpoint=$2
@@ -174,9 +140,32 @@ subscriptionRemoteControlRequest() {
     local publicKey=
     local baselineEndpoint=
     local baselineHandshake=0
+    local token
+    local url
+    local maxTime
+    local -a curlArgs=()
     local response
     local statusCode
     local body
+    token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
+    [[ -n "${token}" ]] || return 2
+    url=$(subscriptionWireGuardControlUrl "${source}" "${endpoint}") || return 1
+    if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
+        maxTime=180
+    else
+        maxTime=15
+    fi
+    curlArgs=(
+        -sS
+        --connect-timeout 5
+        --max-time "${maxTime}"
+        -H "Content-Type: application/json"
+        -H "Authorization: Bearer ${token}"
+        -X POST
+        --data "${payload}"
+        -w '\n%{http_code}'
+        "${url}"
+    )
     if subscriptionRemoteSourceUsesWireGuard "${source}"; then
         publicKey=$(subscriptionRemoteWireGuardPeerPublicKeyFromSource "${source}" 2>/dev/null || true)
         if [[ -n "${publicKey}" ]]; then
@@ -184,10 +173,10 @@ subscriptionRemoteControlRequest() {
             baselineHandshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
         fi
     fi
-    if ! response=$(subscriptionRemoteControlCurlOnce "${source}" "${endpoint}" "${payload}" 2>/dev/null); then
+    if ! response=$(curl "${curlArgs[@]}" 2>/dev/null); then
         if subscriptionRemoteSourceUsesWireGuard "${source}"; then
             subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(subscriptionRemoteControlCurlOnce "${source}" "${endpoint}" "${payload}" 2>/dev/null) || return 1
+            response=$(curl "${curlArgs[@]}" 2>/dev/null) || return 1
         else
             return 1
         fi
@@ -246,11 +235,12 @@ subscriptionRemoteControlHealth() {
     local publicKey=
     local baselineEndpoint=
     local baselineHandshake=0
+    local -a curlArgs=()
     local response
     local statusCode
     local body
     local errorMessage
-    token=$(subscriptionRemoteControlToken "${source}")
+    token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
     if [[ -z "${token}" ]]; then
         jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
         return 0
@@ -262,11 +252,19 @@ subscriptionRemoteControlHealth() {
             baselineHandshake=$(subscriptionRemoteWireGuardPeerLatestHandshake "${publicKey}" 2>/dev/null || printf '0')
         fi
     fi
-    url=$(subscriptionRemoteControlUrl "${source}" health)
-    response=$(curl -sS --connect-timeout 5 --max-time 15 -H "Authorization: Bearer ${token}" -w '\n%{http_code}' "${url}" 2>/dev/null) || {
+    url=$(subscriptionWireGuardControlUrl "${source}" health) || return 1
+    curlArgs=(
+        -sS
+        --connect-timeout 5
+        --max-time 15
+        -H "Authorization: Bearer ${token}"
+        -w '\n%{http_code}'
+        "${url}"
+    )
+    response=$(curl "${curlArgs[@]}" 2>/dev/null) || {
         if subscriptionRemoteSourceUsesWireGuard "${source}"; then
             subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(curl -sS --connect-timeout 5 --max-time 15 -H "Authorization: Bearer ${token}" -w '\n%{http_code}' "${url}" 2>/dev/null) || {
+            response=$(curl "${curlArgs[@]}" 2>/dev/null) || {
                 jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
                 return 0
             }
@@ -382,15 +380,13 @@ subscriptionRemoteSyncPlanForSource() {
     local sourceId
     local payload
     local response
-    local token
     local errorMessage
 
     sourceId=$(jq -r '.id' <<<"${source}")
     payload=$(subscriptionRemoteControlPayload "${source}" true "${desiredUsersBySource}") || return 1
-    token=$(subscriptionRemoteControlToken "${source}")
     if subscriptionRemoteSourceSelfReference "${source}"; then
         jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归同步"}, dry_run:true, request:$payload}'
-    elif [[ -z "${token}" ]]; then
+    elif [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
         jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}, dry_run:true, request:$payload}'
     elif response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
         if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
@@ -437,7 +433,6 @@ runSubscriptionRemoteSync() {
     local sourceId
     local payload
     local response
-    local token
     local errorMessage
     local failures='[]'
     sources=$(subscriptionRemoteControlSources)
@@ -451,8 +446,7 @@ runSubscriptionRemoteSync() {
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 指向当前订阅服务，已跳过"]' <<<"${failures}")
             continue
         fi
-        token=$(subscriptionRemoteControlToken "${source}")
-        if [[ -z "${token}" ]]; then
+        if [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
             setSubscriptionSourceSyncFailure "${sourceId}" missing_token "未配置控制 token"
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 未配置控制 token"]' <<<"${failures}")
             continue

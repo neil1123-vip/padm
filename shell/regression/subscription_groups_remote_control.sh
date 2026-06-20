@@ -159,6 +159,117 @@ runRemoteControlHealthRegression() (
     [[ "${response}" == *'"name":"Edge Remote"'* ]]
 )
 
+runRemoteControlInlineRequestHelpersRegression() (
+    local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
+    local requestResponse
+    local healthResponse
+
+    subscriptionRemoteControlUrl() {
+        return 97
+    }
+    subscriptionRemoteControlToken() {
+        return 98
+    }
+    subscriptionRemoteControlCurlOnce() {
+        return 99
+    }
+    subscriptionRemoteSourceUsesWireGuard() {
+        return 1
+    }
+    subscriptionWireGuardControlUrl() {
+        printf 'https://control.example/%s\n' "$2"
+    }
+    curl() {
+        case "$*" in
+        *'https://control.example/sync'*)
+            printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
+            ;;
+        *'https://control.example/health'*)
+            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    }
+
+    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[]}' 2>/dev/null || true)
+    [[ -n "${requestResponse}" ]] || return 1
+    requestResponse=$(jq -c . <<<"${requestResponse}") || return 1
+    [[ "${requestResponse}" == *'"ok":true'* ]] || return 1
+    [[ "${requestResponse}" == *'"changed":false'* ]] || return 1
+    [[ "${requestResponse}" == *'"create":[]'*'"remove":[]'* ]] || return 1
+
+    healthResponse=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null || true)
+    [[ -n "${healthResponse}" ]] || return 1
+    healthResponse=$(jq -c . <<<"${healthResponse}") || return 1
+    [[ "${healthResponse}" == *'"ok":true'* ]] || return 1
+    [[ "${healthResponse}" == *'"version":"test"'* ]] || return 1
+    [[ "${healthResponse}" == *'"capabilities":["health","sync"]'* ]] || return 1
+    [[ "${healthResponse}" == *'"id":"edge-remote"'* ]] || return 1
+    [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
+)
+
+runRemoteControlInlineTokenConsumersRegression() (
+    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
+    local desiredUsersBySourceJson='{"edge-remote":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
+    local requestPayloadLog="${TMP_DIR}/remote-control-inline-token-consumers.payloads"
+    local statusLog="${TMP_DIR}/remote-control-inline-token-consumers.status"
+    local planResponse
+    local syncFailures
+
+    subscriptionRemoteControlToken() {
+        return 96
+    }
+    subscriptionRemoteSourceSelfReference() {
+        return 1
+    }
+    subscriptionRemoteSourceUsesWireGuard() {
+        return 1
+    }
+    subscriptionRemoteControlSources() {
+        printf '[%s]\n' "${remoteSourceJson}"
+    }
+    subscriptionRemoteDesiredUsersBySource() {
+        printf '%s\n' "${desiredUsersBySourceJson}"
+    }
+    subscriptionRemoteControlRequest() {
+        local sourceJson=$1
+        local endpoint=$2
+        local payload=$3
+        [[ "${endpoint}" == "sync" ]]
+        jq -e '.source_id == "edge-remote" and (.desired_users | length) == 1 and .desired_users[0].account == "sub_team_a"' <<<"${payload}" >/dev/null
+        printf '%s\n' "${payload}" >>"${requestPayloadLog}"
+        printf '%s\t%s\n' "$(jq -r '.id' <<<"${sourceJson}")" "${endpoint}" >>"${statusLog}"
+        printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n'
+    }
+    setSubscriptionSourceSyncStatus() {
+        printf 'status\t%s\t%s\n' "$1" "$2" >>"${statusLog}"
+    }
+    setSubscriptionSourceSyncFailure() {
+        printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
+    }
+    activeSubscriptionGroupId() {
+        printf 'default\n'
+    }
+
+    planResponse=$(subscriptionRemoteSyncPlanForSource "${remoteSourceJson}" "${desiredUsersBySourceJson}" 2>/dev/null || true)
+    [[ -n "${planResponse}" ]] || return 1
+    planResponse=$(jq -c . <<<"${planResponse}") || return 1
+    jq -e '.source_id == "edge-remote" and .status == "success" and .dry_run == true and .request.source_id == "edge-remote" and .request.dry_run == true and .request.desired_users[0].account == "sub_team_a" and .response.ok == true' <<<"${planResponse}" >/dev/null || return 1
+
+    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null || true)
+    [[ -n "${syncFailures}" ]] || return 1
+    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
+    [[ "${syncFailures}" == '[]' ]] || return 1
+    [[ -f "${requestPayloadLog}" ]] || return 1
+    [[ -f "${statusLog}" ]] || return 1
+    jq -s -e 'length == 2 and .[0].dry_run == true and .[1].dry_run == false and all(.[]; .source_id == "edge-remote" and .desired_users[0].account == "sub_team_a")' "${requestPayloadLog}" >/dev/null || return 1
+    grep -qx $'edge-remote\tsync' "${statusLog}" || return 1
+    grep -qx $'status\tedge-remote\tsuccess' "${statusLog}" || return 1
+    ! grep -q '^failure	' "${statusLog}" || return 1
+)
+
 runRemoteControlHandleInlineHelpersRegression() (
     local controlRoot="${TMP_DIR}/remote-control-handle-inline-helpers"
     local healthResponse
@@ -1543,6 +1654,8 @@ runRegressionRemoteControlSmokeCoreSteps() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
+        runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression &&
+        runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression &&
         runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
 }
 
