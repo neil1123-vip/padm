@@ -10753,11 +10753,8 @@ JSON
         cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-        jq() {
-            if [[ "$1" == "--arg" && "$2" == "account" && "$4" == "--arg" && "$5" == "id" && "$7" == ". + {(\$account): \$id}" ]]; then
-                return 94
-            fi
-            command jq "$@"
+        subscriptionSyncAccountIdMapJsonFromIds() {
+            return 94
         }
         writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
         jq -e '
@@ -10766,7 +10763,7 @@ JSON
           .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
           .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
         ' "$(subscriptionGroupsFile)" >/dev/null
-        unset -f jq
+        unset -f subscriptionSyncAccountIdMapJsonFromIds
     )
     (
         subscriptionSyncPlanFromAccounts() {

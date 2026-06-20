@@ -255,15 +255,13 @@ collectLocalTrafficSnapshot() {
 
 writeSubscriptionTrafficSnapshot() {
     local snapshot=$1
-    local userMap
-    local userIds
     if ! jq -e '.ok == true' <<<"${snapshot}" >/dev/null 2>&1; then
         statusCard "流量统计" "采集失败，已保留上次统计"
         return 1
     fi
-    userIds=$(subscriptionActiveGroupRead -r '.user_groups[]?.id') || return 1
-    userMap=$(subscriptionSyncAccountIdMapJsonFromIds <<<"${userIds}") || return 1
-    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" --argjson userMap "${userMap}" '
+    subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" '
+      def account_name($id):
+        "sub_" + ((($id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
       def addTraffic($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
@@ -276,6 +274,7 @@ writeSubscriptionTrafficSnapshot() {
           .download += (if ($oldCounters | has($item.account)) and $downloadDelta > 0 then $downloadDelta else 0 end) |
           .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
         {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
+      (.user_groups // [] | map({key: account_name(.id), value: .id}) | from_entries) as $userMap |
       . as $group |
       ($snapshot.items | map(. + {id: ($userMap[.account] // .account)})) as $items |
       ($items | map(select(.account | startswith("sub_")))) as $userItems |

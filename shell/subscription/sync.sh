@@ -66,19 +66,6 @@ subscriptionSyncAccountId() {
     return 1
 }
 
-subscriptionSyncAccountIdMapJsonFromIds() {
-    local id
-    while IFS= read -r id; do
-        [[ -n "${id}" ]] || continue
-        printf '%s\t%s\n' "${id}" "$(subscriptionSyncAccountName "${id}")"
-    done | jq -R -s '
-      split("\n")
-      | map(select(length > 0))
-      | map(split("\t") | select(length == 2) | {key: .[1], value: .[0]})
-      | from_entries
-    '
-}
-
 subscriptionSyncGenerateUUID() {
     if [[ "${coreInstallType}" == "1" && -x "${ctlPath}" ]]; then
         ${ctlPath} uuid
