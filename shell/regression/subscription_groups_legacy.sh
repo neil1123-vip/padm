@@ -11962,12 +11962,13 @@ JSON
 )
 
 runRemoteControlDesiredUsersSingleSourceReuseRegression() (
-    local capturedSourcesFile="${TMP_DIR}/remote-control-desired-users-single-source.json"
+    local desiredUsersBySource='{"edge-a":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
+    local unexpectedCallFile="${TMP_DIR}/remote-control-desired-users-single-source.unexpected"
     local output
 
     subscriptionRemoteDesiredUsersBySource() {
-        printf '%s\n' "$1" >"${capturedSourcesFile}"
-        printf '{"edge-a":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}\n'
+        : >"${unexpectedCallFile}"
+        return 93
     }
 
     subscriptionRemoteDesiredUsers() {
@@ -11978,7 +11979,7 @@ runRemoteControlDesiredUsersSingleSourceReuseRegression() (
         printf 'default\n'
     }
 
-    output=$(subscriptionRemoteControlPayload '{"id":"edge-a"}' true)
+    output=$(subscriptionRemoteControlPayload '{"id":"edge-a"}' true "${desiredUsersBySource}")
     jq -e '
       .source_id == "edge-a" and
       .group_id == "default" and
@@ -11987,7 +11988,25 @@ runRemoteControlDesiredUsersSingleSourceReuseRegression() (
         {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"}
       ]
     ' <<<"${output}" >/dev/null
-    jq -e '. == [{id:"edge-a"}]' "${capturedSourcesFile}" >/dev/null
+    [[ ! -e "${unexpectedCallFile}" ]]
+)
+
+runRemoteControlPayloadRequiresDesiredUsersMapRegression() (
+    local unexpectedCallFile="${TMP_DIR}/remote-control-payload-missing-map.unexpected"
+
+    subscriptionRemoteDesiredUsersBySource() {
+        : >"${unexpectedCallFile}"
+        printf '{"edge-a":[{"id":"team-a"}]}\n'
+    }
+
+    activeSubscriptionGroupId() {
+        printf 'default\n'
+    }
+
+    if subscriptionRemoteControlPayload '{"id":"edge-a"}' true >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ ! -e "${unexpectedCallFile}" ]]
 )
 
 runRemoteControlCreateUsersAvoidReverseDecodeRegression() (
@@ -17327,6 +17346,7 @@ runRegressionRemoteControl() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-desired-users-batch runRemoteControlDesiredUsersBatchRegression &&
         runRegressionStep remote-control-desired-users-single-source runRemoteControlDesiredUsersSingleSourceReuseRegression &&
+        runRegressionStep remote-control-payload-requires-desired-users-map runRemoteControlPayloadRequiresDesiredUsersMapRegression &&
         runRegressionStep remote-control-create-users-no-reverse-decode runRemoteControlCreateUsersAvoidReverseDecodeRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&

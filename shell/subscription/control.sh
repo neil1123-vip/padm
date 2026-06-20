@@ -202,17 +202,12 @@ subscriptionRemoteControlRequest() {
 subscriptionRemoteControlPayload() {
     local source=$1
     local dryRun=$2
-    local desiredUsersBySource=${3:-}
+    local desiredUsersBySource=${3-}
     local sourceId
-    local sources
     local users
     sourceId=$(jq -r '.id' <<<"${source}")
-    if [[ -n "${desiredUsersBySource}" ]]; then
-        users=$(jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []' <<<"${desiredUsersBySource}") || return 1
-    else
-        sources=$(jq -c -n --arg sourceId "${sourceId}" '[{id:$sourceId}]') || return 1
-        users=$(subscriptionRemoteDesiredUsersBySource "${sources}" | jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []') || return 1
-    fi
+    [[ -n "${desiredUsersBySource}" ]] || return 1
+    users=$(jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []' <<<"${desiredUsersBySource}") || return 1
     jq -n --arg sourceId "${sourceId}" --arg groupId "$(activeSubscriptionGroupId)" --argjson dryRun "${dryRun}" --argjson users "${users}" '{version:1, group_id:$groupId, source_id:$sourceId, dry_run:$dryRun, desired_users:$users}'
 }
 
