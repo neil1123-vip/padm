@@ -349,14 +349,14 @@ EOF
 
 # sing-box TUIC 安装
 singBoxTuicInstall() {
-    if ! currentProtocolHasAny 0 1 2 3 4 5 6 9 10; then
+    if ! currentProtocolHasAny 3 5 21 22 23 24 25 27 28 29 31; then
         errorCard "由于需要依赖证书，如安装 Tuic，请先安装带有 TLS 标识协议"
         exit 0
     fi
 
     totalProgress=5
     installSingBox 1
-    selectCustomInstallType=",9,"
+    selectCustomInstallType=",31,"
     initSingBoxConfig custom 2 true || return 1
     installSingBoxService 3
     reloadCore || return 1
@@ -366,14 +366,14 @@ singBoxTuicInstall() {
 
 # sing-box Hysteria2 安装
 singBoxHysteria2Install() {
-    if ! currentProtocolHasAny 0 1 2 3 4 5 6 9 10; then
+    if ! currentProtocolHasAny 3 5 21 22 23 24 25 27 28 29 31; then
         errorCard "由于需要依赖证书，如安装 Hysteria2，请先安装带有 TLS 标识协议"
         exit 0
     fi
 
     totalProgress=5
     installSingBox 1
-    selectCustomInstallType=",6,"
+    selectCustomInstallType=",3,"
     initSingBoxConfig custom 2 true || return 1
     installSingBoxService 3
     reloadCore || return 1

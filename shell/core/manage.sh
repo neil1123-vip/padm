@@ -565,8 +565,8 @@ manageTraditionalTlsFallback() {
 
     progressCard "$1" "传统 TLS fallback 维护"
 
-    if ! currentProtocolHas 0 || [[ -z "${coreInstallType}" ]]; then
-        errorCard "请先安装 Xray-core 的 VLESS TCP TLS Vision"
+    if ! currentProtocolHas 27 || [[ -z "${coreInstallType}" ]]; then
+        errorCard "请先安装 Xray-core 的 27.VLESS TCP TLS Vision"
         exit 0
     fi
 
@@ -1450,7 +1450,7 @@ cdnClearAddress() {
 
 showCDNUsageNotes() {
     echoContent title "\n┌─ CDN 使用说明 ─────────────────────────────────────"
-    menuLine "1. 新建 CDN 场景优先使用协议 12：$(xrayProtocolName 12)"
+    menuLine "1. 新建 XHTTP 场景优先使用协议 2：$(xrayProtocolName 2)"
     menuLine "2. 这里设置的是客户端订阅里的入口地址，可填 CDN CNAME、优选 IP 或自有域名"
     menuLine "3. Reality SNI/target 不会随入口地址改变；它仍由 Reality 目标站管理维护"
     menuLine "4. Cloudflare WebSocket 可用；gRPC/H2/H3 依赖面板开关、客户端与线路支持"
@@ -1485,12 +1485,12 @@ manageCDN() {
     menuLine "这里只覆盖订阅里的客户端连接地址，不修改 Reality target/SNI 或 XHTTP 参数"
     menuLine "多个 CDN CNAME、优选 IP 或入口域名可用英文逗号分隔，订阅会生成多条节点"
     menuLine "当前入口地址：$(cdnCurrentAddress)"
-    if currentProtocolHas 12; then
+    if currentProtocolHas 2; then
         menuLine "当前已安装 Reality XHTTP，可直接调整入口地址"
-    elif currentProtocolHasAny 1 2 3 5 11; then
+    elif currentProtocolHasAny 21 23 24 25; then
         menuLine "当前是传统 TLS/CDN 协议，仅建议用于旧客户端兼容"
     else
-        menuLine "未检测到 CDN 友好协议；新建 CDN 节点建议安装协议 12：$(xrayProtocolName 12)"
+        menuLine "未检测到 XHTTP 能力；新建 XHTTP 节点建议安装协议 2：$(xrayProtocolName 2)"
     fi
     menuItem 1 "设置入口地址" "写入 CDN CNAME、优选 IP 或自有域名"
     menuItem 2 "清空入口地址" "恢复订阅使用安装入口地址"
@@ -1501,7 +1501,7 @@ manageCDN() {
 
     case ${selectCDNType} in
     1)
-        if currentProtocolHas 12 || currentProtocolHasAny 1 2 3 5 11; then
+        if currentProtocolHas 2 || currentProtocolHasAny 21 23 24 25; then
             setCDNEntryAddress
         else
             statusCard "不可用" "请先安装 Reality XHTTP 或传统 TLS/CDN 协议"
@@ -2455,14 +2455,14 @@ manageRealityTarget() {
 # reality管理
 regenerateRealityProfile() {
     if [[ "${coreInstallType}" == "1" ]]; then
-        selectCustomInstallType=",7,"
+        selectCustomInstallType=",1,"
         initXrayConfig custom 1 true || return 1
     elif [[ "${coreInstallType}" == "2" ]]; then
-        if currentProtocolHas 7; then
-            selectCustomInstallType=",7,"
+        if currentProtocolHas 1; then
+            selectCustomInstallType=",1,"
         fi
-        if currentProtocolHas 8; then
-            selectCustomInstallType="${selectCustomInstallType},8,"
+        if currentProtocolHas 26; then
+            selectCustomInstallType="${selectCustomInstallType},26,"
         fi
         initSingBoxConfig custom 1 true || return 1
     fi
@@ -2477,7 +2477,7 @@ manageReality() {
     readCustomPort
     readSingBoxConfig
 
-    if ! currentProtocolHasAny 7 8 12 || [[ -z "${coreInstallType}" ]]; then
+    if ! currentProtocolHasAny 1 2 26 || [[ -z "${coreInstallType}" ]]; then
         errorCard "请先安装 Reality 协议。新人路径：主菜单 -> 安装与重装 -> 无域名 Reality，或 安装与重装 -> 自定义安装 中选择 Reality 编号"
         exit 0
     fi
@@ -2652,7 +2652,7 @@ commitXHTTPConfigUpdate() {
     configFile=$(manageXHTTPConfigFile)
     configFile=$(padmResolveManagedAbsolutePath "${configFile}") || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
     if [[ "${coreInstallType}" != "1" || ! -f "${configFile}" ]]; then
-        errorCard "未检测到 Xray Reality XHTTP 配置，请先安装 12.VLESS Reality XHTTP"
+        errorCard "未检测到 Xray Reality XHTTP 配置，请先安装 2.VLESS Reality XHTTP"
         padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
@@ -3015,8 +3015,8 @@ showXHTTPUsageNotes() {
 manageXHTTP() {
     readInstallType
     readInstallProtocolType
-    if [[ "${coreInstallType}" != "1" ]] || ! currentProtocolHas 12; then
-        errorCard "请先安装 Xray 的 12.VLESS Reality XHTTP"
+    if [[ "${coreInstallType}" != "1" ]] || ! currentProtocolHas 2; then
+        errorCard "请先安装 Xray 的 2.VLESS Reality XHTTP"
         return 1
     fi
 

@@ -14,7 +14,7 @@ subscriptionAccountProfile() {
 
 showVlessTcpAccounts() {
     # VLESS TCP
-    if currentProtocolHas 0; then
+    if currentProtocolHas 27; then
 
         subscribeSectionTitle "VLESS TCP TLS Vision" "传统 TLS 兼容方案"
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}02_VLESS_TCP_inbounds.json | jq -c '.[]' | while read -r user; do
@@ -31,7 +31,7 @@ showVlessTcpAccounts() {
 
 showVlessWsAccounts() {
     # VLESS WS
-    if currentProtocolHas 1; then
+    if currentProtocolHas 21; then
         subscribeSectionTitle "VLESS WS TLS" "兼容旧客户端，不作为新手推荐"
 
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}03_VLESS_WS_inbounds.json | jq -c '.[]' | while read -r user; do
@@ -66,7 +66,7 @@ showVlessWsAccounts() {
 
 showTrojanGrpcAccounts() {
     # trojan grpc
-    if currentProtocolHas 2; then
+    if currentProtocolHas 25; then
         subscribeSectionTitle "Trojan gRPC TLS" "兼容旧客户端，不作为新手推荐"
         jq .inbounds[0].settings.clients ${configPath}04_trojan_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
             local email password
@@ -87,7 +87,7 @@ showTrojanGrpcAccounts() {
 
 showVmessWsAccounts() {
     # VMess WS
-    if currentProtocolHas 3; then
+    if currentProtocolHas 22; then
         subscribeSectionTitle "VMess WS TLS" "兼容旧客户端，不作为新手推荐"
         local path="${currentPath}vws"
         if [[ ${coreInstallType} == "1" ]]; then
@@ -120,9 +120,15 @@ showVmessWsAccounts() {
 
 showTrojanAccounts() {
     # trojan tcp
-    if currentProtocolHas 4; then
+    local trojanConfigFile=
+    if currentProtocolHas 28; then
+        trojanConfigFile=${configPath}28_trojan_TCP_direct_inbounds.json
+    elif currentProtocolHas 29; then
+        trojanConfigFile=${configPath}04_trojan_TCP_inbounds.json
+    fi
+    if [[ -n "${trojanConfigFile}" ]]; then
         subscribeSectionTitle "Trojan TLS" "不推荐"
-        jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}04_trojan_TCP_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq .inbounds[0].settings.clients//.inbounds[0].users "${trojanConfigFile}" | jq -c '.[]' | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${email}"
@@ -134,9 +140,9 @@ showTrojanAccounts() {
 
 showVlessGrpcAccounts() {
     # VLESS grpc
-    if currentProtocolHas 5; then
+    if currentProtocolHas 24; then
         subscribeSectionTitle "VLESS gRPC TLS" "兼容旧客户端，不作为新手推荐"
-        jq .inbounds[0].settings.clients ${configPath}06_VLESS_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq .inbounds[0].settings.clients ${configPath}06_VLESS_GRPc_inbounds.json | jq -c '.[]' | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
@@ -156,7 +162,7 @@ showVlessGrpcAccounts() {
 
 showHysteriaAccounts() {
     # hysteria2
-    if currentProtocolHas 6 || [[ -n "${hysteriaPort:-}" ]]; then
+    if currentProtocolHas 3 || [[ -n "${hysteriaPort:-}" ]]; then
         readPortHopping "hysteria2" "${singBoxHysteria2Port}"
         subscribeSectionTitle "Hysteria2 TLS" "UDP/移动网络可选"
         local path="${configPath}"
@@ -184,7 +190,7 @@ showHysteriaAccounts() {
 
 showVlessRealityAccounts() {
     # VLESS Reality Vision
-    if currentProtocolHas 7; then
+    if currentProtocolHas 1; then
         subscribeSectionTitle "VLESS reality_vision" "推荐"
         jq .inbounds[1].settings.clients//.inbounds[0].users ${configPath}07_VLESS_vision_reality_inbounds.json | jq -c '.[]' | while read -r user; do
             local email accountId
@@ -205,7 +211,7 @@ showVlessRealityAccounts() {
 
 showVlessRealityGrpcAccounts() {
     # VLESS Reality gRPC
-    if currentProtocolHas 8; then
+    if currentProtocolHas 26; then
         subscribeSectionTitle "VLESS reality_gRPC" "推荐"
         local path="${configPath}"
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
@@ -225,7 +231,7 @@ showVlessRealityGrpcAccounts() {
 
 showTuicAccounts() {
     # TUIC
-    if currentProtocolHas 9 || [[ -n "${tuicPort:-}" ]]; then
+    if currentProtocolHas 31 || [[ -n "${tuicPort:-}" ]]; then
         readPortHopping "tuic" "${singBoxTuicPort}"
         subscribeSectionTitle "Tuic TLS" "UDP/移动网络可选"
         local path="${configPath}"
@@ -249,7 +255,7 @@ showTuicAccounts() {
 
 showNaiveAccounts() {
     # Naive
-    if currentProtocolHas 10 || [[ -n "${singBoxNaivePort:-}" ]]; then
+    if currentProtocolHas 5 || [[ -n "${singBoxNaivePort:-}" ]]; then
         subscribeSectionTitle "naive TLS" "推荐，不支持ClashMeta"
         local path="${configPath}"
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
@@ -268,7 +274,7 @@ showNaiveAccounts() {
 
 showVmessHTTPUpgradeAccounts() {
     # VMess HTTPUpgrade
-    if currentProtocolHas 11; then
+    if currentProtocolHas 23; then
         subscribeSectionTitle "VMess HTTPUpgrade TLS" "兼容旧客户端，不作为新手推荐"
         local path="${currentPath}vws"
         if [[ ${coreInstallType} == "1" ]]; then
@@ -307,7 +313,7 @@ showVmessHTTPUpgradeAccounts() {
 
 showVlessRealityXHTTPAccounts() {
     # VLESS Reality XHTTP
-    if currentProtocolHas 12; then
+    if currentProtocolHas 2; then
         subscribeSectionTitle "VLESS Reality XHTTP" "CDN推荐"
 
         jq .inbounds[0].settings.clients//.inbounds[0].users ${configPath}12_VLESS_XHTTP_inbounds.json | jq -c '.[]' | while read -r user; do
@@ -341,7 +347,7 @@ showVlessRealityXHTTPAccounts() {
 
 showAnyTlsAccounts() {
     # AnyTLS
-    if currentProtocolHas 13; then
+    if currentProtocolHas 4; then
         subscribeSectionTitle "AnyTLS" "TLS 兼容协议"
         local path="${configPath}"
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then

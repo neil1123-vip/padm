@@ -1690,74 +1690,71 @@ initXrayClients() {
         uuid=$(echo "${user}" | jq -r .id//.uuid)
         email=$(stripClientNameSuffix "$(echo "${user}" | jq -r .email//.name//.username)")
         currentUser=
-        if protocolSelectionIncludes "${type}" 0; then
+        if protocolSelectionIncludes "${type}" 27; then
             currentUser="{\"id\":\"${uuid}\",\"flow\":\"xtls-rprx-vision\",\"email\":\"${email}-VLESS_TCP/TLS_Vision\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # VLESS WS
-        if protocolSelectionIncludes "${type}" 1; then
+        if protocolSelectionIncludes "${type}" 21; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VLESS_WS\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VLESS XHTTP
-        if protocolSelectionIncludes "${type}" 12; then
+        if protocolSelectionIncludes "${type}" 2; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VLESS_Reality_XHTTP\",\"flow\":\"xtls-rprx-vision\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # Trojan gRPC
-        if protocolSelectionIncludes "${type}" 2; then
+        if protocolSelectionIncludes "${type}" 25; then
             currentUser="{\"password\":\"${uuid}\",\"email\":\"${email}-Trojan_gRPC\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VMess WS
-        if protocolSelectionIncludes "${type}" 3; then
+        if protocolSelectionIncludes "${type}" 22; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VMess_WS\",\"alterId\": 0}"
+
+            users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
+        fi
+        # VMess HTTPUpgrade
+        if protocolSelectionIncludes "${type}" 23; then
+            currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VMess_HTTPUpgrade\",\"alterId\": 0}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # Trojan TCP
-        if protocolSelectionIncludes "${type}" 4; then
+        if protocolSelectionIncludes "${type}" 28; then
+            currentUser="{\"password\":\"${uuid}\",\"email\":\"${email}-Trojan_TCP_direct\"}"
+            users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
+        fi
+
+        if protocolSelectionIncludes "${type}" 29; then
             currentUser="{\"password\":\"${uuid}\",\"email\":\"${email}-trojan_tcp\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # VLESS gRPC
-        if protocolSelectionIncludes "${type}" 5; then
+        if protocolSelectionIncludes "${type}" 24; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-vless_grpc\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
-        # Hysteria2
-        if protocolSelectionIncludes "${type}" 6; then
-            currentUser="{\"password\":\"${uuid}\",\"name\":\"${email}-singbox_hysteria2\"}"
-
-            users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
-        fi
-
         # VLESS Reality Vision
-        if protocolSelectionIncludes "${type}" 7; then
+        if protocolSelectionIncludes "${type}" 1; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-vless_reality_vision\",\"flow\":\"xtls-rprx-vision\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # VLESS Reality gRPC
-        if protocolSelectionIncludes "${type}" 8; then
+        if protocolSelectionIncludes "${type}" 26; then
             currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-vless_reality_grpc\",\"flow\":\"\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
-        # TUIC
-        if protocolSelectionIncludes "${type}" 9; then
-            currentUser="{\"uuid\":\"${uuid}\",\"password\":\"${uuid}\",\"name\":\"${email}-singbox_tuic\"}"
-
-            users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
-        fi
-
     done < <(echo "${currentClients}" | jq -c '.[]')
     echo "${users}"
 }
@@ -1780,69 +1777,75 @@ initSingBoxClients() {
         name=$(stripClientNameSuffix "$(echo "${user}" | jq -r .name//.email//.username)")
         currentUser=
         # VLESS Vision
-        if protocolSelectionIncludes "${type}" 0; then
+        if protocolSelectionIncludes "${type}" 27; then
             currentUser="{\"uuid\":\"${uuid}\",\"flow\":\"xtls-rprx-vision\",\"name\":\"${name}-VLESS_TCP/TLS_Vision\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VLESS WS
-        if protocolSelectionIncludes "${type}" 1; then
+        if protocolSelectionIncludes "${type}" 21; then
             currentUser="{\"uuid\":\"${uuid}\",\"name\":\"${name}-VLESS_WS\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VMess WS
-        if protocolSelectionIncludes "${type}" 3; then
+        if protocolSelectionIncludes "${type}" 22; then
             currentUser="{\"uuid\":\"${uuid}\",\"name\":\"${name}-VMess_WS\",\"alterId\": 0}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # Trojan TCP
-        if protocolSelectionIncludes "${type}" 4; then
+        if protocolSelectionIncludes "${type}" 28; then
             currentUser="{\"password\":\"${uuid}\",\"name\":\"${name}-Trojan_TCP\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
+        # Shadowsocks
+        if protocolSelectionIncludes "${type}" 30; then
+            currentUser="{\"password\":\"${uuid}\",\"name\":\"${name}-shadowsocks\"}"
+            users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
+        fi
+
         # VLESS Reality Vision
-        if protocolSelectionIncludes "${type}" 7; then
+        if protocolSelectionIncludes "${type}" 1; then
             currentUser="{\"uuid\":\"${uuid}\",\"flow\":\"xtls-rprx-vision\",\"name\":\"${name}-VLESS_Reality_Vision\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VLESS Reality gRPC
-        if protocolSelectionIncludes "${type}" 8; then
+        if protocolSelectionIncludes "${type}" 26; then
             currentUser="{\"uuid\":\"${uuid}\",\"name\":\"${name}-VLESS_Reality_gPRC\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # Hysteria2
-        if protocolSelectionIncludes "${type}" 6; then
+        if protocolSelectionIncludes "${type}" 3; then
             currentUser="{\"password\":\"${uuid}\",\"name\":\"${name}-singbox_hysteria2\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # TUIC
-        if protocolSelectionIncludes "${type}" 9; then
+        if protocolSelectionIncludes "${type}" 31; then
             currentUser="{\"uuid\":\"${uuid}\",\"password\":\"${uuid}\",\"name\":\"${name}-singbox_tuic\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
         # Naive
-        if protocolSelectionIncludes "${type}" 10; then
+        if protocolSelectionIncludes "${type}" 5; then
             currentUser="{\"password\":\"${uuid}\",\"username\":\"${name}-singbox_naive\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # VMess HTTPUpgrade
-        if protocolSelectionIncludes "${type}" 11; then
+        if protocolSelectionIncludes "${type}" 23; then
             currentUser="{\"uuid\":\"${uuid}\",\"name\":\"${name}-VMess_HTTPUpgrade\",\"alterId\": 0}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # AnyTLS
-        if protocolSelectionIncludes "${type}" 13; then
+        if protocolSelectionIncludes "${type}" 4; then
             currentUser="{\"password\":\"${uuid}\",\"name\":\"${name}-anytls\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 
-        if protocolSelectionIncludes "${type}" 20; then
+        if protocolSelectionIncludes "${type}" 201; then
             currentUser="{\"username\":\"${uuid}\",\"password\":\"${uuid}\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
@@ -1855,7 +1858,7 @@ initSingBoxClients() {
 
 # 安装 Xray-core
 installXrayReality() {
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
     unInstallSubscribe
     totalProgress=6
@@ -1882,7 +1885,7 @@ installXrayReality() {
 # 安装 sing-box Reality
 installSingBoxReality() {
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
     unInstallSubscribe
     totalProgress=6
@@ -1903,30 +1906,35 @@ installSingBoxReality() {
 customXrayInstall() {
     local preselectedProtocols=${1:-}
     local preselectedMode=${2:-}
+    local allowedIds
+    allowedIds=$(protocolSelectionCurrentIdsForCore xray)
     realityOnlyWithDomain=
     echoContent title "\n┌─ Xray 个性化安装 ──────────────────────────────────"
-    menuLine "可输入单个编号，也可用英文逗号多选，例如 0,1,7"
-    menuLine "推荐新人：优先选 7；需要 CDN/反代时选 12；协议说明来自 registry"
-    menuLine "传统 TLS/WS/gRPC/HTTPUpgrade 协议仅在明确客户端兼容或迁移需要时选择"
+    menuLine "可输入单个编号，也可用英文逗号多选，例如 1,2,21"
+    menuLine "推荐新人：优先选 1；需要 XHTTP 时选 2；协议说明来自能力库"
+    menuLine "WS/gRPC/HTTPUpgrade/传统 TLS 协议仅在明确客户端兼容或迁移需要时选择"
     menuLine "只安装 Reality 时不补传统 TLS 协议；域名 Reality 会额外申请入口域名的本机 TLS 证书"
-    protocolRegistryMenu ",0,1,3,4,7,12,"
+    menuLine "推荐能力"
+    protocolRegistryMenuByLifecycle "${allowedIds}" recommended
+    menuLine "高级能力"
+    protocolRegistryMenuByLifecycle "${allowedIds}" advanced
     menuClose
     if [[ -n "${preselectedProtocols}" ]]; then
         selectCustomInstallType=${preselectedProtocols}
         statusCard "推荐安装" "已选择协议编号: ${selectCustomInstallType}"
     else
-        autoRead protocols "请选择[多选]，[例如:0,1,7]:" selectCustomInstallType
+        autoRead protocols "请选择[多选]，[例如:1,2,21]:" selectCustomInstallType
     fi
     if echo "${selectCustomInstallType}" | grep -q "，"; then
         errorCard "请使用英文逗号分隔"
         exit 0
     fi
-    if [[ "${selectCustomInstallType}" != "12" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
+    if ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
         errorCard "多选请使用英文逗号分隔"
         exit 0
     fi
     if protocolSelectionOnlyRealityNoDomain "${selectCustomInstallType}"; then
-        if [[ "${selectCustomInstallType}" == "7" ]]; then
+        if [[ "${selectCustomInstallType}" == "1" ]]; then
             if [[ "${preselectedMode}" == "domain" ]]; then
                 realityOnlyWithDomain=true
                 statusCard "Reality 安装方式" "已选择域名 Reality：entry 使用自有域名，target/SNI 仍是外部伪装目标"
@@ -1948,16 +1956,13 @@ customXrayInstall() {
         fi
         selectCustomInstallType=",${selectCustomInstallType},"
     else
-        if ! protocolSelectionHasAny "${selectCustomInstallType}" 0; then
-            selectCustomInstallType=",0,${selectCustomInstallType},"
-        else
-            selectCustomInstallType=",${selectCustomInstallType},"
-        fi
+        selectCustomInstallType=",${selectCustomInstallType},"
     fi
     if [[ "${selectCustomInstallType:0:1}" != "," ]]; then
         selectCustomInstallType=",${selectCustomInstallType},"
     fi
-    if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" ",0,1,3,4,7,12,"; then
+    if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
+        protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
         unInstallSubscribe
         # checkBTPanel
@@ -1967,7 +1972,7 @@ customXrayInstall() {
         if [[ -n "${btDomain}" ]]; then
             skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
             coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
-            if [[ "${selectCustomInstallType}" != ",7," || -n "${realityOnlyWithDomain}" ]]; then
+            if [[ "${selectCustomInstallType}" != ",1," || -n "${realityOnlyWithDomain}" ]]; then
                 customPortFunction || return 1
             fi
         else
@@ -2011,7 +2016,16 @@ customXrayInstall() {
         checkGFWStatue 11
         showAccounts 12
     else
-        errorCard "输入不合法"
+        local unsupportedReason=
+        unsupportedReason=$(protocolCoreUnsupportedReason xray "${selectCustomInstallType}" 2>/dev/null || true)
+        if [[ -n "${unsupportedReason}" ]]; then
+            errorCard "${unsupportedReason}"
+        else
+            errorCard "输入不合法"
+        fi
+        if [[ -n "${preselectedProtocols}" || "${AUTO_INSTALL:-}" == "true" ]]; then
+            return 1
+        fi
         customXrayInstall
     fi
 }
@@ -2020,24 +2034,29 @@ customXrayInstall() {
 # sing-box 个性化安装
 customSingBoxInstall() {
     local preselectedProtocols=${1:-}
+    local allowedIds
+    allowedIds=$(protocolSelectionCurrentIdsForCore sing-box)
     echoContent title "\n┌─ sing-box 个性化安装 ───────────────────────────────"
-    menuLine "可输入单个编号，也可用英文逗号多选，例如 0,6,7"
-    menuLine "推荐新人：优先选 7；需要 CDN/反代时用 Xray 选择 12；协议说明来自 registry"
+    menuLine "可输入单个编号，也可用英文逗号多选，例如 1,3,4"
+    menuLine "推荐新人：优先选 1 或 3；XHTTP 为 Xray-only；协议说明来自能力库"
     menuLine "传统 TLS 类协议仅在明确需要兼容；Hysteria2/Tuic 用于 UDP/移动网络，Naive 用于 TLS 指纹抗性，AnyTLS 按需选择"
-    protocolRegistryMenu ",0,1,3,4,6,7,8,9,10,11,13,"
+    menuLine "推荐能力"
+    protocolRegistryMenuByLifecycle "${allowedIds}" recommended
+    menuLine "高级能力"
+    protocolRegistryMenuByLifecycle "${allowedIds}" advanced
 
     menuClose
     if [[ -n "${preselectedProtocols}" ]]; then
         selectCustomInstallType=${preselectedProtocols}
         statusCard "推荐安装" "已选择协议编号: ${selectCustomInstallType}"
     else
-        autoRead protocols "请选择[多选]，[例如:0,6,7]:" selectCustomInstallType
+        autoRead protocols "请选择[多选]，[例如:1,3,4]:" selectCustomInstallType
     fi
     if echo "${selectCustomInstallType}" | grep -q "，"; then
         errorCard "请使用英文逗号分隔"
         exit 0
     fi
-    if [[ "${selectCustomInstallType}" != "10" ]] && [[ "${selectCustomInstallType}" != "11" ]] && [[ "${selectCustomInstallType}" != "13" ]] && ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
+    if ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
         errorCard "多选请使用英文逗号分隔"
         exit 0
     fi
@@ -2048,13 +2067,14 @@ customSingBoxInstall() {
         selectCustomInstallType=",${selectCustomInstallType},"
     fi
 
-    if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" ",0,1,3,4,6,7,8,9,10,11,13,"; then
+    if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
+        protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
         unInstallSubscribe
         totalProgress=9
         installTools 1
         # 申请tls
-        if protocolSelectionNeedsTLS "${selectCustomInstallType}"; then
+        if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             initTLSNginxConfig 2 || return 1
             installTLS 3 || return 1
             coreInstallServiceAction "Nginx 服务停止失败，已取消 sing-box 安装" handleNginx stop || return 1
@@ -2072,7 +2092,16 @@ customSingBoxInstall() {
         checkGFWStatue 8
         showAccounts 9
     else
-        errorCard "输入不合法"
+        local unsupportedReason=
+        unsupportedReason=$(protocolCoreUnsupportedReason sing-box "${selectCustomInstallType}" 2>/dev/null || true)
+        if [[ -n "${unsupportedReason}" ]]; then
+            errorCard "${unsupportedReason}"
+        else
+            errorCard "输入不合法"
+        fi
+        if [[ -n "${preselectedProtocols}" || "${AUTO_INSTALL:-}" == "true" ]]; then
+            return 1
+        fi
         customSingBoxInstall
     fi
 }

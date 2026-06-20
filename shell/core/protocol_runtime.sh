@@ -661,6 +661,47 @@ initXrayRealityPort() {
 
 }
 
+initXrayRealityGrpcPort() {
+    if [[ -n "${xrayVLESSRealityGRPCPort:-}" && -z "${lastInstallationConfig}" ]]; then
+        autoRead reality_grpc_history_port "读取到上次安装记录，Reality gRPC端口为 [${xrayVLESSRealityGRPCPort}]，是否使用？[y/n]:" historyRealityGrpcPortStatus
+        if [[ "${historyRealityGrpcPortStatus}" == "y" ]]; then
+            realityGrpcPort=${xrayVLESSRealityGRPCPort}
+        fi
+    elif [[ -n "${xrayVLESSRealityGRPCPort:-}" && -n "${lastInstallationConfig}" ]]; then
+        realityGrpcPort=${xrayVLESSRealityGRPCPort}
+    fi
+
+    if [[ -z "${realityGrpcPort:-}" ]]; then
+        echoContent yellow "请输入端口[回车随机10000-30000]"
+        autoRead reality_port "端口:" realityGrpcPort
+        if [[ -z "${realityGrpcPort}" ]]; then
+            realityGrpcPort=$((RANDOM % 20001 + 10000))
+        fi
+        if ! validPortNumber "${realityGrpcPort}"; then
+            errorCard "Reality gRPC 端口输入错误"
+            return 1
+        fi
+        if [[ -n "${realityGrpcPort}" && "${xrayVLESSRealityGRPCPort:-}" == "${realityGrpcPort}" ]]; then
+            if ! runCoreServiceActionAllowFailure handleXray stop; then
+                errorCard "Xray 服务停止失败，无法复用当前 Reality gRPC 端口"
+                return 1
+            fi
+        else
+            checkPort "${realityGrpcPort}" || return 1
+        fi
+    fi
+    if [[ -z "${realityGrpcPort}" ]]; then
+        initXrayRealityGrpcPort || return 1
+    else
+        if ! validPortNumber "${realityGrpcPort}"; then
+            errorCard "Reality gRPC 端口输入错误"
+            return 1
+        fi
+        allowPort "${realityGrpcPort}" || return 1
+        statusCard "Reality gRPC 端口" "${realityGrpcPort}"
+    fi
+}
+
 # 初始化XHTTP端口
 initXrayXHTTPort() {
     if [[ -n "${xrayVLESSRealityXHTTPort}" && -z "${lastInstallationConfig}" ]]; then

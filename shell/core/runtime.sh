@@ -646,6 +646,18 @@ parseInstallArgs() {
         --protocols)
             valueVar=AUTO_PROTOCOLS
             ;;
+        --list-protocols)
+            protocolListProtocols
+            exit 0
+            ;;
+        --list-capabilities)
+            protocolListCapabilities
+            exit 0
+            ;;
+        --show-risky-protocols)
+            protocolShowRiskyProtocols
+            exit 0
+            ;;
         --domain)
             valueVar=AUTO_DOMAIN
             ;;
@@ -734,8 +746,8 @@ showInstallArgsHelp() {
 ┌─ padm 非交互安装参数 ──────────────────────────────
 │ 用法: bash install.sh [RenewTLS|UpdateGeo|SyncSubscriptionGroups|SubscriptionControl|InstallSubscription] [options]
 ├─ 新人三步走
-│ 1. 推荐直连: bash install.sh --install-type custom --core xray --protocols 7 --entry-host node.example.com --reality-target www.ibm.com:443
-│ 2. 推荐 CDN: bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443
+│ 1. 推荐直连: bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443
+│ 2. 推荐 XHTTP: bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443
 │ 3. 安装后: 运行 padm -> 订阅与用户；未初始化先选主控或被控，主控走 发布订阅 / 多服务器协同，被控走 接入主控 / 查看本机状态
 ├─ 交互菜单路径
 │ 安装与重装: 含新手选择指引，推荐直连/CDN/无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装
@@ -754,13 +766,16 @@ showInstallArgsHelp() {
 │ Reality target: REALITY 伪装目标站，建议使用真实大型 HTTPS 站点，端口默认 443
 │ Reality SNI: REALITY 握手 SNI，默认等于 target host
 ├─ 常用示例
-│ bash install.sh --install-type custom --core xray --protocols 7 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
-│ bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
+│ bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
+│ bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
 │ bash install.sh --install-type reality --core xray --reality-target www.ibm.com:443 --reuse-last no
 ├─ 参数
 │ --install-type <install|custom|reality>  安装类型；无自动参数时进入交互菜单；有其它自动参数时默认 custom
 │ --core <xray|sing-box|1|2>              安装核心
-│ --protocols <ids>                       自定义安装协议编号，例如 0,1,7
+│ --protocols <ids>                       当前公开公网节点能力编号，例如 1,2,3；旧 0..13/20 已废弃
+│ --list-protocols                        列出可安装公网节点能力
+│ --list-capabilities                     列出公网节点、内部能力和上游已知能力
+│ --show-risky-protocols                  列出带风险提示的高级公网节点能力
 │ --domain <domain>                       TLS 域名
 │ --port <port>                           TLS 入口端口，默认 443
 │ --tls-ca <letsencrypt|zerossl|buypass>  证书 CA，默认 letsencrypt
