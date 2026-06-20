@@ -16,6 +16,8 @@ subscriptionSyncAccountUnescapeId() {
     printf '%s\n' "${id}"
 }
 
+SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ='((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))'
+
 subscriptionSyncAccountName() {
     local id=$1
     echo "sub_$(subscriptionSyncAccountEscapeId "${id}")"
@@ -56,7 +58,7 @@ subscriptionSyncCurrentManagedUsers() {
     }
     jq -c -s '
       [.[] | [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
-       | ((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))
+       | '"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"'
        | select(startswith("sub_"))]
       | unique' "${validFiles[@]}"
 }
@@ -191,13 +193,13 @@ subscriptionSyncRemoveAccountFromFile() {
     [[ -f "${file}" ]] || return 0
     if ! jq -e --arg accountName "${accountName}" '
       [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
-      | select(((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; "")) == $accountName)' "${file}" >/dev/null 2>&1; then
+      | select(('"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"') == $accountName)' "${file}" >/dev/null 2>&1; then
         return
     fi
     padmCreateTempFileForTarget tmpFile "${file}" sync || return 1
     if ! jq --arg accountName "${accountName}" '
-      (.inbounds[]?.settings.clients? // empty) |= map(select(((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; "")) != $accountName)) |
-      (.inbounds[]?.users? // empty) |= map(select(((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; "")) != $accountName))' "${file}" >"${tmpFile}"; then
+      (.inbounds[]?.settings.clients? // empty) |= map(select(('"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"') != $accountName)) |
+      (.inbounds[]?.users? // empty) |= map(select(('"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"') != $accountName))' "${file}" >"${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
@@ -250,7 +252,7 @@ subscriptionSyncAppendProtocolUser() {
     else
         userPath='.inbounds[0].users'
     fi
-    if jq -e --arg accountName "${accountName}" "${userPath}[]? | select(((.email // .name // .username // \"\") | sub(\"-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$\"; \"\")) == \$accountName)" "${file}" >/dev/null 2>&1; then
+    if jq -e --arg accountName "${accountName}" "${userPath}[]? | select((${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}) == \$accountName)" "${file}" >/dev/null 2>&1; then
         return
     fi
     currentClients=$(jq -c "${userPath} // []" "${file}") || return 1
@@ -797,13 +799,18 @@ subscriptionQuotaValidatePlan() {
     ' <<<"${quotaPlan}" >/dev/null 2>&1
 }
 
+subscriptionQuotaPlanIds() {
+    local quotaPlan=$1
+    subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
+    jq -r '.[].id // empty' <<<"${quotaPlan}"
+}
+
 applySubscriptionQuotaPlan() {
     local quotaPlan=$1
     local id
     local planIds
     local rc=0
-    subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
-    planIds=$(jq -r '.[].id' <<<"${quotaPlan}") || return 1
+    planIds=$(subscriptionQuotaPlanIds "${quotaPlan}") || return 1
     while IFS= read -r id; do
         [[ -n "${id}" ]] || continue
         if ! userSubscriptionExists "${id}"; then
@@ -821,11 +828,10 @@ applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
     local rc=0
-    subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
     accountPlan=$(
         {
             printf '{"create":[],"remove":'
-            jq -r '.[].id // empty' <<<"${quotaPlan}" | subscriptionSyncAccountNamesJsonFromIds
+            subscriptionQuotaPlanIds "${quotaPlan}" | subscriptionSyncAccountNamesJsonFromIds
             printf '}'
         }
     ) || return 1
