@@ -907,30 +907,6 @@ subscriptionControlToken() {
     tr -d '[:space:]' <"${tokenFile}"
 }
 
-subscriptionControlAuthorized() {
-    local token=$1
-    local currentToken
-    currentToken=$(subscriptionControlToken 2>/dev/null || true)
-    [[ -n "${currentToken}" && "${token}" == "${currentToken}" ]]
-}
-
-subscriptionControlValidateSyncPayload() {
-    local payload=$1
-    jq -e '
-      def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
-      type == "object" and
-      (.desired_users? | type == "array") and
-      ((has("dry_run") | not) or (.dry_run | type == "boolean")) and
-      all(.desired_users[]?; type == "object" and
-        (.id | valid_id) and
-        ((has("uuid") | not) or (.uuid | type == "string")) and
-        ((has("name") | not) or (.name | type == "string")) and
-        ((has("account") | not) or (.account | type == "string")) and
-        ((has("traffic_limit_gb") | not) or ((.traffic_limit_gb | type) as $type | $type == "number" or $type == "string"))) and
-      ([.desired_users[]?.id] | length) == ([.desired_users[]?.id] | unique | length)
-    ' <<<"${payload}" >/dev/null 2>&1
-}
-
 subscriptionControlCreateUsersFromPlan() {
     local desiredUsers=$1
     local createAccounts=$2
@@ -1061,7 +1037,19 @@ subscriptionControlApplySync() {
     local outputBackupDir=
     local prepareFailureMessage=
     local refreshPublishedStatus=0
-    if ! subscriptionControlValidateSyncPayload "${payload}"; then
+    if ! jq -e '
+      def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
+      type == "object" and
+      (.desired_users? | type == "array") and
+      ((has("dry_run") | not) or (.dry_run | type == "boolean")) and
+      all(.desired_users[]?; type == "object" and
+        (.id | valid_id) and
+        ((has("uuid") | not) or (.uuid | type == "string")) and
+        ((has("name") | not) or (.name | type == "string")) and
+        ((has("account") | not) or (.account | type == "string")) and
+        ((has("traffic_limit_gb") | not) or ((.traffic_limit_gb | type) as $type | $type == "number" or $type == "string"))) and
+      ([.desired_users[]?.id] | length) == ([.desired_users[]?.id] | unique | length)
+    ' <<<"${payload}" >/dev/null 2>&1; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     fi
@@ -1151,8 +1139,11 @@ handleSubscriptionControl() {
     local endpoint=${1:-}
     local token=${2:-${PADM_CONTROL_TOKEN:-}}
     local payload=${3:-}
+    local currentToken=
+    local account=
     ensureSubscriptionGroupsState
-    if ! subscriptionControlAuthorized "${token}"; then
+    currentToken=$(subscriptionControlToken 2>/dev/null || true)
+    if [[ -z "${currentToken}" || "${token}" != "${currentToken}" ]]; then
         jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
         return 1
     fi
@@ -1175,19 +1166,22 @@ handleSubscriptionControl() {
             jq -n '{ok:false, error:"empty_payload", error_detail:{type:"empty_payload", message:"订阅请求体为空"}}'
             return 1
         fi
-        subscriptionControlRenderSubscribe "${payload}"
+        if ! jq -e '
+          def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
+          type == "object" and (.account? | valid_id)
+        ' <<<"${payload}" >/dev/null 2>&1; then
+            jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
+            return 1
+        fi
+        account=$(jq -r '.account' <<<"${payload}") || {
+            jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
+            return 1
+        }
+        subscriptionControlRenderSubscribeAccount "${account}"
     else
         jq -n '{ok:false, error:"unknown_endpoint", error_detail:{type:"unknown_endpoint", message:"未知控制端点"}}'
         return 1
     fi
-}
-
-subscriptionControlValidateSubscribePayload() {
-    local payload=$1
-    jq -e '
-      def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
-      type == "object" and (.account? | valid_id)
-    ' <<<"${payload}" >/dev/null 2>&1
 }
 
 subscriptionControlRenderSubscribeAccount() {
@@ -1262,18 +1256,4 @@ subscriptionControlRenderSubscribeAccount() {
         --arg clashMeta "${clashContent}" \
         --argjson singBox "${singBoxContent}" \
         '{ok:true, account:$account, default:$default, clash_meta:$clashMeta, sing_box:$singBox}'
-}
-
-subscriptionControlRenderSubscribe() {
-    local payload=$1
-    local account=
-    if ! subscriptionControlValidateSubscribePayload "${payload}"; then
-        jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
-        return 1
-    fi
-    account=$(jq -r '.account' <<<"${payload}") || {
-        jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
-        return 1
-    }
-    subscriptionControlRenderSubscribeAccount "${account}"
 }

@@ -159,6 +159,53 @@ runRemoteControlHealthRegression() (
     [[ "${response}" == *'"name":"Edge Remote"'* ]]
 )
 
+runRemoteControlHandleInlineHelpersRegression() (
+    local controlRoot="${TMP_DIR}/remote-control-handle-inline-helpers"
+    local healthResponse
+    local syncResponse
+    local subscribeResponse
+
+    mkdir -p "${controlRoot}/state"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/state"
+    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
+    printf 'test-token\n' >"$(subscriptionControlTokenFile)"
+
+    getScriptVersion() {
+        printf 'test\n'
+    }
+    subscriptionControlAuthorized() {
+        return 1
+    }
+    subscriptionControlValidateSyncPayload() {
+        return 1
+    }
+    subscriptionControlValidateSubscribePayload() {
+        return 1
+    }
+    subscriptionControlRenderSubscribe() {
+        return 97
+    }
+    subscriptionSyncAccountNamesJsonFromIds() {
+        printf '["sub_team_a"]'
+    }
+    subscriptionSyncPlanFromAccounts() {
+        printf '{"create":[],"remove":[]}'
+    }
+    subscriptionControlRenderSubscribeAccount() {
+        printf '{"ok":true,"account":"team_a","default":"","clash_meta":"","sing_box":[]}\n'
+    }
+
+    healthResponse=$(handleSubscriptionControl health test-token | jq -c .)
+    [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync","subscribe"]'* ]]
+
+    syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a"}],"dry_run":false}' | jq -c .)
+    [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":false'* ]]
+    [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
+
+    subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}' | jq -c .)
+    [[ "${subscribeResponse}" == *'"ok":true'*'"account":"team_a"'* ]]
+)
+
 runRemoteControlServerRefreshRegression() (
     local refreshMode=${1:-full}
     local lightMode=${2:-all}
@@ -1495,7 +1542,8 @@ PY
 runRegressionRemoteControlSmokeCoreSteps() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
-        runRegressionStep remote-control-health runRemoteControlHealthRegression
+        runRegressionStep remote-control-health runRemoteControlHealthRegression &&
+        runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
 }
 
 runRegressionRemoteControlSmokeRefreshApplyBasicSteps() {
