@@ -177,12 +177,13 @@ subscriptionSyncPlanFromAccounts() {
 
 subscriptionSyncPlan() {
     local desiredAccountsJson
+    local enabledUsers
+    enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
     desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(
-        subscriptionActiveGroupRead -r '
-          .user_groups[]?
-          | select(.enabled == true)
+        jq -r '
+          .[]?
           | select((.allowed_sources | index("main")) or (.allowed_sources | index("*")))
-          | .id'
+          | .id' <<<"${enabledUsers}"
     )) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }

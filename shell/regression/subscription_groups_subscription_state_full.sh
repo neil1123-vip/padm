@@ -499,12 +499,8 @@ runSubscriptionGroupStateQuotaPartialSyncPlanRegression() {
         subscriptionSyncDesiredLocalUsers() {
             return 96
         }
-        subscriptionActiveGroupRead() {
-            if [[ "$*" == *".user_groups[]?"* && "$*" == *'select(.enabled == true)'* && "$*" == *'index("main")'* ]]; then
-                printf 'team-a\n'
-                return 0
-            fi
-            return 1
+        subscriptionActiveEnabledUsersJson() {
+            printf '[{"id":"team-a","allowed_sources":["main"]}]\n'
         }
         subscriptionSyncAccountNamesJsonFromIds() {
             printf '%s' '["sub_team_a"]'

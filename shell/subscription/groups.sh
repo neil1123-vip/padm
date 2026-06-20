@@ -330,6 +330,21 @@ subscriptionActiveGroupWrite() {
     subscriptionGroupWrite "$(activeSubscriptionGroupId)" "$@"
 }
 
+subscriptionActiveEnabledUsersJson() {
+    subscriptionActiveGroupRead -c '
+      [.user_groups[]?
+       | select(.enabled == true)
+       | (.allowed_sources // []) as $allowed
+       | {
+           id,
+           name,
+           uuid: (.uuid // ""),
+           traffic_limit_gb: (.traffic_limit_gb // 0),
+           account: (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'),
+           allowed_sources: $allowed
+         }]'
+}
+
 addUserSubscriptionState() {
     local id=$1
     local name=$2

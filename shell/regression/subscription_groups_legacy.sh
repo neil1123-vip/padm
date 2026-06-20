@@ -10248,15 +10248,14 @@ configPath="${oldConfigPath}"
         return 97
     }
     subscriptionActiveGroupRead() {
-        if [[ "$*" == *'--arg id team-a'* && "$*" == *'.allowed_sources // []'* ]]; then
-            printf '["edge"]\n'
-            return 0
-        fi
         if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'.id as $sid | $allowed | index($sid)'* ]]; then
             printf 'example.com:443:edge:https\n'
             return 0
         fi
         return 1
+    }
+    subscriptionActiveEnabledUsersJson() {
+        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}]\n'
     }
     sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
     [[ "${sourceLines}" == "example.com:443:edge:https" ]]
@@ -10462,6 +10461,27 @@ grep -qxF "naive+https://tls-naive-user:pass-naive@tls.example.com:443?padding=t
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-naive-user" ]]
 unset REGRESSION_ECHO_LOG
 }
+
+runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
+    local sourceLines
+
+    subscriptionSyncAccountIdFromName() {
+        return 97
+    }
+    subscriptionActiveEnabledUsersJson() {
+        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}]\n'
+    }
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'.id as $sid | $allowed | index($sid)'* ]]; then
+            printf 'example.com:443:edge:https\n'
+            return 0
+        fi
+        return 1
+    }
+
+    sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
+    [[ "${sourceLines}" == "example.com:443:edge:https" ]]
+)
 
 runSubscriptionGroupStateRegression() {
     ensureSubscriptionGroupsState
@@ -10888,12 +10908,8 @@ JSON
         subscriptionSyncDesiredLocalUsers() {
             return 96
         }
-        subscriptionActiveGroupRead() {
-            if [[ "$*" == *".user_groups[]?"* && "$*" == *'select(.enabled == true)'* && "$*" == *'index("main")'* ]]; then
-                printf 'team-a\n'
-                return 0
-            fi
-            return 1
+        subscriptionActiveEnabledUsersJson() {
+            printf '[{"id":"team-a","allowed_sources":["main"]}]\n'
         }
         subscriptionSyncAccountNamesJsonFromIds() {
             cat >"${capturedSyncPlanIds}"
@@ -17286,6 +17302,7 @@ runRegressionFast() {
 runRegressionTargetedBatchHelpers() {
     runRegressionStep core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression &&
         runRegressionStep core-selection-retry-action runCoreSelectionRetryActionRegression &&
+        runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression &&
         runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
         runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&
@@ -17336,7 +17353,8 @@ runRegressionRouting() {
 }
 
 runRegressionSubscriptionOutput() {
-    runRegressionStep subscription-output runSubscriptionOutputRegression
+    runRegressionStep subscription-output runSubscriptionOutputRegression &&
+        runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
 }
 
 runRegressionSubscriptionState() {

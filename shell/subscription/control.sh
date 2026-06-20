@@ -8,16 +8,15 @@ subscriptionRemoteControlSources() {
 subscriptionRemoteDesiredUsersBySource() {
     local sources=$1
     local sourceIds
+    local enabledUsers
     sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
-    subscriptionActiveGroupRead -c --argjson sourceIds "${sourceIds}" '
-      . as $group |
-      ($group.user_groups // []) as $users |
+    enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
+    jq -c -n --argjson sourceIds "${sourceIds}" --argjson users "${enabledUsers}" '
       reduce $sourceIds[]? as $sourceId ({};
         .[$sourceId] = [
           $users[]?
-          | select(.enabled == true)
           | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
-          | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0), account: (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"')}
+          | {id, name, uuid, traffic_limit_gb, account}
         ])
     ' || return 1
 }
