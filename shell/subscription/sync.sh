@@ -17,6 +17,7 @@ subscriptionSyncAccountUnescapeId() {
 }
 
 SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ='((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))'
+SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ='"sub_" + (((. | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))'
 
 subscriptionSyncAccountName() {
     local id=$1
@@ -152,7 +153,7 @@ subscriptionSyncAccountNamesJsonFromIds() {
       | map(select(length > 0))
       | map(
           . as $id
-          | "sub_" + (($id | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))
+          | ($id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"')
         )
       | unique
     '

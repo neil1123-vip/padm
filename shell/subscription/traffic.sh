@@ -170,7 +170,7 @@ collectLocalTrafficAccounts() {
     }
     jq -c -s '
       [.[] | [.inbounds[]?.settings.clients[]?, .inbounds[]?.users[]?][]?
-       | (.email // .name // .username // empty | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))
+       | '"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"'
        | select(length > 0)]
       | unique' "${files[@]}" 2>/dev/null
 }
@@ -258,8 +258,6 @@ writeSubscriptionTrafficSnapshot() {
         return 1
     fi
     subscriptionActiveGroupWrite --argjson snapshot "${snapshot}" '
-      def account_name($id):
-        "sub_" + ((($id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
       def addTraffic($items): reduce $items[] as $item ({upload:0, download:0}; .upload += ($item.upload // 0) | .download += ($item.download // 0));
       def sourceTotal($prev; $current):
         ($prev // {upload:0, download:0, counters:{}}) as $old |
@@ -272,7 +270,7 @@ writeSubscriptionTrafficSnapshot() {
           .download += (if ($oldCounters | has($item.account)) and $downloadDelta > 0 then $downloadDelta else 0 end) |
           .counters[$item.account] = {upload: ($item.upload // 0), download: ($item.download // 0)})) as $delta |
         {upload: (($old.upload // 0) + $delta.upload), download: (($old.download // 0) + $delta.download), counters: $delta.counters, updated_at: (now | strftime("%F %T"))};
-      (.user_groups // [] | map({key: account_name(.id), value: .id}) | from_entries) as $userMap |
+      (.user_groups // [] | map({key: (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'), value: .id}) | from_entries) as $userMap |
       . as $group |
       ($snapshot.items | map(. + {id: ($userMap[.account] // .account)})) as $items |
       ($items | map(select(.account | startswith("sub_")))) as $userItems |

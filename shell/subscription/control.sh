@@ -10,8 +10,6 @@ subscriptionRemoteDesiredUsersBySource() {
     local sourceIds
     sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
     subscriptionActiveGroupRead -c --argjson sourceIds "${sourceIds}" '
-      def account_name:
-        "sub_" + (((. | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
       . as $group |
       ($group.user_groups // []) as $users |
       reduce $sourceIds[]? as $sourceId ({};
@@ -19,7 +17,7 @@ subscriptionRemoteDesiredUsersBySource() {
           $users[]?
           | select(.enabled == true)
           | select((.allowed_sources | index($sourceId)) or (.allowed_sources | index("*")))
-          | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0), account: (.id | account_name)}
+          | {id, name, uuid: (.uuid // ""), traffic_limit_gb: (.traffic_limit_gb // 0), account: (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"')}
         ])
     ' || return 1
 }
@@ -895,12 +893,10 @@ subscriptionControlCreateUsersFromPlan() {
     jq -c -n \
       --argjson desiredUsers "${desiredUsers}" \
       --argjson createAccounts "${createAccounts}" '
-      def account_name($id):
-        "sub_" + ((($id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
       [ $desiredUsers[]?
         | select((.id // "") != "")
         | . as $user
-        | account_name($user.id) as $account
+        | ($user.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"') as $account
         | select(any($createAccounts[]?; . == $account))
         | ($user.uuid // "") as $uuid
         | select($uuid != "")
