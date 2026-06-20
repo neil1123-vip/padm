@@ -434,6 +434,57 @@ runRemoteControlInlineTokenConsumersRegression() (
     ! grep -q '^failure	' "${statusLog}" || return 1
 )
 
+runRemoteControlInlineSyncRunnerRegression() (
+    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
+    local desiredUsersBySourceJson='{"edge-remote":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
+    local statusLog="${TMP_DIR}/remote-control-inline-sync-runner.status"
+    local sourceResultLog="${TMP_DIR}/remote-control-inline-sync-runner.calls"
+    local syncFailures
+
+    : >"${sourceResultLog}"
+
+    subscriptionRemoteControlSources() {
+        printf '[%s]\n' "${remoteSourceJson}"
+    }
+    subscriptionRemoteDesiredUsersBySource() {
+        printf '%s\n' "${desiredUsersBySourceJson}"
+    }
+    subscriptionRemoteControlPayload() {
+        return 96
+    }
+    subscriptionRemoteControlRequest() {
+        return 97
+    }
+    subscriptionRemoteSyncPlanForSource() {
+        local sourceJson=$1
+        local desiredUsersBySource=$2
+        local dryRun=${3:-true}
+        printf '1\n' >>"${sourceResultLog}"
+        [[ "$(jq -r '.id' <<<"${sourceJson}")" == "edge-remote" ]] || return 1
+        [[ "${dryRun}" == "false" ]] || return 1
+        jq -e '.["edge-remote"][0].account == "sub_team_a"' <<<"${desiredUsersBySource}" >/dev/null || return 1
+        jq -n \
+            --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
+            --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}' \
+            '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
+    }
+    setSubscriptionSourceSyncStatus() {
+        printf 'status\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${statusLog}"
+    }
+    setSubscriptionSourceSyncFailure() {
+        printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
+    }
+
+    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null || true)
+    [[ -n "${syncFailures}" ]] || return 1
+    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
+    [[ "${syncFailures}" == '[]' ]] || return 1
+    [[ "$(wc -l <"${sourceResultLog}")" == "1" ]] || return 1
+    [[ -f "${statusLog}" ]] || return 1
+    grep -Fqx $'status\tedge-remote\tsuccess\tfalse\t{"create":[],"remove":[]}' "${statusLog}" || return 1
+    ! grep -q '^failure	' "${statusLog}" || return 1
+)
+
 runRemoteControlHandleInlineHelpersRegression() (
     local controlRoot="${TMP_DIR}/remote-control-handle-inline-helpers"
     local healthResponse
@@ -1822,6 +1873,7 @@ runRegressionRemoteControlSmokeCoreSteps() {
         runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression &&
         runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression &&
         runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression &&
+        runRegressionStep remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression &&
         runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
 }
 

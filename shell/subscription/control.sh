@@ -338,26 +338,32 @@ subscriptionRemoteControlHealthAll() {
 subscriptionRemoteSyncPlanForSource() {
     local source=$1
     local desiredUsersBySource=${2:-}
+    local dryRun=${3:-true}
     local sourceId
     local payload
     local response
     local errorMessage
 
     sourceId=$(jq -r '.id' <<<"${source}")
-    payload=$(subscriptionRemoteControlPayload "${source}" true "${desiredUsersBySource}") || return 1
+    payload=$(subscriptionRemoteControlPayload "${source}" "${dryRun}" "${desiredUsersBySource}") || return 1
     if subscriptionRemoteSourceSelfReference "${source}"; then
-        jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归同步"}, dry_run:true, request:$payload}'
+        jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"self_reference", error_detail:{type:"self_reference", message:"服务器源指向当前订阅服务，已跳过以避免递归同步"}, dry_run:$dryRun, request:$payload}'
     elif [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
-        jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}, dry_run:true, request:$payload}'
-    elif response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
-        if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
-            jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" '{source_id:$sourceId, status:"success", dry_run:true, request:$payload, response:$response}'
-        else
-            errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
-            jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}, dry_run:true, request:$payload, response:$response}'
-        fi
+        jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}, dry_run:$dryRun, request:$payload}'
     else
-        jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或同步请求失败"}, dry_run:true, request:$payload}'
+        if [[ "${dryRun}" != "true" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
+            subscriptionRemoteControlWarmup "${source}" >/dev/null 2>&1 || true
+        fi
+        if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
+            if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
+                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"success", dry_run:$dryRun, request:$payload, response:$response}'
+            else
+                errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
+                jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
+            fi
+        else
+            jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或同步请求失败"}, dry_run:$dryRun, request:$payload}'
+        fi
     fi
 }
 
@@ -427,42 +433,51 @@ runSubscriptionRemoteSync() {
     local sources
     local desiredUsersBySource='{}'
     local sourceId
-    local payload
-    local response
+    local sourceResult
+    local status
     local errorMessage
+    local changed
+    local plan
     local failures='[]'
     sources=$(subscriptionRemoteControlSources)
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
     fi
     while IFS= read -r source; do
-        sourceId=$(jq -r '.id' <<<"${source}")
-        if subscriptionRemoteSourceSelfReference "${source}"; then
+        sourceResult=$(subscriptionRemoteSyncPlanForSource "${source}" "${desiredUsersBySource}" false 2>/dev/null) || return 1
+        sourceId=$(jq -r '.source_id // empty' <<<"${sourceResult}") || return 1
+        [[ -n "${sourceId}" ]] || return 1
+        status=$(jq -r '.status // empty' <<<"${sourceResult}") || return 1
+        case "${status}" in
+        self_reference)
+            errorMessage=$(jq -r '.error_detail.message // "服务器源指向当前订阅服务，已跳过以避免递归同步"' <<<"${sourceResult}") || return 1
             setSubscriptionSourceSyncFailure "${sourceId}" self_reference "服务器源指向当前订阅服务，已跳过以避免递归同步"
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 指向当前订阅服务，已跳过"]' <<<"${failures}")
-            continue
-        fi
-        if [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
-            setSubscriptionSourceSyncFailure "${sourceId}" missing_token "未配置控制 token"
+            ;;
+        missing_token)
+            errorMessage=$(jq -r '.error_detail.message // "未配置控制 token"' <<<"${sourceResult}") || return 1
+            setSubscriptionSourceSyncFailure "${sourceId}" missing_token "${errorMessage}"
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 未配置控制 token"]' <<<"${failures}")
-            continue
-        fi
-        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            subscriptionRemoteControlWarmup "${source}" >/dev/null 2>&1 || true
-        fi
-        payload=$(subscriptionRemoteControlPayload "${source}" false "${desiredUsersBySource}") || return 1
-        if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
-            if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
-                setSubscriptionSourceSyncStatus "${sourceId}" success "$(jq -r 'if has("changed") then .changed else true end' <<<"${response}")" "$(jq -c '.plan // {create: [], remove: []}' <<<"${response}")"
-            else
-                errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
-                setSubscriptionSourceSyncFailure "${sourceId}" remote_error "${errorMessage}"
-                failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 拒绝同步: " + $errorMessage]' <<<"${failures}")
-            fi
-        else
-            setSubscriptionSourceSyncFailure "${sourceId}" unreachable "不可达或同步请求失败"
+            ;;
+        success)
+            changed=$(jq -r 'if (.response | has("changed")) then .response.changed else true end' <<<"${sourceResult}") || return 1
+            plan=$(jq -c '.response.plan // {create: [], remove: []}' <<<"${sourceResult}") || return 1
+            setSubscriptionSourceSyncStatus "${sourceId}" success "${changed}" "${plan}"
+            ;;
+        remote_error)
+            errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${sourceResult}") || return 1
+            setSubscriptionSourceSyncFailure "${sourceId}" remote_error "${errorMessage}"
+            failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 拒绝同步: " + $errorMessage]' <<<"${failures}")
+            ;;
+        unreachable)
+            errorMessage=$(jq -r '.error_detail.message // "不可达或同步请求失败"' <<<"${sourceResult}") || return 1
+            setSubscriptionSourceSyncFailure "${sourceId}" unreachable "${errorMessage}"
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 不可达或同步请求失败"]' <<<"${failures}")
-        fi
+            ;;
+        *)
+            return 1
+            ;;
+        esac
     done < <(jq -c '.[]' <<<"${sources}")
     echo "${failures}"
 }
