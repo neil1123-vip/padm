@@ -511,10 +511,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     subscriptionControlRenderSubscribe() {
         return 97
     }
-    subscriptionSyncAccountNamesJsonFromIds() {
-        printf '["sub_team_a"]'
-    }
-    subscriptionSyncPlanFromAccounts() {
+    subscriptionSyncAccountPlanFromIds() {
         printf '{"create":[],"remove":[]}'
     }
     subscriptionControlRenderSubscribeAccount() {

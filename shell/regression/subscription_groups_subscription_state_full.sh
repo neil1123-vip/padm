@@ -495,22 +495,22 @@ JSON
 
 runSubscriptionGroupStateQuotaPartialSyncPlanRegression() {
     (
-        local capturedDesiredAccounts="${TMP_DIR}/subscription-state-quota-partial-sync-plan-accounts.json"
+        local capturedSyncPlanIds="${TMP_DIR}/subscription-state-quota-partial-sync-plan-ids.txt"
+        local capturedSyncPlanMode="${TMP_DIR}/subscription-state-quota-partial-sync-plan-mode.txt"
         subscriptionSyncDesiredLocalUsers() {
             return 96
         }
         subscriptionActiveEnabledUsersJson() {
-            printf '[{"id":"team-a","allowed_sources":["main"]}]\n'
+            printf '[{"id":"team-a","allowed_sources":["main"],"allows_main":true}]\n'
         }
-        subscriptionSyncAccountNamesJsonFromIds() {
-            printf '%s' '["sub_team_a"]'
-        }
-        subscriptionSyncPlanFromAccounts() {
-            printf '%s\n' "$1" >"${capturedDesiredAccounts}"
-            jq -n --argjson desired "$1" '{create:[], remove:$desired}'
+        subscriptionSyncAccountPlanFromIds() {
+            printf '%s\n' "$1" >"${capturedSyncPlanMode}"
+            cat >"${capturedSyncPlanIds}"
+            printf '{"create":[],"remove":["sub_team_a"]}\n'
         }
         subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
-        jq -e '. == ["sub_team_a"]' "${capturedDesiredAccounts}" >/dev/null
+        grep -qx 'sync' "${capturedSyncPlanMode}"
+        grep -qx 'team-a' "${capturedSyncPlanIds}"
     )
 }
 

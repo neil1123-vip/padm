@@ -1001,7 +1001,6 @@ subscriptionControlApplySync() {
     local payload=$1
     local dryRun
     local desiredUsers
-    local desiredAccountsJson
     local plan
     local previousGroupsState
     local configBackupDir=
@@ -1029,11 +1028,7 @@ subscriptionControlApplySync() {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     }
-    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(jq -r '.[].id' <<<"${desiredUsers}")) || {
-        jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划生成失败"}}'
-        return 1
-    }
-    if ! plan=$(subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"); then
+    if ! plan=$(subscriptionSyncAccountPlanFromIds sync < <(jq -r '.[].id' <<<"${desiredUsers}")); then
         jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划生成失败"}}'
         return 1
     fi

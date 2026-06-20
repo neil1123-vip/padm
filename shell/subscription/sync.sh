@@ -175,6 +175,24 @@ subscriptionSyncAccountNamesJsonFromIds() {
     '
 }
 
+subscriptionSyncAccountPlanFromIds() {
+    local mode=$1
+    local desiredAccountsJson
+
+    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds) || return 1
+    case "${mode}" in
+    sync)
+        subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
+        ;;
+    remove)
+        jq -n --argjson remove "${desiredAccountsJson}" '{create:[], remove:$remove}'
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+}
+
 subscriptionSyncAccountIdMapJsonFromIds() {
     jq -R -s '
       split("\n")
@@ -197,16 +215,16 @@ subscriptionSyncPlanFromAccounts() {
 }
 
 subscriptionSyncPlan() {
-    local desiredAccountsJson
     local enabledUsers
+    local plan
     enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
-    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(
+    plan=$(subscriptionSyncAccountPlanFromIds sync < <(
         jq -r '
           .[]?
           | select((.allows_main // false) == true)
           | .id' <<<"${enabledUsers}"
     )) || return 1
-    subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
+    printf '%s\n' "${plan}"
 }
 
 subscriptionSyncRemoveAccountFromFile() {
@@ -862,13 +880,7 @@ applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
     local rc=0
-    accountPlan=$(
-        {
-            printf '{"create":[],"remove":'
-            subscriptionQuotaPlanIds "${quotaPlan}" | subscriptionSyncAccountNamesJsonFromIds
-            printf '}'
-        }
-    ) || return 1
+    accountPlan=$(subscriptionSyncAccountPlanFromIds remove < <(subscriptionQuotaPlanIds "${quotaPlan}")) || return 1
     if jq -e '.remove | length > 0' <<<"${accountPlan}" >/dev/null 2>&1; then
         if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
             rc=1

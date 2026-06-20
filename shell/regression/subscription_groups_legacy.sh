@@ -10870,17 +10870,20 @@ JSON
         local quotaBatchPlan='[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"team-b","action":"disable-and-remove-local-account"}]'
         local capturedAccountPlan="${TMP_DIR}/subscription-quota-account-plan.json"
         local capturedQuotaAccountIds="${TMP_DIR}/subscription-quota-account-ids.txt"
+        local capturedQuotaPlanMode="${TMP_DIR}/subscription-quota-account-plan-mode.txt"
         local oldSubscriptionSyncApplyAccountPlanTransaction
         eval "$(declare -f subscriptionSyncApplyAccountPlanTransaction | sed '1s/^subscriptionSyncApplyAccountPlanTransaction/originalSubscriptionSyncApplyAccountPlanTransaction/')"
-        subscriptionSyncAccountNamesJsonFromIds() {
+        subscriptionSyncAccountPlanFromIds() {
+            printf '%s\n' "$1" >"${capturedQuotaPlanMode}"
             cat >"${capturedQuotaAccountIds}"
-            printf '["quota_team_a","quota_team_b"]\n'
+            printf '{"create":[],"remove":["quota_team_a","quota_team_b"]}\n'
         }
         subscriptionSyncApplyAccountPlanTransaction() {
             printf '%s\n' "$1" >"${capturedAccountPlan}"
             return 0
         }
         applySubscriptionQuotaPlanAccounts "${quotaBatchPlan}"
+        grep -qx 'remove' "${capturedQuotaPlanMode}"
         grep -qx 'team-a' "${capturedQuotaAccountIds}"
         grep -qx 'team-b' "${capturedQuotaAccountIds}"
         jq -e '.create == [] and .remove == ["quota_team_a", "quota_team_b"]' "${capturedAccountPlan}" >/dev/null
@@ -10914,45 +10917,39 @@ JSON
     )
     (
         local capturedSyncPlanIds="${TMP_DIR}/subscription-sync-plan-ids.txt"
-        local capturedSyncPlanAccounts="${TMP_DIR}/subscription-sync-plan-accounts.json"
+        local capturedSyncPlanMode="${TMP_DIR}/subscription-sync-plan-mode.txt"
         subscriptionSyncDesiredLocalUsers() {
             return 96
         }
         subscriptionActiveEnabledUsersJson() {
             printf '[{"id":"team-a","allowed_sources":["main"],"allows_main":true}]\n'
         }
-        subscriptionSyncAccountNamesJsonFromIds() {
+        subscriptionSyncAccountPlanFromIds() {
+            printf '%s\n' "$1" >"${capturedSyncPlanMode}"
             cat >"${capturedSyncPlanIds}"
-            printf '["plan_team_a"]\n'
-        }
-        subscriptionSyncPlanFromAccounts() {
-            printf '%s\n' "$1" >"${capturedSyncPlanAccounts}"
-            jq -n --argjson desired "$1" '{create:[], remove:$desired}'
+            printf '{"create":[],"remove":["plan_team_a"]}\n'
         }
         subscriptionSyncPlan | jq -e '.remove == ["plan_team_a"]' >/dev/null
+        grep -qx 'sync' "${capturedSyncPlanMode}"
         grep -qx 'team-a' "${capturedSyncPlanIds}"
-        jq -e '. == ["plan_team_a"]' "${capturedSyncPlanAccounts}" >/dev/null
-        unset -f subscriptionSyncDesiredLocalUsers subscriptionActiveGroupRead subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
+        unset -f subscriptionSyncDesiredLocalUsers subscriptionActiveGroupRead subscriptionSyncAccountPlanFromIds
     )
     (
         local capturedControlSyncPlanIds="${TMP_DIR}/subscription-control-sync-plan-ids.txt"
-        local capturedControlSyncPlanAccounts="${TMP_DIR}/subscription-control-sync-plan-accounts.json"
+        local capturedControlSyncPlanMode="${TMP_DIR}/subscription-control-sync-plan-mode.txt"
         subscriptionControlSyncPlan() {
             return 97
         }
-        subscriptionSyncAccountNamesJsonFromIds() {
+        subscriptionSyncAccountPlanFromIds() {
+            printf '%s\n' "$1" >"${capturedControlSyncPlanMode}"
             cat >"${capturedControlSyncPlanIds}"
-            printf '["control_team_a"]\n'
-        }
-        subscriptionSyncPlanFromAccounts() {
-            printf '%s\n' "$1" >"${capturedControlSyncPlanAccounts}"
-            jq -n --argjson desired "$1" '{create:[], remove:$desired}'
+            printf '{"create":[],"remove":["control_team_a"]}\n'
         }
         subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":true}' |
             jq -e '.ok == true and .dry_run == true and .changed == true and .plan.remove == ["control_team_a"]' >/dev/null
+        grep -qx 'sync' "${capturedControlSyncPlanMode}"
         grep -qx 'team-a' "${capturedControlSyncPlanIds}"
-        jq -e '. == ["control_team_a"]' "${capturedControlSyncPlanAccounts}" >/dev/null
-        unset -f subscriptionControlSyncPlan subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
+        unset -f subscriptionControlSyncPlan subscriptionSyncAccountPlanFromIds
     )
     local oldConfigPath="${configPath:-}"
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"
