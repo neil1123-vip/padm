@@ -60,13 +60,13 @@ bash install.sh --help
 推荐直连 Reality Vision：
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 7 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
 ```
 
 推荐 CDN Reality XHTTP：
 
 ```bash
-bash install.sh --install-type custom --core xray --protocols 12 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
+bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com --reuse-last no
 ```
 
 无域名 Reality：
@@ -78,8 +78,10 @@ bash install.sh --install-type reality --core xray --reality-target www.ibm.com:
 NaiveProxy：
 
 ```bash
-bash install.sh --install-type custom --core sing-box --protocols 10 --domain naive.example.com --port 443 --reuse-last no
+bash install.sh --install-type custom --core sing-box --protocols 5 --domain naive.example.com --port 443 --reuse-last no
 ```
+
+多个协议可以逗号分隔，例如 `--protocols 1,2,21`。当前公开 ID 是唯一安装入口，旧版 `0..13/20` 编号已废弃；已有旧配置需要重新选择当前公开 ID 后重装或调整。
 
 传统 TLS 兼容安装，Cloudflare DNS-01 可全程非交互：
 
@@ -181,34 +183,62 @@ padm 不是单个超长 Bash 文件，而是“自刷新入口 + 分模块运行
 
 | 目标 | 推荐协议 | 说明 |
 | --- | --- | --- |
-| 新手直连、有域名或普通自用 | `7. VLESS Reality Vision` | 当前主线推荐；不依赖本机伪装站点。 |
-| CDN / 反代 | `12. VLESS Reality XHTTP` | 新建 CDN 节点优先；使用 XHTTP 与 XMUX。 |
+| 新手直连、有域名或普通自用 | `1` VLESS Reality Vision | 当前主线推荐；不依赖本机伪装站点。 |
+| CDN / 反代 | `2` VLESS Reality XHTTP | 新建 CDN 节点优先；使用 XHTTP 与 XMUX。本项目只用 Xray 生成 XHTTP，sing-box 当前没有 XHTTP transport。 |
 | 没有域名 | 无域名 Reality | 菜单会走 Reality 快速路径。 |
-| TLS 指纹抗性 | `10. Naive` | 需要真实域名和证书；依赖 sing-box。 |
-| UDP、移动网络、弱网 | `6. Hysteria2` 或 `9. Tuic` | 按客户端支持和网络环境选择。 |
-| 兼容或迁移 | 传统 TLS 协议 | 仅在老客户端、存量 CDN 或迁移窗口需要时选择。 |
-| 明确需要 AnyTLS | `13. AnyTLS` | sing-box AnyTLS 场景；确认客户端支持后再用。 |
+| TLS 指纹抗性 | `5` NaiveProxy | 需要真实域名和证书；依赖 sing-box。 |
+| UDP、移动网络、弱网 | `3` Hysteria2 | Hysteria2 节点流量不套 CDN/Nginx；需要 UDP 可达，可按需使用端口跳跃。 |
+| 明确需要 AnyTLS | `4` AnyTLS | sing-box AnyTLS 场景；确认客户端支持后再用。 |
+| 兼容或迁移 | 高级协议 `21..31` | 仅在旧客户端、存量 CDN、传统 TLS 或迁移窗口需要时选择。 |
 
-推荐协议能力对照（保留旧表型，按当前推荐更新）：
+能力库是协议选择、核心支持、Nginx 拓扑和订阅输出的统一事实源。`category=node` 的公开 ID 才能传给 `--protocols`；旧版公开编号已废弃，不再作为 CLI、菜单或订阅同步输入。
 
-| 脚本协议名 | 推荐状态 | 解决 TLS in TLS | 解决指纹问题 | 自带多路复用 | 支持 CDN | 推荐场景 |
+### 推荐公网节点能力
+
+| ID | 能力 | 项目生成核心 | Nginx 模式 | UDP | CDN | 推荐场景 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `7. VLESS Reality Vision` | 首选 | ✅ | ✅ | ❌ | ❌ | 新手直连、有域名或无域名 Reality 首选；高级实验可叠加 VLESS Encryption。 |
-| `12. VLESS Reality XHTTP` | 首选（CDN/反代） | ✅ | ✅ | ✅ XMUX | ✅ | 新建 CDN / 反代首选；优先替代 WS/gRPC/HTTPUpgrade 的新建 CDN 方案；高级实验可叠加 VLESS Encryption。 |
-| `10. NaiveProxy` | 场景推荐 | ❌ | ✅ | 按客户端能力 | ❌ | 明确需要 TLS 指纹抗性且有真实域名和可信证书时优先选择。 |
-| `6. Hysteria2` | 场景推荐 | 不适用 | ❌ | QUIC | ❌ | 移动网络、UDP、弱网或端口跳跃场景按需选择；需要 UDP 可达。 |
-| `9. Tuic` | 场景推荐 | 不适用 | ❌ | QUIC | ❌ | UDP/移动网络场景按需选择；取决于客户端支持和 UDP 放行质量。 |
-| `13. AnyTLS` | 小众按需 | ❌ | 协议侧缓解 | 新多路复用 | ❌ | 明确需要 sing-box AnyTLS 且客户端支持时选择。 |
-| `0. VLESS TCP TLS Vision` | 兼容保留 | ✅ | ❌ | ❌ | ❌ | 传统 TLS + Vision 迁移路径；需要域名和证书，新建直连优先选 `7`。 |
-| `4. Trojan TCP TLS` | 兼容保留 | ❌ | ❌ | ❌ | ❌ | Trojan 生态或旧客户端兼容；需要域名和证书，新建不主推。 |
-| `8. VLESS Reality gRPC` | 高级/兼容 | ❌ | ✅ | ✅ HTTP/2 | ❌ | 仅在明确需要 Reality + gRPC/HTTP2 且不走 CDN 时保留，新建优先选 `7` 或 `12`。 |
-| `1. VLESS WS TLS` | 不建议新建 | ❌ | ❌ | ❌ | ✅ | 旧 CDN/WS 客户端兼容；新建 CDN 优先选 `12`。 |
-| `3. VMess WS TLS` | 不建议新建 | ❌ | ❌ | ❌ | ✅ | 旧 VMess 客户端兼容；仅用于存量迁移。 |
-| `11. VMess HTTPUpgrade TLS` | 不建议新建 | ❌ | ❌ | ❌ | ✅ | 传统 HTTPUpgrade/TLS 兼容；新建 CDN 优先选 `12`。 |
-| `2. Trojan gRPC TLS` | 历史隐藏 | ❌ | ❌ | ✅ HTTP/2 | 有限/不推荐 | 当前安装菜单不开放；不建议恢复为普通入口，存量迁移优先转 `12`。 |
-| `5. VLESS gRPC TLS` | 历史隐藏 | ❌ | ❌ | ✅ HTTP/2 | 有限/不推荐 | 当前安装菜单不开放；不建议恢复为普通入口，存量迁移优先转 `12`。 |
+| `1` | VLESS Reality Vision | Xray / sing-box | `none` | 否 | 否 | 新手直连、有域名或无域名 Reality 首选。 |
+| `2` | VLESS Reality XHTTP | Xray | `none` | 否 | 条件支持 | 新建 CDN / 反代首选；XHTTP 在本项目中是 Xray-only。 |
+| `3` | Hysteria2 | sing-box | `none` | 是 | 否 | 移动网络、UDP、弱网和端口跳跃场景；节点流量不经过 CDN/Nginx。 |
+| `4` | AnyTLS | sing-box | `none` | 否 | 否 | 明确需要 sing-box AnyTLS 且客户端支持时选择。 |
+| `5` | NaiveProxy | sing-box | `none` | 否 | 否 | 明确需要 TLS 指纹抗性且有真实域名和可信证书时选择。 |
 
-Xray 自定义菜单当前允许 `0,1,3,4,7,12`；sing-box 自定义菜单当前允许 `0,1,3,4,6,7,8,9,10,11,13`。以 `bash install.sh --help` 和实际菜单为准。
+### 高级公网节点能力
+
+gRPC、WebSocket 和 HTTPUpgrade 是高级协议，不是删除协议。它们仍可显式选择，但新建节点优先使用推荐能力，特别是直连 Reality Vision 或 CDN/反代 Reality XHTTP。
+
+| ID | 能力 | 项目生成核心 | Nginx 模式 | 使用边界 |
+| --- | --- | --- | --- | --- |
+| `21` | VLESS WS TLS | Xray | `http_front` | WebSocket 属高级兼容方案；新建 CDN 优先选 `2`。 |
+| `22` | VMess WS TLS | Xray | `http_front` | VMess 与 WS 均为高级兼容方案；新建优先选 `1` 或 `2`。 |
+| `23` | VMess HTTPUpgrade TLS | Xray / sing-box | `http_front` | HTTPUpgrade 属高级兼容方案；新建 CDN 优先选 `2`。 |
+| `24` | VLESS gRPC TLS | Xray | `grpc_front` | gRPC 有主动探测与 fallback 限制；新建优先选 `2`。 |
+| `25` | Trojan gRPC TLS | Xray | `grpc_front` | 仅在明确需要 Trojan + gRPC 时使用；可考虑 `4` 或 `2`。 |
+| `26` | VLESS Reality gRPC | Xray / sing-box | `none` | Reality gRPC 是高级直连方案；新建优先选 `1` 或 `2`。 |
+| `27` | VLESS TCP TLS Vision | Xray | `fallback_backend` | 传统 TLS/fallback 迁移路径；新建直连优先选 `1`。 |
+| `28` | Trojan TCP TLS direct | Xray / sing-box | `none` | 传统 TLS 协议，仅在旧客户端或明确需求下选择。 |
+| `29` | Trojan TCP TLS fallback | Xray | `fallback_backend` | fallback 只适用于 TCP+TLS；新建优先考虑 `4` 或 `1`。 |
+| `30` | Shadowsocks | sing-box | `none` | 高级兼容项，不作为默认公网节点推荐。 |
+| `31` | TUIC | sing-box | `none` | UDP/弱网高级项；新装优先引导使用 `3`。 |
+
+### 内部服务端能力
+
+内部能力只进入路由、中继、透明代理、访问控制或管理菜单，不能作为公网节点安装输入：`201` Socks 中继、`202` HTTP 中继、`203` WireGuard、`204` TUN、`205` Redirect/TProxy、`206` DNS/Direct/Block、`207` Tunnel/dokodemo-door。
+
+### 上游已知但本项目暂不生成的能力
+
+`301..309` 仅用于 `--list-capabilities` 和文档说明，不生成安装入口，包括 Xray Hysteria2 inbound、Hysteria v1、ShadowTLS、mKCP 组合、Cloudflared inbound、Selector、URLTest、Tor outbound、SSH outbound，以及纯 transport/security 说明项。
+
+### Nginx 拓扑
+
+| `nginx_mode` | 含义 | 适用能力 |
+| --- | --- | --- |
+| `none` | 核心直接监听公网；节点流量不安装、不启动 Nginx。 | Reality Vision、Reality XHTTP、Hysteria2、AnyTLS、NaiveProxy、Reality gRPC、Trojan direct、Shadowsocks、TUIC。 |
+| `http_front` | Nginx HTTP/1.1 反代，显式处理 `Upgrade` / `Connection`。 | WS / HTTPUpgrade 能力 `21..23`。 |
+| `grpc_front` | Nginx HTTP/2 + `grpc_pass` 反代。 | gRPC TLS 能力 `24..25`。 |
+| `xhttp_front` | 预留给显式 XHTTP TLS/CDN/反代能力；默认不套到 Reality XHTTP。 | 当前无默认公网节点使用。 |
+| `fallback_backend` | Xray fallback 后端，只允许 TCP+TLS 能力使用。 | `27`、`29`。 |
+| `acme_only` | Nginx 可服务证书申请或订阅发布，不代表节点流量经过 Nginx。 | 证书与订阅服务。 |
 
 sing-box 订阅输出中的 `utls.fingerprint=chrome` 是客户端兼容/模拟选项，不是抗封锁保证。需要抗 TLS 指纹识别时，优先考虑 Reality Vision、Reality XHTTP 或 NaiveProxy。
 
@@ -230,7 +260,7 @@ Reality 里有三个容易混淆的概念：
 
 ## XHTTP 与 CDN
 
-安装 `12. VLESS Reality XHTTP` 后，在 `协议与入口` -> `XHTTP 管理` 调整协议参数：
+安装 `2. VLESS Reality XHTTP` 后，在 `协议与入口` -> `XHTTP 管理` 调整协议参数：
 
 | 层级 | 内容 |
 | --- | --- |
@@ -239,6 +269,8 @@ Reality 里有三个容易混淆的概念：
 | ⚠️ 实验功能 | 配置或关闭上下行分离 `downloadSettings`。 |
 
 默认推荐值面向日常和 CDN：`mode=auto`，`xmux.maxConcurrency=16-32`，`hMaxRequestTimes=600-900`，`hMaxReusableSecs=1800-3000`。每次修改都会先写临时配置并执行 Xray 校验，失败会自动回滚并提示日志路径。
+
+XHTTP 在本项目中由 Xray 生成；sing-box 当前没有 XHTTP transport，因此不会输出 sing-box XHTTP 客户端配置。
 
 `协议与入口` -> `CDN 入口管理` 只负责订阅里的客户端入口地址覆盖，例如 CDN CNAME、优选 IP 或多个入口地址。XHTTP 的 mode、XMUX、path/host 等协议参数仍在 `XHTTP 管理` 中调整。
 
@@ -343,7 +375,7 @@ net.ipv4.tcp_congestion_control = bbr
 | --- | --- | --- | --- |
 | `--install-type` | `install`、`custom`、`reality` | 无自动参数时进入交互菜单；传其它安装参数但不传本参数时默认 `custom` | 安装类型。 |
 | `--core` | `xray`、`sing-box`、`1`、`2` | `xray` | `1` 等同 `xray`，`2` 等同 `sing-box`。 |
-| `--protocols` | 协议编号，逗号分隔 | 无固定默认 | 自定义安装协议，例如 `7` 或 `0,1,7`。 |
+| `--protocols` | 当前公开协议编号，逗号分隔 | 无固定默认 | 自定义安装协议，例如 `1` 或 `1,2,21`；旧版 `0..13/20` 编号已废弃。 |
 | `--domain` | 域名 | TLS 安装时必须提供或交互输入 | TLS 证书域名和默认客户端入口地址；不是 Reality target。 |
 | `--entry-host` | 域名或 IP | Reality 默认优先使用 `--domain`，否则使用公网 IP | 客户端实际连接地址。 |
 | `--reality-target` | `host[:port]` | 未传时进入目标站选择器；兜底 `www.ibm.com:443` | Reality 伪装目标站。 |
