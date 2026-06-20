@@ -2089,8 +2089,8 @@ subscriptionPublishAccounts() {
     local publishAccounts=
     local account=
     local defaultFile
-    local id
     local allowsMain
+    local hasRemote
     local mainPublishSourceAvailable=false
 
     SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=1
@@ -2104,23 +2104,31 @@ subscriptionPublishAccounts() {
     if subscriptionActiveGroupRead -e 'any(.sources[]?; .id == "main" and ((.enabled // true) == true))' >/dev/null 2>&1; then
         mainPublishSourceAvailable=true
     fi
-    while IFS=$'\t' read -r id allowsMain; do
-        [[ -n "${id}" ]] || continue
-        account=$(subscriptionSyncAccountName "${id}")
+    while IFS=$'\t' read -r account allowsMain hasRemote; do
+        [[ -n "${account}" ]] || continue
         if [[ "${allowsMain}" == "true" && "${mainPublishSourceAvailable}" == "true" ]]; then
             stagedAccounts+="${account}"$'\n'
             continue
         fi
-        if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
+        if [[ "${hasRemote}" == "true" ]]; then
             SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
             stagedAccounts+="${account}"$'\n'
         fi
     done < <(subscriptionActiveGroupRead -r '
+      . as $group |
       .user_groups[]?
       | select(.enabled == true)
+      | (.allowed_sources // []) as $allowed
       | [
-          .id,
-          (if ((.allowed_sources // []) | index("*") or index("main")) then "true" else "false" end)
+          (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'),
+          (if ($allowed | index("*") or index("main")) then "true" else "false" end),
+          (if ($allowed | length) == 0 then
+             "false"
+           elif ($allowed | index("*")) then
+             (if any($group.sources[]?; .role != "main" and .enabled == true) then "true" else "false" end)
+           else
+             (if any($group.sources[]?; .role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid))) then "true" else "false" end)
+           end)
         ]
       | @tsv')
     publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++' | sed '/^$/d')

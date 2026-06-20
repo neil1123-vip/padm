@@ -10228,7 +10228,7 @@ configPath="${oldConfigPath}"
             return 0
         fi
         if [[ "$*" == *".user_groups[]?"* && "$*" == *"select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
-            printf 'team-a\ttrue\nteam-b\ttrue\n'
+            printf 'sub_team_a\ttrue\tfalse\nsub_team_b\ttrue\tfalse\n'
             return 0
         fi
         return 1
@@ -10279,7 +10279,7 @@ configPath="${oldConfigPath}"
             return 1
         fi
         if [[ "$*" == *".user_groups[]?"* && "$*" == *"select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
-            printf 'team-a\tfalse\n'
+            printf 'sub_team_a\tfalse\ttrue\n'
             return 0
         fi
         return 1
@@ -10304,7 +10304,7 @@ configPath="${oldConfigPath}"
 
     renderAllSubscribeUserOutputs "${localBase}" "" true "" true
     [[ "${autoReadCalls}" == "1" ]]
-    [[ "$(wc -l < "${remoteChecksFile}")" == "1" ]]
+    [[ ! -s "${remoteChecksFile}" ]]
 
     if [[ -n "${oldSubscribeSalt}" ]]; then
         subscribeSalt="${oldSubscribeSalt}"
