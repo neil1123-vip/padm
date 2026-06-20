@@ -2067,7 +2067,9 @@ subscriptionPublishAccounts() {
     local stagedAccounts=
     local publishAccounts=
     local account=
-    local userJson
+    local defaultFile
+    local id
+    local allowsMain
     local mainPublishSourceAvailable=false
 
     localBase=${localBase:-$(subscribeLocalBaseDir)}
@@ -2080,20 +2082,24 @@ subscriptionPublishAccounts() {
     if subscriptionActiveGroupRead -e 'any(.sources[]?; .id == "main" and ((.enabled // true) == true))' >/dev/null 2>&1; then
         mainPublishSourceAvailable=true
     fi
-    while IFS= read -r account; do
-        [[ -n "${account}" ]] || continue
-        userJson=$(subscriptionSyncFindUserByAccountName "${account}" 2>/dev/null) || continue
-        [[ -n "${userJson}" ]] || continue
-        jq -e '.enabled == true' <<<"${userJson}" >/dev/null 2>&1 || continue
-        if jq -e '((.allowed_sources // []) | index("*") or index("main"))' <<<"${userJson}" >/dev/null 2>&1 &&
-            [[ "${mainPublishSourceAvailable}" == "true" ]]; then
+    while IFS=$'\t' read -r id allowsMain; do
+        [[ -n "${id}" ]] || continue
+        account=$(subscriptionSyncAccountName "${id}")
+        if [[ "${allowsMain}" == "true" && "${mainPublishSourceAvailable}" == "true" ]]; then
             stagedAccounts+="${account}"$'\n'
             continue
         fi
         if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
             stagedAccounts+="${account}"$'\n'
         fi
-    done < <(subscriptionActiveGroupRead -r '.user_groups[]? | select(.enabled == true) | .id' | while IFS= read -r id; do [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"; done)
+    done < <(subscriptionActiveGroupRead -r '
+      .user_groups[]?
+      | select(.enabled == true)
+      | [
+          .id,
+          (if ((.allowed_sources // []) | index("*") or index("main")) then "true" else "false" end)
+        ]
+      | @tsv')
     publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++')
     printf '%s\n' "${publishAccounts}" | sed '/^$/d'
 }

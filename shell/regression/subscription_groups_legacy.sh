@@ -10203,24 +10203,14 @@ configPath="${oldConfigPath}"
             printf '%s\n' "$(( $(<"${mainCheckFile}") + 1 ))" >"${mainCheckFile}"
             return 0
         fi
-        if [[ "$*" == *".user_groups[]? | select(.enabled == true) | .id"* ]]; then
-            printf 'team-a\nteam-b\n'
+        if [[ "$*" == *".user_groups[]? | select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
+            printf 'team-a\ttrue\nteam-b\ttrue\n'
             return 0
         fi
         return 1
     }
     subscriptionSyncFindUserByAccountName() {
-        case "$1" in
-        sub_team_a)
-            printf '{"id":"team-a","enabled":true,"allowed_sources":["*"]}\n'
-            ;;
-        sub_team_b)
-            printf '{"id":"team-b","enabled":true,"allowed_sources":["main"]}\n'
-            ;;
-        *)
-            return 1
-            ;;
-        esac
+        return 99
     }
 
     output=$(subscriptionPublishAccounts "${localBase}")
@@ -11309,7 +11299,7 @@ runSubscriptionSyncAccountFastPathRegression() (
         originalSubscriptionGroupsStateRead "$@"
     }
 
-    [[ "$(subscriptionSyncAccountId 'sub_team-a')" == "team-a" ]]
+    [[ "$(subscriptionSyncAccountIdFromName 'sub_team-a')" == "team-a" ]]
     [[ "${stateReadCalls}" == "0" ]]
 
     unset -f subscriptionGroupsStateRead

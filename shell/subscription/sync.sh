@@ -30,42 +30,6 @@ subscriptionSyncAccountIdFromName() {
     subscriptionSyncAccountUnescapeId "${escapedId}"
 }
 
-subscriptionSyncFindUserByAccountName() {
-    local accountName=$1
-    local id
-    local userJson
-    if id=$(subscriptionSyncAccountIdFromName "${accountName}" 2>/dev/null); then
-        userJson=$(subscriptionActiveGroupRead -c --arg id "${id}" '.user_groups[]? | select(.id == $id)') || return 1
-        [[ -n "${userJson}" ]] || return 1
-        printf '%s\n' "${userJson}"
-        return 0
-    fi
-    while IFS= read -r id; do
-        [[ -n "${id}" ]] || continue
-        if [[ "$(subscriptionSyncAccountName "${id}")" == "${accountName}" ]]; then
-            subscriptionActiveGroupRead -c --arg id "${id}" '.user_groups[]? | select(.id == $id)'
-            return 0
-        fi
-    done < <(subscriptionActiveGroupRead -r '.user_groups[]?.id')
-    return 1
-}
-
-subscriptionSyncAccountId() {
-    local accountName=$1
-    local userJson
-    local id
-    if id=$(subscriptionSyncAccountIdFromName "${accountName}" 2>/dev/null); then
-        printf '%s\n' "${id}"
-        return 0
-    fi
-    userJson=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null || true)
-    if [[ -n "${userJson}" ]]; then
-        jq -r '.id' <<<"${userJson}"
-        return 0
-    fi
-    return 1
-}
-
 subscriptionSyncGenerateUUID() {
     if [[ "${coreInstallType}" == "1" && -x "${ctlPath}" ]]; then
         ${ctlPath} uuid
@@ -354,7 +318,7 @@ subscriptionSyncAppendLocalUser() {
 subscriptionSyncAppendLocalAccount() {
     local accountName=$1
     local accountId
-    if ! accountId=$(subscriptionSyncAccountId "${accountName}"); then
+    if ! accountId=$(subscriptionSyncAccountIdFromName "${accountName}"); then
         return 1
     fi
     subscriptionSyncAppendLocalUser "${accountId}"

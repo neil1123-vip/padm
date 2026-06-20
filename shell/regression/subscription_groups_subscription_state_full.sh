@@ -121,9 +121,9 @@ runSubscriptionGroupStateStructureFoundationNormalizeRegression() {
     [[ "${accountDashUnderscore}" != "${accountUnderscoreDash}" ]]
     [[ "${accountDashUnderscore}" != "${accountDashDash}" ]]
     [[ "${accountUnderscoreDash}" != "${accountDashDash}" ]]
-    [[ "$(subscriptionSyncAccountId "${accountDashUnderscore}")" == "team-a_b" ]]
-    [[ "$(subscriptionSyncAccountId "${accountUnderscoreDash}")" == "team_a-b" ]]
-    [[ "$(subscriptionSyncAccountId "${accountDashDash}")" == "team-a-b" ]]
+    [[ "$(subscriptionSyncAccountIdFromName "${accountDashUnderscore}")" == "team-a_b" ]]
+    [[ "$(subscriptionSyncAccountIdFromName "${accountUnderscoreDash}")" == "team_a-b" ]]
+    [[ "$(subscriptionSyncAccountIdFromName "${accountDashDash}")" == "team-a-b" ]]
 }
 
 runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
