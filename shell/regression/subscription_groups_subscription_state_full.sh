@@ -510,16 +510,16 @@ runSubscriptionGroupStateQuotaPartialSyncConfigRegression() {
     singBoxConfigPath="${syncConfigRoot}/sing-box/"
     mkdir -p "${configPath}" "${singBoxConfigPath}"
     cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-VLESS_TCP/TLS_Vision"},{"email":"sub_team_b-VLESS_TCP/TLS_Vision"}]}}]}
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"sub_team_b-main"}]}}]}
 JSON
     cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"name":"sub_team_a-singbox_hysteria2"},{"username":"sub_team_b-singbox_hysteria2"}]}]}
+{"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
 JSON
-    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
-    subscriptionSyncPlanFromAccounts $'sub_team_a-main' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
+    subscriptionSyncConfiguredManagedUsers | jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
+    subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
     set +e
-    subscriptionSyncPlanFromAccounts $'sub_team_a' >/dev/null 2>&1
+    subscriptionSyncPlanFromAccounts '["sub_team_a"]' >/dev/null 2>&1
     local brokenPlanStatus=$?
     set -e
     [[ "${brokenPlanStatus}" -ne 0 ]]

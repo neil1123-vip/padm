@@ -66,13 +66,6 @@ subscriptionSyncAccountId() {
     return 1
 }
 
-subscriptionSyncAccountNamesFromIds() {
-    local id
-    while IFS= read -r id; do
-        [[ -n "${id}" ]] && subscriptionSyncAccountName "${id}"
-    done
-}
-
 subscriptionSyncAccountIdMapJsonFromIds() {
     local id
     while IFS= read -r id; do
@@ -119,18 +112,33 @@ subscriptionSyncDesiredLocalUsers() {
       | .id'
 }
 
+subscriptionSyncAccountNamesJsonFromIds() {
+    jq -R -s '
+      split("\n")
+      | map(select(length > 0))
+      | map(
+          . as $id
+          | "sub_" + (($id | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))
+        )
+      | unique
+    '
+}
+
 subscriptionSyncCurrentManagedUsers() {
     local file
     local validFiles=()
     for file in "$@"; do
         [[ -f "${file}" ]] && validFiles+=("${file}")
     done
-    [[ "${#validFiles[@]}" -gt 0 ]] || return 0
-    jq -r -s '
+    [[ "${#validFiles[@]}" -gt 0 ]] || {
+        printf '[]\n'
+        return 0
+    }
+    jq -c -s '
       [.[] | [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
        | ((.email // .name // .username // "") | sub("-(VLESS_TCP/TLS_Vision|VLESS_WS|VLESS_Reality_XHTTP|Trojan_gRPC|VMess_WS|trojan_tcp|Trojan_TCP|vless_grpc|singbox_hysteria2|vless_reality_vision|vless_reality_grpc|VLESS_Reality_Vision|VLESS_Reality_gPRC|singbox_tuic|singbox_naive|VMess_HTTPUpgrade|anytls)$"; ""))
        | select(startswith("sub_"))]
-      | unique[]' "${validFiles[@]}"
+      | unique' "${validFiles[@]}"
 }
 
 subscriptionSyncResolveManagedConfigDir() {
@@ -227,19 +235,19 @@ subscriptionSyncConfiguredManagedUsers() {
 }
 
 subscriptionSyncPlanFromAccounts() {
-    local desiredAccounts=$1
+    local desiredAccountsJson=$1
     local currentAccounts
     currentAccounts=$(subscriptionSyncConfiguredManagedUsers) || return 1
     jq -n \
-      --argjson desired "$(printf '%s\n' "${desiredAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
-      --argjson current "$(printf '%s\n' "${currentAccounts}" | jq -R -s 'split("\n") | map(select(length > 0))')" \
+      --argjson desired "${desiredAccountsJson}" \
+      --argjson current "${currentAccounts}" \
       '{create: ($desired - $current), remove: ($current - $desired)}'
 }
 
 subscriptionSyncPlan() {
-    local desiredAccounts
-    desiredAccounts=$(subscriptionSyncAccountNamesFromIds < <(subscriptionSyncDesiredLocalUsers) | sort -u) || return 1
-    subscriptionSyncPlanFromAccounts "${desiredAccounts}"
+    local desiredAccountsJson
+    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(subscriptionSyncDesiredLocalUsers)) || return 1
+    subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }
 
 subscriptionSyncRemoveAccountFromFile() {

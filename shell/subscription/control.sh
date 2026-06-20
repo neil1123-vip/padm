@@ -963,9 +963,9 @@ subscriptionControlCreateUsersFromPlan() {
 
 subscriptionControlSyncPlan() {
     local desiredUsers=$1
-    local desiredAccounts
-    desiredAccounts=$(subscriptionSyncAccountNamesFromIds < <(jq -r '.[].id' <<<"${desiredUsers}") | sort -u) || return 1
-    subscriptionSyncPlanFromAccounts "${desiredAccounts}"
+    local desiredAccountsJson
+    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(jq -r '.[].id' <<<"${desiredUsers}")) || return 1
+    subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }
 
 subscriptionControlUpdateDesiredUserState() {

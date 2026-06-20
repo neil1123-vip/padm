@@ -10786,11 +10786,11 @@ JSON
     cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
 {"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
 JSON
-    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
-    subscriptionSyncPlanFromAccounts $'sub_team_a-main' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
+    subscriptionSyncConfiguredManagedUsers | jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
+    subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
     printf '{bad-json' >"${configPath}99_broken_inbounds.json"
     set +e
-    subscriptionSyncPlanFromAccounts $'sub_team_a' >/dev/null 2>&1
+    subscriptionSyncPlanFromAccounts '["sub_team_a"]' >/dev/null 2>&1
     local brokenPlanStatus=$?
     set -e
     [[ "${brokenPlanStatus}" -ne 0 ]]
