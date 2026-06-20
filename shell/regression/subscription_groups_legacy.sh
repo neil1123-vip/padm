@@ -10294,6 +10294,52 @@ configPath="${oldConfigPath}"
     fi
 )
 
+(
+    local renderRoot="${TMP_DIR}/subscription-render-remote-hint-override"
+    local localBase="${renderRoot}/local"
+    local remoteChecksFile="${renderRoot}/remote-checks.log"
+    local autoReadCalls=0
+    local oldSubscribeSalt="${subscribeSalt:-}"
+    local oldCurrentDefaultPort="${currentDefaultPort:-}"
+    mkdir -p "${localBase}/default" "${renderRoot}"
+    : >"${remoteChecksFile}"
+    subscribeSalt=test-salt
+    currentDefaultPort=443
+
+    subscriptionPublishHasRemoteSources() {
+        return 99
+    }
+    subscriptionRemoteSubscribeSourcesForAccount() {
+        printf '%s\n' "$1" >>"${remoteChecksFile}"
+        printf 'example.com:443:edge:https\n'
+    }
+    autoRead() {
+        autoReadCalls=$((autoReadCalls + 1))
+        printf -v "$3" 'y'
+    }
+    resolveSubscribePublicDomain() {
+        printf 'example.com'
+    }
+    renderSubscribeUserOutputs() {
+        [[ "$1" == "sub_team_a" && "$4" == "y" ]]
+    }
+
+    renderAllSubscribeUserOutputs "${localBase}" "" true "sub_team_a" true
+    [[ "${autoReadCalls}" == "1" ]]
+    [[ "$(wc -l < "${remoteChecksFile}")" == "1" ]]
+
+    if [[ -n "${oldSubscribeSalt}" ]]; then
+        subscribeSalt="${oldSubscribeSalt}"
+    else
+        unset subscribeSalt
+    fi
+    if [[ -n "${oldCurrentDefaultPort}" ]]; then
+        currentDefaultPort="${oldCurrentDefaultPort}"
+    else
+        unset currentDefaultPort
+    fi
+)
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vlesstcp 443 tls-user uuid-tls "" ""

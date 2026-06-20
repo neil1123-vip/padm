@@ -1998,7 +1998,7 @@ renderAllSubscribeUserOutputs() {
     local publishAccountsOverride=${4:-}
     local skipCleanup=${5:-}
     local subscribePortLocal="${subscribePort:-}"
-    local email emailMd5 currentDomain defaultFile
+    local email emailMd5 currentDomain defaultFile account
     local publishAccounts=
     local publishAccountsFile="${TMPDIR:-/tmp}/padm-subscribe-accounts.$$.$RANDOM"
     local existingMd5s='[]'
@@ -2006,8 +2006,18 @@ renderAllSubscribeUserOutputs() {
     SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=
     if [[ -n "${publishAccountsOverride}" ]]; then
         publishAccounts=${publishAccountsOverride}
-        subscriptionPublishHasRemoteSources "${publishAccounts}"
-        SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
+        SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=1
+        while IFS= read -r account; do
+            [[ -n "${account}" ]] || continue
+            if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
+                SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
+                break
+            fi
+        done <<<"${publishAccounts}"
+        if [[ "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
+            subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .transport != "wireguard")' >/dev/null 2>&1
+            SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
+        fi
     else
         if ! subscriptionPublishAccounts "${localBase}" >"${publishAccountsFile}" 2>/dev/null; then
             padmRemoveCleanupPath "${publishAccountsFile}"
