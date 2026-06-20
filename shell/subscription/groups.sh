@@ -332,6 +332,7 @@ subscriptionActiveGroupWrite() {
 
 subscriptionActiveEnabledUsersJson() {
     subscriptionActiveGroupRead -c '
+      . as $group |
       [.user_groups[]?
        | select(.enabled == true)
        | (.allowed_sources // []) as $allowed
@@ -341,7 +342,15 @@ subscriptionActiveEnabledUsersJson() {
            uuid: (.uuid // ""),
            traffic_limit_gb: (.traffic_limit_gb // 0),
            account: (.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"'),
-           allowed_sources: $allowed
+           allowed_sources: $allowed,
+           allows_main: (if ($allowed | index("*") or index("main")) then true else false end),
+           has_remote: (if ($allowed | length) == 0 then
+               false
+             elif ($allowed | index("*")) then
+               any($group.sources[]?; .role != "main" and .enabled == true)
+             else
+               any($group.sources[]?; .role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid)))
+             end)
          }]'
 }
 

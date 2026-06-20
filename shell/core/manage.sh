@@ -2112,17 +2112,10 @@ subscriptionPublishAccounts() {
     done < <(subscriptionActiveGroupRead -r --argjson enabledUsers "${enabledUsers}" '
       . as $group |
       $enabledUsers[]?
-      | (.allowed_sources // []) as $allowed
       | [
           (.account // ""),
-          (if ($allowed | index("*") or index("main")) then "true" else "false" end),
-          (if ($allowed | length) == 0 then
-             "false"
-           elif ($allowed | index("*")) then
-             (if any($group.sources[]?; .role != "main" and .enabled == true) then "true" else "false" end)
-           else
-             (if any($group.sources[]?; .role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid))) then "true" else "false" end)
-           end)
+          ((.allows_main // false) | tostring),
+          ((.has_remote // false) | tostring)
         ]
       | @tsv')
     publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++' | sed '/^$/d')

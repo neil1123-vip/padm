@@ -203,7 +203,7 @@ subscriptionSyncPlan() {
     desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(
         jq -r '
           .[]?
-          | select((.allowed_sources | index("main")) or (.allowed_sources | index("*")))
+          | select((.allows_main // false) == true)
           | .id' <<<"${enabledUsers}"
     )) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
