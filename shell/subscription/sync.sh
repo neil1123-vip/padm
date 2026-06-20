@@ -287,6 +287,50 @@ subscriptionSyncAppendProtocolUser() {
     subscriptionSyncSetUsersInFile "${file}" "${userPath}" "${clients}"
 }
 
+subscriptionSyncAppendProtocolBatch() {
+    local configDir=$1
+    local uuid=$2
+    local accountName=$3
+    local mode=$4
+    local protocolId
+    local fileName
+    local rc=0
+
+    while IFS=$'\t' read -r protocolId fileName; do
+        [[ -n "${protocolId}" && -n "${fileName}" ]] || continue
+        subscriptionSyncAppendProtocolUser "${protocolId}" "${configDir}${fileName}" '' "${uuid}" "${accountName}" || rc=1
+    done <<EOF
+$(case "${mode}" in
+    xray)
+        cat <<'LIST'
+0	02_VLESS_TCP_inbounds.json
+1	03_VLESS_WS_inbounds.json
+2	04_trojan_gRPC_inbounds.json
+3	05_VMess_WS_inbounds.json
+4	04_trojan_TCP_inbounds.json
+5	06_VLESS_gRPC_inbounds.json
+7	07_VLESS_vision_reality_inbounds.json
+8	08_VLESS_vision_gRPC_inbounds.json
+11	11_VMess_HTTPUpgrade_inbounds.json
+12	12_VLESS_XHTTP_inbounds.json
+13	13_anytls_inbounds.json
+LIST
+        ;;
+    singbox)
+        cat <<'LIST'
+6	06_hysteria2_inbounds.json
+9	09_tuic_inbounds.json
+10	10_naive_inbounds.json
+LIST
+        ;;
+    *)
+        return 1
+        ;;
+esac)
+EOF
+    return "${rc}"
+}
+
 subscriptionSyncAppendLocalUser() {
     local id=$1
     local accountName
@@ -306,21 +350,9 @@ subscriptionSyncAppendLocalUser() {
         singBoxConfigDir=$(subscriptionSyncSafeSingBoxConfigDir) || return 1
     fi
 
-    subscriptionSyncAppendProtocolUser 0 "${xrayConfigDir}02_VLESS_TCP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 1 "${xrayConfigDir}03_VLESS_WS_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 2 "${xrayConfigDir}04_trojan_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 3 "${xrayConfigDir}05_VMess_WS_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 4 "${xrayConfigDir}04_trojan_TCP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 5 "${xrayConfigDir}06_VLESS_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 7 "${xrayConfigDir}07_VLESS_vision_reality_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 8 "${xrayConfigDir}08_VLESS_vision_gRPC_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 11 "${xrayConfigDir}11_VMess_HTTPUpgrade_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 12 "${xrayConfigDir}12_VLESS_XHTTP_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-    subscriptionSyncAppendProtocolUser 13 "${xrayConfigDir}13_anytls_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+    subscriptionSyncAppendProtocolBatch "${xrayConfigDir}" "${uuid}" "${accountName}" xray || rc=1
     if [[ -n "${singBoxConfigDir}" && "${singBoxConfigDir}" != "${xrayConfigDir}" ]]; then
-        subscriptionSyncAppendProtocolUser 6 "${singBoxConfigDir}06_hysteria2_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-        subscriptionSyncAppendProtocolUser 9 "${singBoxConfigDir}09_tuic_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
-        subscriptionSyncAppendProtocolUser 10 "${singBoxConfigDir}10_naive_inbounds.json" '' "${uuid}" "${accountName}" || rc=1
+        subscriptionSyncAppendProtocolBatch "${singBoxConfigDir}" "${uuid}" "${accountName}" singbox || rc=1
     fi
     return "${rc}"
 }

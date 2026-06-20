@@ -11540,6 +11540,35 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runSubscriptionSyncAppendLocalUserBatchRegression() (
+    local root="${TMP_DIR}/subscription-sync-append-local-user-batch"
+    local callLog="${root}/calls.log"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+
+    mkdir -p "${root}" "${root}/xray" "${root}/sing-box" "${root}/groups"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    ensureSubscriptionGroupsState
+    subscriptionGroupsStateWrite '.groups[0].user_groups += [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}]'
+
+    subscriptionSyncAppendProtocolBatch() {
+        printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${callLog}"
+        return 0
+    }
+
+    subscriptionSyncAppendLocalUser team-a
+
+    [[ -f "${callLog}" ]] || return 1
+    [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "2" ]] || return 1
+    grep -qx "${root}/xray/	11111111-1111-1111-1111-111111111111	sub_team_a	xray" "${callLog}" || return 1
+    grep -qx "${root}/sing-box/	11111111-1111-1111-1111-111111111111	sub_team_a	singbox" "${callLog}" || return 1
+
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+)
+
 runSubscriptionSyncReconcileEarlyExitRegression() (
     local root="${TMP_DIR}/subscription-sync-reconcile-early-exit"
     local callLog="${root}/calls.log"
@@ -17428,6 +17457,7 @@ runRegressionTargetedBatchHelpers() {
     runRegressionStep core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression &&
         runRegressionStep core-selection-retry-action runCoreSelectionRetryActionRegression &&
         runRegressionStep sync-configured-managed-users-helper runSyncConfiguredManagedUsersHelperRegression &&
+        runRegressionStep sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression &&
         runRegressionStep traffic-configured-accounts-helper runTrafficConfiguredAccountsHelperRegression &&
         runRegressionStep traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression &&
         runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression &&
