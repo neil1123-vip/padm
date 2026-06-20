@@ -1450,7 +1450,7 @@ xrayVersionManageMenu() {
     2) checkXrayPrereleaseCompatibility ;;
     3) upgradeXrayCore true ;;
     4)
-        version=$(selectRollbackVersion XTLS/Xray-core "Xray-core") || { coreInvalidInputErrorCard; xrayVersionManageMenu; return; }
+        version=$(selectRollbackVersion XTLS/Xray-core "Xray-core") || { coreInvalidInputRetryMenu xrayVersionManageMenu; return; }
         upgradeXrayCore false "${version}"
         ;;
     5)
@@ -1470,7 +1470,7 @@ xrayVersionManageMenu() {
     11) coreServiceControlMenu xray ;;
     12) checkLog 1 ;;
     13) coreVersionManageMenu ;;
-    *) coreInvalidInputErrorCard; xrayVersionManageMenu ;;
+    *) coreInvalidInputRetryMenu xrayVersionManageMenu ;;
     esac
 }
 
@@ -2213,7 +2213,7 @@ coreServiceControlMenu() {
     2) coreServiceControlAction "${serviceName}" stop ;;
     3) coreServiceControlAction "${serviceName}" restart ;;
     4) coreVersionManageMenu ;;
-    *) coreInvalidInputErrorCard; coreServiceControlMenu "${core}" ;;
+    *) coreInvalidInputRetryMenu coreServiceControlMenu "${core}" ;;
     esac
 }
 
@@ -2288,7 +2288,7 @@ coreConfigMaintenanceMenu() {
     9) showXrayGeoStatus ;;
     10) installCronUpdateGeo ;;
     11) coreVersionManageMenu ;;
-    *) coreInvalidInputErrorCard; coreConfigMaintenanceMenu ;;
+    *) coreInvalidInputRetryMenu coreConfigMaintenanceMenu ;;
     esac
 }
 
@@ -2307,7 +2307,7 @@ coreLogsMenu() {
         tail -f /etc/padm/sing-box/conf/box.log
         ;;
     3) coreVersionManageMenu ;;
-    *) coreInvalidInputErrorCard; coreLogsMenu ;;
+    *) coreInvalidInputRetryMenu coreLogsMenu ;;
     esac
 }
 
@@ -2322,7 +2322,7 @@ coreAllServicesMenu() {
     1) coreServiceControlMenu xray ;;
     2) coreServiceControlMenu sing-box ;;
     3) coreVersionManageMenu ;;
-    *) coreInvalidInputErrorCard; coreAllServicesMenu ;;
+    *) coreInvalidInputRetryMenu coreAllServicesMenu ;;
     esac
 }
 
@@ -2352,7 +2352,7 @@ coreVersionManageMenu() {
     4) coreAllServicesMenu ;;
     5) coreLogsMenu ;;
     6) menu ;;
-    *) coreInvalidInputErrorCard; coreVersionManageMenu ;;
+    *) coreInvalidInputRetryMenu coreVersionManageMenu ;;
     esac
 }
 
@@ -2381,7 +2381,7 @@ singBoxVersionManageMenu() {
     2) checkSingBoxPrereleaseCompatibility ;;
     3) upgradeSingBoxCore true ;;
     4)
-        version=$(selectRollbackVersion SagerNet/sing-box "sing-box") || { coreInvalidInputErrorCard; singBoxVersionManageMenu; return; }
+        version=$(selectRollbackVersion SagerNet/sing-box "sing-box") || { coreInvalidInputRetryMenu singBoxVersionManageMenu; return; }
         upgradeSingBoxCore false "${version}"
         ;;
     5)
@@ -2404,7 +2404,7 @@ singBoxVersionManageMenu() {
         tail -f /etc/padm/sing-box/conf/box.log
         ;;
     9) coreVersionManageMenu ;;
-    *) coreInvalidInputErrorCard; singBoxVersionManageMenu ;;
+    *) coreInvalidInputRetryMenu singBoxVersionManageMenu ;;
     esac
 }
 

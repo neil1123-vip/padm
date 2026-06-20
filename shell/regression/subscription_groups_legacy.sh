@@ -14029,6 +14029,44 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
     grep -q 'manual-check:请手动检查订阅组状态文件|/tmp/groups.json' "${helperLog}"
 )
 
+runCoreInvalidInputRetryMenuRegression() (
+    local actions=
+
+    recordMenuAction() {
+        actions+="$1"$'\n'
+    }
+    assertMenuAction() {
+        grep -qxF "$1" <<<"${actions}"
+    }
+    errorCard() {
+        recordMenuAction "errorCard:$1"
+    }
+    sampleMenu() {
+        recordMenuAction "sampleMenu:$*"
+    }
+
+    declare -F coreInvalidInputRetryMenu >/dev/null
+    coreInvalidInputRetryMenu sampleMenu alpha beta
+    assertMenuAction 'errorCard:输入有误，请重新输入'
+    assertMenuAction 'sampleMenu:alpha beta'
+
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu xrayVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "2" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu singBoxVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "2" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreServiceControlMenu "${core}"' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreConfigMaintenanceMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreLogsMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreAllServicesMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+
+    ! grep -qF 'coreInvalidInputErrorCard; xrayVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; singBoxVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreServiceControlMenu "${core}"' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreConfigMaintenanceMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreLogsMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreAllServicesMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+)
+
 runMenuSmokeLightRegression() {
     local actions=
     local output=
@@ -17164,7 +17202,8 @@ runRegressionFast() {
 }
 
 runRegressionTargetedBatchHelpers() {
-    runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
+    runRegressionStep core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression &&
+        runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
         runRegressionStep config-transaction runConfigTransactionRegression &&
         runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&
         runRegressionStep alone-nginx-backup-manual-check runNginxBackupManualCheckRegression

@@ -348,6 +348,13 @@ coreInvalidInputErrorCard() {
     errorCard "输入有误，请重新输入"
 }
 
+coreInvalidInputRetryMenu() {
+    local menuHandler=$1
+    shift
+    coreInvalidInputErrorCard
+    "${menuHandler}" "$@"
+}
+
 coreCancelledStatusCard() {
     statusCard "已取消" "$@"
 }
