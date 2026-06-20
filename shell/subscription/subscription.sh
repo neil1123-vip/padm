@@ -82,18 +82,6 @@ subscriptionRemoteSubscribeSourcesForAccount() {
       end'
 }
 
-subscriptionPublishHasRemoteSources() {
-    local accounts=$1
-    local account
-    while IFS= read -r account; do
-        [[ -n "${account}" ]] || continue
-        if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
-            return 0
-        fi
-    done <<<"${accounts}"
-    subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .transport != "wireguard")' >/dev/null 2>&1
-}
-
 ensureSubscriptionControlNginxLocation() {
     return 1
 }
