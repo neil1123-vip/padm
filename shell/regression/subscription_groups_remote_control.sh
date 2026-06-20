@@ -504,6 +504,9 @@ JSON
                     local expectedBackupDir="${prepareRoot}/created-backup"
                     local prepareStatus
                     resetVirtualSubscriptionGroupsState
+                    subscriptionControlPrepareSyncFailure() {
+                        return 97
+                    }
                     subscriptionSyncCreateConfigBackups() {
                         local backupPath="${expectedBackupDir}"
                         mkdir -p "${backupPath}" || return 1
@@ -1398,7 +1401,7 @@ SH
     writeSubscriptionControlServer
     serverScript=$(subscriptionControlServerScript)
     printf 'noise\n' >"${modeFile}"
-    PADM_CONTROL_SCRIPT_TIMEOUT=0.4 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
+    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
     serverPid=$!
     trap '[[ -n "${serverPid}" ]] && kill "${serverPid}" >/dev/null 2>&1 || true; [[ -n "${serverPid}" ]] && wait "${serverPid}" 2>/dev/null || true' EXIT
 

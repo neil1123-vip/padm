@@ -1050,13 +1050,6 @@ subscriptionControlRestoreAppliedPlan() {
     fi
 }
 
-subscriptionControlPrepareSyncFailure() {
-    local plan=$1
-    local message=$2
-    jq -n --argjson plan "${plan}" --arg message "${message}" '{ok:false, changed:false, dry_run:false, error:"prepare_failed", error_detail:{type:"prepare_failed", message:$message}, plan:$plan}'
-    return 1
-}
-
 subscriptionControlApplySync() {
     local payload=$1
     local dryRun
@@ -1066,6 +1059,7 @@ subscriptionControlApplySync() {
     local previousGroupsState
     local configBackupDir=
     local outputBackupDir=
+    local prepareFailureMessage=
     local refreshPublishedStatus=0
     if ! subscriptionControlValidateSyncPayload "${payload}"; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
@@ -1100,19 +1094,20 @@ subscriptionControlApplySync() {
         jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
         return 0
     fi
-    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
-        subscriptionControlPrepareSyncFailure "${plan}" "同步前订阅状态读取失败"
-        return 1
-    }
-    subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
-        subscriptionControlPrepareSyncFailure "${plan}" "同步前配置备份失败"
+    if ! previousGroupsState=$(subscriptionGroupsStateRead -c '.'); then
+        prepareFailureMessage="同步前订阅状态读取失败"
+    elif ! subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir; then
+        prepareFailureMessage="同步前配置备份失败"
         if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
-            subscriptionControlPrepareSyncFailure "${plan}" "同步前订阅输出备份失败"
+            prepareFailureMessage="同步前订阅输出备份失败"
             configBackupDir=
             outputBackupDir=
         fi
+    fi
+    if [[ -n "${prepareFailureMessage}" ]]; then
+        jq -n --argjson plan "${plan}" --arg message "${prepareFailureMessage}" '{ok:false, changed:false, dry_run:false, error:"prepare_failed", error_detail:{type:"prepare_failed", message:$message}, plan:$plan}'
         return 1
-    }
+    fi
     SUBSCRIPTION_CONTROL_RESTORE_ERROR=
     if ! subscriptionControlApplyAccountPlan "${plan}" "${desiredUsers}"; then
         subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"

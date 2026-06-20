@@ -12115,16 +12115,13 @@ JSON
         local prepareRoot="${TMP_DIR}/remote-control-prepare-output-failure"
         local prepareResponse="${TMP_DIR}/remote-control-prepare-output-failure.json"
         local expectedBackupDir="${prepareRoot}/created-backup"
-        local prepareCalls=0
         mkdir -p "${prepareRoot}/groups"
         export PADM_SUBSCRIPTION_GROUPS_DIR="${prepareRoot}/groups"
         cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
-        eval "$(declare -f subscriptionControlPrepareSyncFailure | sed '1s/^subscriptionControlPrepareSyncFailure/originalSubscriptionControlPrepareSyncFailure/')"
         subscriptionControlPrepareSyncFailure() {
-            prepareCalls=$((prepareCalls + 1))
-            originalSubscriptionControlPrepareSyncFailure "$@"
+            return 97
         }
         subscriptionSyncCreateConfigBackups() {
             local backupPath="${expectedBackupDir}"
@@ -12140,7 +12137,6 @@ JSON
         set -e
         [[ "${prepareStatus}" -ne 0 ]]
         jq -e '.ok == false and .changed == false and .dry_run == false and .error == "prepare_failed" and .error_detail.type == "prepare_failed" and (.error_detail.message | contains("订阅输出备份失败")) and .plan.create == ["sub_team_a"] and .plan.remove == []' "${prepareResponse}" >/dev/null
-        [[ "${prepareCalls}" == "1" ]]
         [[ ! -e "${expectedBackupDir}" ]]
     )
 
