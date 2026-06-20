@@ -970,7 +970,7 @@ JSON
 {"inbounds":[{"users":[{"username":"sub_team_a-tuic"},{"username":"ops"}]}]}
 JSON
     accounts=$(collectLocalTrafficAccounts)
-    jq -R -s 'split("\n") | map(select(length > 0))' <<<"${accounts}" | jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' >/dev/null
+    jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
 
     printf '{bad-json\n' >"${singBoxConfig}03_inbounds.json"
     if collectLocalTrafficAccounts >/dev/null 2>&1; then
