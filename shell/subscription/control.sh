@@ -928,53 +928,47 @@ subscriptionControlCreateUsersFromPlan() {
       ]'
 }
 
-subscriptionControlUpdateDesiredUserState() {
-    local desiredUsers=$1
-    local createAccounts=$2
-    local createUsers
-    createUsers=$(subscriptionControlCreateUsersFromPlan "${desiredUsers}" "${createAccounts}") || return 1
-    if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1; then
-        subscriptionActiveGroupWrite --argjson users "${createUsers}" '
-          reduce $users[] as $user (.;
-            if any(.user_groups[]?; .id == $user.id) then
-              .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
-            else
-              .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, token:"", uuid:$user.uuid}]
-            end)
-        '
-    fi
-}
-
 subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
     local createAccounts
+    local createUsers
     local previousGroupsState
     local applyError=
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     subscriptionSyncValidateAccountPlan "${plan}" || return 1
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
     createAccounts=$(jq -c '.create' <<<"${plan}") || return 1
-    if ! subscriptionControlUpdateDesiredUserState "${desiredUsers}" "${createAccounts}"; then
-        applyError="控制面同步期望用户状态写入失败"
-        if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
+    createUsers=$(subscriptionControlCreateUsersFromPlan "${desiredUsers}" "${createAccounts}") || return 1
+    if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1; then
+        if ! subscriptionActiveGroupWrite --argjson users "${createUsers}" '
+          reduce $users[] as $user (.;
+            if any(.user_groups[]?; .id == $user.id) then
+              .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
+            else
+              .user_groups += [{id:$user.id, name:$user.id, enabled:true, allowed_sources:["main"], traffic_limit_gb:0, token:"", uuid:$user.uuid}]
+            end)
+        '; then
+            applyError="控制面同步期望用户状态写入失败"
+            if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
+                subscriptionSyncSetSingleRestoreResultMessage \
+                    SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
+                    "${applyError}" \
+                    false \
+                    "" \
+                    "订阅状态" \
+                    "$(subscriptionGroupsFile)"
+                return 1
+            fi
             subscriptionSyncSetSingleRestoreResultMessage \
                 SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
                 "${applyError}" \
-                false \
+                true \
                 "" \
                 "订阅状态" \
                 "$(subscriptionGroupsFile)"
             return 1
         fi
-        subscriptionSyncSetSingleRestoreResultMessage \
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
-            "${applyError}" \
-            true \
-            "" \
-            "订阅状态" \
-            "$(subscriptionGroupsFile)"
-        return 1
     fi
     if ! subscriptionSyncApplyAccountPlanTransaction "${plan}"; then
         applyError="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-控制面同步计划应用失败}"

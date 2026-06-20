@@ -12024,6 +12024,40 @@ runRemoteControlCreateUsersAvoidReverseDecodeRegression() (
     ' <<<"${output}" >/dev/null
 )
 
+runRemoteControlApplyAccountPlanInlinesDesiredUserStateRegression() (
+    local groupsRoot="${TMP_DIR}/remote-control-inline-desired-user-state"
+    mkdir -p "${groupsRoot}"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsRoot}"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+
+    subscriptionControlUpdateDesiredUserState() {
+        return 96
+    }
+    subscriptionSyncApplyAccountPlanTransaction() {
+        return 0
+    }
+
+    subscriptionControlApplyAccountPlan '{"create":["sub_team_a"],"remove":[]}' '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' >/dev/null 2>&1
+    jq -e '
+      .groups[0].user_groups == [
+        {
+          id:"team-a",
+          name:"team-a",
+          enabled:true,
+          allowed_sources:["main"],
+          traffic_limit_gb:0,
+          token:"",
+          uuid:"11111111-1111-1111-1111-111111111111"
+        }
+      ]
+    ' "$(subscriptionGroupsFile)" >/dev/null
+    if subscriptionGroupsStateRead -e '.groups[0].user_groups | length != 1' >/dev/null 2>&1; then
+        return 1
+    fi
+)
+
 runRemoteControlAggregationFailureRegression() (
     mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
@@ -17348,6 +17382,7 @@ runRegressionRemoteControl() {
         runRegressionStep remote-control-desired-users-single-source runRemoteControlDesiredUsersSingleSourceReuseRegression &&
         runRegressionStep remote-control-payload-requires-desired-users-map runRemoteControlPayloadRequiresDesiredUsersMapRegression &&
         runRegressionStep remote-control-create-users-no-reverse-decode runRemoteControlCreateUsersAvoidReverseDecodeRegression &&
+        runRegressionStep remote-control-inline-desired-user-state runRemoteControlApplyAccountPlanInlinesDesiredUserStateRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&
