@@ -10766,10 +10766,14 @@ JSON
         unset -f subscriptionSyncAccountIdMapJsonFromIds
     )
     (
+        subscriptionSyncAccountNamesJsonFromIds() {
+            return 98
+        }
         subscriptionSyncPlanFromAccounts() {
             jq -n '{create:[], remove:["sub_team_a"]}'
         }
         subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
+        unset -f subscriptionSyncAccountNamesJsonFromIds
     )
     local oldConfigPath="${configPath:-}"
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"

@@ -99,18 +99,6 @@ subscriptionSyncDesiredLocalUsers() {
       | .id'
 }
 
-subscriptionSyncAccountNamesJsonFromIds() {
-    jq -R -s '
-      split("\n")
-      | map(select(length > 0))
-      | map(
-          . as $id
-          | "sub_" + (($id | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))
-        )
-      | unique
-    '
-}
-
 subscriptionSyncCurrentManagedUsers() {
     local file
     local validFiles=()
@@ -233,7 +221,15 @@ subscriptionSyncPlanFromAccounts() {
 
 subscriptionSyncPlan() {
     local desiredAccountsJson
-    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(subscriptionSyncDesiredLocalUsers)) || return 1
+    desiredAccountsJson=$(jq -R -s '
+      split("\n")
+      | map(select(length > 0))
+      | map(
+          . as $id
+          | "sub_" + (($id | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))
+        )
+      | unique
+    ' < <(subscriptionSyncDesiredLocalUsers)) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }
 
