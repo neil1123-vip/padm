@@ -8,6 +8,7 @@ AgentState.archive.md
 ProjectLog.md
 ProjectLog.archive.md
 Status.md
+.worktrees/
 
 # Local install metadata
 .padm-ref
