@@ -2529,6 +2529,32 @@ EOF
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
+runInstallEarlyCapabilityListRegression() {
+    local outputFile
+    outputFile="${TMP_DIR}/install-early-capability-list.txt"
+    (
+        eval "$(awk '
+            /^installEarlyCapabilityRegistry\(\)/ { capture = 1 }
+            /^loadScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        installHandleEarlyCapabilityListArgs --list-protocols
+    ) >"${outputFile}"
+    grep -q '^1[[:space:]]\+VLESS Reality Vision[[:space:]]\+node[[:space:]]\+recommended' "${outputFile}"
+    grep -q '^2[[:space:]]\+VLESS Reality XHTTP[[:space:]]\+node[[:space:]]\+recommended' "${outputFile}"
+    grep -q '^31[[:space:]]\+TUIC[[:space:]]\+node[[:space:]]\+advanced' "${outputFile}"
+    ! grep -q 'padm 管理面板' "${outputFile}"
+}
+
+runInstallMenuRecommendedIdsRegression() {
+    grep -q 'customXrayInstall 1 domain' "${PROJECT_ROOT}/shell/core/menu.sh"
+    grep -q 'customXrayInstall 2' "${PROJECT_ROOT}/shell/core/menu.sh"
+    grep -q 'customSingBoxInstall 5' "${PROJECT_ROOT}/shell/core/menu.sh"
+    ! grep -q 'customXrayInstall 7 domain' "${PROJECT_ROOT}/shell/core/menu.sh"
+    ! grep -q 'customXrayInstall 12' "${PROJECT_ROOT}/shell/core/menu.sh"
+    ! grep -q 'customSingBoxInstall 10' "${PROJECT_ROOT}/shell/core/menu.sh"
+}
+
 runAliasInstallMetadataCopyRegression() {
     local sourceDir targetDir oldScriptDir oldPadmInstallDir oldHome
     sourceDir="${TMP_DIR}/alias-install-source"
@@ -3625,6 +3651,8 @@ runRegressionPlatform() {
         runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
+        runRegressionStep install-early-capability-list runInstallEarlyCapabilityListRegression &&
+        runRegressionStep install-menu-recommended-ids runInstallMenuRecommendedIdsRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
         runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression &&
         runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&

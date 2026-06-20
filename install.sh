@@ -503,6 +503,79 @@ loadScriptModules() {
     source "${SCRIPT_DIR}/shell/core/bootstrap.sh"
 }
 
+installEarlyCapabilityRegistry() {
+    cat <<'EOF'
+1|VLESS Reality Vision|node|recommended|xray,sing-box|tcp|reality|none|
+2|VLESS Reality XHTTP|node|recommended|xray|xhttp|reality|none|
+3|Hysteria2|node|recommended|sing-box|quic|tls|none|
+4|AnyTLS|node|recommended|sing-box|tcp|tls|none|
+5|NaiveProxy|node|recommended|sing-box|tcp|tls|none|
+21|VLESS WS TLS|node|advanced|xray|ws|tls|http_front|WebSocket 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP
+22|VMess WS TLS|node|advanced|xray|ws|tls|http_front|VMess 与 WebSocket 均为高级方案|VLESS Reality Vision
+23|VMess HTTPUpgrade TLS|node|advanced|xray,sing-box|httpupgrade|tls|http_front|HTTPUpgrade 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP
+24|VLESS gRPC TLS|node|advanced|xray|grpc|tls|grpc_front|gRPC 有主动探测与 fallback 限制|VLESS Reality XHTTP
+25|Trojan gRPC TLS|node|advanced|xray|grpc|tls|grpc_front|gRPC 有主动探测与 fallback 限制|AnyTLS
+26|VLESS Reality gRPC|node|advanced|xray,sing-box|grpc|reality|none|Reality gRPC 是高级方案|VLESS Reality Vision
+27|VLESS TCP TLS Vision|node|advanced|xray|tcp|tls|fallback_backend|传统 TLS/fallback 高级路径|VLESS Reality Vision
+28|Trojan TCP TLS direct|node|advanced|xray,sing-box|tcp|tls|none|传统 TLS 协议，仅显式选择时使用|AnyTLS
+29|Trojan TCP TLS fallback|node|advanced|xray|tcp|tls|fallback_backend|fallback 仅限 TCP+TLS|AnyTLS
+30|Shadowsocks|node|advanced|sing-box|tcp|none|none|不作为默认公网节点推荐|VLESS Reality Vision
+31|TUIC|node|advanced|sing-box|quic|tls|none|UDP/弱网新装引导使用 Hysteria2|Hysteria2
+201|Socks 中继|internal|advanced|xray,sing-box|tcp|none|none|
+202|HTTP 中继|internal|advanced|xray,sing-box|tcp|none|none|
+203|WireGuard|internal|advanced|xray,sing-box|udp|none|none|
+204|TUN|internal|advanced|sing-box|mixed|none|none|
+205|Redirect/TProxy|internal|advanced|xray,sing-box|tcp,udp|none|none|
+206|DNS/Direct/Block|internal|advanced|xray,sing-box|mixed|none|none|
+207|Tunnel/dokodemo-door|internal|advanced|xray|tcp,udp|none|none|
+301|Xray Hysteria2 inbound|known|advanced|none|quic|tls|none|
+302|Hysteria v1|known|advanced|none|quic|tls|none|
+303|ShadowTLS|known|advanced|none|tcp|tls|none|
+304|mKCP combinations|known|advanced|none|mkcp|none|none|
+305|Cloudflared inbound|known|advanced|none|tcp|tls|none|
+306|Selector|known|advanced|none|mixed|none|none|
+307|URLTest|known|advanced|none|mixed|none|none|
+308|Tor outbound|known|advanced|none|tcp|none|none|
+309|SSH outbound|known|advanced|none|tcp|ssh|none|
+EOF
+}
+
+installPrintEarlyCapabilities() {
+    local categoryFilter=${1:-}
+    local riskyOnly=${2:-false}
+    local id name category lifecycle projectCore transport security nginxMode risk replacement
+    while IFS='|' read -r id name category lifecycle projectCore transport security nginxMode risk replacement; do
+        [[ -z "${categoryFilter}" || "${category}" == "${categoryFilter}" ]] || continue
+        [[ "${riskyOnly}" != "true" || -n "${risk}" ]] || continue
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "${id}" "${name}" "${category}" "${lifecycle}" "${projectCore}" "${transport}" "${security}" "${nginxMode}"
+        if [[ -n "${risk}" ]]; then
+            printf '\t%s' "${risk}"
+            [[ -n "${replacement}" ]] && printf '\t替代：%s' "${replacement}"
+        fi
+        printf '\n'
+    done < <(installEarlyCapabilityRegistry)
+}
+
+installHandleEarlyCapabilityListArgs() {
+    local arg
+    for arg in "$@"; do
+        case "${arg}" in
+        --list-protocols)
+            installPrintEarlyCapabilities node false
+            exit 0
+            ;;
+        --list-capabilities)
+            installPrintEarlyCapabilities "" false
+            exit 0
+            ;;
+        --show-risky-protocols)
+            installPrintEarlyCapabilities node true
+            exit 0
+            ;;
+        esac
+    done
+}
+
 initScriptRuntime() {
     parseInstallArgs "$@"
     initVar "$1"
@@ -560,6 +633,7 @@ runMainMenu() {
     menu
 }
 
+installHandleEarlyCapabilityListArgs "$@"
 loadScriptModules
 initScriptRuntime "$@"
 runMainMenu "$@"
