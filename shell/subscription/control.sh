@@ -1050,19 +1050,6 @@ subscriptionControlRestoreAppliedPlan() {
     fi
 }
 
-subscriptionControlRefreshPublishedSubscriptions() {
-    local role
-    subscribePort=
-    subscribeType=
-    subscribeDomain=
-    readNginxSubscribe
-    role=$(subscriptionWireGuardRole 2>/dev/null || printf 'uninitialized')
-    if [[ "${role}" == "controlled" && -z "${subscribePort:-}" ]]; then
-        return 0
-    fi
-    subscribe false false >/dev/null 2>&1
-}
-
 subscriptionControlPrepareSyncFailure() {
     local plan=$1
     local message=$2
@@ -1079,6 +1066,7 @@ subscriptionControlApplySync() {
     local previousGroupsState
     local configBackupDir=
     local outputBackupDir=
+    local refreshPublishedStatus=0
     if ! subscriptionControlValidateSyncPayload "${payload}"; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
@@ -1143,7 +1131,14 @@ subscriptionControlApplySync() {
             return 1
         fi
     else
-        if ! subscriptionControlRefreshPublishedSubscriptions; then
+        subscribePort=
+        subscribeType=
+        subscribeDomain=
+        readNginxSubscribe
+        if [[ "$(subscriptionWireGuardRole 2>/dev/null || printf 'uninitialized')" != "controlled" || -n "${subscribePort:-}" ]]; then
+            subscribe false false >/dev/null 2>&1 || refreshPublishedStatus=$?
+        fi
+        if [[ "${refreshPublishedStatus}" -ne 0 ]]; then
             if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
             else

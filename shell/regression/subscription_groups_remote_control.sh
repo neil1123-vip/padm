@@ -436,6 +436,32 @@ JSON
                 responseHasErrorType "${invalidDuplicateResponse}" invalid_payload
                 responseHasErrorType "${invalidUuidResponse}" invalid_payload
 
+                (
+                    local controlledSkipResponse controlledSkipStatus
+                    resetVirtualSubscriptionGroupsState
+                    subscribeCalls=0
+                    subscribeArgs=
+                    subscriptionControlRefreshPublishedSubscriptions() {
+                        return 98
+                    }
+                    subscriptionWireGuardRole() {
+                        printf 'controlled\n'
+                    }
+                    readNginxSubscribe() {
+                        subscribePort=
+                        subscribeDomain=main.example.com
+                        subscribeType=https
+                    }
+                    subscribe() {
+                        subscribeCalls=$((subscribeCalls + 1))
+                        return 99
+                    }
+                    runControlApplyCapture controlledSkipResponse controlledSkipStatus server '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}'
+                    [[ "${controlledSkipStatus}" -eq 0 ]]
+                    responseHasApplySuccess "${controlledSkipResponse}" true false
+                    [[ "${subscribeCalls}" == "0" ]]
+                )
+
                 subscriptionSyncPlanFromAccounts() {
                     printf '{"create":["sub_team_a"],"remove":[]}'
                 }
