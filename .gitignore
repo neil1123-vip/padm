@@ -9,6 +9,11 @@ ProjectLog.md
 ProjectLog.archive.md
 Status.md
 
+# Local install metadata
+.padm-ref
+.padm-entry-ref
+.padm-module-manifest
+
 # Local test and runtime artifacts
 .tmp-*/
 *.tmp
