@@ -1998,11 +1998,11 @@ renderAllSubscribeUserOutputs() {
     local publishAccountsOverride=${4:-}
     local skipCleanup=${5:-}
     local subscribePortLocal="${subscribePort:-}"
-    local email emailMd5 currentDomain defaultFile account
+    local email emailMd5 currentDomain account
     local publishAccounts=
-    local publishAccountsFile="${TMPDIR:-/tmp}/padm-subscribe-accounts.$$.$RANDOM"
     local existingMd5s='[]'
 
+    SUBSCRIPTION_PUBLISH_ACCOUNTS=
     SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=
     if [[ -n "${publishAccountsOverride}" ]]; then
         publishAccounts=${publishAccountsOverride}
@@ -2019,15 +2019,10 @@ renderAllSubscribeUserOutputs() {
             SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
         fi
     else
-        if ! subscriptionPublishAccounts "${localBase}" >"${publishAccountsFile}" 2>/dev/null; then
-            padmRemoveCleanupPath "${publishAccountsFile}"
+        if ! subscriptionPublishAccounts "${localBase}" >/dev/null 2>&1; then
             return 1
         fi
-        publishAccounts=$(cat "${publishAccountsFile}") || {
-            padmRemoveCleanupPath "${publishAccountsFile}"
-            return 1
-        }
-        padmRemoveCleanupPath "${publishAccountsFile}"
+        publishAccounts=${SUBSCRIPTION_PUBLISH_ACCOUNTS:-}
     fi
     if [[ "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" == "0" ]]; then
         if [[ -z "${renewSalt}" ]]; then
@@ -2128,8 +2123,9 @@ subscriptionPublishAccounts() {
           (if ((.allowed_sources // []) | index("*") or index("main")) then "true" else "false" end)
         ]
       | @tsv')
-    publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++')
-    printf '%s\n' "${publishAccounts}" | sed '/^$/d'
+    publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++' | sed '/^$/d')
+    SUBSCRIPTION_PUBLISH_ACCOUNTS=${publishAccounts}
+    [[ -n "${publishAccounts}" ]] && printf '%s\n' "${publishAccounts}"
 }
 
 cleanupStaleSubscribeOutputs() {
