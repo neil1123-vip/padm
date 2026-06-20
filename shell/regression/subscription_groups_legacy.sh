@@ -11769,6 +11769,7 @@ JSON
         local controlledLocal="${controlledRoot}/local"
         local controlledEmail="sub_team"
         local controlledEmailMd5="hash-team"
+        local controlledRequestLog="${controlledRoot}/request.log"
         local oldSubscribeLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
         local oldSubscribeDir="${PADM_SUBSCRIBE_DIR:-}"
         local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
@@ -11783,9 +11784,20 @@ JSON
         printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
         printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
         curl() {
+            return 95
+        }
+        subscriptionRemoteControlRequest() {
+            local sourceJson=$1
+            local endpoint=$2
+            local payload=$3
+            [[ "${endpoint}" == "subscribe" ]]
+            [[ "$(jq -r '.id' <<<"${sourceJson}")" == "edge-wg" ]]
+            jq -e --arg account "${controlledEmail}" '.account == $account' <<<"${payload}" >/dev/null
+            printf '%s\n' "${payload}" >"${controlledRequestLog}"
             printf '%s\n' '{"ok":true,"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}'
         }
         updateRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}"
+        jq -e --arg account "${controlledEmail}" '.account == $account' "${controlledRequestLog}" >/dev/null
         grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
         grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
         jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null

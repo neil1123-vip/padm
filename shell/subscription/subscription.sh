@@ -378,8 +378,6 @@ updateRemoteSubscribe() {
         local default=
         local singBoxSubscribe=
         local controlledResponse=
-        local controlledToken=
-        local controlledUrl=
         local controlledPayload=
         local clashFile="${tmpDir}/clash"
         local defaultFile="${tmpDir}/default"
@@ -391,14 +389,8 @@ updateRemoteSubscribe() {
         source=$(subscriptionActiveGroupRead -c --arg id "${serverAlias}" '.sources[]? | select(.id == $id)' 2>/dev/null) || source=
         if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
             controlledResponse=
-            if controlledToken=$(jq -r '.control_token // empty' <<<"${source}" 2>/dev/null) &&
-                [[ -n "${controlledToken}" ]] &&
-                controlledUrl=$(subscriptionWireGuardControlUrl "${source}" subscribe 2>/dev/null) &&
-                controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
-                controlledResponse=$(curl -sS --connect-timeout 5 --max-time 30 \
-                    -H "Content-Type: application/json" \
-                    -H "Authorization: Bearer ${controlledToken}" \
-                    -X POST --data "${controlledPayload}" "${controlledUrl}" 2>/dev/null); then
+            if controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
+                controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null); then
                 :
             fi
             if [[ -n "${controlledResponse}" ]] && jq -e '.ok == true' <<<"${controlledResponse}" >/dev/null 2>&1; then
