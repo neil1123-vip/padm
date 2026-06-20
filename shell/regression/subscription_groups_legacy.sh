@@ -6902,7 +6902,7 @@ EOF
             printf -v "$1" "%s，请手动检查%s" "$2" "$3"
         }
         rm() {
-            if [[ "$1" == "-f" && "$2" == "${targetPath}" ]]; then
+            if [[ "$1" == "-f" && ( "$2" == "${targetPath}" || ( "$2" == "--" && "$3" == "${targetPath}" ) ) ]]; then
                 return 1
             fi
             command rm "$@"

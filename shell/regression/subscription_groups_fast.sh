@@ -379,6 +379,34 @@ EOF
     )
 }
 
+runWriteWireGuardControlNginxPathSafetyRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/write-wireguard-control-nginx-path-safety"
+        local unsafeRoot="${root}/unsafe"
+        local nginxRoot="${root}/nginx conf.d"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}" "${root}/static"
+
+        nginx() { return 0; }
+        subscriptionWireGuardReadState() { printf '%s\n' '{"address":"10.77.0.1/24","control_port":39778}'; }
+        fail2banPadmControlLogFile() { printf '%s\n' "${TMP_DIR}/wg-control-access.log"; }
+        subscriptionControlPort() { printf '%s\n' 39999; }
+        nginxStaticPath="${root}/static"
+
+        (
+            cd "${unsafeRoot}"
+            nginxConfigPath='relative-nginx/'
+            ! ensureSubscriptionWireGuardNginxConfig
+            [[ ! -e relative-nginx ]]
+            [[ ! -e padm-control-wg.conf ]]
+        )
+
+        nginxConfigPath="${nginxRoot}/"
+        ensureSubscriptionWireGuardNginxConfig
+        grep -q 'listen 10.77.0.1:39778;' "${nginxRoot}/padm-control-wg.conf"
+    )
+}
+
 runWriteAloneNginxPathSafetyRegression() {
     (
         set -euo pipefail
@@ -3627,6 +3655,7 @@ runRegressionFast() {
         runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression &&
         runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression &&
         runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression &&
+        runRegressionStep write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression &&
         runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
         runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
         runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression &&

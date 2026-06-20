@@ -98,6 +98,10 @@ writeSubscribeNginxConfig() {
         subscribeNginxConfigWriteError "订阅 Nginx 配置路径异常"
         return 1
     fi
+    if ! padmCommitTargetIsFileLike "${targetPath}"; then
+        subscribeNginxConfigWriteError "订阅 Nginx 配置目标异常"
+        return 1
+    fi
     local tmpPath
     local backupPath=
     local nginxTestLog
@@ -111,7 +115,11 @@ writeSubscribeNginxConfig() {
     if command -v nginx >/dev/null 2>&1; then
         if [[ -f "${targetPath}" ]]; then
             padmCreateTempFileForTarget backupPath "${targetPath}" backup || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-            cp "${targetPath}" "${backupPath}" || { padmRemoveCleanupPath "${tmpPath}"; padmRemoveCleanupPath "${backupPath}"; return 1; }
+            backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || {
+                padmRemoveCleanupPath "${tmpPath}"
+                padmRemoveCleanupPath "${backupPath}"
+                return 1
+            }
         fi
         if ! commitGeneratedFile "${tmpPath}" "${targetPath}" 644; then
             padmRemoveCleanupPath "${tmpPath}"
@@ -128,7 +136,7 @@ writeSubscribeNginxConfig() {
                 }
             else
                 subscriptionSyncSetManualCheckMessage restoreMessage "订阅 Nginx 配置校验失败，且新配置清理失败" " ${targetPath}"
-                rm -f "${targetPath}" || subscribeNginxConfigWriteError "${restoreMessage}" || return 1
+                removeManagedFileIfPresent "${targetPath}" || subscribeNginxConfigWriteError "${restoreMessage}" || return 1
             fi
             return 1
         fi

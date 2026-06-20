@@ -477,7 +477,9 @@ applySubscriptionWireGuardService() {
 }
 
 subscriptionWireGuardNginxConfigFile() {
-    echo "${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf"
+    local targetPath="${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf"
+    padmIsSafeAbsolutePath "${targetPath}" || return 1
+    printf '%s\n' "${targetPath}"
 }
 
 ensureSubscriptionWireGuardNginx() {
@@ -530,7 +532,8 @@ ensureSubscriptionWireGuardNginxConfig() {
     listenHost=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${state}")")
     controlPort=$(jq -r '.control_port' <<<"${state}")
     [[ -n "${listenHost}" && "${listenHost}" != "null" ]] || return 1
-    targetPath=$(subscriptionWireGuardNginxConfigFile)
+    targetPath=$(subscriptionWireGuardNginxConfigFile) || return 1
+    padmCommitTargetIsFileLike "${targetPath}" || return 1
     padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || return 1
     cat >"${tmpPath}" <<EOF || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 server {
@@ -555,14 +558,18 @@ EOF
     if command -v nginx >/dev/null 2>&1; then
         if [[ -f "${targetPath}" ]]; then
             padmCreateTempFileForTarget backupPath "${targetPath}" backup || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-            cp "${targetPath}" "${backupPath}" || { padmRemoveCleanupPath "${tmpPath}"; padmRemoveCleanupPath "${backupPath}"; return 1; }
+            backupManagedFileToPath "${targetPath}" "${backupPath}" 644 || {
+                padmRemoveCleanupPath "${tmpPath}"
+                padmRemoveCleanupPath "${backupPath}"
+                return 1
+            }
         fi
         commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"; return 1; }
         if ! nginx -t >"$(subscriptionWireGuardNginxTestLog)" 2>&1; then
             if [[ -n "${backupPath}" && -f "${backupPath}" ]]; then
                 commitGeneratedFile "${backupPath}" "${targetPath}" 644 || padmRemoveCleanupPath "${backupPath}"
             else
-                rm -f "${targetPath}"
+                removeManagedFileIfPresent "${targetPath}" || return 1
             fi
             return 1
         fi
