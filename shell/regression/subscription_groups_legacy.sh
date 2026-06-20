@@ -10203,7 +10203,7 @@ configPath="${oldConfigPath}"
             printf '%s\n' "$(( $(<"${mainCheckFile}") + 1 ))" >"${mainCheckFile}"
             return 0
         fi
-        if [[ "$*" == *".user_groups[]? | select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
+        if [[ "$*" == *".user_groups[]?"* && "$*" == *"select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
             printf 'team-a\ttrue\nteam-b\ttrue\n'
             return 0
         fi
@@ -10236,6 +10236,62 @@ configPath="${oldConfigPath}"
     }
     sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
     [[ "${sourceLines}" == "example.com:443:edge:https" ]]
+)
+
+(
+    local renderRoot="${TMP_DIR}/subscription-render-remote-hint-batch"
+    local localBase="${renderRoot}/local"
+    local remoteChecksFile="${renderRoot}/remote-checks.log"
+    local autoReadCalls=0
+    local oldSubscribeSalt="${subscribeSalt:-}"
+    local oldCurrentDefaultPort="${currentDefaultPort:-}"
+    mkdir -p "${localBase}/default" "${renderRoot}"
+    : >"${remoteChecksFile}"
+    subscribeSalt=test-salt
+    currentDefaultPort=443
+
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
+            return 1
+        fi
+        if [[ "$*" == *".user_groups[]?"* && "$*" == *"select(.enabled == true)"* && "$*" == *"@tsv"* ]]; then
+            printf 'team-a\tfalse\n'
+            return 0
+        fi
+        return 1
+    }
+    subscriptionPublishHasRemoteSources() {
+        return 99
+    }
+    subscriptionRemoteSubscribeSourcesForAccount() {
+        printf '%s\n' "$1" >>"${remoteChecksFile}"
+        printf 'example.com:443:edge:https\n'
+    }
+    autoRead() {
+        autoReadCalls=$((autoReadCalls + 1))
+        printf -v "$3" 'y'
+    }
+    resolveSubscribePublicDomain() {
+        printf 'example.com'
+    }
+    renderSubscribeUserOutputs() {
+        [[ "$1" == "sub_team_a" && "$4" == "y" ]]
+    }
+
+    renderAllSubscribeUserOutputs "${localBase}" "" true "" true
+    [[ "${autoReadCalls}" == "1" ]]
+    [[ "$(wc -l < "${remoteChecksFile}")" == "1" ]]
+
+    if [[ -n "${oldSubscribeSalt}" ]]; then
+        subscribeSalt="${oldSubscribeSalt}"
+    else
+        unset subscribeSalt
+    fi
+    if [[ -n "${oldCurrentDefaultPort}" ]]; then
+        currentDefaultPort="${oldCurrentDefaultPort}"
+    else
+        unset currentDefaultPort
+    fi
 )
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"

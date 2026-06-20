@@ -1997,13 +1997,29 @@ renderAllSubscribeUserOutputs() {
     local showStatus=$3
     local publishAccountsOverride=${4:-}
     local skipCleanup=${5:-}
-    local subscribePortLocal="${subscribePort}"
+    local subscribePortLocal="${subscribePort:-}"
     local email emailMd5 currentDomain defaultFile
     local publishAccounts=
+    local publishAccountsFile="${TMPDIR:-/tmp}/padm-subscribe-accounts.$$.$RANDOM"
     local existingMd5s='[]'
 
-    publishAccounts=${publishAccountsOverride:-$(subscriptionPublishAccounts "${localBase}" 2>/dev/null)} || return 1
-    if subscriptionPublishHasRemoteSources "${publishAccounts}"; then
+    SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=
+    if [[ -n "${publishAccountsOverride}" ]]; then
+        publishAccounts=${publishAccountsOverride}
+        subscriptionPublishHasRemoteSources "${publishAccounts}"
+        SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
+    else
+        if ! subscriptionPublishAccounts "${localBase}" >"${publishAccountsFile}" 2>/dev/null; then
+            padmRemoveCleanupPath "${publishAccountsFile}"
+            return 1
+        fi
+        publishAccounts=$(cat "${publishAccountsFile}") || {
+            padmRemoveCleanupPath "${publishAccountsFile}"
+            return 1
+        }
+        padmRemoveCleanupPath "${publishAccountsFile}"
+    fi
+    if [[ "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" == "0" ]]; then
         if [[ -z "${renewSalt}" ]]; then
             autoRead subscribe_update_remote "读取到其他订阅，是否更新？[y/n]" updateOtherSubscribeStatus
         else
@@ -2072,6 +2088,7 @@ subscriptionPublishAccounts() {
     local allowsMain
     local mainPublishSourceAvailable=false
 
+    SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=1
     localBase=${localBase:-$(subscribeLocalBaseDir)}
     if [[ -d "${localBase}/default" ]]; then
         while IFS= read -r defaultFile; do
@@ -2090,6 +2107,7 @@ subscriptionPublishAccounts() {
             continue
         fi
         if [[ -n "$(subscriptionRemoteSubscribeSourcesForAccount "${account}" 2>/dev/null)" ]]; then
+            SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
             stagedAccounts+="${account}"$'\n'
         fi
     done < <(subscriptionActiveGroupRead -r '
