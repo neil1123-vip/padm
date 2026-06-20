@@ -275,9 +275,28 @@ subscriptionRemoteControlHealth() {
     jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" --arg statusCode "${statusCode}" '{id:$id, name:$name, ok:false, status:"remote_error", status_code:$statusCode}'
 }
 
-subscriptionRemoteControlHealthAll() {
+subscriptionRemoteHealthInternalErrorResult() {
+    local source=$1
+    jq -n \
+        --arg id "$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
+        --arg name "$(jq -r '.name // .id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
+        '{id:$id, name:$name, ok:false, status:"internal_error", error_detail:{type:"internal_error", message:"健康检查结果生成失败"}}'
+}
+
+subscriptionRemoteSyncPlanInternalErrorResult() {
+    local source=$1
+    jq -n \
+        --arg sourceId "$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
+        '{source_id:$sourceId, status:"internal_error", dry_run:true, error_detail:{type:"internal_error", message:"远程同步计划生成失败"}}'
+}
+
+subscriptionRemoteCollectParallelResults() {
+    local sources=$1
+    local tmpPattern=$2
+    local workerFn=$3
+    local fallbackFn=$4
+    shift 4
     local source
-    local sources
     local tmpDir
     local outputFile
     local result
@@ -285,22 +304,19 @@ subscriptionRemoteControlHealthAll() {
     local index=0
     local -a sourceList=()
     local -a resultList=()
+    local -a workerArgs=("$@")
     local pids=()
-    sources=$(subscriptionRemoteControlSources)
-    padmCreateTmpRootPath tmpDir padm-remote-health.XXXXXX -d || return 1
+
+    padmCreateTmpRootPath tmpDir "${tmpPattern}" -d || return 1
     while IFS= read -r source; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         (
             local writeResult
-            local sourceId
-            local sourceName
-            writeResult=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null) || writeResult=
+            writeResult=$("${workerFn}" "${source}" "${workerArgs[@]}" 2>/dev/null) || writeResult=
             if [[ -n "${writeResult}" ]] && jq -e . <<<"${writeResult}" >/dev/null 2>&1; then
                 printf '%s\n' "${writeResult}" >"${outputFile}"
             else
-                sourceId=$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)
-                sourceName=$(jq -r '.name // .id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)
-                jq -n --arg id "${sourceId}" --arg name "${sourceName}" '{id:$id, name:$name, ok:false, status:"internal_error", error_detail:{type:"internal_error", message:"健康检查结果生成失败"}}' >"${outputFile}"
+                "${fallbackFn}" "${source}" >"${outputFile}" 2>/dev/null || true
             fi
         ) &
         pids+=("$!")
@@ -319,10 +335,7 @@ subscriptionRemoteControlHealthAll() {
             if [[ -f "${outputFile}" ]] && result=$(jq -c . "${outputFile}" 2>/dev/null); then
                 resultList+=("${result}")
             else
-                result=$(jq -n \
-                    --arg id "$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
-                    --arg name "$(jq -r '.name // .id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
-                    '{id:$id, name:$name, ok:false, status:"internal_error", error_detail:{type:"internal_error", message:"健康检查结果生成失败"}}') || {
+                result=$("${fallbackFn}" "${source}") || {
                     padmRemoveCleanupPath "${tmpDir}"
                     return 1
                 }
@@ -333,6 +346,16 @@ subscriptionRemoteControlHealthAll() {
     fi
     padmRemoveCleanupPath "${tmpDir}"
     printf '%s\n' "${aggregatedResults}"
+}
+
+subscriptionRemoteControlHealthAll() {
+    local sources
+    sources=$(subscriptionRemoteControlSources)
+    subscriptionRemoteCollectParallelResults \
+        "${sources}" \
+        padm-remote-health.XXXXXX \
+        subscriptionRemoteControlHealth \
+        subscriptionRemoteHealthInternalErrorResult
 }
 
 subscriptionRemoteSyncPlanForSource() {
@@ -368,64 +391,18 @@ subscriptionRemoteSyncPlanForSource() {
 }
 
 subscriptionRemoteSyncPlan() {
-    local source
     local sources
     local desiredUsersBySource='{}'
-    local tmpDir
-    local outputFile
-    local result
-    local aggregatedResults
-    local index=0
-    local -a sourceList=()
-    local -a resultList=()
-    local pids=()
     sources=$(subscriptionRemoteControlSources)
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
     fi
-    padmCreateTmpRootPath tmpDir padm-remote-plan.XXXXXX -d || return 1
-    while IFS= read -r source; do
-        printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
-        (
-            local writeResult
-            local sourceId
-            writeResult=$(subscriptionRemoteSyncPlanForSource "${source}" "${desiredUsersBySource}" 2>/dev/null) || writeResult=
-            if [[ -n "${writeResult}" ]] && jq -e . <<<"${writeResult}" >/dev/null 2>&1; then
-                printf '%s\n' "${writeResult}" >"${outputFile}"
-            else
-                sourceId=$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)
-                jq -n --arg sourceId "${sourceId}" '{source_id:$sourceId, status:"internal_error", dry_run:true, error_detail:{type:"internal_error", message:"远程同步计划生成失败"}}' >"${outputFile}"
-            fi
-        ) &
-        pids+=("$!")
-        index=$((index + 1))
-    done < <(jq -c '.[]' <<<"${sources}")
-    for pid in "${pids[@]}"; do
-        wait "${pid}" 2>/dev/null || true
-    done
-    mapfile -t sourceList < <(jq -c '.[]' <<<"${sources}")
-    if [[ "${#sourceList[@]}" == "0" ]]; then
-        aggregatedResults=$(jq -n '[]') || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
-    else
-        for index in "${!sourceList[@]}"; do
-            source=${sourceList[$index]}
-            printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
-            if [[ -f "${outputFile}" ]] && result=$(jq -c . "${outputFile}" 2>/dev/null); then
-                resultList+=("${result}")
-            else
-                result=$(jq -n \
-                    --arg sourceId "$(jq -r '.id // "unknown"' <<<"${source}" 2>/dev/null || echo unknown)" \
-                    '{source_id:$sourceId, status:"internal_error", dry_run:true, error_detail:{type:"internal_error", message:"远程同步计划生成失败"}}') || {
-                    padmRemoveCleanupPath "${tmpDir}"
-                    return 1
-                }
-                resultList+=("${result}")
-            fi
-        done
-        aggregatedResults=$(printf '%s\n' "${resultList[@]}" | jq -s '.') || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
-    fi
-    padmRemoveCleanupPath "${tmpDir}"
-    printf '%s\n' "${aggregatedResults}"
+    subscriptionRemoteCollectParallelResults \
+        "${sources}" \
+        padm-remote-plan.XXXXXX \
+        subscriptionRemoteSyncPlanForSource \
+        subscriptionRemoteSyncPlanInternalErrorResult \
+        "${desiredUsersBySource}"
 }
 
 runSubscriptionRemoteSync() {
