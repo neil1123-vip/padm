@@ -10834,6 +10834,9 @@ JSON
     (
         local capturedControlSyncPlanIds="${TMP_DIR}/subscription-control-sync-plan-ids.txt"
         local capturedControlSyncPlanAccounts="${TMP_DIR}/subscription-control-sync-plan-accounts.json"
+        subscriptionControlSyncPlan() {
+            return 97
+        }
         subscriptionSyncAccountNamesJsonFromIds() {
             cat >"${capturedControlSyncPlanIds}"
             printf '["control_team_a"]\n'
@@ -10842,10 +10845,11 @@ JSON
             printf '%s\n' "$1" >"${capturedControlSyncPlanAccounts}"
             jq -n --argjson desired "$1" '{create:[], remove:$desired}'
         }
-        subscriptionControlSyncPlan '[{"id":"team-a"}]' | jq -e '.remove == ["control_team_a"]' >/dev/null
+        subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":true}' |
+            jq -e '.ok == true and .dry_run == true and .changed == true and .plan.remove == ["control_team_a"]' >/dev/null
         grep -qx 'team-a' "${capturedControlSyncPlanIds}"
         jq -e '. == ["control_team_a"]' "${capturedControlSyncPlanAccounts}" >/dev/null
-        unset -f subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
+        unset -f subscriptionControlSyncPlan subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
     )
     local oldConfigPath="${configPath:-}"
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"
@@ -11979,6 +11983,18 @@ runRemoteControlServerRefreshRegression() (
     jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}" >/dev/null
     jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.duplicate" >/dev/null
     jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.uuid" >/dev/null
+    (
+        subscriptionControlDesiredUsers() {
+            return 96
+        }
+        set +e
+        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":true}' >"${responseFile}.desired-users-inline"
+        local desiredUsersInlineStatus=$?
+        set -e
+        [[ "${desiredUsersInlineStatus}" == "0" ]]
+        jq -e '.ok == true and .dry_run == true and .changed == true and .plan.create == ["sub_team_a"] and .plan.remove == []' "${responseFile}.desired-users-inline" >/dev/null
+        unset -f subscriptionControlDesiredUsers
+    )
 
     subscriptionSyncPlanFromAccounts() {
         printf '{"create":["sub_team_a"],"remove":[]}'

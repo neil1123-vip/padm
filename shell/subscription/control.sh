@@ -937,11 +937,6 @@ subscriptionControlValidateSyncPayload() {
     ' <<<"${payload}" >/dev/null 2>&1
 }
 
-subscriptionControlDesiredUsers() {
-    local payload=$1
-    jq '[.desired_users[]? | {id, uuid: (.uuid // "")}]' <<<"${payload}"
-}
-
 subscriptionControlCreateUsersFromPlan() {
     local desiredUsers=$1
     local createAccounts=$2
@@ -959,13 +954,6 @@ subscriptionControlCreateUsersFromPlan() {
         | select($uuid != "")
         | {id: $user.id, uuid: $uuid}
       ]'
-}
-
-subscriptionControlSyncPlan() {
-    local desiredUsers=$1
-    local desiredAccountsJson
-    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(jq -r '.[].id' <<<"${desiredUsers}")) || return 1
-    subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }
 
 subscriptionControlUpdateDesiredUserState() {
@@ -1092,6 +1080,7 @@ subscriptionControlApplySync() {
     local payload=$1
     local dryRun
     local desiredUsers
+    local desiredAccountsJson
     local plan
     local previousGroupsState
     local configBackupDir=
@@ -1101,11 +1090,15 @@ subscriptionControlApplySync() {
         return 1
     fi
     dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
-    desiredUsers=$(subscriptionControlDesiredUsers "${payload}") || {
+    desiredUsers=$(jq '[.desired_users[]? | {id, uuid: (.uuid // "")}]' <<<"${payload}") || {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     }
-    if ! plan=$(subscriptionControlSyncPlan "${desiredUsers}"); then
+    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(jq -r '.[].id' <<<"${desiredUsers}")) || {
+        jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划生成失败"}}'
+        return 1
+    }
+    if ! plan=$(subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"); then
         jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划生成失败"}}'
         return 1
     fi
