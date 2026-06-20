@@ -2555,6 +2555,15 @@ runInstallMenuRecommendedIdsRegression() {
     ! grep -q 'customSingBoxInstall 10' "${PROJECT_ROOT}/shell/core/menu.sh"
 }
 
+runValidateInstallLoadsRuntimeRegression() {
+    grep -q 'shell/core/runtime\.sh' "${PROJECT_ROOT}/shell/validate_install.sh"
+}
+
+runValidateInstallTempRootStaysInParentShellRegression() {
+    ! grep -q 'root=$(validate_tmp_root)' "${PROJECT_ROOT}/shell/validate_install.sh"
+    grep -q 'validate_tmp_root >/dev/null' "${PROJECT_ROOT}/shell/validate_install.sh"
+}
+
 runAliasInstallMetadataCopyRegression() {
     local sourceDir targetDir oldScriptDir oldPadmInstallDir oldHome
     sourceDir="${TMP_DIR}/alias-install-source"
@@ -3653,6 +3662,8 @@ runRegressionPlatform() {
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-early-capability-list runInstallEarlyCapabilityListRegression &&
         runRegressionStep install-menu-recommended-ids runInstallMenuRecommendedIdsRegression &&
+        runRegressionStep validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression &&
+        runRegressionStep validate-install-temp-root-parent-shell runValidateInstallTempRootStaysInParentShellRegression &&
         runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
         runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression &&
         runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&

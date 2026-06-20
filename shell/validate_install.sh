@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/shell/core/runtime.sh"
+
 passed=0
 failed=0
 warned=0
@@ -32,9 +36,8 @@ validate_tmp_root() {
 
 validate_tmp_file() {
     local name=$1
-    local root
-    root=$(validate_tmp_root) || return 1
-    printf '%s/%s\n' "${root}" "${name}"
+    validate_tmp_root >/dev/null || return 1
+    printf '%s/%s\n' "${PADM_VALIDATE_TMP_ROOT}" "${name}"
 }
 
 find_has_matches() {
@@ -628,6 +631,8 @@ main() {
             ;;
         esac
     done
+
+    validate_tmp_root >/dev/null || warn "验证临时目录创建失败，部分深度检查会跳过"
 
     check_command curl
     check_command jq
