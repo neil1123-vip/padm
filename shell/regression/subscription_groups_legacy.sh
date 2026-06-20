@@ -10646,6 +10646,9 @@ JSON
         menuLine() { printf 'menu:%s\n' "$*"; }
         menuClose() { return 0; }
         userResultCard() { printf 'card:%s\n' "$*"; }
+        showUserSubscriptionQuotaStatus() {
+            return 93
+        }
         trafficOutput=$(showUserSubscriptionTraffic team-a)
         [[ "${trafficOutput}" == *"card:用户订阅流量"* ]]
         [[ "${trafficOutput}" == *"menu:用户订阅：team-a"* ]]
@@ -10770,24 +10773,22 @@ JSON
     (
         local quotaBatchPlan='[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"team-b","action":"disable-and-remove-local-account"}]'
         local capturedAccountPlan="${TMP_DIR}/subscription-quota-account-plan.json"
+        local capturedQuotaAccountIds="${TMP_DIR}/subscription-quota-account-ids.txt"
         local oldSubscriptionSyncApplyAccountPlanTransaction
         eval "$(declare -f subscriptionSyncApplyAccountPlanTransaction | sed '1s/^subscriptionSyncApplyAccountPlanTransaction/originalSubscriptionSyncApplyAccountPlanTransaction/')"
         subscriptionSyncAccountNamesJsonFromIds() {
-            return 98
-        }
-        jq() {
-            if [[ "$1" == "--arg" && "$2" == "accountName" && "$4" == ". + [\$accountName]" ]]; then
-                return 91
-            fi
-            command jq "$@"
+            cat >"${capturedQuotaAccountIds}"
+            printf '["quota_team_a","quota_team_b"]\n'
         }
         subscriptionSyncApplyAccountPlanTransaction() {
             printf '%s\n' "$1" >"${capturedAccountPlan}"
             return 0
         }
         applySubscriptionQuotaPlanAccounts "${quotaBatchPlan}"
-        jq -e '.create == [] and .remove == ["sub_team_a", "sub_team_b"]' "${capturedAccountPlan}" >/dev/null
-        unset -f jq subscriptionSyncApplyAccountPlanTransaction
+        grep -qx 'team-a' "${capturedQuotaAccountIds}"
+        grep -qx 'team-b' "${capturedQuotaAccountIds}"
+        jq -e '.create == [] and .remove == ["quota_team_a", "quota_team_b"]' "${capturedAccountPlan}" >/dev/null
+        unset -f subscriptionSyncApplyAccountPlanTransaction
         eval "$(declare -f originalSubscriptionSyncApplyAccountPlanTransaction | sed '1s/^originalSubscriptionSyncApplyAccountPlanTransaction/subscriptionSyncApplyAccountPlanTransaction/')"
         unset -f originalSubscriptionSyncApplyAccountPlanTransaction
     )
@@ -10812,24 +10813,39 @@ JSON
         unset -f subscriptionSyncAccountIdMapJsonFromIds
     )
     (
+        local capturedSyncPlanIds="${TMP_DIR}/subscription-sync-plan-ids.txt"
+        local capturedSyncPlanAccounts="${TMP_DIR}/subscription-sync-plan-accounts.json"
+        subscriptionSyncDesiredLocalUsers() {
+            printf 'team-a\n'
+        }
         subscriptionSyncAccountNamesJsonFromIds() {
-            return 98
+            cat >"${capturedSyncPlanIds}"
+            printf '["plan_team_a"]\n'
         }
         subscriptionSyncPlanFromAccounts() {
-            jq -n '{create:[], remove:["sub_team_a"]}'
+            printf '%s\n' "$1" >"${capturedSyncPlanAccounts}"
+            jq -n --argjson desired "$1" '{create:[], remove:$desired}'
         }
-        subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
-        unset -f subscriptionSyncAccountNamesJsonFromIds
+        subscriptionSyncPlan | jq -e '.remove == ["plan_team_a"]' >/dev/null
+        grep -qx 'team-a' "${capturedSyncPlanIds}"
+        jq -e '. == ["plan_team_a"]' "${capturedSyncPlanAccounts}" >/dev/null
+        unset -f subscriptionSyncDesiredLocalUsers subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
     )
     (
+        local capturedControlSyncPlanIds="${TMP_DIR}/subscription-control-sync-plan-ids.txt"
+        local capturedControlSyncPlanAccounts="${TMP_DIR}/subscription-control-sync-plan-accounts.json"
         subscriptionSyncAccountNamesJsonFromIds() {
-            return 98
+            cat >"${capturedControlSyncPlanIds}"
+            printf '["control_team_a"]\n'
         }
         subscriptionSyncPlanFromAccounts() {
-            jq -n '{create:[], remove:["sub_team_a"]}'
+            printf '%s\n' "$1" >"${capturedControlSyncPlanAccounts}"
+            jq -n --argjson desired "$1" '{create:[], remove:$desired}'
         }
-        subscriptionControlSyncPlan '[{"id":"team-a"}]' | jq -e '.remove | index("sub_team_a")' >/dev/null
-        unset -f subscriptionSyncAccountNamesJsonFromIds
+        subscriptionControlSyncPlan '[{"id":"team-a"}]' | jq -e '.remove == ["control_team_a"]' >/dev/null
+        grep -qx 'team-a' "${capturedControlSyncPlanIds}"
+        jq -e '. == ["control_team_a"]' "${capturedControlSyncPlanAccounts}" >/dev/null
+        unset -f subscriptionSyncAccountNamesJsonFromIds subscriptionSyncPlanFromAccounts
     )
     local oldConfigPath="${configPath:-}"
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"

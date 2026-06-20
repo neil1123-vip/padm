@@ -322,19 +322,6 @@ def subscriptionUserQuotaStatus($user; $traffic; $showPercent):
 EOF
 }
 
-showUserSubscriptionQuotaStatus() {
-    local userSubscriptionId=$1
-    local jqProgram
-    local quotaStatusJq
-    quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
-    ensureSubscriptionGroupsState
-    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
-      (.user_groups[]? | select(.id == $id)) as $userGroup |
-      (.traffic.user_groups[$id] // {upload:0, download:0}) as $traffic |
-      subscriptionUserQuotaStatus($userGroup; $traffic; true)')
-    subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}"
-}
-
 showAdminSubscriptionTraffic() {
     local traffic
     local summary
@@ -352,10 +339,19 @@ showAdminSubscriptionTraffic() {
 showUserSubscriptionTraffic() {
     local userSubscriptionId=$1
     local traffic
+    local quotaStatus
+    local jqProgram
+    local quotaStatusJq
     ensureSubscriptionGroupsState
+    quotaStatusJq=$(subscriptionUserQuotaStatusJq) || return 1
+    jqProgram=$(printf '%s\n%s\n' "${quotaStatusJq}" '
+      (.user_groups[]? | select(.id == $id)) as $userGroup |
+      (.traffic.user_groups[$id] // {upload:0, download:0}) as $traffic |
+      subscriptionUserQuotaStatus($userGroup; $traffic; true)')
+    quotaStatus=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" "${jqProgram}") || return 1
     userResultCard "用户订阅流量"
     menuLine "用户订阅：${userSubscriptionId}"
-    menuLine "限额状态：$(showUserSubscriptionQuotaStatus "${userSubscriptionId}")"
+    menuLine "限额状态：${quotaStatus}"
     traffic=$(subscriptionActiveGroupRead -r --arg id "${userSubscriptionId}" '.traffic.user_groups[$id] // {upload:0, download:0, sources:{}}')
     printf '%s\n' "${traffic}" | jq .
     menuClose
