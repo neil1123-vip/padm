@@ -964,15 +964,7 @@ subscriptionControlCreateUsersFromPlan() {
 subscriptionControlSyncPlan() {
     local desiredUsers=$1
     local desiredAccountsJson
-    desiredAccountsJson=$(jq -R -s '
-      split("\n")
-      | map(select(length > 0))
-      | map(
-          . as $id
-          | "sub_" + (($id | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))
-        )
-      | unique
-    ' < <(jq -r '.[].id' <<<"${desiredUsers}")) || return 1
+    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(jq -r '.[].id' <<<"${desiredUsers}")) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }
 

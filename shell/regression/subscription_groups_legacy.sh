@@ -10765,6 +10765,16 @@ JSON
         subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
         unset -f subscriptionSyncAccountNamesJsonFromIds
     )
+    (
+        subscriptionSyncAccountNamesJsonFromIds() {
+            return 98
+        }
+        subscriptionSyncPlanFromAccounts() {
+            jq -n '{create:[], remove:["sub_team_a"]}'
+        }
+        subscriptionControlSyncPlan '[{"id":"team-a"}]' | jq -e '.remove | index("sub_team_a")' >/dev/null
+        unset -f subscriptionSyncAccountNamesJsonFromIds
+    )
     local oldConfigPath="${configPath:-}"
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"
     local syncConfigRoot="${TMP_DIR}/subscription-sync-config"

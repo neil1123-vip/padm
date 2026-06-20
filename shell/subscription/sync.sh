@@ -173,6 +173,18 @@ subscriptionSyncConfiguredManagedUsers() {
     subscriptionSyncCurrentManagedUsers "${files[@]}"
 }
 
+subscriptionSyncAccountNamesJsonFromIds() {
+    jq -R -s '
+      split("\n")
+      | map(select(length > 0))
+      | map(
+          . as $id
+          | "sub_" + (($id | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))
+        )
+      | unique
+    '
+}
+
 subscriptionSyncPlanFromAccounts() {
     local desiredAccountsJson=$1
     local currentAccounts
@@ -185,15 +197,7 @@ subscriptionSyncPlanFromAccounts() {
 
 subscriptionSyncPlan() {
     local desiredAccountsJson
-    desiredAccountsJson=$(jq -R -s '
-      split("\n")
-      | map(select(length > 0))
-      | map(
-          . as $id
-          | "sub_" + (($id | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")))
-        )
-      | unique
-    ' < <(subscriptionSyncDesiredLocalUsers)) || return 1
+    desiredAccountsJson=$(subscriptionSyncAccountNamesJsonFromIds < <(subscriptionSyncDesiredLocalUsers)) || return 1
     subscriptionSyncPlanFromAccounts "${desiredAccountsJson}"
 }
 
@@ -848,20 +852,15 @@ applySubscriptionQuotaPlan() {
 applySubscriptionQuotaPlanAccounts() {
     local quotaPlan=$1
     local accountPlan
-    local id
     local rc=0
     subscriptionQuotaValidatePlan "${quotaPlan}" || return 1
-    accountPlan=$(jq -n --argjson quotaPlan "${quotaPlan}" '
-      def account_name($id):
-        "sub_" + ((($id | tostring) | gsub("_"; "\u0001") | gsub("-"; "_") | gsub("\u0001"; "-")));
-      {
-        create: [],
-        remove: [
-          $quotaPlan[]?.id
-          | select(type == "string" and length > 0)
-          | account_name(.)
-        ]
-      }') || return 1
+    accountPlan=$(
+        {
+            printf '{"create":[],"remove":'
+            jq -r '.[].id // empty' <<<"${quotaPlan}" | subscriptionSyncAccountNamesJsonFromIds
+            printf '}'
+        }
+    ) || return 1
     if jq -e '.remove | length > 0' <<<"${accountPlan}" >/dev/null 2>&1; then
         if ! subscriptionSyncApplyAccountPlanTransaction "${accountPlan}" reloadCore; then
             rc=1
