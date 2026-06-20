@@ -11832,13 +11832,20 @@ runRemoteControlDesiredUsersSingleSourceReuseRegression() (
         printf '{"edge-a":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}\n'
     }
 
-    subscriptionActiveGroupRead() {
-        return 91
+    subscriptionRemoteDesiredUsers() {
+        return 93
     }
 
-    output=$(subscriptionRemoteDesiredUsers edge-a)
+    activeSubscriptionGroupId() {
+        printf 'default\n'
+    }
+
+    output=$(subscriptionRemoteControlPayload '{"id":"edge-a"}' true)
     jq -e '
-      . == [
+      .source_id == "edge-a" and
+      .group_id == "default" and
+      .dry_run == true and
+      .desired_users == [
         {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"}
       ]
     ' <<<"${output}" >/dev/null
