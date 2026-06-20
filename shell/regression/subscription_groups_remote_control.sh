@@ -111,6 +111,65 @@ JSON
     [[ "${planResult}" == *'"status":"internal_error"'*'"type":"internal_error"'* ]]
 )
 
+runRemoteControlInlineAggregationHelpersRegression() (
+    local healthResult
+    local planResult
+
+    subscriptionRemoteInternalErrorResult() {
+        return 91
+    }
+    subscriptionRemoteWriteCheckedResult() {
+        return 92
+    }
+    subscriptionRemoteCollectCheckedResults() {
+        return 93
+    }
+    subscriptionRemoteControlSources() {
+        cat <<'JSON'
+[{"id":"edge-a","name":"Edge A"},{"id":"edge-b","name":"Edge B"}]
+JSON
+    }
+    subscriptionRemoteControlHealth() {
+        local source=$1
+        case "$(remoteControlRegressionSourceId "${source}")" in
+        edge-a)
+            printf '{"id":"edge-a","name":"Edge A","ok":true}\n'
+            ;;
+        edge-b)
+            printf 'broken-health-json\n'
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    }
+    subscriptionRemoteSyncPlanForSource() {
+        local source=$1
+        case "$(remoteControlRegressionSourceId "${source}")" in
+        edge-a)
+            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            ;;
+        edge-b)
+            printf 'broken-plan-json\n'
+            ;;
+        *)
+            return 1
+            ;;
+        esac
+    }
+
+    healthResult=$(subscriptionRemoteControlHealthAll 2>/dev/null || true)
+    [[ -n "${healthResult}" ]] || return 1
+    healthResult=$(jq -c . <<<"${healthResult}") || return 1
+    [[ "${healthResult}" == *'"id":"edge-a"'*'"status":"internal_error"'*'"type":"internal_error"'* ]] || return 1
+
+    planResult=$(subscriptionRemoteSyncPlan 2>/dev/null || true)
+    [[ -n "${planResult}" ]] || return 1
+    planResult=$(jq -c . <<<"${planResult}") || return 1
+    [[ "${planResult}" == *'"source_id":"edge-a"'*'"status":"success"'* ]] || return 1
+    [[ "${planResult}" == *'"status":"internal_error"'*'"type":"internal_error"'* ]] || return 1
+)
+
 runRemoteControlHealthRegression() (
     local sourceMissing='{"id":"edge-missing","name":"Edge Missing","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
     local sourceRemote='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
@@ -1653,6 +1712,7 @@ PY
 runRegressionRemoteControlSmokeCoreSteps() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
+        runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression &&
         runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression &&
