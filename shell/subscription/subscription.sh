@@ -293,22 +293,6 @@ fetchRemoteSubscribeContent() {
     curl -fsSL --connect-timeout 5 --max-time 15 "${url}" 2>/dev/null
 }
 
-fetchRemoteControlledSubscribePayload() {
-    local source=$1
-    local account=$2
-    local token
-    local url
-    local payload
-    token=$(subscriptionRemoteControlToken "${source}") || return 1
-    [[ -n "${token}" ]] || return 1
-    url=$(subscriptionRemoteControlUrl "${source}" subscribe) || return 1
-    payload=$(jq -nc --arg account "${account}" '{account:$account}') || return 1
-    curl -sS --connect-timeout 5 --max-time 30 \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${token}" \
-        -X POST --data "${payload}" "${url}" 2>/dev/null
-}
-
 appendUniqueLines() {
     local content=$1
     local targetPath=$2
@@ -356,6 +340,7 @@ updateRemoteSubscribe() {
     local line=
     local source=
     local sourceLines=
+    local escapedEmail=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
     local commitFailed=false
 
@@ -392,6 +377,7 @@ updateRemoteSubscribe() {
           | select(.role != "main" and .transport != "wireguard")
           | "\(.host):\(.port):\(.id):\(.scheme)"')
     fi
+    escapedEmail=$(printf '%s\n' "${email}" | sed 's/[][\/.^$*+?(){}|]/\\&/g')
 
     while IFS= read -r line; do
         if [[ -z "${line}" ]]; then
@@ -404,6 +390,9 @@ updateRemoteSubscribe() {
         local default=
         local singBoxSubscribe=
         local controlledResponse=
+        local controlledToken=
+        local controlledUrl=
+        local controlledPayload=
         local clashFile="${tmpDir}/clash"
         local defaultFile="${tmpDir}/default"
         local singBoxFile="${tmpDir}/sing-box"
@@ -413,7 +402,17 @@ updateRemoteSubscribe() {
         remoteUrl="${remoteHost}:${remotePort}"
         source=$(subscriptionActiveGroupRead -c --arg id "${serverAlias}" '.sources[]? | select(.id == $id)' 2>/dev/null) || source=
         if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            controlledResponse=$(fetchRemoteControlledSubscribePayload "${source}" "${email}" 2>/dev/null || true)
+            controlledResponse=
+            if controlledToken=$(subscriptionRemoteControlToken "${source}" 2>/dev/null) &&
+                [[ -n "${controlledToken}" ]] &&
+                controlledUrl=$(subscriptionRemoteControlUrl "${source}" subscribe 2>/dev/null) &&
+                controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
+                controlledResponse=$(curl -sS --connect-timeout 5 --max-time 30 \
+                    -H "Content-Type: application/json" \
+                    -H "Authorization: Bearer ${controlledToken}" \
+                    -X POST --data "${controlledPayload}" "${controlledUrl}" 2>/dev/null); then
+                :
+            fi
             if [[ -n "${controlledResponse}" ]] && jq -e '.ok == true' <<<"${controlledResponse}" >/dev/null 2>&1; then
                 jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
                 jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
@@ -432,7 +431,9 @@ updateRemoteSubscribe() {
             wait "${singBoxPid}" 2>/dev/null || true
         fi
 
-        clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed "s/\"${email}/\"${email}_${serverAlias}/g")
+        clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed -E \
+            -e "s/^([[:space:]-]*name:[[:space:]]*\")${escapedEmail}([^\"]*)(\".*)$/\1${email}_${serverAlias}\2\3/" \
+            -e "s/^([[:space:]-]*name:[[:space:]]*)${escapedEmail}([^[:space:]]*)([[:space:]]*)$/\1${email}_${serverAlias}\2\3/")
         if [[ -n "${clashMetaProxies}" && "${clashMetaProxies}" != *nginx* ]]; then
             if ! appendUniqueLines "${clashMetaProxies}" "${clashTarget}"; then
                 padmRemoveCleanupPath "${tmpDir}"

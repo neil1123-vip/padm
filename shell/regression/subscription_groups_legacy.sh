@@ -11622,8 +11622,8 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
 runRemoteSubscribeFetchRegression() {
     local publicDir="${TMP_DIR}/remote-subscribe-public"
     local localDir="${TMP_DIR}/remote-subscribe-local"
-    local email="user@example.com"
-    local emailMd5="hash-user"
+    local email="sub_team"
+    local emailMd5="hash-team"
     local uniqueFile="${TMP_DIR}/remote-subscribe-unique.txt"
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
     local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
@@ -11637,6 +11637,10 @@ runRemoteSubscribeFetchRegression() {
     TMPDIR="${remoteTmpRoot}"
     rm -rf "${publicDir}" "${localDir}" "${remoteTmpRoot}"
     mkdir -p "${publicDir}/default" "${publicDir}/clashMeta" "${localDir}/sing-box" "${remoteTmpRoot}"
+    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"r1","name":"Remote 1","role":"secondary","scheme":"https","transport":"https","host":"remote1.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r2","name":"Remote 2","role":"secondary","scheme":"https","transport":"https","host":"remote2.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r3","name":"Remote 3","role":"secondary","scheme":"https","transport":"https","host":"remote3.example","port":443,"enabled":true,"sync_status":"success"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["r1","r2","r3"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
     : >"${fetchTmpMarker}"
     : >"${stageTmpMarker}"
 
@@ -11663,37 +11667,40 @@ runRemoteSubscribeFetchRegression() {
         recordRemoteSubscribeTmpDirs
         case "${url}" in
         *remote1.example*/s/clashMeta/*)
-            printf '%s\n' 'proxies:' '- name: "user@example.com"'
+            printf '%s\n' 'proxies:' '- name: "sub_team"'
             ;;
         *remote1.example*/s/default/*)
-            printf '%s' 'vless://uuid@remote1.example:443#user@example.com' | base64
+            printf '%s' 'vless://uuid@remote1.example:443#sub_team' | base64
             ;;
         *remote1.example*/s/sing-box_profiles/*)
-            printf '%s\n' '[{"tag":"user@example.com"}]'
+            printf '%s\n' '[{"tag":"sub_team"}]'
             ;;
         *remote2.example*/s/default/*)
             printf '%s\n' 'not-base64'
             ;;
         *remote2.example*/s/sing-box_profiles/*)
             if [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-partial}" == "fail-singbox-merge" ]]; then
-                printf '%s\n' '[{"tag":"user@example.com_r2"}]'
+                printf '%s\n' '[{"tag":"sub_team_r2"}]'
             else
                 printf '%s\n' '{bad json'
             fi
             ;;
         *remote3.example*/s/clashMeta/*)
-            printf '%s\n' 'proxies:' '- name: "user@example.com"'
+            printf '%s\n' 'proxies:' '- name: "sub_team"'
             ;;
         *remote3.example*/s/default/*)
-            printf '%s' 'trojan://pass@remote3.example:443#user@example.com-extra' | base64
+            printf '%s' 'trojan://pass@remote3.example:443#sub_team-extra' | base64
             ;;
         *remote3.example*/s/sing-box_profiles/*)
-            printf '%s\n' '[{"tag":"user@example.com-extra"}]'
+            printf '%s\n' '[{"tag":"sub_team-extra"}]'
             ;;
         *)
             return 1
             ;;
         esac
+    }
+    fetchRemoteControlledSubscribePayload() {
+        return 97
     }
 
     writeRemoteSubscribeOldOutputs
@@ -11720,13 +11727,45 @@ runRemoteSubscribeFetchRegression() {
     writeRemoteSubscribeOldOutputs
     unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
     updateRemoteSubscribe "${emailMd5}" "${email}"
-    grep -qxF -- '- name: "user@example.com_r1"' "${publicDir}/clashMeta/${emailMd5}"
-    grep -qxF 'vless://uuid@remote1.example:443#user@example.com_r1' "${publicDir}/default/${emailMd5}"
-    grep -qxF 'trojan://pass@remote3.example:443#user@example.com_r3-extra' "${publicDir}/default/${emailMd5}"
-    jq -e '.[0].tag == "old-local" and .[1].tag == "user@example.com_r1" and .[2].tag == "user@example.com_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+    grep -qxF -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}"
+    grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
+    grep -qxF 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}"
+    jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
     [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
     [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
     [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
+
+    (
+        local controlledRoot="${TMP_DIR}/remote-controlled-fetch"
+        local controlledState="${controlledRoot}/state"
+        local controlledPublic="${controlledRoot}/public"
+        local controlledLocal="${controlledRoot}/local"
+        local controlledEmail="sub_team"
+        local controlledEmailMd5="hash-team"
+        local oldSubscribeLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+        local oldSubscribeDir="${PADM_SUBSCRIBE_DIR:-}"
+        local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+        mkdir -p "${controlledState}" "${controlledPublic}/default" "${controlledPublic}/clashMeta" "${controlledLocal}/sing-box"
+        export PADM_SUBSCRIPTION_GROUPS_DIR="${controlledState}"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${controlledLocal}"
+        export PADM_SUBSCRIBE_DIR="${controlledPublic}"
+        cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-wg","name":"Edge WG","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"wg.example.com","port":443,"enabled":true,"sync_status":"success","control_token":"token-edge"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["edge-wg"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+        printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
+        printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
+        curl() {
+            printf '%s\n' '{"ok":true,"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}'
+        }
+        updateRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}"
+        grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
+        grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+        if [[ -n "${oldSubscribeLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldSubscribeLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+        if [[ -n "${oldSubscribeDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldSubscribeDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+        if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+    )
 
     writeRemoteSubscribeOldOutputs
     (
@@ -11774,10 +11813,10 @@ runRemoteSubscribeFetchRegression() {
     )
 
     updateRemoteSubscribe "${emailMd5}" "${email}"
-    [[ "$(grep -cFx -- '- name: "user@example.com_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
-    [[ "$(grep -cFx 'vless://uuid@remote1.example:443#user@example.com_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
-    [[ "$(grep -cFx 'trojan://pass@remote3.example:443#user@example.com_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
-    jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "user@example.com_r1" and .[2].tag == "user@example.com_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+    [[ "$(grep -cFx -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
+    [[ "$(grep -cFx 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
+    [[ "$(grep -cFx 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
+    jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
