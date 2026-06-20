@@ -778,15 +778,6 @@ subscriptionSyncReconcileLocalServices() {
     return 0
 }
 
-subscriptionSyncRefreshPublishedSubscriptions() {
-    subscribePort=
-    subscribeType=
-    subscribeDomain=
-    readNginxSubscribe
-    [[ -n "${subscribePort:-}" ]] || return 0
-    subscribe false false >/dev/null 2>&1
-}
-
 subscriptionSyncMarkResult() {
     local status=$1
     local failures=$2
@@ -1042,9 +1033,15 @@ runSubscriptionGroupSync() {
     fi
 
     if [[ "${localSyncReady}" == "true" ]]; then
-        if ! subscriptionSyncRefreshPublishedSubscriptions; then
-            failures=$(jq '. + ["同步完成后公网订阅刷新失败"]' <<<"${failures}")
-            rc=1
+        subscribePort=
+        subscribeType=
+        subscribeDomain=
+        readNginxSubscribe
+        if [[ -n "${subscribePort:-}" ]]; then
+            if ! subscribe false false >/dev/null 2>&1; then
+                failures=$(jq '. + ["同步完成后公网订阅刷新失败"]' <<<"${failures}")
+                rc=1
+            fi
         fi
     fi
 

@@ -1446,6 +1446,87 @@ PY
     fi
 )
 
+runSubscriptionGroupSyncPublishRefreshInlineRegression() (
+    local syncRoot="${TMP_DIR}/subscription-group-sync-publish-refresh-inline"
+    local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
+    local callLog="${syncRoot}/calls.log"
+    local resultStatus="${syncRoot}/mark-status.log"
+    local resultFailures="${syncRoot}/mark-failures.log"
+    local statusLog="${syncRoot}/status.log"
+    local syncStatus
+
+    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
+    configPath="${syncRoot}/xray/"
+    singBoxConfigPath="${syncRoot}/xray/"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
+    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
+    TMPDIR="${syncRoot}/tmp"
+    : >"${callLog}"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":false,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    cat >"${syncConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+
+    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+    subscriptionGroupRemoteSyncEnabled() { return 1; }
+    collectSubscriptionTraffic() { return 0; }
+    readInstallType() { return 0; }
+    readInstallProtocolType() { return 0; }
+    readConfigHostPathUUID() { return 0; }
+    subscriptionSyncPlan() {
+        printf '{"create":["sub_team_a"],"remove":[]}'
+    }
+    subscriptionSyncApplyAccountPlanTransaction() {
+        printf 'apply\n' >>"${callLog}"
+        return 0
+    }
+    subscriptionSyncReconcileLocalServices() {
+        printf 'reconcile:%s\n' "${1:-<empty>}" >>"${callLog}"
+        return 0
+    }
+    runSubscriptionRemoteSync() {
+        printf 'remote\n' >>"${callLog}"
+        printf '[]'
+    }
+    subscriptionSyncRefreshPublishedSubscriptions() {
+        return 98
+    }
+    readNginxSubscribe() {
+        printf 'read-subscribe\n' >>"${callLog}"
+        subscribePort=39778
+        subscribeType=https
+        subscribeDomain=main.example.com
+    }
+    subscribe() {
+        printf 'subscribe:%s\n' "$*" >>"${callLog}"
+        return 0
+    }
+    subscriptionSyncMarkResult() {
+        printf '%s\n' "$1" >"${resultStatus}"
+        printf '%s\n' "$2" >"${resultFailures}"
+        return 0
+    }
+    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
+    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
+
+    set +e
+    runSubscriptionGroupSync
+    syncStatus=$?
+    set -e
+    [[ "${syncStatus}" == "0" ]]
+    [[ ! -e "${resultFailures}" || "$(<"${resultFailures}")" == "[]" ]]
+    grep -q '同步完成后公网订阅刷新失败' "${resultFailures}" && return 1
+    grep -qx 'success' "${resultStatus}"
+    grep -qx 'apply' "${callLog}"
+    grep -qx 'reconcile:<empty>' "${callLog}"
+    grep -qx 'remote' "${callLog}"
+    grep -qx 'read-subscribe' "${callLog}"
+    grep -qx 'subscribe:false false' "${callLog}"
+)
+
 runSubscriptionGroupSyncRollbackRegression() {
     runSubscriptionGroupSyncRollbackSerialRegression
 }
@@ -1856,6 +1937,7 @@ runRegressionSubscriptionStateSupport() {
         runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression &&
         runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression &&
         runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression &&
+        runRegressionStep subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression &&
         runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
 }
 
