@@ -978,14 +978,7 @@ setSubscriptionSourceControlTokenMenu() {
         errorCard "被控服务器别名无效"
         return 1
     fi
-    previousState=$(subscriptionWireGuardReadState) || {
-        errorCard "WireGuard 状态读取失败"
-        return 1
-    }
-    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
-        errorCard "订阅组状态读取失败"
-        return 1
-    }
+    subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
     subscriptionWireGuardUpdatePeerFromCredential "${sourceId}" "${credentialJson}" || {
         errorCard "被控服务器 Peer 更新失败"
         return 1

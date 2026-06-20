@@ -277,6 +277,37 @@ subscriptionWireGuardRestoreStateAndGroupsOrReport() {
     subscriptionWireGuardRunRestoreSteps "${previousState}" "${previousGroupsState}" "${failureTitle}"
 }
 
+subscriptionWireGuardReadPreviousState() {
+    local outputVar=$1
+    local errorMessage=${2:-}
+    local __padmWireGuardPreviousState
+    __padmWireGuardPreviousState=$(subscriptionWireGuardReadState) || {
+        [[ -n "${errorMessage}" ]] && errorCard "${errorMessage}"
+        return 1
+    }
+    printf -v "${outputVar}" '%s' "${__padmWireGuardPreviousState}"
+}
+
+subscriptionWireGuardReadPreviousStateAndGroups() {
+    local stateVar=$1
+    local groupsVar=$2
+    local stateErrorMessage=${3:-}
+    local groupsErrorMessage=${4:-}
+    local __padmWireGuardPreviousStateValue
+    local __padmWireGuardPreviousGroupsStateValue
+
+    __padmWireGuardPreviousStateValue=$(subscriptionWireGuardReadState) || {
+        [[ -n "${stateErrorMessage}" ]] && errorCard "${stateErrorMessage}"
+        return 1
+    }
+    __padmWireGuardPreviousGroupsStateValue=$(subscriptionGroupsStateRead -c '.') || {
+        [[ -n "${groupsErrorMessage}" ]] && errorCard "${groupsErrorMessage}"
+        return 1
+    }
+    printf -v "${stateVar}" '%s' "${__padmWireGuardPreviousStateValue}"
+    printf -v "${groupsVar}" '%s' "${__padmWireGuardPreviousGroupsStateValue}"
+}
+
 subscriptionWireGuardRole() {
     subscriptionWireGuardReadState | jq -r '.role'
 }
@@ -589,10 +620,7 @@ initSubscriptionWireGuardMain() {
         errorCard "当前机器已初始化为被控" "第一版只支持星型拓扑，被控不能再作为主控"
         return 1
     fi
-    previousState=$(subscriptionWireGuardReadState) || {
-        errorCard "WireGuard 状态读取失败"
-        return 1
-    }
+    subscriptionWireGuardReadPreviousState previousState "WireGuard 状态读取失败" || return 1
     installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     listenPort=$(subscriptionWireGuardDefaultListenPort)
@@ -643,10 +671,7 @@ initSubscriptionWireGuardControlled() {
         errorCard "当前机器已初始化为主控" "第一版只支持星型拓扑，主控不能再作为被控"
         return 1
     fi
-    previousState=$(subscriptionWireGuardReadState) || {
-        errorCard "WireGuard 状态读取失败"
-        return 1
-    }
+    subscriptionWireGuardReadPreviousState previousState "WireGuard 状态读取失败" || return 1
     installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     controlPort=$(subscriptionWireGuardDefaultControlPort)
@@ -753,10 +778,7 @@ importSubscriptionWireGuardMainCredential() {
         errorCard "请先初始化本机为被控" "第一版星型拓扑要求被控导入主控凭据"
         return 1
     fi
-    previousState=$(subscriptionWireGuardReadState) || {
-        errorCard "当前 WireGuard 状态读取失败"
-        return 1
-    }
+    subscriptionWireGuardReadPreviousState previousState "当前 WireGuard 状态读取失败" || return 1
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
     subscriptionWireGuardWriteState \
       --arg network "$(jq -r '.network' <<<"${credentialJson}")" \
@@ -832,11 +854,7 @@ subscriptionWireGuardAddPeerFromCredential() {
     publicKey=$(jq -r '.public_key' <<<"${credentialJson}")
     controlPort=$(jq -r '.control_port' <<<"${credentialJson}")
     token=$(jq -r '.token' <<<"${credentialJson}")
-    previousState=$(subscriptionWireGuardReadState) || return 1
-    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
-        errorCard "订阅组状态读取失败"
-        return 1
-    }
+    subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "" "订阅组状态读取失败" || return 1
     subscriptionWireGuardWriteState \
       --arg id "${alias}" \
       --arg address "${address}" \
@@ -886,11 +904,7 @@ subscriptionWireGuardRemovePeerAndSource() {
         errorCard "只有主控可以移除被控服务器" "第一版只支持一台主控管理多台被控"
         return 1
     fi
-    previousState=$(subscriptionWireGuardReadState) || return 1
-    previousGroupsState=$(subscriptionGroupsStateRead -c '.') || {
-        errorCard "订阅组状态读取失败"
-        return 1
-    }
+    subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "" "订阅组状态读取失败" || return 1
     subscriptionWireGuardWriteState \
       --arg id "${id}" \
       '.peers = ([.peers[]? | select(.id != $id)])' || return 1
@@ -942,10 +956,7 @@ restartSubscriptionWireGuardControl() {
 
 disableSubscriptionWireGuardControl() {
     local previousState
-    previousState=$(subscriptionWireGuardReadState) || {
-        errorCard "WireGuard 控制面状态读取失败"
-        return 1
-    }
+    subscriptionWireGuardReadPreviousState previousState "WireGuard 控制面状态读取失败" || return 1
     if ! stopSubscriptionWireGuardControlService; then
         errorCard "WireGuard 控制面停用失败"
         return 1
