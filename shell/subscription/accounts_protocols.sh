@@ -213,20 +213,33 @@ showVlessRealityGrpcAccounts() {
     # VLESS Reality gRPC
     if currentProtocolHas 26; then
         subscribeSectionTitle "VLESS reality_gRPC" "推荐"
-        local path="${configPath}"
+        showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${xrayVLESSRealityGRPCPort:-}" "${xrayVLESSRealityGRPCSNI:-}" "${xrayVLESSRealityGRPCPublicKey:-${currentRealityPublicKey:-}}" "${xrayVLESSRealityGRPCMldsa65Verify:-${currentRealityMldsa65Verify:-}}"
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
-            path="${singBoxConfigPath}"
+            showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" ""
         fi
-        jq .inbounds[0].settings.clients//.inbounds[0].users "${path}08_VLESS_vision_gRPC_inbounds.json" | jq -c '.[]' | while read -r user; do
+    fi
+}
+
+showVlessRealityGrpcAccountsFromConfig() {
+    local configFile=$1
+    local realityGRPCPort=$2
+    local realityGRPCSNI=$3
+    local realityGRPCPublicKey=$4
+    local realityGRPCMldsa65Verify=$5
+    [[ -f "${configFile}" ]] || return 0
+    jq '.inbounds[0].settings.clients // .inbounds[0].users' "${configFile}" | jq -c '.[]' | while read -r user; do
             local email accountId
             IFS=$'\037' read -r email accountId _ _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
 
             subscribeAccountTitle "${email}"
             echo
-            local realityGRPCPort="${singBoxVLESSRealityGRPCPort:-${xrayVLESSRealityPort}}"
+            local xrayVLESSRealitySNI="${realityGRPCSNI}"
+            local currentRealityPublicKey="${realityGRPCPublicKey}"
+            local currentRealityMldsa65Verify="${realityGRPCMldsa65Verify}"
+            local singBoxVLESSRealityGRPCSNI=
+            local singBoxVLESSRealityPublicKey=
             defaultBase64Code vlessRealityGRPC "${realityGRPCPort}" "${email}" "${accountId}"
         done
-    fi
 }
 
 showTuicAccounts() {

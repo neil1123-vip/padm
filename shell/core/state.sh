@@ -160,6 +160,8 @@ readInstallProtocolType() {
     xrayVLESSRealityGRPCSNI=
 
     currentRealityXHTTPPublicKey=
+    xrayVLESSRealityGRPCPublicKey=
+    xrayVLESSRealityGRPCMldsa65Verify=
 
     currentRealityPrivateKey=
     currentRealityPublicKey=
@@ -289,7 +291,9 @@ readInstallProtocolType() {
                 realityGrpcTarget=$(jq -r .inbounds[0].streamSettings.realitySettings.target "${row}.json")
                 realityTargetHost=${realityGrpcTarget%%:*}
                 realityTargetPort=${realityGrpcTarget#*:}
-                currentRealityPublicKey=$(jq -r .inbounds[0].streamSettings.realitySettings.publicKey "${row}.json")
+                xrayVLESSRealityGRPCPublicKey=$(jq -r .inbounds[0].streamSettings.realitySettings.publicKey "${row}.json")
+                xrayVLESSRealityGRPCMldsa65Verify=$(jq -r '.inbounds[0].streamSettings.realitySettings.mldsa65Verify // empty' "${row}.json")
+                currentRealityPublicKey=${xrayVLESSRealityGRPCPublicKey}
                 currentRealityPrivateKey=$(jq -r .inbounds[0].streamSettings.realitySettings.privateKey "${row}.json")
             elif [[ "${coreInstallType}" == "2" ]]; then
                 frontingTypeReality=08_VLESS_vision_gRPC_inbounds
@@ -645,6 +649,10 @@ cleanLastInstallationConfig() {
     realityEntryHost=
     xrayVLESSRealityPort=
     xrayVLESSRealityXHTTPort=
+    xrayVLESSRealityGRPCPort=
+    xrayVLESSRealityGRPCSNI=
+    xrayVLESSRealityGRPCPublicKey=
+    xrayVLESSRealityGRPCMldsa65Verify=
     currentRealityPublicKey=
     currentRealityPrivateKey=
     currentRealityMldsa65Seed=

@@ -3051,6 +3051,9 @@ runShowAccountsXrayWithSingBoxAssistRegression() {
         cat >"${xrayRoot}/07_VLESS_vision_reality_inbounds.json" <<'JSON'
 {"inbounds":[{"port":443},{"settings":{"clients":[{"email":"sub_base-vless_reality_vision","id":"11111111-1111-1111-1111-111111111111"}]},"streamSettings":{"realitySettings":{"serverNames":["www.ibm.com"],"publicKey":"pub","privateKey":"priv","target":"www.ibm.com:443","mldsa65Seed":"","mldsa65Verify":""}}}]}
 JSON
+        cat >"${xrayRoot}/08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
+{"inbounds":[{"port":17694,"settings":{"clients":[{"email":"sub_xray_grpc-vless_reality_grpc","id":"44444444-4444-4444-4444-444444444444"}]},"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"publicKey":"xray-grpc-public-key","privateKey":"xray-grpc-private-key","target":"www.cloudflare.com:443","mldsa65Seed":"","mldsa65Verify":""},"grpcSettings":{"serviceName":"grpc"}}}]}
+JSON
         cat >"${singBoxRoot}/08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
 {"inbounds":[{"type":"vless","listen_port":20888,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"nodejs.org","reality":{"handshake":{"server":"nodejs.org","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
 JSON
@@ -3120,6 +3123,11 @@ EOF
         grep -q 'default:sub_naive:' "${captureLog}"
         grep -q 'default:sub_httpupgrade:' "${captureLog}"
         grep -q 'default:sub_anytls:' "${captureLog}"
+        grep -q 'default:sub_xray_grpc:.*@entry.example.com:17694' "${captureLog}"
+        grep -q 'default:sub_xray_grpc:.*sni=www.cloudflare.com' "${captureLog}"
+        grep -q 'singbox:.*"tag":"sub_xray_grpc-vless_reality_grpc"' "${captureLog}"
+        grep -q 'singbox:.*"server_port":17694' "${captureLog}"
+        grep -q 'singbox:.*"server_name":"www.cloudflare.com"' "${captureLog}"
         grep -q 'default:sub_grpc:.*sni=nodejs.org' "${captureLog}"
         grep -q 'default:sub_grpc:.*pbk=grpc-public-key' "${captureLog}"
 
