@@ -1134,3 +1134,27 @@ runSubscriptionGroupSyncCron() {
         runSubscriptionGroupSync "$@"
     fi
 }
+
+subscriptionGroupSyncCronFile() {
+    printf '/etc/padm/crontab_subscription_groups.log\n'
+}
+
+subscriptionGroupSyncCronCommand() {
+    local interval
+    interval=$(subscriptionActiveGroupRead -r '(.sync.interval_minutes // 10) | tonumber? // 10') || return 1
+    subscriptionGroupSyncIntervalValid "${interval}" || interval=10
+    printf '*/%s * * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> %s 2>&1\n' \
+        "${interval}" \
+        "$(subscriptionGroupSyncCronFile)"
+}
+
+installSubscriptionGroupSyncCron() {
+    local currentCrontab
+    local syncCron
+
+    ensureSubscriptionGroupsState || return 1
+    currentCrontab=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
+    syncCron=$(subscriptionGroupSyncCronCommand) || return 1
+    installUserCrontabContent "${currentCrontab}
+${syncCron}"
+}

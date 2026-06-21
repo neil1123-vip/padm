@@ -281,6 +281,35 @@ runSubscriptionGroupStateStructureSourceStatusRegression() {
     jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
 }
 
+runSubscriptionGroupStateStructureSyncCronRegression() {
+    mkdir -p "$(subscriptionGroupsDir)"
+    writeSubscriptionStateSourceStatusFixture
+    setSubscriptionGroupSyncInterval 17
+    (
+        local crontabLog="${TMP_DIR}/subscription-sync-crontab.txt"
+        crontab() {
+            case "${1:-}" in
+            -l)
+                printf '5 0 * * * /bin/bash /etc/padm/install.sh RenewTLS\n'
+                printf '10 0 * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups old\n'
+                ;;
+            *)
+                cat "$1" >"${crontabLog}"
+                ;;
+            esac
+        }
+        installSubscriptionGroupSyncCron
+        grep -qx '5 0 \* \* \* /bin/bash /etc/padm/install.sh RenewTLS' "${crontabLog}" || return 1
+        grep -qx '*/17 \* \* \* \* /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> /etc/padm/crontab_subscription_groups.log 2>&1' "${crontabLog}" || return 1
+        [[ "$(grep -c 'SyncSubscriptionGroups' "${crontabLog}")" == "1" ]] || return 1
+
+        setSubscriptionGroupSyncEnabled false
+        refreshSubscriptionGroupSyncCron
+        grep -qx '5 0 \* \* \* /bin/bash /etc/padm/install.sh RenewTLS' "${crontabLog}" || return 1
+        ! grep -q 'SyncSubscriptionGroups' "${crontabLog}" || return 1
+    )
+}
+
 runSubscriptionGroupStateStructureSourceRemoveRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceRemoveFixture
@@ -291,6 +320,7 @@ runSubscriptionGroupStateStructureSourceRemoveRegression() {
 runSubscriptionGroupStateStructureSourceSerialRegression() {
     runRegressionStep subscription-state-structure-source-credential runSubscriptionGroupStateStructureSourceCredentialRegression &&
         runRegressionStep subscription-state-structure-source-status runSubscriptionGroupStateStructureSourceStatusRegression &&
+        runRegressionStep subscription-state-structure-sync-cron runSubscriptionGroupStateStructureSyncCronRegression &&
         runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
 }
 

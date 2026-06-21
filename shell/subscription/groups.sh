@@ -438,6 +438,11 @@ setSubscriptionGroupSyncInterval() {
     subscriptionActiveGroupWrite --argjson interval "${interval}" '.sync.interval_minutes = $interval'
 }
 
+subscriptionGroupSyncIntervalValid() {
+    local interval=$1
+    [[ "${interval}" =~ ^[0-9]+$ ]] && [[ "${interval}" -ge 1 ]] && [[ "${interval}" -le 59 ]]
+}
+
 addSubscriptionSourceState() {
     local id=$1
     local name=$2
