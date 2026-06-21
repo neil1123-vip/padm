@@ -960,6 +960,7 @@ EOF
             "tag": "singbox-shadowsocks-in",
             "listen_port": ${result[-1]},
             "method": "2022-blake3-aes-128-gcm",
+            "password": "$(shadowsocks2022KeyFromSeed "server:${currentClients}")",
             "users": $(initSingBoxClients 30)
         }
     ]

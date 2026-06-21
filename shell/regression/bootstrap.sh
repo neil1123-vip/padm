@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 PROJECT_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd)
+
+regressionEnsureWritableDir() {
+    local varName=$1
+    local fallbackPath=$2
+    local currentPath=${!varName:-}
+
+    if [[ -n "${currentPath}" && -d "${currentPath}" && -w "${currentPath}" ]]; then
+        return 0
+    fi
+    mkdir -p "${fallbackPath}"
+    printf -v "${varName}" '%s' "${fallbackPath}"
+    export "${varName}"
+}
+
+regressionEnsureWritableDir TMPDIR "${PROJECT_ROOT}/.tmp-msys/tmp"
+regressionEnsureWritableDir HOME "${PROJECT_ROOT}/.tmp-msys/home"
+
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "${TMP_DIR}"' EXIT
 

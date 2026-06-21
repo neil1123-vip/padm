@@ -728,6 +728,15 @@ readConfigHostPathUUID() {
                 currentHost=$(grep 'server_name' <${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf | awk '{print $2}')
                 currentHost=${currentHost//;/}
             fi
+            if [[ -z "${currentHost}" || "${currentHost}" == "null" ]]; then
+                if [[ -n "${AUTO_ENTRY_HOST:-}" ]]; then
+                    currentHost=${AUTO_ENTRY_HOST}
+                elif [[ -n "${domain:-}" ]]; then
+                    currentHost=${domain}
+                else
+                    currentHost=$(getPublicIP)
+                fi
+            fi
             currentUUID=$(jq -r .inbounds[0].users[0].uuid ${configPath}${frontingType}.json)
             currentClients=$(jq -r .inbounds[0].users ${configPath}${frontingType}.json)
         else

@@ -28,6 +28,7 @@ subscriptionAccountDisplayFunction() {
     26) printf 'showVlessRealityGrpcAccounts' ;;
     27) printf 'showVlessTcpAccounts' ;;
     28 | 29) printf 'showTrojanAccounts' ;;
+    30) printf 'showShadowsocksAccounts' ;;
     31) printf 'showTuicAccounts' ;;
     *) return 1 ;;
     esac

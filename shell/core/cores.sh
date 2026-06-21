@@ -1675,6 +1675,15 @@ stripClientNameSuffix() {
     printf '%s' "${label}"
 }
 
+shadowsocks2022KeyFromSeed() {
+    local seed=$1
+    local hex escaped
+
+    hex=$(printf '%s' "${seed}" | sha256sum | awk '{print substr($1, 1, 32)}') || return 1
+    escaped=$(printf '%s' "${hex}" | sed 's/../\\x&/g') || return 1
+    printf '%b' "${escaped}" | base64 | tr -d '\n'
+}
+
 initXrayClients() {
     local type=",$1,"
     local newUUID=${2:-}
@@ -1800,7 +1809,7 @@ initSingBoxClients() {
 
         # Shadowsocks
         if protocolSelectionIncludes "${type}" 30; then
-            currentUser="{\"password\":\"${uuid}\",\"name\":\"${name}-shadowsocks\"}"
+            currentUser="{\"password\":\"$(shadowsocks2022KeyFromSeed "user:${uuid}")\",\"name\":\"${name}-shadowsocks\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
 

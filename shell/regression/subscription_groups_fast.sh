@@ -49,6 +49,26 @@ regressionEnsureScriptModules() {
     [[ -n "${remoteRef}" ]] && printf '%s\n' "${remoteRef}" >"${SCRIPT_EXPECTED_REF_FILE}"
 }
 
+runRegressionBootstrapLocalEnvFallbackRegression() {
+    local root="${TMP_DIR}/bootstrap-local-env-fallback"
+    local outputFile="${root}/output"
+    local missingTmp="${root}/missing-tmp"
+    local missingHome="${root}/missing-home"
+
+    mkdir -p "${root}"
+    TMPDIR="${missingTmp}" HOME="${missingHome}" bash -c '
+        set -euo pipefail
+        source "$1"
+        printf "TMPDIR=%s\n" "${TMPDIR}" >"$2"
+        printf "HOME=%s\n" "${HOME}" >>"$2"
+        [[ -d "${TMPDIR}" && -w "${TMPDIR}" ]]
+        [[ -d "${HOME}" && -w "${HOME}" ]]
+    ' _ "${PROJECT_ROOT}/shell/regression/bootstrap.sh" "${outputFile}"
+
+    grep -q "^TMPDIR=${PROJECT_ROOT}/.tmp-msys/tmp$" "${outputFile}"
+    grep -q "^HOME=${PROJECT_ROOT}/.tmp-msys/home$" "${outputFile}"
+}
+
 runCleanupTrapRegression() {
     local tmpDir exitProbe intProbe intOutput termProbe termOutput
 
@@ -3670,6 +3690,7 @@ runXrayPrereleaseDryRunRegression() {
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep version-helpers runVersionHelpersRegression &&
+        runRegressionStep regression-bootstrap-local-env-fallback runRegressionBootstrapLocalEnvFallbackRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
         runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression &&
         runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&

@@ -230,8 +230,17 @@ runProtocolCapabilityTemplateRegression() {
 
     currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_Reality_Vision"}]'
     ssUsers=$(initSingBoxClients 30)
-    if ! jq -e '.[0].name == "main-shadowsocks" and .[0].password == "11111111-1111-4111-8111-111111111111"' >/dev/null <<<"${ssUsers}"; then
-        printf 'assert-fail:sing-box Shadowsocks users should use name/password\n' >&2
+    if ! jq -e '.[0].name == "main-shadowsocks" and .[0].password != "11111111-1111-4111-8111-111111111111"' >/dev/null <<<"${ssUsers}"; then
+        printf 'assert-fail:sing-box Shadowsocks 2022 users should not use UUID as raw key\n' >&2
+        return 1
+    fi
+    ssPassword=$(jq -r '.[0].password' <<<"${ssUsers}")
+    if [[ "$(printf '%s' "${ssPassword}" | base64 -d 2>/dev/null | wc -c | tr -d ' ')" != "16" ]]; then
+        printf 'assert-fail:sing-box Shadowsocks 2022 user key should decode to 16 bytes\n' >&2
+        return 1
+    fi
+    if ! grep -Fq '"password": "$(shadowsocks2022KeyFromSeed "server:${currentClients}")",' "${coreTemplate}"; then
+        printf 'assert-fail:sing-box Shadowsocks 2022 inbound should include server password\n' >&2
         return 1
     fi
 }
@@ -302,6 +311,7 @@ runSubscriptionCapabilityDispatchRegression() {
     assertEquals showVlessRealityAccounts "$(subscriptionAccountDisplayFunction 1)" "account-display-fn:1"
     assertEquals showHysteriaAccounts "$(subscriptionAccountDisplayFunction 3)" "account-display-fn:3"
     assertEquals showVmessHTTPUpgradeAccounts "$(subscriptionAccountDisplayFunction 23)" "account-display-fn:23"
+    assertEquals showShadowsocksAccounts "$(subscriptionAccountDisplayFunction 30)" "account-display-fn:30"
     assertEquals showTuicAccounts "$(subscriptionAccountDisplayFunction 31)" "account-display-fn:31"
 
     if grep -Eq '^[[:space:]]*show(Vless|Trojan|Vmess|Hysteria|Tuic|Naive|AnyTls)' "${accountsFile}"; then
@@ -325,10 +335,42 @@ runSubscriptionCapabilityDispatchRegression() {
     fi
 }
 
+runSingBoxPlainInboundHostFallbackRegression() {
+    local oldCoreInstallType="${coreInstallType:-}"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local oldFrontingType="${frontingType:-}"
+    local oldCurrentInstallProtocolType="${currentInstallProtocolType:-}"
+    local oldAutoEntryHost="${AUTO_ENTRY_HOST:-}"
+    local configDir="${TMP_DIR}/singbox-plain-host/"
+
+    mkdir -p "${configDir}"
+    cat >"${configDir}30_shadowsocks_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"shadowsocks","listen_port":23432,"method":"2022-blake3-aes-128-gcm","password":"server-key","users":[{"name":"main-shadowsocks","password":"user-key"}]}]}
+JSON
+
+    coreInstallType=2
+    configPath="${configDir}"
+    singBoxConfigPath="${configDir}"
+    frontingType=30_shadowsocks_inbounds
+    currentInstallProtocolType=",30,"
+    AUTO_ENTRY_HOST=45.221.113.40
+    readConfigHostPathUUID
+    assertEquals 45.221.113.40 "${currentHost}" "singbox-plain-current-host"
+
+    coreInstallType="${oldCoreInstallType}"
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    frontingType="${oldFrontingType}"
+    currentInstallProtocolType="${oldCurrentInstallProtocolType}"
+    AUTO_ENTRY_HOST="${oldAutoEntryHost}"
+}
+
 runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
 runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression
 runRegressionStep protocol-capability-nginx-topology runProtocolCapabilityNginxTopologyRegression
 runRegressionStep protocol-capability-templates runProtocolCapabilityTemplateRegression
 runRegressionStep hysteria2-capability runHysteria2CapabilityRegression
 runRegressionStep subscription-capability-dispatch runSubscriptionCapabilityDispatchRegression
+runRegressionStep singbox-plain-inbound-host-fallback runSingBoxPlainInboundHostFallbackRegression
 echo "protocol-capabilities-regression-ok"

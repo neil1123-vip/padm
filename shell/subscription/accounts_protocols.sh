@@ -272,6 +272,27 @@ showNaiveAccounts() {
     fi
 }
 
+showShadowsocksAccounts() {
+    # Shadowsocks
+    if currentProtocolHas 30; then
+        subscribeSectionTitle "Shadowsocks" "高级兼容协议"
+        local path="${configPath}"
+        if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}30_shadowsocks_inbounds.json" ]]; then
+            path="${singBoxConfigPath}"
+        fi
+        local serverPassword
+        serverPassword=$(jq -r '.inbounds[0].password // empty' "${path}30_shadowsocks_inbounds.json")
+        jq -r -c '.inbounds[]|.users[]' "${path}30_shadowsocks_inbounds.json" | while read -r user; do
+            local name password
+            IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
+            subscribeAccountTitle "${name}"
+            echo
+            defaultBase64Code shadowsocks "${singBoxShadowsocksPort}" "${name}" "${serverPassword}:${password}"
+        done
+
+    fi
+}
+
 showVmessHTTPUpgradeAccounts() {
     # VMess HTTPUpgrade
     if currentProtocolHas 23; then

@@ -210,6 +210,9 @@ defaultBase64Code() {
     tuic)
         emitTuicSubscribeOutput "${port}" "${email}" "${id}" "${add}" "${path}" "${user}"
         ;;
+    shadowsocks)
+        emitShadowsocksSubscribeOutput "${port}" "${email}" "${id}" "${add}" "${path}" "${user}"
+        ;;
     naive)
         emitNaiveSubscribeOutput "${port}" "${email}" "${id}" "${add}" "${path}" "${user}"
         ;;

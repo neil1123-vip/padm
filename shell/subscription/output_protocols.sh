@@ -499,6 +499,41 @@ EOF
     echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=tuic%3A%2F%2F${tuicUUID}%3A${tuicPassword}%40${currentHost}%3A${port}%3Fcongestion_control%3D${tuicAlgorithm}%26alpn%3Dh3%26sni%3D${currentHost}%26udp_relay_mode%3Dnative%26allow_insecure%3D0%23${email}\n"
 }
 
+emitShadowsocksSubscribeOutput() {
+    local port=$1
+    local email=$2
+    local id=$3
+    local add=$4
+    local path=$5
+    local user=$6
+    local method="2022-blake3-aes-128-gcm"
+    local defaultUserInfo
+    local defaultLink
+    local clashMetaBlock
+    local singBoxFilter
+
+    defaultUserInfo=$(printf '%s' "${method}:${id}" | base64 -w 0)
+    defaultLink="ss://${defaultUserInfo}@${currentHost}:${port}#${email}"
+    clashMetaBlock=$(cat <<EOF
+  - name: "${email}"
+    type: ss
+    server: ${currentHost}
+    port: ${port}
+    cipher: ${method}
+    password: "${id}"
+EOF
+)
+    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"shadowsocks\",\"server\":\"${currentHost}\",\"server_port\":${port},\"method\":\"${method}\",\"password\":\"${id}\"}]"
+
+    subscribeOutputTitle "通用链接：Shadowsocks"
+    echoContent green "    ${defaultLink}\n"
+
+    subscribeOutputTitle "格式化明文：Shadowsocks"
+    echoContent green "协议类型:Shadowsocks，地址:${currentHost}，端口:${port}，method:${method}，账户名:${email}\n"
+
+    appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
+}
+
 emitNaiveSubscribeOutput() {
     local port=$1
     local email=$2
