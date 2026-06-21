@@ -422,6 +422,7 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         )
 
         nginxConfigPath="${nginxRoot}/"
+        rm -f "${nginxRoot}/padm-control-wg.conf"
         ensureSubscriptionWireGuardNginxConfig
         grep -q 'listen 10.77.0.1:39778;' "${nginxRoot}/padm-control-wg.conf"
     )

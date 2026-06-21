@@ -581,6 +581,7 @@ EOF
             return 1
         fi
         [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"
+        return 0
     else
         commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     fi
