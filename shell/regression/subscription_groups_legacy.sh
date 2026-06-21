@@ -4147,6 +4147,7 @@ runCoreInstallServiceActionFailureRegression() (
     installSingBoxService() { printf 'installSingBoxService:%s\n' "$*" >>"${callLog}"; return 0; }
     initSingBoxConfig() { printf 'initSingBoxConfig:%s\n' "$*" >>"${callLog}"; return 0; }
     cleanUp() { printf 'cleanup:%s\n' "$*" >>"${callLog}"; return 0; }
+    cleanAgentNginxConf() { printf 'clean-nginx\n' >>"${callLog}"; return 0; }
     installCronTLS() { printf 'cron:%s\n' "$*" >>"${callLog}"; return 0; }
     customPortFunction() { printf 'customPort\n' >>"${callLog}"; return 0; }
     subscriptionWireGuardControlEnabled() { return 0; }
@@ -4196,7 +4197,7 @@ runCoreInstallServiceActionFailureRegression() (
 
     resetInstallServiceFixture nginx-start-fail
     set +e
-    customXrayInstall 0 >/dev/null 2>&1
+    customXrayInstall 21 >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
@@ -4207,7 +4208,7 @@ runCoreInstallServiceActionFailureRegression() (
 
     resetInstallServiceFixture redirect-fail
     set +e
-    customXrayInstall 0 >/dev/null 2>&1
+    customXrayInstall 21 >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
@@ -4215,6 +4216,17 @@ runCoreInstallServiceActionFailureRegression() (
     ! grep -q '^nginx:start:' "${serviceLog}"
     ! grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture no-local-cert
+    set +e
+    customXrayInstall 2 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    grep -qx 'clean-nginx' "${callLog}"
+    grep -q '^installXray:' "${callLog}"
+    [[ -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-start-fail
@@ -17784,6 +17796,9 @@ reality-stream)
 core-rollback-result-message)
     regressionRunner=runCoreRollbackResultMessageRegression
     ;;
+core-install-service-action-failure)
+    regressionRunner=runCoreInstallServiceActionFailureRegression
+    ;;
 transaction)
     regressionRunner=runRegressionTransaction
     ;;
@@ -17815,7 +17830,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|core-install-service-action-failure|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac

@@ -1993,6 +1993,7 @@ customXrayInstall() {
                 installTLS 3 || return 1
             else
                 skipTlsCertificateStatusCard "仅安装无域名 Reality"
+                cleanAgentNginxConf || { errorCard "Nginx 配置清理失败，已取消 Xray 安装"; return 1; }
             fi
         fi
 
