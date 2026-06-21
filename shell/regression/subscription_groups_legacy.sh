@@ -14403,8 +14403,8 @@ runMenuSmokeLightRegression() {
     resetMenuActions
     systemScriptMenu <<<"4"
     assertMenuAction bbrInstall
-    [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
-    [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
 }
 
@@ -14692,7 +14692,7 @@ runMenuSmokeRegression() {
     assertMenuAction menu
     resetMenuActions
     installMenu <<<"4"
-    assertMenuAction "customSingBoxInstall:10"
+    assertMenuAction "customSingBoxInstall:5"
     resetMenuActions
     installMenu <<<"5"
     assertMenuAction selectCoreInstall
