@@ -716,6 +716,28 @@ runAutoInstallTlsDomainMissingReturnsRegression() {
     grep -q 'AUTO_INSTALL.*return 1' "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
 }
 
+runAutoInstallTwoDigitSingleProtocolRegression() {
+    local outputFile
+    outputFile="${TMP_DIR}/auto-install-two-digit-single-protocol.txt"
+    (
+        source "${PROJECT_ROOT}/shell/core/bootstrap.sh"
+        AUTO_INSTALL=true
+        installTools() { :; }
+        initTLSNginxConfig() { return 1; }
+        readAcmeTLS() { :; }
+        errorCard() { printf 'ERROR:%s\n' "$*"; }
+        statusCard() { :; }
+        progressCard() { printf 'PROGRESS:%s\n' "$*"; }
+        successCard() { :; }
+        readLastInstallationConfig() { :; }
+        unInstallSubscribe() { :; }
+        protocolSelectionShowRiskNotes() { :; }
+        customSingBoxInstall 31
+    ) >"${outputFile}" 2>&1 || true
+    ! grep -q '多选请使用英文逗号分隔' "${outputFile}"
+    grep -q 'TUIC' "${outputFile}"
+}
+
 runParseInstallArgsMissingValueRegression() {
     (
         set -euo pipefail
@@ -742,7 +764,7 @@ runClientNameSuffixPreservesRandomPrefixRegression() {
         source "${PROJECT_ROOT}/shell/core/cores.sh"
         local xrayUsers singboxUsers
         xrayUsers=$(initXrayClients 0)
-        singboxUsers=$(initSingBoxClients 7)
+        singboxUsers=$(initSingBoxClients 1)
         jq -e '.[0].email == "padm-abcdef12-VLESS_TCP/TLS_Vision"' <<<"${xrayUsers}" >/dev/null
         jq -e '.[0].name == "padm-abcdef12-VLESS_Reality_Vision"' <<<"${singboxUsers}" >/dev/null
     )
@@ -1317,8 +1339,8 @@ runMenuSmokeLightRegression() {
     resetMenuActions
     systemScriptMenu <<<"4"
     assertMenuAction bbrInstall
-    [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
-    [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
 }
 
@@ -3102,7 +3124,7 @@ runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
         mkdir -p "${singBoxRoot}" "${nginxRoot}"
         : >"${actionLog}"
 
-        selectCustomInstallType=",11,"
+        selectCustomInstallType=",23,"
         currentUUID="11111111-1111-4111-8111-111111111111"
         currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_TCP/TLS_Vision"}]'
         lastInstallationConfig=true
@@ -3170,7 +3192,7 @@ runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression() {
         printf 'stale\n' >"${unsafeRoot}/sing_box_VMess_HTTPUpgrade.conf"
         cd "${unsafeRoot}"
 
-        selectCustomInstallType=",11,"
+        selectCustomInstallType=",23,"
         currentUUID="11111111-1111-4111-8111-111111111111"
         currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_TCP/TLS_Vision"}]'
         lastInstallationConfig=true
@@ -3235,8 +3257,8 @@ runCoreClientOptionalArgsRegression() {
         protocolSelectionIncludes() { return 1; }
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/cores.sh"
-        initXrayClients 7 >/dev/null
-        initSingBoxClients 7 >/dev/null
+        initXrayClients 1 >/dev/null
+        initSingBoxClients 1 >/dev/null
     )
 }
 
@@ -3728,6 +3750,7 @@ runRegressionFast() {
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
         runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression &&
         runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression &&
+        runRegressionStep auto-install-two-digit-single-protocol runAutoInstallTwoDigitSingleProtocolRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
         runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
         runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&

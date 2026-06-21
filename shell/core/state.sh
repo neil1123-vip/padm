@@ -333,11 +333,11 @@ readInstallProtocolType() {
 
     if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
-            protocolStateAdd 6
+            protocolStateAdd 3
             singBoxHysteria2Port=$(jq .inbounds[0].listen_port "${singBoxConfigPath}06_hysteria2_inbounds.json")
         fi
         if [[ -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
-            protocolStateAdd 8
+            protocolStateAdd 26
             singBoxVLESSRealityGRPCPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             singBoxVLESSRealityGRPCSNI=$(jq -r '.inbounds[0].tls.server_name // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
             currentRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json")
@@ -358,15 +358,15 @@ readInstallProtocolType() {
             fi
         fi
         if [[ -f "${singBoxConfigPath}09_tuic_inbounds.json" ]]; then
-            protocolStateAdd 9
+            protocolStateAdd 31
             singBoxTuicPort=$(jq .inbounds[0].listen_port "${singBoxConfigPath}09_tuic_inbounds.json")
         fi
         if [[ -f "${singBoxConfigPath}10_naive_inbounds.json" ]]; then
-            protocolStateAdd 10
+            protocolStateAdd 5
             singBoxNaivePort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}10_naive_inbounds.json")
         fi
         if [[ -f "${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
-            protocolStateAdd 11
+            protocolStateAdd 23
             singBoxVMessHTTPUpgradePort=$(awk '
               /listen/ {
                 for (i = 1; i <= NF; i++) {
@@ -384,7 +384,7 @@ readInstallProtocolType() {
             fi
         fi
         if [[ -f "${singBoxConfigPath}13_anytls_inbounds.json" ]]; then
-            protocolStateAdd 13
+            protocolStateAdd 4
             singBoxAnyTLSPort=$(jq -r '.inbounds[0].listen_port' "${singBoxConfigPath}13_anytls_inbounds.json")
         fi
     fi

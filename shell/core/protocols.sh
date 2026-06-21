@@ -275,10 +275,6 @@ protocolSelectionNeedsCertificate() {
     protocolSelectionHasCapability "${selection}" "needs_certificate"
 }
 
-protocolSelectionNeedsTLS() {
-    local selection=$1
-    protocolSelectionHasCapability "${selection}" "needs_tls"
-}
 
 protocolSelectionNeedsLocalCertificate() {
     local selection=$1

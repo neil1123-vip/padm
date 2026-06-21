@@ -1929,10 +1929,7 @@ customXrayInstall() {
         errorCard "请使用英文逗号分隔"
         exit 0
     fi
-    if ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
-        errorCard "多选请使用英文逗号分隔"
-        exit 0
-    fi
+
     if protocolSelectionOnlyRealityNoDomain "${selectCustomInstallType}"; then
         if [[ "${selectCustomInstallType}" == "1" ]]; then
             if [[ "${preselectedMode}" == "domain" ]]; then
@@ -2056,10 +2053,7 @@ customSingBoxInstall() {
         errorCard "请使用英文逗号分隔"
         exit 0
     fi
-    if ((${#selectCustomInstallType} >= 2)) && ! echo "${selectCustomInstallType}" | grep -q ","; then
-        errorCard "多选请使用英文逗号分隔"
-        exit 0
-    fi
+
     if [[ "${selectCustomInstallType: -1}" != "," ]]; then
         selectCustomInstallType="${selectCustomInstallType},"
     fi
