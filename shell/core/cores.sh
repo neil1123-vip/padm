@@ -1494,15 +1494,17 @@ updateGeoSite() {
 
 # 验证整个服务是否可用
 checkGFWStatue() {
+    local serviceCheckAttempts=${PADM_CHECK_GFW_SERVICE_ATTEMPTS:-30}
+    local serviceCheckInterval=${PADM_CHECK_GFW_SERVICE_INTERVAL:-0.2}
     readInstallType
     progressCard "$1" "验证服务启动状态"
-    if [[ "${coreInstallType}" == "1" ]] && [[ -n $(pgrep -f "xray/xray") ]]; then
+    if [[ "${coreInstallType}" == "1" ]] && waitForServiceState xrayRunning running "${serviceCheckAttempts}" "${serviceCheckInterval}"; then
         successCard "服务启动成功"
-    elif [[ "${coreInstallType}" == "2" ]] && [[ -n $(pgrep -f "sing-box/sing-box") ]]; then
+    elif [[ "${coreInstallType}" == "2" ]] && waitForServiceState singBoxRunning running "${serviceCheckAttempts}" "${serviceCheckInterval}"; then
         successCard "服务启动成功"
     else
         errorCard "服务启动失败，请检查终端是否有日志打印"
-        exit 0
+        return 1
     fi
 }
 
@@ -1887,7 +1889,7 @@ installXrayReality() {
     serviceQueueRestart xray
     serviceQueueApply || return 1
     # 生成账号
-    checkGFWStatue 5
+    checkGFWStatue 5 || return 1
     showAccounts 6
 }
 
@@ -1907,7 +1909,7 @@ installSingBoxReality() {
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
     # 生成账号
-    checkGFWStatue 5
+    checkGFWStatue 5 || return 1
     showAccounts 6
 }
 
@@ -2019,7 +2021,7 @@ customXrayInstall() {
         serviceQueueRestart xray
         serviceQueueApply || return 1
         # 生成账号
-        checkGFWStatue 11
+        checkGFWStatue 11 || return 1
         showAccounts 12
     else
         local unsupportedReason=
@@ -2092,7 +2094,7 @@ customSingBoxInstall() {
         serviceQueueRestart nginx
         serviceQueueApply || return 1
         # 生成账号
-        checkGFWStatue 8
+        checkGFWStatue 8 || return 1
         showAccounts 9
     else
         local unsupportedReason=
@@ -2183,7 +2185,7 @@ xrayCoreInstall() {
 
     coreInstallServiceAction "Nginx 服务启动失败，已取消安装收尾" handleNginx start || return 1
     # 生成账号
-    checkGFWStatue 11
+    checkGFWStatue 11 || return 1
     showAccounts 12
 }
 

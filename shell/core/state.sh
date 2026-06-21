@@ -109,14 +109,22 @@ readInstallType() {
     coreInstallType=
     configPath=
     singBoxConfigPath=
+    local configFile
 
     if [[ -d "/etc/padm" ]]; then
         if [[ -f "/etc/padm/xray/xray" ]]; then
             # 检测 Xray-core
-            if [[ -d "/etc/padm/xray/conf" ]] && [[ -f "/etc/padm/xray/conf/02_VLESS_TCP_inbounds.json" || -f "/etc/padm/xray/conf/02_trojan_TCP_inbounds.json" || -f "/etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json" || -f "/etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json" ]]; then
+            if [[ -d "/etc/padm/xray/conf" ]]; then
+                for configFile in $(protocolCapabilityIdsByProjectCore xray | tr ',' ' '); do
+                    configFile=$(protocolCapabilityMeta "${configFile}" config_file 2>/dev/null || true)
+                    [[ -n "${configFile}" && -f "/etc/padm/xray/conf/${configFile}" ]] || continue
+                    coreInstallType=1
+                    break
+                done
+            fi
+            if [[ "${coreInstallType}" == "1" ]]; then
                 configPath=/etc/padm/xray/conf/
                 ctlPath=/etc/padm/xray/xray
-                coreInstallType=1
 
                 if [[ -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
                     realityStatus=7
@@ -826,14 +834,14 @@ showInstallStatus() {
     if [[ -n "${coreInstallType}" ]]; then
         local protocolId statusLabel
         if [[ "${coreInstallType}" == 1 ]]; then
-            if [[ -n $(pgrep -f "xray/xray") ]]; then
+            if xrayRunning; then
                 echoContent yellow "\n核心: Xray-core[运行中]"
             else
                 echoContent yellow "\n核心: Xray-core[未运行]"
             fi
 
         elif [[ "${coreInstallType}" == 2 ]]; then
-            if [[ -n $(pgrep -f "sing-box/sing-box") ]]; then
+            if singBoxRunning; then
                 echoContent yellow "\n核心: sing-box[运行中]"
             else
                 echoContent yellow "\n核心: sing-box[未运行]"

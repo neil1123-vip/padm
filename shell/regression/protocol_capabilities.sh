@@ -179,6 +179,7 @@ runProtocolCapabilityNginxTopologyRegression() {
 
 runProtocolCapabilityTemplateRegression() {
     local coreTemplate="${PROJECT_ROOT}/shell/core/core_templates.sh"
+    local stateFile="${PROJECT_ROOT}/shell/core/state.sh"
     local xrayIds singBoxIds reason ssUsers id configFile
 
     assertEquals "1,2,21,22,23,24,25,26,27,28,29" "$(protocolCapabilityIdsByProjectCore xray)" "xray-template-core-ids"
@@ -213,6 +214,11 @@ runProtocolCapabilityTemplateRegression() {
             return 1
         fi
     done
+    if ! grep -Fq 'protocolCapabilityIdsByProjectCore xray' "${stateFile}" ||
+        ! grep -Fq 'protocolCapabilityMeta "${configFile}" config_file' "${stateFile}"; then
+        printf 'assert-fail:readInstallType should recognize xray configs through capability metadata\n' >&2
+        return 1
+    fi
     for id in 1 3 4 5 23 26 28 30 31; do
         configFile=$(protocolCapabilityMeta "${id}" config_file)
         if ! grep -Fq "writeGeneratedJsonFile /etc/padm/sing-box/conf/config/${configFile}" "${coreTemplate}"; then
@@ -331,6 +337,10 @@ runSubscriptionCapabilityDispatchRegression() {
     assertEquals 'VMess HTTPUpgrade TLS [advanced, nginx:http_front] 风险:HTTPUpgrade 属高级方案，新装优先 XHTTP' "$(protocolCapabilityStatusLabel 23)" "status-label:23"
     if grep -Fq 'VLESS+Reality+Vision' "${stateFile}" || grep -Fq 'VMess+TLS+HTTPUpgrade' "${stateFile}"; then
         printf 'assert-fail:showInstallStatus should use capability status labels instead of hard-coded names\n' >&2
+        return 1
+    fi
+    if grep -Fq 'pgrep -f "xray/xray"' "${stateFile}" || grep -Fq 'pgrep -f "sing-box/sing-box"' "${stateFile}"; then
+        printf 'assert-fail:showInstallStatus should use service helpers instead of process substring checks\n' >&2
         return 1
     fi
 }

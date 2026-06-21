@@ -98,6 +98,8 @@ padmInstallCleanupTrap
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/reality_targets.sh"
 # shellcheck source=/dev/null
+source "${PROJECT_ROOT}/shell/core/services.sh"
+# shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
 # shellcheck source=/dev/null
 source "${PROJECT_ROOT}/shell/core/singbox.sh"

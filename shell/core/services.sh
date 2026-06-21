@@ -41,6 +41,10 @@ padmReadProcCmdline() {
     tr '\0' ' ' <"${path}" 2>/dev/null || true
 }
 
+padmCommandExists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 serviceQueueAdd() {
     local serviceName=$1
     local action=$2
@@ -206,6 +210,12 @@ singBoxRunning() {
         fi
         return 0
     done < <(pgrep -x sing-box 2>/dev/null)
+    if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+        systemctl is-active --quiet sing-box.service && return 0
+    fi
+    if [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
+        rc-service sing-box status >/dev/null 2>&1 && return 0
+    fi
     return 1
 }
 
@@ -271,6 +281,8 @@ xrayRunning() {
     local pid
     local exe
     local cmdline
+    local systemdServiceFile=${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}
+    local openRcServiceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
@@ -279,6 +291,12 @@ xrayRunning() {
         [[ "${cmdline}" == *" api statsquery "* ]] && continue
         return 0
     done < <(pgrep -x xray 2>/dev/null)
+    if [[ -n "${systemdServiceFile}" && -f "${systemdServiceFile}" ]] && padmCommandExists systemctl; then
+        systemctl is-active --quiet xray.service && return 0
+    fi
+    if [[ -n "${openRcServiceFile}" && -f "${openRcServiceFile}" ]] && padmCommandExists rc-service; then
+        rc-service xray status >/dev/null 2>&1 && return 0
+    fi
     return 1
 }
 

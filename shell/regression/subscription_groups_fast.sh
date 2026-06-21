@@ -2595,7 +2595,7 @@ runInstallEarlyCapabilityListRegression() {
     (
         eval "$(awk '
             /^installEarlyCapabilityRegistry\(\)/ { capture = 1 }
-            /^loadScriptModules\(\)/ { capture = 0 }
+            /^installHandleEarlyCapabilityListArgs "\$@"/ { capture = 0 }
             capture { print }
         ' "${PROJECT_ROOT}/install.sh")"
         installHandleEarlyCapabilityListArgs --list-protocols
@@ -3305,6 +3305,43 @@ runSingBoxServiceMainPidTemplateRegression() {
     )
 }
 
+runCheckGFWStatusServiceWaitRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local successLog="${TMP_DIR}/check-gfw-success.log"
+        local errorLog="${TMP_DIR}/check-gfw-error.log"
+        local xrayAttempts=0
+
+        export REGRESSION_SUCCESS_CARD_LOG="${successLog}"
+        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        export PADM_CHECK_GFW_SERVICE_ATTEMPTS=4
+        export PADM_CHECK_GFW_SERVICE_INTERVAL=0.01
+
+        readInstallType() { coreInstallType=1; }
+        xrayRunning() {
+            xrayAttempts=$((xrayAttempts + 1))
+            [[ "${xrayAttempts}" -ge 3 ]]
+        }
+
+        checkGFWStatue 1
+        [[ "${xrayAttempts}" -ge 3 ]]
+        grep -q '服务启动成功' "${successLog}"
+
+        xrayAttempts=0
+        : >"${errorLog}"
+        xrayRunning() {
+            xrayAttempts=$((xrayAttempts + 1))
+            return 1
+        }
+        if checkGFWStatue 1; then
+            return 1
+        fi
+        grep -q '服务启动失败' "${errorLog}"
+    )
+}
+
 runServicesProcRaceRegression() {
     (
         set -euo pipefail
@@ -3318,6 +3355,30 @@ runServicesProcRaceRegression() {
         ! nginxRunning
         ! singBoxRunning
         ! xrayRunning
+    )
+}
+
+runCoreRunningFallsBackToServiceStateRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local root="${TMP_DIR}/core-running-service-state"
+        mkdir -p "${root}"
+        PADM_XRAY_SYSTEMD_SERVICE_FILE="${root}/xray.service"
+        PADM_XRAY_OPENRC_SERVICE_FILE="${root}/xray.openrc"
+        PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
+        PADM_SINGBOX_OPENRC_SERVICE_FILE="${root}/sing-box.openrc"
+        : >"${PADM_XRAY_SYSTEMD_SERVICE_FILE}"
+        : >"${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
+        pgrep() { return 1; }
+        padmCommandExists() { [[ "$1" == "systemctl" ]]; }
+        systemctl() {
+            [[ "$1" == "is-active" && "$2" == "--quiet" && ( "$3" == "xray.service" || "$3" == "sing-box.service" ) ]]
+        }
+        singBoxMergedConfigFile() { printf '%s\n' "/etc/padm/sing-box/conf/config.json"; }
+        xrayRunning
+        singBoxRunning
     )
 }
 
@@ -3784,7 +3845,9 @@ runRegressionFast() {
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
         runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
         runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
+        runRegressionStep check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression &&
         runRegressionStep service-wait-state runServiceWaitForStateRegression &&
+        runRegressionStep core-running-service-state runCoreRunningFallsBackToServiceStateRegression &&
         runRegressionStep warp-config-generation-failure runWarpConfigGenerationFailureRegression &&
         runRegressionStep fail2ban-profile runFail2banProfileRegression &&
         runRegressionStep fail2ban-menu runFail2banMenuRegression &&
