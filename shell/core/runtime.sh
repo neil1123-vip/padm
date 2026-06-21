@@ -741,6 +741,16 @@ parseInstallArgs() {
     done
 }
 
+autoInstallValidateRequiredInputs() {
+    [[ "${AUTO_INSTALL:-}" == "true" ]] || return 0
+    [[ -n "${AUTO_PROTOCOLS:-}" ]] || return 0
+
+    if protocolSelectionNeedsLocalCertificate "${AUTO_PROTOCOLS}" && [[ -z "${AUTO_DOMAIN:-}" ]]; then
+        coreDomainRequiredErrorCard
+        return 1
+    fi
+}
+
 showInstallArgsHelp() {
     cat <<EOF
 ┌─ padm 非交互安装参数 ──────────────────────────────

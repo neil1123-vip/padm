@@ -733,7 +733,27 @@ runAutoInstallDoesNotReadMissingRequiredValueRegression() {
 }
 
 runAutoInstallTlsDomainMissingReturnsRegression() {
-    grep -q 'AUTO_INSTALL.*return 1' "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local logFile="${TMP_DIR}/auto-install-tls-domain-missing.log"
+
+        parseInstallArgs --install-type custom --core sing-box --protocols 4 --entry-host 45.221.113.40 --reuse-last no
+        errorCard() { printf 'error:%s\n' "$*" >>"${logFile}"; }
+        initVar() { printf 'initVar\n' >>"${logFile}"; }
+        mkdirTools() { printf 'mkdirTools\n' >>"${logFile}"; }
+
+        set +e
+        autoInstallValidateRequiredInputs
+        local status=$?
+        set -e
+
+        [[ "${status}" -ne 0 ]]
+        grep -q '域名不可为空' "${logFile}"
+        ! grep -q 'initVar' "${logFile}"
+        ! grep -q 'mkdirTools' "${logFile}"
+    )
 }
 
 runAutoInstallTwoDigitSingleProtocolRegression() {

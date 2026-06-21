@@ -578,6 +578,7 @@ installHandleEarlyCapabilityListArgs() {
 
 initScriptRuntime() {
     parseInstallArgs "$@"
+    autoInstallValidateRequiredInputs || exit 1
     initVar "$1"
     if [[ "${cronName}" == "RefreshScriptModules" ]]; then
         return 0
