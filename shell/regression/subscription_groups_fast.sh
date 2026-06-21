@@ -3192,6 +3192,9 @@ JSON
         cat >"${xrayRoot}/08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
 {"inbounds":[{"port":17694,"settings":{"clients":[{"email":"sub_xray_grpc-vless_reality_grpc","id":"44444444-4444-4444-4444-444444444444"}]},"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"publicKey":"xray-grpc-public-key","privateKey":"xray-grpc-private-key","target":"www.cloudflare.com:443","mldsa65Seed":"","mldsa65Verify":""},"grpcSettings":{"serviceName":"grpc"}}}]}
 JSON
+        cat >"${xrayRoot}/04_trojan_GRPc_inbounds.json" <<'JSON'
+{"inbounds":[{"listen":"127.0.0.1","port":31304,"protocol":"trojan","settings":{"clients":[{"email":"sub_trojan_grpc-trojan_grpc","password":"trojan-grpc-pass"}]},"streamSettings":{"network":"grpc","security":"none","grpcSettings":{"serviceName":"padmtrojangrpc"}}}]}
+JSON
         cat >"${singBoxRoot}/08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
 {"inbounds":[{"type":"vless","listen_port":20888,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"nodejs.org","reality":{"handshake":{"server":"nodejs.org","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
 JSON
@@ -3263,6 +3266,9 @@ EOF
         grep -q 'default:sub_anytls:' "${captureLog}"
         grep -q 'default:sub_xray_grpc:.*@entry.example.com:17694' "${captureLog}"
         grep -q 'default:sub_xray_grpc:.*sni=www.cloudflare.com' "${captureLog}"
+        grep -q 'default:sub_trojan_grpc:trojan://trojan-grpc-pass@cdn.example.com:443' "${captureLog}"
+        grep -q 'singbox:sub_trojan_grpc:.*"type":"trojan"' "${captureLog}"
+        grep -q 'singbox:sub_trojan_grpc:.*"service_name":"padmtrojangrpc"' "${captureLog}"
         grep -q 'singbox:.*"tag":"sub_xray_grpc-vless_reality_grpc"' "${captureLog}"
         grep -q 'singbox:.*"server_port":17694' "${captureLog}"
         grep -q 'singbox:.*"server_name":"www.cloudflare.com"' "${captureLog}"
@@ -3338,6 +3344,23 @@ EOF
         grep -q 'singbox:.*"server_port":15210' "${captureLog}"
         grep -q 'singbox:.*"server_name":"www.ibm.com"' "${captureLog}"
         grep -q 'singbox:.*"public_key":"grpc-public-key"' "${captureLog}"
+    )
+}
+
+runTrojanGrpcAccountUsesTemplateFilenameRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        if ! grep -q '04_trojan_GRPc_inbounds\.json' "${PROJECT_ROOT}/shell/subscription/accounts_protocols.sh"; then
+            printf 'assert-fail:trojan grpc account reader must use generated 04_trojan_GRPc_inbounds.json filename\n' >&2
+            return 1
+        fi
+        if grep -q '04_trojan_gRPC_inbounds\.json' "${PROJECT_ROOT}/shell/subscription/accounts_protocols.sh"; then
+            printf 'assert-fail:trojan grpc account reader uses non-generated 04_trojan_gRPC_inbounds.json filename\n' >&2
+            return 1
+        fi
     )
 }
 
@@ -4260,6 +4283,7 @@ runRegressionFastOnlyOutputRest() {
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
         runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression &&
+        runRegressionStep trojan-grpc-account-template-filename runTrojanGrpcAccountUsesTemplateFilenameRegression &&
         runRegressionStep trojan-fallback-subscribe-entry runTrojanFallbackSubscribeUsesTlsEntryRegression &&
         runRegressionStep trojan-fallback-template-frontend runTrojanFallbackTemplateCreatesTlsFrontendRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&

@@ -68,7 +68,7 @@ showTrojanGrpcAccounts() {
     # trojan grpc
     if currentProtocolHas 25; then
         subscribeSectionTitle "Trojan gRPC TLS" "兼容旧客户端，不作为新手推荐"
-        jq .inbounds[0].settings.clients ${configPath}04_trojan_gRPC_inbounds.json | jq -c '.[]' | while read -r user; do
+        jq .inbounds[0].settings.clients ${configPath}04_trojan_GRPc_inbounds.json | jq -c '.[]' | while read -r user; do
             local email password
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             local count=
