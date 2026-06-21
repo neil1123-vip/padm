@@ -240,7 +240,7 @@ readInstallProtocolType() {
                 frontingType=04_trojan_TCP_inbounds
                 singBoxTrojanPort=$(jq .inbounds[0].listen_port "${row}.json")
             elif [[ "${coreInstallType}" == "1" ]]; then
-                frontingType=04_trojan_TCP_inbounds
+                [[ -n "${frontingType}" ]] || frontingType=04_trojan_TCP_inbounds
                 currentPort=$(jq .inbounds[0].port "${row}.json")
             fi
         fi

@@ -3362,6 +3362,9 @@ runTrojanFallbackSubscribeUsesTlsEntryRegression() {
         cat >"${xrayRoot}/04_trojan_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"port":31296,"listen":"127.0.0.1","protocol":"trojan","settings":{"clients":[{"email":"sub_fallback-trojan_tcp","password":"fallback-pass"}],"fallbacks":[{"dest":"31300","xver":1}]},"streamSettings":{"network":"tcp","security":"none","tcpSettings":{"acceptProxyProtocol":true}}}]}
 JSON
+        cat >"${xrayRoot}/02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"port":443,"protocol":"vless","settings":{"clients":[{"id":"11111111-1111-4111-8111-111111111111","email":"fronting"}],"fallbacks":[{"dest":31296,"xver":1}]},"streamSettings":{"network":"tcp","security":"tls","tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/tls.example.com.crt","keyFile":"/etc/padm/tls/tls.example.com.key"}]}}}]}
+JSON
         cat >"${xrayRoot}/02_dokodemodoor_inbounds_443_default.json" <<'JSON'
 {"inbounds":[{"port":443,"settings":{"port":443}}]}
 JSON
@@ -3390,6 +3393,14 @@ JSON
 
         readInstallProtocolType
         readConfigHostPathUUID
+        if [[ "${frontingType}" != "02_VLESS_TCP_inbounds" ]]; then
+            printf 'assert-fail:trojan fallback frontingType=%s\n' "${frontingType}" >&2
+            return 1
+        fi
+        if [[ "${currentPort}" != "443" || "${currentDefaultPort}" != "443" ]]; then
+            printf 'assert-fail:trojan fallback entry port current=%s default=%s\n' "${currentPort}" "${currentDefaultPort}" >&2
+            return 1
+        fi
         showTrojanAccounts >/dev/null
 
         if ! grep -q 'default:sub_fallback:trojan://fallback-pass@tls\.example\.com:443' "${captureLog}"; then
