@@ -3257,6 +3257,70 @@ EOF
     )
 }
 
+runShowAccountsSingBoxRealityGrpcRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/show-accounts-singbox-reality-grpc"
+        local singBoxRoot="${root}/etc/padm/sing-box/conf/config"
+        local captureLog="${root}/capture.log"
+
+        mkdir -p "${singBoxRoot}"
+        : >"${captureLog}"
+        cat >"${singBoxRoot}/08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
+{"inbounds":[{"type":"vless","listen_port":15210,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"www.ibm.com","reality":{"private_key":"singbox-private-key","handshake":{"server":"www.ibm.com","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
+JSON
+        local fakeXray="${root}/etc/padm/xray/xray"
+        mkdir -p "$(dirname "${fakeXray}")"
+        cat >"${fakeXray}" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "x25519" && "${2:-}" == "-i" ]]; then
+    printf 'PrivateKey: %s\n' "${3:-}"
+    printf 'Password (PublicKey): grpc-public-key\n'
+    exit 0
+fi
+exit 1
+EOF
+        chmod +x "${fakeXray}"
+        export PADM_XRAY_BINARY="${fakeXray}"
+
+        readInstallType() {
+            coreInstallType=2
+            configPath="${singBoxRoot}/"
+            singBoxConfigPath="${singBoxRoot}/"
+            ctlPath="${root}/etc/padm/sing-box/sing-box"
+        }
+        readConfigHostPathUUID() {
+            currentHost=45.221.113.40
+            return 0
+        }
+        readSingBoxConfig() { return 0; }
+        subscribeSectionTitle() { return 0; }
+        subscribeAccountTitle() { return 0; }
+        subscribeOutputTitle() { return 0; }
+        realityEntryHost() { printf '45.221.113.40'; }
+        appendDefaultSubscribeLine() {
+            printf 'default:%s:%s\n' "$1" "$2" >>"${captureLog}"
+        }
+        appendClashMetaSubscribeBlock() { return 0; }
+        appendSingBoxSubscribeLocalConfig() {
+            printf 'singbox:%s:%s\n' "$1" "$2" >>"${captureLog}"
+        }
+        initSubscribeLocalConfig() { return 0; }
+
+        showAccounts >/dev/null
+
+        grep -q 'default:sub_grpc:.*@45.221.113.40:15210' "${captureLog}"
+        grep -q 'default:sub_grpc:.*sni=www.ibm.com' "${captureLog}"
+        grep -q 'default:sub_grpc:.*pbk=grpc-public-key' "${captureLog}"
+        grep -q 'singbox:.*"server_port":15210' "${captureLog}"
+        grep -q 'singbox:.*"server_name":"www.ibm.com"' "${captureLog}"
+        grep -q 'singbox:.*"public_key":"grpc-public-key"' "${captureLog}"
+    )
+}
+
 runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
     (
         set -euo pipefail
@@ -4035,6 +4099,7 @@ runRegressionFastOnlyOutputRest() {
         runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
+        runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression &&

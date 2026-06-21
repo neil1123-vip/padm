@@ -213,7 +213,11 @@ showVlessRealityGrpcAccounts() {
     # VLESS Reality gRPC
     if currentProtocolHas 26; then
         subscribeSectionTitle "VLESS reality_gRPC" "推荐"
-        showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${xrayVLESSRealityGRPCPort:-}" "${xrayVLESSRealityGRPCSNI:-}" "${xrayVLESSRealityGRPCPublicKey:-${currentRealityPublicKey:-}}" "${xrayVLESSRealityGRPCMldsa65Verify:-${currentRealityMldsa65Verify:-}}"
+        if [[ "${coreInstallType}" == "2" ]]; then
+            showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" ""
+        else
+            showVlessRealityGrpcAccountsFromConfig "${configPath}08_VLESS_vision_gRPC_inbounds.json" "${xrayVLESSRealityGRPCPort:-}" "${xrayVLESSRealityGRPCSNI:-}" "${xrayVLESSRealityGRPCPublicKey:-${currentRealityPublicKey:-}}" "${xrayVLESSRealityGRPCMldsa65Verify:-${currentRealityMldsa65Verify:-}}"
+        fi
         if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" && -f "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" ]]; then
             showVlessRealityGrpcAccountsFromConfig "${singBoxConfigPath}08_VLESS_vision_gRPC_inbounds.json" "${singBoxVLESSRealityGRPCPort:-}" "${singBoxVLESSRealityGRPCSNI:-}" "${singBoxVLESSRealityPublicKey:-}" ""
         fi
@@ -236,8 +240,8 @@ showVlessRealityGrpcAccountsFromConfig() {
             local xrayVLESSRealitySNI="${realityGRPCSNI}"
             local currentRealityPublicKey="${realityGRPCPublicKey}"
             local currentRealityMldsa65Verify="${realityGRPCMldsa65Verify}"
-            local singBoxVLESSRealityGRPCSNI=
-            local singBoxVLESSRealityPublicKey=
+            local singBoxVLESSRealityGRPCSNI="${realityGRPCSNI}"
+            local singBoxVLESSRealityPublicKey="${realityGRPCPublicKey}"
             defaultBase64Code vlessRealityGRPC "${realityGRPCPort}" "${email}" "${accountId}"
         done
 }

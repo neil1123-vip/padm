@@ -196,6 +196,7 @@ readInstallProtocolType() {
     }
 
     while read -r row; do
+        row=${row%.json}
         local protocolId=
         protocolId=$(protocolCapabilityIdByConfigFile "${row##*/}.json" 2>/dev/null || true)
         protocolStateAdd "${protocolId}"
@@ -301,8 +302,15 @@ readInstallProtocolType() {
                 singBoxVLESSRealityGRPCSNI=$(jq -r .inbounds[0].tls.server_name "${row}.json")
                 realityTargetHost=$(jq -r .inbounds[0].tls.reality.handshake.server "${row}.json")
                 realityTargetPort=$(jq -r .inbounds[0].tls.reality.handshake.server_port "${row}.json")
+                currentRealityPrivateKey=$(jq -r '.inbounds[0].tls.reality.private_key // empty' "${row}.json")
                 if [[ -f "${configPath}reality_key" ]]; then
                     singBoxVLESSRealityPublicKey=$(grep "publicKey" <"${configPath}reality_key" | awk -F "[:]" '{print $2}')
+                fi
+                if [[ -z "${singBoxVLESSRealityPublicKey:-}" && -n "${currentRealityPrivateKey:-}" ]]; then
+                    singBoxVLESSRealityPublicKey=$(derivePublicKeyFromPrivateKey "${currentRealityPrivateKey}" || true)
+                fi
+                if [[ -n "${singBoxVLESSRealityPublicKey:-}" ]]; then
+                    currentRealityPublicKey=${singBoxVLESSRealityPublicKey}
                 fi
             fi
         fi
@@ -341,7 +349,7 @@ readInstallProtocolType() {
             singBoxSocks5Port=$(jq .inbounds[0].listen_port "${row}.json")
         fi
 
-    done < <(find ${configPath} -name "*inbounds.json" | sort | awk -F "[.]" '{print $1}')
+    done < <(find ${configPath} -name "*inbounds.json" | sort)
 
     if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then
