@@ -2197,6 +2197,124 @@ runRegressionDispatcherSingleLegacyFallbackRegression() {
     [[ "${legacyDispatchCount}" == "1" ]]
 }
 
+runRegressionFastParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-fast-parallel-composition.log"
+
+    runRegressionPlatform() {
+        printf 'platform-start\n' >>"${callLog}"
+        while [[ ! -f "${TMP_DIR}/fast-only-started" ]]; do
+            sleep 0.05
+        done
+        printf 'platform-finish\n' >>"${callLog}"
+    }
+    runRegressionFastOnly() {
+        printf 'fast-only-start\n' >>"${callLog}"
+        : >"${TMP_DIR}/fast-only-started"
+        printf 'fast-only-finish\n' >>"${callLog}"
+    }
+
+    runRegressionFast
+    grep -qx 'platform-start' "${callLog}"
+    grep -qx 'fast-only-start' "${callLog}"
+    awk '
+        $0 == "platform-start" { platformStart = NR }
+        $0 == "fast-only-start" { fastOnlyStart = NR }
+        $0 == "platform-finish" { platformFinish = NR }
+        END { exit !(platformStart && fastOnlyStart && platformFinish && fastOnlyStart < platformFinish) }
+    ' "${callLog}"
+)
+
+runRegressionFastOnlyParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-fast-only-parallel-composition.log"
+
+    runRegressionFastOnlySafety() {
+        printf 'safety-start\n' >>"${callLog}"
+        while [[ ! -f "${TMP_DIR}/fast-only-output-started" ]]; do
+            sleep 0.05
+        done
+        printf 'safety-finish\n' >>"${callLog}"
+    }
+    runRegressionFastOnlyOutput() {
+        printf 'output-start\n' >>"${callLog}"
+        : >"${TMP_DIR}/fast-only-output-started"
+        printf 'output-finish\n' >>"${callLog}"
+    }
+    runRegressionFastOnlyCore() {
+        printf 'core\n' >>"${callLog}"
+    }
+
+    runRegressionFastOnly
+    grep -qx 'safety-start' "${callLog}"
+    grep -qx 'output-start' "${callLog}"
+    awk '
+        $0 == "safety-start" { safetyStart = NR }
+        $0 == "output-start" { outputStart = NR }
+        $0 == "safety-finish" { safetyFinish = NR }
+        END { exit !(safetyStart && outputStart && safetyFinish && outputStart < safetyFinish) }
+    ' "${callLog}"
+)
+
+runRegressionFastOnlyOutputParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-fast-only-output-parallel-composition.log"
+
+    runRegressionFastOnlyOutputAutoInstall() {
+        printf 'auto-install-start\n' >>"${callLog}"
+        while [[ ! -f "${TMP_DIR}/fast-only-subscription-started" ]]; do
+            sleep 0.05
+        done
+        printf 'auto-install-finish\n' >>"${callLog}"
+    }
+    runRegressionFastOnlyOutputRest() {
+        printf 'rest-start\n' >>"${callLog}"
+        : >"${TMP_DIR}/fast-only-subscription-started"
+        printf 'rest-finish\n' >>"${callLog}"
+    }
+
+    runRegressionFastOnlyOutput
+    grep -qx 'auto-install-start' "${callLog}"
+    grep -qx 'rest-start' "${callLog}"
+    awk '
+        $0 == "auto-install-start" { autoInstallStart = NR }
+        $0 == "rest-start" { restStart = NR }
+        $0 == "auto-install-finish" { autoInstallFinish = NR }
+        END { exit !(autoInstallStart && restStart && autoInstallFinish && restStart < autoInstallFinish) }
+    ' "${callLog}"
+)
+
+runRegressionPlatformHotParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-platform-hot-parallel-composition.log"
+
+    runRegressionPlatformUpdate() {
+        printf 'update-start\n' >>"${callLog}"
+        while [[ ! -f "${TMP_DIR}/platform-refresh-started" ]]; do
+            sleep 0.05
+        done
+        printf 'update-finish\n' >>"${callLog}"
+    }
+    runRegressionPlatformRefresh() {
+        printf 'refresh-start\n' >>"${callLog}"
+        : >"${TMP_DIR}/platform-refresh-started"
+        printf 'refresh-finish\n' >>"${callLog}"
+    }
+    runRegressionPlatformRest() {
+        printf 'rest\n' >>"${callLog}"
+    }
+
+    runRegressionPlatform
+    grep -qx 'update-start' "${callLog}"
+    grep -qx 'refresh-start' "${callLog}"
+    awk '
+        $0 == "update-start" { updateStart = NR }
+        $0 == "refresh-start" { refreshStart = NR }
+        $0 == "update-finish" { updateFinish = NR }
+        END { exit !(updateStart && refreshStart && updateFinish && refreshStart < updateFinish) }
+    ' "${callLog}"
+)
+
 runRemoteControlSystemctlStubDefaultStopDisableRegression() {
     local explicitStopDisableCount
     explicitStopDisableCount=$(awk '
@@ -3756,7 +3874,21 @@ runXrayPrereleaseDryRunRegression() {
     )
 }
 
-runRegressionPlatform() {
+runRegressionPlatformUpdate() {
+    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
+}
+
+runRegressionPlatformRefresh() {
+    runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
+        runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
+        runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
+        runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
+        runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
+        runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
+        runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression
+}
+
+runRegressionPlatformRest() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep version-helpers runVersionHelpersRegression &&
         runRegressionStep regression-bootstrap-local-env-fallback runRegressionBootstrapLocalEnvFallbackRegression &&
@@ -3768,15 +3900,11 @@ runRegressionPlatform() {
         runRegressionStep remove-managed-files-ignore-failure runRemoveManagedFilesIgnoreFailureRegression &&
         runRegressionStep remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
-        runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
-        runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
-        runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
-        runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
-        runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
-        runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
-        runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
-        runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression &&
         runRegressionStep regression-dispatcher-single-legacy-fallback runRegressionDispatcherSingleLegacyFallbackRegression &&
+        runRegressionStep regression-fast-parallel-composition runRegressionFastParallelCompositionRegression &&
+        runRegressionStep regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression &&
+        runRegressionStep regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression &&
+        runRegressionStep regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression &&
         runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
         runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
         runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
@@ -3808,9 +3936,64 @@ runRegressionPlatform() {
         runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression
 }
 
-runRegressionFast() {
-    runRegressionStep platform runRegressionPlatform &&
-        runRegressionStep commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression &&
+runRegressionPlatform() {
+    runParallelFastTotals "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" \
+        update runRegressionPlatformUpdate \
+        refresh runRegressionPlatformRefresh \
+        rest runRegressionPlatformRest
+}
+
+runParallelFastTotals() {
+    local orchestrationRoot=$1
+    shift
+    local -a labels=()
+    local -a runners=()
+    local -a logs=()
+    local -a pids=()
+    local -a statuses=()
+    local status=0
+    local i
+
+    if [[ $# -eq 0 || $(( $# % 2 )) -ne 0 ]]; then
+        printf 'runParallelFastTotals expects label/runner pairs\n' >&2
+        return 2
+    fi
+
+    mkdir -p "${orchestrationRoot}"
+    while [[ $# -gt 0 ]]; do
+        labels+=("$1")
+        runners+=("$2")
+        logs+=("${orchestrationRoot}/$1.log")
+        shift 2
+    done
+
+    set +e
+    for i in "${!runners[@]}"; do
+        (
+            trap - EXIT INT TERM
+            set -e
+            runRegressionStep "${labels[$i]}" "${runners[$i]}"
+        ) >"${logs[$i]}" 2>&1 &
+        pids[$i]=$!
+    done
+    for i in "${!pids[@]}"; do
+        wait "${pids[$i]}"
+        statuses[$i]=$?
+    done
+    set -e
+
+    for i in "${!logs[@]}"; do
+        [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
+        if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
+            status=${statuses[$i]}
+        fi
+    done
+
+    return "${status}"
+}
+
+runRegressionFastOnlySafety() {
+    runRegressionStep commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression &&
         runRegressionStep restore-managed-file-directory-target runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression &&
         runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
         runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
@@ -3835,24 +4018,39 @@ runRegressionFast() {
         runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&
         runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression &&
         runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression &&
-        runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
-        runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
+        runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression
+}
+
+runRegressionFastOnlyOutputAutoInstall() {
+    runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
         runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression &&
         runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression &&
-        runRegressionStep auto-install-two-digit-single-protocol runAutoInstallTwoDigitSingleProtocolRegression &&
-        runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
-        runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
+        runRegressionStep auto-install-two-digit-single-protocol runAutoInstallTwoDigitSingleProtocolRegression
+}
+
+runRegressionFastOnlyOutputRest() {
+    runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
         runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&
         runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression &&
-        runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
+        runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
+        runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression &&
         runRegressionStep httpupgrade-rejects-unsafe-nginx-path runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression &&
         runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
-        runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression &&
-        runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
+        runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression
+}
+
+runRegressionFastOnlyOutput() {
+    runParallelFastTotals "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" \
+        auto-install runRegressionFastOnlyOutputAutoInstall \
+        rest runRegressionFastOnlyOutputRest
+}
+
+runRegressionFastOnlyCore() {
+    runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
         runRegressionStep check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression &&
         runRegressionStep service-wait-state runServiceWaitForStateRegression &&
         runRegressionStep core-running-service-state runCoreRunningFallsBackToServiceStateRegression &&
@@ -3868,6 +4066,19 @@ runRegressionFast() {
         runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression &&
         runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression
+}
+
+runRegressionFastOnly() {
+    runParallelFastTotals "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" \
+        safety runRegressionFastOnlySafety \
+        output runRegressionFastOnlyOutput \
+        core runRegressionFastOnlyCore
+}
+
+runRegressionFast() {
+    runParallelFastTotals "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" \
+        platform runRegressionPlatform \
+        fast-only runRegressionFastOnly
 }
 
 regressionName=${1:-fast}
