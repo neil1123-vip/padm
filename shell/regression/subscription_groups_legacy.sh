@@ -1755,6 +1755,8 @@ runRemoveUserRegression() {
     local trojanGrpcFile="${configPath}04_trojan_gRPC_inbounds.json"
     local httpUpgradeXrayFile="${configPath}11_VMess_HTTPUpgrade_inbounds.json"
     local httpUpgradeSingBoxFile="${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json"
+    local trojanDirectFile="${configPath}28_trojan_TCP_direct_inbounds.json"
+    local shadowsocksFile="${singBoxConfigPath}30_shadowsocks_inbounds.json"
     local originalContent
     mkdir -p "${configPath}" "${singBoxConfigPath}"
     cat >"${xrayFile}" <<'JSON'
@@ -1769,12 +1771,20 @@ JSON
     cat >"${httpUpgradeSingBoxFile}" <<'JSON'
 {"inbounds":[{"users":[{"uuid":"uuid-a","name":"alpha-VMess_HTTPUpgrade"},{"uuid":"uuid-b","name":"bravo-VMess_HTTPUpgrade"}]}]}
 JSON
+    cat >"${trojanDirectFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"password":"uuid-a","email":"alpha-Trojan_TCP_direct"},{"password":"uuid-b","email":"bravo-Trojan_TCP_direct"}]}}]}
+JSON
+    cat >"${shadowsocksFile}" <<'JSON'
+{"inbounds":[{"users":[{"password":"ss-a","name":"alpha-shadowsocks"},{"password":"ss-b","name":"bravo-shadowsocks"}]}]}
+JSON
 
     removeUserFromConfigFiles uuid-a alpha
     jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].id == "uuid-b"' "${xrayFile}" >/dev/null
     jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].password == "uuid-b"' "${trojanGrpcFile}" >/dev/null
     jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].id == "uuid-b"' "${httpUpgradeXrayFile}" >/dev/null
     jq -e '(.inbounds[0].users | length == 1) and .inbounds[0].users[0].uuid == "uuid-b"' "${httpUpgradeSingBoxFile}" >/dev/null
+    jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].password == "uuid-b"' "${trojanDirectFile}" >/dev/null
+    jq -e '(.inbounds[0].users | length == 1) and .inbounds[0].users[0].password == "ss-b"' "${shadowsocksFile}" >/dev/null
 
     originalContent=$(<"${xrayFile}")
     if writeUserConfigJq "${xrayFile}" '.inbounds[0].settings.clients = [' 2>/dev/null; then
@@ -2477,7 +2487,7 @@ runXrayRealityPortFailureRegression() (
     [[ "${allowCalls}" == "0" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     xrayVLESSRealityPort=
     xrayVLESSRealityXHTTPort=
     xHTTPort=
@@ -2494,7 +2504,7 @@ runXrayRealityPortFailureRegression() (
     [[ ! -e "${allowMarker}" ]]
     [[ ! -e "${configPath}07_VLESS_vision_reality_inbounds.json" ]]
 
-    selectCustomInstallType=",12,"
+    selectCustomInstallType=",2,"
     realityPort=10888
     xHTTPort=bad-port
     rm -f "${allowMarker}"
@@ -2597,7 +2607,7 @@ runRealityProfileFailureRegression() (
     realitySNI=
     realityEntryHost=
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     if initXrayConfig custom 1 true 2>/dev/null; then
         return 1
     fi
@@ -2606,7 +2616,7 @@ runRealityProfileFailureRegression() (
     [[ ! -e "${entryHostFile}" ]]
     [[ ! -e "${xrayRoot}07_VLESS_vision_reality_inbounds.json" ]]
 
-    selectCustomInstallType=",12,"
+    selectCustomInstallType=",2,"
     if initXrayConfig custom 1 true 2>/dev/null; then
         return 1
     fi
@@ -2615,7 +2625,7 @@ runRealityProfileFailureRegression() (
     [[ ! -e "${entryHostFile}" ]]
     [[ ! -e "${xrayRoot}12_VLESS_XHTTP_inbounds.json" ]]
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     if initSingBoxConfig custom 1 true 2>/dev/null; then
         return 1
     fi
@@ -2636,7 +2646,7 @@ runCoreTemplateReturnFailureRegression() (
     domain=tls.example.com
     currentHost=tls.example.com
     lastInstallationConfig=true
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     singBoxVLESSVisionPort=10890
 
     initXrayClients() { printf '[]\n'; }
@@ -2674,7 +2684,7 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${xrayRc}" != "0" ]]
 
     mode=stop-fail
-    selectCustomInstallType=",0,"
+    selectCustomInstallType=",27,"
     writeCalls=0
     : >"${serviceLog}"
     SERVICE_QUEUE_ALLOW_FAILURE=previous
@@ -2688,7 +2698,7 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     mode=sing-box
-    selectCustomInstallType=",0,"
+    selectCustomInstallType=",27,"
     writeCalls=0
     set +e
     initSingBoxConfig custom 1 true 2>/dev/null
@@ -6390,17 +6400,17 @@ SH
     domain=example.com
     nginxStaticPath="${TMP_DIR}/static"
     currentPath=padm
-    selectCustomInstallType=11
+    selectCustomInstallType=23
     printf 'old config\n' >"${nginxTarget}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=fail
-    if singBoxNginxConfig 11 443 2>/dev/null; then
+    if singBoxNginxConfig 23 443 2>/dev/null; then
         return 1
     fi
     [[ "$(<"${nginxTarget}")" == "old config" ]]
     [[ ! -e "${nginxTarget}.tmp" ]]
     [[ -s "${entryTmpRoot}/padm-sing-box-vmess-httpupgrade-nginx-test.log" ]]
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
-    singBoxNginxConfig 11 443
+    singBoxNginxConfig 23 443
     grep -q 'server_name example.com;' "${nginxTarget}"
     grep -q 'location /padm' "${nginxTarget}"
     ! grep -qx 'old config' "${nginxTarget}"
