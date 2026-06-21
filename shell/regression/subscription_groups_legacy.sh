@@ -14039,6 +14039,8 @@ enable"
     stopShouldFail=true
     stopAllowMissingBackend=true
     resetMenuActions
+    nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+    printf 'keep-nginx-control\n' >"${nginxTarget}"
     subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1 || {
         stopShouldFail=
         stopAllowMissingBackend=
@@ -14048,6 +14050,7 @@ enable"
     stopAllowMissingBackend=
     assertMenuAction 'stopSubscriptionWireGuardControlService:true'
     [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+    [[ ! -e "${nginxTarget}" ]]
 
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
     currentHost="${oldCurrentHost}"

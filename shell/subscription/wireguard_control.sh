@@ -211,6 +211,7 @@ subscriptionWireGuardRestoreStateAndConfig() {
         applySubscriptionWireGuardService >/dev/null 2>&1 || return 1
     else
         stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || return 1
+        removeSubscriptionWireGuardNginxConfig >/dev/null 2>&1 || return 1
         rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || return 1
     fi
 }
@@ -480,6 +481,12 @@ subscriptionWireGuardNginxConfigFile() {
     local targetPath="${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf"
     padmIsSafeAbsolutePath "${targetPath}" || return 1
     printf '%s\n' "${targetPath}"
+}
+
+removeSubscriptionWireGuardNginxConfig() {
+    local targetPath
+    targetPath=$(subscriptionWireGuardNginxConfigFile) || return 1
+    removeManagedFileIfPresent "${targetPath}"
 }
 
 ensureSubscriptionWireGuardNginx() {
