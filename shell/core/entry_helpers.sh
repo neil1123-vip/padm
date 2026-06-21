@@ -51,6 +51,7 @@ initTLSNginxConfig() {
 
     if [[ -z ${domain} ]]; then
         coreDomainRequiredErrorCard
+        [[ "${AUTO_INSTALL:-}" == "true" ]] && return 1
         initTLSNginxConfig 3
     else
         dnsTLSDomain=$(echo "${domain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')

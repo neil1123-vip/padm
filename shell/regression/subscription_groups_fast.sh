@@ -712,6 +712,10 @@ runAutoInstallDoesNotReadMissingRequiredValueRegression() {
     )
 }
 
+runAutoInstallTlsDomainMissingReturnsRegression() {
+    grep -q 'AUTO_INSTALL.*return 1' "${PROJECT_ROOT}/shell/core/entry_helpers.sh"
+}
+
 runParseInstallArgsMissingValueRegression() {
     (
         set -euo pipefail
@@ -3723,6 +3727,7 @@ runRegressionFast() {
         runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
         runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
         runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression &&
+        runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
         runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
         runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&
