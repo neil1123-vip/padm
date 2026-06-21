@@ -239,6 +239,9 @@ readInstallProtocolType() {
             if [[ "${coreInstallType}" == "2" ]]; then
                 frontingType=04_trojan_TCP_inbounds
                 singBoxTrojanPort=$(jq .inbounds[0].listen_port "${row}.json")
+            elif [[ "${coreInstallType}" == "1" ]]; then
+                frontingType=04_trojan_TCP_inbounds
+                currentPort=$(jq .inbounds[0].port "${row}.json")
             fi
         fi
         if [[ "${row}" == *hysteria2_inbounds* ]]; then
@@ -709,6 +712,9 @@ readConfigHostPathUUID() {
         # 安装
         if [[ -n "${frontingType}" ]]; then
             currentHost=$(jq -r .inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile ${configPath}${frontingType}.json | awk -F '[t][l][s][/]' '{print $2}' | awk -F '[.][c][r][t]' '{print $1}')
+            if [[ -z "${currentHost}" || "${currentHost}" == "null" ]]; then
+                currentHost=$(resolveInstalledTLSDomain 2>/dev/null || true)
+            fi
 
             currentPort=$(jq .inbounds[0].port ${configPath}${frontingType}.json)
 
@@ -719,6 +725,9 @@ readConfigHostPathUUID() {
                 currentDefaultPort=$(basename "${defaultPortFile}" | awk -F [_] '{print $4}')
             else
                 currentDefaultPort=$(jq -r .inbounds[0].port ${configPath}${frontingType}.json)
+            fi
+            if [[ -z "${currentDefaultPort}" || "${currentDefaultPort}" == "null" ]]; then
+                currentDefaultPort=${currentPort}
             fi
             currentUUID=$(jq -r .inbounds[0].settings.clients[0].id ${configPath}${frontingType}.json)
             currentClients=$(jq -r .inbounds[0].settings.clients ${configPath}${frontingType}.json)

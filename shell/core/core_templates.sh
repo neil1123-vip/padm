@@ -372,8 +372,8 @@ EOF
     elif [[ -z "$3" ]]; then
         removeXrayTemplateConfigFiles 04_trojan_GRPc_inbounds.json || return 1
     fi
-    # VLESS Vision
-    if protocolSelectionIncludes "${selectCustomInstallType}" 27 "$1"; then
+    # VLESS Vision / traditional TLS fallback frontend
+    if [[ "$1" == "all" ]] || protocolSelectionHasAny "${selectCustomInstallType}" 21 22 23 24 25 27 29; then
 
         writeGeneratedJsonFile /etc/padm/xray/conf/02_VLESS_TCP_inbounds.json padm-xray-vless-tcp <<EOF || { errorCard "Xray VLESS TCP 入站模板提交失败"; return 1; }
 {

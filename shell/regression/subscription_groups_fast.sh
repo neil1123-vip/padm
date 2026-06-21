@@ -3251,7 +3251,7 @@ EOF
             printf 'clash:%s\n' "$1" >>"${captureLog}"
         }
         appendSingBoxSubscribeLocalConfig() {
-            printf 'singbox:%s\n' "$1" >>"${captureLog}"
+            printf 'singbox:%s:%s\n' "$1" "$2" >>"${captureLog}"
         }
         initSubscribeLocalConfig() { return 0; }
 
@@ -3338,6 +3338,135 @@ EOF
         grep -q 'singbox:.*"server_port":15210' "${captureLog}"
         grep -q 'singbox:.*"server_name":"www.ibm.com"' "${captureLog}"
         grep -q 'singbox:.*"public_key":"grpc-public-key"' "${captureLog}"
+    )
+}
+
+runTrojanFallbackSubscribeUsesTlsEntryRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/trojan-fallback-subscribe-entry"
+        local xrayRoot="${root}/etc/padm/xray/conf"
+        local tlsRoot="${root}/etc/padm/tls"
+        local captureLog="${root}/capture.log"
+        local oldTlsDir="${PADM_TLS_DIR:-}"
+
+        mkdir -p "${xrayRoot}" "${tlsRoot}"
+        : >"${captureLog}"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${root}/subscribe_local"
+        export PADM_TLS_DIR="${tlsRoot}"
+        mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box"
+
+        cat >"${xrayRoot}/04_trojan_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"port":31296,"listen":"127.0.0.1","protocol":"trojan","settings":{"clients":[{"email":"sub_fallback-trojan_tcp","password":"fallback-pass"}],"fallbacks":[{"dest":"31300","xver":1}]},"streamSettings":{"network":"tcp","security":"none","tcpSettings":{"acceptProxyProtocol":true}}}]}
+JSON
+        cat >"${xrayRoot}/02_dokodemodoor_inbounds_443_default.json" <<'JSON'
+{"inbounds":[{"port":443,"settings":{"port":443}}]}
+JSON
+        printf 'crt\n' >"${tlsRoot}/tls.example.com.crt"
+        printf 'key\n' >"${tlsRoot}/tls.example.com.key"
+
+        coreInstallType=1
+        configPath="${xrayRoot}/"
+        singBoxConfigPath="${root}/etc/padm/sing-box/conf/config/"
+        nginxConfigPath="${root}/etc/nginx/conf.d/"
+        domain=tls.example.com
+        currentInstallProtocolType=
+        frontingType=
+        currentHost=
+        currentDefaultPort=
+
+        subscribeSectionTitle() { return 0; }
+        subscribeAccountTitle() { return 0; }
+        subscribeOutputTitle() { return 0; }
+        appendDefaultSubscribeLine() {
+            printf 'default:%s:%s\n' "$1" "$2" >>"${captureLog}"
+        }
+        appendClashMetaSubscribeBlock() {
+            printf 'clash:%s\n' "$1" >>"${captureLog}"
+        }
+
+        readInstallProtocolType
+        readConfigHostPathUUID
+        showTrojanAccounts >/dev/null
+
+        if ! grep -q 'default:sub_fallback:trojan://fallback-pass@tls\.example\.com:443' "${captureLog}"; then
+            sed -n '1,120p' "${captureLog}" >&2
+            printf 'assert-fail:trojan fallback default subscribe entry missing\n' >&2
+            return 1
+        fi
+        if ! jq -e '.[0].server == "tls.example.com"' "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/sub_fallback" >/dev/null; then
+            cat "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/sub_fallback" >&2
+            printf 'assert-fail:trojan fallback sing-box server missing\n' >&2
+            return 1
+        fi
+        if ! jq -e '.[0].server_port == 443' "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/sub_fallback" >/dev/null; then
+            cat "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/sub_fallback" >&2
+            printf 'assert-fail:trojan fallback sing-box port missing\n' >&2
+            return 1
+        fi
+        if grep -q 'trojan://fallback-pass@:' "${captureLog}"; then
+            printf 'assert-fail:trojan fallback subscribe host/port empty\n' >&2
+            return 1
+        fi
+        if [[ -n "${oldTlsDir}" ]]; then
+            export PADM_TLS_DIR="${oldTlsDir}"
+        else
+            unset PADM_TLS_DIR
+        fi
+    )
+}
+
+runTrojanFallbackTemplateCreatesTlsFrontendRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/trojan-fallback-template-frontend"
+        local xrayRoot="${root}/etc/padm/xray/conf"
+        local tlsRoot="${root}/etc/padm/tls"
+        local vlessFile="${xrayRoot}/02_VLESS_TCP_inbounds.json"
+        local trojanFile="${xrayRoot}/04_trojan_TCP_inbounds.json"
+        mkdir -p "${xrayRoot}" "${tlsRoot}"
+
+        selectCustomInstallType=",29,"
+        currentUUID="11111111-1111-4111-8111-111111111111"
+        currentClients='[{"id":"11111111-1111-4111-8111-111111111111","email":"main"}]'
+        currentHost=example.com
+        domain=example.com
+        port=443
+        add=example.com
+        customPath=padm
+        configPath="${xrayRoot}/"
+        lastInstallationConfig=true
+
+        addXrayOutbound() { return 0; }
+        removeXrayTemplateConfigFiles() { return 0; }
+        randomPathFunction() { currentPath=padm; customPath=padm; }
+        initRealityProfile() { return 0; }
+        initXrayXHTTPort() { return 0; }
+        initRealityKey() { return 0; }
+        initRealityMldsa65() { return 0; }
+        writeGeneratedJsonFile() {
+            local targetPath=$1
+            if [[ "${targetPath}" == /etc/padm/* ]]; then
+                targetPath="${root}${targetPath}"
+            fi
+            mkdir -p "$(dirname -- "${targetPath}")"
+            shift 2
+            cat >"${targetPath}"
+        }
+
+        initXrayConfig custom 1 true >/dev/null
+
+        [[ -f "${trojanFile}" ]]
+        [[ -f "${vlessFile}" ]]
+        jq -e '.inbounds[0].port == 443' "${vlessFile}" >/dev/null
+        jq -e '.inbounds[0].streamSettings.tlsSettings.certificates[0].certificateFile == "/etc/padm/tls/example.com.crt"' "${vlessFile}" >/dev/null
+        jq -e '.inbounds[0].settings.fallbacks[] | select(.dest == 31296 or .dest == "31296")' "${vlessFile}" >/dev/null
     )
 }
 
@@ -4120,6 +4249,8 @@ runRegressionFastOnlyOutputRest() {
         runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
         runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
         runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression &&
+        runRegressionStep trojan-fallback-subscribe-entry runTrojanFallbackSubscribeUsesTlsEntryRegression &&
+        runRegressionStep trojan-fallback-template-frontend runTrojanFallbackTemplateCreatesTlsFrontendRegression &&
         runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
         runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
         runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression &&
