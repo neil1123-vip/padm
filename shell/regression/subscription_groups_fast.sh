@@ -3356,7 +3356,7 @@ runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
 
         selectCustomInstallType=",23,"
         currentUUID="11111111-1111-4111-8111-111111111111"
-        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_TCP/TLS_Vision"}]'
+        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VMess_HTTPUpgrade"}]'
         lastInstallationConfig=true
         currentHost=example.com
         domain=example.com
@@ -3424,7 +3424,7 @@ runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression() {
 
         selectCustomInstallType=",23,"
         currentUUID="11111111-1111-4111-8111-111111111111"
-        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VLESS_TCP/TLS_Vision"}]'
+        currentClients='[{"uuid":"11111111-1111-4111-8111-111111111111","name":"main-VMess_HTTPUpgrade"}]'
         lastInstallationConfig=true
         currentHost=example.com
         domain=example.com
