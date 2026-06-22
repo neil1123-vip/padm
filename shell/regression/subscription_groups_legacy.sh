@@ -2179,6 +2179,7 @@ runCorePortFileTransactionRegression() {
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
 
     local reloadCalls=0 errorLog="${TMP_DIR}/core-port-reload-error.log"
+    local reloadLog="${TMP_DIR}/core-port-reload-calls.log"
     local helperLog="${TMP_DIR}/core-port-helper.log"
     : >"${errorLog}"
     : >"${helperLog}"
@@ -2282,16 +2283,18 @@ runCorePortFileTransactionRegression() {
     grep -q "恢复后核心重载仍失败" "${errorLog}" && return 1
 
     reloadCalls=0
+    : >"${reloadLog}"
     : >"${errorLog}"
     reloadCore() {
+        printf 'reload\n' >>"${reloadLog}"
         reloadCalls=$((reloadCalls + 1))
         [[ "${reloadCalls}" != "1" ]]
     }
     (
         cp() {
             local args=("$@")
-            local targetPath="${args[$((${#args[@]} - 1))]}"
-            if [[ "${targetPath}" == "${configPath}".02_dokodemodoor_inbounds_2053_default.json.restore.* ]]; then
+            local sourcePath="${args[$((${#args[@]} - 2))]}"
+            if [[ "${sourcePath}" == */padm-core-port.*/02_dokodemodoor_inbounds_2053_default.json ]]; then
                 return 1
             fi
             command cp "$@"
@@ -2300,7 +2303,7 @@ runCorePortFileTransactionRegression() {
             return 1
         fi
     ) || return 1
-    [[ "${reloadCalls}" == "1" ]]
+    [[ "$(grep -c '^reload$' "${reloadLog}")" == "1" ]]
     grep -q "入口端口核心重载失败，且旧配置恢复失败" "${errorLog}"
     keptBackup=$(find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' -print -quit)
     [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
@@ -3845,7 +3848,7 @@ runNetworkCheckReturnFailureRegression() (
     domain=tls.example.com
     currentHost=tls.example.com
     lastInstallationConfig=true
-    selectCustomInstallType=",0,"
+    selectCustomInstallType=",27,"
     singBoxVLESSVisionPort=10890
 
     initSingBoxClients() { printf '[]\n'; }
@@ -4415,7 +4418,8 @@ SH
 
     export PADM_FAKE_SINGBOX_MERGE_MODE=success
     mv() {
-        if [[ "$#" -eq 2 && "$2" == "${outputFile}" ]]; then
+        local args=("$@")
+        if [[ "${args[$((${#args[@]} - 1))]}" == "${outputFile}" ]]; then
             printf 'commit\n' >"${commitMarker}"
             return 1
         fi
@@ -6556,6 +6560,7 @@ if [[ "$1" == "-v" ]]; then
     exit 0
 fi
 [[ "$1" == "-t" ]]
+printf 'entry-helper validate %s\n' "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}"
 [[ "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}" == "success" ]]
 SH
     chmod +x "${TMP_DIR}/fake-bin/nginx"
@@ -15390,46 +15395,159 @@ runRegressionRuntime() {
 }
 
 runRegressionTransactionCore() {
-    runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
-        runRegressionStep config-transaction runConfigTransactionRegression &&
-        runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
-        runRegressionStep core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression &&
-        runRegressionStep entry-helper-config runEntryHelperConfigRegression &&
-        runRegressionStep check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression &&
-        runRegressionStep alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression &&
-        runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
-        runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
-        runRegressionStep sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression &&
-        runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
-        runRegressionStep core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression &&
-        runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
-        runRegressionStep sing-box-cronet-rollback runSingBoxCronetRollbackRegression &&
-        runRegressionStep finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression &&
-        runRegressionStep core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression &&
-        runRegressionStep legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression &&
-        runRegressionStep core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression &&
-        runRegressionStep core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression &&
-        runRegressionStep core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression &&
-        runRegressionStep sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression &&
-        runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
-        runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
-        runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackRegression &&
-        runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression &&
-        runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
-        runRegressionStep core-install-service-action-failure runCoreInstallServiceActionFailureRegression &&
-        runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
-        runRegressionStep sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression &&
-        runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
-    runRegressionStep sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression &&
-    runRegressionStep sing-box-managed-cleanup runSingBoxManagedCleanupRegression &&
-    runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
-    runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
-    runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
-    runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
-        runRegressionStep sing-box-log-transaction runSingBoxLogTransactionRegression &&
-        runRegressionStep user-config-write runUserConfigWriteRegression &&
-        runRegressionStep remove-user runRemoveUserRegression
+    runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-${BASHPID:-$$}" \
+        core-rollback-result-message \
+        config-transaction \
+        core-port-file-transaction \
+        core-port-unsafe-config-dir \
+        entry-helper-config \
+        check-port-open-nginx-directory-target \
+        alone-nginx-directory-target \
+        xray-reality-port-failure \
+        reality-profile-failure \
+        sing-box-reality-key-transaction \
+        core-template-return-failure \
+        core-template-managed-remove \
+        core-binary-install-copy-failure \
+        sing-box-cronet-rollback \
+        finalize-sing-box-rollback \
+        core-upgrade-directory-target \
+        legacy-core-upgrade-keeps-existing \
+        core-first-install-failure-clean \
+        core-first-install-commit-rollback \
+        core-install-unsafe-binary-path \
+        sing-box-download-artifacts-cleanup \
+        network-check-return-failure \
+        tls-failure-return \
+        tls-reinstall-rollback \
+        tls-renew-failure-propagation \
+        service-queue-apply-propagation \
+        core-install-service-action-failure \
+        sing-box-merge-start-failure \
+        sing-box-merge-config-transaction \
+        sing-box-uninstall-failure-propagation \
+        sing-box-uninstall-rejects-unsafe-config-path \
+        sing-box-managed-cleanup \
+        sing-box-protocol-reload-failure \
+        geo-update-reload-failure \
+        core-cleanup-failure-propagation \
+        reload-core-propagation \
+        sing-box-log-transaction \
+        user-config-write \
+        remove-user
 }
+
+runRegressionTransactionCoreParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-transaction-core-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "core-rollback-result-message" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/config-transaction-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "config-transaction" ]]; then
+            : >"${TMP_DIR}/config-transaction-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runCoreRollbackResultMessageRegression() { runRegressionAllSelector core-rollback-result-message; }
+    runConfigTransactionRegression() { runRegressionAllSelector config-transaction; }
+    runCorePortFileTransactionRegression() { runRegressionAllSelector core-port-file-transaction; }
+    runCorePortRejectsUnsafeConfigDirRegression() { runRegressionAllSelector core-port-unsafe-config-dir; }
+    runEntryHelperConfigRegression() { runRegressionAllSelector entry-helper-config; }
+    runCheckPortOpenNginxRejectsDirectoryTargetRegression() { runRegressionAllSelector check-port-open-nginx-directory-target; }
+    runAloneNginxRejectsDirectoryTargetRegression() { runRegressionAllSelector alone-nginx-directory-target; }
+    runXrayRealityPortFailureRegression() { runRegressionAllSelector xray-reality-port-failure; }
+    runRealityProfileFailureRegression() { runRegressionAllSelector reality-profile-failure; }
+    runSingBoxRealityKeyTransactionRegression() { runRegressionAllSelector sing-box-reality-key-transaction; }
+    runCoreTemplateReturnFailureRegression() { runRegressionAllSelector core-template-return-failure; }
+    runCoreTemplateManagedConfigRemovalRegression() { runRegressionAllSelector core-template-managed-remove; }
+    runCoreBinaryInstallCopyFailureRegression() { runRegressionAllSelector core-binary-install-copy-failure; }
+    runSingBoxCronetRollbackRegression() { runRegressionAllSelector sing-box-cronet-rollback; }
+    runFinalizeSingBoxBinaryInstallRollbackRegression() { runRegressionAllSelector finalize-sing-box-rollback; }
+    runCoreUpgradeRejectsDirectoryTargetRegression() { runRegressionAllSelector core-upgrade-directory-target; }
+    runLegacyCoreUpgradeKeepsExistingBinaryRegression() { runRegressionAllSelector legacy-core-upgrade-keeps-existing; }
+    runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() { runRegressionAllSelector core-first-install-failure-clean; }
+    runCoreFirstInstallCommitFailureRollbackRegression() { runRegressionAllSelector core-first-install-commit-rollback; }
+    runCoreInstallRejectsUnsafeBinaryPathRegression() { runRegressionAllSelector core-install-unsafe-binary-path; }
+    runSingBoxDownloadArtifactsCleanupRegression() { runRegressionAllSelector sing-box-download-artifacts-cleanup; }
+    runNetworkCheckReturnFailureRegression() { runRegressionAllSelector network-check-return-failure; }
+    runTlsFailureReturnRegression() { runRegressionAllSelector tls-failure-return; }
+    runTlsReinstallRollbackRegression() { runRegressionAllSelector tls-reinstall-rollback; }
+    runTlsRenewalFailurePropagationRegression() { runRegressionAllSelector tls-renew-failure-propagation; }
+    runServiceQueueApplyPropagationRegression() { runRegressionAllSelector service-queue-apply-propagation; }
+    runCoreInstallServiceActionFailureRegression() { runRegressionAllSelector core-install-service-action-failure; }
+    runSingBoxMergeStartFailureRegression() { runRegressionAllSelector sing-box-merge-start-failure; }
+    runSingBoxMergeConfigTransactionRegression() { runRegressionAllSelector sing-box-merge-config-transaction; }
+    runSingBoxUninstallFailurePropagationRegression() { runRegressionAllSelector sing-box-uninstall-failure-propagation; }
+    runSingBoxUninstallRejectsUnsafeConfigPathRegression() { runRegressionAllSelector sing-box-uninstall-rejects-unsafe-config-path; }
+    runSingBoxManagedCleanupRegression() { runRegressionAllSelector sing-box-managed-cleanup; }
+    runSingBoxProtocolReloadFailureRegression() { runRegressionAllSelector sing-box-protocol-reload-failure; }
+    runGeoUpdateReloadFailureRegression() { runRegressionAllSelector geo-update-reload-failure; }
+    runCoreCleanupFailurePropagationRegression() { runRegressionAllSelector core-cleanup-failure-propagation; }
+    runReloadCorePropagationRegression() { runRegressionAllSelector reload-core-propagation; }
+    runSingBoxLogTransactionRegression() { runRegressionAllSelector sing-box-log-transaction; }
+    runUserConfigWriteRegression() { runRegressionAllSelector user-config-write; }
+    runRemoveUserRegression() { runRegressionAllSelector remove-user; }
+
+    runRegressionTransactionCore
+
+    for selector in \
+        core-rollback-result-message \
+        config-transaction \
+        core-port-file-transaction \
+        core-port-unsafe-config-dir \
+        entry-helper-config \
+        check-port-open-nginx-directory-target \
+        alone-nginx-directory-target \
+        xray-reality-port-failure \
+        reality-profile-failure \
+        sing-box-reality-key-transaction \
+        core-template-return-failure \
+        core-template-managed-remove \
+        core-binary-install-copy-failure \
+        sing-box-cronet-rollback \
+        finalize-sing-box-rollback \
+        core-upgrade-directory-target \
+        legacy-core-upgrade-keeps-existing \
+        core-first-install-failure-clean \
+        core-first-install-commit-rollback \
+        core-install-unsafe-binary-path \
+        sing-box-download-artifacts-cleanup \
+        network-check-return-failure \
+        tls-failure-return \
+        tls-reinstall-rollback \
+        tls-renew-failure-propagation \
+        service-queue-apply-propagation \
+        core-install-service-action-failure \
+        sing-box-merge-start-failure \
+        sing-box-merge-config-transaction \
+        sing-box-uninstall-failure-propagation \
+        sing-box-uninstall-rejects-unsafe-config-path \
+        sing-box-managed-cleanup \
+        sing-box-protocol-reload-failure \
+        geo-update-reload-failure \
+        core-cleanup-failure-propagation \
+        reload-core-propagation \
+        sing-box-log-transaction \
+        user-config-write \
+        remove-user; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "core-rollback-result-message-start" { firstStart = NR }
+        $0 == "config-transaction-start" { configStart = NR }
+        $0 == "core-rollback-result-message-finish" { firstFinish = NR }
+        END { exit !(firstStart && configStart && firstFinish && configStart < firstFinish) }
+    ' "${callLog}"
+)
 
 runRegressionTransactionSubscription() {
     runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression &&
@@ -15533,7 +15651,9 @@ runRegressionAllCompositionRegression() (
     runRegressionTransaction() { runRegressionSelector transaction; }
     runRegressionTransactionCore() { runRegressionSelector transaction-core; }
     runRegressionTransactionSystem() { runRegressionSelector transaction-system; }
-    runRegressionRemoteControl() { runRegressionSelector remote-control; }
+    runRegressionRemoteControlSmoke() { runRegressionSelector remote-control-smoke; }
+    runRegressionRemoteControlContractServiceInstall() { runRegressionSelector remote-control-contract-service-install; }
+    runRegressionRemoteControlContractServerResponse() { runRegressionSelector remote-control-contract-server-response; }
     runRegressionUi() { runRegressionSelector ui; }
     runRegressionAllSelector() {
         case "$1" in
@@ -15542,7 +15662,9 @@ runRegressionAllCompositionRegression() (
         runtime) runRegressionRuntime ;;
         transaction-core) runRegressionTransactionCore ;;
         transaction-system) runRegressionTransactionSystem ;;
-        remote-control) runRegressionRemoteControl ;;
+        remote-control-smoke) runRegressionRemoteControlSmoke ;;
+        remote-control-contract-service-install) runRegressionRemoteControlContractServiceInstall ;;
+        remote-control-contract-server-response) runRegressionRemoteControlContractServerResponse ;;
         ui) runRegressionUi ;;
         transaction) runRegressionTransaction ;;
         *) return 2 ;;
@@ -15551,7 +15673,7 @@ runRegressionAllCompositionRegression() (
 
     runRegressionAll
 
-    for selector in routing subscription runtime transaction-core transaction-system remote-control ui; do
+    for selector in routing subscription runtime transaction-core transaction-system remote-control-smoke remote-control-contract-service-install remote-control-contract-server-response ui; do
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
     done
@@ -15561,8 +15683,29 @@ runRegressionAllCompositionRegression() (
         $0 == "routing-finish" { routingFinish = NR }
         END { exit !(routingStart && subscriptionStart && routingFinish && subscriptionStart < routingFinish) }
     ' "${callLog}"
+    awk '
+        $0 == "routing-finish" { routingFinish = NR }
+        $0 == "subscription-finish" { subscriptionFinish = NR }
+        $0 == "runtime-finish" { runtimeFinish = NR }
+        $0 == "transaction-core-finish" { transactionCoreFinish = NR }
+        $0 == "transaction-system-finish" { transactionSystemFinish = NR }
+        $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
+        $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
+        $0 == "ui-finish" { uiFinish = NR }
+        $0 == "remote-control-contract-server-response-start" { serverResponseStart = NR }
+        END {
+            exit !(routingFinish && subscriptionFinish && runtimeFinish && transactionCoreFinish && transactionSystemFinish &&
+                remoteSmokeFinish && remoteServiceFinish && uiFinish && serverResponseStart &&
+                routingFinish < serverResponseStart && subscriptionFinish < serverResponseStart &&
+                runtimeFinish < serverResponseStart && transactionCoreFinish < serverResponseStart &&
+                transactionSystemFinish < serverResponseStart && remoteSmokeFinish < serverResponseStart &&
+                remoteServiceFinish < serverResponseStart && uiFinish < serverResponseStart)
+        }
+    ' "${callLog}"
     ! grep -qx 'transaction-start' "${callLog}"
     ! grep -qx 'transaction-finish' "${callLog}"
+    ! grep -qx 'remote-control-start' "${callLog}"
+    ! grep -qx 'remote-control-finish' "${callLog}"
 )
 
 runRegressionRemoteControl() {
@@ -15589,9 +15732,46 @@ runRegressionSelectorDispatchCompositionRegression() (
     ! grep -q "script=${REGRESSION_LEGACY_SCRIPT_PATH}" "${callLog}"
 )
 
+runRegressionParallelSelectorLimitCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-parallel-selector-limit-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        [[ "${selector}" == "first" ]] && sleep 0.1
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=1 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
+        first \
+        second \
+        third
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-start" { secondStart = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
+
 runRegressionAllSelector() {
     local selector=$1
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+    if [[ -n "${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}" ]]; then
+        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_CHILD_PARALLEL_JOBS}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+    else
+        PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+    fi
 }
 
 runParallelRegressionSelectors() {
@@ -15602,6 +15782,10 @@ runParallelRegressionSelectors() {
     local -a pids=()
     local -a statuses=()
     local status=0
+    local maxJobs="${PADM_REGRESSION_PARALLEL_JOBS:-0}"
+    local nextIndex=0
+    local running=0
+    local flushStart=0
     local i
 
     if [[ $# -eq 0 ]]; then
@@ -15616,40 +15800,55 @@ runParallelRegressionSelectors() {
         shift
     done
 
+    if ! [[ "${maxJobs}" =~ ^[0-9]+$ ]] || [[ "${maxJobs}" -le 0 ]]; then
+        maxJobs=${#selectors[@]}
+    fi
+
     set +e
-    for i in "${!selectors[@]}"; do
+    while [[ "${nextIndex}" -lt "${#selectors[@]}" ]]; do
+        i=${nextIndex}
         (
             trap - EXIT INT TERM
             set -e
             runRegressionStep "${selectors[$i]}" runRegressionAllSelector "${selectors[$i]}"
         ) >"${logs[$i]}" 2>&1 &
         pids[$i]=$!
-    done
-    for i in "${!pids[@]}"; do
-        wait "${pids[$i]}"
-        statuses[$i]=$?
-    done
-    set -e
+        nextIndex=$((nextIndex + 1))
+        running=$((running + 1))
 
-    for i in "${!logs[@]}"; do
-        [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
-        if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
-            status=${statuses[$i]}
+        if [[ "${running}" -ge "${maxJobs}" || "${nextIndex}" -ge "${#selectors[@]}" ]]; then
+            for ((i = flushStart; i < nextIndex; i++)); do
+                wait "${pids[$i]}"
+                statuses[$i]=$?
+            done
+            for ((i = flushStart; i < nextIndex; i++)); do
+                [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
+                if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
+                    status=${statuses[$i]}
+                fi
+            done
+            flushStart=${nextIndex}
+            running=0
         fi
     done
+    set -e
 
     return "${status}"
 }
 
 runRegressionAll() {
-    runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-0}" \
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-4}" \
+        runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
         routing \
         subscription \
         runtime \
         transaction-core \
         transaction-system \
-        remote-control \
+        remote-control-smoke \
+        remote-control-contract-service-install \
         ui
+    runRegressionStep remote-control-contract-server-response runRegressionAllSelector remote-control-contract-server-response
 }
 
 regressionName=${1:-fast}
@@ -15774,8 +15973,119 @@ reality-stream)
 core-rollback-result-message)
     regressionRunner=runCoreRollbackResultMessageRegression
     ;;
+config-transaction)
+    regressionRunner=runConfigTransactionRegression
+    ;;
+core-port-file-transaction)
+    regressionRunner=runCorePortFileTransactionRegression
+    ;;
+core-port-unsafe-config-dir)
+    regressionRunner=runCorePortRejectsUnsafeConfigDirRegression
+    ;;
+entry-helper-config)
+    regressionRunner=runEntryHelperConfigRegression
+    ;;
+check-port-open-nginx-directory-target)
+    regressionRunner=runCheckPortOpenNginxRejectsDirectoryTargetRegression
+    ;;
+alone-nginx-directory-target)
+    regressionRunner=runAloneNginxRejectsDirectoryTargetRegression
+    ;;
+xray-reality-port-failure)
+    regressionRunner=runXrayRealityPortFailureRegression
+    ;;
+reality-profile-failure)
+    regressionRunner=runRealityProfileFailureRegression
+    ;;
+sing-box-reality-key-transaction)
+    regressionRunner=runSingBoxRealityKeyTransactionRegression
+    ;;
+core-template-return-failure)
+    regressionRunner=runCoreTemplateReturnFailureRegression
+    ;;
+core-template-managed-remove)
+    regressionRunner=runCoreTemplateManagedConfigRemovalRegression
+    ;;
+core-binary-install-copy-failure)
+    regressionRunner=runCoreBinaryInstallCopyFailureRegression
+    ;;
+sing-box-cronet-rollback)
+    regressionRunner=runSingBoxCronetRollbackRegression
+    ;;
+finalize-sing-box-rollback)
+    regressionRunner=runFinalizeSingBoxBinaryInstallRollbackRegression
+    ;;
+core-upgrade-directory-target)
+    regressionRunner=runCoreUpgradeRejectsDirectoryTargetRegression
+    ;;
+legacy-core-upgrade-keeps-existing)
+    regressionRunner=runLegacyCoreUpgradeKeepsExistingBinaryRegression
+    ;;
+core-first-install-failure-clean)
+    regressionRunner=runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
+    ;;
+core-first-install-commit-rollback)
+    regressionRunner=runCoreFirstInstallCommitFailureRollbackRegression
+    ;;
+core-install-unsafe-binary-path)
+    regressionRunner=runCoreInstallRejectsUnsafeBinaryPathRegression
+    ;;
+sing-box-download-artifacts-cleanup)
+    regressionRunner=runSingBoxDownloadArtifactsCleanupRegression
+    ;;
+network-check-return-failure)
+    regressionRunner=runNetworkCheckReturnFailureRegression
+    ;;
+tls-failure-return)
+    regressionRunner=runTlsFailureReturnRegression
+    ;;
+tls-reinstall-rollback)
+    regressionRunner=runTlsReinstallRollbackRegression
+    ;;
+tls-renew-failure-propagation)
+    regressionRunner=runTlsRenewalFailurePropagationRegression
+    ;;
+service-queue-apply-propagation)
+    regressionRunner=runServiceQueueApplyPropagationRegression
+    ;;
 core-install-service-action-failure)
     regressionRunner=runCoreInstallServiceActionFailureRegression
+    ;;
+sing-box-merge-start-failure)
+    regressionRunner=runSingBoxMergeStartFailureRegression
+    ;;
+sing-box-merge-config-transaction)
+    regressionRunner=runSingBoxMergeConfigTransactionRegression
+    ;;
+sing-box-uninstall-failure-propagation)
+    regressionRunner=runSingBoxUninstallFailurePropagationRegression
+    ;;
+sing-box-uninstall-rejects-unsafe-config-path)
+    regressionRunner=runSingBoxUninstallRejectsUnsafeConfigPathRegression
+    ;;
+sing-box-managed-cleanup)
+    regressionRunner=runSingBoxManagedCleanupRegression
+    ;;
+sing-box-protocol-reload-failure)
+    regressionRunner=runSingBoxProtocolReloadFailureRegression
+    ;;
+geo-update-reload-failure)
+    regressionRunner=runGeoUpdateReloadFailureRegression
+    ;;
+core-cleanup-failure-propagation)
+    regressionRunner=runCoreCleanupFailurePropagationRegression
+    ;;
+reload-core-propagation)
+    regressionRunner=runReloadCorePropagationRegression
+    ;;
+sing-box-log-transaction)
+    regressionRunner=runSingBoxLogTransactionRegression
+    ;;
+user-config-write)
+    regressionRunner=runUserConfigWriteRegression
+    ;;
+remove-user)
+    regressionRunner=runRemoveUserRegression
     ;;
 regression-all-composition)
     regressionRunner=runRegressionAllCompositionRegression
@@ -15786,11 +16096,17 @@ regression-subscription-parallel-composition)
 regression-subscription-write-transaction-parallel-composition)
     regressionRunner=runRegressionSubscriptionWriteTransactionParallelCompositionRegression
     ;;
+regression-transaction-core-parallel-composition)
+    regressionRunner=runRegressionTransactionCoreParallelCompositionRegression
+    ;;
 regression-ui-parallel-composition)
     regressionRunner=runRegressionUiParallelCompositionRegression
     ;;
 regression-selector-dispatch-composition)
     regressionRunner=runRegressionSelectorDispatchCompositionRegression
+    ;;
+regression-parallel-selector-limit-composition)
+    regressionRunner=runRegressionParallelSelectorLimitCompositionRegression
     ;;
 transaction)
     regressionRunner=runRegressionTransaction
@@ -15823,7 +16139,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|core-install-service-action-failure|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-parallel-selector-limit-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
