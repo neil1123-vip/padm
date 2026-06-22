@@ -6029,9 +6029,43 @@ runUninstallServiceStopFailureRegression() (
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
+    runUninstallNoNginxProtocolCase() {
+        mode=nginx-stop-fail
+        : >"${serviceLog}"
+        : >"${actionLog}"
+        : >"${errorLog}"
+        rm -f "${rcFile}"
+        release=centos
+        coreInstallType=1
+        currentInstallProtocolType=",1,"
+        singBoxConfigPath="${root}/sing-box-conf/"
+        nginxConfigPath="${root}/nginx/"
+        nginxStaticPath="${root}/static"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        (
+            set +e
+            unInstall >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ "$(<"${rcFile}")" == "0" ]]
+        if grep -q '^nginx:stop:' "${serviceLog}"; then
+            return 1
+        fi
+        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        grep -qxF 'padm-root-cleanup' "${actionLog}"
+        grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
     runUninstallStopFailureCase nginx-stop-fail
     runUninstallStopFailureCase xray-stop-fail
     runUninstallStopFailureCase sing-box-stop-fail
+    runUninstallNoNginxProtocolCase
 )
 
 runCleanLastInstallationConfigFailureRegression() (

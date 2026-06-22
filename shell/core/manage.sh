@@ -1255,6 +1255,15 @@ cleanupFail2banManagedFilesOnUninstall() {
     [[ "${failed}" != "true" ]]
 }
 
+uninstallShouldStopNginx() {
+    if [[ -n "${currentInstallProtocolType:-}" ]] && ! protocolSelectionSkipsNginx "${currentInstallProtocolType}"; then
+        return 0
+    fi
+    [[ -f "${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf" ]] && return 0
+    [[ -d "${nginxStaticPath:-}" && -f "${nginxStaticPath}/check" ]] && return 0
+    return 1
+}
+
 cleanupPadmManagedRootOnUninstall() {
     local installRoot="${PADM_INSTALL_DIR:-/etc/padm}"
     local resolvedRoot
@@ -1334,7 +1343,7 @@ unInstall() {
     statusCard "卸载提示" "脚本不会删除 acme 相关配置" "如需删除请手动执行：rm -rf ${HOME:-/root}/.acme.sh"
     local uninstallFailed=false
     local serviceStopFailed=false
-    if ! runCoreServiceActionAllowFailure handleNginx stop; then
+    if uninstallShouldStopNginx && ! runCoreServiceActionAllowFailure handleNginx stop; then
         serviceStopFailed=true
     fi
     if [[ -z $(pgrep -f "nginx") ]]; then
