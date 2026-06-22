@@ -66,6 +66,7 @@ writeDefaultSubscriptionGroupsState() {
         "last_status": "pending",
         "failures": [],
         "remote_enabled": true,
+        "event_enabled": true,
         "quota_auto_apply": false
       },
       "traffic": {
@@ -151,7 +152,7 @@ normalizeSubscriptionGroupsState() {
           sources: ([($group.sources // [])[]? | normalize_source | select(.id != "")] as $sources |
             if any($sources[]?; .role == "main") then $sources else [source_default] + $sources end),
           user_groups: [($group.user_groups // [])[]? | normalize_user_group | select(.id != "")],
-          sync: ({enabled:true, interval_minutes:10, last_run:"", last_status:"pending", failures:[], remote_enabled:true, quota_auto_apply:false} + ($group.sync // {})),
+          sync: ({enabled:true, interval_minutes:10, last_run:"", last_status:"pending", failures:[], remote_enabled:true, event_enabled:true, quota_auto_apply:false} + ($group.sync // {})),
           traffic: (($group.traffic // {}) | normalize_traffic)
         };
       . as $state |
@@ -176,7 +177,7 @@ migrateSubscriptionGroupsState() {
     currentVersion=$(jq -r '.version // 0' "${stateFile}" 2>/dev/null || echo 0)
     if [[ "${currentVersion}" == "${schemaVersion}" ]] && jq -e '
       type == "object" and (.groups | type == "array") and (.groups | length > 0) and
-      all(.groups[]; (.id // "") != "" and (.sources | type == "array") and any(.sources[]?; .role == "main") and (.user_groups | type == "array") and (.sync | type == "object") and (.sync | has("remote_enabled")) and (.sync | has("quota_auto_apply")) and (.traffic | type == "object"))
+      all(.groups[]; (.id // "") != "" and (.sources | type == "array") and any(.sources[]?; .role == "main") and (.user_groups | type == "array") and (.sync | type == "object") and (.sync | has("remote_enabled")) and (.sync | has("event_enabled")) and (.sync | has("quota_auto_apply")) and (.traffic | type == "object"))
     ' "${stateFile}" >/dev/null 2>&1; then
         return 0
     fi
@@ -423,6 +424,14 @@ subscriptionGroupRemoteSyncEnabled() {
 
 toggleSubscriptionGroupRemoteSyncEnabled() {
     subscriptionActiveGroupWrite '.sync.remote_enabled = (if .sync | has("remote_enabled") then (.sync.remote_enabled | not) else false end)'
+}
+
+subscriptionEventSyncEnabled() {
+    subscriptionActiveGroupRead -e '(if .sync | has("event_enabled") then .sync.event_enabled else true end) == true' >/dev/null 2>&1
+}
+
+toggleSubscriptionEventSyncEnabled() {
+    subscriptionActiveGroupWrite '.sync.event_enabled = (if .sync | has("event_enabled") then (.sync.event_enabled | not) else false end)'
 }
 
 subscriptionGroupQuotaAutoApplyEnabled() {

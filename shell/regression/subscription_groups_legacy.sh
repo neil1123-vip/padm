@@ -8504,6 +8504,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     local root="${TMP_DIR}/remove-user-subscription-menu-failure"
     local callLog="${root}/calls.log"
     local successLog="${root}/success.log"
+    local statusLog="${root}/status.log"
     local errorLog="${root}/error.log"
     local helperLog="${root}/helper.log"
     local backupDir="${root}/backup"
@@ -8512,6 +8513,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     mkdir -p "${root}"
     : >"${callLog}"
     : >"${successLog}"
+    : >"${statusLog}"
     : >"${errorLog}"
     : >"${helperLog}"
 
@@ -8560,8 +8562,18 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         printf 'reload\n' >>"${callLog}"
         [[ "${mode}" != "reload-fail" ]]
     }
+    subscriptionEventSyncEnabled() {
+        return 0
+    }
+    runSubscriptionGroupSync() {
+        printf 'sync:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "sync-fail" ]]
+    }
     successCard() {
         printf '%s\n' "$*" >>"${successLog}"
+    }
+    statusCard() {
+        printf '%s\n' "$*" >>"${statusLog}"
     }
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
@@ -8574,6 +8586,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         mode=$1
         : >"${callLog}"
         : >"${successLog}"
+        : >"${statusLog}"
         : >"${errorLog}"
         : >"${helperLog}"
         set +e
@@ -8585,6 +8598,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     runRemoveCase groups-read-fail
     [[ "${rc}" == "1" ]]
     ! grep -q '^backup-create$' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -q "manual-check:读取当前订阅状态失败| ${root}/groups.json" "${helperLog}"
     grep -q "读取当前订阅状态失败，请手动检查 ${root}/groups.json" "${errorLog}"
     [[ ! -s "${successLog}" ]]
@@ -8593,6 +8607,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     [[ "${rc}" == "1" ]]
     grep -qx 'backup-create' "${callLog}"
     ! grep -q '^state:' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -q "manual-check:删除订阅前托管账号配置备份失败|本机配置" "${helperLog}"
     grep -q "删除订阅前托管账号配置备份失败，请手动检查本机配置" "${errorLog}"
     [[ ! -s "${successLog}" ]]
@@ -8603,6 +8618,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state:team-a' "${callLog}"
     ! grep -q '^account:' "${callLog}"
     ! grep -qx 'reload' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -qx "cleanup:${backupDir}" "${callLog}"
     [[ ! -s "${successLog}" ]]
 
@@ -8612,6 +8628,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state:team-a' "${callLog}"
     grep -qx 'account:sub_team-a' "${callLog}"
     ! grep -qx 'reload' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -qx 'state-restore' "${callLog}"
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "cleanup:${backupDir}" "${callLog}"
@@ -8624,9 +8641,11 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state:team-a' "${callLog}"
     grep -qx 'account:sub_team-a' "${callLog}"
     [[ "$(grep -c '^reload$' "${callLog}")" == "2" ]]
+    ! grep -q '^sync:' "${callLog}"
     grep -qx 'state-restore' "${callLog}"
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "cleanup:${backupDir}" "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -q '恢复旧配置后核心重载仍失败' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
@@ -8647,6 +8666,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state-restore' "${callLog}"
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "keep-backup:${backupDir}" "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -q '托管账号配置恢复失败' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
@@ -8657,6 +8677,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state-restore' "${callLog}"
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "keep-backup:${backupDir}" "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -q '订阅状态与托管账号配置恢复失败' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
@@ -8664,6 +8685,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     [[ "${rc}" == "0" ]]
     grep -qx "cleanup:${backupDir}" "${callLog}"
     grep -qx 'reload' "${callLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
     grep -q '用户订阅已删除' "${successLog}"
 )
 
@@ -8726,6 +8748,10 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf 'limit:%s:%s\n' "$1" "$2" >>"${callLog}"
         [[ "${mode}" != "limit-fail" ]]
     }
+    runSubscriptionGroupSync() {
+        printf 'sync:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "sync-fail" ]]
+    }
     selectUserSubscriptionId() {
         printf 'team-a\n'
     }
@@ -8747,6 +8773,19 @@ runUserSubscriptionMenuMutationFailureRegression() (
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
     }
+
+    mode=event-disabled
+    resetLogs
+    subscriptionEventSyncEnabled() { return 1; }
+    runSubscriptionEventSyncIfEnabled "test-disabled" >/dev/null 2>&1
+    ! grep -q '^sync:' "${callLog}"
+    grep -q '等待手动/定时同步' "${statusLog}"
+    subscriptionEventSyncEnabled() { [[ "${mode}" != "event-disabled" ]]; }
+
+    mode=success
+    resetLogs
+    runSubscriptionEventSyncIfEnabled "test-enabled" >/dev/null 2>&1
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
 
     mode=subscribe-fail
     resetLogs
@@ -8806,12 +8845,15 @@ runUserSubscriptionMenuMutationFailureRegression() (
     resetLogs
     setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
     grep -q '节点范围已更新' "${successLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
     resetLogs
     setUserSubscriptionTrafficLimitMenu team-a >/dev/null 2>&1
     grep -q '订阅额度已更新' "${successLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
     resetLogs
     manageUserSubscriptionItem >/dev/null 2>&1
     grep -q '用户订阅状态已切换' "${successLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
 )
 
 runRealityStreamDisableRegression() {
@@ -9627,6 +9669,7 @@ runAutoInstallRealityRouteRegression() (
     menuReturnItem() { output+="$2 $3"$'\n'; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
+    runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     showInstallStatus() { recordMenuAction showInstallStatus; }
     checkWgetShowProgress() { return 0; }
@@ -10720,7 +10763,7 @@ runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
 
 runSubscriptionGroupStateRegression() {
     ensureSubscriptionGroupsState
-    jq -e '.version == 2 and .active_group == "default" and (.groups | length == 1)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.version == 2 and .active_group == "default" and (.groups | length == 1) and (.groups[0].sync.event_enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
 
     addSubscriptionSourceState ip-edge "IP Edge" 203.0.113.10 39778
     jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
@@ -10772,6 +10815,7 @@ JSON
       .version == 2 and
       .active_group == "edge-group" and
       (.groups[0].sync.remote_enabled == true) and
+      (.groups[0].sync.event_enabled == true) and
       (.groups[0].sync.quota_auto_apply == false) and
       any(.groups[0].sources[]; .id == "main" and .role == "main") and
       any(.groups[0].sources[]; .id == "edge" and .port == 443) and
@@ -10934,6 +10978,11 @@ JSON
     [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "no" ]]
     toggleSubscriptionGroupRemoteSyncEnabled
     [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "yes" ]]
+    [[ "$(subscriptionEventSyncEnabled && echo yes || echo no)" == "yes" ]]
+    toggleSubscriptionEventSyncEnabled
+    [[ "$(subscriptionEventSyncEnabled && echo yes || echo no)" == "no" ]]
+    toggleSubscriptionEventSyncEnabled
+    [[ "$(subscriptionEventSyncEnabled && echo yes || echo no)" == "yes" ]]
     [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "no" ]]
     toggleSubscriptionGroupQuotaAutoApplyEnabled
     [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "yes" ]]
@@ -11753,7 +11802,7 @@ runSubscriptionSyncAppendProtocolUserPreservesExistingClientsRegression() (
 {"inbounds":[{"settings":{"clients":[{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","flow":"xtls-rprx-vision","email":"existing-VLESS_TCP/TLS_Vision"}]}}]}
 JSON
 
-    subscriptionSyncAppendProtocolUser 0 "${targetFile}" '.inbounds[0].settings.clients' "11111111-1111-1111-1111-111111111111" "sub_team-a"
+    subscriptionSyncAppendProtocolUser 27 "${targetFile}" '.inbounds[0].settings.clients' "11111111-1111-1111-1111-111111111111" "sub_team-a"
 
     jq -e '
       (.inbounds[0].settings.clients | length) == 2 and
@@ -13930,6 +13979,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
+    runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
 
     PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/menu-smoke-wireguard"
     currentHost="main.example.com"
@@ -14057,6 +14107,7 @@ ${controlledCredential}
 edge-a
 3
 5"
+    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
     subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
 
@@ -14136,6 +14187,7 @@ edge-a
 ${updatedCredential}
 edge-a
 5"
+    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
 
     resetMenuActions
@@ -14861,6 +14913,7 @@ runMenuSmokeRegression() {
     restoreSubscriptionGroupsBackupMenu() { recordMenuAction restoreSubscriptionGroupsBackupMenu; }
     resetSubscriptionGroupsStateMenu() { recordMenuAction resetSubscriptionGroupsStateMenu; }
     refreshSubscriptionGroupSyncCron() { recordMenuAction refreshSubscriptionGroupSyncCron; }
+    toggleSubscriptionEventSyncEnabled() { recordMenuAction toggleSubscriptionEventSyncEnabled; }
     subscriptionGroupSyncCronStatus() { recordMenuAction subscriptionGroupSyncCronStatus; }
     installUserCrontabContent() { return 0; }
     xrayInstalled() { return 0; }
@@ -15132,18 +15185,23 @@ main
     resetMenuActions
     output=
     manageSubscriptionMainMaintenance <<<"5
-11
+12
 9"
     grep -q "开启/关闭自动同步" <<<"${output}"
+    grep -q "开启/关闭事件同步" <<<"${output}"
     grep -q "查看定时任务" <<<"${output}"
     resetMenuActions
     manageSubscriptionSyncSettings <<<"5
-11"
+12"
     assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
     if assertMenuAction 'runSubscriptionGroupSync:'; then
         printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
         return 1
     fi
+    resetMenuActions
+    manageSubscriptionSyncSettings <<<"10
+12"
+    assertMenuAction toggleSubscriptionEventSyncEnabled
     resetMenuActions
     output=
     manageSubscriptionMainMaintenance <<<"6
@@ -15282,7 +15340,7 @@ main-credential
     manageSubscriptionStateBackups <<<"6" || true
     assertMenuAction 'errorCard:当前机器已初始化为被控'
     resetMenuActions
-    manageSubscriptionSyncSettings <<<"11" || true
+    manageSubscriptionSyncSettings <<<"12" || true
     assertMenuAction 'errorCard:当前机器已初始化为被控'
     resetMenuActions
     setMenuSmokeRole uninitialized
@@ -15292,7 +15350,7 @@ main-credential
     manageSubscriptionStateBackups <<<"6" || true
     assertMenuAction 'errorCard:当前机器还没完成角色初始化'
     resetMenuActions
-    manageSubscriptionSyncSettings <<<"11" || true
+    manageSubscriptionSyncSettings <<<"12" || true
     assertMenuAction 'errorCard:当前机器还没完成角色初始化'
     resetMenuActions
     coreVersionManageMenu <<<"6"

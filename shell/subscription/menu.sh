@@ -93,6 +93,16 @@ showSubscriptionCurrentRoleCredential() {
     esac
 }
 
+runSubscriptionEventSyncIfEnabled() {
+    local reason=${1:-subscription-change}
+    if subscriptionEventSyncEnabled; then
+        statusCard "订阅变更已保存" "正在自动同步订阅控制面（${reason}）"
+        runSubscriptionGroupSync skip-subscribe-refresh
+        return $?
+    fi
+    statusCard "订阅变更已保存" "事件同步已关闭，等待手动/定时同步" "也可到 主控维护与排障 -> 自动同步设置 中重新开启事件同步"
+}
+
 subscriptionRequireMainRole() {
     local role
     role=$(subscriptionCurrentRoleNormalized)
@@ -711,6 +721,7 @@ removeUserSubscriptionMenu() {
     fi
     padmRemoveCleanupPath "${configBackupDir}"
     successCard "用户订阅已删除"
+    runSubscriptionEventSyncIfEnabled "用户订阅删除"
 }
 
 manageUserSubscriptionItem() {
@@ -744,6 +755,7 @@ manageUserSubscriptionItem() {
         6)
             if toggleUserSubscriptionState "${userSubscriptionId}"; then
                 successCard "用户订阅状态已切换"
+                runSubscriptionEventSyncIfEnabled "用户订阅状态切换" || return 1
             else
                 errorCard "用户订阅状态切换失败"
             fi
@@ -779,6 +791,7 @@ setUserSubscriptionSourcesMenu() {
         return 1
     fi
     successCard "节点范围已更新"
+    runSubscriptionEventSyncIfEnabled "用户订阅节点范围更新"
 }
 
 setUserSubscriptionTrafficLimitMenu() {
@@ -794,6 +807,7 @@ setUserSubscriptionTrafficLimitMenu() {
         return 1
     fi
     successCard "订阅额度已更新" "超限停用和批量处理请到 主控维护与排障 -> 用量与限额 执行"
+    runSubscriptionEventSyncIfEnabled "用户订阅额度更新"
 }
 # 添加服务器源
 addSubscribeMenu() {
@@ -833,7 +847,8 @@ addSubscribeMenu() {
                 errorCard "被控服务器删除失败"
                 continue
             fi
-            successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除" "如需应用订阅变更，请到 主控维护与排障 -> 立即执行同步"
+            successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除"
+            runSubscriptionEventSyncIfEnabled "被控服务器删除" || continue
             ;;
         3) return ;;
         *) coreSelectionErrorCard ;;
@@ -885,6 +900,7 @@ addOtherSubscribe() {
         return 1
     fi
     successCard "被控服务器已添加" "WireGuard 内网地址：${host}:${port}" "别名：${alias}" "已保存 Token 和 Peer，可继续测试被控连接或执行同步"
+    runSubscriptionEventSyncIfEnabled "被控服务器添加"
 }
 
 
@@ -993,6 +1009,7 @@ setSubscriptionSourceControlTokenMenu() {
         return 1
     }
     successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Peer 公钥和 Token 已保存，可继续测试被控连接"
+    runSubscriptionEventSyncIfEnabled "被控服务器凭据更新"
 }
 
 clearSubscriptionSourceSyncErrorMenu() {
@@ -1043,8 +1060,9 @@ manageSubscriptionSyncSettings() {
         menuDangerItem 7 "执行超限处理" "停用超额用户并等待同步移除账号"
         menuItem 8 "开启/关闭远程同步" "切换远端同步状态"
         menuItem 9 "开启/关闭自动执行超限处理" "切换超限处理自动执行状态"
-        menuItem 10 "查看定时任务" "显示当前 cron 配置"
-        menuReturnItem 11 "返回主控维护与排障" "回到上级菜单"
+        menuItem 10 "开启/关闭事件同步" "菜单变更后自动同步一次，cron 继续兜底"
+        menuItem 11 "查看定时任务" "显示当前 cron 配置"
+        menuReturnItem 12 "返回主控维护与排障" "回到上级菜单"
         menuClose
         autoRead sync_settings_menu "请选择:" syncSettingsStatus
         case "${syncSettingsStatus}" in
@@ -1077,8 +1095,12 @@ manageSubscriptionSyncSettings() {
             toggleSubscriptionGroupQuotaAutoApplyEnabled
             successCard "限额自动执行状态已切换"
             ;;
-        10) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-        11) return ;;
+        10)
+            toggleSubscriptionEventSyncEnabled
+            successCard "事件同步状态已切换"
+            ;;
+        11) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+        12) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
