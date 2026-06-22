@@ -339,7 +339,7 @@ handleXray() {
             exit 0
         fi
     elif [[ "$1" == "stop" ]]; then
-        if waitForServiceState xrayRunning stopped 20 0.1; then
+        if waitForServiceState xrayRunning stopped "${PADM_XRAY_STOP_WAIT_ATTEMPTS:-60}" "${PADM_XRAY_STOP_WAIT_INTERVAL:-0.1}"; then
             successCard "Xray关闭成功"
         else
             errorCard "xray关闭失败"

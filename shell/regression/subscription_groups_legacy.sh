@@ -5513,6 +5513,30 @@ SH
         return 1
     fi
     [[ -z "${SERVICE_ACTIONS}" ]]
+
+    local xrayWaitLog="${serviceTmp}/xray-wait.log"
+    find() {
+        if [[ "$*" == *'systemctl'* ]]; then
+            printf '/usr/bin/systemctl\n'
+            return 0
+        fi
+        if [[ "$*" == *'xray.service'* ]]; then
+            printf '/etc/systemd/system/xray.service\n'
+            return 0
+        fi
+        command find "$@"
+    }
+    systemctl() { return 0; }
+    xrayRunning() { return 0; }
+    waitForServiceState() {
+        printf '%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${xrayWaitLog}"
+        return 0
+    }
+    handleXray stop >/dev/null
+    if ! grep -qx 'xrayRunning:stopped:60:0.1' "${xrayWaitLog}"; then
+        cat "${xrayWaitLog}" >&2 || true
+        return 1
+    fi
     rm -rf "${serviceTmp}"
 )
 
