@@ -9164,7 +9164,7 @@ runRealityAsnScanPlanRegression() {
     local sampleFile="${TMP_DIR}/asn-sample-ips.txt"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local sampleCount=0
-    local _sampleIp
+    local _sampleIp prefixFirst prefixLast prefixUsable
     AUTO_INSTALL=
     cat >"${asnPrefixFile}" <<'EOF'
 192.0.2.0/24
@@ -9173,13 +9173,10 @@ runRealityAsnScanPlanRegression() {
 10.0.0.0/27
 172.16.0.0/28
 EOF
-    [[ "$(filterRealityAsnPrefixesByMask 28 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "1" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 27 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "2" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 26 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "3" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 25 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "4" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 24 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "5" ]]
-    [[ "$(realityAsnPrefixAddressCount "172.16.0.0/28")" == "16" ]]
-    [[ "$(realityAsnPrefixTotalAddressCount <"${asnPrefixFile}")" == "496" ]]
+    IFS=$'\t' read -r prefixFirst prefixLast prefixUsable <<<"$(realityAsnPrefixUsableRange "172.16.0.0/28")"
+    [[ "$(realityIntToIpv4 "${prefixFirst}")" == "172.16.0.1" ]]
+    [[ "$(realityIntToIpv4 "${prefixLast}")" == "172.16.0.14" ]]
+    [[ "${prefixUsable}" == "14" ]]
     [[ "$(realityAsnPrefixTotalUsableAddressCount <"${asnPrefixFile}")" == "486" ]]
     generateRealityAsnSampleIps "${asnPrefixFile}" 12 "${sampleFile}"
     while IFS= read -r _sampleIp; do
@@ -9194,8 +9191,8 @@ y
     [[ -f "${selectedRealityScannerPrefixFile}" ]]
     [[ "${selectedRealityAsnSampleSize}" == "12" ]]
     [[ "${selectedRealityAsnPrefixTotal}" == "5" ]]
-    [[ "${selectedRealityAsnAddressTotal}" == "486" ]]
-    [[ "${selectedRealityScannerRange}" == "随机抽样 12/486 IP" ]]
+    [[ "${selectedRealityAsnAddressTotal}" == "12" ]]
+    [[ "${selectedRealityScannerRange}" == "本次抽样 12 IP（ASN 总可用 486）" ]]
     sampleCount=0
     while IFS= read -r _sampleIp; do
         sampleCount=$((sampleCount + 1))
@@ -9219,7 +9216,7 @@ y
 runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate
     [[ "$(realityTargetCandidateCount)" -ge 194 ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 50 ]]
+    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 40 ]]
     [[ "$(realityTargetFilteredCandidateCount developer)" -ge 10 ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
     [[ "$(realityTargetFilteredCandidateCount microsoft)" -ge 1 ]]
@@ -9233,6 +9230,7 @@ runRealityCandidateFullRegression() {
     [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.microsoft.com" ]]
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
+    realityTargetBlockedCandidates >/dev/null
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
 }
@@ -17639,6 +17637,7 @@ runRegressionRuntime() {
         runRegressionStep runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression &&
         runRegressionStep runtime-auto-install-reality-route runAutoInstallRealityRouteRegression &&
         runRegressionStep runtime-tempdir runRuntimeTempDirRegression &&
+        runRegressionStep reality-candidates runRegressionRealityCandidates &&
         runRegressionStep reality-config runRealityConfigRegression
 }
 

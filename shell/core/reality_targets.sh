@@ -301,6 +301,7 @@ EOF
     local customBlockedFile
     customBlockedFile="${PADM_REALITY_TARGET_BLOCKED_FILE:-/etc/padm/reality_target_blocked.tsv}"
     [[ -f "${customBlockedFile}" ]] && cat "${customBlockedFile}"
+    return 0
 }
 
 addRealityTargetBlockedCandidate() {
