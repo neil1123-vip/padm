@@ -177,6 +177,23 @@ fail2banGuessNginxAccessLogFile() {
     printf '/var/log/nginx/access.log\n'
 }
 
+fail2banSshdBackend() {
+    local backend="${PADM_FAIL2BAN_SSHD_BACKEND:-}"
+    if [[ -n "${backend}" ]]; then
+        printf '%s\n' "${backend}"
+        return 0
+    fi
+    if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system || -d /var/log/journal ]]; then
+        printf 'systemd\n'
+    else
+        printf 'auto\n'
+    fi
+}
+
+fail2banSshdJournalMatch() {
+    printf '_SYSTEMD_UNIT=ssh.service + _COMM=sshd\n'
+}
+
 fail2banManagedJailHasSection() {
     local jailName=$1
     local jailFile
@@ -351,6 +368,7 @@ fail2banWriteManagedJail() {
     local profile=$1
     local nginxScanEnabled=${2:-}
     local jailFile tmpFile controlLog controlPort nginxAccessLog
+    local sshdBackend sshdJournalMatch
     local sshdEnabled=false
     local controlEnabled=false
 
@@ -386,6 +404,8 @@ fail2banWriteManagedJail() {
     controlLog=$(fail2banPadmControlLogFile)
     controlPort=$(fail2banPadmControlPort)
     nginxAccessLog=$(fail2banNginxAccessLogFile)
+    sshdBackend=$(fail2banSshdBackend)
+    sshdJournalMatch=$(fail2banSshdJournalMatch)
     padmCreateTempFileForTarget tmpFile "${jailFile}" fail2ban || return 1
     cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 # Managed by padm. Edit via 系统与脚本 -> Fail2ban 防护.
@@ -396,8 +416,15 @@ maxretry = 6
 
 [sshd]
 enabled = ${sshdEnabled}
-backend = auto
+backend = ${sshdBackend}
 port = ssh
+EOF
+    if [[ "${sshdBackend}" == "systemd" ]]; then
+        cat >>"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+journalmatch = ${sshdJournalMatch}
+EOF
+    fi
+    cat >>"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 
 [padm-control]
 enabled = ${controlEnabled}

@@ -3849,6 +3849,7 @@ runFail2banProfileRegression() {
         export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/nginx/padm-control-access.log"
         export PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE="${root}/nginx/access.log"
         export PADM_FAIL2BAN_VALIDATE_LOG="${root}/fail2ban/validate.log"
+        export PADM_FAIL2BAN_SSHD_BACKEND=systemd
 
         subscriptionWireGuardReadState() {
             jq -n '{enabled:true, role:"main", address:"10.77.0.1/24", control_port:39778, peers:[{id:"edge-a"}]}'
@@ -3870,6 +3871,18 @@ runFail2banProfileRegression() {
         fail2banWriteManagedJail sshd+control false
         grep -q '^\[sshd\]' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '^enabled = true' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q '^backend = systemd$' "${PADM_FAIL2BAN_JAIL_FILE}"
+        grep -q '^journalmatch = _SYSTEMD_UNIT=ssh.service + _COMM=sshd$' "${PADM_FAIL2BAN_JAIL_FILE}"
+        ! awk '
+            /^\[/ {
+                section=$0
+                next
+            }
+            section == "[sshd]" && /^[[:space:]]*logpath[[:space:]]*=/ {
+                found=1
+            }
+            END { exit found ? 0 : 1 }
+        ' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '^\[padm-control\]' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '^\[nginx-scan-basic\]' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '^enabled = false$' "${PADM_FAIL2BAN_JAIL_FILE}"
@@ -3931,6 +3944,47 @@ EOF
         fail2banApplyNginxScanExtension disable
         [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd" ]]
         ! fail2banCurrentNginxScanEnabled
+    )
+}
+
+runFail2banSshdSystemdBackendRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/fail2ban.sh"
+
+        local root="${TMP_DIR}/fail2ban-sshd-systemd"
+        mkdir -p "${root}/fail2ban/jail.d" "${root}/nginx"
+        export PADM_FAIL2BAN_JAIL_FILE="${root}/fail2ban/jail.d/padm.local"
+        export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/nginx/padm-control-access.log"
+        export PADM_FAIL2BAN_NGINX_ACCESS_LOG_FILE="${root}/nginx/access.log"
+        export PADM_FAIL2BAN_SSHD_BACKEND=systemd
+
+        subscriptionWireGuardReadState() {
+            jq -n '{control_port:39778}'
+        }
+
+        fail2banWriteManagedJail sshd+control false
+        awk '
+            /^\[/ {
+                section=$0
+                next
+            }
+            section == "[sshd]" && /^backend = systemd$/ {
+                backend=1
+            }
+            section == "[sshd]" && /^journalmatch = _SYSTEMD_UNIT=ssh.service \+ _COMM=sshd$/ {
+                journal=1
+            }
+            section == "[sshd]" && /^[[:space:]]*logpath[[:space:]]*=/ {
+                logpath=1
+            }
+            END {
+                exit (backend && journal && !logpath) ? 0 : 1
+            }
+        ' "${PADM_FAIL2BAN_JAIL_FILE}"
     )
 }
 
@@ -4308,6 +4362,7 @@ runRegressionFastOnlyCore() {
         runRegressionStep core-running-service-state runCoreRunningFallsBackToServiceStateRegression &&
         runRegressionStep warp-config-generation-failure runWarpConfigGenerationFailureRegression &&
         runRegressionStep fail2ban-profile runFail2banProfileRegression &&
+        runRegressionStep fail2ban-sshd-systemd-backend runFail2banSshdSystemdBackendRegression &&
         runRegressionStep fail2ban-menu runFail2banMenuRegression &&
         runRegressionStep xray-strict-validation runXrayStrictValidationRegression &&
         runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression &&
