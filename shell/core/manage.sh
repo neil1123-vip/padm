@@ -1333,8 +1333,9 @@ unInstall() {
     # checkBTPanel
     statusCard "卸载提示" "脚本不会删除 acme 相关配置" "如需删除请手动执行：rm -rf ${HOME:-/root}/.acme.sh"
     local uninstallFailed=false
+    local serviceStopFailed=false
     if ! runCoreServiceActionAllowFailure handleNginx stop; then
-        uninstallFailed=true
+        serviceStopFailed=true
     fi
     if [[ -z $(pgrep -f "nginx") ]]; then
         successCard "停止Nginx成功"
@@ -1342,8 +1343,19 @@ unInstall() {
     if [[ "${release}" == "alpine" ]]; then
         if [[ "${coreInstallType}" == "1" || -e /etc/init.d/xray || -L /etc/init.d/xray ]]; then
             if ! runCoreServiceActionAllowFailure handleXray stop; then
-                uninstallFailed=true
+                serviceStopFailed=true
             fi
+        fi
+        if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/init.d/sing-box || -L /etc/init.d/sing-box ]]; then
+            if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+                serviceStopFailed=true
+            fi
+        fi
+        if [[ "${serviceStopFailed}" == "true" ]]; then
+            errorCard "卸载未完全完成，请根据上方失败项手动处理；服务停止失败，已取消后续删除"
+            return 1
+        fi
+        if [[ "${coreInstallType}" == "1" || -e /etc/init.d/xray || -L /etc/init.d/xray ]]; then
             if ! rc-update del xray default; then
                 uninstallFailed=true
                 errorCard "Xray开机自启删除失败"
@@ -1352,9 +1364,6 @@ unInstall() {
             successCard "删除Xray开机自启完成"
         fi
         if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/init.d/sing-box || -L /etc/init.d/sing-box ]]; then
-            if ! runCoreServiceActionAllowFailure handleSingBox stop; then
-                uninstallFailed=true
-            fi
             if ! rc-update del sing-box default; then
                 uninstallFailed=true
                 errorCard "sing-box开机自启删除失败"
@@ -1365,15 +1374,23 @@ unInstall() {
     else
         if [[ "${coreInstallType}" == "1" || -e /etc/systemd/system/xray.service || -L /etc/systemd/system/xray.service ]]; then
             if ! runCoreServiceActionAllowFailure handleXray stop; then
-                uninstallFailed=true
+                serviceStopFailed=true
             fi
+        fi
+        if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/systemd/system/sing-box.service || -L /etc/systemd/system/sing-box.service ]]; then
+            if ! runCoreServiceActionAllowFailure handleSingBox stop; then
+                serviceStopFailed=true
+            fi
+        fi
+        if [[ "${serviceStopFailed}" == "true" ]]; then
+            errorCard "卸载未完全完成，请根据上方失败项手动处理；服务停止失败，已取消后续删除"
+            return 1
+        fi
+        if [[ "${coreInstallType}" == "1" || -e /etc/systemd/system/xray.service || -L /etc/systemd/system/xray.service ]]; then
             removeInstallPath /etc/systemd/system/xray.service "Xray systemd服务" || uninstallFailed=true
             successCard "删除Xray开机自启完成"
         fi
         if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/systemd/system/sing-box.service || -L /etc/systemd/system/sing-box.service ]]; then
-            if ! runCoreServiceActionAllowFailure handleSingBox stop; then
-                uninstallFailed=true
-            fi
             removeInstallPath /etc/systemd/system/sing-box.service "sing-box systemd服务" || uninstallFailed=true
             successCard "删除sing-box开机自启完成"
         fi

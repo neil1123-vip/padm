@@ -6013,8 +6013,18 @@ runUninstallServiceStopFailureRegression() (
         grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
-        grep -qxF 'padm-root-cleanup' "${actionLog}"
-        grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        if grep -qxF 'padm-root-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        if grep -qxF 'unsubscribe-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        if grep -q '^remove:/etc/systemd/system/xray.service:' "${actionLog}"; then
+            return 1
+        fi
+        if grep -q '^remove:/etc/systemd/system/sing-box.service:' "${actionLog}"; then
+            return 1
+        fi
         grep -q '卸载未完全完成' "${errorLog}"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
