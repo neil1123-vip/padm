@@ -6796,6 +6796,25 @@ runCdnAddressTransactionRegression() (
     cdnClearAddress
     [[ ! -s "${cdnFile}" ]]
     ! compgen -G "${root}/.cdn.cdn.*" >/dev/null
+
+    subscribe() {
+        return 1
+    }
+    AUTO_INSTALL=
+    cdnWriteAddress "old-cdn.example.com"
+    set +e
+    setCDNEntryAddress <<<"new-cdn.example.com"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
+
+    set +e
+    clearCDNEntryAddress
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
 )
 
 runSingBoxSubscribeWriteRegression() {

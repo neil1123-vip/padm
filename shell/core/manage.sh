@@ -1448,6 +1448,28 @@ cdnClearAddress() {
     commitGeneratedFile "${stagedPath}" "${targetFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
 }
 
+cdnRestoreAddressValue() {
+    local previousAddress=$1
+    if [[ -n "${previousAddress}" ]]; then
+        cdnWriteAddress "${previousAddress}"
+    else
+        cdnClearAddress
+    fi
+}
+
+cdnRefreshSubscriptionsOrRollback() {
+    local previousAddress=$1
+    if subscribe false false; then
+        return 0
+    fi
+    cdnRestoreAddressValue "${previousAddress}" || {
+        errorCard "订阅刷新失败，且 CDN 入口地址恢复失败，请手动检查 $(cdnAddressFile)"
+        return 1
+    }
+    errorCard "订阅刷新失败，已恢复旧 CDN 入口地址"
+    return 1
+}
+
 showCDNUsageNotes() {
     echoContent title "\n┌─ CDN 使用说明 ─────────────────────────────────────"
     menuLine "1. 新建 XHTTP 场景优先使用协议 2：$(xrayProtocolName 2)"
@@ -1459,8 +1481,12 @@ showCDNUsageNotes() {
 }
 
 setCDNEntryAddress() {
-    local currentAddress input
+    local currentAddress input previousAddress
     currentAddress=$(cdnCurrentAddress)
+    previousAddress=
+    if [[ -f "$(cdnAddressFile)" ]]; then
+        previousAddress=$(head -1 "$(cdnAddressFile)")
+    fi
     echoContent title "\n┌─ 设置 CDN 入口地址 ─────────────────────────────────"
     menuLine "当前入口地址：${currentAddress}"
     menuLine "可输入多个地址，用英文逗号分隔；订阅会为每个地址生成一条节点"
@@ -1473,7 +1499,17 @@ setCDNEntryAddress() {
     fi
     cdnWriteAddress "${input}"
     statusCard "CDN 入口" "已更新为 ${input}"
-    subscribe false false
+    cdnRefreshSubscriptionsOrRollback "${previousAddress}"
+}
+
+clearCDNEntryAddress() {
+    local previousAddress=
+    if [[ -f "$(cdnAddressFile)" ]]; then
+        previousAddress=$(head -1 "$(cdnAddressFile)")
+    fi
+    cdnClearAddress
+    statusCard "CDN 入口" "已清空，订阅将使用安装入口地址"
+    cdnRefreshSubscriptionsOrRollback "${previousAddress}"
 }
 
 manageCDN() {
@@ -1508,9 +1544,7 @@ manageCDN() {
         fi
         ;;
     2)
-        cdnClearAddress
-        statusCard "CDN 入口" "已清空，订阅将使用安装入口地址"
-        subscribe false false
+        clearCDNEntryAddress
         ;;
     3)
         showCDNUsageNotes
