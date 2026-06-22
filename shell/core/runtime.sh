@@ -1076,7 +1076,7 @@ autoRead() {
 
     prompt=$(formatReadPrompt "${prompt}")
 
-    if [[ -n "${AUTO_INSTALL}" && ( "${key}" != "install_type" || -n "${AUTO_INSTALL_TYPE}" ) ]]; then
+    if [[ -n "${AUTO_INSTALL:-}" && ( "${key}" != "install_type" || -n "${AUTO_INSTALL_TYPE:-}" ) ]]; then
         autoValue=$(autoValueForKey "${key}")
         if [[ -n "${autoValue}" ]]; then
             showAutoInstallSummary

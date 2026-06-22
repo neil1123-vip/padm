@@ -3946,6 +3946,13 @@ runTlsFailureReturnRegression() (
     HOME="${oldHome}"
 )
 
+runAutoReadUnsetAutoInstallRegression() (
+    local value=
+    unset AUTO_INSTALL AUTO_INSTALL_TYPE
+    autoRead regression_unset_auto_install "请输入:" value <<<"manual-value"
+    [[ "${value}" == "manual-value" ]]
+)
+
 runTlsCustomSSLEmailUsesHomeAccountFileRegression() (
     local root="${TMP_DIR}/tls-custom-email-home"
     local homeDir="${root}/home"
@@ -17629,6 +17636,7 @@ runRegressionRealityStream() {
 
 runRegressionRuntime() {
     runRegressionStep runtime-core runRuntimeAndRealityRegression &&
+        runRegressionStep runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression &&
         runRegressionStep runtime-auto-install-reality-route runAutoInstallRealityRouteRegression &&
         runRegressionStep runtime-tempdir runRuntimeTempDirRegression &&
         runRegressionStep reality-config runRealityConfigRegression
