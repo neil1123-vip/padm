@@ -362,7 +362,7 @@ deletePortHoppingRules() {
 portHoppingMenu() {
     local type=$1
     # 判断iptables是否存在
-    if ! find /usr/bin /usr/sbin | grep -q -w iptables; then
+    if ! command -v iptables >/dev/null 2>&1; then
         protocolPortHoppingStatusCard "无法识别 iptables 工具，无法使用端口跳跃，退出安装"
         exit 0
     fi

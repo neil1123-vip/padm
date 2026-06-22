@@ -1046,6 +1046,52 @@ EOF
     [[ "${tuicPortHoppingEnd}" == "33005" ]]
 )
 
+runPortHoppingMenuUsesCommandLookupRegression() (
+    set -euo pipefail
+    source "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
+
+    local actionLog="${TMP_DIR}/port-hopping-menu-command-lookup.log"
+    local findLog="${TMP_DIR}/port-hopping-menu-find.log"
+    local exitLog="${TMP_DIR}/port-hopping-menu-exit.log"
+    : >"${actionLog}"
+    : >"${findLog}"
+    : >"${exitLog}"
+
+    find() {
+        printf 'find-called:%s\n' "$*" >>"${findLog}"
+        return 1
+    }
+    exit() {
+        printf 'exit-called:%s\n' "${1:-}" >>"${exitLog}"
+        return 97
+    }
+    command() {
+        if [[ "${1:-}" == "-v" && "${2:-}" == "iptables" ]]; then
+            return 0
+        fi
+        builtin command "$@"
+    }
+    autoRead() {
+        printf -v "$3" '%s' '3'
+    }
+    readPortHopping() {
+        hysteria2PortHoppingStart=33000
+        hysteria2PortHoppingEnd=33005
+    }
+    statusCard() {
+        printf '%s|%s\n' "$1" "$2" >>"${actionLog}"
+    }
+    menuItem() { :; }
+    menuClose() { :; }
+    echoContent() { :; }
+
+    singBoxHysteria2Port=16295
+    portHoppingMenu hysteria2
+    [[ ! -s "${findLog}" ]]
+    [[ ! -s "${exitLog}" ]]
+    grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
+)
+
 runXrayTrafficStatsJqCompatibilityRegression() (
     local fakeBin="${TMP_DIR}/fake-xray-stats-bin"
     mkdir -p "${fakeBin}"
@@ -4235,7 +4281,8 @@ runRegressionPlatformRest() {
         runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression &&
         runRegressionStep rhel-like-detection runRhelLikeDetectionRegression &&
         runRegressionStep fedora-detection runFedoraDetectionRegression &&
-        runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression
+        runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression &&
+        runRegressionStep port-hopping-menu-command-lookup runPortHoppingMenuUsesCommandLookupRegression
 }
 
 runRegressionPlatform() {
