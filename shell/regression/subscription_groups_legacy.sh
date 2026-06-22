@@ -5995,6 +5995,10 @@ runUninstallServiceStopFailureRegression() (
         printf 'unsubscribe-cleanup\n' >>"${actionLog}"
         return 0
     }
+    uninstallReloadSystemdUnits() {
+        printf 'daemon-reload\n' >>"${serviceLog}"
+        return 0
+    }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         if [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]]; then
@@ -6041,6 +6045,9 @@ runUninstallServiceStopFailureRegression() (
         set -e
         [[ "${shellRc}" == "0" ]]
         [[ "$(<"${rcFile}")" == "1" ]]
+        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
+            return 1
+        fi
         grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
@@ -6083,6 +6090,9 @@ runUninstallServiceStopFailureRegression() (
         set -e
         [[ "${shellRc}" == "0" ]]
         [[ "$(<"${rcFile}")" == "1" ]]
+        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
+            return 1
+        fi
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
         if grep -qxF 'padm-root-cleanup' "${actionLog}"; then
@@ -6119,6 +6129,9 @@ runUninstallServiceStopFailureRegression() (
         set -e
         [[ "${shellRc}" == "0" ]]
         [[ "$(<"${rcFile}")" == "0" ]]
+        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
+            return 1
+        fi
         if grep -q '^nginx:stop:' "${serviceLog}"; then
             return 1
         fi

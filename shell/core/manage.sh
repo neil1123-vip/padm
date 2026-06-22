@@ -1284,6 +1284,12 @@ uninstallStoppedServicesVerified() {
     [[ "${failed}" != "true" ]]
 }
 
+uninstallReloadSystemdUnits() {
+    if padmCommandExists systemctl; then
+        systemctl daemon-reload
+    fi
+}
+
 cleanupPadmManagedRootOnUninstall() {
     local installRoot="${PADM_INSTALL_DIR:-/etc/padm}"
     local resolvedRoot
@@ -1410,6 +1416,10 @@ unInstall() {
             successCard "删除sing-box开机自启完成"
         fi
     else
+        if ! uninstallReloadSystemdUnits; then
+            serviceStopFailed=true
+            errorCard "systemd 配置重载失败，已取消后续删除"
+        fi
         if [[ "${coreInstallType}" == "1" || -e /etc/systemd/system/xray.service || -L /etc/systemd/system/xray.service ]]; then
             shouldStopXray=true
             if ! runCoreServiceActionAllowFailure handleXray stop; then
