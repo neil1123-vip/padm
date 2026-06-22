@@ -180,7 +180,7 @@ runSubscriptionGroupStateStructureMigrationRegression() {
       (.groups[0].sync.remote_enabled == true) and
       (.groups[0].sync.quota_auto_apply == false) and
       any(.groups[0].sources[]; .id == "main" and .role == "main") and
-      any(.groups[0].sources[]; .id == "edge" and .port == 443) and
+      any(.groups[0].sources[]; .id == "edge" and .scheme == "https" and .transport == "https" and .port == 443) and
       (.groups[0].user_groups[0].traffic_limit_gb == 1)
     ' "$(subscriptionGroupsFile)" >/dev/null
 
@@ -662,6 +662,7 @@ runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression() {
 runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateDefaultFixture
+    ensureSubscriptionGroupsState
 
     local stateSnapshot badBackup
     stateSnapshot=$(<"$(subscriptionGroupsFile)")

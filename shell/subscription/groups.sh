@@ -119,8 +119,8 @@ normalizeSubscriptionGroupsState() {
         .id = (($source.id // "") | tostring) |
         .name = (($source.name // $source.id // "") | tostring) |
         .role = (if ($source.role // "") == "main" then "main" else "secondary" end) |
-        .transport = (if .role == "main" then "local" else "wireguard" end) |
-        .scheme = (if .role == "main" then "local" else "wireguard" end) |
+        .transport = (if .role == "main" then "local" else (($source.transport // $source.scheme // "wireguard") | tostring) end) |
+        .scheme = (if .role == "main" then "local" else (($source.scheme // $source.transport // .transport // "wireguard") | tostring) end) |
         .host = (($source.host // "") | tostring) |
         .port = (($source.port // 0) | tonumber? // 0) |
         .enabled = (if $source.enabled == false then false else true end) |

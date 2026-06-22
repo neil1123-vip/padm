@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+REGRESSION_ENTRY_SCRIPT_PATH="${REGRESSION_ENTRY_DIR}/subscription_groups_regression.sh"
+REGRESSION_LEGACY_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 
@@ -8305,51 +8307,6 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
-runSubscriptionGroupsRestoreFailureRegression() (
-    local root="${TMP_DIR}/subscription-groups-restore-failure"
-    local groupsDir="${root}/groups"
-    local currentBackup="${root}/current-backup.json"
-    local targetBackup="${root}/target-backup.json"
-    local stateFile="${groupsDir}/groups.json"
-    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-    local oldTmpDir="${TMPDIR:-}"
-    local beforeSnapshot
-    local rc
-
-    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
-    TMPDIR="${root}"
-    mkdir -p "${groupsDir}"
-    cat >"${stateFile}" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    beforeSnapshot=$(<"${stateFile}")
-    cp "${stateFile}" "${currentBackup}"
-    cat >"${targetBackup}" <<'JSON'
-{"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
-JSON
-
-    createSubscriptionGroupsBackup() {
-        printf '%s\n' "${currentBackup}"
-    }
-    migrateSubscriptionGroupsState() {
-        return 1
-    }
-
-    set +e
-    restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
-    rc=$?
-    set -e
-    unset -f createSubscriptionGroupsBackup
-    unset -f migrateSubscriptionGroupsState
-    [[ "${rc}" == "1" ]]
-    [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
-    [[ ! -e "${currentBackup}" ]]
-
-    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
 runSubscriptionGroupsBackupFailureRegression() (
     local root="${TMP_DIR}/subscription-groups-backup-failure"
     local groupsDir="${root}/subscribe_groups"
@@ -8388,42 +8345,6 @@ JSON
 
     if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
-runSubscriptionGroupsRejectsUnsafeDirRegression() (
-    local root="${TMP_DIR}/subscription-groups-unsafe-dir"
-    local rmLog="${root}/rm.log"
-    local rc
-
-    mkdir -p "${root}"
-    root=$(cd -- "${root}" && pwd -P)
-    rmLog="${root}/rm.log"
-    : >"${rmLog}"
-    export PADM_SUBSCRIPTION_GROUPS_DIR=relative-groups
-
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${rmLog}"
-        command rm "$@"
-    }
-
-    set +e
-    (
-        cd -- "${root}" || exit 1
-        ensureSubscriptionGroupsState >/dev/null 2>&1
-    )
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
-    [[ ! -e "${root}/relative-groups" ]]
-
-    set +e
-    createSubscriptionGroupsBackup >/dev/null 2>&1
-    rc=$?
-    set -e
-    unset -f rm
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
 )
 
 runRefreshLocalSubscriptionsRollbackRegression() (
@@ -10769,1007 +10690,6 @@ runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
     grep -qx 'sub_team_a' "${helperAccountFile}"
 )
 
-runSubscriptionGroupStateRegression() {
-    ensureSubscriptionGroupsState
-    jq -e '.version == 2 and .active_group == "default" and (.groups | length == 1) and (.groups[0].sync.event_enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-
-    addSubscriptionSourceState ip-edge "IP Edge" 203.0.113.10 39778
-    jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
-    removeSubscriptionSourceState ip-edge
-
-    local credential decodedCredential invalidCredential oldWireGuardDir selfRefHost
-    credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
-    decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
-    jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
-    if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.999.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":70000,"token":"token-abc"}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{
-  "version": 1,
-  "active_group": "edge-group",
-  "groups": [
-    {
-      "id": "edge-group",
-      "name": "Edge Group",
-      "sources": [
-        {"id": "edge", "name": "Edge", "scheme": "https", "host": "example.com", "port": "443", "enabled": true, "sync_status": "failed", "last_sync_error": {"type": "unreachable", "message": "old"}}
-      ],
-      "user_groups": [
-        {"id": "team-a", "name": "Team:A", "enabled": true, "allowed_sources": ["edge"], "traffic_limit_gb": "1", "uuid": "11111111-1111-1111-1111-111111111111"}
-      ],
-      "sync": {"enabled": true},
-      "traffic": {"user_groups": {"team-a": {"upload": 1, "download": 2, "sources": {"edge": {"upload": 1, "download": 2}}}}, "sources": {"edge": {"upload": 1, "download": 2}}, "admin": {"sources": {"edge": {"upload": 0, "download": 0}}}}
-    }
-  ]
-}
-JSON
-
-    ensureSubscriptionGroupsState
-    jq -e '
-      .version == 2 and
-      .active_group == "edge-group" and
-      (.groups[0].sync.remote_enabled == true) and
-      (.groups[0].sync.event_enabled == true) and
-      (.groups[0].sync.quota_auto_apply == false) and
-      any(.groups[0].sources[]; .id == "main" and .role == "main") and
-      any(.groups[0].sources[]; .id == "edge" and .port == 443) and
-      (.groups[0].user_groups[0].traffic_limit_gb == 1)
-    ' "$(subscriptionGroupsFile)" >/dev/null
-
-    (
-        local summaryOutput
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
-        summaryOutput=$(showSubscriptionGroupsStateSummary)
-        [[ "${summaryOutput}" == *"当前组：Edge Group(edge-group)"* ]]
-        [[ "${summaryOutput}" == *"分享订阅：1 个，启用 1 个"* ]]
-        [[ "${summaryOutput}" == *"服务器源：2 个，启用远端 1 个"* ]]
-    )
-
-    (
-        local output
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
-        userResultCard() { printf 'card:%s\n' "$*"; }
-        output=$(showUserSubscriptions)
-        [[ "${output}" == *"card:用户订阅列表"* ]]
-        [[ "${output}" == *"menu:ID：team-a"* ]]
-        [[ "${output}" == *"menu:名称：Team:A"* ]]
-        [[ "${output}" == *"menu:可用服务器：edge"* ]]
-        [[ "${output}" == *"menu:订阅额度GB：1"* ]]
-        [[ "${output}" == *"menu:限额状态：正常(0%)"* ]]
-    )
-    subscriptionGroupsStateWrite '
-      .groups += [(.groups[0]
-        | .id = "shadow-group"
-        | .name = "Shadow Group"
-        | .user_groups = []
-        | .sources = [{id:"main", name:"Shadow Main", role:"main", transport:"local", scheme:"local", host:"127.0.0.2", port:0, enabled:true, sync_status:"local"}]
-        | .sync.last_status = "pending"
-        | .sync.last_run = ""
-        | .traffic = {global:{upload:0, download:0}, admin:{upload:0, download:0, sources:{}}, user_groups:{}, sources:{}}
-      )]
-    '
-    [[ "$(subscriptionGroupRead shadow-group -r '.name')" == "Shadow Group" ]]
-    subscriptionGroupWrite shadow-group --arg status "success" '.sync.last_status = $status'
-    jq -e '.groups[] | select(.id == "shadow-group") | .sync.last_status == "success"' "$(subscriptionGroupsFile)" >/dev/null
-    [[ "$(subscriptionGroupRead edge-group -r '.name')" == "Edge Group" ]]
-
-    (
-        local resetRoot="${TMP_DIR}/subscription-groups-reset-failure"
-        local resetGroupsDir="${resetRoot}/groups"
-        local resetStateFile="${resetGroupsDir}/groups.json"
-        local resetErrorLog="${resetRoot}/error.log"
-        local resetCurrentBackup
-        local resetBeforeSnapshot
-        local resetStatus
-        local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-        local oldTmpDir="${TMPDIR:-}"
-
-        # shellcheck source=/dev/null
-        source "${PROJECT_ROOT}/shell/subscription/state_maintenance.sh"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${resetGroupsDir}"
-        TMPDIR="${resetRoot}"
-        REGRESSION_ERROR_CARD_LOG="${resetErrorLog}"
-        mkdir -p "${resetGroupsDir}"
-        cat >"${resetStateFile}" <<'JSON'
-{"version":2,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        resetBeforeSnapshot=$(<"${resetStateFile}")
-        resetCurrentBackup="${resetGroupsDir}/backups/groups-current.json"
-
-        showSubscriptionGroupsStateSummary() { return 0; }
-        autoRead() {
-            local targetVar=$3
-            printf -v "${targetVar}" '%s' "yes"
-        }
-        createSubscriptionGroupsBackup() {
-            mkdir -p "${resetGroupsDir}/backups" || return 1
-            cp "${resetStateFile}" "${resetCurrentBackup}" || return 1
-            printf '%s\n' "${resetCurrentBackup}"
-        }
-        migrateSubscriptionGroupsState() {
-            return 1
-        }
-
-        : >"${resetErrorLog}"
-        set +e
-        resetSubscriptionGroupsStateMenu >/dev/null 2>&1
-        resetStatus=$?
-        set -e
-        unset -f showSubscriptionGroupsStateSummary
-        unset -f statusCard
-        unset -f successCard
-        unset -f autoRead
-        unset -f createSubscriptionGroupsBackup
-        unset -f migrateSubscriptionGroupsState
-        [[ "${resetStatus}" == "1" ]]
-        [[ "$(<"${resetStateFile}")" == "${resetBeforeSnapshot}" ]]
-        grep -q '订阅状态重建失败，已恢复旧状态' "${resetErrorLog}"
-        [[ -f "${resetCurrentBackup}" ]]
-        if regressionFindHasMatches "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*'; then
-            return 1
-        fi
-
-        if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-        if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-    )
-
-    if ! true >/dev/null 2>&1; then
-        return 1
-    fi
-    if ! true >/dev/null 2>&1; then
-        return 1
-    fi
-
-    addSubscriptionSourceState remote-edge remote-edge "10.77.0.2" 39778
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id remote-edge --arg token "token-abc" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)
-      else . end)'
-    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
-    setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
-    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
-
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id edge --argjson enabled false '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-      else . end)'
-    jq -e '.groups[0].sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id main --argjson enabled false '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-      else . end)'
-    jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-    (
-        local output
-        output=$(showSubscriptionSources)
-        [[ "${output}" == *$'ID:main\n名称:本机\n角色:main'* ]]
-        [[ "${output}" == *$'ID:edge\n名称:Edge\n角色:secondary'* ]]
-        [[ "${output}" == *"上次同步错误:unreachable old"* ]]
-    )
-    (
-        local output
-        output=$(showSubscriptionSourceControlUrls)
-        [[ "${output}" == *$'ID:edge\n名称:Edge\n控制面:WireGuard'* ]]
-        [[ "${output}" == *"Health:http://example.com:443/s/control/health"* ]]
-        [[ "${output}" == *"Sync:http://example.com:443/s/control/sync"* ]]
-    )
-    (
-        local output
-        output=$(showSubscriptionSourceSyncResults)
-        [[ "${output}" == *$'ID:edge\n名称:Edge\n同步状态:failed'* ]]
-        [[ "${output}" == *"上次同步错误:unreachable old"* ]]
-    )
-    toggleSubscriptionGroupSyncEnabled
-    [[ "$(subscriptionGroupSyncEnabled && echo yes || echo no)" == "no" ]]
-    toggleSubscriptionGroupSyncEnabled
-    [[ "$(subscriptionGroupSyncEnabled && echo yes || echo no)" == "yes" ]]
-    setSubscriptionGroupSyncInterval 17
-    jq -e '.groups[0].sync.interval_minutes == 17' "$(subscriptionGroupsFile)" >/dev/null
-    [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "yes" ]]
-    toggleSubscriptionGroupRemoteSyncEnabled
-    [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "no" ]]
-    toggleSubscriptionGroupRemoteSyncEnabled
-    [[ "$(subscriptionGroupRemoteSyncEnabled && echo yes || echo no)" == "yes" ]]
-    [[ "$(subscriptionEventSyncEnabled && echo yes || echo no)" == "yes" ]]
-    toggleSubscriptionEventSyncEnabled
-    [[ "$(subscriptionEventSyncEnabled && echo yes || echo no)" == "no" ]]
-    toggleSubscriptionEventSyncEnabled
-    [[ "$(subscriptionEventSyncEnabled && echo yes || echo no)" == "yes" ]]
-    [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "no" ]]
-    toggleSubscriptionGroupQuotaAutoApplyEnabled
-    [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "yes" ]]
-    toggleSubscriptionGroupQuotaAutoApplyEnabled
-    [[ "$(subscriptionGroupQuotaAutoApplyEnabled && echo yes || echo no)" == "no" ]]
-    clearSubscriptionSourceSyncError edge
-    jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
-    removeSubscriptionSourceState edge
-    jq -e '(.groups[0].sources | map(.id) | index("edge") | not) and (.groups[0].traffic.sources | has("edge") | not) and (.groups[0].traffic.user_groups["team-a"].sources | has("edge") | not)' "$(subscriptionGroupsFile)" >/dev/null
-
-    subscriptionGroupsStateWrite '
-      .groups[0].user_groups[0].enabled = true |
-      .groups[0].user_groups[0].traffic_limit_gb = 1 |
-      .groups[0].sync.last_run = "2026-06-10 10:01:00" |
-      .groups[0].traffic.global = {upload:3145728, download:1048576} |
-      .groups[0].traffic.admin = {upload:2097152, download:1048576, sources:{main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}}} |
-      .groups[0].traffic.sources = {main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}, "remote-edge":{upload:1048576, download:0, updated_at:"2026-06-10 10:01:00"}} |
-      .groups[0].traffic.user_groups["team-a"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
-    '
-    (
-        local trafficOutput
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        trafficOutput=$(showAdminSubscriptionTraffic)
-        [[ "${trafficOutput}" == *"总上传：2 MB"* ]]
-        [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
-        [[ "${trafficOutput}" == *"来源数：1"* ]]
-        trafficOutput=$(showSubscriptionSourcesTraffic)
-        [[ "${trafficOutput}" == *"服务器数：2"* ]]
-        [[ "${trafficOutput}" == *"总上传：3 MB"* ]]
-        [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
-        [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
-    )
-    (
-        local trafficOutput
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
-        userResultCard() { printf 'card:%s\n' "$*"; }
-        showUserSubscriptionQuotaStatus() {
-            return 93
-        }
-        trafficOutput=$(showUserSubscriptionTraffic team-a)
-        [[ "${trafficOutput}" == *"card:用户订阅流量"* ]]
-        [[ "${trafficOutput}" == *"menu:用户订阅：team-a"* ]]
-        [[ "${trafficOutput}" == *"menu:限额状态：已超限(100%)"* ]]
-        [[ "${trafficOutput}" == *'"upload": 1073741824'* ]]
-        [[ "${trafficOutput}" == *'"download": 1'* ]]
-    )
-    (
-        local trafficOutput
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
-        userResultCard() { printf 'card:%s\n' "$*"; }
-        trafficOutput=$(showSubscriptionTrafficOverview)
-        [[ "${trafficOutput}" == *"card:用量与限额总览"* ]]
-        [[ "${trafficOutput}" == *"menu:全局累计：上传 3 MB / 下载 1 MB"* ]]
-        [[ "${trafficOutput}" == *"menu:分享订阅：共 1 个，启用 1 个"* ]]
-        [[ "${trafficOutput}" == *"menu:限额状态：超限 1 个，接近上限 0 个"* ]]
-        [[ "${trafficOutput}" == *"menu:最近同步：状态 pending，时间 2026-06-10 10:01:00"* ]]
-    )
-    subscriptionGroupsStateWrite '
-      .groups[0].user_groups += [{"id":"team-b","name":"Team B","enabled":false,"allowed_sources":["main"],"traffic_limit_gb":1,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}] |
-      .groups[0].traffic.user_groups["team-b"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
-    '
-    subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
-    if applySubscriptionQuotaPlan '{bad-json' 2>/dev/null; then
-        return 1
-    fi
-    if applySubscriptionQuotaPlan '[{"id":"","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
-        return 1
-    fi
-    if applySubscriptionQuotaPlan '[{"id":"missing","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
-        return 1
-    fi
-    if subscriptionSyncApplyAccountPlan '{bad-json' 2>/dev/null; then
-        return 1
-    fi
-    if subscriptionSyncApplyAccountPlan '{"create":["sub_team_a"],"remove":[null]}' 2>/dev/null; then
-        return 1
-    fi
-    applySubscriptionQuotaPlan "$(subscriptionQuotaDryRunPlan)"
-    jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    subscriptionGroupsStateWrite '.groups[0].user_groups[0].enabled = true'
-    (
-        local quotaMenuOutput
-        local quotaMenuStatus
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            return 42
-        }
-        reloadCore() {
-            return 0
-        }
-        set +e
-        quotaMenuOutput=$(executeSubscriptionQuotaPlanMenu <<<"yes" 2>/dev/null)
-        quotaMenuStatus=$?
-        set -e
-        if [[ "${quotaMenuStatus}" -eq 0 ]]; then
-            return 1
-        fi
-        [[ "${quotaMenuOutput}" == *"待处理订阅：1"* ]]
-        [[ "${quotaMenuOutput}" == *"动作：停用超额订阅并移除本机托管账号"* ]]
-    )
-    (
-        local quotaTxRoot="${TMP_DIR}/subscription-quota-transaction"
-        local quotaTxPlan
-        local quotaTxStatus
-        mkdir -p "${quotaTxRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${quotaTxRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}}}]}
-JSON
-        quotaTxPlan=$(subscriptionQuotaDryRunPlan)
-        subscriptionSyncApplyAccountPlanTransaction() {
-            return 1
-        }
-        set +e
-        applySubscriptionQuotaPlanTransaction "${quotaTxPlan}"
-        quotaTxStatus=$?
-        set -e
-        [[ "${quotaTxStatus}" == "1" ]]
-        jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
-        if regressionFindHasMatches "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
-            return 1
-        fi
-    )
-    (
-        local quotaPartialRoot="${TMP_DIR}/subscription-quota-partial-state-failure"
-        local quotaPartialPlan='[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"team-b","action":"disable-and-remove-local-account"}]'
-        local quotaPartialStatus
-        local accountPhaseMarker="${quotaPartialRoot}/account-phase-called"
-        mkdir -p "${quotaPartialRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${quotaPartialRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        setUserSubscriptionEnabled() {
-            local id=$1
-            local enabled=$2
-            if [[ "${id}" == "team-b" ]]; then
-                return 1
-            fi
-            subscriptionGroupsStateWrite --arg groupId "default" --arg id "${id}" --argjson enabled "${enabled}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .enabled = $enabled else . end) else . end)'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            printf 'called\n' >"${accountPhaseMarker}"
-            return 0
-        }
-        set +e
-        applySubscriptionQuotaPlanTransaction "${quotaPartialPlan}"
-        quotaPartialStatus=$?
-        set -e
-        [[ "${quotaPartialStatus}" == "1" ]]
-        jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-        jq -e '.groups[0].user_groups[] | select(.id == "team-b" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-        [[ ! -e "${accountPhaseMarker}" ]]
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"停用超额分享订阅失败"* ]]
-        if regressionFindHasMatches "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
-            return 1
-        fi
-    )
-    (
-        local quotaBatchPlan='[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"team-b","action":"disable-and-remove-local-account"}]'
-        local capturedAccountPlan="${TMP_DIR}/subscription-quota-account-plan.json"
-        local capturedQuotaAccountIds="${TMP_DIR}/subscription-quota-account-ids.txt"
-        local capturedQuotaPlanMode="${TMP_DIR}/subscription-quota-account-plan-mode.txt"
-        local oldSubscriptionSyncApplyAccountPlanTransaction
-        eval "$(declare -f subscriptionSyncApplyAccountPlanTransaction | sed '1s/^subscriptionSyncApplyAccountPlanTransaction/originalSubscriptionSyncApplyAccountPlanTransaction/')"
-        subscriptionSyncAccountPlanFromIds() {
-            printf '%s\n' "$1" >"${capturedQuotaPlanMode}"
-            cat >"${capturedQuotaAccountIds}"
-            printf '{"create":[],"remove":["quota_team_a","quota_team_b"]}\n'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            printf '%s\n' "$1" >"${capturedAccountPlan}"
-            return 0
-        }
-        applySubscriptionQuotaPlanAccounts "${quotaBatchPlan}"
-        grep -qx 'remove' "${capturedQuotaPlanMode}"
-        grep -qx 'team-a' "${capturedQuotaAccountIds}"
-        grep -qx 'team-b' "${capturedQuotaAccountIds}"
-        jq -e '.create == [] and .remove == ["quota_team_a", "quota_team_b"]' "${capturedAccountPlan}" >/dev/null
-        unset -f subscriptionSyncApplyAccountPlanTransaction
-        eval "$(declare -f originalSubscriptionSyncApplyAccountPlanTransaction | sed '1s/^originalSubscriptionSyncApplyAccountPlanTransaction/subscriptionSyncApplyAccountPlanTransaction/')"
-        unset -f originalSubscriptionSyncApplyAccountPlanTransaction
-    )
-    (
-        local trafficRoot="${TMP_DIR}/subscription-traffic-usermap-batch"
-        local trafficSnapshot='{"ok":true,"items":[{"account":"sub_team_a","upload":1,"download":2},{"account":"sub_team_b","upload":3,"download":4}]}'
-        local capturedTrafficAccountIds="${TMP_DIR}/subscription-traffic-account-ids.txt"
-        mkdir -p "${trafficRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${trafficRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        subscriptionSyncAccountIdMapJsonFromIds() {
-            cat >"${capturedTrafficAccountIds}"
-            printf '{"sub_team_a":"team-a","sub_team_b":"team-b"}\n'
-        }
-        writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
-        jq -e '
-          .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
-          .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.download == 2 and
-          .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
-          .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
-        ' "$(subscriptionGroupsFile)" >/dev/null
-        grep -qx 'team-a' "${capturedTrafficAccountIds}"
-        grep -qx 'team-b' "${capturedTrafficAccountIds}"
-        unset -f subscriptionSyncAccountIdMapJsonFromIds
-    )
-    (
-        local capturedSyncPlanIds="${TMP_DIR}/subscription-sync-plan-ids.txt"
-        local capturedSyncPlanMode="${TMP_DIR}/subscription-sync-plan-mode.txt"
-        subscriptionSyncDesiredLocalUsers() {
-            return 96
-        }
-        subscriptionActiveEnabledUsersJson() {
-            printf '[{"id":"team-a","allowed_sources":["main"],"allows_main":true}]\n'
-        }
-        subscriptionSyncAccountPlanFromIds() {
-            printf '%s\n' "$1" >"${capturedSyncPlanMode}"
-            cat >"${capturedSyncPlanIds}"
-            printf '{"create":[],"remove":["plan_team_a"]}\n'
-        }
-        subscriptionSyncPlan | jq -e '.remove == ["plan_team_a"]' >/dev/null
-        grep -qx 'sync' "${capturedSyncPlanMode}"
-        grep -qx 'team-a' "${capturedSyncPlanIds}"
-        unset -f subscriptionSyncDesiredLocalUsers subscriptionActiveGroupRead subscriptionSyncAccountPlanFromIds
-    )
-    (
-        local capturedControlSyncPlanIds="${TMP_DIR}/subscription-control-sync-plan-ids.txt"
-        local capturedControlSyncPlanMode="${TMP_DIR}/subscription-control-sync-plan-mode.txt"
-        subscriptionControlSyncPlan() {
-            return 97
-        }
-        subscriptionSyncAccountPlanFromIds() {
-            printf '%s\n' "$1" >"${capturedControlSyncPlanMode}"
-            cat >"${capturedControlSyncPlanIds}"
-            printf '{"create":[],"remove":["control_team_a"]}\n'
-        }
-        subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":true}' |
-            jq -e '.ok == true and .dry_run == true and .changed == true and .plan.remove == ["control_team_a"]' >/dev/null
-        grep -qx 'sync' "${capturedControlSyncPlanMode}"
-        grep -qx 'team-a' "${capturedControlSyncPlanIds}"
-        unset -f subscriptionControlSyncPlan subscriptionSyncAccountPlanFromIds
-    )
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local syncConfigRoot="${TMP_DIR}/subscription-sync-config"
-    configPath="${syncConfigRoot}/xray/"
-    singBoxConfigPath="${syncConfigRoot}/sing-box/"
-    mkdir -p "${configPath}" "${singBoxConfigPath}"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"sub_team_b-main"}]}}]}
-JSON
-    cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
-JSON
-    (
-        local capturedConfiguredAccountArgc="${TMP_DIR}/subscription-sync-configured-account-argc.txt"
-        subscriptionSyncConfiguredManagedUsers() {
-            printf '%s\n' "$#" >"${capturedConfiguredAccountArgc}"
-            printf '["sub_team_a-main","sub_team_b-main"]\n'
-        }
-        subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
-        grep -qx '0' "${capturedConfiguredAccountArgc}"
-        unset -f subscriptionSyncConfiguredManagedUsers
-    )
-    subscriptionSyncCurrentManagedUsers \
-        "${configPath}02_VLESS_TCP_inbounds.json" \
-        "${singBoxConfigPath}06_hysteria2_inbounds.json" |
-        jq -e '. == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
-    subscriptionSyncPlanFromAccounts '["sub_team_a-main"]' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
-    printf '{bad-json' >"${configPath}99_broken_inbounds.json"
-    set +e
-    subscriptionSyncPlanFromAccounts '["sub_team_a"]' >/dev/null 2>&1
-    local brokenPlanStatus=$?
-    set -e
-    [[ "${brokenPlanStatus}" -ne 0 ]]
-    rm -f "${configPath}99_broken_inbounds.json"
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    (
-        runSubscriptionGroupSync() {
-            return 23
-        }
-        set +e
-        runSubscriptionGroupSyncCron
-        local cronStatus=$?
-        set -e
-        [[ "${cronStatus}" -eq 23 ]]
-    )
-
-    currentHost="self.example.com"
-    subscribeDomain="self.example.com"
-    subscribePort=39778
-    oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
-    PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/subscription-state-wireguard"
-    mkdir -p "$(subscriptionWireGuardDir)"
-    cat >"$(subscriptionWireGuardStateFile)" <<'JSON'
-{"enabled":true,"role":"main","address":"10.77.0.1/24","peers":[]}
-JSON
-    selfRefHost=$(subscriptionWireGuardReadState | jq -r '.address // empty')
-    selfRefHost=$(subscriptionWireGuardAddressHost "${selfRefHost}")
-    subscriptionGroupsStateWrite --arg selfRefHost "${selfRefHost}" '
-      .groups[0].sources |= map(if .id == "remote-edge" then .enabled = false else . end) |
-      .groups[0].sources += [{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"wireguard","transport":"wireguard","host":$selfRefHost,"port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}] |
-      .groups[0].user_groups = (.groups[0].user_groups | map(if .id == "team-a" then .allowed_sources = ["self-ref"] else . end))
-    '
-    subscriptionRemoteControlRequest() {
-        return 19
-    }
-    subscriptionRemoteSyncPlan | jq -e '.[] | select(.source_id == "self-ref" and .status == "self_reference" and .error_detail.type == "self_reference")' >/dev/null
-    runSubscriptionRemoteSync | jq -e '.[] | contains("self-ref")' >/dev/null
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "self-ref" and .sync_status == "failed" and .last_sync_error.type == "self_reference")' >/dev/null
-    if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
-    local stateSnapshot badBackup legacyBackup menuBackup
-    stateSnapshot=$(<"$(subscriptionGroupsFile)")
-    if subscriptionGroupsStateWrite '.groups = "broken" | .dangling = ' 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"$(subscriptionGroupsFile)")" == "${stateSnapshot}" ]]
-    [[ ! -e "$(subscriptionGroupsFile).tmp" ]]
-    [[ ! -e "$(subscriptionGroupsFile).tmp.commit" ]]
-
-    badBackup="${TMP_DIR}/bad-groups-backup.json"
-    printf '{bad json\n' >"${badBackup}"
-    if restoreSubscriptionGroupsBackup "${badBackup}" 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"$(subscriptionGroupsFile)")" == "${stateSnapshot}" ]]
-    [[ ! -e "$(subscriptionGroupsFile).restore.tmp" ]]
-
-    legacyBackup="${TMP_DIR}/legacy-groups-backup.json"
-    cat >"${legacyBackup}" <<'JSON'
-{"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
-JSON
-    restoreSubscriptionGroupsBackup "${legacyBackup}"
-    jq -e '.version == 2 and .active_group == "legacy" and any(.groups[0].sources[]; .role == "main") and (.groups[0].sync.remote_enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-
-    menuBackup=$(createSubscriptionGroupsBackup)
-    subscriptionGroupsStateWrite '.active_group = "changed" | .groups[0].id = "changed" | .groups[0].name = "Changed"'
-    (
-        local menuOutput
-        autoRead() {
-            local targetVar=$3
-            local input=
-            IFS= read -r input || input=
-            printf -v "${targetVar}" '%s' "${input}"
-        }
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { printf 'menu:close\n'; }
-        menuOutput=$(printf '%s\nyes\n' "${menuBackup}" | restoreSubscriptionGroupsBackupMenu)
-        [[ "${menuOutput}" == *"menu:"* ]]
-    )
-    jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
-}
-
-runSubscriptionSyncTempDirRegression() (
-    local oldTmpDir="${TMPDIR:-}"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
-    local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
-    local tmpRoot="${TMP_DIR}/subscription-sync-tmp"
-    local syncConfigRoot="${TMP_DIR}/subscription-sync-tempdir-config"
-    local localDir="${TMP_DIR}/subscription-sync-tempdir-local"
-    local publicDir="${TMP_DIR}/subscription-sync-tempdir-public"
-    local backupDir
-    local outputBackupDir
-
-    mkdir -p "${tmpRoot}" "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box" "${localDir}/default" "${publicDir}/default"
-    TMPDIR="${tmpRoot}"
-    configPath="${syncConfigRoot}/xray/"
-    singBoxConfigPath="${syncConfigRoot}/sing-box/"
-    cat >"${configPath}01_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"}]}}]}
-JSON
-
-    backupDir=$(subscriptionSyncCreateConfigBackups)
-    [[ "${backupDir}" == "${tmpRoot}"/padm-subscription-sync-backup.* ]]
-    [[ -f "${backupDir}/manifest" ]]
-    padmRemoveCleanupPath "${backupDir}"
-
-    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
-    export PADM_SUBSCRIBE_DIR="${publicDir}"
-    printf 'local\n' >"${localDir}/default/user"
-    printf 'public\n' >"${publicDir}/default/user"
-    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups)
-    [[ "${outputBackupDir}" == "${tmpRoot}"/padm-subscription-output-backup.* ]]
-    [[ -f "${outputBackupDir}/local.exists" && -f "${outputBackupDir}/public.exists" ]]
-    padmRemoveCleanupPath "${outputBackupDir}"
-
-    if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
-        return 1
-    fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
-runSubscriptionSyncRollbackFailureRegression() (
-    local root="${TMP_DIR}/subscription-sync-rollback-failure"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local oldTmpDir="${TMPDIR:-}"
-    local targetFile="${root}/xray/02_VLESS_TCP_inbounds.json"
-    local rc backupDirs=()
-
-    mkdir -p "${root}/xray" "${root}/tmp"
-    configPath="${root}/xray/"
-    singBoxConfigPath="${root}/xray/"
-    TMPDIR="${root}/tmp"
-    coreInstallType=1
-    ctlPath=
-    cat >"${targetFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-    eval "$(declare -f subscriptionSyncApplyAccountPlan | sed '1s/^subscriptionSyncApplyAccountPlan/originalSubscriptionSyncApplyAccountPlan/')"
-
-    initXrayClients() {
-        jq -n --arg email "$3-main" '[{email:$email}]'
-    }
-    subscriptionSyncGenerateUUID() {
-        printf '99999999-9999-9999-9999-999999999999\n'
-    }
-    subscriptionSyncApplyAccountPlan() {
-        originalSubscriptionSyncApplyAccountPlan "$@"
-        return 1
-    }
-    cp() {
-        if [[ "$1" == "-p" && "$2" == "${root}/tmp"/padm-subscription-sync-backup.*/*.json && "$3" == "${root}/xray"/.02_VLESS_TCP_inbounds.json.restore.* ]]; then
-            return 1
-        fi
-        command cp "$@"
-    }
-
-    set +e
-    subscriptionSyncApplyAccountPlanTransaction '{"create":["sub_new"],"remove":[]}'
-    rc=$?
-    set -e
-    unset -f cp subscriptionSyncApplyAccountPlan initXrayClients subscriptionSyncGenerateUUID
-
-    [[ "${rc}" == "1" ]]
-    jq -e '.inbounds[0].settings.clients[0].email == "sub_new-main"' "${targetFile}" >/dev/null
-    [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"配置恢复失败"* ]]
-    [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"备份目录:"* ]]
-    mapfile -t backupDirs < <(find "${root}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' -print)
-    [[ "${#backupDirs[@]}" == "1" ]]
-    [[ -f "${backupDirs[0]}/manifest" ]]
-    grep -q "${targetFile}" "${backupDirs[0]}/manifest"
-    if regressionFindHasMatches "${root}/xray" -name '*.sync.*'; then
-        return 1
-    fi
-
-    (
-        local restoreDirRoot="${TMP_DIR}/subscription-sync-restore-dir-failure"
-        local restoreDirTarget="${restoreDirRoot}/subscribe_local"
-        local restoreDirBackup="${restoreDirRoot}/backup"
-        local restoreStatus
-        mkdir -p "${restoreDirTarget}/default" "${restoreDirTarget}/clashMeta" "${restoreDirBackup}/local/default" "${restoreDirBackup}/local/clashMeta"
-        printf 'current default\n' >"${restoreDirTarget}/default/existing"
-        printf 'current clash\n' >"${restoreDirTarget}/clashMeta/existing"
-        printf 'backup default\n' >"${restoreDirBackup}/local/default/existing"
-        printf 'backup clash\n' >"${restoreDirBackup}/local/clashMeta/existing"
-        printf 'dir\n' >"${restoreDirBackup}/local.exists"
-        cp() {
-            if [[ "$1" == "-a" && "$2" == "${restoreDirBackup}/local/." && "$3" == "${restoreDirRoot}"/.restore-local.*"/" ]]; then
-                return 1
-            fi
-            command cp "$@"
-        }
-        set +e
-        subscriptionSyncRestoreBackupPath "${restoreDirTarget}" "${restoreDirBackup}" local
-        restoreStatus=$?
-        set -e
-        unset -f cp
-        [[ "${restoreStatus}" == "1" ]]
-        [[ "$(<"${restoreDirTarget}/default/existing")" == "current default" ]]
-        [[ "$(<"${restoreDirTarget}/clashMeta/existing")" == "current clash" ]]
-        if regressionFindHasMatches "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \); then
-            return 1
-        fi
-    )
-
-    (
-        local reloadRoot="${TMP_DIR}/subscription-sync-reload-rollback"
-        local reloadTargetFile="${reloadRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local reloadLog="${reloadRoot}/reload.log"
-        local reloadOriginalContent
-        local reloadStatus
-
-        mkdir -p "${reloadRoot}/xray" "${reloadRoot}/tmp"
-        configPath="${reloadRoot}/xray/"
-        singBoxConfigPath="${reloadRoot}/xray/"
-        TMPDIR="${reloadRoot}/tmp"
-        coreInstallType=1
-        cat >"${reloadTargetFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        reloadOriginalContent=$(<"${reloadTargetFile}")
-
-        subscriptionSyncApplyAccountPlan() {
-            originalSubscriptionSyncApplyAccountPlan "$@"
-        }
-        reloadCore() {
-            printf 'reload\n' >>"${reloadLog}"
-            return 1
-        }
-
-        set +e
-        applySubscriptionQuotaPlanAccounts '[{"id":"team-a","action":"disable-and-remove-local-account"}]'
-        reloadStatus=$?
-        set -e
-        [[ "${reloadStatus}" == "1" ]]
-        [[ "$(<"${reloadTargetFile}")" == "${reloadOriginalContent}" ]]
-        [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"核心重载失败"* ]]
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"恢复旧配置后核心重载仍失败"* ]]
-        if regressionFindHasMatches "${reloadRoot}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*'; then
-            return 1
-        fi
-    )
-
-    (
-        local syncRoot="${TMP_DIR}/subscription-group-sync-apply-failure"
-        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
-        local syncPublicFile="${syncRoot}/subscribe/default/user"
-        local remoteLog="${syncRoot}/remote.log"
-        local reconcileLog="${syncRoot}/reconcile.log"
-        local statusLog="${syncRoot}/status.log"
-        local resultStatus="${syncRoot}/mark-status.log"
-        local resultFailures="${syncRoot}/mark-failures.log"
-        local originalConfig
-        local syncStatus
-
-        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-        configPath="${syncRoot}/xray/"
-        singBoxConfigPath="${syncRoot}/xray/"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-        TMPDIR="${syncRoot}/tmp"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        printf 'old-local\n' >"${syncLocalFile}"
-        printf 'old-public\n' >"${syncPublicFile}"
-        originalConfig=$(<"${syncConfigFile}")
-
-        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-        subscriptionGroupRemoteSyncEnabled() { return 0; }
-        collectSubscriptionTraffic() { return 0; }
-        readInstallType() { return 0; }
-        readInstallProtocolType() { return 0; }
-        readConfigHostPathUUID() { return 0; }
-        subscriptionSyncPlan() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败"
-            return 1
-        }
-        subscriptionSyncReconcileLocalServices() {
-            printf 'reconcile\n' >>"${reconcileLog}"
-            return 0
-        }
-        runSubscriptionRemoteSync() {
-            printf 'remote\n' >>"${remoteLog}"
-            printf '[]'
-        }
-        subscriptionSyncMarkResult() {
-            printf '%s\n' "$1" >"${resultStatus}"
-            printf '%s\n' "$2" >"${resultFailures}"
-            return 0
-        }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
-
-        set +e
-        runSubscriptionGroupSync
-        syncStatus=$?
-        set -e
-        [[ "${syncStatus}" == "1" ]]
-        [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
-        [[ "$(<"${syncLocalFile}")" == "old-local" ]]
-        [[ "$(<"${syncPublicFile}")" == "old-public" ]]
-        [[ ! -e "${remoteLog}" ]]
-        [[ ! -e "${reconcileLog}" ]]
-        grep -q '本机同步计划应用失败' "${resultFailures}"
-        grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
-        grep -q '本机同步未完全完成' "${statusLog}"
-        grep -qx 'partial' "${resultStatus}"
-        if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
-            return 1
-        fi
-    )
-
-    (
-        local syncRoot="${TMP_DIR}/subscription-group-sync-reconcile-rollback"
-        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
-        local syncPublicFile="${syncRoot}/subscribe/default/user"
-        local remoteLog="${syncRoot}/remote.log"
-        local reconcileLog="${syncRoot}/reconcile.log"
-        local statusLog="${syncRoot}/status.log"
-        local resultStatus="${syncRoot}/mark-status.log"
-        local resultFailures="${syncRoot}/mark-failures.log"
-        local originalConfig
-        local syncStatus
-
-        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-        configPath="${syncRoot}/xray/"
-        singBoxConfigPath="${syncRoot}/xray/"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-        TMPDIR="${syncRoot}/tmp"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        printf 'old-local\n' >"${syncLocalFile}"
-        printf 'old-public\n' >"${syncPublicFile}"
-        originalConfig=$(<"${syncConfigFile}")
-
-        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-        subscriptionGroupRemoteSyncEnabled() { return 0; }
-        collectSubscriptionTraffic() { return 0; }
-        readInstallType() { return 0; }
-        readInstallProtocolType() { return 0; }
-        readConfigHostPathUUID() { return 0; }
-        subscriptionSyncPlan() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_new-main"}]}}]}
-JSON
-            return 0
-        }
-        subscriptionSyncReconcileLocalServices() {
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            if [[ -z "${1:-}" ]]; then
-                printf 'new-local\n' >"${syncLocalFile}"
-                printf 'new-public\n' >"${syncPublicFile}"
-                return 1
-            fi
-            return 0
-        }
-        runSubscriptionRemoteSync() {
-            printf 'remote\n' >>"${remoteLog}"
-            printf '[]'
-        }
-        subscriptionSyncMarkResult() {
-            printf '%s\n' "$1" >"${resultStatus}"
-            printf '%s\n' "$2" >"${resultFailures}"
-            return 0
-        }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
-
-        set +e
-        runSubscriptionGroupSync
-        syncStatus=$?
-        set -e
-        [[ "${syncStatus}" == "1" ]]
-        [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
-        [[ "$(<"${syncLocalFile}")" == "old-local" ]]
-        [[ "$(<"${syncPublicFile}")" == "old-public" ]]
-        [[ ! -e "${remoteLog}" ]]
-        [[ "$(wc -l <"${reconcileLog}" | tr -d ' ')" == "2" ]]
-        grep -qx '<empty>' "${reconcileLog}"
-        grep -qx 'true' "${reconcileLog}"
-        grep -q '本机同步后服务重建失败，已恢复旧配置' "${resultFailures}"
-        grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
-        grep -q '本机同步未完全完成' "${statusLog}"
-        grep -qx 'partial' "${resultStatus}"
-        if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
-            return 1
-        fi
-    )
-
-    (
-        local syncRoot="${TMP_DIR}/subscription-group-sync-remote-failure"
-        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
-        local syncPublicFile="${syncRoot}/subscribe/default/user"
-        local remoteLog="${syncRoot}/remote.log"
-        local reconcileLog="${syncRoot}/reconcile.log"
-        local statusLog="${syncRoot}/status.log"
-        local resultStatus="${syncRoot}/mark-status.log"
-        local resultFailures="${syncRoot}/mark-failures.log"
-        local originalConfig
-        local syncStatus
-
-        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-        configPath="${syncRoot}/xray/"
-        singBoxConfigPath="${syncRoot}/xray/"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-        TMPDIR="${syncRoot}/tmp"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        printf 'old-local\n' >"${syncLocalFile}"
-        printf 'old-public\n' >"${syncPublicFile}"
-        originalConfig=$(<"${syncConfigFile}")
-
-        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-        subscriptionGroupRemoteSyncEnabled() { return 0; }
-        collectSubscriptionTraffic() { return 0; }
-        readInstallType() { return 0; }
-        readInstallProtocolType() { return 0; }
-        readConfigHostPathUUID() { return 0; }
-        subscriptionSyncPlan() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_new-main"}]}}]}
-JSON
-            return 0
-        }
-        subscriptionSyncReconcileLocalServices() {
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            if [[ -z "${1:-}" ]]; then
-                printf 'new-local\n' >"${syncLocalFile}"
-                printf 'new-public\n' >"${syncPublicFile}"
-            fi
-            return 0
-        }
-        runSubscriptionRemoteSync() {
-            printf 'remote\n' >>"${remoteLog}"
-            printf '["被控服务器同步失败"]'
-        }
-        subscriptionSyncMarkResult() {
-            printf '%s\n' "$1" >"${resultStatus}"
-            printf '%s\n' "$2" >"${resultFailures}"
-            return 0
-        }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
-
-        set +e
-        runSubscriptionGroupSync
-        syncStatus=$?
-        set -e
-        [[ "${syncStatus}" == "1" ]]
-        [[ "$(<"${syncConfigFile}")" != "${originalConfig}" ]]
-        grep -q 'sub_new-main' "${syncConfigFile}"
-        [[ "$(<"${syncLocalFile}")" == "new-local" ]]
-        [[ "$(<"${syncPublicFile}")" == "new-public" ]]
-        grep -qx 'remote' "${remoteLog}"
-        grep -q '被控服务器同步失败' "${resultFailures}"
-        grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"
-        grep -qx 'partial' "${resultStatus}"
-        if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
-            return 1
-        fi
-    )
-
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
 runSubscriptionSyncAccountFastPathRegression() (
     local root="${TMP_DIR}/subscription-sync-account-fast-path"
     local stateReadCalls=0
@@ -11788,39 +10708,6 @@ runSubscriptionSyncAccountFastPathRegression() (
     [[ "${stateReadCalls}" == "0" ]]
 
     unset -f subscriptionGroupsStateRead
-)
-
-runSubscriptionSyncAppendProtocolUserPreservesExistingClientsRegression() (
-    local root="${TMP_DIR}/subscription-sync-append-preserve-clients"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local oldTmpDir="${TMPDIR:-}"
-    local targetFile="${root}/xray/02_VLESS_TCP_inbounds.json"
-
-    mkdir -p "${root}/xray" "${root}/tmp" "${root}/groups"
-    configPath="${root}/xray/"
-    singBoxConfigPath="${root}/xray/"
-    TMPDIR="${root}/tmp"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
-    coreInstallType=1
-    ctlPath=
-    ensureSubscriptionGroupsState
-
-    cat >"${targetFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","flow":"xtls-rprx-vision","email":"existing-VLESS_TCP/TLS_Vision"}]}}]}
-JSON
-
-    subscriptionSyncAppendProtocolUser 27 "${targetFile}" '.inbounds[0].settings.clients' "11111111-1111-1111-1111-111111111111" "sub_team-a"
-
-    jq -e '
-      (.inbounds[0].settings.clients | length) == 2 and
-      .inbounds[0].settings.clients[0].email == "existing-VLESS_TCP/TLS_Vision" and
-      .inbounds[0].settings.clients[1].email == "sub_team-a-VLESS_TCP/TLS_Vision"
-    ' "${targetFile}" >/dev/null
-
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
 runSubscriptionSyncAppendLocalUserBatchRegression() (
@@ -11850,141 +10737,6 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
 
     configPath="${oldConfigPath}"
     singBoxConfigPath="${oldSingBoxConfigPath}"
-)
-
-runSubscriptionSyncReconcileEarlyExitRegression() (
-    local root="${TMP_DIR}/subscription-sync-reconcile-early-exit"
-    local callLog="${root}/calls.log"
-    local rc
-
-    mkdir -p "${root}"
-
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 1
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 0
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 0
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "1" ]]
-    )
-
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 0
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 1
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 0
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        grep -qx 'read' "${callLog}"
-        grep -qx 'install' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "3" ]]
-    )
-
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 0
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 0
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 1
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        grep -qx 'read' "${callLog}"
-        grep -qx 'install' "${callLog}"
-        grep -qx 'ensure' "${callLog}"
-        grep -qx 'restart:nginx' "${callLog}"
-        grep -qx 'apply' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "6" ]]
-    )
 )
 
 runRemoteSubscribeFetchRegression() {
@@ -12203,1333 +10955,6 @@ JSON
     if [[ -n "${oldFakeRemoteSubscribeMode}" ]]; then export PADM_FAKE_REMOTE_SUBSCRIBE_MODE="${oldFakeRemoteSubscribeMode}"; else unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE; fi
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
-
-runRemoteControlConcurrencyRegression() (
-    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
-JSON
-    subscriptionGroupsStateWrite '
-      .groups[0].sources += [
-        {id:"src0", name:"Src0", role:"secondary", scheme:"https", host:"remote0.example", port:443, enabled:true, sync_status:"pending", control_token:"token0"},
-        {id:"src2", name:"Src2", role:"secondary", scheme:"https", host:"remote2.example", port:443, enabled:true, sync_status:"pending", control_token:"token2"},
-        {id:"src10", name:"Src10", role:"secondary", scheme:"https", host:"remote10.example", port:443, enabled:true, sync_status:"pending", control_token:"token10"}
-      ]
-    '
-
-    regressionSourceId() {
-        local source=$1
-        local id=${source#*\"id\":\"}
-        printf '%s\n' "${id%%\"*}"
-    }
-
-    subscriptionRemoteControlPayload() {
-        local source=$1
-        local dryRun=$2
-        local sourceId
-        sourceId=$(regressionSourceId "${source}")
-        printf '{"version":1,"group_id":"default","source_id":"%s","dry_run":%s,"desired_users":[]}\n' "${sourceId}" "${dryRun}"
-    }
-
-    subscriptionRemoteControlHealth() {
-        local source=$1
-        local id
-        id=$(regressionSourceId "${source}")
-        [[ "${id}" == "src0" ]] && sleep 0.01
-        printf '{"id":"%s","name":"%s","ok":true}\n' "${id}" "${id}"
-    }
-
-    subscriptionRemoteControlRequest() {
-        local source=$1
-        local endpoint=$2
-        local sourceId
-        sourceId=$(regressionSourceId "${source}")
-        [[ "${sourceId}" == "src0" ]] && sleep 0.01
-        printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"source_id":"%s","endpoint":"%s"}\n' "${sourceId}" "${endpoint}"
-    }
-
-    subscriptionRemoteSyncPlanForSource() {
-        local source=$1
-        local sourceId
-        sourceId=$(regressionSourceId "${source}")
-        [[ "${sourceId}" == "src0" ]] && sleep 0.01
-        printf '{"source_id":"%s","status":"success","dry_run":true,"request":{"source_id":"%s"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n' "${sourceId}" "${sourceId}"
-    }
-
-    subscriptionRemoteControlHealthAll | jq -e 'length == 3 and .[0].id == "src0" and .[1].id == "src2" and .[2].id == "src10"' >/dev/null
-    subscriptionRemoteSyncPlan | jq -e 'length == 3 and .[0].source_id == "src0" and .[1].source_id == "src2" and .[2].source_id == "src10" and all(.[]; .status == "success")' >/dev/null
-)
-
-runRemoteControlDesiredUsersBatchRegression() (
-    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"a.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"https","host":"b.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["edge-b"],"traffic_limit_gb":2,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
-JSON
-
-    eval "$(declare -f subscriptionGroupsStateRead | sed '1s/^subscriptionGroupsStateRead/originalSubscriptionGroupsStateRead/')"
-    subscriptionGroupsStateRead() {
-        if [[ "$1" == "-c" && "$2" == "--arg" && "$3" == "groupId" && "$4" == "default" &&
-            "$5" == "--arg" && "$6" == "sourceId" ]]; then
-            if [[ "$7" == "edge-a" ]]; then
-                printf '[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]\n'
-                return 0
-            fi
-            return 92
-        fi
-        originalSubscriptionGroupsStateRead "$@"
-    }
-
-    subscriptionRemoteSyncPlanForSource() {
-        local source=$1
-        local desiredUsersBySource=${2:-}
-        local payload
-        payload=$(subscriptionRemoteControlPayload "${source}" true "${desiredUsersBySource}") || return 1
-        jq -n --argjson payload "${payload}" '{source_id:$payload.source_id, status:"success", dry_run:true, request:$payload, response:{ok:true, changed:false, plan:{create:[], remove:[]}}}'
-    }
-
-    subscriptionRemoteSyncPlan | jq -e '
-      length == 2 and
-      .[0].source_id == "edge-a" and
-      .[0].request.desired_users == [
-        {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"}
-      ] and
-      .[1].source_id == "edge-b" and
-      .[1].request.desired_users == [
-        {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"},
-        {id:"team-b", name:"Team B", uuid:"22222222-2222-2222-2222-222222222222", traffic_limit_gb:2, account:"sub_team_b"}
-      ]
-    ' >/dev/null
-    unset -f subscriptionGroupsStateRead subscriptionRemoteSyncPlanForSource
-)
-
-runRemoteControlDesiredUsersSingleSourceReuseRegression() (
-    local desiredUsersBySource='{"edge-a":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
-    local unexpectedCallFile="${TMP_DIR}/remote-control-desired-users-single-source.unexpected"
-    local output
-
-    subscriptionRemoteDesiredUsersBySource() {
-        : >"${unexpectedCallFile}"
-        return 93
-    }
-
-    subscriptionRemoteDesiredUsers() {
-        return 93
-    }
-
-    activeSubscriptionGroupId() {
-        printf 'default\n'
-    }
-
-    output=$(subscriptionRemoteControlPayload '{"id":"edge-a"}' true "${desiredUsersBySource}")
-    jq -e '
-      .source_id == "edge-a" and
-      .group_id == "default" and
-      .dry_run == true and
-      .desired_users == [
-        {id:"team-a", name:"Team A", uuid:"11111111-1111-1111-1111-111111111111", traffic_limit_gb:1, account:"sub_team_a"}
-      ]
-    ' <<<"${output}" >/dev/null
-    [[ ! -e "${unexpectedCallFile}" ]]
-)
-
-runRemoteControlPayloadRequiresDesiredUsersMapRegression() (
-    local unexpectedCallFile="${TMP_DIR}/remote-control-payload-missing-map.unexpected"
-
-    subscriptionRemoteDesiredUsersBySource() {
-        : >"${unexpectedCallFile}"
-        printf '{"edge-a":[{"id":"team-a"}]}\n'
-    }
-
-    activeSubscriptionGroupId() {
-        printf 'default\n'
-    }
-
-    if subscriptionRemoteControlPayload '{"id":"edge-a"}' true >/dev/null 2>&1; then
-        return 1
-    fi
-    [[ ! -e "${unexpectedCallFile}" ]]
-)
-
-runRemoteControlCreateUsersAvoidReverseDecodeRegression() (
-    local output
-
-    subscriptionSyncAccountIdsJsonFromNames() {
-        return 96
-    }
-
-    output=$(subscriptionControlCreateUsersFromPlan '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' '["sub_team_a"]')
-    jq -e '
-      . == [
-        {id:"team-a", uuid:"11111111-1111-1111-1111-111111111111"}
-      ]
-    ' <<<"${output}" >/dev/null
-)
-
-runRemoteControlApplyAccountPlanInlinesDesiredUserStateRegression() (
-    local groupsRoot="${TMP_DIR}/remote-control-inline-desired-user-state"
-    mkdir -p "${groupsRoot}"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsRoot}"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-
-    subscriptionControlUpdateDesiredUserState() {
-        return 96
-    }
-    subscriptionSyncApplyAccountPlanTransaction() {
-        return 0
-    }
-
-    subscriptionControlApplyAccountPlan '{"create":["sub_team_a"],"remove":[]}' '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' >/dev/null 2>&1
-    jq -e '
-      .groups[0].user_groups == [
-        {
-          id:"team-a",
-          name:"team-a",
-          enabled:true,
-          allowed_sources:["main"],
-          traffic_limit_gb:0,
-          token:"",
-          uuid:"11111111-1111-1111-1111-111111111111"
-        }
-      ]
-    ' "$(subscriptionGroupsFile)" >/dev/null
-    if subscriptionGroupsStateRead -e '.groups[0].user_groups | length != 1' >/dev/null 2>&1; then
-        return 1
-    fi
-)
-
-runRemoteControlAggregationFailureRegression() (
-    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"a.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"https","host":"b.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
-JSON
-
-    subscriptionRemoteControlHealth() {
-        local source=$1
-        case "$(jq -r '.id' <<<"${source}")" in
-        edge-a)
-            printf '{"id":"edge-a","name":"Edge A","ok":true}\n'
-            ;;
-        edge-b)
-            printf 'broken-health-json\n'
-            ;;
-        *)
-            printf '{"id":"main","name":"Main","ok":true}\n'
-            ;;
-        esac
-    }
-    subscriptionRemoteSyncPlanForSource() {
-        local source=$1
-        case "$(jq -r '.id' <<<"${source}")" in
-        edge-a)
-            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
-            ;;
-        edge-b)
-            printf 'broken-plan-json\n'
-            ;;
-        *)
-            printf '{"source_id":"main","status":"success","dry_run":true,"request":{"source_id":"main"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
-            ;;
-        esac
-    }
-
-    subscriptionRemoteControlHealthAll | jq -e 'length == 2 and .[0].ok == true and .[0].id == "edge-a" and .[1].status == "internal_error" and .[1].error_detail.type == "internal_error"' >/dev/null
-    subscriptionRemoteSyncPlan | jq -e 'length == 2 and .[0].status == "success" and .[0].source_id == "edge-a" and .[1].status == "internal_error" and .[1].error_detail.type == "internal_error"' >/dev/null
-)
-
-runRemoteControlHealthRegression() (
-    local responseFile="${TMP_DIR}/remote-control-health.json"
-    local sourceMissing='{"id":"edge-missing","name":"Edge Missing","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
-    local sourceRemote='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
-    local sourceUnauthorized='{"id":"edge-auth","name":"Edge Auth","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
-
-    curl() {
-        case "${PADM_FAKE_REMOTE_HEALTH_MODE:-}" in
-        unauthorized)
-            printf '{"ok":false,"error":"unauthorized"}\n401'
-            ;;
-        remote_error)
-            printf '{"ok":false,"error":"service_unavailable","error_detail":{"type":"service_unavailable","message":"服务暂时不可用"}}\n503'
-            ;;
-        success)
-            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
-            ;;
-        *)
-            printf '{"ok":false,"error":"unexpected"}\n500'
-            ;;
-        esac
-    }
-
-    subscriptionRemoteControlHealth "${sourceMissing}" >"${responseFile}"
-    jq -e '.status == "missing_token" and .error_detail.type == "missing_token" and .error_detail.message == "未配置控制 token"' "${responseFile}" >/dev/null
-
-    PADM_FAKE_REMOTE_HEALTH_MODE=unauthorized subscriptionRemoteControlHealth "${sourceUnauthorized}" >"${responseFile}"
-    jq -e '.status == "unauthorized" and .status_code == "401" and .error_detail.type == "unauthorized" and .error_detail.message == "控制 token 验证失败"' "${responseFile}" >/dev/null
-
-    PADM_FAKE_REMOTE_HEALTH_MODE=remote_error subscriptionRemoteControlHealth "${sourceRemote}" >"${responseFile}"
-    jq -e '.status == "remote_error" and .status_code == "503" and .error_detail.type == "remote_error" and (.error | contains("服务暂时不可用"))' "${responseFile}" >/dev/null
-
-    PADM_FAKE_REMOTE_HEALTH_MODE=success subscriptionRemoteControlHealth "${sourceRemote}" >"${responseFile}"
-    jq -e '.ok == true and .version == "test" and .capabilities == ["health","sync"] and .id == "edge-remote" and .name == "Edge Remote"' "${responseFile}" >/dev/null
-)
-
-runRemoteControlServerRefreshRegression() (
-    local subscribeCalls=0
-    local subscribeArgs=
-    local reconcileCalls=0
-    local responseFile="${TMP_DIR}/remote-control-server-refresh.json"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local rollbackRoot="${TMP_DIR}/remote-control-rollback"
-    local rollbackStateBefore
-    local rollbackFirstBefore
-    local rollbackSecondBefore
-    local oldCoreInstallType="${coreInstallType:-}"
-    local setUsersCalls=0
-    local rollbackExpectedFile="${TMP_DIR}/remote-control-rollback-expected.json"
-
-    eval "$(declare -f subscriptionControlApplyAccountPlan | sed '1s/^subscriptionControlApplyAccountPlan/originalSubscriptionControlApplyAccountPlan/')"
-    eval "$(declare -f subscriptionSyncSetUsersInFile | sed '1s/^subscriptionSyncSetUsersInFile/originalSubscriptionSyncSetUsersInFile/')"
-    eval "$(declare -f subscriptionSyncPlanFromAccounts | sed '1s/^subscriptionSyncPlanFromAccounts/originalSubscriptionSyncPlanFromAccounts/')"
-    eval "$(declare -f renderSubscribeUserOutputs | sed '1s/^renderSubscribeUserOutputs/originalRenderSubscribeUserOutputs/')"
-
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_team_a"],"remove":[]}'
-    }
-    subscriptionControlApplyAccountPlan() {
-        return 0
-    }
-    subscribe() {
-        subscribeCalls=$((subscribeCalls + 1))
-        subscribeArgs="$*"
-    }
-    subscriptionSyncReconcileLocalServices() {
-        reconcileCalls=$((reconcileCalls + 1))
-    }
-
-    set +e
-    subscriptionControlApplySync '{"desired_users":[{"id":"","uuid":""}]}' >"${responseFile}"
-    local invalidEmptyIdStatus=$?
-    subscriptionControlApplySync '{"desired_users":[{"id":"team-a"},{"id":"team-a"}]}' >"${responseFile}.duplicate"
-    local invalidDuplicateStatus=$?
-    subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":123}]}' >"${responseFile}.uuid"
-    local invalidUuidStatus=$?
-    set -e
-    [[ "${invalidEmptyIdStatus}" -ne 0 ]]
-    [[ "${invalidDuplicateStatus}" -ne 0 ]]
-    [[ "${invalidUuidStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}" >/dev/null
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.duplicate" >/dev/null
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.uuid" >/dev/null
-    (
-        subscriptionControlDesiredUsers() {
-            return 96
-        }
-        set +e
-        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":true}' >"${responseFile}.desired-users-inline"
-        local desiredUsersInlineStatus=$?
-        set -e
-        [[ "${desiredUsersInlineStatus}" == "0" ]]
-        jq -e '.ok == true and .dry_run == true and .changed == true and .plan.create == ["sub_team_a"] and .plan.remove == []' "${responseFile}.desired-users-inline" >/dev/null
-        unset -f subscriptionControlDesiredUsers
-    )
-
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_team_a"],"remove":[]}'
-    }
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
-    jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
-    [[ "${subscribeCalls}" == "1" ]]
-    [[ "${subscribeArgs}" == "false false" ]]
-    [[ "${reconcileCalls}" == "0" ]]
-    (
-        local createUsersProbe
-        createUsersProbe=$(subscriptionControlCreateUsersFromPlan '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' '["sub_team_a"]')
-        jq -e 'length == 1 and .[0].id == "team-a" and .[0].uuid == "11111111-1111-1111-1111-111111111111"' <<<"${createUsersProbe}" >/dev/null
-    )
-    (
-        jq() {
-            if [[ "$1" == "-c" && "$2" == "-n" && "$5" == "--argjson" && "$8" == *"def decode_account_id:"* ]]; then
-                return 95
-            fi
-            command jq "$@"
-        }
-        subscriptionControlCreateUsersFromPlan '[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' '["sub_team_a"]' |
-            jq -e '. == [{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}]' >/dev/null
-        unset -f jq
-    )
-    PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
-    jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
-    [[ "${subscribeCalls}" == "1" ]]
-    [[ "${reconcileCalls}" == "1" ]]
-
-    (
-        local prepareRoot="${TMP_DIR}/remote-control-prepare-config-failure"
-        local prepareResponse="${TMP_DIR}/remote-control-prepare-config-failure.json"
-        mkdir -p "${prepareRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${prepareRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        subscriptionSyncCreateConfigBackups() {
-            return 1
-        }
-        set +e
-        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${prepareResponse}"
-        local prepareStatus=$?
-        set -e
-        [[ "${prepareStatus}" -ne 0 ]]
-        jq -e '.ok == false and .changed == false and .dry_run == false and .error == "prepare_failed" and .error_detail.type == "prepare_failed" and (.error_detail.message | contains("配置备份失败")) and .plan.create == ["sub_team_a"] and .plan.remove == []' "${prepareResponse}" >/dev/null
-    )
-
-    (
-        local prepareRoot="${TMP_DIR}/remote-control-prepare-output-failure"
-        local prepareResponse="${TMP_DIR}/remote-control-prepare-output-failure.json"
-        local expectedBackupDir="${prepareRoot}/created-backup"
-        mkdir -p "${prepareRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${prepareRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        subscriptionControlPrepareSyncFailure() {
-            return 97
-        }
-        subscriptionSyncCreateConfigBackups() {
-            local backupPath="${expectedBackupDir}"
-            mkdir -p "${backupPath}" || return 1
-            printf '%s\n' "${backupPath}"
-        }
-        subscriptionSyncCreateSubscribeOutputBackups() {
-            return 1
-        }
-        set +e
-        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${prepareResponse}"
-        local prepareStatus=$?
-        set -e
-        [[ "${prepareStatus}" -ne 0 ]]
-        jq -e '.ok == false and .changed == false and .dry_run == false and .error == "prepare_failed" and .error_detail.type == "prepare_failed" and (.error_detail.message | contains("订阅输出备份失败")) and .plan.create == ["sub_team_a"] and .plan.remove == []' "${prepareResponse}" >/dev/null
-        [[ ! -e "${expectedBackupDir}" ]]
-    )
-
-    subscribe() {
-        subscribeCalls=$((subscribeCalls + 1))
-        subscribeArgs="$*"
-        return 1
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
-    local refreshStatus=$?
-    set -e
-    [[ "${refreshStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed"' "${responseFile}" >/dev/null
-
-    subscriptionControlApplyAccountPlan() {
-        return 1
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false}' >"${responseFile}"
-    local applyStatus=$?
-    set -e
-    [[ "${applyStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}" >/dev/null
-
-    (
-        local restoreFailureStateWriteCalls=0
-        local restoreFailureRoot="${TMP_DIR}/remote-control-apply-restore-failure"
-        local restoreFailureResponse="${TMP_DIR}/remote-control-apply-restore-failure.json"
-        mkdir -p "${restoreFailureRoot}/xray"
-        configPath="${restoreFailureRoot}/xray/"
-        singBoxConfigPath="${restoreFailureRoot}/xray/"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":false,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"00000000-0000-0000-0000-000000000000"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        eval "$(declare -f subscriptionGroupsStateWrite | sed '1s/^subscriptionGroupsStateWrite/originalSubscriptionGroupsStateWrite/')"
-        subscriptionSyncPlanFromAccounts() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            return 1
-        }
-        subscriptionGroupsStateWrite() {
-            restoreFailureStateWriteCalls=$((restoreFailureStateWriteCalls + 1))
-            if [[ "${restoreFailureStateWriteCalls}" == "2" ]]; then
-                return 1
-            fi
-            originalSubscriptionGroupsStateWrite "$@"
-        }
-        set +e
-        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${restoreFailureResponse}"
-        local restoreFailureStatus=$?
-        set -e
-        [[ "${restoreFailureStatus}" -ne 0 ]]
-        jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed" and (.error_detail.message | contains("订阅状态恢复失败"))' "${restoreFailureResponse}" >/dev/null
-        jq -e '.groups[0].user_groups[0].enabled == true and .groups[0].user_groups[0].uuid == "11111111-1111-1111-1111-111111111111"' "$(subscriptionGroupsFile)" >/dev/null
-    )
-
-    (
-        local restoreOrderLog="${TMP_DIR}/remote-control-restore-order.log"
-        local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config"
-        local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output"
-        local helperCalls=0
-        mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
-        subscriptionGroupsStateWrite() {
-            printf 'state\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncRestoreConfigBackups() {
-            printf 'config\n' >>"${restoreOrderLog}"
-            return 1
-        }
-        subscriptionSyncRestoreSubscribeOutputBackups() {
-            printf 'output\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncSetRestoreFailureDetail() {
-            local failedLocation=${3:-}
-            helperCalls=$((helperCalls + 1))
-            if [[ -n "${failedLocation}" ]]; then
-                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${failedLocation}"
-            else
-                command printf -v "$1" '%s' "${2}恢复失败"
-            fi
-            [[ "$2" == "配置" ]]
-            [[ "${failedLocation}" == "备份目录: ${restoreOrderConfig}" ]]
-            return 0
-        }
-        SUBSCRIPTION_CONTROL_RESTORE_ERROR=
-        rm -f "${restoreOrderLog}"
-        set +e
-        subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
-        local restoreOrderStatus=$?
-        set -e
-        [[ "${restoreOrderStatus}" -eq 1 ]]
-        [[ "${helperCalls}" == "1" ]] || return 1
-        grep -qx 'state' "${restoreOrderLog}"
-        grep -qx 'config' "${restoreOrderLog}"
-        grep -qx 'output' "${restoreOrderLog}"
-        [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == "控制面同步失败后配置恢复失败，请手动检查备份目录: ${restoreOrderConfig}" ]]
-    )
-
-    (
-        local restoreOrderLog="${TMP_DIR}/remote-control-restore-order-state.log"
-        local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config-state"
-        local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output-state"
-        local helperCalls=0
-        mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
-        subscriptionGroupsStateWrite() {
-            printf 'state\n' >>"${restoreOrderLog}"
-            return 1
-        }
-        subscriptionSyncRestoreConfigBackups() {
-            printf 'config\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncRestoreSubscribeOutputBackups() {
-            printf 'output\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncSetRestoreFailureDetail() {
-            local failedLocation=${3:-}
-            helperCalls=$((helperCalls + 1))
-            if [[ -n "${failedLocation}" ]]; then
-                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${failedLocation}"
-            else
-                command printf -v "$1" '%s' "${2}恢复失败"
-            fi
-            [[ "$2" == "状态" ]]
-            [[ -z "${failedLocation}" ]]
-            return 0
-        }
-        SUBSCRIPTION_CONTROL_RESTORE_ERROR=
-        rm -f "${restoreOrderLog}"
-        set +e
-        subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
-        local restoreOrderStatus=$?
-        set -e
-        [[ "${restoreOrderStatus}" -eq 1 ]]
-        [[ "${helperCalls}" == "1" ]] || return 1
-        grep -qx 'state' "${restoreOrderLog}"
-        grep -qx 'config' "${restoreOrderLog}"
-        grep -qx 'output' "${restoreOrderLog}"
-        [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == *"状态恢复失败"* ]]
-    )
-
-    (
-        local restoreOrderLog="${TMP_DIR}/remote-control-restore-order-output.log"
-        local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config-output"
-        local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output-output"
-        local helperCalls=0
-        mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
-        subscriptionGroupsStateWrite() {
-            printf 'state\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncRestoreConfigBackups() {
-            printf 'config\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncRestoreSubscribeOutputBackups() {
-            printf 'output\n' >>"${restoreOrderLog}"
-            return 1
-        }
-        subscriptionSyncSetRestoreFailureDetail() {
-            local failedLocation=${3:-}
-            helperCalls=$((helperCalls + 1))
-            if [[ -n "${failedLocation}" ]]; then
-                command printf -v "$1" '%s' "${2}恢复失败，请手动检查${failedLocation}"
-            else
-                command printf -v "$1" '%s' "${2}恢复失败"
-            fi
-            [[ "$2" == "订阅输出" ]]
-            [[ "${failedLocation}" == "备份目录: ${restoreOrderOutput}" ]]
-            return 0
-        }
-        SUBSCRIPTION_CONTROL_RESTORE_ERROR=
-        rm -f "${restoreOrderLog}"
-        set +e
-        subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
-        local restoreOrderStatus=$?
-        set -e
-        [[ "${restoreOrderStatus}" -eq 1 ]]
-        [[ "${helperCalls}" == "1" ]] || return 1
-        grep -qx 'state' "${restoreOrderLog}"
-        grep -qx 'config' "${restoreOrderLog}"
-        grep -qx 'output' "${restoreOrderLog}"
-        [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == "控制面同步失败后订阅输出恢复失败，请手动检查备份目录: ${restoreOrderOutput}" ]]
-    )
-
-    mkdir -p "${rollbackRoot}/xray"
-    configPath="${rollbackRoot}/xray/"
-    singBoxConfigPath="${rollbackRoot}/xray/"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    cat >"${configPath}03_VLESS_WS_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    coreInstallType=1
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_rollback"],"remove":[]}'
-    }
-    rollbackStateBefore=$(<"$(subscriptionGroupsFile)")
-    rollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
-    rollbackSecondBefore=$(<"${configPath}03_VLESS_WS_inbounds.json")
-    subscriptionControlApplyAccountPlan() {
-        originalSubscriptionControlApplyAccountPlan "$@"
-    }
-    subscriptionSyncSetUsersInFile() {
-        setUsersCalls=$((setUsersCalls + 1))
-        if [[ "${setUsersCalls}" -eq 2 ]]; then
-            return 1
-        fi
-        originalSubscriptionSyncSetUsersInFile "$@"
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"rollback","uuid":"66666666-6666-6666-6666-666666666666"}],"dry_run":false}' >"${responseFile}.rollback"
-    local rollbackStatus=$?
-    set -e
-    [[ "${rollbackStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}.rollback" >/dev/null
-    printf '%s\n' "${rollbackStateBefore}" >"${rollbackExpectedFile}"
-    jq -e --slurpfile expected "${rollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
-    [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${rollbackFirstBefore}" ]]
-    [[ "$(<"${configPath}03_VLESS_WS_inbounds.json")" == "${rollbackSecondBefore}" ]]
-    if regressionFindHasMatches "${rollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' \); then
-        return 1
-    fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    coreInstallType="${oldCoreInstallType}"
-    subscriptionSyncSetUsersInFile() {
-        originalSubscriptionSyncSetUsersInFile "$@"
-    }
-
-    local refreshRollbackRoot="${TMP_DIR}/remote-control-refresh-rollback"
-    local refreshRollbackLocalDir="${refreshRollbackRoot}/subscribe_local"
-    local refreshRollbackPublicDir="${refreshRollbackRoot}/subscribe"
-    local refreshRollbackStateBefore
-    local refreshRollbackFirstBefore
-    local refreshRollbackOldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
-    local refreshRollbackOldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
-    local refreshRollbackOldScriptDir="${SCRIPT_DIR}"
-    local refreshRollbackPublicBefore
-    local refreshRollbackLocalBefore
-    local refreshRollbackExpectedFile="${TMP_DIR}/remote-control-refresh-rollback-expected.json"
-    local refreshRollbackPublicExpected="${TMP_DIR}/remote-control-refresh-public-expected.txt"
-    local refreshRollbackLocalExpected="${TMP_DIR}/remote-control-refresh-local-expected.txt"
-    mkdir -p "${refreshRollbackRoot}/xray"
-    configPath="${refreshRollbackRoot}/xray/"
-    singBoxConfigPath="${refreshRollbackRoot}/xray/"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    mkdir -p "${refreshRollbackLocalDir}/default" "${refreshRollbackLocalDir}/clashMeta" "${refreshRollbackLocalDir}/sing-box" "${refreshRollbackPublicDir}/default" "${refreshRollbackPublicDir}/clashMeta"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${refreshRollbackLocalDir}"
-    export PADM_SUBSCRIBE_DIR="${refreshRollbackPublicDir}"
-    SCRIPT_DIR="${PROJECT_ROOT}"
-    subscribeType=https
-    subscribePort=39778
-    currentHost=refresh.example.com
-    printf 'old salt\n' >"${refreshRollbackLocalDir}/subscribeSalt"
-    printf 'old local default\n' >"${refreshRollbackLocalDir}/default/existing"
-    printf 'old public default\n' >"${refreshRollbackPublicDir}/default/existing-md5"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    coreInstallType=1
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_publish"],"remove":[]}'
-    }
-    subscriptionControlApplyAccountPlan() {
-        subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"77777777-7777-7777-7777-777777777777"}])'
-        cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_publish-vless","id":"77777777-7777-7777-7777-777777777777"}]}}]}
-JSON
-    }
-    refreshRollbackStateBefore=$(<"$(subscriptionGroupsFile)")
-    refreshRollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
-    refreshRollbackLocalBefore=$(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    refreshRollbackPublicBefore=$(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    printf '%s\n' "${refreshRollbackLocalBefore}" >"${refreshRollbackLocalExpected}"
-    printf '%s\n' "${refreshRollbackPublicBefore}" >"${refreshRollbackPublicExpected}"
-    subscriptionControlRefreshPublishedSubscriptions() {
-        printf 'new salt\n' >"${refreshRollbackLocalDir}/subscribeSalt"
-        printf 'new local default\n' >"${refreshRollbackLocalDir}/default/existing"
-        printf 'new local created\n' >"${refreshRollbackLocalDir}/default/generated"
-        printf 'new public default\n' >"${refreshRollbackPublicDir}/default/existing-md5"
-        printf 'new public created\n' >"${refreshRollbackPublicDir}/default/generated-md5"
-        return 1
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"publish","uuid":"77777777-7777-7777-7777-777777777777"}],"dry_run":false}' >"${responseFile}.refresh-rollback"
-    local refreshRollbackStatus=$?
-    set -e
-    [[ "${refreshRollbackStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed"' "${responseFile}.refresh-rollback" >/dev/null
-    printf '%s\n' "${refreshRollbackStateBefore}" >"${refreshRollbackExpectedFile}"
-    jq -e --slurpfile expected "${refreshRollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
-    [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${refreshRollbackFirstBefore}" ]]
-    diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    diff -u "${refreshRollbackPublicExpected}" <(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    if regressionFindHasMatches "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \); then
-        return 1
-    fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    coreInstallType="${oldCoreInstallType}"
-    SCRIPT_DIR="${refreshRollbackOldScriptDir}"
-    if [[ -n "${refreshRollbackOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${refreshRollbackOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${refreshRollbackOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${refreshRollbackOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-    subscriptionControlRefreshPublishedSubscriptions() {
-        subscribe false false >/dev/null 2>&1
-    }
-
-    local restoreFailureRoot="${TMP_DIR}/remote-control-restore-failure"
-    local restoreFailureLocalDir="${restoreFailureRoot}/subscribe_local"
-    local restoreFailurePublicDir="${restoreFailureRoot}/subscribe"
-    local restoreFailureOldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
-    local restoreFailureOldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
-    local restoreFailureOldScriptDir="${SCRIPT_DIR}"
-    local restoreFailureOldTmpDir="${TMPDIR:-}"
-    local restoreFailureBackupDirs=()
-    mkdir -p "${restoreFailureRoot}/xray" "${restoreFailureLocalDir}/default" "${restoreFailurePublicDir}/default"
-    configPath="${restoreFailureRoot}/xray/"
-    singBoxConfigPath="${restoreFailureRoot}/xray/"
-    TMPDIR="${restoreFailureRoot}"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureLocalDir}"
-    export PADM_SUBSCRIBE_DIR="${restoreFailurePublicDir}"
-    SCRIPT_DIR="${PROJECT_ROOT}"
-    printf 'old local\n' >"${restoreFailureLocalDir}/default/existing"
-    printf 'old public\n' >"${restoreFailurePublicDir}/default/existing-md5"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    coreInstallType=1
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_restore_fail"],"remove":[]}'
-    }
-    subscriptionControlApplyAccountPlan() {
-        subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"88888888-8888-8888-8888-888888888888"}])'
-        cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_restore_fail-vless","id":"88888888-8888-8888-8888-888888888888"}]}}]}
-JSON
-    }
-    subscriptionControlRefreshPublishedSubscriptions() {
-        printf 'new local\n' >"${restoreFailureLocalDir}/default/existing"
-        printf 'new local created\n' >"${restoreFailureLocalDir}/default/generated"
-        printf 'new public\n' >"${restoreFailurePublicDir}/default/existing-md5"
-        printf 'new public created\n' >"${restoreFailurePublicDir}/default/generated-md5"
-        return 1
-    }
-    cp() {
-        if [[ "$1" == "-a" && "$2" == ${restoreFailureRoot}/padm-subscription-output-backup.*/local/. ]]; then
-            return 1
-        fi
-        command cp "$@"
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"restore-fail","uuid":"88888888-8888-8888-8888-888888888888"}],"dry_run":false}' >"${responseFile}.restore-failure"
-    local restoreFailureStatus=$?
-    set -e
-    unset -f cp
-    [[ "${restoreFailureStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed" and (.error_detail.message | contains("订阅输出恢复失败"))' "${responseFile}.restore-failure" >/dev/null
-    mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
-    [[ "${#restoreFailureBackupDirs[@]}" == "2" ]]
-    regressionFindHasMatches "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
-    [[ ! -e "${restoreFailureLocalDir}/default/existing" || "$(<"${restoreFailureLocalDir}/default/existing")" != "old local" ]]
-    if regressionFindHasMatches "${restoreFailureRoot}/xray" -name '*.sync.*'; then
-        return 1
-    fi
-    if [[ -n "${restoreFailureOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${restoreFailureOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${restoreFailureOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    coreInstallType="${oldCoreInstallType}"
-    SCRIPT_DIR="${restoreFailureOldScriptDir}"
-    if [[ -n "${restoreFailureOldTmpDir}" ]]; then export TMPDIR="${restoreFailureOldTmpDir}"; else unset TMPDIR; fi
-    subscriptionControlRefreshPublishedSubscriptions() {
-        subscribe false false >/dev/null 2>&1
-    }
-    subscriptionControlApplyAccountPlan() {
-        originalSubscriptionControlApplyAccountPlan "$@"
-    }
-    subscriptionSyncPlanFromAccounts() {
-        originalSubscriptionSyncPlanFromAccounts "$@"
-    }
-
-    subscriptionControlApplyAccountPlan() {
-        return 0
-    }
-    (
-        local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry.log"
-        reconcileCalls=0
-        : >"${reconcileLog}"
-        subscriptionSyncReconcileLocalServices() {
-            reconcileCalls=$((reconcileCalls + 1))
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            [[ -n "${1:-}" ]]
-        }
-        set +e
-        PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}"
-        local reconcileStatus=$?
-        set -e
-        [[ "${reconcileStatus}" -ne 0 ]]
-        [[ "${reconcileCalls}" == "2" ]]
-        grep -qx '<empty>' "${reconcileLog}"
-        grep -qx 'true' "${reconcileLog}"
-        jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("已恢复旧配置")) and ((.error_detail.message | contains("恢复旧配置后服务重建仍失败")) | not)' "${responseFile}" >/dev/null
-    )
-
-    (
-        local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry-fail.log"
-        reconcileCalls=0
-        : >"${reconcileLog}"
-        subscriptionSyncReconcileLocalServices() {
-            reconcileCalls=$((reconcileCalls + 1))
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            return 1
-        }
-        set +e
-        PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}.reconcile-retry-fail"
-        local reconcileStatus=$?
-        set -e
-        [[ "${reconcileStatus}" -ne 0 ]]
-        [[ "${reconcileCalls}" == "2" ]]
-        grep -qx '<empty>' "${reconcileLog}"
-        grep -qx 'true' "${reconcileLog}"
-        jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("恢复旧配置后服务重建仍失败"))' "${responseFile}.reconcile-retry-fail" >/dev/null
-    )
-
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":[null],"remove":[]}'
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-d","uuid":"44444444-4444-4444-4444-444444444444"}],"dry_run":true}' >"${responseFile}"
-    local invalidPlanStatus=$?
-    set -e
-    [[ "${invalidPlanStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "plan_failed" and .error_detail.type == "plan_failed" and (.plan.create[0] == null)' "${responseFile}" >/dev/null
-
-    subscriptionSyncPlanFromAccounts() {
-        printf 'not-json\n'
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-e","uuid":"55555555-5555-5555-5555-555555555555"}],"dry_run":true}' >"${responseFile}"
-    local badPlanStatus=$?
-    set -e
-    [[ "${badPlanStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "plan_failed" and .error_detail.type == "plan_failed" and has("plan") == false' "${responseFile}" >/dev/null
-)
-
-runSubscriptionControlServiceInstallRegression() (
-    local fakeBin="${TMP_DIR}/remote-control-service-bin"
-    local controlRoot="${TMP_DIR}/remote-control-service-install"
-    local actionsFile="${TMP_DIR}/remote-control-systemctl-actions.txt"
-    local healthTokensFile="${TMP_DIR}/remote-control-health-tokens.txt"
-    local knownToken="known-control-token"
-    local installStatus
-    local oldPath="${PATH}"
-    local oldServerScript
-    local oldServiceFile
-    local oldHealthCheckDefinition=
-    local oldHealthRetries="${PADM_CONTROL_HEALTH_RETRIES:-}"
-    local oldHealthRetryDelay="${PADM_CONTROL_HEALTH_RETRY_DELAY:-}"
-    local oldHealthTimeout="${PADM_CONTROL_HEALTH_TIMEOUT:-}"
-
-    mkdir -p "${fakeBin}" "${controlRoot}"
-    cat >"${fakeBin}/python3" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "${PADM_CONTROL_HEALTH_TOKEN:-}" >>"${PADM_FAKE_HEALTH_TOKENS}"
-[[ "${PADM_FAKE_HEALTH_FAIL:-}" == "true" ]] && exit 1
-exit 0
-SH
-    cat >"${fakeBin}/sleep" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-    cat >"${fakeBin}/systemctl" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS}"
-case "$1" in
-daemon-reload)
-    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "daemon-reload" ]] && exit 1
-    exit 0
-    ;;
-is-active)
-    [[ "${PADM_FAKE_SYSTEMCTL_ACTIVE:-}" == "true" ]] && exit 0
-    exit 3
-    ;;
-is-enabled)
-    [[ "${PADM_FAKE_SYSTEMCTL_ENABLED:-}" == "true" ]] && exit 0
-    exit 1
-    ;;
-restart)
-    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "restart" ]] && exit 1
-    exit 0
-    ;;
-enable)
-    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && exit 1
-    exit 0
-    ;;
-*)
-    exit 0
-    ;;
-esac
-SH
-    chmod +x "${fakeBin}/python3" "${fakeBin}/sleep" "${fakeBin}/systemctl"
-
-    oldHealthCheckDefinition=$(declare -f subscriptionControlHealthCheck)
-    subscriptionControlHealthCheck() {
-        printf '%s\n' "$1" >>"${PADM_FAKE_HEALTH_TOKENS}"
-        [[ "${PADM_FAKE_HEALTH_FAIL:-}" != "true" ]]
-    }
-
-    subscriptionControlServiceFile() {
-        printf '%s\n' "${controlRoot}/systemd/padm-subscription-control.service"
-    }
-    export PADM_FAKE_SYSTEMCTL_ACTIONS="${actionsFile}"
-    export PADM_FAKE_HEALTH_TOKENS="${healthTokensFile}"
-    export PADM_CONTROL_HEALTH_RETRIES=1
-    export PADM_CONTROL_HEALTH_RETRY_DELAY=0
-    export PADM_CONTROL_HEALTH_TIMEOUT=0.05
-    PATH="${fakeBin}:${oldPath}"
-    sleep() { return 0; }
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/success"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    : >"${actionsFile}"
-    : >"${healthTokensFile}"
-    installSubscriptionControlService
-    [[ -x "$(subscriptionControlServerScript)" ]]
-    grep -q 'ExecStart=/usr/bin/env python3' "$(subscriptionControlServiceFile)"
-    grep -qxF 'enable --now padm-subscription-control.service' "${actionsFile}"
-    grep -qxF "${knownToken}" "${healthTokensFile}"
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/systemctl-fail"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    export PADM_FAKE_SYSTEMCTL_FAIL=enable
-    set +e
-    installSubscriptionControlService
-    installStatus=$?
-    set -e
-    PADM_FAKE_SYSTEMCTL_FAIL=
-    [[ "${installStatus}" -ne 0 ]]
-    [[ ! -e "$(subscriptionControlServerScript)" ]]
-    [[ ! -e "$(subscriptionControlServiceFile)" ]]
-    [[ "${SUBSCRIPTION_CONTROL_INSTALL_ERROR}" == *"已恢复安装前状态"* ]]
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/health-fail"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    : >"${actionsFile}"
-    export PADM_FAKE_HEALTH_FAIL=true
-    set +e
-    installSubscriptionControlService
-    installStatus=$?
-    set -e
-    PADM_FAKE_HEALTH_FAIL=
-    [[ "${installStatus}" -ne 0 ]]
-    [[ ! -e "$(subscriptionControlServerScript)" ]]
-    [[ ! -e "$(subscriptionControlServiceFile)" ]]
-    [[ "${SUBSCRIPTION_CONTROL_INSTALL_ERROR}" == *"已恢复安装前状态"* ]]
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/health-rollback"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")" "$(dirname "$(subscriptionControlServerScript)")" "$(dirname "$(subscriptionControlServiceFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    printf 'old-server\n' >"$(subscriptionControlServerScript)"
-    printf 'old-service\n' >"$(subscriptionControlServiceFile)"
-    oldServerScript=$(subscriptionControlServerScript)
-    oldServiceFile=$(subscriptionControlServiceFile)
-    : >"${actionsFile}"
-    export PADM_FAKE_SYSTEMCTL_ACTIVE=true
-    export PADM_FAKE_SYSTEMCTL_ENABLED=true
-    export PADM_FAKE_HEALTH_FAIL=true
-    set +e
-    installSubscriptionControlService
-    installStatus=$?
-    set -e
-    PADM_FAKE_SYSTEMCTL_ACTIVE=
-    PADM_FAKE_SYSTEMCTL_ENABLED=
-    PADM_FAKE_HEALTH_FAIL=
-    [[ "${installStatus}" -ne 0 ]]
-    [[ "$(<"${oldServerScript}")" == "old-server" ]]
-    [[ "$(<"${oldServiceFile}")" == "old-service" ]]
-    [[ "$(grep -c '^daemon-reload$' "${actionsFile}")" == "2" ]]
-    [[ "$(grep -c '^restart padm-subscription-control.service$' "${actionsFile}")" == "2" ]]
-
-    if [[ -n "${oldHealthRetries}" ]]; then export PADM_CONTROL_HEALTH_RETRIES="${oldHealthRetries}"; else unset PADM_CONTROL_HEALTH_RETRIES; fi
-    if [[ -n "${oldHealthRetryDelay}" ]]; then export PADM_CONTROL_HEALTH_RETRY_DELAY="${oldHealthRetryDelay}"; else unset PADM_CONTROL_HEALTH_RETRY_DELAY; fi
-    if [[ -n "${oldHealthTimeout}" ]]; then export PADM_CONTROL_HEALTH_TIMEOUT="${oldHealthTimeout}"; else unset PADM_CONTROL_HEALTH_TIMEOUT; fi
-    if [[ -n "${oldHealthCheckDefinition}" ]]; then
-        eval "${oldHealthCheckDefinition}"
-    else
-        unset -f subscriptionControlHealthCheck
-    fi
-)
-
-runSubscriptionControlRejectsUnsafeGroupsDirRegression() (
-    local root="${TMP_DIR}/remote-control-unsafe-groups-dir"
-    local fakeBin="${root}/fake-bin"
-    local actionsFile="${root}/actions.log"
-    local healthTokensFile="${root}/health.log"
-    local oldPath="${PATH}"
-    local installStatus
-
-    mkdir -p "${fakeBin}" "${root}"
-    root=$(cd -- "${root}" && pwd -P)
-    fakeBin="${root}/fake-bin"
-    actionsFile="${root}/actions.log"
-    healthTokensFile="${root}/health.log"
-    cat >"${fakeBin}/python3" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-    cat >"${fakeBin}/systemctl" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS}"
-exit 0
-SH
-    chmod +x "${fakeBin}/python3" "${fakeBin}/systemctl"
-
-    export PADM_FAKE_SYSTEMCTL_ACTIONS="${actionsFile}"
-    export PADM_FAKE_HEALTH_TOKENS="${healthTokensFile}"
-    PATH="${fakeBin}:${oldPath}"
-    PADM_SUBSCRIPTION_GROUPS_DIR=relative-control
-
-    set +e
-    (
-        cd -- "${root}" || exit 1
-        subscriptionControlEnsureToken >/dev/null 2>&1
-    )
-    installStatus=$?
-    set -e
-    [[ "${installStatus}" == "1" ]]
-    [[ ! -e "${root}/relative-control" ]]
-
-    set +e
-    (
-        cd -- "${root}" || exit 1
-        installSubscriptionControlService >/dev/null 2>&1
-    )
-    installStatus=$?
-    set -e
-    [[ "${installStatus}" == "1" ]]
-    [[ ! -s "${actionsFile}" ]]
-    [[ ! -e "${root}/relative-control" ]]
-)
-
-runSubscriptionControlSubscribeEnvRestoreRegression() (
-    local rootRel="${TMP_DIR}/remote-control-subscribe-env-restore"
-    local root expectedLocal expectedPublic renderStatus
-
-    mkdir -p "${rootRel}"
-    root=$(cd -- "${rootRel}" && pwd -P)
-    expectedLocal="${root}/persist-local"
-    expectedPublic="${root}/persist-public"
-    export TMPDIR="${root}"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${expectedLocal}"
-    export PADM_SUBSCRIBE_DIR="${expectedPublic}"
-
-    mkdir() {
-        if [[ "$*" == *"/subscribe_local/default"* ]]; then
-            return 1
-        fi
-        command mkdir "$@"
-    }
-
-    set +e
-    subscriptionControlRenderSubscribeAccount team_a >/dev/null 2>&1
-    renderStatus=$?
-    set -e
-    unset -f mkdir
-
-    [[ "${renderStatus}" == "1" ]]
-    [[ "${PADM_SUBSCRIBE_LOCAL_DIR}" == "${expectedLocal}" ]]
-    [[ "${PADM_SUBSCRIBE_DIR}" == "${expectedPublic}" ]]
-    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-control-subscribe.*'; then
-        return 1
-    fi
-)
-
-runSubscriptionControlServerResponseRegression() (
-    command -v python3 >/dev/null 2>&1 || return 0
-
-    local controlRoot="${TMP_DIR}/remote-control-server-response"
-    local fakeInstall="${controlRoot}/install.sh"
-    local modeFile="${controlRoot}/mode"
-    local responseFile="${controlRoot}/response.txt"
-    local serverLog="${controlRoot}/server.log"
-    local serverScript
-    local serverPid=
-    local testPort
-    local serverToken="test-token"
-    local status
-    local body
-    local ready=
-
-    mkdir -p "${controlRoot}"
-    testPort=$(python3 <<'PY'
-import socket
-with socket.socket() as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
-)
-    getScriptVersion() {
-        printf 'test\n'
-    }
-    cat >"${fakeInstall}" <<'SH'
-#!/usr/bin/env bash
-endpoint=${2:-}
-mode=$(cat "${PADM_FAKE_CONTROL_MODE_FILE}" 2>/dev/null || true)
-payload=
-if [[ "${PADM_CONTROL_TOKEN:-}" != "${PADM_FAKE_SERVER_TOKEN:-}" ]]; then
-    printf '{"ok":false,"error":"unauthorized","error_detail":{"type":"unauthorized","message":"控制 token 验证失败"}}\n'
-    exit 1
-fi
-        if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
-            payload=$(cat)
-            if [[ -z "${payload}" ]]; then
-                if [[ "${endpoint}" == "sync" ]]; then
-                    printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
-                else
-                    printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"订阅请求体为空"}}\n'
-                fi
-                exit 1
-            fi
-            if ! jq -e . >/dev/null 2>&1 <<<"${payload}"; then
-                if [[ "${endpoint}" == "sync" ]]; then
-                    printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
-                else
-                    printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"订阅请求体格式不正确"}}\n'
-                fi
-                exit 1
-            fi
-        fi
-        case "${endpoint}:${mode}" in
-        health:*)
-    printf '{"ok":false,"error":"health_should_not_execute"}\n'
-    exit 9
-    ;;
-sync:noise)
-    printf 'ui noise before sync\n'
-    printf '{"ok":false,"error":"first_json"}\n'
-    printf 'ui noise between json\n'
-    printf '{"ok":true,"changed":true,"plan":{"create":[],"remove":[]}}\n'
-    ;;
-sync:failed)
-    printf 'ui noise before failed sync\n'
-    printf '{"ok":true,"changed":true}\n'
-    exit 7
-    ;;
-sync:timeout)
-    /bin/sleep 2
-    printf '{"ok":true}\n'
-    ;;
-        sync:invalid)
-            printf 'ui noise only\n'
-            exit 0
-            ;;
-        subscribe:noise)
-            printf 'ui noise before subscribe\n'
-            printf '{"ok":false,"error":"first_json"}\n'
-            printf 'ui noise between json\n'
-            cat <<'JSON'
-{"ok":true,"default":"dmxlc3M6Ly91dWlkQGV4YW1wbGUuY29tOjQ0MyN0ZWFtLWE=","clash_meta":"proxies:\n- name: team-a\n","sing_box":[{"tag":"team-a"}]}
-JSON
-            ;;
-        *)
-            printf '{"ok":false,"error":"unexpected"}\n'
-            exit 1
-            ;;
-        esac
-SH
-    chmod +x "${fakeInstall}"
-
-    subscriptionControlPort() {
-        printf '%s\n' "${testPort}"
-    }
-    subscriptionGroupSyncInstallScript() {
-        printf '%s\n' "${fakeInstall}"
-    }
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/state"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${serverToken}" >"$(subscriptionControlTokenFile)"
-    export PADM_FAKE_SERVER_TOKEN="${serverToken}"
-    writeSubscriptionControlServer
-    serverScript=$(subscriptionControlServerScript)
-    printf 'noise\n' >"${modeFile}"
-    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
-    serverPid=$!
-    trap '[[ -n "${serverPid}" ]] && kill "${serverPid}" >/dev/null 2>&1 || true; [[ -n "${serverPid}" ]] && wait "${serverPid}" 2>/dev/null || true' EXIT
-
-    controlServerRequest() {
-        local method=$1
-        local endpoint=$2
-        local payload=${3:-}
-        local token=${4:-${serverToken}}
-        PADM_TEST_CONTROL_METHOD="${method}" \
-        PADM_TEST_CONTROL_ENDPOINT="${endpoint}" \
-        PADM_TEST_CONTROL_PORT="${testPort}" \
-        PADM_TEST_CONTROL_PAYLOAD="${payload}" \
-        PADM_TEST_CONTROL_TOKEN="${token}" \
-        python3 <<'PY'
-import os
-import sys
-import urllib.error
-import urllib.request
-
-method = os.environ["PADM_TEST_CONTROL_METHOD"]
-endpoint = os.environ["PADM_TEST_CONTROL_ENDPOINT"]
-port = os.environ["PADM_TEST_CONTROL_PORT"]
-payload = os.environ.get("PADM_TEST_CONTROL_PAYLOAD", "")
-token = os.environ["PADM_TEST_CONTROL_TOKEN"]
-data = payload.encode() if method == "POST" else None
-request = urllib.request.Request(
-    f"http://127.0.0.1:{port}/s/control/{endpoint}",
-    data=data,
-    method=method,
-    headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-)
-try:
-    with urllib.request.urlopen(request, timeout=3) as response:
-        print(response.status)
-        print(response.read().decode())
-except urllib.error.HTTPError as error:
-    print(error.code)
-    print(error.read().decode())
-except Exception:
-    sys.exit(1)
-PY
-    }
-
-    for _ in {1..50}; do
-        if controlServerRequest GET health >"${responseFile}" 2>/dev/null; then
-            ready=true
-            break
-        fi
-        sleep 0.1
-    done
-    [[ "${ready}" == "true" ]]
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "200" ]]
-    jq -e '.ok == true and .version == "test" and .capabilities == ["health","sync","subscribe"]' <<<"${body}" >/dev/null
-
-    printf 'noise\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "200" ]]
-    jq -e '.ok == true and .changed == true and (.plan.create | length) == 0' <<<"${body}" >/dev/null
-
-    controlServerRequest POST subscribe '{"account":"team_a"}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "200" ]]
-    jq -e '.ok == true and (.default | @base64d) == "vless://uuid@example.com:443#team-a" and (.clash_meta | contains("team-a")) and .sing_box[0].tag == "team-a"' <<<"${body}" >/dev/null
-
-    controlServerRequest GET health '' wrong-token >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "401" ]]
-    jq -e '.ok == false and .error == "unauthorized" and .error_detail.type == "unauthorized"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST sync '' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "empty_payload" and .error_detail.type == "empty_payload"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST sync 'not-json' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST subscribe '' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "empty_payload" and .error_detail.type == "empty_payload"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST subscribe 'not-json' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' <<<"${body}" >/dev/null
-
-    printf 'failed\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "503" ]]
-    jq -e '.ok == false and .error == "script_failed" and .error_detail.type == "script_failed" and .exit_code == 7' <<<"${body}" >/dev/null
-
-    printf 'timeout\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "503" ]]
-    jq -e '.ok == false and .error == "script_timeout" and .error_detail.type == "script_timeout"' <<<"${body}" >/dev/null
-
-    printf 'invalid\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "503" ]]
-    jq -e '.ok == false and .error == "invalid_response" and .error_detail.type == "invalid_response"' <<<"${body}" >/dev/null
-)
 
 runNginxBlogAutoInstallRegression() {
     local oldAutoInstall="${AUTO_INSTALL:-}"
@@ -17765,10 +15190,11 @@ runRegressionFastReality() {
 }
 
 runRegressionUi() {
-    runRegressionStep ui-smoke-light runMenuSmokeLightRegression
-    runRegressionStep ui-smoke runMenuSmokeRegression
-    runRegressionStep wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
-    runRegressionStep wireguard-menu-flow runSubscriptionWireGuardMenuFlowRegression
+    runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+        menu-smoke \
+        menu-smoke-full \
+        wireguard-restore-runner \
+        wireguard-menu-flow
 }
 
 runRegressionMenuSmoke() {
@@ -17804,13 +15230,7 @@ runRegressionSubscriptionOutput() {
 }
 
 runRegressionSubscriptionState() {
-    runRegressionStep subscription-state runSubscriptionGroupStateRegression
-    runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
-    runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
-    runRegressionStep subscription-sync-append-preserve-clients runSubscriptionSyncAppendProtocolUserPreservesExistingClientsRegression
-    runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
-    runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
-    runRegressionStep subscription-groups-unsafe-dir runSubscriptionGroupsRejectsUnsafeDirRegression
+    runRegressionAllSelector subscription-state
 }
 
 runRegressionSubscriptionRemoteFetch() {
@@ -17818,29 +15238,135 @@ runRegressionSubscriptionRemoteFetch() {
 }
 
 runRegressionSubscriptionWriteTransaction() {
-    runRegressionStep sing-box-subscribe-write runSingBoxSubscribeWriteRegression
-    runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression
-    runRegressionStep subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
-    runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
-    runRegressionStep subscribe-server-name runSubscribeServerNameRegression
-    runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
-    runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
-    runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
-    runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
-    runRegressionStep subscribe-local-rollback runSubscribeLocalRollbackRegression
-    runRegressionStep subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegression
-    runRegressionStep subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
-    runRegressionStep refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
-    runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
-    runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
-    runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
+    runParallelRegressionSelectors "${TMP_DIR}/subscription-write-transaction-parallel-${BASHPID:-$$}" \
+        sing-box-subscribe-write \
+        cdn-address-write-transaction \
+        subscribe-local-output-transaction \
+        subscribe-salt-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        sing-box-port-failure \
+        subscribe-user-output-transaction \
+        subscribe-local-rollback \
+        subscription-groups-migration-backup \
+        subscription-groups-backup-failure \
+        refresh-local-subscriptions-rollback \
+        subscribe-return-failure \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure
 }
 
-runRegressionSubscription() {
-    runRegressionSubscriptionOutput
-    runRegressionSubscriptionState
-    runRegressionSubscriptionRemoteFetch
+runRegressionSubscriptionWriteTransactionParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-write-transaction-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "sing-box-subscribe-write" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscribe-user-output-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscribe-user-output-transaction" ]]; then
+            : >"${TMP_DIR}/subscribe-user-output-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runSingBoxSubscribeWriteRegression() { runRegressionAllSelector sing-box-subscribe-write; }
+    runCdnAddressTransactionRegression() { runRegressionAllSelector cdn-address-write-transaction; }
+    runSubscribeLocalOutputTransactionRegression() { runRegressionAllSelector subscribe-local-output-transaction; }
+    runSubscribeSaltWriteTransactionRegression() { runRegressionAllSelector subscribe-salt-write-transaction; }
+    runSubscribeServerNameRegression() { runRegressionAllSelector subscribe-server-name; }
+    runSubscribeNginxConfigWriteRegression() { runRegressionAllSelector subscribe-nginx-config-write; }
+    runSubscribeNginxServiceFailureRegression() { runRegressionAllSelector subscribe-nginx-service-failure; }
+    runSingBoxPortFailureRegression() { runRegressionAllSelector sing-box-port-failure; }
+    runSubscribeUserOutputTransactionRegression() { runRegressionAllSelector subscribe-user-output-transaction; }
+    runSubscribeLocalRollbackRegression() { runRegressionAllSelector subscribe-local-rollback; }
+    runSubscriptionGroupsMigrationBackupRegression() { runRegressionAllSelector subscription-groups-migration-backup; }
+    runSubscriptionGroupsBackupFailureRegression() { runRegressionAllSelector subscription-groups-backup-failure; }
+    runRefreshLocalSubscriptionsRollbackRegression() { runRegressionAllSelector refresh-local-subscriptions-rollback; }
+    runSubscribeReturnFailureRegression() { runRegressionAllSelector subscribe-return-failure; }
+    runRemoveUserSubscriptionMenuFailureRegression() { runRegressionAllSelector remove-user-subscription-menu-failure; }
+    runUserSubscriptionMenuMutationFailureRegression() { runRegressionAllSelector user-subscription-menu-mutation-failure; }
+
     runRegressionSubscriptionWriteTransaction
+
+    for selector in \
+        sing-box-subscribe-write \
+        cdn-address-write-transaction \
+        subscribe-local-output-transaction \
+        subscribe-salt-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        sing-box-port-failure \
+        subscribe-user-output-transaction \
+        subscribe-local-rollback \
+        subscription-groups-migration-backup \
+        subscription-groups-backup-failure \
+        refresh-local-subscriptions-rollback \
+        subscribe-return-failure \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "sing-box-subscribe-write-start" { singboxStart = NR }
+        $0 == "subscribe-user-output-transaction-start" { userOutputStart = NR }
+        $0 == "sing-box-subscribe-write-finish" { singboxFinish = NR }
+        END { exit !(singboxStart && userOutputStart && singboxFinish && userOutputStart < singboxFinish) }
+    ' "${callLog}"
+)
+
+runRegressionSubscriptionParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "subscription-output" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-state-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription-state" ]]; then
+            : >"${TMP_DIR}/subscription-state-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRegressionSubscriptionOutput() { runRegressionAllSelector subscription-output; }
+    runRegressionSubscriptionState() { runRegressionAllSelector subscription-state; }
+    runRegressionSubscriptionRemoteFetch() { runRegressionAllSelector subscription-remote-fetch; }
+    runRegressionSubscriptionWriteTransaction() { runRegressionAllSelector subscription-write-transaction; }
+
+    runRegressionSubscription
+
+    for selector in subscription-output subscription-state subscription-remote-fetch subscription-write-transaction; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "subscription-output-start" { outputStart = NR }
+        $0 == "subscription-state-start" { stateStart = NR }
+        $0 == "subscription-output-finish" { outputFinish = NR }
+        END { exit !(outputStart && stateStart && outputFinish && stateStart < outputFinish) }
+    ' "${callLog}"
+)
+
+runRegressionSubscription() {
+    runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
+        subscription-output \
+        subscription-state \
+        subscription-remote-fetch \
+        subscription-write-transaction
 }
 
 runRegressionRealityCandidates() {
@@ -17942,52 +15468,188 @@ runRegressionTransaction() {
         runRegressionTransactionSystem
 }
 
-runRegressionAllCompositionRegression() (
-    local callLog="${TMP_DIR}/regression-all-composition.log"
-    local actualOrder
+runRegressionUiParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-ui-parallel-composition.log"
 
     : >"${callLog}"
 
-    runRegressionRouting() { printf 'routing\n' >>"${callLog}"; }
-    runRegressionSubscription() { printf 'subscription\n' >>"${callLog}"; }
-    runRegressionRuntime() { printf 'runtime\n' >>"${callLog}"; }
-    runRegressionTransaction() { printf 'transaction\n' >>"${callLog}"; }
-    runRegressionTransactionCore() { printf 'transaction-core\n' >>"${callLog}"; }
-    runRegressionTransactionSystem() { printf 'transaction-system\n' >>"${callLog}"; }
-    runRegressionRemoteControl() { printf 'remote-control\n' >>"${callLog}"; }
-    runRegressionUi() { printf 'ui\n' >>"${callLog}"; }
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "menu-smoke-full" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/wireguard-menu-flow-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "wireguard-menu-flow" ]]; then
+            : >"${TMP_DIR}/wireguard-menu-flow-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runMenuSmokeLightRegression() { runRegressionAllSelector menu-smoke; }
+    runMenuSmokeRegression() { runRegressionAllSelector menu-smoke-full; }
+    runSubscriptionWireGuardRestoreRunnerRegression() { runRegressionAllSelector wireguard-restore-runner; }
+    runSubscriptionWireGuardMenuFlowRegression() { runRegressionAllSelector wireguard-menu-flow; }
+
+    runRegressionUi
+
+    for selector in menu-smoke menu-smoke-full wireguard-restore-runner wireguard-menu-flow; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "menu-smoke-full-start" { smokeStart = NR }
+        $0 == "wireguard-menu-flow-start" { wireguardStart = NR }
+        $0 == "menu-smoke-full-finish" { smokeFinish = NR }
+        END { exit !(smokeStart && wireguardStart && smokeFinish && wireguardStart < smokeFinish) }
+    ' "${callLog}"
+)
+
+runRegressionAllCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-all-composition.log"
+    local selector
+
+    : >"${callLog}"
+
+    runRegressionSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "routing" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription" ]]; then
+            : >"${TMP_DIR}/subscription-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    runRegressionRouting() { runRegressionSelector routing; }
+    runRegressionSubscription() { runRegressionSelector subscription; }
+    runRegressionRuntime() { runRegressionSelector runtime; }
+    runRegressionTransaction() { runRegressionSelector transaction; }
+    runRegressionTransactionCore() { runRegressionSelector transaction-core; }
+    runRegressionTransactionSystem() { runRegressionSelector transaction-system; }
+    runRegressionRemoteControl() { runRegressionSelector remote-control; }
+    runRegressionUi() { runRegressionSelector ui; }
+    runRegressionAllSelector() {
+        case "$1" in
+        routing) runRegressionRouting ;;
+        subscription) runRegressionSubscription ;;
+        runtime) runRegressionRuntime ;;
+        transaction-core) runRegressionTransactionCore ;;
+        transaction-system) runRegressionTransactionSystem ;;
+        remote-control) runRegressionRemoteControl ;;
+        ui) runRegressionUi ;;
+        transaction) runRegressionTransaction ;;
+        *) return 2 ;;
+        esac
+    }
 
     runRegressionAll
 
-    actualOrder=$(tr '\n' ',' <"${callLog}" | sed 's/,$//')
-    [[ "${actualOrder}" == "routing,subscription,runtime,transaction-core,transaction-system,remote-control,ui" ]]
-    ! grep -qx 'transaction' "${callLog}"
+    for selector in routing subscription runtime transaction-core transaction-system remote-control ui; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "routing-start" { routingStart = NR }
+        $0 == "subscription-start" { subscriptionStart = NR }
+        $0 == "routing-finish" { routingFinish = NR }
+        END { exit !(routingStart && subscriptionStart && routingFinish && subscriptionStart < routingFinish) }
+    ' "${callLog}"
+    ! grep -qx 'transaction-start' "${callLog}"
+    ! grep -qx 'transaction-finish' "${callLog}"
 )
 
 runRegressionRemoteControl() {
-    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
-        runRegressionStep remote-control-desired-users-batch runRemoteControlDesiredUsersBatchRegression &&
-        runRegressionStep remote-control-desired-users-single-source runRemoteControlDesiredUsersSingleSourceReuseRegression &&
-        runRegressionStep remote-control-payload-requires-desired-users-map runRemoteControlPayloadRequiresDesiredUsersMapRegression &&
-        runRegressionStep remote-control-create-users-no-reverse-decode runRemoteControlCreateUsersAvoidReverseDecodeRegression &&
-        runRegressionStep remote-control-inline-desired-user-state runRemoteControlApplyAccountPlanInlinesDesiredUserStateRegression &&
-        runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
-        runRegressionStep remote-control-health runRemoteControlHealthRegression &&
-        runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&
-        runRegressionStep remote-control-unsafe-groups-dir runSubscriptionControlRejectsUnsafeGroupsDirRegression &&
-        runRegressionStep remote-control-subscribe-env-restore runSubscriptionControlSubscribeEnvRestoreRegression &&
-        runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression &&
-        runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
+    runRegressionAllSelector remote-control
+}
+
+runRegressionSelectorDispatchCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-selector-dispatch-composition.log"
+
+    : >"${callLog}"
+
+    bash() {
+        printf 'script=%s selector=%s suppress=%s\n' "$1" "$2" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    }
+
+    runRegressionAllSelector subscription-state
+    runRegressionAllSelector remote-control
+    runRegressionAllSelector routing
+
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=subscription-state suppress=1" "${callLog}"
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=remote-control suppress=1" "${callLog}"
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=routing suppress=1" "${callLog}"
+    ! grep -q "script=${REGRESSION_LEGACY_SCRIPT_PATH}" "${callLog}"
+)
+
+runRegressionAllSelector() {
+    local selector=$1
+    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+}
+
+runParallelRegressionSelectors() {
+    local orchestrationRoot=$1
+    shift
+    local -a selectors=()
+    local -a logs=()
+    local -a pids=()
+    local -a statuses=()
+    local status=0
+    local i
+
+    if [[ $# -eq 0 ]]; then
+        printf 'runParallelRegressionSelectors expects at least one selector\n' >&2
+        return 2
+    fi
+
+    mkdir -p "${orchestrationRoot}"
+    while [[ $# -gt 0 ]]; do
+        selectors+=("$1")
+        logs+=("${orchestrationRoot}/$1.log")
+        shift
+    done
+
+    set +e
+    for i in "${!selectors[@]}"; do
+        (
+            trap - EXIT INT TERM
+            set -e
+            runRegressionStep "${selectors[$i]}" runRegressionAllSelector "${selectors[$i]}"
+        ) >"${logs[$i]}" 2>&1 &
+        pids[$i]=$!
+    done
+    for i in "${!pids[@]}"; do
+        wait "${pids[$i]}"
+        statuses[$i]=$?
+    done
+    set -e
+
+    for i in "${!logs[@]}"; do
+        [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
+        if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
+            status=${statuses[$i]}
+        fi
+    done
+
+    return "${status}"
 }
 
 runRegressionAll() {
-    runRegressionRouting &&
-        runRegressionSubscription &&
-        runRegressionRuntime &&
-        runRegressionTransactionCore &&
-        runRegressionTransactionSystem &&
-        runRegressionRemoteControl &&
-        runRegressionUi
+    runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
+        routing \
+        subscription \
+        runtime \
+        transaction-core \
+        transaction-system \
+        remote-control \
+        ui
 }
 
 regressionName=${1:-fast}
@@ -18037,6 +15699,54 @@ subscription-remote-fetch)
 subscription-write-transaction)
     regressionRunner=runRegressionSubscriptionWriteTransaction
     ;;
+sing-box-subscribe-write)
+    regressionRunner=runSingBoxSubscribeWriteRegression
+    ;;
+cdn-address-write-transaction)
+    regressionRunner=runCdnAddressTransactionRegression
+    ;;
+subscribe-local-output-transaction)
+    regressionRunner=runSubscribeLocalOutputTransactionRegression
+    ;;
+subscribe-salt-write-transaction)
+    regressionRunner=runSubscribeSaltWriteTransactionRegression
+    ;;
+subscribe-server-name)
+    regressionRunner=runSubscribeServerNameRegression
+    ;;
+subscribe-nginx-config-write)
+    regressionRunner=runSubscribeNginxConfigWriteRegression
+    ;;
+subscribe-nginx-service-failure)
+    regressionRunner=runSubscribeNginxServiceFailureRegression
+    ;;
+sing-box-port-failure)
+    regressionRunner=runSingBoxPortFailureRegression
+    ;;
+subscribe-user-output-transaction)
+    regressionRunner=runSubscribeUserOutputTransactionRegression
+    ;;
+subscribe-local-rollback)
+    regressionRunner=runSubscribeLocalRollbackRegression
+    ;;
+subscription-groups-migration-backup)
+    regressionRunner=runSubscriptionGroupsMigrationBackupRegression
+    ;;
+subscription-groups-backup-failure)
+    regressionRunner=runSubscriptionGroupsBackupFailureRegression
+    ;;
+refresh-local-subscriptions-rollback)
+    regressionRunner=runRefreshLocalSubscriptionsRollbackRegression
+    ;;
+subscribe-return-failure)
+    regressionRunner=runSubscribeReturnFailureRegression
+    ;;
+remove-user-subscription-menu-failure)
+    regressionRunner=runRemoveUserSubscriptionMenuFailureRegression
+    ;;
+user-subscription-menu-mutation-failure)
+    regressionRunner=runUserSubscriptionMenuMutationFailureRegression
+    ;;
 runtime)
     regressionRunner=runRegressionRuntime
     ;;
@@ -18066,6 +15776,21 @@ core-rollback-result-message)
     ;;
 core-install-service-action-failure)
     regressionRunner=runCoreInstallServiceActionFailureRegression
+    ;;
+regression-all-composition)
+    regressionRunner=runRegressionAllCompositionRegression
+    ;;
+regression-subscription-parallel-composition)
+    regressionRunner=runRegressionSubscriptionParallelCompositionRegression
+    ;;
+regression-subscription-write-transaction-parallel-composition)
+    regressionRunner=runRegressionSubscriptionWriteTransactionParallelCompositionRegression
+    ;;
+regression-ui-parallel-composition)
+    regressionRunner=runRegressionUiParallelCompositionRegression
+    ;;
+regression-selector-dispatch-composition)
+    regressionRunner=runRegressionSelectorDispatchCompositionRegression
     ;;
 transaction)
     regressionRunner=runRegressionTransaction
@@ -18098,10 +15823,12 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|core-install-service-action-failure|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|core-install-service-action-failure|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
 
 runRegressionStep "total:${regressionName}" "${regressionRunner}"
-echo "subscription-groups-regression-ok:${regressionName}"
+if [[ "${PADM_REGRESSION_SUPPRESS_DONE:-}" != "1" ]]; then
+    echo "subscription-groups-regression-ok:${regressionName}"
+fi

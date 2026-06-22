@@ -2382,19 +2382,6 @@ runRegressionPlatformHotParallelCompositionRegression() (
     ' "${callLog}"
 )
 
-runRemoteControlSystemctlStubDefaultStopDisableRegression() {
-    local explicitStopDisableCount
-    explicitStopDisableCount=$(awk '
-        /runSubscriptionControlServiceInstallRegression\(\) \(/ { capture = 1 }
-        capture && /cat >"\$\{fakeBin\}\/systemctl" <<\x27SH\x27/ { in_stub = 1 }
-        in_stub && /^stop\)$/ { count++ }
-        in_stub && /^disable\)$/ { count++ }
-        in_stub && /^SH$/ { in_stub = 0; capture = 0 }
-        END { print count + 0 }
-    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh")
-    [[ "${explicitStopDisableCount}" == "0" ]]
-}
-
 runRemoteControlFunctionStubDefaultStopDisableRegression() {
     local explicitStopDisableCount
     explicitStopDisableCount=$(awk '
@@ -4253,7 +4240,6 @@ runRegressionPlatformRest() {
         runRegressionStep regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression &&
         runRegressionStep regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression &&
         runRegressionStep regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression &&
-        runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
         runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
         runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
         runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression &&

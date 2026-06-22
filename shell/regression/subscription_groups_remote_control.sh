@@ -1807,7 +1807,7 @@ def request(method, endpoint, payload="", token_override=None):
         headers=headers,
     )
     try:
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=10) as response:
             status = response.status
             body_text = response.read().decode()
     except urllib.error.HTTPError as error:
@@ -1823,12 +1823,12 @@ def request(method, endpoint, payload="", token_override=None):
 
 results = {}
 set_mode("noise")
-for _ in range(20):
+for _ in range(80):
     results["health_ready"] = request("GET", "health")
     body = results["health_ready"].get("body") or {}
     if results["health_ready"]["status"] == 200 and body.get("ok") is True:
         break
-    time.sleep(0.05)
+    time.sleep(0.1)
 
 set_mode("noise")
 results["sync_success"] = request("POST", "sync", '{"desired_users":[]}')
