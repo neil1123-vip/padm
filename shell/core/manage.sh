@@ -1264,6 +1264,26 @@ uninstallShouldStopNginx() {
     return 1
 }
 
+uninstallStoppedServicesVerified() {
+    local failed=false
+    local shouldStopNginx=$1
+    local shouldStopXray=$2
+    local shouldStopSingBox=$3
+    if [[ "${shouldStopNginx}" == "true" ]] && nginxRunning; then
+        failed=true
+        errorCard "Nginx停止后仍在运行，已取消后续删除"
+    fi
+    if [[ "${shouldStopXray}" == "true" ]] && xrayRunning; then
+        failed=true
+        errorCard "Xray停止后仍在运行，已取消后续删除"
+    fi
+    if [[ "${shouldStopSingBox}" == "true" ]] && singBoxRunning; then
+        failed=true
+        errorCard "sing-box停止后仍在运行，已取消后续删除"
+    fi
+    [[ "${failed}" != "true" ]]
+}
+
 cleanupPadmManagedRootOnUninstall() {
     local installRoot="${PADM_INSTALL_DIR:-/etc/padm}"
     local resolvedRoot
@@ -1343,23 +1363,32 @@ unInstall() {
     statusCard "卸载提示" "脚本不会删除 acme 相关配置" "如需删除请手动执行：rm -rf ${HOME:-/root}/.acme.sh"
     local uninstallFailed=false
     local serviceStopFailed=false
-    if uninstallShouldStopNginx && ! runCoreServiceActionAllowFailure handleNginx stop; then
+    local shouldStopNginx=false
+    local shouldStopXray=false
+    local shouldStopSingBox=false
+    if uninstallShouldStopNginx; then
+        shouldStopNginx=true
+    fi
+    if [[ "${shouldStopNginx}" == "true" ]] && ! runCoreServiceActionAllowFailure handleNginx stop; then
         serviceStopFailed=true
     fi
-    if [[ -z $(pgrep -f "nginx") ]]; then
+    if [[ "${shouldStopNginx}" == "true" && -z $(pgrep -f "nginx") ]]; then
         successCard "停止Nginx成功"
     fi
     if [[ "${release}" == "alpine" ]]; then
         if [[ "${coreInstallType}" == "1" || -e /etc/init.d/xray || -L /etc/init.d/xray ]]; then
+            shouldStopXray=true
             if ! runCoreServiceActionAllowFailure handleXray stop; then
                 serviceStopFailed=true
             fi
         fi
         if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/init.d/sing-box || -L /etc/init.d/sing-box ]]; then
+            shouldStopSingBox=true
             if ! runCoreServiceActionAllowFailure handleSingBox stop; then
                 serviceStopFailed=true
             fi
         fi
+        uninstallStoppedServicesVerified "${shouldStopNginx}" "${shouldStopXray}" "${shouldStopSingBox}" || serviceStopFailed=true
         if [[ "${serviceStopFailed}" == "true" ]]; then
             errorCard "卸载未完全完成，请根据上方失败项手动处理；服务停止失败，已取消后续删除"
             return 1
@@ -1382,15 +1411,18 @@ unInstall() {
         fi
     else
         if [[ "${coreInstallType}" == "1" || -e /etc/systemd/system/xray.service || -L /etc/systemd/system/xray.service ]]; then
+            shouldStopXray=true
             if ! runCoreServiceActionAllowFailure handleXray stop; then
                 serviceStopFailed=true
             fi
         fi
         if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/systemd/system/sing-box.service || -L /etc/systemd/system/sing-box.service ]]; then
+            shouldStopSingBox=true
             if ! runCoreServiceActionAllowFailure handleSingBox stop; then
                 serviceStopFailed=true
             fi
         fi
+        uninstallStoppedServicesVerified "${shouldStopNginx}" "${shouldStopXray}" "${shouldStopSingBox}" || serviceStopFailed=true
         if [[ "${serviceStopFailed}" == "true" ]]; then
             errorCard "卸载未完全完成，请根据上方失败项手动处理；服务停止失败，已取消后续删除"
             return 1

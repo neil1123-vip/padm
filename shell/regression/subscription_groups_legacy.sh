@@ -5944,6 +5944,13 @@ runUninstallServiceStopFailureRegression() (
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     menu() { return 0; }
     pgrep() { return 1; }
+    nginxRunning() { return 1; }
+    xrayRunning() {
+        [[ "${mode:-}" == "xray-still-running" ]]
+    }
+    singBoxRunning() {
+        [[ "${mode:-}" == "sing-box-still-running" ]]
+    }
     removeInstallPath() {
         printf 'remove:%s:%s\n' "$1" "$2" >>"${actionLog}"
         return 0
@@ -6029,6 +6036,42 @@ runUninstallServiceStopFailureRegression() (
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
+    runUninstallStillRunningCase() {
+        mode=$1
+        : >"${serviceLog}"
+        : >"${actionLog}"
+        : >"${errorLog}"
+        rm -f "${rcFile}"
+        release=centos
+        coreInstallType=1
+        currentInstallProtocolType=",1,"
+        singBoxConfigPath="${root}/sing-box-conf/"
+        nginxConfigPath="${root}/nginx/"
+        nginxStaticPath="${root}/static"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        (
+            set +e
+            unInstall >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ "$(<"${rcFile}")" == "1" ]]
+        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        if grep -qxF 'padm-root-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        if grep -qxF 'unsubscribe-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        grep -q '停止后仍在运行' "${errorLog}"
+        grep -q '卸载未完全完成' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
     runUninstallNoNginxProtocolCase() {
         mode=nginx-stop-fail
         : >"${serviceLog}"
@@ -6065,6 +6108,8 @@ runUninstallServiceStopFailureRegression() (
     runUninstallStopFailureCase nginx-stop-fail
     runUninstallStopFailureCase xray-stop-fail
     runUninstallStopFailureCase sing-box-stop-fail
+    runUninstallStillRunningCase xray-still-running
+    runUninstallStillRunningCase sing-box-still-running
     runUninstallNoNginxProtocolCase
 )
 
