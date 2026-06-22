@@ -580,6 +580,8 @@ collectTLSProfile() {
         tlsCertDomain=${domain%%:*}
     elif [[ -n "${currentHost:-}" ]]; then
         tlsCertDomain=${currentHost}
+    elif declare -F resolveInstalledTLSDomain >/dev/null 2>&1; then
+        tlsCertDomain=$(resolveInstalledTLSDomain 2>/dev/null || true)
     else
         tlsCertDomain=
     fi

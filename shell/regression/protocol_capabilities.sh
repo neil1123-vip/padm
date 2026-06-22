@@ -257,6 +257,10 @@ runHysteria2CapabilityRegression() {
     local configDir="${TMP_DIR}/hysteria2-conf/"
     local oldUpload="${hysteria2ClientUploadSpeed:-}"
     local oldDownload="${hysteria2ClientDownloadSpeed:-}"
+    local oldDomain="${domain:-}"
+    local oldCurrentHost="${currentHost:-}"
+    local oldPadmTlsDir="${PADM_TLS_DIR:-}"
+    local tlsFallbackDir="${TMP_DIR}/hysteria2-tls-fallback/"
 
     if ! grep -Fq '"up_mbps":${hysteria2ClientUploadSpeed}' "${coreTemplate}"; then
         printf 'assert-fail:hysteria2 template up_mbps should use upload speed\n' >&2
@@ -279,6 +283,18 @@ EOF
     readSingBoxConfig
     assertEquals 75 "${hysteria2ClientUploadSpeed}" "hysteria2-read-upload"
     assertEquals 150 "${hysteria2ClientDownloadSpeed}" "hysteria2-read-download"
+
+    mkdir -p "${tlsFallbackDir}"
+    printf 'cert\n' >"${tlsFallbackDir}/fallback.example.com.crt"
+    printf 'key\n' >"${tlsFallbackDir}/fallback.example.com.key"
+    domain=
+    currentHost=
+    export PADM_TLS_DIR="${tlsFallbackDir}"
+    collectTLSProfile
+    assertEquals fallback.example.com "${tlsCertDomain}" "hysteria2-tls-profile-installed-domain"
+    assertEquals fallback.example.com "${tlsSNI}" "hysteria2-tls-profile-installed-sni"
+    assertEquals /etc/padm/tls/fallback.example.com.crt "${tlsCertFile}" "hysteria2-tls-profile-installed-cert-path"
+    assertEquals /etc/padm/tls/fallback.example.com.key "${tlsKeyFile}" "hysteria2-tls-profile-installed-key-path"
 
     if ! declare -F singBoxVersionAtLeast >/dev/null; then
         printf 'assert-fail:missing singBoxVersionAtLeast\n' >&2
@@ -304,6 +320,13 @@ EOF
     singBoxConfigPath="${oldSingBoxConfigPath}"
     hysteria2ClientUploadSpeed="${oldUpload}"
     hysteria2ClientDownloadSpeed="${oldDownload}"
+    domain="${oldDomain}"
+    currentHost="${oldCurrentHost}"
+    if [[ -n "${oldPadmTlsDir}" ]]; then
+        export PADM_TLS_DIR="${oldPadmTlsDir}"
+    else
+        unset PADM_TLS_DIR
+    fi
 }
 
 runSubscriptionCapabilityDispatchRegression() {
