@@ -574,6 +574,7 @@ writeGeneratedJsonFile() {
     local tmpPrefix=$2
     local tmpFile
 
+    padmEnsureSafeDirectory "$(dirname -- "${targetFile}")" || return 1
     padmCreateTempPath tmpFile "$(padmTmpFilePath "${tmpPrefix}.XXXXXX")" || return 1
     cat >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
     commitGeneratedJsonFile "${tmpFile}" "${targetFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }

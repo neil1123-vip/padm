@@ -1832,6 +1832,7 @@ runRuntimeTempDirRegression() (
     local targetRoot="${TMP_DIR}/runtime-tempdir-target"
     local crontabPathMarker="${TMP_DIR}/runtime-crontab-path.txt"
     local jsonFile="${targetRoot}/state.json"
+    local nestedJsonFile="${targetRoot}/missing/parent/state.json"
     local mkdirToolsLog="${TMP_DIR}/runtime-mkdir-tools.log"
     local mkdirStatus
 
@@ -1897,6 +1898,8 @@ runRuntimeTempDirRegression() (
     if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*'; then
         return 1
     fi
+    printf '{"nested":true}\n' | writeGeneratedJsonFile "${nestedJsonFile}" padm-runtime-json
+    jq -e '.nested == true' "${nestedJsonFile}" >/dev/null
 
     crontab() {
         printf '%s\n' "$1" >"${crontabPathMarker}"
