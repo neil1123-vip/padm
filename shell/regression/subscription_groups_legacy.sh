@@ -5537,6 +5537,43 @@ SH
         cat "${xrayWaitLog}" >&2 || true
         return 1
     fi
+
+    local xrayStartLimitLog="${serviceTmp}/xray-start-limit.log"
+    local xrayRunningState="${serviceTmp}/xray-running"
+    : >"${xrayStartLimitLog}"
+    printf 'false\n' >"${xrayRunningState}"
+    xrayRunning() {
+        [[ "$(<"${xrayRunningState}")" == "true" ]]
+    }
+    waitForServiceState() {
+        printf '%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${xrayWaitLog}"
+        [[ "${2}" == "running" ]] && xrayRunning
+    }
+    systemctl() {
+        printf '%s\n' "$*" >>"${xrayStartLimitLog}"
+        case "$1" in
+        start)
+            if ! grep -qx 'reset-failed xray.service' "${xrayStartLimitLog}"; then
+                return 1
+            fi
+            printf 'true\n' >"${xrayRunningState}"
+            return 0
+            ;;
+        reset-failed)
+            return 0
+            ;;
+        esac
+        return 0
+    }
+    SERVICE_QUEUE_ALLOW_FAILURE=true
+    if ! handleXray start >/dev/null 2>&1; then
+        cat "${xrayStartLimitLog}" >&2 || true
+        return 1
+    fi
+    grep -qx 'start xray.service' "${xrayStartLimitLog}" || return 1
+    grep -qx 'reset-failed xray.service' "${xrayStartLimitLog}" || return 1
+    [[ "$(grep -c '^start xray.service$' "${xrayStartLimitLog}")" == "2" ]] || return 1
+    [[ "$(<"${xrayRunningState}")" == "true" ]] || return 1
     rm -rf "${serviceTmp}"
 )
 

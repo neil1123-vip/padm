@@ -7,6 +7,12 @@ xrayStartTestLog() {
     padmFallbackTmpFilePath padm-xray-start-test.log
 }
 
+xraySystemdStart() {
+    systemctl start xray.service && return 0
+    systemctl reset-failed xray.service >/dev/null 2>&1 || true
+    systemctl start xray.service
+}
+
 waitForServiceState() {
     local checkFunc=$1
     local expectState=$2
@@ -311,7 +317,7 @@ handleXray() {
                 [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
                 exit 0
             fi
-            systemctl start xray.service
+            xraySystemdStart
         elif xrayRunning && [[ "$1" == "stop" ]]; then
             systemctl stop xray.service
         fi
