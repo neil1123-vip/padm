@@ -544,9 +544,9 @@ createAndSyncUserSubscriptionWizard() {
     local sourceIds=main
     local sourceJson=
     local limit=0
-    local confirm=
     local enableSync=
     local canShowLinks=true
+    local eventSyncEnabled=false
     autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
     autoRead user_subscription_name "请输入显示名称[例 家人A/团队A]:" name
     if [[ -z "${id}" || -z "${name}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
@@ -593,21 +593,20 @@ createAndSyncUserSubscriptionWizard() {
             refreshSubscriptionGroupSyncCron
             successCard "自动同步已开启" "后续会按当前间隔自动同步；可在 主控维护与排障 -> 自动同步设置 中调整间隔"
         else
-            statusCard "自动同步未开启" "本次仍可立即同步一次；后续变更需手动同步，或到 主控维护与排障 -> 自动同步设置 中开启"
+            statusCard "自动同步未开启" "事件同步开启时，菜单变更仍会立即同步一次；cron 兜底可稍后到 主控维护与排障 -> 自动同步设置 中开启"
         fi
     fi
 
-    autoRead user_subscription_sync_now "现在同步并发布这个订阅？[yes/no，默认 yes]:" confirm
-    confirm=${confirm:-yes}
-    if [[ "${confirm}" == "yes" || "${confirm}" == "y" ]]; then
-        runSubscriptionGroupSync skip-subscribe-refresh || return 1
+    if subscriptionEventSyncEnabled; then
+        eventSyncEnabled=true
+    fi
+    runSubscriptionEventSyncIfEnabled "用户订阅创建" || return 1
+    if [[ "${eventSyncEnabled}" == "true" ]]; then
         if [[ "${canShowLinks}" == "true" ]]; then
             showUserSubscriptionLinks "${id}"
         else
             statusCard "同步完成，但暂时还不能查看链接" "订阅对象和托管账号已生成" "等安装好订阅服务后，到 发布订阅 -> 查看并处理已有订阅 中再刷新并查看链接"
         fi
-    else
-        statusCard "稍后同步" "该订阅已保存；之后可在 主控维护与排障 -> 立即执行同步 中生成托管账号，再到 发布订阅 -> 查看并处理已有订阅 中刷新并查看链接"
     fi
 }
 

@@ -15059,7 +15059,6 @@ demo-user
 Demo User
 main
 0
-n
 7"
     subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "Demo User")' >/dev/null
     resetMenuActions
@@ -15079,15 +15078,10 @@ Team A
 *
 0
 n
-n
 7"
-    assertMenuAction 'statusCard:稍后同步'
     subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "Team A")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
-    if assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'; then
-        printf 'menu-smoke failed: team-a should stay deferred when sync-now is disabled\n' >&2
-        return 1
-    fi
+    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
     resetMenuActions
     rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
     ensureSubscriptionGroupsState
@@ -15097,7 +15091,6 @@ team-b
 Team B
 main
 0
-
 
 7"
     assertMenuAction refreshSubscriptionGroupSyncCron
