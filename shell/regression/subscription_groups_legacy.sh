@@ -1886,12 +1886,11 @@ runRuntimeTempDirRegression() (
     [[ "$(bbrSysctlTempTemplate)" == "${tmpRoot}/padm-bbr-sysctl.XXXXXX" ]]
     [[ "$(singBoxVMessHTTPUpgradeNginxTestLog)" == "${tmpRoot}/padm-sing-box-vmess-httpupgrade-nginx-test.log" ]]
     [[ "$(thirdPartyTcpScriptPath)" == "${tmpRoot}/padm-tcpx.sh" ]]
-    [[ "$(realityScannerDir)" == "${tmpRoot}/RealiTLScanner" ]]
     [[ "$(realityScannerOutputPath 123)" == "${tmpRoot}/padm-realitlscanner-123.csv" ]]
     [[ "$(realityScannerOutputPath 123 sample-2)" == "${tmpRoot}/padm-realitlscanner-123-sample-2.csv" ]]
-    [[ "$(realityTargetXrayTestLog)" == "${tmpRoot}/padm-reality-target-xray-test.log" ]]
-    [[ "$(realityTargetSingBoxTestLog)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
-    [[ "$(realityTargetBackupTemplate)" == "${tmpRoot}/padm-reality-target.XXXXXX" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target-xray-test.log)" == "${tmpRoot}/padm-reality-target-xray-test.log" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target-sing-box-test.log)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target.XXXXXX)" == "${tmpRoot}/padm-reality-target.XXXXXX" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
@@ -9668,7 +9667,8 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine batchLinesFile failedTargetsFile
+    local scannerLine batchLinesFile failedTargetsFile scannerSummary
+    local scannerImported scannerSkipped scannerA scannerB scannerC scannerFail
     cat >"${scannerCandidatesFile}" <<'EOF'
 fail-auto.example.com|fail-auto.example.com|Fail Auto|global|large_site|unknown|1|yes|fixture failing candidate
 www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|2|yes|fixture fallback candidate
@@ -9686,9 +9686,14 @@ IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
 192.0.2.16,192.0.2.0/24,invalid.invalid,"Invalid",N/A
 192.0.2.17,192.0.2.0/24,192.0.2.17,"Self",N/A
 CSV
-    scannerImport=$(realityTargetImportScannerCandidates "${TMP_DIR}/realitlscanner.csv")
-    [[ "${scannerImport}" == "1" ]]
-    importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet"
+    importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet" scannerSummary
+    IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${scannerSummary}"
+    [[ "${scannerImported}" == "1" ]]
+    [[ "${scannerSkipped}" == "7" ]]
+    [[ "${scannerA}" == "1" ]]
+    [[ "${scannerB}" == "0" ]]
+    [[ "${scannerC}" == "0" ]]
+    [[ "${scannerFail}" == "0" ]]
     scannerLine=$(grep -F $'scanner.example.com:443\tscanner.example.com\tscanner.example.com\tscanner' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${scannerLine}" 7)" == "AS64501" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 8)" == "RemoteNet" ]]
@@ -9705,7 +9710,7 @@ CSV
     [[ "$(realityTargetResultField "${batchLine}" 10)" == "A" ]]
     grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
     printf '%s\n' "batch-old.example.com:443" >"${failedTargetsFile}"
-    writeRealityTargetCandidateLine "batch-old.example.com" "batch-old.example.com" "Batch Old" "global" "large_site" "unknown" "9" "yes" "batch candidate" >>"${scannerCandidatesFile}"
+    printf '%s\n' "batch-old.example.com|batch-old.example.com|Batch Old|global|large_site|unknown|9|yes|batch candidate" >>"${scannerCandidatesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
     ! grep -qF $'batch-old.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     ! grep -qF 'batch-old.example.com|' "${scannerCandidatesFile}"
@@ -9716,7 +9721,7 @@ CSV
     writeRealityTargetResultLine "local.example.com:443" "sni.local.example.com" "Local Example" "test" "no" "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "same ASN test target"
     writeRealityTargetResultLine "remote.example.com:443" "sni.remote.example.com" "Remote Example" "test" "no" "198.51.100.1" "AS64501" "RemoteNet" "different_network" "A" "yes" "8192" "yes" "1234567899" "longer cert but different network"
     [[ "$(realityTargetResultCount)" == "2" ]]
-    scanLine=$(realityTargetResultLineByIndex 1)
+    scanLine=$(grep -F $'local.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${scanLine}" 1)" == "local.example.com:443" ]]
     selectDefaultRealityTarget
     [[ "${realityTargetHost}" == "local.example.com" ]]
@@ -9895,7 +9900,7 @@ JSON
     PADM_REALITY_XRAY_XHTTP_CONFIG_FILE="${xrayXhttp}"
     PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${singBoxVision}"
     PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${singBoxGrpc}"
-    applyLog=$(realityTargetApplyLog)
+    applyLog=$(realityTargetTmpPath padm-reality-target-apply.log)
     : >"${statusLog}"
     : >"${refreshLog}"
 
