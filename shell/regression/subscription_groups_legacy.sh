@@ -9372,15 +9372,16 @@ runRuntimeAndRealityRegression() {
     collectTLSProfile
     [[ "${tlsCertDomain}" == "tls.example.com" ]]
     [[ "${tlsSNI}" == "tls.example.com" ]]
-    protocolMeta 7 security | grep -qx reality
-    protocolMeta 7 transport | grep -qx tcp
-    protocolSelectionNeedsReality 7
-    protocolSelectionNeedsCertificate 0
-    protocolSelectionNeedsUdp 6
-    protocolSelectionTransportHas 7 tcp
-    protocolSelectionSecurityHas 7 reality
+    protocolMeta 1 security | grep -qx reality
+    protocolMeta 1 transport | grep -qx tcp
+    protocolMeta 1 needs_reality | grep -qx 1
+    ! protocolSelectionNeedsCertificate 1
+    protocolSelectionNeedsCertificate 3
+    protocolMeta 3 needs_udp | grep -qx 1
+    protocolCapabilityMeta 1 transport | grep -qx tcp
+    protocolCapabilityMeta 1 security | grep -qx reality
 
-    parseInstallArgs --install-type custom --core xray --protocols 7 --domain node.example.com --reality-target www.microsoft.com:443 --reality-server-name www.microsoft.com --entry-host node.example.com --reuse-last no
+    parseInstallArgs --install-type custom --core xray --protocols 1 --domain node.example.com --reality-target www.microsoft.com:443 --reality-server-name www.microsoft.com --entry-host node.example.com --reuse-last no
     [[ "${AUTO_REALITY_TARGET}" == "www.microsoft.com:443" ]]
     [[ "${AUTO_REALITY_SERVER_NAME}" == "www.microsoft.com" ]]
     [[ "${AUTO_ENTRY_HOST}" == "node.example.com" ]]
@@ -9403,6 +9404,7 @@ runRuntimeAndRealityRegression() {
     rm -f "${geoTmpDir}/geo.version"
     [[ "$(xrayGeoDisplayVersion "${geoTmpDir}")" == 更新时间* || "$(xrayGeoDisplayVersion "${geoTmpDir}")" == "版本未知" ]]
 
+    AUTO_REALITY_SERVER_NAME=
     parseRealityTargetInput "example.com"
     [[ "${realityTargetHost}" == "example.com" ]]
     [[ "${realityTargetPort}" == "443" ]]
@@ -9417,8 +9419,8 @@ runRuntimeAndRealityRegression() {
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "A" ]]
     showRealityTargetQuality "www.microsoft.com:443"
     [[ "$(realityTargetResultCount)" -ge "1" ]]
-    cachedLine=$(realityTargetCachedLine "www.microsoft.com:443")
-    [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $1}')" == "A" ]]
+    cachedLine=$(awk -F'\t' '$1 == "www.microsoft.com:443" {print; found=1; exit} END {exit found ? 0 : 1}' "${PADM_REALITY_TARGET_RESULTS_FILE}")
+    [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $10}')" == "A" ]]
     grep -q "tls ping www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 2048')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "B" ]]
