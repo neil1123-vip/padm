@@ -8687,6 +8687,14 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'reload' "${callLog}"
     grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
     grep -q '用户订阅已删除' "${successLog}"
+
+    runRemoveCase sync-fail
+    [[ "${rc}" == "0" ]]
+    grep -qx "cleanup:${backupDir}" "${callLog}"
+    grep -qx 'reload' "${callLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -q '用户订阅已删除' "${successLog}"
+    grep -q '订阅已删除，但自动同步失败' "${statusLog}"
 )
 
 runUserSubscriptionMenuMutationFailureRegression() (

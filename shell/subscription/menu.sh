@@ -720,7 +720,10 @@ removeUserSubscriptionMenu() {
     fi
     padmRemoveCleanupPath "${configBackupDir}"
     successCard "用户订阅已删除"
-    runSubscriptionEventSyncIfEnabled "用户订阅删除"
+    if ! runSubscriptionEventSyncIfEnabled "用户订阅删除"; then
+        statusCard "订阅已删除，但自动同步失败" "删除已保存；请到 主控维护与排障 -> 立即执行同步 重试" "也可查看同步失败列表定位本机或被控服务器问题"
+    fi
+    return 0
 }
 
 manageUserSubscriptionItem() {
