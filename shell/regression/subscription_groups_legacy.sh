@@ -11369,6 +11369,7 @@ EOF
 }
 
 runSubscriptionWireGuardMenuFlowRegression() (
+    local wireGuardMenuPart="${1:-all}"
     local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     local oldCurrentHost="${currentHost:-}"
     local oldNginxConfigPath="${nginxConfigPath:-}"
@@ -11503,268 +11504,388 @@ runSubscriptionWireGuardMenuFlowRegression() (
     userJsonCard() { recordMenuAction "userJsonCard:$1"; }
     subscribe() { recordMenuAction subscribe; }
 
-    resetMenuActions
-    manageSubscriptionRoleSelection <<<"1
+    wireGuardMenuPartSelected() {
+        [[ "${wireGuardMenuPart}" == "all" || "${wireGuardMenuPart}" == "$1" ]]
+    }
+
+    wireGuardMenuResetFixture() {
+        PATH="${oldPath}"
+        wireGuardApplyShouldFail=
+        installControlShouldFail=
+        refreshControlShouldFail=
+        serviceQueueShouldFail=
+        addSourceShouldFail=
+        setCredentialShouldFail=
+        restoreStateWriteShouldFail=
+        restoreGroupsWriteShouldFail=
+        disableStateWriteShouldFail=
+        stopShouldFail=
+        stopAllowMissingBackend=
+        actions=
+        rm -rf "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+        mkdir -p "${nginxConfigPath}"
+        ensureSubscriptionGroupsState
+    }
+
+    wireGuardMenuInitializeMain() {
+        wireGuardMenuResetFixture
+        resetMenuActions
+        manageSubscriptionRoleSelection <<<"1
 main.example.com
 3"
-    assertMenuAction initSubscriptionWireGuardMain
-    subscriptionWireGuardReadState | jq -e '.role == "main" and .enabled == true and .endpoint_host == "main.example.com" and .address == "10.77.0.1/24"' >/dev/null
-    grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+        assertMenuAction initSubscriptionWireGuardMain
+        subscriptionWireGuardReadState | jq -e '.role == "main" and .enabled == true and .endpoint_host == "main.example.com" and .address == "10.77.0.1/24"' >/dev/null
+        grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+        mainStateSnapshot=$(subscriptionWireGuardReadState)
+    }
 
-    mainStateSnapshot=$(subscriptionWireGuardReadState)
-    subscriptionWireGuardWriteState '.endpoint_host = ""'
-    if showSubscriptionWireGuardMainCredential >/dev/null 2>&1; then
-        return 1
-    fi
-    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
-
-    nginxFakeBin="${TMP_DIR}/wg-nginx-fail-bin"
-    mkdir -p "${nginxFakeBin}"
-    cat >"${nginxFakeBin}/nginx" <<'SH'
-#!/usr/bin/env bash
-exit 1
-SH
-    chmod +x "${nginxFakeBin}/nginx"
-    nginxStaticPath="${TMP_DIR}/static"
-    nginxTarget=$(subscriptionWireGuardNginxConfigFile)
-    printf 'old config\n' >"${nginxTarget}"
-    PATH="${nginxFakeBin}:${PATH}"
-    if ensureSubscriptionWireGuardNginxConfig >/dev/null 2>&1; then
-        PATH="${oldPath}"
-        return 1
-    fi
-    PATH="${oldPath}"
-    grep -qxF 'old config' "${nginxTarget}"
-    ! regressionFindHasMatches "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \)
-
-    controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"2
+    wireGuardMenuAddEdgePeer() {
+        controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"2
 1
 ${controlledCredential}
 edge-a
 3
 5"
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
+        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
+    }
 
-    failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
-    failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
-    if subscriptionWireGuardAddPeerFromCredential "bad alias" "${failingCredentialJson}" >/dev/null 2>&1; then
-        return 1
-    fi
-    wireGuardApplyShouldFail=true
-    if subscriptionWireGuardAddPeerFromCredential "edge-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        wireGuardApplyShouldFail=
-        return 1
-    fi
-    wireGuardApplyShouldFail=
-    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-fail")' >/dev/null 2>&1; then
-        return 1
-    fi
-    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-fail")' >/dev/null 2>&1; then
-        return 1
-    fi
+    if wireGuardMenuPartSelected bootstrap; then
+        wireGuardMenuInitializeMain
 
-    wireGuardApplyShouldFail=true
-    restoreStateWriteShouldFail=true
-    resetMenuActions
-    if subscriptionWireGuardAddPeerFromCredential "edge-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        wireGuardApplyShouldFail=
-        restoreStateWriteShouldFail=
-        return 1
-    fi
-    wireGuardApplyShouldFail=
-    restoreStateWriteShouldFail=
-    assertMenuAction 'errorCard:WireGuard 被控服务器服务应用失败，且旧状态恢复失败'
-    subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-restore-fail")' >/dev/null
+        subscriptionWireGuardWriteState '.endpoint_host = ""'
+        if showSubscriptionWireGuardMainCredential >/dev/null 2>&1; then
+            return 1
+        fi
+        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
 
-    addSourceShouldFail=true
-    if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        addSourceShouldFail=
-        return 1
-    fi
-    addSourceShouldFail=
-    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-addfail")' >/dev/null 2>&1; then
-        return 1
+        nginxFakeBin="${TMP_DIR}/wg-nginx-fail-bin"
+        mkdir -p "${nginxFakeBin}"
+        cat >"${nginxFakeBin}/nginx" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+        chmod +x "${nginxFakeBin}/nginx"
+        nginxStaticPath="${TMP_DIR}/static"
+        nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+        printf 'old config\n' >"${nginxTarget}"
+        PATH="${nginxFakeBin}:${PATH}"
+        if ensureSubscriptionWireGuardNginxConfig >/dev/null 2>&1; then
+            PATH="${oldPath}"
+            return 1
+        fi
+        PATH="${oldPath}"
+        grep -qxF 'old config' "${nginxTarget}"
+        ! regressionFindHasMatches "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \)
     fi
 
-    setCredentialShouldFail=true
-    if subscriptionWireGuardAddPeerFromCredential "edge-setfail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        setCredentialShouldFail=
-        return 1
-    fi
-    setCredentialShouldFail=
-    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
-        return 1
-    fi
-    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
-        return 1
-    fi
+    if wireGuardMenuPartSelected peer-add-update; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
 
-    setCredentialShouldFail=true
-    restoreGroupsWriteShouldFail=true
-    resetMenuActions
-    if subscriptionWireGuardAddPeerFromCredential "edge-groups-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        setCredentialShouldFail=
-        restoreGroupsWriteShouldFail=
-        return 1
-    fi
-    setCredentialShouldFail=
-    restoreGroupsWriteShouldFail=
-    assertMenuAction 'errorCard:订阅来源凭据写入失败，且旧状态恢复失败'
-    subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-groups-restore-fail")' >/dev/null
-    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-groups-restore-fail")' >/dev/null 2>&1; then
-        return 1
-    fi
-
-    updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"3
+        updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"3
 ${updatedCredential}
 edge-a
 5"
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
+    fi
 
-    resetMenuActions
-    toggleSubscriptionSourceMenu() {
-        subscriptionRequireMainRole || return 1
-        recordMenuAction toggleSubscriptionSourceMenu
-        local sourceId=
-        local sourceAction=
-        autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
-        autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
-        if [[ "${sourceAction}" == "enable" ]]; then
-            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
-              .groups |= map(if .id == $groupId then
-                .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-              else . end)'
-        elif [[ "${sourceAction}" == "disable" ]]; then
-            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
-              .groups |= map(if .id == $groupId then
-                .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-              else . end)'
-        else
+    if wireGuardMenuPartSelected peer-rollback-apply; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+        if subscriptionWireGuardAddPeerFromCredential "bad alias" "${failingCredentialJson}" >/dev/null 2>&1; then
             return 1
         fi
-    }
-    resetMenuActions
-    toggleSubscriptionSourceMenu <<<"edge-a
-disable"
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
-    resetMenuActions
-    toggleSubscriptionSourceMenu <<<"edge-a
-enable"
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
-    setSubscriptionSourceSyncFailure edge-a remote_error old-error
-    resetMenuActions
-    clearSubscriptionSourceSyncErrorMenu() {
-        subscriptionRequireMainRole || return 1
-        recordMenuAction clearSubscriptionSourceSyncErrorMenu
-        local sourceId=
-        autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
-        clearSubscriptionSourceSyncError "${sourceId}"
-    }
-    clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
-    subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
-    resetMenuActions
-    local multiServerStatusOutput
-    multiServerStatusOutput=
-    manageSubscriptionMultiServer <<<"4
-5"
-    assertMenuAction 'statusCard:本机主控接入凭据'
-
-    installControlShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
-        installControlShouldFail=
-        return 1
-    fi
-    installControlShouldFail=
-    wireGuardApplyShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+        wireGuardApplyShouldFail=true
+        if subscriptionWireGuardAddPeerFromCredential "edge-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            wireGuardApplyShouldFail=
+            return 1
+        fi
         wireGuardApplyShouldFail=
-        return 1
-    fi
-    wireGuardApplyShouldFail=
-    refreshControlShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
-        refreshControlShouldFail=
-        return 1
-    fi
-    refreshControlShouldFail=
-    serviceQueueShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
-        serviceQueueShouldFail=
-        return 1
-    fi
-    serviceQueueShouldFail=
+        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-fail")' >/dev/null 2>&1; then
+            return 1
+        fi
+        if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-fail")' >/dev/null 2>&1; then
+            return 1
+        fi
 
-    resetMenuActions
-    manageSubscriptionMainControlDetails <<<"5
+        wireGuardApplyShouldFail=true
+        restoreStateWriteShouldFail=true
+        resetMenuActions
+        if subscriptionWireGuardAddPeerFromCredential "edge-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            wireGuardApplyShouldFail=
+            restoreStateWriteShouldFail=
+            return 1
+        fi
+        wireGuardApplyShouldFail=
+        restoreStateWriteShouldFail=
+        assertMenuAction 'errorCard:WireGuard 被控服务器服务应用失败，且旧状态恢复失败'
+        subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-restore-fail")' >/dev/null
+    fi
+
+    if wireGuardMenuPartSelected peer-rollback-source; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+
+        addSourceShouldFail=true
+        if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            addSourceShouldFail=
+            return 1
+        fi
+        addSourceShouldFail=
+        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-addfail")' >/dev/null 2>&1; then
+            return 1
+        fi
+    fi
+
+    if wireGuardMenuPartSelected peer-rollback-credential; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+
+        setCredentialShouldFail=true
+        if subscriptionWireGuardAddPeerFromCredential "edge-setfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            setCredentialShouldFail=
+            return 1
+        fi
+        setCredentialShouldFail=
+        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+            return 1
+        fi
+        if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+            return 1
+        fi
+
+        setCredentialShouldFail=true
+        restoreGroupsWriteShouldFail=true
+        resetMenuActions
+        if subscriptionWireGuardAddPeerFromCredential "edge-groups-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            setCredentialShouldFail=
+            restoreGroupsWriteShouldFail=
+            return 1
+        fi
+        setCredentialShouldFail=
+        restoreGroupsWriteShouldFail=
+        assertMenuAction 'errorCard:订阅来源凭据写入失败，且旧状态恢复失败'
+        subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-groups-restore-fail")' >/dev/null
+        if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-groups-restore-fail")' >/dev/null 2>&1; then
+            return 1
+        fi
+    fi
+
+    if wireGuardMenuPartSelected peer-source-control; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        resetMenuActions
+        toggleSubscriptionSourceMenu() {
+            subscriptionRequireMainRole || return 1
+            recordMenuAction toggleSubscriptionSourceMenu
+            local sourceId=
+            local sourceAction=
+            autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
+            autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
+            if [[ "${sourceAction}" == "enable" ]]; then
+                subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
+                  .groups |= map(if .id == $groupId then
+                    .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+                  else . end)'
+            elif [[ "${sourceAction}" == "disable" ]]; then
+                subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
+                  .groups |= map(if .id == $groupId then
+                    .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+                  else . end)'
+            else
+                return 1
+            fi
+        }
+        resetMenuActions
+        toggleSubscriptionSourceMenu <<<"edge-a
+disable"
+        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
+        resetMenuActions
+        toggleSubscriptionSourceMenu <<<"edge-a
+enable"
+        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+        setSubscriptionSourceSyncFailure edge-a remote_error old-error
+        resetMenuActions
+        clearSubscriptionSourceSyncErrorMenu() {
+            subscriptionRequireMainRole || return 1
+            recordMenuAction clearSubscriptionSourceSyncErrorMenu
+            local sourceId=
+            autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
+            clearSubscriptionSourceSyncError "${sourceId}"
+        }
+        clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
+        subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
+        resetMenuActions
+        local multiServerStatusOutput
+        multiServerStatusOutput=
+        manageSubscriptionMultiServer <<<"4
+5"
+        assertMenuAction 'statusCard:本机主控接入凭据'
+    fi
+
+    if wireGuardMenuPartSelected control-restore; then
+        wireGuardMenuInitializeMain
+
+        installControlShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            installControlShouldFail=
+            return 1
+        fi
+        installControlShouldFail=
+        wireGuardApplyShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            wireGuardApplyShouldFail=
+            return 1
+        fi
+        wireGuardApplyShouldFail=
+        refreshControlShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            refreshControlShouldFail=
+            return 1
+        fi
+        refreshControlShouldFail=
+        serviceQueueShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            serviceQueueShouldFail=
+            return 1
+        fi
+        serviceQueueShouldFail=
+
+        resetMenuActions
+        manageSubscriptionMainControlDetails <<<"5
 6
 7"
-    assertMenuAction installSubscriptionControlService
-    assertMenuAction refreshSubscriptionWireGuardNginxControl
-    subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
+        assertMenuAction installSubscriptionControlService
+        assertMenuAction refreshSubscriptionWireGuardNginxControl
+        subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
 
-    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
-    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
-    stopShouldFail=true
-    resetMenuActions
-    if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+        printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+        stopShouldFail=true
+        resetMenuActions
+        if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+            stopShouldFail=
+            return 1
+        fi
         stopShouldFail=
-        return 1
-    fi
-    stopShouldFail=
-    assertMenuAction 'errorCard:WireGuard 控制面停用失败'
-    subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
-    grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
+        assertMenuAction 'errorCard:WireGuard 控制面停用失败'
+        subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
+        grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
 
-    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
-    disableStateWriteShouldFail=true
-    resetMenuActions
-    if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+        disableStateWriteShouldFail=true
+        resetMenuActions
+        if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+            disableStateWriteShouldFail=
+            return 1
+        fi
         disableStateWriteShouldFail=
-        return 1
-    fi
-    disableStateWriteShouldFail=
-    assertMenuAction 'errorCard:WireGuard 控制面状态写入失败'
-    subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
-    grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+        assertMenuAction 'errorCard:WireGuard 控制面状态写入失败'
+        subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
+        grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
 
-    local restoreStopState='{"enabled":false,"role":"uninitialized","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"address":"","endpoint_host":"","public_key":"","peers":[]}'
-    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
-    stopShouldFail=true
-    if subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1; then
+        local restoreStopState='{"enabled":false,"role":"uninitialized","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"address":"","endpoint_host":"","public_key":"","peers":[]}'
+        printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+        stopShouldFail=true
+        if subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1; then
+            stopShouldFail=
+            return 1
+        fi
         stopShouldFail=
-        return 1
-    fi
-    stopShouldFail=
-    grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
+        grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
 
-    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
-    stopShouldFail=true
-    stopAllowMissingBackend=true
-    resetMenuActions
-    nginxTarget=$(subscriptionWireGuardNginxConfigFile)
-    printf 'keep-nginx-control\n' >"${nginxTarget}"
-    subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1 || {
+        printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+        stopShouldFail=true
+        stopAllowMissingBackend=true
+        resetMenuActions
+        nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+        printf 'keep-nginx-control\n' >"${nginxTarget}"
+        subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1 || {
+            stopShouldFail=
+            stopAllowMissingBackend=
+            return 1
+        }
         stopShouldFail=
         stopAllowMissingBackend=
-        return 1
-    }
-    stopShouldFail=
-    stopAllowMissingBackend=
-    assertMenuAction 'stopSubscriptionWireGuardControlService:true'
-    [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
-    [[ ! -e "${nginxTarget}" ]]
+        assertMenuAction 'stopSubscriptionWireGuardControlService:true'
+        [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+        [[ ! -e "${nginxTarget}" ]]
+    fi
 
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
     currentHost="${oldCurrentHost}"
     nginxConfigPath="${oldNginxConfigPath}"
 )
+
+runRegressionWireGuardMenuFlow() {
+    runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-source-control \
+        wireguard-menu-flow-control-restore
+}
+
+runSubscriptionWireGuardMenuFlowBootstrapRegression() {
+    runSubscriptionWireGuardMenuFlowRegression bootstrap
+}
+
+runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback \
+        wireguard-menu-flow-peer-source-control
+}
+
+runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-add-update
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-source
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-source-control
+}
+
+runSubscriptionWireGuardMenuFlowControlRestoreRegression() {
+    runSubscriptionWireGuardMenuFlowRegression control-restore
+}
 
 runSubscriptionWireGuardRestoreRunnerRegression() (
     local errorLog="${TMP_DIR}/subscription-wireguard-restore-runner-error.log"
@@ -12122,6 +12243,7 @@ runMenuSmokeLightRegression() {
 
 runMenuSmokeRegression() {
     local actions=
+    local menuSmokePart="${1:-all}"
     local oldConfigPath="${configPath:-}"
     local oldCoreInstallType="${coreInstallType:-}"
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
@@ -12141,6 +12263,9 @@ runMenuSmokeRegression() {
     )
     coreInstallType=${coreInstallType:-}
 
+    menuSmokePartSelected() {
+        [[ "${menuSmokePart}" == "all" || "${menuSmokePart}" == "$1" ]]
+    }
     recordMenuAction() {
         actions+="$1"$'\n'
     }
@@ -12162,72 +12287,74 @@ runMenuSmokeRegression() {
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
-    coreSelectionErrorCard
-    assertMenuAction 'errorCard:选择错误，请重新选择'
-    resetMenuActions
-    coreInvalidInputErrorCard
-    assertMenuAction 'errorCard:输入有误，请重新输入'
-    resetMenuActions
-    coreCancelledStatusCard "操作未执行"
-    assertMenuAction 'statusCard:已取消'
-    resetMenuActions
-    coreRuleExistsStatusCard "example.com 已存在，跳过"
-    assertMenuAction 'statusCard:规则已存在'
-    resetMenuActions
-    corePortInputErrorCard
-    assertMenuAction 'errorCard:端口输入错误'
-    resetMenuActions
-    aloneNginxConfigRecoveredErrorCard
-    assertMenuAction 'errorCard:Nginx 配置检测失败，已恢复旧 alone.conf'
-    resetMenuActions
-    nginxStartFailureCard "请查看下方日志"
-    assertMenuAction 'statusCard:Nginx 启动失败'
-    resetMenuActions
-    coreNotInstalledErrorCard
-    assertMenuAction 'errorCard:未安装，请使用脚本安装'
-    resetMenuActions
-    coreDomainRequiredErrorCard
-    assertMenuAction 'errorCard:域名不可为空'
-    resetMenuActions
-    coreIPRequiredErrorCard
-    assertMenuAction 'errorCard:IP不可为空'
-    resetMenuActions
-    xrayConfigValidationFailureCard "已取消启动"
-    assertMenuAction 'statusCard:Xray 配置校验失败'
-    resetMenuActions
-    xrayPrereleaseCompatibilityCard "通过"
-    assertMenuAction 'statusCard:Xray 预发布兼容检查'
-    resetMenuActions
-    singBoxPrereleaseCompatibilityCard "通过"
-    assertMenuAction 'statusCard:sing-box 预发布兼容检查'
-    resetMenuActions
-    xrayConfigValidationCard "通过"
-    assertMenuAction 'statusCard:Xray 配置校验'
-    resetMenuActions
-    singBoxConfigValidationCard "通过"
-    assertMenuAction 'statusCard:sing-box 配置校验'
-    resetMenuActions
-    skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
-    assertMenuAction 'statusCard:跳过 TLS 证书'
-    resetMenuActions
-    protocolPortInputStatusCard "端口不合法"
-    assertMenuAction 'statusCard:端口输入'
-    resetMenuActions
-    protocolPortHoppingRangeStatusCard "范围不合法"
-    assertMenuAction 'statusCard:端口跳跃范围'
-    resetMenuActions
-    protocolPortHoppingStatusCard "删除成功"
-    assertMenuAction 'statusCard:端口跳跃'
-    resetMenuActions
-    tuicAlgorithmStatusCard "cubic"
-    assertMenuAction 'statusCard:Tuic 算法'
-    resetMenuActions
-    tlsCertificateCard "重新生成证书"
-    assertMenuAction 'statusCard:TLS 证书'
-    resetMenuActions
-    tlsCertificateStatusCard "未检测到本机 TLS 证书"
-    assertMenuAction 'statusCard:TLS 证书状态'
-    resetMenuActions
+    if menuSmokePartSelected core; then
+        coreSelectionErrorCard
+        assertMenuAction 'errorCard:选择错误，请重新选择'
+        resetMenuActions
+        coreInvalidInputErrorCard
+        assertMenuAction 'errorCard:输入有误，请重新输入'
+        resetMenuActions
+        coreCancelledStatusCard "操作未执行"
+        assertMenuAction 'statusCard:已取消'
+        resetMenuActions
+        coreRuleExistsStatusCard "example.com 已存在，跳过"
+        assertMenuAction 'statusCard:规则已存在'
+        resetMenuActions
+        corePortInputErrorCard
+        assertMenuAction 'errorCard:端口输入错误'
+        resetMenuActions
+        aloneNginxConfigRecoveredErrorCard
+        assertMenuAction 'errorCard:Nginx 配置检测失败，已恢复旧 alone.conf'
+        resetMenuActions
+        nginxStartFailureCard "请查看下方日志"
+        assertMenuAction 'statusCard:Nginx 启动失败'
+        resetMenuActions
+        coreNotInstalledErrorCard
+        assertMenuAction 'errorCard:未安装，请使用脚本安装'
+        resetMenuActions
+        coreDomainRequiredErrorCard
+        assertMenuAction 'errorCard:域名不可为空'
+        resetMenuActions
+        coreIPRequiredErrorCard
+        assertMenuAction 'errorCard:IP不可为空'
+        resetMenuActions
+        xrayConfigValidationFailureCard "已取消启动"
+        assertMenuAction 'statusCard:Xray 配置校验失败'
+        resetMenuActions
+        xrayPrereleaseCompatibilityCard "通过"
+        assertMenuAction 'statusCard:Xray 预发布兼容检查'
+        resetMenuActions
+        singBoxPrereleaseCompatibilityCard "通过"
+        assertMenuAction 'statusCard:sing-box 预发布兼容检查'
+        resetMenuActions
+        xrayConfigValidationCard "通过"
+        assertMenuAction 'statusCard:Xray 配置校验'
+        resetMenuActions
+        singBoxConfigValidationCard "通过"
+        assertMenuAction 'statusCard:sing-box 配置校验'
+        resetMenuActions
+        skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
+        assertMenuAction 'statusCard:跳过 TLS 证书'
+        resetMenuActions
+        protocolPortInputStatusCard "端口不合法"
+        assertMenuAction 'statusCard:端口输入'
+        resetMenuActions
+        protocolPortHoppingRangeStatusCard "范围不合法"
+        assertMenuAction 'statusCard:端口跳跃范围'
+        resetMenuActions
+        protocolPortHoppingStatusCard "删除成功"
+        assertMenuAction 'statusCard:端口跳跃'
+        resetMenuActions
+        tuicAlgorithmStatusCard "cubic"
+        assertMenuAction 'statusCard:Tuic 算法'
+        resetMenuActions
+        tlsCertificateCard "重新生成证书"
+        assertMenuAction 'statusCard:TLS 证书'
+        resetMenuActions
+        tlsCertificateStatusCard "未检测到本机 TLS 证书"
+        assertMenuAction 'statusCard:TLS 证书状态'
+        resetMenuActions
+    fi
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }
@@ -12398,425 +12525,468 @@ runMenuSmokeRegression() {
     printf 'geosite' >"${geoOverviewDir}/geosite.dat"
     printf 'v20260513' >"${geoOverviewDir}/geo.version"
     local output=
-    PADM_XRAY_DIR="${geoOverviewDir}" PADM_XRAY_BINARY="${geoOverviewDir}/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
-    [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
-    customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
-    installMenu <<<"7"
-    assertMenuAction menu
-    resetMenuActions
-    installMenu <<<"4"
-    assertMenuAction "customSingBoxInstall:5"
-    resetMenuActions
-    installMenu <<<"5"
-    assertMenuAction selectCoreInstall
-    resetMenuActions
-    protocolEntryMenu <<<"7"
-    assertMenuAction menu
-    resetMenuActions
-    output=
-    protocolEntryMenu <<<"1
+    if menuSmokePartSelected core; then
+        PADM_XRAY_DIR="${geoOverviewDir}" PADM_XRAY_BINARY="${geoOverviewDir}/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
+        [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
+        customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
+        installMenu <<<"7"
+        assertMenuAction menu
+        resetMenuActions
+        installMenu <<<"4"
+        assertMenuAction "customSingBoxInstall:5"
+        resetMenuActions
+        installMenu <<<"5"
+        assertMenuAction selectCoreInstall
+        resetMenuActions
+        protocolEntryMenu <<<"7"
+        assertMenuAction menu
+        resetMenuActions
+        output=
+        protocolEntryMenu <<<"1
 2
 9"
-    grep -q "实时查看目标质量" <<<"${output}"
-    if assertMenuAction 'errorCard:选择错误'; then
-        printf 'menu-smoke failed: protocol entry reality target flow returned unexpected selection error\n' >&2
-        return 1
+        grep -q "实时查看目标质量" <<<"${output}"
+        if assertMenuAction 'errorCard:选择错误'; then
+            printf 'menu-smoke failed: protocol entry reality target flow returned unexpected selection error\n' >&2
+            return 1
+        fi
     fi
 
-    configPath="${TMP_DIR}/menu-smoke-xray/"
-    coreInstallType=1
-    ensureSubscriptionGroupsState
-    setMenuSmokeRole uninitialized
-    resetMenuActions
-    output=
-    manageSubscription <<<"3" || true
-    assertMenuAction menu
-    grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
-    grep -q "这台作为主控" <<<"${output}"
-    grep -q "这台作为被控" <<<"${output}"
-    if grep -q "快速开始" <<<"${output}" || grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "高级诊断" <<<"${output}"; then
-        printf 'menu-smoke failed: uninitialized top-level still shows post-init entries\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    output=
-    manageSubscriptionRoleSelection <<<"1
+    if menuSmokePartSelected subscription-main-entry; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole uninitialized
+        resetMenuActions
+        output=
+        manageSubscription <<<"3" || true
+        assertMenuAction menu
+        grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
+        grep -q "这台作为主控" <<<"${output}"
+        grep -q "这台作为被控" <<<"${output}"
+        if grep -q "快速开始" <<<"${output}" || grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "高级诊断" <<<"${output}"; then
+            printf 'menu-smoke failed: uninitialized top-level still shows post-init entries\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        output=
+        manageSubscriptionRoleSelection <<<"1
 3"
-    assertMenuAction initSubscriptionWireGuardMain
-    assertMenuAction showSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionRemoteHealthPlan
-    assertMenuAction showSubscriptionRemoteSyncPlan
-    resetMenuActions
-    output=
-    manageSubscriptionRoleSelection <<<"2"
-    assertMenuAction initSubscriptionWireGuardControlled
-    assertMenuAction importSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionWireGuardControlledCredential
-    assertMenuAction showSubscriptionWireGuardStatus
-    setMenuSmokeRole main
-    resetMenuActions
-    output=
-    manageSubscription <<<"4"
-    grep -q "发布订阅" <<<"${output}"
-    grep -q "多服务器协同" <<<"${output}"
-    grep -q "主控维护与排障" <<<"${output}"
-    if grep -q "我自己用" <<<"${output}" || grep -q "给别人用" <<<"${output}" || grep -q "运行与维护" <<<"${output}" || grep -q "高级诊断" <<<"${output}" || grep -q "被控维护与排障" <<<"${output}"; then
-        printf 'menu-smoke failed: main top-level still shows removed or controlled entries\n' >&2
-        return 1
+        assertMenuAction initSubscriptionWireGuardMain
+        assertMenuAction showSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction showSubscriptionRemoteSyncPlan
+        resetMenuActions
+        output=
+        manageSubscriptionRoleSelection <<<"2"
+        assertMenuAction initSubscriptionWireGuardControlled
+        assertMenuAction importSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionWireGuardControlledCredential
+        assertMenuAction showSubscriptionWireGuardStatus
+        setMenuSmokeRole main
+        resetMenuActions
+        output=
+        manageSubscription <<<"4"
+        grep -q "发布订阅" <<<"${output}"
+        grep -q "多服务器协同" <<<"${output}"
+        grep -q "主控维护与排障" <<<"${output}"
+        if grep -q "我自己用" <<<"${output}" || grep -q "给别人用" <<<"${output}" || grep -q "运行与维护" <<<"${output}" || grep -q "高级诊断" <<<"${output}" || grep -q "被控维护与排障" <<<"${output}"; then
+            printf 'menu-smoke failed: main top-level still shows removed or controlled entries\n' >&2
+            return 1
+        fi
+        assertMenuAction menu
     fi
-    assertMenuAction menu
-    resetMenuActions
-    output=
-    manageSubscriptionPublishSubscriptions <<<"7"
-    grep -q "安装/更新订阅服务" <<<"${output}"
-    grep -q "刷新并查看我的订阅链接" <<<"${output}"
-    grep -q "新建并发布订阅" <<<"${output}"
-    grep -q "查看并处理已有订阅" <<<"${output}"
-    grep -q "查看我的可用服务器" <<<"${output}"
-    grep -q "查看我的流量" <<<"${output}"
-    if grep -q "同步订阅变更" <<<"${output}" || grep -q "预览同步变更" <<<"${output}"; then
-        printf 'menu-smoke failed: publish menu still shows batch sync entries\n' >&2
-        return 1
+
+    if menuSmokePartSelected subscription-main-publish-service; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"7"
+        grep -q "安装/更新订阅服务" <<<"${output}"
+        grep -q "刷新并查看我的订阅链接" <<<"${output}"
+        grep -q "新建并发布订阅" <<<"${output}"
+        grep -q "查看并处理已有订阅" <<<"${output}"
+        grep -q "查看我的可用服务器" <<<"${output}"
+        grep -q "查看我的流量" <<<"${output}"
+        if grep -q "同步订阅变更" <<<"${output}" || grep -q "预览同步变更" <<<"${output}"; then
+            printf 'menu-smoke failed: publish menu still shows batch sync entries\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"1
+7"
+        assertMenuAction installSubscribe
+        assertMenuAction showSubscriptionServiceStatus
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"2
+7"
+        assertMenuAction subscribe
+        resetMenuActions
     fi
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"1
-7"
-    assertMenuAction installSubscribe
-    assertMenuAction showSubscriptionServiceStatus
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"2
-7"
-    assertMenuAction subscribe
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"4
+
+    if menuSmokePartSelected subscription-main-publish-user; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"4
 7" || true
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | ((.user_groups // []) | length) == 0' >/dev/null
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"3
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | ((.user_groups // []) | length) == 0' >/dev/null
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"3
 demo-user
 Demo User
 main
 0
 7"
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "Demo User")' >/dev/null
-    resetMenuActions
-    output=
-    manageSubscriptionPublishSubscriptions <<<"4
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "Demo User")' >/dev/null
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"4
 demo-user
 3
 9
 7"
-    grep -q "查看并处理已有订阅" <<<"${output}"
-    grep -q "查看当前用量" <<<"${output}"
-    resetMenuActions
-    subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
-    manageSubscriptionPublishSubscriptions <<<"3
+        grep -q "查看并处理已有订阅" <<<"${output}"
+        grep -q "查看当前用量" <<<"${output}"
+        resetMenuActions
+    fi
+
+    if menuSmokePartSelected subscription-main-publish-sync; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
+        manageSubscriptionPublishSubscriptions <<<"3
 team-a
 Team A
 *
 0
 n
 7"
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "Team A")' >/dev/null
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    resetMenuActions
-    rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
-    ensureSubscriptionGroupsState
-    subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
-    manageSubscriptionPublishSubscriptions <<<"3
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "Team A")' >/dev/null
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        resetMenuActions
+        rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+        ensureSubscriptionGroupsState
+        subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
+        manageSubscriptionPublishSubscriptions <<<"3
 team-b
 Team B
 main
 0
 
 7"
-    assertMenuAction refreshSubscriptionGroupSyncCron
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
-    resetMenuActions
-    output=
-    manageSubscriptionMultiServer <<<"5"
-    grep -q "主控建链向导" <<<"${output}"
-    grep -q "添加/移除被控服务器" <<<"${output}"
-    grep -q "更新被控服务器凭据" <<<"${output}"
-    grep -q "查看协同状态" <<<"${output}"
-    if grep -q "多服务器细项" <<<"${output}"; then
-        printf 'menu-smoke failed: main multi-server still shows advanced submenu\n' >&2
-        return 1
+        assertMenuAction refreshSubscriptionGroupSyncCron
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
     fi
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"1
+
+    if menuSmokePartSelected subscription-main-maintenance; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        output=
+        manageSubscriptionMultiServer <<<"5"
+        grep -q "主控建链向导" <<<"${output}"
+        grep -q "添加/移除被控服务器" <<<"${output}"
+        grep -q "更新被控服务器凭据" <<<"${output}"
+        grep -q "查看协同状态" <<<"${output}"
+        if grep -q "多服务器细项" <<<"${output}"; then
+            printf 'menu-smoke failed: main multi-server still shows advanced submenu\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"1
 3
 5"
-    assertMenuAction initSubscriptionWireGuardMain
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"3
+        assertMenuAction initSubscriptionWireGuardMain
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"3
 5"
-    assertMenuAction setSubscriptionSourceControlTokenMenu
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"4
+        assertMenuAction setSubscriptionSourceControlTokenMenu
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"4
 5"
-    assertMenuAction showSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionSources
-    assertMenuAction showSubscriptionRemoteHealthPlan
-    assertMenuAction subscriptionRemoteControlHealthAll
-    assertMenuAction showSubscriptionSourceSyncResults
-    resetMenuActions
-    output=
-    manageSubscriptionMainMaintenance <<<"9"
-    grep -q "刷新并查看运行总览" <<<"${output}"
-    grep -q "立即执行同步" <<<"${output}"
-    grep -q "查看运行状态" <<<"${output}"
-    grep -q "用量与限额" <<<"${output}"
-    grep -q "自动同步设置" <<<"${output}"
-    grep -q "状态备份与恢复" <<<"${output}"
-    grep -q "控制面与连接细节" <<<"${output}"
-    grep -q "清除同步错误" <<<"${output}"
-    if grep -q "兼容 WireGuard 控制面" <<<"${output}"; then
-        printf 'menu-smoke failed: main maintenance still shows compatibility entry\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    manageSubscriptionMainMaintenance <<<"1
+        assertMenuAction showSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionSources
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction subscriptionRemoteControlHealthAll
+        assertMenuAction showSubscriptionSourceSyncResults
+        resetMenuActions
+        output=
+        manageSubscriptionMainMaintenance <<<"9"
+        grep -q "刷新并查看运行总览" <<<"${output}"
+        grep -q "立即执行同步" <<<"${output}"
+        grep -q "查看运行状态" <<<"${output}"
+        grep -q "用量与限额" <<<"${output}"
+        grep -q "自动同步设置" <<<"${output}"
+        grep -q "状态备份与恢复" <<<"${output}"
+        grep -q "控制面与连接细节" <<<"${output}"
+        grep -q "清除同步错误" <<<"${output}"
+        if grep -q "兼容 WireGuard 控制面" <<<"${output}"; then
+            printf 'menu-smoke failed: main maintenance still shows compatibility entry\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionMainMaintenance <<<"1
 9"
-    assertMenuAction collectSubscriptionTraffic
-    assertMenuAction showSubscriptionTrafficOverview
-    resetMenuActions
-    manageSubscriptionMainMaintenance <<<"2
+        assertMenuAction collectSubscriptionTraffic
+        assertMenuAction showSubscriptionTrafficOverview
+        resetMenuActions
+        manageSubscriptionMainMaintenance <<<"2
 9"
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    if assertMenuAction 'runSubscriptionGroupSync:'; then
-        printf 'menu-smoke failed: main maintenance sync still triggers publish refresh path\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    manageSubscriptionMainMaintenance <<<"3
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        if assertMenuAction 'runSubscriptionGroupSync:'; then
+            printf 'menu-smoke failed: main maintenance sync still triggers publish refresh path\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionMainMaintenance <<<"3
 9"
-    assertMenuAction showSubscriptionGroupsStateSummary
-    assertMenuAction showSubscriptionLocalSyncPlan
-    assertMenuAction subscriptionSyncPlan
-    assertMenuAction showSubscriptionRemoteSyncPlan
-    assertMenuAction subscriptionRemoteSyncPlan
-    assertMenuAction showSubscriptionSourceSyncResults
-    resetMenuActions
-    manageTrafficAndQuota <<<"1
+        assertMenuAction showSubscriptionGroupsStateSummary
+        assertMenuAction showSubscriptionLocalSyncPlan
+        assertMenuAction subscriptionSyncPlan
+        assertMenuAction showSubscriptionRemoteSyncPlan
+        assertMenuAction subscriptionRemoteSyncPlan
+        assertMenuAction showSubscriptionSourceSyncResults
+        resetMenuActions
+        manageTrafficAndQuota <<<"1
 8"
-    assertMenuAction collectSubscriptionTraffic
-    assertMenuAction showSubscriptionTrafficOverview
-    resetMenuActions
-    manageTrafficAndQuota <<<"6
+        assertMenuAction collectSubscriptionTraffic
+        assertMenuAction showSubscriptionTrafficOverview
+        resetMenuActions
+        manageTrafficAndQuota <<<"6
 8"
-    assertMenuAction showSubscriptionQuotaPlan
-    assertMenuAction subscriptionQuotaDryRunPlan
-    resetMenuActions
-    manageTrafficAndQuota <<<"7
+        assertMenuAction showSubscriptionQuotaPlan
+        assertMenuAction subscriptionQuotaDryRunPlan
+        resetMenuActions
+        manageTrafficAndQuota <<<"7
 8"
-    assertMenuAction executeSubscriptionQuotaPlanMenu
-    resetMenuActions
-    output=
-    manageSubscriptionMainMaintenance <<<"5
+        assertMenuAction executeSubscriptionQuotaPlanMenu
+        resetMenuActions
+        output=
+        manageSubscriptionMainMaintenance <<<"5
 12
 9"
-    grep -q "开启/关闭自动同步" <<<"${output}"
-    grep -q "开启/关闭事件同步" <<<"${output}"
-    grep -q "查看定时任务" <<<"${output}"
-    resetMenuActions
-    manageSubscriptionSyncSettings <<<"5
+        grep -q "开启/关闭自动同步" <<<"${output}"
+        grep -q "开启/关闭事件同步" <<<"${output}"
+        grep -q "查看定时任务" <<<"${output}"
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"5
 12"
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    if assertMenuAction 'runSubscriptionGroupSync:'; then
-        printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    manageSubscriptionSyncSettings <<<"10
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        if assertMenuAction 'runSubscriptionGroupSync:'; then
+            printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"10
 12"
-    assertMenuAction toggleSubscriptionEventSyncEnabled
-    resetMenuActions
-    output=
-    manageSubscriptionMainMaintenance <<<"6
+        assertMenuAction toggleSubscriptionEventSyncEnabled
+        resetMenuActions
+        output=
+        manageSubscriptionMainMaintenance <<<"6
 6
 9"
-    grep -q "查看当前状态摘要" <<<"${output}"
-    grep -q "重建订阅状态" <<<"${output}"
-    resetMenuActions
-    manageSubscriptionMainControlDetails <<<"1
-7"
-    assertMenuAction showSubscriptionWireGuardMainCredential
-    for wgAction in "2:showSubscriptionWireGuardPeers" "4:showSubscriptionSourceControlUrls" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
-        wgChoice=${wgAction%%:*}
+        grep -q "查看当前状态摘要" <<<"${output}"
+        grep -q "重建订阅状态" <<<"${output}"
         resetMenuActions
-        manageSubscriptionMainControlDetails <<<"${wgChoice}
+        manageSubscriptionMainControlDetails <<<"1
 7"
-        assertMenuAction "${wgAction#*:}"
-    done
-    resetMenuActions
-    manageSubscriptionMainControlDetails <<<"3
+        assertMenuAction showSubscriptionWireGuardMainCredential
+        for wgAction in "2:showSubscriptionWireGuardPeers" "4:showSubscriptionSourceControlUrls" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
+            wgChoice=${wgAction%%:*}
+            resetMenuActions
+            manageSubscriptionMainControlDetails <<<"${wgChoice}
 7"
-    assertMenuAction showSubscriptionRemoteHealthPlan
-    assertMenuAction subscriptionRemoteControlHealthAll
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"1
+            assertMenuAction "${wgAction#*:}"
+        done
+        resetMenuActions
+        manageSubscriptionMainControlDetails <<<"3
+7"
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction subscriptionRemoteControlHealthAll
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"1
 6"
-    assertMenuAction showSubscriptionGroupsStateSummary
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"2
+        assertMenuAction showSubscriptionGroupsStateSummary
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"2
 6"
-    assertMenuAction createSubscriptionGroupsBackupMenu
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"3
+        assertMenuAction createSubscriptionGroupsBackupMenu
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"3
 6"
-    assertMenuAction showSubscriptionGroupsBackups
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"4
+        assertMenuAction showSubscriptionGroupsBackups
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"4
 6"
-    assertMenuAction restoreSubscriptionGroupsBackupMenu
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"5
+        assertMenuAction restoreSubscriptionGroupsBackupMenu
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"5
 6"
-    assertMenuAction resetSubscriptionGroupsStateMenu
-    setMenuSmokeRole controlled
-    resetMenuActions
-    output=
-    manageSubscription <<<"4"
-    grep -q "接入主控" <<<"${output}"
-    grep -q "查看本机状态" <<<"${output}"
-    grep -q "被控维护与排障" <<<"${output}"
-    if grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "主控维护与排障" <<<"${output}"; then
-        printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
-        return 1
+        assertMenuAction resetSubscriptionGroupsStateMenu
     fi
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscriptionControlledHome <<<"1
+
+    if menuSmokePartSelected subscription-controlled; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole controlled
+        resetMenuActions
+        output=
+        manageSubscription <<<"4"
+        grep -q "接入主控" <<<"${output}"
+        grep -q "查看本机状态" <<<"${output}"
+        grep -q "被控维护与排障" <<<"${output}"
+        if grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "主控维护与排障" <<<"${output}"; then
+            printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
+            return 1
+        fi
+        assertMenuAction menu
+        resetMenuActions
+        manageSubscriptionControlledHome <<<"1
 main-credential
 4"
-    assertMenuAction initSubscriptionWireGuardControlled
-    assertMenuAction importSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionWireGuardControlledCredential
-    assertMenuAction showSubscriptionWireGuardStatus
-    resetMenuActions
-    output=
-    manageSubscriptionControlledHome <<<"2
+        assertMenuAction initSubscriptionWireGuardControlled
+        assertMenuAction importSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionWireGuardControlledCredential
+        assertMenuAction showSubscriptionWireGuardStatus
+        resetMenuActions
+        output=
+        manageSubscriptionControlledHome <<<"2
 4"
-    grep -q "当前服务器角色：" <<<"${output}"
-    assertMenuAction showSubscriptionWireGuardControlledCredential
-    assertMenuAction showSubscriptionWireGuardStatus
-    assertMenuAction showSubscriptionSourceSyncResults
-    resetMenuActions
-    output=
-    manageSubscriptionControlledMaintenance <<<"5"
-    grep -q "导入/更新主控接入凭据" <<<"${output}"
-    grep -q "查看控制面与 Peer 细节" <<<"${output}"
-    grep -q "重写配置并重启被控控制面" <<<"${output}"
-    grep -q "关闭被控控制面" <<<"${output}"
-    if grep -q "查看本机主控接入凭据" <<<"${output}" || grep -q "初始化本机为主控" <<<"${output}"; then
-        printf 'menu-smoke failed: controlled maintenance still shows main-only actions\n' >&2
-        return 1
+        grep -q "当前服务器角色：" <<<"${output}"
+        assertMenuAction showSubscriptionWireGuardControlledCredential
+        assertMenuAction showSubscriptionWireGuardStatus
+        assertMenuAction showSubscriptionSourceSyncResults
+        resetMenuActions
+        output=
+        manageSubscriptionControlledMaintenance <<<"5"
+        grep -q "导入/更新主控接入凭据" <<<"${output}"
+        grep -q "查看控制面与 Peer 细节" <<<"${output}"
+        grep -q "重写配置并重启被控控制面" <<<"${output}"
+        grep -q "关闭被控控制面" <<<"${output}"
+        if grep -q "查看本机主控接入凭据" <<<"${output}" || grep -q "初始化本机为主控" <<<"${output}"; then
+            printf 'menu-smoke failed: controlled maintenance still shows main-only actions\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"1
+5"
+        assertMenuAction importSubscriptionWireGuardMainCredential
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"2
+5"
+        assertMenuAction showSubscriptionWireGuardStatus
+        assertMenuAction showSubscriptionWireGuardPeers
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"3
+5"
+        assertMenuAction restartSubscriptionWireGuardControl
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"4
+5"
+        assertMenuAction disableSubscriptionWireGuardControl
+        resetMenuActions
+        addSubscribeMenu <<<"3" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        setSubscriptionSourceControlTokenMenu <<<"" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        toggleSubscriptionSourceMenu <<<"" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        clearSubscriptionSourceSyncErrorMenu <<<"" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        manageSubscriptionMainHome <<<"4" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        setMenuSmokeRole main
+        manageSubscriptionControlledHome <<<"4" || true
+        assertMenuAction 'errorCard:当前机器已初始化为主控'
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"7"
+        grep -q "安装/更新订阅服务" <<<"${output}"
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"7"
+        grep -q "查看并处理已有订阅" <<<"${output}"
+        resetMenuActions
+        output=
+        manageTrafficAndQuota <<<"8"
+        grep -q "查看用量总览" <<<"${output}"
+        resetMenuActions
+        setMenuSmokeRole controlled
+        manageTrafficAndQuota <<<"8" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"6" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"12" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        setMenuSmokeRole uninitialized
+        manageTrafficAndQuota <<<"8" || true
+        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"6" || true
+        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"12" || true
+        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
     fi
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"1
-5"
-    assertMenuAction importSubscriptionWireGuardMainCredential
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"2
-5"
-    assertMenuAction showSubscriptionWireGuardStatus
-    assertMenuAction showSubscriptionWireGuardPeers
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"3
-5"
-    assertMenuAction restartSubscriptionWireGuardControl
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"4
-5"
-    assertMenuAction disableSubscriptionWireGuardControl
-    resetMenuActions
-    addSubscribeMenu <<<"3" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    setSubscriptionSourceControlTokenMenu <<<"" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    toggleSubscriptionSourceMenu <<<"" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    clearSubscriptionSourceSyncErrorMenu <<<"" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    manageSubscriptionMainHome <<<"4" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    setMenuSmokeRole main
-    manageSubscriptionControlledHome <<<"4" || true
-    assertMenuAction 'errorCard:当前机器已初始化为主控'
-    resetMenuActions
-    output=
-    manageSubscriptionPublishSubscriptions <<<"7"
-    grep -q "安装/更新订阅服务" <<<"${output}"
-    resetMenuActions
-    output=
-    manageSubscriptionPublishSubscriptions <<<"7"
-    grep -q "查看并处理已有订阅" <<<"${output}"
-    resetMenuActions
-    output=
-    manageTrafficAndQuota <<<"8"
-    grep -q "查看用量总览" <<<"${output}"
-    resetMenuActions
-    setMenuSmokeRole controlled
-    manageTrafficAndQuota <<<"8" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"6" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    manageSubscriptionSyncSettings <<<"12" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    setMenuSmokeRole uninitialized
-    manageTrafficAndQuota <<<"8" || true
-    assertMenuAction 'errorCard:当前机器还没完成角色初始化'
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"6" || true
-    assertMenuAction 'errorCard:当前机器还没完成角色初始化'
-    resetMenuActions
-    manageSubscriptionSyncSettings <<<"12" || true
-    assertMenuAction 'errorCard:当前机器还没完成角色初始化'
-    resetMenuActions
-    coreVersionManageMenu <<<"6"
-    assertMenuAction menu
-    if assertMenuAction unexpected-network-version-fetch; then
-        printf 'menu-smoke failed: core menu fetched release versions while rendering overview\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    coreConfigMaintenanceMenu <<<"3"
-    assertMenuAction 'statusCard:Xray 兼容体检'
-    resetMenuActions
-    coreConfigMaintenanceMenu <<<"4"
-    assertMenuAction 'statusCard:Xray 预发布兼容检查'
-    resetMenuActions
-    coreConfigMaintenanceMenu <<<"6"
-    assertMenuAction 'statusCard:sing-box 兼容体检'
-    if assertMenuAction unexpected-network-version-fetch; then
-        printf 'menu-smoke failed: core maintenance fetched release versions while rendering compatibility entries\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    coreServiceControlMenu xray <<<"3"
-    assertMenuAction 'serviceQueueRestart:xray'
-    assertMenuAction serviceQueueApply
-    serviceQueueShouldFail=true
-    resetMenuActions
-    if coreServiceControlMenu sing-box <<<"3" >/dev/null 2>&1; then
+
+    if menuSmokePartSelected core-maintenance; then
+        resetMenuActions
+        coreVersionManageMenu <<<"6"
+        assertMenuAction menu
+        if assertMenuAction unexpected-network-version-fetch; then
+            printf 'menu-smoke failed: core menu fetched release versions while rendering overview\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        coreConfigMaintenanceMenu <<<"3"
+        assertMenuAction 'statusCard:Xray 兼容体检'
+        resetMenuActions
+        coreConfigMaintenanceMenu <<<"4"
+        assertMenuAction 'statusCard:Xray 预发布兼容检查'
+        resetMenuActions
+        coreConfigMaintenanceMenu <<<"6"
+        assertMenuAction 'statusCard:sing-box 兼容体检'
+        if assertMenuAction unexpected-network-version-fetch; then
+            printf 'menu-smoke failed: core maintenance fetched release versions while rendering compatibility entries\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        coreServiceControlMenu xray <<<"3"
+        assertMenuAction 'serviceQueueRestart:xray'
+        assertMenuAction serviceQueueApply
+        serviceQueueShouldFail=true
+        resetMenuActions
+        if coreServiceControlMenu sing-box <<<"3" >/dev/null 2>&1; then
+            serviceQueueShouldFail=
+            return 1
+        fi
         serviceQueueShouldFail=
-        return 1
+        assertMenuAction 'serviceQueueRestart:sing-box'
+        assertMenuAction serviceQueueApply
+        assertMenuAction 'errorCard:sing-box 服务重启失败'
     fi
-    serviceQueueShouldFail=
-    assertMenuAction 'serviceQueueRestart:sing-box'
-    assertMenuAction serviceQueueApply
-    assertMenuAction 'errorCard:sing-box 服务重启失败'
 
     configPath="${oldConfigPath}"
     coreInstallType="${oldCoreInstallType}"
@@ -12825,6 +12995,54 @@ main-credential
     else
         unset REALITY_TARGET_PAGE_SIZE
     fi
+}
+
+runMenuSmokeFullCoreRegression() {
+    runMenuSmokeRegression core
+}
+
+runMenuSmokeFullSubscriptionMainRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync \
+        menu-smoke-full-subscription-main-maintenance
+}
+
+runMenuSmokeFullSubscriptionMainEntryRegression() {
+    runMenuSmokeRegression subscription-main-entry
+}
+
+runMenuSmokeFullSubscriptionMainPublishRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync
+}
+
+runMenuSmokeFullSubscriptionMainPublishServiceRegression() {
+    runMenuSmokeRegression subscription-main-publish-service
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserRegression() {
+    runMenuSmokeRegression subscription-main-publish-user
+}
+
+runMenuSmokeFullSubscriptionMainPublishSyncRegression() {
+    runMenuSmokeRegression subscription-main-publish-sync
+}
+
+runMenuSmokeFullSubscriptionMainMaintenanceRegression() {
+    runMenuSmokeRegression subscription-main-maintenance
+}
+
+runMenuSmokeFullSubscriptionControlledRegression() {
+    runMenuSmokeRegression subscription-controlled
+}
+
+runMenuSmokeFullCoreMaintenanceRegression() {
+    runMenuSmokeRegression core-maintenance
 }
 
 runInstallToolsCertificateDependencyRegression() {
@@ -15196,10 +15414,23 @@ runRegressionFastReality() {
 
 runRegressionUi() {
     runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-sync \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-rollback-source \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-service \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-source-control \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-control-restore \
+        wireguard-menu-flow-bootstrap \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
         menu-smoke \
-        menu-smoke-full \
-        wireguard-restore-runner \
-        wireguard-menu-flow
+        wireguard-restore-runner
 }
 
 runRegressionMenuSmoke() {
@@ -15207,7 +15438,15 @@ runRegressionMenuSmoke() {
 }
 
 runRegressionMenuSmokeFull() {
-    runRegressionStep ui-smoke runMenuSmokeRegression
+    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync \
+        menu-smoke-full-subscription-main-maintenance \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance
 }
 
 runRegressionRouting() {
@@ -15595,13 +15834,13 @@ runRegressionUiParallelCompositionRegression() (
     runRegressionAllSelector() {
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "menu-smoke-full" ]]; then
+        if [[ "${selector}" == "menu-smoke-full-subscription-main-publish-sync" ]]; then
             for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/wireguard-menu-flow-started" ]] && break
+                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-started" ]] && break
                 sleep 0.05
             done
-        elif [[ "${selector}" == "wireguard-menu-flow" ]]; then
-            : >"${TMP_DIR}/wireguard-menu-flow-started"
+        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply" ]]; then
+            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-started"
         fi
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
@@ -15609,18 +15848,67 @@ runRegressionUiParallelCompositionRegression() (
     runMenuSmokeRegression() { runRegressionAllSelector menu-smoke-full; }
     runSubscriptionWireGuardRestoreRunnerRegression() { runRegressionAllSelector wireguard-restore-runner; }
     runSubscriptionWireGuardMenuFlowRegression() { runRegressionAllSelector wireguard-menu-flow; }
+    runSubscriptionWireGuardMenuFlowBootstrapRegression() { runRegressionAllSelector wireguard-menu-flow-bootstrap; }
+    runSubscriptionWireGuardMenuFlowPeerTransactionRegression() { runRegressionAllSelector wireguard-menu-flow-peer-transaction; }
+    runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression() { runRegressionAllSelector wireguard-menu-flow-peer-add-update; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback-apply; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback-source; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback-credential; }
+    runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() { runRegressionAllSelector wireguard-menu-flow-peer-source-control; }
+    runSubscriptionWireGuardMenuFlowControlRestoreRegression() { runRegressionAllSelector wireguard-menu-flow-control-restore; }
 
     runRegressionUi
 
-    for selector in menu-smoke menu-smoke-full wireguard-restore-runner wireguard-menu-flow; do
+    for selector in \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-source-control \
+        wireguard-menu-flow-control-restore \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner; do
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
     done
     awk '
-        $0 == "menu-smoke-full-start" { smokeStart = NR }
-        $0 == "wireguard-menu-flow-start" { wireguardStart = NR }
-        $0 == "menu-smoke-full-finish" { smokeFinish = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-sync-start" { smokeStart = NR }
+        $0 == "wireguard-menu-flow-peer-rollback-apply-start" { wireguardStart = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-sync-finish" { smokeFinish = NR }
         END { exit !(smokeStart && wireguardStart && smokeFinish && wireguardStart < smokeFinish) }
+    ' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-transaction-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-transaction-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-finish' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_PARALLEL_JOBS=4 runRegressionUi
+    awk '
+        /-start$/ {
+            starts++
+            if ($0 == "menu-smoke-full-subscription-main-publish-sync-start") { publishStart = starts }
+            if ($0 == "wireguard-menu-flow-peer-rollback-apply-start") { peerRollbackStart = starts }
+        }
+        END { exit !(publishStart && peerRollbackStart && publishStart <= 4 && peerRollbackStart <= 4) }
     ' "${callLog}"
 )
 
@@ -15877,6 +16165,36 @@ menu-smoke)
 menu-smoke-full)
     regressionRunner=runRegressionMenuSmokeFull
     ;;
+menu-smoke-full-core)
+    regressionRunner=runMenuSmokeFullCoreRegression
+    ;;
+menu-smoke-full-subscription-main)
+    regressionRunner=runMenuSmokeFullSubscriptionMainRegression
+    ;;
+menu-smoke-full-subscription-main-entry)
+    regressionRunner=runMenuSmokeFullSubscriptionMainEntryRegression
+    ;;
+menu-smoke-full-subscription-main-publish)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishRegression
+    ;;
+menu-smoke-full-subscription-main-publish-service)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishServiceRegression
+    ;;
+menu-smoke-full-subscription-main-publish-user)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserRegression
+    ;;
+menu-smoke-full-subscription-main-publish-sync)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishSyncRegression
+    ;;
+menu-smoke-full-subscription-main-maintenance)
+    regressionRunner=runMenuSmokeFullSubscriptionMainMaintenanceRegression
+    ;;
+menu-smoke-full-subscription-controlled)
+    regressionRunner=runMenuSmokeFullSubscriptionControlledRegression
+    ;;
+menu-smoke-full-core-maintenance)
+    regressionRunner=runMenuSmokeFullCoreMaintenanceRegression
+    ;;
 routing)
     regressionRunner=runRegressionRouting
     ;;
@@ -16127,7 +16445,34 @@ targeted-subscription-restore)
     regressionRunner=runRegressionTargetedSubscriptionRestore
     ;;
 wireguard-menu-flow)
-    regressionRunner=runSubscriptionWireGuardMenuFlowRegression
+    regressionRunner=runRegressionWireGuardMenuFlow
+    ;;
+wireguard-menu-flow-bootstrap)
+    regressionRunner=runSubscriptionWireGuardMenuFlowBootstrapRegression
+    ;;
+wireguard-menu-flow-peer-transaction)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerTransactionRegression
+    ;;
+wireguard-menu-flow-peer-add-update)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression
+    ;;
+wireguard-menu-flow-peer-rollback)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackRegression
+    ;;
+wireguard-menu-flow-peer-rollback-apply)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
+    ;;
+wireguard-menu-flow-peer-rollback-source)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
+    ;;
+wireguard-menu-flow-peer-rollback-credential)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
+    ;;
+wireguard-menu-flow-peer-source-control)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
+    ;;
+wireguard-menu-flow-control-restore)
+    regressionRunner=runSubscriptionWireGuardMenuFlowControlRestoreRegression
     ;;
 wireguard-restore-runner)
     regressionRunner=runSubscriptionWireGuardRestoreRunnerRegression
@@ -16139,7 +16484,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-parallel-selector-limit-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-parallel-selector-limit-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
