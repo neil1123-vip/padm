@@ -16147,10 +16147,9 @@ runRegressionAllResourceLayerCompositionRegression() (
         local selector=$2
         printf '%s-start jobs=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
         case "${selector}" in
-        subscription | transaction-system | ui | transaction-core | routing)
+        subscription | ui | transaction-core | routing)
             for _ in 1 2 3 4 5 6 7 8 9 10; do
                 grep -q '^subscription-start ' "${callLog}" &&
-                    grep -q '^transaction-system-start ' "${callLog}" &&
                     grep -q '^ui-start ' "${callLog}" &&
                     grep -q '^transaction-core-start ' "${callLog}" &&
                     grep -q '^routing-start ' "${callLog}" && break
@@ -16168,18 +16167,38 @@ runRegressionAllResourceLayerCompositionRegression() (
             selector = $1
             sub(/-start$/, "", selector)
             print selector
-            if (++count == 5) { exit }
+            if (++count == 4) { exit }
         }
     ' "${callLog}" | sort >"${firstWave}"
-    printf '%s\n' routing subscription transaction-core transaction-system ui | sort >"${expectedFirstWave}"
+    printf '%s\n' routing subscription transaction-core ui | sort >"${expectedFirstWave}"
     cmp -s "${expectedFirstWave}" "${firstWave}"
 
     grep -qx 'subscription-start jobs=3 suppress=1' "${callLog}"
-    grep -qx 'transaction-system-start jobs=1 suppress=1' "${callLog}"
+    grep -qx 'transaction-system-start jobs=4 suppress=1' "${callLog}"
     grep -qx 'transaction-core-start jobs=3 suppress=1' "${callLog}"
     grep -qx 'ui-start jobs=4 suppress=1' "${callLog}"
     grep -qx 'routing-start jobs=1 suppress=1' "${callLog}"
+    grep -qx 'runtime-start jobs=1 suppress=1' "${callLog}"
     grep -qx 'remote-control-smoke-start jobs=1 suppress=1' "${callLog}"
+    grep -qx 'remote-control-contract-service-install-start jobs=1 suppress=1' "${callLog}"
+    awk '
+        $0 == "subscription-finish" { subscriptionFinish = NR }
+        $0 == "ui-finish" { uiFinish = NR }
+        $0 == "transaction-core-finish" { transactionCoreFinish = NR }
+        $0 == "routing-finish" { routingFinish = NR }
+        $0 == "runtime-finish" { runtimeFinish = NR }
+        $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
+        $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
+        $0 == "transaction-system-start jobs=4 suppress=1" { transactionSystemStart = NR }
+        END {
+            exit !(subscriptionFinish && uiFinish && transactionCoreFinish && routingFinish && runtimeFinish &&
+                remoteSmokeFinish && remoteServiceFinish && transactionSystemStart &&
+                subscriptionFinish < transactionSystemStart && uiFinish < transactionSystemStart &&
+                transactionCoreFinish < transactionSystemStart && routingFinish < transactionSystemStart &&
+                runtimeFinish < transactionSystemStart && remoteSmokeFinish < transactionSystemStart &&
+                remoteServiceFinish < transactionSystemStart)
+        }
+    ' "${callLog}"
 )
 
 runRegressionParallelSelectorLimitCompositionRegression() (
@@ -16356,25 +16375,26 @@ runParallelRegressionSelectors() {
     return "${status}"
 }
 
-runRegressionAll() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}" \
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-3}" \
-    PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-4}" \
-    PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}" \
-    PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-1}" \
-    PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}" \
-    PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}" \
-        runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
+runRegressionAll() (
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}"
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-4}"
+    PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
+    PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}"
+
+    runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
         subscription \
-        transaction-system \
         ui \
         transaction-core \
         routing \
         runtime \
         remote-control-smoke \
         remote-control-contract-service-install
+    runRegressionStep transaction-system runRegressionAllSelector transaction-system
     runRegressionStep remote-control-contract-server-response runRegressionAllSelector remote-control-contract-server-response
-}
+)
 
 regressionName=${1:-fast}
 case "${regressionName}" in
