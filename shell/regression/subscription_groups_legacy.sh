@@ -16020,6 +16020,75 @@ runRegressionSelectorDispatchCompositionRegression() (
     ! grep -q "script=${REGRESSION_LEGACY_SCRIPT_PATH}" "${callLog}"
 )
 
+runRegressionAllChildParallelBudgetCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-all-child-parallel-budget-composition.log"
+
+    : >"${callLog}"
+
+    bash() {
+        printf 'selector=%s jobs=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
+
+    grep -qx 'selector=ui jobs=4 suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=2 suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 suppress=1' "${callLog}"
+    grep -qx 'selector=remote-control-smoke jobs=4 suppress=1' "${callLog}"
+)
+
+runRegressionAllResourceLayerCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-all-resource-layer-composition.log"
+    local firstWave="${TMP_DIR}/regression-all-resource-layer-first-wave.log"
+    local expectedFirstWave="${TMP_DIR}/regression-all-resource-layer-expected-first-wave.log"
+
+    : >"${callLog}"
+
+    bash() {
+        local selector=$2
+        printf '%s-start jobs=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        case "${selector}" in
+        subscription | transaction-system | ui | transaction-core | routing)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                grep -q '^subscription-start ' "${callLog}" &&
+                    grep -q '^transaction-system-start ' "${callLog}" &&
+                    grep -q '^ui-start ' "${callLog}" &&
+                    grep -q '^transaction-core-start ' "${callLog}" &&
+                    grep -q '^routing-start ' "${callLog}" && break
+                sleep 0.05
+            done
+            ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    runRegressionAll
+
+    awk '
+        /-start / {
+            selector = $1
+            sub(/-start$/, "", selector)
+            print selector
+            if (++count == 5) { exit }
+        }
+    ' "${callLog}" | sort >"${firstWave}"
+    printf '%s\n' routing subscription transaction-core transaction-system ui | sort >"${expectedFirstWave}"
+    cmp -s "${expectedFirstWave}" "${firstWave}"
+
+    grep -qx 'subscription-start jobs=3 suppress=1' "${callLog}"
+    grep -qx 'transaction-core-start jobs=3 suppress=1' "${callLog}"
+    grep -qx 'ui-start jobs=4 suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 suppress=1' "${callLog}"
+    grep -qx 'remote-control-smoke-start jobs=1 suppress=1' "${callLog}"
+)
+
 runRegressionParallelSelectorLimitCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-parallel-selector-limit-composition.log"
@@ -16053,10 +16122,67 @@ runRegressionParallelSelectorLimitCompositionRegression() (
     ' "${callLog}"
 )
 
+runRegressionParallelSelectorSlotRefillCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-parallel-selector-slot-refill-composition.log"
+    local thirdStarted="${TMP_DIR}/regression-parallel-selector-slot-refill-third-started"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        case "${selector}" in
+        first)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${thirdStarted}" ]] && break
+                sleep 0.05
+            done
+            ;;
+        second) sleep 0.02 ;;
+        third) : >"${thirdStarted}" ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
+        first \
+        second \
+        third
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END { exit !(secondFinish && thirdStart && firstFinish && secondFinish < thirdStart && thirdStart < firstFinish) }
+    ' "${callLog}"
+)
+
 runRegressionAllSelector() {
     local selector=$1
-    if [[ -n "${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}" ]]; then
-        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_CHILD_PARALLEL_JOBS}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+    local childParallelJobs=
+
+    regressionChildParallelJobsForSelector() {
+        case "$1" in
+        subscription) printf '%s\n' "${PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        transaction-core) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        ui) printf '%s\n' "${PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        routing | runtime | remote-control-smoke | remote-control-contract-service-install | remote-control-contract-server-response)
+            printf '%s\n' "${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}"
+            ;;
+        *) printf '%s\n' "${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}" ;;
+        esac
+    }
+
+    childParallelJobs=$(regressionChildParallelJobsForSelector "${selector}")
+    if [[ -n "${childParallelJobs}" ]]; then
+        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
     else
         PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
     fi
@@ -16069,12 +16195,13 @@ runParallelRegressionSelectors() {
     local -a logs=()
     local -a pids=()
     local -a statuses=()
+    local -a rcFiles=()
+    local -a completed=()
     local status=0
     local maxJobs="${PADM_REGRESSION_PARALLEL_JOBS:-0}"
     local nextIndex=0
     local running=0
-    local flushStart=0
-    local i
+    local i madeProgress
 
     if [[ $# -eq 0 ]]; then
         printf 'runParallelRegressionSelectors expects at least one selector\n' >&2
@@ -16085,6 +16212,7 @@ runParallelRegressionSelectors() {
     while [[ $# -gt 0 ]]; do
         selectors+=("$1")
         logs+=("${orchestrationRoot}/$1.log")
+        rcFiles+=("${orchestrationRoot}/$1.rc")
         shift
     done
 
@@ -16093,30 +16221,37 @@ runParallelRegressionSelectors() {
     fi
 
     set +e
-    while [[ "${nextIndex}" -lt "${#selectors[@]}" ]]; do
-        i=${nextIndex}
-        (
-            trap - EXIT INT TERM
-            set -e
-            runRegressionStep "${selectors[$i]}" runRegressionAllSelector "${selectors[$i]}"
-        ) >"${logs[$i]}" 2>&1 &
-        pids[$i]=$!
-        nextIndex=$((nextIndex + 1))
-        running=$((running + 1))
+    while [[ "${nextIndex}" -lt "${#selectors[@]}" || "${running}" -gt 0 ]]; do
+        while [[ "${nextIndex}" -lt "${#selectors[@]}" && "${running}" -lt "${maxJobs}" ]]; do
+            i=${nextIndex}
+            (
+                trap - EXIT INT TERM
+                set +e
+                runRegressionStep "${selectors[$i]}" runRegressionAllSelector "${selectors[$i]}"
+                printf '%s\n' "$?" >"${rcFiles[$i]}"
+            ) >"${logs[$i]}" 2>&1 &
+            pids[$i]=$!
+            completed[$i]=0
+            nextIndex=$((nextIndex + 1))
+            running=$((running + 1))
+        done
 
-        if [[ "${running}" -ge "${maxJobs}" || "${nextIndex}" -ge "${#selectors[@]}" ]]; then
-            for ((i = flushStart; i < nextIndex; i++)); do
-                wait "${pids[$i]}"
-                statuses[$i]=$?
-            done
-            for ((i = flushStart; i < nextIndex; i++)); do
+        madeProgress=
+        for ((i = 0; i < nextIndex; i++)); do
+            if [[ "${completed[$i]:-0}" -eq 0 && -f "${rcFiles[$i]}" ]]; then
+                statuses[$i]=$(<"${rcFiles[$i]}")
+                wait "${pids[$i]}" >/dev/null 2>&1
+                completed[$i]=1
                 [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
                 if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
                     status=${statuses[$i]}
                 fi
-            done
-            flushStart=${nextIndex}
-            running=0
+                running=$((running - 1))
+                madeProgress=1
+            fi
+        done
+        if [[ -z "${madeProgress}" ]]; then
+            sleep 0.05
         fi
     done
     set -e
@@ -16125,17 +16260,21 @@ runParallelRegressionSelectors() {
 }
 
 runRegressionAll() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-0}" \
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-4}" \
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}" \
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-3}" \
+    PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-4}" \
+    PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}" \
+    PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}" \
+    PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}" \
         runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
-        routing \
         subscription \
-        runtime \
-        transaction-core \
         transaction-system \
+        ui \
+        transaction-core \
+        routing \
+        runtime \
         remote-control-smoke \
-        remote-control-contract-service-install \
-        ui
+        remote-control-contract-service-install
     runRegressionStep remote-control-contract-server-response runRegressionAllSelector remote-control-contract-server-response
 }
 
@@ -16423,8 +16562,17 @@ regression-ui-parallel-composition)
 regression-selector-dispatch-composition)
     regressionRunner=runRegressionSelectorDispatchCompositionRegression
     ;;
+regression-all-child-parallel-budget-composition)
+    regressionRunner=runRegressionAllChildParallelBudgetCompositionRegression
+    ;;
+regression-all-resource-layer-composition)
+    regressionRunner=runRegressionAllResourceLayerCompositionRegression
+    ;;
 regression-parallel-selector-limit-composition)
     regressionRunner=runRegressionParallelSelectorLimitCompositionRegression
+    ;;
+regression-parallel-selector-slot-refill-composition)
+    regressionRunner=runRegressionParallelSelectorSlotRefillCompositionRegression
     ;;
 transaction)
     regressionRunner=runRegressionTransaction
@@ -16484,7 +16632,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-parallel-selector-limit-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
