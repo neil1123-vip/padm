@@ -834,19 +834,19 @@ updateAloneNginxConfig() {
 traditionalTlsFallbackSelection() {
     local selection=
     if currentProtocolHas 25; then
-        selection="2"
+        selection="25"
     fi
     if currentProtocolHas 24; then
         if [[ -n "${selection}" ]]; then
-            selection="${selection},5"
+            selection="${selection},24"
         else
-            selection="5"
+            selection="24"
         fi
     fi
     if [[ -z "${selection}" ]]; then
-        selection="0"
+        selection="27"
     elif currentProtocolHas 27; then
-        selection="0,${selection}"
+        selection="27,${selection}"
     fi
     printf '%s\n' "${selection}"
 }

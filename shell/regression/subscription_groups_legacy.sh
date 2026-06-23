@@ -5495,9 +5495,17 @@ SH
     updateSELinuxHTTPPortT() { return 0; }
     protocolSelectionSkipsNginx() { return 1; }
     nginxServiceInstalled() { return 0; }
+    padmReadProcExe() {
+        [[ "$1" == "/proc/12345/exe" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]] || return 1
+        printf '/usr/sbin/nginx\n'
+    }
+    padmReadProcCmdline() {
+        [[ "$1" == "/proc/12345/cmdline" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]] || return 1
+        printf 'nginx: master process nginx\n'
+    }
     release=centos
     selectCustomInstallType=
-    btDomain=panel.example.com
+    btDomain=
     SERVICE_QUEUE_ALLOW_FAILURE=true
     export PADM_FAKE_NGINX_STATE_FILE="${serviceTmp}/nginx-running"
     export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
@@ -6075,6 +6083,7 @@ runUninstallServiceStopFailureRegression() (
         rm -f "${rcFile}"
         release=centos
         coreInstallType=1
+        currentInstallProtocolType=",27,"
         singBoxConfigPath="${root}/sing-box-conf/"
         nginxStaticPath="${root}/static"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
@@ -7480,7 +7489,7 @@ SH
         grep -q '请先重建 alone.conf' "${errorLog}"
     ) || return 1
 
-    currentInstallProtocolType=",0,5,"
+    currentInstallProtocolType=",24,27,"
     currentHost=example.com
     currentPort=443
     currentPath=padm
@@ -15801,23 +15810,102 @@ runRegressionTransactionSubscription() {
 }
 
 runRegressionTransactionSystem() {
-    runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
-        runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
-        runRegressionStep clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression &&
-        runRegressionStep fail2ban-managed-cleanup runFail2banManagedCleanupRegression &&
-        runRegressionStep fail2ban-apply-transaction runFail2banApplyTransactionRegression &&
-        runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
-        runRegressionStep wireguard-key-transaction runWireGuardKeyTransactionRegression &&
-        runRegressionStep wireguard-control-safe-dir runWireGuardControlSafeDirRegression &&
-        runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&
-        runRegressionStep warp-config-file-cleanup runWarpConfigFileCleanupRegression &&
-        runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
-        runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
-        runRegressionStep clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression &&
-        runRegressionStep clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression &&
-        runRegressionStep alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression &&
-        runRegressionStep alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
+        nginx-service-failure \
+        uninstall-nginx-cleanup \
+        clean-agent-nginx-managed-remove \
+        fail2ban-managed-cleanup \
+        fail2ban-apply-transaction \
+        uninstall-wireguard-cleanup \
+        wireguard-key-transaction \
+        wireguard-control-safe-dir \
+        warp-config-safe-dir \
+        warp-config-file-cleanup \
+        uninstall-service-stop-failure \
+        clean-last-installation-failure \
+        clean-last-installation-acme-home \
+        clean-last-installation-acme-relative-home \
+        alone-nginx-write-transaction \
+        alone-nginx-update-transaction
 }
+
+runRegressionTransactionSystemParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-transaction-system-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "nginx-service-failure" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/fail2ban-apply-transaction-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "fail2ban-apply-transaction" ]]; then
+            : >"${TMP_DIR}/fail2ban-apply-transaction-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runNginxServiceFailureRegression() { runRegressionAllSelector nginx-service-failure; }
+    runUninstallNginxCleanupRegression() { runRegressionAllSelector uninstall-nginx-cleanup; }
+    runCleanAgentNginxManagedRemovalRegression() { runRegressionAllSelector clean-agent-nginx-managed-remove; }
+    runFail2banManagedCleanupRegression() { runRegressionAllSelector fail2ban-managed-cleanup; }
+    runFail2banApplyTransactionRegression() { runRegressionAllSelector fail2ban-apply-transaction; }
+    runUninstallWireGuardCleanupRegression() { runRegressionAllSelector uninstall-wireguard-cleanup; }
+    runWireGuardKeyTransactionRegression() { runRegressionAllSelector wireguard-key-transaction; }
+    runWireGuardControlSafeDirRegression() { runRegressionAllSelector wireguard-control-safe-dir; }
+    runWarpConfigSafeDirRegression() { runRegressionAllSelector warp-config-safe-dir; }
+    runWarpConfigFileCleanupRegression() { runRegressionAllSelector warp-config-file-cleanup; }
+    runUninstallServiceStopFailureRegression() { runRegressionAllSelector uninstall-service-stop-failure; }
+    runCleanLastInstallationConfigFailureRegression() { runRegressionAllSelector clean-last-installation-failure; }
+    runCleanLastInstallationConfigAcmeHomeFailureRegression() { runRegressionAllSelector clean-last-installation-acme-home; }
+    runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() { runRegressionAllSelector clean-last-installation-acme-relative-home; }
+    runAloneNginxConfigWriteTransactionRegression() { runRegressionAllSelector alone-nginx-write-transaction; }
+    runAloneNginxUpdateTransactionRegression() { runRegressionAllSelector alone-nginx-update-transaction; }
+
+    runRegressionTransactionSystem
+
+    for selector in \
+        nginx-service-failure \
+        uninstall-nginx-cleanup \
+        clean-agent-nginx-managed-remove \
+        fail2ban-managed-cleanup \
+        fail2ban-apply-transaction \
+        uninstall-wireguard-cleanup \
+        wireguard-key-transaction \
+        wireguard-control-safe-dir \
+        warp-config-safe-dir \
+        warp-config-file-cleanup \
+        uninstall-service-stop-failure \
+        clean-last-installation-failure \
+        clean-last-installation-acme-home \
+        clean-last-installation-acme-relative-home \
+        alone-nginx-write-transaction \
+        alone-nginx-update-transaction; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "nginx-service-failure-start" { firstStart = NR }
+        $0 == "fail2ban-apply-transaction-start" { fail2banStart = NR }
+        $0 == "nginx-service-failure-finish" { firstFinish = NR }
+        END { exit !(firstStart && fail2banStart && firstFinish && fail2banStart < firstFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/fail2ban-apply-transaction-started"
+    PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS=1 runRegressionTransactionSystem
+    awk '
+        $0 == "nginx-service-failure-finish" { firstFinish = NR }
+        $0 == "uninstall-nginx-cleanup-start" { secondStart = NR }
+        $0 == "uninstall-nginx-cleanup-finish" { secondFinish = NR }
+        $0 == "clean-agent-nginx-managed-remove-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
 
 runRegressionTransaction() {
     runRegressionTransactionCore &&
@@ -16033,12 +16121,16 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector ui
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector transaction-system
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector routing
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
 
     grep -qx 'selector=ui jobs=4 suppress=1' "${callLog}"
     grep -qx 'selector=ui jobs=2 suppress=1' "${callLog}"
     grep -qx 'selector=transaction-core jobs=4 suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=4 suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=2 suppress=1' "${callLog}"
     grep -qx 'selector=routing jobs=4 suppress=1' "${callLog}"
     grep -qx 'selector=remote-control-smoke jobs=4 suppress=1' "${callLog}"
 )
@@ -16083,6 +16175,7 @@ runRegressionAllResourceLayerCompositionRegression() (
     cmp -s "${expectedFirstWave}" "${firstWave}"
 
     grep -qx 'subscription-start jobs=3 suppress=1' "${callLog}"
+    grep -qx 'transaction-system-start jobs=1 suppress=1' "${callLog}"
     grep -qx 'transaction-core-start jobs=3 suppress=1' "${callLog}"
     grep -qx 'ui-start jobs=4 suppress=1' "${callLog}"
     grep -qx 'routing-start jobs=1 suppress=1' "${callLog}"
@@ -16171,6 +16264,7 @@ runRegressionAllSelector() {
     regressionChildParallelJobsForSelector() {
         case "$1" in
         subscription) printf '%s\n' "${PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        transaction-system) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         transaction-core) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         ui) printf '%s\n' "${PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         routing | runtime | remote-control-smoke | remote-control-contract-service-install | remote-control-contract-server-response)
@@ -16226,9 +16320,12 @@ runParallelRegressionSelectors() {
             i=${nextIndex}
             (
                 trap - EXIT INT TERM
+                rc=0
                 set +e
                 runRegressionStep "${selectors[$i]}" runRegressionAllSelector "${selectors[$i]}"
-                printf '%s\n' "$?" >"${rcFiles[$i]}"
+                rc=$?
+                printf '%s\n' "${rc}" >"${rcFiles[$i]}"
+                exit "${rc}"
             ) >"${logs[$i]}" 2>&1 &
             pids[$i]=$!
             completed[$i]=0
@@ -16264,6 +16361,7 @@ runRegressionAll() {
     PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-3}" \
     PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-4}" \
     PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}" \
+    PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-1}" \
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}" \
     PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}" \
         runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
@@ -16556,6 +16654,9 @@ regression-subscription-write-transaction-parallel-composition)
 regression-transaction-core-parallel-composition)
     regressionRunner=runRegressionTransactionCoreParallelCompositionRegression
     ;;
+regression-transaction-system-parallel-composition)
+    regressionRunner=runRegressionTransactionSystemParallelCompositionRegression
+    ;;
 regression-ui-parallel-composition)
     regressionRunner=runRegressionUiParallelCompositionRegression
     ;;
@@ -16585,6 +16686,54 @@ transaction-subscription)
     ;;
 transaction-system)
     regressionRunner=runRegressionTransactionSystem
+    ;;
+nginx-service-failure)
+    regressionRunner=runNginxServiceFailureRegression
+    ;;
+uninstall-nginx-cleanup)
+    regressionRunner=runUninstallNginxCleanupRegression
+    ;;
+clean-agent-nginx-managed-remove)
+    regressionRunner=runCleanAgentNginxManagedRemovalRegression
+    ;;
+fail2ban-managed-cleanup)
+    regressionRunner=runFail2banManagedCleanupRegression
+    ;;
+fail2ban-apply-transaction)
+    regressionRunner=runFail2banApplyTransactionRegression
+    ;;
+uninstall-wireguard-cleanup)
+    regressionRunner=runUninstallWireGuardCleanupRegression
+    ;;
+wireguard-key-transaction)
+    regressionRunner=runWireGuardKeyTransactionRegression
+    ;;
+wireguard-control-safe-dir)
+    regressionRunner=runWireGuardControlSafeDirRegression
+    ;;
+warp-config-safe-dir)
+    regressionRunner=runWarpConfigSafeDirRegression
+    ;;
+warp-config-file-cleanup)
+    regressionRunner=runWarpConfigFileCleanupRegression
+    ;;
+uninstall-service-stop-failure)
+    regressionRunner=runUninstallServiceStopFailureRegression
+    ;;
+clean-last-installation-failure)
+    regressionRunner=runCleanLastInstallationConfigFailureRegression
+    ;;
+clean-last-installation-acme-home)
+    regressionRunner=runCleanLastInstallationConfigAcmeHomeFailureRegression
+    ;;
+clean-last-installation-acme-relative-home)
+    regressionRunner=runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
+    ;;
+alone-nginx-write-transaction)
+    regressionRunner=runAloneNginxConfigWriteTransactionRegression
+    ;;
+alone-nginx-update-transaction)
+    regressionRunner=runAloneNginxUpdateTransactionRegression
     ;;
 targeted-batch-helpers)
     regressionRunner=runRegressionTargetedBatchHelpers
@@ -16632,7 +16781,7 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
