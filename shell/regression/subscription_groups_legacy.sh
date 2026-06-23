@@ -15873,9 +15873,45 @@ runRegressionSubscriptionParallelCompositionRegression() (
         $0 == "subscription-output-finish" { outputFinish = NR }
         END { exit !(outputStart && stateStart && outputFinish && stateStart < outputFinish) }
     ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/subscription-state-started"
+    PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionSubscription
+
+    for selector in subscription-output subscription-state subscription-remote-fetch subscription-write-transaction; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "subscription-output-start" { outputStart = NR }
+        $0 == "subscription-state-start" { stateStart = NR }
+        $0 == "subscription-output-finish" { outputFinish = NR }
+        $0 == "subscription-state-finish" { stateFinish = NR }
+        $0 == "subscription-write-transaction-start" { writeStart = NR }
+        $0 == "subscription-remote-fetch-start" { remoteStart = NR }
+        END {
+            exit !(outputStart && stateStart && outputFinish && stateFinish && writeStart && remoteStart &&
+                stateStart < outputFinish &&
+                outputFinish < writeStart && stateFinish < writeStart &&
+                outputFinish < remoteStart && stateFinish < remoteStart)
+        }
+    ' "${callLog}"
 )
 
 runRegressionSubscription() {
+    if [[ "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" == "all" ]]; then
+        runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
+            subscription-output \
+            subscription-state
+        (
+            export PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-2}"
+            runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
+                subscription-write-transaction \
+                subscription-remote-fetch
+        )
+        return
+    fi
+
     runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
         subscription-output \
         subscription-state \
@@ -16628,12 +16664,13 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     : >"${callLog}"
 
     bash() {
-        printf 'selector=%s jobs=%s profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
     }
 
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector ui
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelector subscription
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-core
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector transaction-system
@@ -16641,15 +16678,16 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector routing
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
 
-    grep -qx 'selector=ui jobs=4 profile= suppress=1' "${callLog}"
-    grep -qx 'selector=ui jobs=2 profile= suppress=1' "${callLog}"
-    grep -qx 'selector=ui jobs=4 profile=all suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-core jobs=4 profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=4 profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=2 profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=4 profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=2 profile= suppress=1' "${callLog}"
-    grep -qx 'selector=remote-control-smoke jobs=4 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 ui_profile= subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=2 ui_profile= subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 ui_profile=all subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=subscription jobs=4 ui_profile= subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=4 ui_profile= subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=2 ui_profile= subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=2 ui_profile= subscription_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=remote-control-smoke jobs=4 ui_profile= subscription_profile= suppress=1' "${callLog}"
 )
 
 runRegressionAllResourceLayerCompositionRegression() (
@@ -16662,7 +16700,7 @@ runRegressionAllResourceLayerCompositionRegression() (
 
     bash() {
         local selector=$2
-        printf '%s-start jobs=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        printf '%s-start jobs=%s ui_profile=%s subscription_profile=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
         case "${selector}" in
         subscription | ui | transaction-core | routing)
             for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -16690,14 +16728,14 @@ runRegressionAllResourceLayerCompositionRegression() (
     printf '%s\n' routing subscription transaction-core ui | sort >"${expectedFirstWave}"
     cmp -s "${expectedFirstWave}" "${firstWave}"
 
-    grep -qx 'subscription-start jobs=3 suppress=1' "${callLog}"
-    grep -qx 'transaction-system-start jobs=4 suppress=1' "${callLog}"
-    grep -qx 'transaction-core-start jobs=3 suppress=1' "${callLog}"
-    grep -qx 'ui-start jobs=4 suppress=1' "${callLog}"
-    grep -qx 'routing-start jobs=1 suppress=1' "${callLog}"
-    grep -qx 'runtime-start jobs=1 suppress=1' "${callLog}"
-    grep -qx 'remote-control-smoke-start jobs=1 suppress=1' "${callLog}"
-    grep -qx 'remote-control-contract-service-install-start jobs=1 suppress=1' "${callLog}"
+    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
+    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all suppress=1' "${callLog}"
     awk '
         $0 == "subscription-finish" { subscriptionFinish = NR }
         $0 == "ui-finish" { uiFinish = NR }
@@ -16706,7 +16744,7 @@ runRegressionAllResourceLayerCompositionRegression() (
         $0 == "runtime-finish" { runtimeFinish = NR }
         $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
         $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
-        $0 == "transaction-system-start jobs=4 suppress=1" { transactionSystemStart = NR }
+        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all suppress=1" { transactionSystemStart = NR }
         END {
             exit !(subscriptionFinish && uiFinish && transactionCoreFinish && routingFinish && runtimeFinish &&
                 remoteSmokeFinish && remoteServiceFinish && transactionSystemStart &&
@@ -16813,17 +16851,45 @@ runRegressionAllSelector() {
 
     childParallelJobs=$(regressionChildParallelJobsForSelector "${selector}")
     if [[ -n "${childParallelJobs}" ]]; then
-        if [[ "${selector}" == "ui" && -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
-            PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-        else
+        case "${selector}" in
+        ui)
+            if [[ -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        subscription)
+            if [[ -n "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        *)
             PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-        fi
+            ;;
+        esac
     else
-        if [[ "${selector}" == "ui" && -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
-            PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-        else
+        case "${selector}" in
+        ui)
+            if [[ -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        subscription)
+            if [[ -n "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        *)
             PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-        fi
+            ;;
+        esac
     fi
 }
 
@@ -16907,6 +16973,7 @@ runRegressionAll() (
     PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-4}"
     PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_UI_RESOURCE_PROFILE:-all}"
     PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_SUBSCRIPTION_RESOURCE_PROFILE:-all}"
     PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
     PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_ROUTING_CHILD_PARALLEL_JOBS:-1}"
