@@ -10754,6 +10754,7 @@ runSubscriptionSyncAppendLocalUserBatchRegression() (
 )
 
 runRemoteSubscribeFetchRegression() {
+    local remoteFetchPart="${1:-all}"
     local publicDir="${TMP_DIR}/remote-subscribe-public"
     local localDir="${TMP_DIR}/remote-subscribe-local"
     local email="sub_team"
@@ -10778,6 +10779,10 @@ JSON
     : >"${fetchTmpMarker}"
     : >"${stageTmpMarker}"
 
+    remoteSubscribeFetchPartSelected() {
+        [[ "${remoteFetchPart}" == "all" || "${remoteFetchPart}" == "$1" ]]
+    }
+
     writeRemoteSubscribeOldOutputs() {
         printf 'old-default\n' >"${publicDir}/default/${emailMd5}"
         printf 'old-clash\n' >"${publicDir}/clashMeta/${emailMd5}"
@@ -10787,9 +10792,11 @@ JSON
     eval "$(declare -f appendUniqueLines | sed '1s/^appendUniqueLines/originalAppendUniqueLines/')"
     eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
 
-    printf '%s\n' old same >"${uniqueFile}"
-    appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"
-    cmp -s "${uniqueFile}" <(printf '%s\n' old same new)
+    if remoteSubscribeFetchPartSelected unique; then
+        printf '%s\n' old same >"${uniqueFile}"
+        appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"
+        cmp -s "${uniqueFile}" <(printf '%s\n' old same new)
+    fi
 
     recordRemoteSubscribeTmpDirs() {
         find "${remoteTmpRoot}" -maxdepth 1 -type d -name 'padm-remote-subscribe-fetch.*' -print >>"${fetchTmpMarker}" 2>/dev/null || true
@@ -10837,39 +10844,44 @@ JSON
         return 97
     }
 
-    writeRemoteSubscribeOldOutputs
-    export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fail-singbox-merge
-    printf '{bad local json\n' >"${localDir}/sing-box/${email}"
-    if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
-    [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
-    [[ "$(<"${localDir}/sing-box/${email}")" == "{bad local json" ]]
-    grep -q . "${fetchTmpMarker}"
-    grep -q . "${stageTmpMarker}"
-    while IFS= read -r path; do
-        [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-fetch.* ]] || return 1
-    done <"${fetchTmpMarker}"
-    while IFS= read -r path; do
-        [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-stage.* ]] || return 1
-    done <"${stageTmpMarker}"
-    if regressionFindHasMatches "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
-        return 1
+    if remoteSubscribeFetchPartSelected rollback; then
+        writeRemoteSubscribeOldOutputs
+        export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fail-singbox-merge
+        printf '{bad local json\n' >"${localDir}/sing-box/${email}"
+        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+            return 1
+        fi
+        [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+        [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+        [[ "$(<"${localDir}/sing-box/${email}")" == "{bad local json" ]]
+        grep -q . "${fetchTmpMarker}"
+        grep -q . "${stageTmpMarker}"
+        while IFS= read -r path; do
+            [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-fetch.* ]] || return 1
+        done <"${fetchTmpMarker}"
+        while IFS= read -r path; do
+            [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-stage.* ]] || return 1
+        done <"${stageTmpMarker}"
+        if regressionFindHasMatches "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
+            return 1
+        fi
     fi
 
-    writeRemoteSubscribeOldOutputs
-    unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
-    updateRemoteSubscribe "${emailMd5}" "${email}"
-    grep -qxF -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}"
-    grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
-    grep -qxF 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}"
-    jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
-    [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
-    [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
-    [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
+    if remoteSubscribeFetchPartSelected merge; then
+        writeRemoteSubscribeOldOutputs
+        unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
+        updateRemoteSubscribe "${emailMd5}" "${email}"
+        grep -qxF -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}"
+        grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
+        grep -qxF 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}"
+        jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+        [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
+        [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
+        [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
+    fi
 
-    (
+    if remoteSubscribeFetchPartSelected controlled; then
+        (
         local controlledRoot="${TMP_DIR}/remote-controlled-fetch"
         local controlledState="${controlledRoot}/state"
         local controlledPublic="${controlledRoot}/public"
@@ -10911,10 +10923,12 @@ JSON
         if [[ -n "${oldSubscribeLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldSubscribeLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
         if [[ -n "${oldSubscribeDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldSubscribeDir}"; else unset PADM_SUBSCRIBE_DIR; fi
         if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-    )
+        )
+    fi
 
-    writeRemoteSubscribeOldOutputs
-    (
+    if remoteSubscribeFetchPartSelected append-failure; then
+        writeRemoteSubscribeOldOutputs
+        (
         local appendCalls=0
         appendUniqueLines() {
             appendCalls=$((appendCalls + 1))
@@ -10932,10 +10946,12 @@ JSON
         [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
         [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
         [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
-    )
+        )
+    fi
 
-    writeRemoteSubscribeOldOutputs
-    (
+    if remoteSubscribeFetchPartSelected commit-failure; then
+        writeRemoteSubscribeOldOutputs
+        (
         local commitCalls=0
         commitGeneratedFile() {
             commitCalls=$((commitCalls + 1))
@@ -10956,13 +10972,18 @@ JSON
         if regressionFindHasMatches "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
             return 1
         fi
-    )
+        )
+    fi
 
-    updateRemoteSubscribe "${emailMd5}" "${email}"
-    [[ "$(grep -cFx -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
-    [[ "$(grep -cFx 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
-    [[ "$(grep -cFx 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
-    jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+    if remoteSubscribeFetchPartSelected idempotent; then
+        writeRemoteSubscribeOldOutputs
+        updateRemoteSubscribe "${emailMd5}" "${email}"
+        updateRemoteSubscribe "${emailMd5}" "${email}"
+        [[ "$(grep -cFx -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
+        [[ "$(grep -cFx 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
+        [[ "$(grep -cFx 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
+        jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+    fi
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
@@ -15540,6 +15561,28 @@ runRegressionFastReality() {
 }
 
 runRegressionUi() {
+    if [[ "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" == "all" ]]; then
+        runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+            menu-smoke-full-subscription-main-publish-sync \
+            wireguard-menu-flow-peer-rollback-apply \
+            wireguard-menu-flow-peer-rollback-credential \
+            wireguard-menu-flow-peer-rollback-source \
+            menu-smoke-full-subscription-main-publish-user \
+            menu-smoke-full-subscription-main-publish-service \
+            wireguard-menu-flow-peer-add-update \
+            wireguard-menu-flow-peer-source-control \
+            menu-smoke-full-subscription-main-maintenance \
+            wireguard-menu-flow-control-restore \
+            wireguard-menu-flow-bootstrap \
+            menu-smoke-full-subscription-main-entry \
+            menu-smoke-full-subscription-controlled \
+            menu-smoke-full-core \
+            menu-smoke-full-core-maintenance \
+            menu-smoke \
+            wireguard-restore-runner
+        return
+    fi
+
     runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
         menu-smoke-full-subscription-main-publish-sync-enable \
         wireguard-menu-flow-peer-rollback-apply-service \
@@ -15614,8 +15657,99 @@ runRegressionSubscriptionState() {
 }
 
 runRegressionSubscriptionRemoteFetch() {
-    runRegressionStep subscription-remote-fetch runRemoteSubscribeFetchRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-fetch-parallel-${BASHPID:-$$}" \
+        subscription-remote-fetch-unique \
+        subscription-remote-fetch-rollback \
+        subscription-remote-fetch-merge \
+        subscription-remote-fetch-controlled \
+        subscription-remote-fetch-append-failure \
+        subscription-remote-fetch-commit-failure \
+        subscription-remote-fetch-idempotent
 }
+
+runRemoteSubscribeFetchUniqueRegression() {
+    runRemoteSubscribeFetchRegression unique
+}
+
+runRemoteSubscribeFetchRollbackRegression() {
+    runRemoteSubscribeFetchRegression rollback
+}
+
+runRemoteSubscribeFetchMergeRegression() {
+    runRemoteSubscribeFetchRegression merge
+}
+
+runRemoteSubscribeFetchControlledRegression() {
+    runRemoteSubscribeFetchRegression controlled
+}
+
+runRemoteSubscribeFetchAppendFailureRegression() {
+    runRemoteSubscribeFetchRegression append-failure
+}
+
+runRemoteSubscribeFetchCommitFailureRegression() {
+    runRemoteSubscribeFetchRegression commit-failure
+}
+
+runRemoteSubscribeFetchIdempotentRegression() {
+    runRemoteSubscribeFetchRegression idempotent
+}
+
+runRegressionSubscriptionRemoteFetchParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-remote-fetch-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "subscription-remote-fetch-unique" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-remote-fetch-merge-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription-remote-fetch-merge" ]]; then
+            : >"${TMP_DIR}/subscription-remote-fetch-merge-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRemoteSubscribeFetchRegression() { runRegressionAllSelector subscription-remote-fetch; }
+
+    runRegressionSubscriptionRemoteFetch
+
+    for selector in \
+        subscription-remote-fetch-unique \
+        subscription-remote-fetch-rollback \
+        subscription-remote-fetch-merge \
+        subscription-remote-fetch-controlled \
+        subscription-remote-fetch-append-failure \
+        subscription-remote-fetch-commit-failure \
+        subscription-remote-fetch-idempotent; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "subscription-remote-fetch-unique-start" { uniqueStart = NR }
+        $0 == "subscription-remote-fetch-merge-start" { mergeStart = NR }
+        $0 == "subscription-remote-fetch-unique-finish" { uniqueFinish = NR }
+        END { exit !(uniqueStart && mergeStart && uniqueFinish && mergeStart < uniqueFinish) }
+    ' "${callLog}"
+    ! grep -qx 'subscription-remote-fetch-start' "${callLog}"
+    ! grep -qx 'subscription-remote-fetch-finish' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/subscription-remote-fetch-merge-started"
+    PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS=1 runRegressionSubscriptionRemoteFetch
+    awk '
+        $0 == "subscription-remote-fetch-unique-finish" { firstFinish = NR }
+        $0 == "subscription-remote-fetch-rollback-start" { secondStart = NR }
+        $0 == "subscription-remote-fetch-rollback-finish" { secondFinish = NR }
+        $0 == "subscription-remote-fetch-merge-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
 
 runRegressionSubscriptionWriteTransaction() {
     runParallelRegressionSelectors "${TMP_DIR}/subscription-write-transaction-parallel-${BASHPID:-$$}" \
@@ -16293,6 +16427,34 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ! grep -qx 'wireguard-menu-flow-peer-source-control-finish' "${callLog}"
 
     : >"${callLog}"
+    PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionUi
+    for selector in \
+        menu-smoke-full-subscription-main-publish-sync \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-rollback-source \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-service \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-source-control \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-control-restore \
+        wireguard-menu-flow-bootstrap \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-enable-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-service-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-write-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-toggle-start' "${callLog}"
+
+    : >"${callLog}"
     runMenuSmokeFullSubscriptionMainPublishUserRegression
     for selector in \
         menu-smoke-full-subscription-main-publish-user-empty \
@@ -16466,11 +16628,12 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     : >"${callLog}"
 
     bash() {
-        printf 'selector=%s jobs=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        printf 'selector=%s jobs=%s profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
     }
 
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelector ui
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-core
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector transaction-system
@@ -16478,14 +16641,15 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector routing
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
 
-    grep -qx 'selector=ui jobs=4 suppress=1' "${callLog}"
-    grep -qx 'selector=ui jobs=2 suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-core jobs=4 suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=4 suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=2 suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=4 suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=2 suppress=1' "${callLog}"
-    grep -qx 'selector=remote-control-smoke jobs=4 suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=2 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 profile=all suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=4 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=2 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=2 profile= suppress=1' "${callLog}"
+    grep -qx 'selector=remote-control-smoke jobs=4 profile= suppress=1' "${callLog}"
 )
 
 runRegressionAllResourceLayerCompositionRegression() (
@@ -16649,9 +16813,17 @@ runRegressionAllSelector() {
 
     childParallelJobs=$(regressionChildParallelJobsForSelector "${selector}")
     if [[ -n "${childParallelJobs}" ]]; then
-        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+        if [[ "${selector}" == "ui" && -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
+            PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+        else
+            PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+        fi
     else
-        PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+        if [[ "${selector}" == "ui" && -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
+            PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+        else
+            PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+        fi
     fi
 }
 
@@ -16733,6 +16905,7 @@ runRegressionAll() (
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}"
     PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-3}"
     PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-4}"
+    PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_UI_RESOURCE_PROFILE:-all}"
     PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}"
     PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
@@ -16884,6 +17057,27 @@ subscription-state)
     ;;
 subscription-remote-fetch)
     regressionRunner=runRegressionSubscriptionRemoteFetch
+    ;;
+subscription-remote-fetch-unique)
+    regressionRunner=runRemoteSubscribeFetchUniqueRegression
+    ;;
+subscription-remote-fetch-rollback)
+    regressionRunner=runRemoteSubscribeFetchRollbackRegression
+    ;;
+subscription-remote-fetch-merge)
+    regressionRunner=runRemoteSubscribeFetchMergeRegression
+    ;;
+subscription-remote-fetch-controlled)
+    regressionRunner=runRemoteSubscribeFetchControlledRegression
+    ;;
+subscription-remote-fetch-append-failure)
+    regressionRunner=runRemoteSubscribeFetchAppendFailureRegression
+    ;;
+subscription-remote-fetch-commit-failure)
+    regressionRunner=runRemoteSubscribeFetchCommitFailureRegression
+    ;;
+subscription-remote-fetch-idempotent)
+    regressionRunner=runRemoteSubscribeFetchIdempotentRegression
     ;;
 subscription-write-transaction)
     regressionRunner=runRegressionSubscriptionWriteTransaction
@@ -17086,6 +17280,9 @@ regression-subscription-parallel-composition)
 regression-subscription-write-transaction-parallel-composition)
     regressionRunner=runRegressionSubscriptionWriteTransactionParallelCompositionRegression
     ;;
+regression-subscription-remote-fetch-parallel-composition)
+    regressionRunner=runRegressionSubscriptionRemoteFetchParallelCompositionRegression
+    ;;
 regression-routing-parallel-composition)
     regressionRunner=runRegressionRoutingParallelCompositionRegression
     ;;
@@ -17245,7 +17442,8 @@ all|full|ci)
 *)
     printf 'routing leaf selectors: routing-core|routing-core-unsafe-config-dir|routing-access-control-failure-return|routing-access-control-config-transaction|routing-access-control-unsafe-backup-dir|routing-access-control-unsafe-config-dir|routing-bt-failure-return|routing-ipv6-failure-return|routing-warp-failure-return|routing-socks5-failure-return|routing-dns-failure-return|routing-dns-unsafe-backup-dir|routing-dns-unsafe-config-dir|routing-dns-restore-scope|routing-port-panel\n' >&2
     printf 'ui leaf selectors: menu-smoke-full-subscription-main-publish-user-empty|menu-smoke-full-subscription-main-publish-user-create|menu-smoke-full-subscription-main-publish-user-inspect|menu-smoke-full-subscription-main-publish-sync-skip|menu-smoke-full-subscription-main-publish-sync-enable|wireguard-menu-flow-peer-rollback-apply-service|wireguard-menu-flow-peer-rollback-apply-restore|wireguard-menu-flow-peer-rollback-credential-write|wireguard-menu-flow-peer-rollback-credential-groups-restore|wireguard-menu-flow-peer-source-control-toggle|wireguard-menu-flow-peer-source-control-clear-error|wireguard-menu-flow-peer-source-control-status\n' >&2
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-routing-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'subscription remote fetch leaf selectors: subscription-remote-fetch-unique|subscription-remote-fetch-rollback|subscription-remote-fetch-merge|subscription-remote-fetch-controlled|subscription-remote-fetch-append-failure|subscription-remote-fetch-commit-failure|subscription-remote-fetch-idempotent\n' >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-subscription-remote-fetch-parallel-composition|regression-routing-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
