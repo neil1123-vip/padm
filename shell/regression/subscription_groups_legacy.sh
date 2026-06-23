@@ -15459,22 +15459,24 @@ runRegressionMenuSmokeFull() {
 }
 
 runRegressionRouting() {
-    runRegressionStep routing-core runRoutingRegression
-    runRegressionStep routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
-    runRegressionStep routing-socks5-udp-associate runSocks5UdpAssociateRegression
-    runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
-    runRegressionStep routing-access-control-config-transaction runAccessControlConfigTransactionRegression
-    runRegressionStep routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
-    runRegressionStep routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
-    runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
-    runRegressionStep routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
-    runRegressionStep routing-warp-failure-return runWARPRoutingFailureReturnRegression
-    runRegressionStep routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
-    runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
-    runRegressionStep routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
-    runRegressionStep routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
-    runRegressionStep routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
-    runRegressionStep routing-port-panel runPortAndPanelHelperRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ROUTING_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/routing-parallel-${BASHPID:-$$}" \
+        routing-core \
+        routing-core-unsafe-config-dir \
+        routing-socks5-udp-associate \
+        routing-access-control-failure-return \
+        routing-access-control-config-transaction \
+        routing-access-control-unsafe-backup-dir \
+        routing-access-control-unsafe-config-dir \
+        routing-bt-failure-return \
+        routing-ipv6-failure-return \
+        routing-warp-failure-return \
+        routing-socks5-failure-return \
+        routing-dns-failure-return \
+        routing-dns-unsafe-backup-dir \
+        routing-dns-unsafe-config-dir \
+        routing-dns-restore-scope \
+        routing-port-panel
 }
 
 runRegressionSubscriptionOutput() {
@@ -15913,6 +15915,83 @@ runRegressionTransaction() {
         runRegressionTransactionSystem
 }
 
+runRegressionRoutingParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-routing-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "routing-core" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/routing-core-unsafe-config-dir-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "routing-core-unsafe-config-dir" ]]; then
+            : >"${TMP_DIR}/routing-core-unsafe-config-dir-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRoutingRegression() { runRegressionAllSelector routing-core; }
+    runRoutingCoreRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-core-unsafe-config-dir; }
+    runSocks5UdpAssociateRegression() { runRegressionAllSelector routing-socks5-udp-associate; }
+    runAccessControlFailureReturnRegression() { runRegressionAllSelector routing-access-control-failure-return; }
+    runAccessControlConfigTransactionRegression() { runRegressionAllSelector routing-access-control-config-transaction; }
+    runAccessControlRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-access-control-unsafe-backup-dir; }
+    runAccessControlRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-access-control-unsafe-config-dir; }
+    runBTRoutingFailureReturnRegression() { runRegressionAllSelector routing-bt-failure-return; }
+    runIPv6RoutingFailureReturnRegression() { runRegressionAllSelector routing-ipv6-failure-return; }
+    runWARPRoutingFailureReturnRegression() { runRegressionAllSelector routing-warp-failure-return; }
+    runSocks5RoutingFailureReturnRegression() { runRegressionAllSelector routing-socks5-failure-return; }
+    runDNSRoutingFailureReturnRegression() { runRegressionAllSelector routing-dns-failure-return; }
+    runDNSRoutingRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-dns-unsafe-backup-dir; }
+    runDNSRoutingRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-dns-unsafe-config-dir; }
+    runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() { runRegressionAllSelector routing-dns-restore-scope; }
+    runPortAndPanelHelperRegression() { runRegressionAllSelector routing-port-panel; }
+
+    runRegressionRouting
+
+    for selector in \
+        routing-core \
+        routing-core-unsafe-config-dir \
+        routing-socks5-udp-associate \
+        routing-access-control-failure-return \
+        routing-access-control-config-transaction \
+        routing-access-control-unsafe-backup-dir \
+        routing-access-control-unsafe-config-dir \
+        routing-bt-failure-return \
+        routing-ipv6-failure-return \
+        routing-warp-failure-return \
+        routing-socks5-failure-return \
+        routing-dns-failure-return \
+        routing-dns-unsafe-backup-dir \
+        routing-dns-unsafe-config-dir \
+        routing-dns-restore-scope \
+        routing-port-panel; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "routing-core-start" { coreStart = NR }
+        $0 == "routing-core-unsafe-config-dir-start" { unsafeStart = NR }
+        $0 == "routing-core-finish" { coreFinish = NR }
+        END { exit !(coreStart && unsafeStart && coreFinish && unsafeStart < coreFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/routing-core-unsafe-config-dir-started"
+    PADM_REGRESSION_ROUTING_PARALLEL_JOBS=1 runRegressionRouting
+    awk '
+        $0 == "routing-core-finish" { firstFinish = NR }
+        $0 == "routing-core-unsafe-config-dir-start" { secondStart = NR }
+        $0 == "routing-core-unsafe-config-dir-finish" { secondFinish = NR }
+        $0 == "routing-socks5-udp-associate-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
+
 runRegressionUiParallelCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-ui-parallel-composition.log"
@@ -16124,6 +16203,7 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector transaction-system
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector routing
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
 
     grep -qx 'selector=ui jobs=4 suppress=1' "${callLog}"
@@ -16132,6 +16212,7 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     grep -qx 'selector=transaction-system jobs=4 suppress=1' "${callLog}"
     grep -qx 'selector=transaction-system jobs=2 suppress=1' "${callLog}"
     grep -qx 'selector=routing jobs=4 suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=2 suppress=1' "${callLog}"
     grep -qx 'selector=remote-control-smoke jobs=4 suppress=1' "${callLog}"
 )
 
@@ -16286,7 +16367,8 @@ runRegressionAllSelector() {
         transaction-system) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         transaction-core) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         ui) printf '%s\n' "${PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
-        routing | runtime | remote-control-smoke | remote-control-contract-service-install | remote-control-contract-server-response)
+        routing) printf '%s\n' "${PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}}" ;;
+        runtime | remote-control-smoke | remote-control-contract-service-install | remote-control-contract-server-response)
             printf '%s\n' "${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}"
             ;;
         *) printf '%s\n' "${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}" ;;
@@ -16382,6 +16464,7 @@ runRegressionAll() (
     PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}"
     PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_ROUTING_CHILD_PARALLEL_JOBS:-1}"
     PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}"
 
     runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
@@ -16455,8 +16538,53 @@ menu-smoke-full-core-maintenance)
 routing)
     regressionRunner=runRegressionRouting
     ;;
+routing-core)
+    regressionRunner=runRoutingRegression
+    ;;
+routing-core-unsafe-config-dir)
+    regressionRunner=runRoutingCoreRejectsUnsafeConfigDirRegression
+    ;;
 routing-socks5-udp-associate)
     regressionRunner=runSocks5UdpAssociateRegression
+    ;;
+routing-access-control-failure-return)
+    regressionRunner=runAccessControlFailureReturnRegression
+    ;;
+routing-access-control-config-transaction)
+    regressionRunner=runAccessControlConfigTransactionRegression
+    ;;
+routing-access-control-unsafe-backup-dir)
+    regressionRunner=runAccessControlRejectsUnsafeBackupDirRegression
+    ;;
+routing-access-control-unsafe-config-dir)
+    regressionRunner=runAccessControlRejectsUnsafeConfigDirRegression
+    ;;
+routing-bt-failure-return)
+    regressionRunner=runBTRoutingFailureReturnRegression
+    ;;
+routing-ipv6-failure-return)
+    regressionRunner=runIPv6RoutingFailureReturnRegression
+    ;;
+routing-warp-failure-return)
+    regressionRunner=runWARPRoutingFailureReturnRegression
+    ;;
+routing-socks5-failure-return)
+    regressionRunner=runSocks5RoutingFailureReturnRegression
+    ;;
+routing-dns-failure-return)
+    regressionRunner=runDNSRoutingFailureReturnRegression
+    ;;
+routing-dns-unsafe-backup-dir)
+    regressionRunner=runDNSRoutingRejectsUnsafeBackupDirRegression
+    ;;
+routing-dns-unsafe-config-dir)
+    regressionRunner=runDNSRoutingRejectsUnsafeConfigDirRegression
+    ;;
+routing-dns-restore-scope)
+    regressionRunner=runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+    ;;
+routing-port-panel)
+    regressionRunner=runPortAndPanelHelperRegression
     ;;
 subscription)
     regressionRunner=runRegressionSubscription
@@ -16671,6 +16799,9 @@ regression-subscription-parallel-composition)
 regression-subscription-write-transaction-parallel-composition)
     regressionRunner=runRegressionSubscriptionWriteTransactionParallelCompositionRegression
     ;;
+regression-routing-parallel-composition)
+    regressionRunner=runRegressionRoutingParallelCompositionRegression
+    ;;
 regression-transaction-core-parallel-composition)
     regressionRunner=runRegressionTransactionCoreParallelCompositionRegression
     ;;
@@ -16801,7 +16932,8 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'routing leaf selectors: routing-core|routing-core-unsafe-config-dir|routing-access-control-failure-return|routing-access-control-config-transaction|routing-access-control-unsafe-backup-dir|routing-access-control-unsafe-config-dir|routing-bt-failure-return|routing-ipv6-failure-return|routing-warp-failure-return|routing-socks5-failure-return|routing-dns-failure-return|routing-dns-unsafe-backup-dir|routing-dns-unsafe-config-dir|routing-dns-restore-scope|routing-port-panel\n' >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-routing-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
