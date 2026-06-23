@@ -11605,7 +11605,7 @@ edge-a
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
     fi
 
-    if wireGuardMenuPartSelected peer-rollback-apply; then
+    if wireGuardMenuPartSelected peer-rollback-apply || wireGuardMenuPartSelected peer-rollback-apply-service; then
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
@@ -11626,6 +11626,14 @@ edge-a
         if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-fail")' >/dev/null 2>&1; then
             return 1
         fi
+    fi
+
+    if wireGuardMenuPartSelected peer-rollback-apply || wireGuardMenuPartSelected peer-rollback-apply-restore; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
 
         wireGuardApplyShouldFail=true
         restoreStateWriteShouldFail=true
@@ -11659,7 +11667,7 @@ edge-a
         fi
     fi
 
-    if wireGuardMenuPartSelected peer-rollback-credential; then
+    if wireGuardMenuPartSelected peer-rollback-credential || wireGuardMenuPartSelected peer-rollback-credential-write; then
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
@@ -11678,6 +11686,14 @@ edge-a
         if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
             return 1
         fi
+    fi
+
+    if wireGuardMenuPartSelected peer-rollback-credential || wireGuardMenuPartSelected peer-rollback-credential-groups-restore; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
 
         setCredentialShouldFail=true
         restoreGroupsWriteShouldFail=true
@@ -11696,57 +11712,65 @@ edge-a
         fi
     fi
 
-    if wireGuardMenuPartSelected peer-source-control; then
+    if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-toggle || wireGuardMenuPartSelected peer-source-control-clear-error || wireGuardMenuPartSelected peer-source-control-status; then
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
-        resetMenuActions
-        toggleSubscriptionSourceMenu() {
-            subscriptionRequireMainRole || return 1
-            recordMenuAction toggleSubscriptionSourceMenu
-            local sourceId=
-            local sourceAction=
-            autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
-            autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
-            if [[ "${sourceAction}" == "enable" ]]; then
-                subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
-                  .groups |= map(if .id == $groupId then
-                    .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-                  else . end)'
-            elif [[ "${sourceAction}" == "disable" ]]; then
-                subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
-                  .groups |= map(if .id == $groupId then
-                    .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-                  else . end)'
-            else
-                return 1
-            fi
-        }
-        resetMenuActions
-        toggleSubscriptionSourceMenu <<<"edge-a
+        if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-toggle; then
+            resetMenuActions
+            toggleSubscriptionSourceMenu() {
+                subscriptionRequireMainRole || return 1
+                recordMenuAction toggleSubscriptionSourceMenu
+                local sourceId=
+                local sourceAction=
+                autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
+                autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
+                if [[ "${sourceAction}" == "enable" ]]; then
+                    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
+                      .groups |= map(if .id == $groupId then
+                        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+                      else . end)'
+                elif [[ "${sourceAction}" == "disable" ]]; then
+                    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
+                      .groups |= map(if .id == $groupId then
+                        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+                      else . end)'
+                else
+                    return 1
+                fi
+            }
+            resetMenuActions
+            toggleSubscriptionSourceMenu <<<"edge-a
 disable"
-        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
-        resetMenuActions
-        toggleSubscriptionSourceMenu <<<"edge-a
+            subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
+            resetMenuActions
+            toggleSubscriptionSourceMenu <<<"edge-a
 enable"
-        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
-        setSubscriptionSourceSyncFailure edge-a remote_error old-error
-        resetMenuActions
-        clearSubscriptionSourceSyncErrorMenu() {
-            subscriptionRequireMainRole || return 1
-            recordMenuAction clearSubscriptionSourceSyncErrorMenu
-            local sourceId=
-            autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
-            clearSubscriptionSourceSyncError "${sourceId}"
-        }
-        clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
-        subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
-        resetMenuActions
-        local multiServerStatusOutput
-        multiServerStatusOutput=
-        manageSubscriptionMultiServer <<<"4
+            subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+        fi
+
+        if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-clear-error; then
+            setSubscriptionSourceSyncFailure edge-a remote_error old-error
+            resetMenuActions
+            clearSubscriptionSourceSyncErrorMenu() {
+                subscriptionRequireMainRole || return 1
+                recordMenuAction clearSubscriptionSourceSyncErrorMenu
+                local sourceId=
+                autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
+                clearSubscriptionSourceSyncError "${sourceId}"
+            }
+            clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
+            subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
+        fi
+
+        if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-status; then
+            resetMenuActions
+            local multiServerStatusOutput
+            multiServerStatusOutput=
+            manageSubscriptionMultiServer <<<"4
 5"
-        assertMenuAction 'statusCard:本机主控接入凭据'
+            assertMenuAction 'statusCard:本机主控接入凭据'
+        fi
     fi
 
     if wireGuardMenuPartSelected control-restore; then
@@ -11877,7 +11901,10 @@ runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() {
@@ -11885,11 +11912,46 @@ runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() {
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore
 }
 
 runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
-    runSubscriptionWireGuardMenuFlowRegression peer-source-control
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-service
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-restore
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-write
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-groups-restore
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-source-control-toggle
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-source-control-clear-error
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-source-control-status
 }
 
 runSubscriptionWireGuardMenuFlowControlRestoreRegression() {
@@ -12636,7 +12698,7 @@ runMenuSmokeRegression() {
         resetMenuActions
     fi
 
-    if menuSmokePartSelected subscription-main-publish-user; then
+    if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-empty; then
         configPath="${TMP_DIR}/menu-smoke-xray/"
         coreInstallType=1
         ensureSubscriptionGroupsState
@@ -12645,6 +12707,13 @@ runMenuSmokeRegression() {
         manageSubscriptionPublishSubscriptions <<<"4
 7" || true
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | ((.user_groups // []) | length) == 0' >/dev/null
+    fi
+
+    if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-create; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
         resetMenuActions
         manageSubscriptionPublishSubscriptions <<<"3
 demo-user
@@ -12653,6 +12722,21 @@ main
 0
 7"
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "Demo User")' >/dev/null
+    fi
+
+    if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-inspect; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
+            manageSubscriptionPublishSubscriptions <<<"3
+demo-user
+Demo User
+main
+0
+7"
+        fi
         resetMenuActions
         output=
         manageSubscriptionPublishSubscriptions <<<"4
@@ -12665,7 +12749,7 @@ demo-user
         resetMenuActions
     fi
 
-    if menuSmokePartSelected subscription-main-publish-sync; then
+    if menuSmokePartSelected subscription-main-publish-sync || menuSmokePartSelected subscription-main-publish-sync-skip; then
         configPath="${TMP_DIR}/menu-smoke-xray/"
         coreInstallType=1
         ensureSubscriptionGroupsState
@@ -12682,6 +12766,13 @@ n
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "Team A")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
         assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+    fi
+
+    if menuSmokePartSelected subscription-main-publish-sync || menuSmokePartSelected subscription-main-publish-sync-enable; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
         resetMenuActions
         rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
         ensureSubscriptionGroupsState
@@ -13035,11 +13126,38 @@ runMenuSmokeFullSubscriptionMainPublishServiceRegression() {
 }
 
 runMenuSmokeFullSubscriptionMainPublishUserRegression() {
-    runMenuSmokeRegression subscription-main-publish-user
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-publish-user-create \
+        menu-smoke-full-subscription-main-publish-user-inspect
 }
 
 runMenuSmokeFullSubscriptionMainPublishSyncRegression() {
-    runMenuSmokeRegression subscription-main-publish-sync
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        menu-smoke-full-subscription-main-publish-sync-enable
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression() {
+    runMenuSmokeRegression subscription-main-publish-user-empty
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserCreateRegression() {
+    runMenuSmokeRegression subscription-main-publish-user-create
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserInspectRegression() {
+    runMenuSmokeRegression subscription-main-publish-user-inspect
+}
+
+runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression() {
+    runMenuSmokeRegression subscription-main-publish-sync-skip
+}
+
+runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression() {
+    runMenuSmokeRegression subscription-main-publish-sync-enable
 }
 
 runMenuSmokeFullSubscriptionMainMaintenanceRegression() {
@@ -15423,14 +15541,21 @@ runRegressionFastReality() {
 
 runRegressionUi() {
     runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
-        menu-smoke-full-subscription-main-publish-sync \
-        wireguard-menu-flow-peer-rollback-apply \
-        wireguard-menu-flow-peer-rollback-credential \
+        menu-smoke-full-subscription-main-publish-sync-enable \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-credential-write \
         wireguard-menu-flow-peer-rollback-source \
-        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        wireguard-menu-flow-peer-rollback-apply-restore \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        menu-smoke-full-subscription-main-publish-user-inspect \
+        wireguard-menu-flow-peer-source-control-toggle \
+        menu-smoke-full-subscription-main-publish-user-create \
         menu-smoke-full-subscription-main-publish-service \
         wireguard-menu-flow-peer-add-update \
-        wireguard-menu-flow-peer-source-control \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status \
+        menu-smoke-full-subscription-main-publish-user-empty \
         menu-smoke-full-subscription-main-maintenance \
         wireguard-menu-flow-control-restore \
         wireguard-menu-flow-bootstrap \
@@ -16001,13 +16126,13 @@ runRegressionUiParallelCompositionRegression() (
     runRegressionAllSelector() {
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "menu-smoke-full-subscription-main-publish-sync" ]]; then
+        if [[ "${selector}" == "menu-smoke-full-subscription-main-publish-sync-enable" ]]; then
             for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-started" ]] && break
+                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started" ]] && break
                 sleep 0.05
             done
-        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply" ]]; then
-            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-started"
+        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply-service" ]]; then
+            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
         fi
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
@@ -16030,15 +16155,22 @@ runRegressionUiParallelCompositionRegression() (
     for selector in \
         menu-smoke-full-subscription-main-entry \
         menu-smoke-full-subscription-main-publish-service \
-        menu-smoke-full-subscription-main-publish-user \
-        menu-smoke-full-subscription-main-publish-sync \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-publish-user-create \
+        menu-smoke-full-subscription-main-publish-user-inspect \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        menu-smoke-full-subscription-main-publish-sync-enable \
         menu-smoke-full-subscription-main-maintenance \
         wireguard-menu-flow-bootstrap \
         wireguard-menu-flow-peer-add-update \
-        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore \
         wireguard-menu-flow-peer-rollback-source \
-        wireguard-menu-flow-peer-rollback-credential \
-        wireguard-menu-flow-peer-source-control \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status \
         wireguard-menu-flow-control-restore \
         menu-smoke-full-subscription-controlled \
         menu-smoke-full-core \
@@ -16049,9 +16181,9 @@ runRegressionUiParallelCompositionRegression() (
         grep -qx "${selector}-finish" "${callLog}"
     done
     awk '
-        $0 == "menu-smoke-full-subscription-main-publish-sync-start" { smokeStart = NR }
-        $0 == "wireguard-menu-flow-peer-rollback-apply-start" { wireguardStart = NR }
-        $0 == "menu-smoke-full-subscription-main-publish-sync-finish" { smokeFinish = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-start" { smokeStart = NR }
+        $0 == "wireguard-menu-flow-peer-rollback-apply-service-start" { wireguardStart = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-finish" { smokeFinish = NR }
         END { exit !(smokeStart && wireguardStart && smokeFinish && wireguardStart < smokeFinish) }
     ' "${callLog}"
     ! grep -qx 'menu-smoke-full-subscription-main-publish-start' "${callLog}"
@@ -16066,16 +16198,156 @@ runRegressionUiParallelCompositionRegression() (
     ! grep -qx 'menu-smoke-full-subscription-main-finish' "${callLog}"
     ! grep -qx 'menu-smoke-full-start' "${callLog}"
     ! grep -qx 'menu-smoke-full-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-finish' "${callLog}"
 
     : >"${callLog}"
     PADM_REGRESSION_PARALLEL_JOBS=4 runRegressionUi
     awk '
         /-start$/ {
             starts++
-            if ($0 == "menu-smoke-full-subscription-main-publish-sync-start") { publishStart = starts }
-            if ($0 == "wireguard-menu-flow-peer-rollback-apply-start") { peerRollbackStart = starts }
+            if ($0 == "menu-smoke-full-subscription-main-publish-sync-enable-start") { publishStart = starts }
+            if ($0 == "wireguard-menu-flow-peer-rollback-apply-service-start") { peerRollbackStart = starts }
         }
         END { exit !(publishStart && peerRollbackStart && publishStart <= 4 && peerRollbackStart <= 4) }
+    ' "${callLog}"
+)
+
+runRegressionUiLongTailSplitCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-ui-long-tail-split-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "menu-smoke-full-subscription-main-publish-sync-enable" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply-service" ]]; then
+            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runMenuSmokeLightRegression() { runRegressionAllSelector menu-smoke; }
+    runMenuSmokeRegression() { runRegressionAllSelector "menu-smoke-full:${1:-all}"; }
+    runSubscriptionWireGuardRestoreRunnerRegression() { runRegressionAllSelector wireguard-restore-runner; }
+    runSubscriptionWireGuardMenuFlowRegression() { runRegressionAllSelector "wireguard-menu-flow:${1:-all}"; }
+
+    runRegressionUi
+
+    for selector in \
+        menu-smoke-full-subscription-main-publish-sync-enable \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-source \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        wireguard-menu-flow-peer-rollback-apply-restore \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        menu-smoke-full-subscription-main-publish-user-inspect \
+        wireguard-menu-flow-peer-source-control-toggle \
+        menu-smoke-full-subscription-main-publish-user-create \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        menu-smoke-full-subscription-main-publish-service \
+        wireguard-menu-flow-peer-source-control-status \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-control-restore \
+        wireguard-menu-flow-bootstrap \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-start" { syncStart = NR }
+        $0 == "wireguard-menu-flow-peer-rollback-apply-service-start" { applyStart = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-finish" { syncFinish = NR }
+        END { exit !(syncStart && applyStart && syncFinish && applyStart < syncFinish) }
+    ' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-finish' "${callLog}"
+
+    : >"${callLog}"
+    runMenuSmokeFullSubscriptionMainPublishUserRegression
+    for selector in \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-publish-user-create \
+        menu-smoke-full-subscription-main-publish-user-inspect; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    ! grep -q '^menu-smoke-full:subscription-main-publish-user-start$' "${callLog}"
+
+    : >"${callLog}"
+    runMenuSmokeFullSubscriptionMainPublishSyncRegression
+    for selector in \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        menu-smoke-full-subscription-main-publish-sync-enable; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
+    for selector in \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
+    for selector in \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
+    for selector in \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS=1 runMenuSmokeFullSubscriptionMainPublishUserRegression
+    awk '
+        $0 == "menu-smoke-full-subscription-main-publish-user-empty-finish" { firstFinish = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-user-create-start" { secondStart = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-user-create-finish" { secondFinish = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-user-inspect-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
     ' "${callLog}"
 )
 
@@ -16523,8 +16795,23 @@ menu-smoke-full-subscription-main-publish-service)
 menu-smoke-full-subscription-main-publish-user)
     regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserRegression
     ;;
+menu-smoke-full-subscription-main-publish-user-empty)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
+    ;;
+menu-smoke-full-subscription-main-publish-user-create)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
+    ;;
+menu-smoke-full-subscription-main-publish-user-inspect)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
+    ;;
 menu-smoke-full-subscription-main-publish-sync)
     regressionRunner=runMenuSmokeFullSubscriptionMainPublishSyncRegression
+    ;;
+menu-smoke-full-subscription-main-publish-sync-skip)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
+    ;;
+menu-smoke-full-subscription-main-publish-sync-enable)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
     ;;
 menu-smoke-full-subscription-main-maintenance)
     regressionRunner=runMenuSmokeFullSubscriptionMainMaintenanceRegression
@@ -16811,6 +17098,9 @@ regression-transaction-system-parallel-composition)
 regression-ui-parallel-composition)
     regressionRunner=runRegressionUiParallelCompositionRegression
     ;;
+regression-ui-long-tail-split-composition)
+    regressionRunner=runRegressionUiLongTailSplitCompositionRegression
+    ;;
 regression-selector-dispatch-composition)
     regressionRunner=runRegressionSelectorDispatchCompositionRegression
     ;;
@@ -16910,14 +17200,35 @@ wireguard-menu-flow-peer-rollback)
 wireguard-menu-flow-peer-rollback-apply)
     regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
     ;;
+wireguard-menu-flow-peer-rollback-apply-service)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression
+    ;;
+wireguard-menu-flow-peer-rollback-apply-restore)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression
+    ;;
 wireguard-menu-flow-peer-rollback-source)
     regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
     ;;
 wireguard-menu-flow-peer-rollback-credential)
     regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
     ;;
+wireguard-menu-flow-peer-rollback-credential-write)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression
+    ;;
+wireguard-menu-flow-peer-rollback-credential-groups-restore)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression
+    ;;
 wireguard-menu-flow-peer-source-control)
     regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
+    ;;
+wireguard-menu-flow-peer-source-control-toggle)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression
+    ;;
+wireguard-menu-flow-peer-source-control-clear-error)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression
+    ;;
+wireguard-menu-flow-peer-source-control-status)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression
     ;;
 wireguard-menu-flow-control-restore)
     regressionRunner=runSubscriptionWireGuardMenuFlowControlRestoreRegression
@@ -16933,7 +17244,8 @@ all|full|ci)
     ;;
 *)
     printf 'routing leaf selectors: routing-core|routing-core-unsafe-config-dir|routing-access-control-failure-return|routing-access-control-config-transaction|routing-access-control-unsafe-backup-dir|routing-access-control-unsafe-config-dir|routing-bt-failure-return|routing-ipv6-failure-return|routing-warp-failure-return|routing-socks5-failure-return|routing-dns-failure-return|routing-dns-unsafe-backup-dir|routing-dns-unsafe-config-dir|routing-dns-restore-scope|routing-port-panel\n' >&2
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-routing-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'ui leaf selectors: menu-smoke-full-subscription-main-publish-user-empty|menu-smoke-full-subscription-main-publish-user-create|menu-smoke-full-subscription-main-publish-user-inspect|menu-smoke-full-subscription-main-publish-sync-skip|menu-smoke-full-subscription-main-publish-sync-enable|wireguard-menu-flow-peer-rollback-apply-service|wireguard-menu-flow-peer-rollback-apply-restore|wireguard-menu-flow-peer-rollback-credential-write|wireguard-menu-flow-peer-rollback-credential-groups-restore|wireguard-menu-flow-peer-source-control-toggle|wireguard-menu-flow-peer-source-control-clear-error|wireguard-menu-flow-peer-source-control-status\n' >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-routing-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
