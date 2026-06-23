@@ -16795,14 +16795,14 @@ runRegressionAllResourceLayerCompositionRegression() (
     printf '%s\n' routing subscription transaction-core ui | sort >"${expectedFirstWave}"
     cmp -s "${expectedFirstWave}" "${firstWave}"
 
-    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
+    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
     awk '
         $0 == "subscription-finish" { subscriptionFinish = NR }
         $0 == "ui-finish" { uiFinish = NR }
@@ -16811,7 +16811,7 @@ runRegressionAllResourceLayerCompositionRegression() (
         $0 == "runtime-finish" { runtimeFinish = NR }
         $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
         $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
-        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile=all suppress=1" { transactionSystemStart = NR }
+        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= suppress=1" { transactionSystemStart = NR }
         END {
             exit !(subscriptionFinish && uiFinish && transactionCoreFinish && routingFinish && runtimeFinish &&
                 remoteSmokeFinish && remoteServiceFinish && transactionSystemStart &&
@@ -16821,6 +16821,10 @@ runRegressionAllResourceLayerCompositionRegression() (
                 remoteServiceFinish < transactionSystemStart)
         }
     ' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE=all runRegressionAll
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
 )
 
 runRegressionParallelSelectorLimitCompositionRegression() (
@@ -17058,7 +17062,7 @@ runRegressionAll() (
     PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
     PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_ROUTING_CHILD_PARALLEL_JOBS:-1}"
-    PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE:-all}"
+    PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE:-}"
     PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}"
 
     runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
