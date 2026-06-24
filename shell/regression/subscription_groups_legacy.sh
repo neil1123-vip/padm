@@ -17013,11 +17013,29 @@ runRegressionAllResourceLayerCompositionRegression() (
     ' "${callLog}" | sort >"${firstWave}"
     printf '%s\n' routing runtime subscription transaction-core ui | sort >"${expectedFirstWave}"
     cmp -s "${expectedFirstWave}" "${firstWave}"
+    awk '
+        /^subscription-start / { subscriptionStart = NR }
+        /^ui-start / { uiStart = NR }
+        /^transaction-core-start / { transactionCoreStart = NR }
+        /^routing-start / { routingStart = NR }
+        /^runtime-start / { runtimeStart = NR }
+        $0 == "subscription-finish" || $0 == "ui-finish" || $0 == "transaction-core-finish" ||
+            $0 == "routing-finish" || $0 == "runtime-finish" {
+            if (!firstHeavyFinish) { firstHeavyFinish = NR }
+        }
+        END {
+            exit !(subscriptionStart && uiStart && transactionCoreStart && routingStart && runtimeStart &&
+                firstHeavyFinish &&
+                subscriptionStart < firstHeavyFinish && uiStart < firstHeavyFinish &&
+                transactionCoreStart < firstHeavyFinish && routingStart < firstHeavyFinish &&
+                runtimeStart < firstHeavyFinish)
+        }
+    ' "${callLog}"
 
-    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'subscription-start jobs=2 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
-    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'ui-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
@@ -17310,10 +17328,10 @@ runParallelRegressionSelectors() {
 
 runRegressionAll() (
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}"
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-3}"
-    PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-4}"
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-2}"
+    PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-3}"
     PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_UI_RESOURCE_PROFILE:-all}"
-    PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-2}"
     PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_SUBSCRIPTION_RESOURCE_PROFILE:-all}"
     PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
