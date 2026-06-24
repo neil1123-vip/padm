@@ -15774,6 +15774,7 @@ runRegressionSubscriptionRemoteFetchParallelCompositionRegression() (
         $0 == "subscription-remote-fetch-merge-start" { thirdStart = NR }
         END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
     ' "${callLog}"
+
 )
 
 runRegressionSubscriptionWriteTransaction() {
@@ -16056,6 +16057,55 @@ runRegressionRuntimeParallelCompositionRegression() (
 )
 
 runRegressionTransactionCore() {
+    if [[ "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" == "all" ]]; then
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-heavy-${BASHPID:-$$}" \
+            core-install-service-action-failure \
+            core-port-file-transaction
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-medium-${BASHPID:-$$}" \
+            config-transaction \
+            entry-helper-config \
+            reload-core-propagation \
+            sing-box-log-transaction \
+            sing-box-merge-config-transaction \
+            tls-renew-failure-propagation
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-light-${BASHPID:-$$}" \
+            core-rollback-result-message \
+            core-port-unsafe-config-dir \
+            check-port-open-nginx-directory-target \
+            alone-nginx-directory-target \
+            xray-reality-port-failure \
+            reality-profile-failure \
+            sing-box-reality-key-transaction \
+            core-template-return-failure \
+            core-template-managed-remove \
+            core-binary-install-copy-failure \
+            sing-box-cronet-rollback \
+            finalize-sing-box-rollback \
+            core-upgrade-directory-target \
+            legacy-core-upgrade-keeps-existing \
+            core-first-install-failure-clean \
+            core-first-install-commit-rollback \
+            core-install-unsafe-binary-path \
+            sing-box-download-artifacts-cleanup \
+            network-check-return-failure \
+            tls-failure-return \
+            tls-reinstall-rollback \
+            service-queue-apply-propagation \
+            sing-box-merge-start-failure \
+            sing-box-uninstall-failure-propagation \
+            sing-box-uninstall-rejects-unsafe-config-path \
+            sing-box-managed-cleanup \
+            sing-box-protocol-reload-failure \
+            geo-update-reload-failure \
+            core-cleanup-failure-propagation \
+            user-config-write \
+            remove-user
+        return
+    fi
+
     runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-${BASHPID:-$$}" \
         core-rollback-result-message \
         config-transaction \
@@ -16114,7 +16164,29 @@ runRegressionTransactionCoreParallelCompositionRegression() (
             done
         elif [[ "${selector}" == "config-transaction" ]]; then
             : >"${TMP_DIR}/config-transaction-started"
+        elif [[ "${selector}" == "core-install-service-action-failure" ]]; then
+            if [[ -f "${TMP_DIR}/transaction-core-expect-heavy-concurrency" ]]; then
+                for _ in 1 2 3 4 5 6 7 8 9 10; do
+                    [[ -f "${TMP_DIR}/core-port-file-transaction-started" ]] && break
+                    sleep 0.05
+                done
+                [[ -f "${TMP_DIR}/core-port-file-transaction-started" ]] || : >"${TMP_DIR}/transaction-core-heavy-concurrency-violation"
+            fi
+        elif [[ "${selector}" == "core-port-file-transaction" ]]; then
+            : >"${TMP_DIR}/core-port-file-transaction-started"
         fi
+        case "${selector}" in
+        config-transaction | entry-helper-config | reload-core-propagation | sing-box-log-transaction | sing-box-merge-config-transaction | tls-renew-failure-propagation)
+            if [[ -f "${TMP_DIR}/transaction-core-expect-profile-boundary" ]] &&
+                { [[ ! -f "${TMP_DIR}/core-install-service-action-failure-finished" ]] || [[ ! -f "${TMP_DIR}/core-port-file-transaction-finished" ]]; }; then
+                : >"${TMP_DIR}/transaction-core-wave-boundary-violation"
+            fi
+            ;;
+        esac
+        case "${selector}" in
+        core-install-service-action-failure) : >"${TMP_DIR}/core-install-service-action-failure-finished" ;;
+        core-port-file-transaction) : >"${TMP_DIR}/core-port-file-transaction-finished" ;;
+        esac
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
     runCoreRollbackResultMessageRegression() { runRegressionAllSelector core-rollback-result-message; }
@@ -16207,6 +16279,53 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         $0 == "config-transaction-start" { configStart = NR }
         $0 == "core-rollback-result-message-finish" { firstFinish = NR }
         END { exit !(firstStart && configStart && firstFinish && configStart < firstFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f \
+        "${TMP_DIR}/core-port-file-transaction-started" \
+        "${TMP_DIR}/core-install-service-action-failure-finished" \
+        "${TMP_DIR}/core-port-file-transaction-finished" \
+        "${TMP_DIR}/transaction-core-heavy-concurrency-violation" \
+        "${TMP_DIR}/transaction-core-wave-boundary-violation"
+    : >"${TMP_DIR}/transaction-core-expect-heavy-concurrency"
+    : >"${TMP_DIR}/transaction-core-expect-profile-boundary"
+    PADM_REGRESSION_PARALLEL_JOBS=6 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCore
+
+    for selector in \
+        core-install-service-action-failure \
+        core-port-file-transaction \
+        config-transaction \
+        entry-helper-config \
+        reload-core-propagation \
+        sing-box-log-transaction \
+        sing-box-merge-config-transaction \
+        tls-renew-failure-propagation; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    [[ ! -f "${TMP_DIR}/transaction-core-heavy-concurrency-violation" ]]
+    [[ ! -f "${TMP_DIR}/transaction-core-wave-boundary-violation" ]]
+
+    : >"${callLog}"
+    rm -f \
+        "${TMP_DIR}/transaction-core-expect-heavy-concurrency" \
+        "${TMP_DIR}/transaction-core-expect-profile-boundary" \
+        "${TMP_DIR}/core-port-file-transaction-started" \
+        "${TMP_DIR}/core-install-service-action-failure-finished" \
+        "${TMP_DIR}/core-port-file-transaction-finished"
+    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS=1 runRegressionTransactionCore
+    awk '
+        $0 == "core-install-service-action-failure-finish" { serviceFinish = NR }
+        $0 == "core-port-file-transaction-start" { portStart = NR }
+        $0 == "core-port-file-transaction-finish" { portFinish = NR }
+        $0 == "config-transaction-start" { configStart = NR }
+        $0 == "config-transaction-finish" { configFinish = NR }
+        $0 == "entry-helper-config-start" { entryStart = NR }
+        END {
+            exit !(serviceFinish && portStart && portFinish && configStart && configFinish && entryStart &&
+                serviceFinish < portStart && portFinish < configStart && configFinish < entryStart)
+        }
     ' "${callLog}"
 )
 
@@ -16820,7 +16939,7 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     : >"${callLog}"
 
     bash() {
-        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
     }
 
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
@@ -16828,6 +16947,7 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelector ui
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelector subscription
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSelector transaction-core
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector transaction-system
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector routing
@@ -16838,20 +16958,21 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelector runtime
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
 
-    grep -qx 'selector=ui jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=ui jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=ui jobs=4 ui_profile=all subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=subscription jobs=4 ui_profile= subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile=all runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=runtime jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile=all suppress=1' "${callLog}"
-    grep -qx 'selector=remote-control-smoke jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 ui_profile=all subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=subscription jobs=4 ui_profile= subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=all suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile=all runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile=all transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=remote-control-smoke jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
 )
 
 runRegressionAllResourceLayerCompositionRegression() (
@@ -16864,7 +16985,7 @@ runRegressionAllResourceLayerCompositionRegression() (
 
     bash() {
         local selector=$2
-        printf '%s-start jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        printf '%s-start jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
         case "${selector}" in
         subscription | ui | transaction-core | routing | runtime)
             for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -16893,14 +17014,14 @@ runRegressionAllResourceLayerCompositionRegression() (
     printf '%s\n' routing runtime subscription transaction-core ui | sort >"${expectedFirstWave}"
     cmp -s "${expectedFirstWave}" "${firstWave}"
 
-    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
-    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     awk '
         $0 == "subscription-finish" { subscriptionFinish = NR }
         $0 == "ui-finish" { uiFinish = NR }
@@ -16909,7 +17030,7 @@ runRegressionAllResourceLayerCompositionRegression() (
         $0 == "runtime-finish" { runtimeFinish = NR }
         $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
         $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
-        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1" { transactionSystemStart = NR }
+        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1" { transactionSystemStart = NR }
         END {
             exit !(subscriptionFinish && uiFinish && transactionCoreFinish && routingFinish && runtimeFinish &&
                 remoteSmokeFinish && remoteServiceFinish && transactionSystemStart &&
@@ -16922,11 +17043,15 @@ runRegressionAllResourceLayerCompositionRegression() (
 
     : >"${callLog}"
     PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE=all runRegressionAll
-    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
 
     : >"${callLog}"
     PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE=all runRegressionAll
-    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile=all suppress=1' "${callLog}"
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile=all transaction_core_profile= suppress=1' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_ALL_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAll
+    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile=all suppress=1' "${callLog}"
 )
 
 runRegressionParallelSelectorLimitCompositionRegression() (
@@ -17040,6 +17165,13 @@ runRegressionAllSelector() {
                 PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
             fi
             ;;
+        transaction-core)
+            if [[ -n "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
         routing)
             if [[ -n "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" ]]; then
                 PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
@@ -17070,6 +17202,13 @@ runRegressionAllSelector() {
         subscription)
             if [[ -n "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" ]]; then
                 PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        transaction-core)
+            if [[ -n "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
             else
                 PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
             fi
@@ -17178,6 +17317,7 @@ runRegressionAll() (
     PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_SUBSCRIPTION_RESOURCE_PROFILE:-all}"
     PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_TRANSACTION_CORE_RESOURCE_PROFILE:-}"
     PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_ROUTING_CHILD_PARALLEL_JOBS:-1}"
     PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE:-}"
     PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_RUNTIME_CHILD_PARALLEL_JOBS:-1}"
