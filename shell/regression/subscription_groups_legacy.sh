@@ -15956,6 +15956,20 @@ runRegressionRealityStream() {
 }
 
 runRegressionRuntime() {
+    if [[ "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" == "all" ]]; then
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-light-${BASHPID:-$$}" \
+            runtime-core \
+            runtime-autoread-unset-auto-install \
+            runtime-auto-install-reality-route \
+            runtime-tempdir
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-heavy-${BASHPID:-$$}" \
+            reality-candidates \
+            reality-config
+        return
+    fi
+
     runRegressionStep runtime-core runRuntimeAndRealityRegression &&
         runRegressionStep runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression &&
         runRegressionStep runtime-auto-install-reality-route runAutoInstallRealityRouteRegression &&
@@ -15963,6 +15977,83 @@ runRegressionRuntime() {
         runRegressionStep reality-candidates runRegressionRealityCandidates &&
         runRegressionStep reality-config runRealityConfigRegression
 }
+
+runRegressionRuntimeParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-runtime-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        case "${selector}" in
+        runtime-core)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/runtime-tempdir-started" ]] && break
+                sleep 0.05
+            done
+            ;;
+        runtime-tempdir)
+            : >"${TMP_DIR}/runtime-tempdir-started"
+            ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRuntimeAndRealityRegression() { runRegressionAllSelector runtime-core; }
+    runAutoReadUnsetAutoInstallRegression() { runRegressionAllSelector runtime-autoread-unset-auto-install; }
+    runAutoInstallRealityRouteRegression() { runRegressionAllSelector runtime-auto-install-reality-route; }
+    runRuntimeTempDirRegression() { runRegressionAllSelector runtime-tempdir; }
+    runRegressionRealityCandidates() { runRegressionAllSelector reality-candidates; }
+    runRealityConfigRegression() { runRegressionAllSelector reality-config; }
+
+    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntime
+
+    for selector in \
+        runtime-core \
+        runtime-autoread-unset-auto-install \
+        runtime-auto-install-reality-route \
+        runtime-tempdir \
+        reality-candidates \
+        reality-config; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "runtime-core-start" { coreStart = NR }
+        $0 == "runtime-tempdir-start" { tempdirStart = NR }
+        $0 == "runtime-core-finish" { coreFinish = NR }
+        $0 == "runtime-autoread-unset-auto-install-finish" { autoreadFinish = NR }
+        $0 == "runtime-auto-install-reality-route-finish" { routeFinish = NR }
+        $0 == "runtime-tempdir-finish" { tempdirFinish = NR }
+        $0 == "reality-candidates-start" { candidatesStart = NR }
+        $0 == "reality-config-start" { configStart = NR }
+        END {
+            exit !(coreStart && tempdirStart && coreFinish && autoreadFinish && routeFinish && tempdirFinish &&
+                candidatesStart && configStart && tempdirStart < coreFinish &&
+                coreFinish < candidatesStart && autoreadFinish < candidatesStart &&
+                routeFinish < candidatesStart && tempdirFinish < candidatesStart &&
+                coreFinish < configStart && autoreadFinish < configStart &&
+                routeFinish < configStart && tempdirFinish < configStart)
+        }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/runtime-tempdir-started"
+    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS=1 PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS=1 runRegressionRuntime
+    awk '
+        $0 == "runtime-core-finish" { coreFinish = NR }
+        $0 == "runtime-autoread-unset-auto-install-start" { autoreadStart = NR }
+        $0 == "runtime-autoread-unset-auto-install-finish" { autoreadFinish = NR }
+        $0 == "runtime-auto-install-reality-route-start" { routeStart = NR }
+        $0 == "reality-candidates-finish" { candidatesFinish = NR }
+        $0 == "reality-config-start" { configStart = NR }
+        END {
+            exit !(coreFinish && autoreadStart && autoreadFinish && routeStart && candidatesFinish && configStart &&
+                coreFinish < autoreadStart && autoreadFinish < routeStart && candidatesFinish < configStart)
+        }
+    ' "${callLog}"
+)
 
 runRegressionTransactionCore() {
     runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-${BASHPID:-$$}" \
@@ -16729,7 +16820,7 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     : >"${callLog}"
 
     bash() {
-        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
     }
 
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
@@ -16742,19 +16833,25 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector routing
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector routing
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionAllSelector routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelector runtime
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
 
-    grep -qx 'selector=ui jobs=4 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=ui jobs=2 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=ui jobs=4 ui_profile=all subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=subscription jobs=4 ui_profile= subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=4 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=transaction-system jobs=2 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=2 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
-    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile=all suppress=1' "${callLog}"
-    grep -qx 'selector=remote-control-smoke jobs=4 ui_profile= subscription_profile= routing_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 ui_profile=all subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=subscription jobs=4 ui_profile= subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile=all runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile=all suppress=1' "${callLog}"
+    grep -qx 'selector=remote-control-smoke jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= suppress=1' "${callLog}"
 )
 
 runRegressionAllResourceLayerCompositionRegression() (
@@ -16767,14 +16864,15 @@ runRegressionAllResourceLayerCompositionRegression() (
 
     bash() {
         local selector=$2
-        printf '%s-start jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        printf '%s-start jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
         case "${selector}" in
-        subscription | ui | transaction-core | routing)
+        subscription | ui | transaction-core | routing | runtime)
             for _ in 1 2 3 4 5 6 7 8 9 10; do
                 grep -q '^subscription-start ' "${callLog}" &&
                     grep -q '^ui-start ' "${callLog}" &&
                     grep -q '^transaction-core-start ' "${callLog}" &&
-                    grep -q '^routing-start ' "${callLog}" && break
+                    grep -q '^routing-start ' "${callLog}" &&
+                    grep -q '^runtime-start ' "${callLog}" && break
                 sleep 0.05
             done
             ;;
@@ -16789,20 +16887,20 @@ runRegressionAllResourceLayerCompositionRegression() (
             selector = $1
             sub(/-start$/, "", selector)
             print selector
-            if (++count == 4) { exit }
+            if (++count == 5) { exit }
         }
     ' "${callLog}" | sort >"${firstWave}"
-    printf '%s\n' routing subscription transaction-core ui | sort >"${expectedFirstWave}"
+    printf '%s\n' routing runtime subscription transaction-core ui | sort >"${expectedFirstWave}"
     cmp -s "${expectedFirstWave}" "${firstWave}"
 
-    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
-    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all routing_profile= suppress=1' "${callLog}"
+    grep -qx 'subscription-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'ui-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1' "${callLog}"
     awk '
         $0 == "subscription-finish" { subscriptionFinish = NR }
         $0 == "ui-finish" { uiFinish = NR }
@@ -16811,7 +16909,7 @@ runRegressionAllResourceLayerCompositionRegression() (
         $0 == "runtime-finish" { runtimeFinish = NR }
         $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
         $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
-        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= suppress=1" { transactionSystemStart = NR }
+        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= suppress=1" { transactionSystemStart = NR }
         END {
             exit !(subscriptionFinish && uiFinish && transactionCoreFinish && routingFinish && runtimeFinish &&
                 remoteSmokeFinish && remoteServiceFinish && transactionSystemStart &&
@@ -16824,7 +16922,11 @@ runRegressionAllResourceLayerCompositionRegression() (
 
     : >"${callLog}"
     PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE=all runRegressionAll
-    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all runtime_profile= suppress=1' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE=all runRegressionAll
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile=all suppress=1' "${callLog}"
 )
 
 runRegressionParallelSelectorLimitCompositionRegression() (
@@ -16913,7 +17015,8 @@ runRegressionAllSelector() {
         transaction-core) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         ui) printf '%s\n' "${PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
         routing) printf '%s\n' "${PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}}" ;;
-        runtime | remote-control-smoke | remote-control-contract-service-install | remote-control-contract-server-response)
+        runtime) printf '%s\n' "${PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}}" ;;
+        remote-control-smoke | remote-control-contract-service-install | remote-control-contract-server-response)
             printf '%s\n' "${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}"
             ;;
         *) printf '%s\n' "${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}" ;;
@@ -16944,6 +17047,13 @@ runRegressionAllSelector() {
                 PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
             fi
             ;;
+        runtime)
+            if [[ -n "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
         *)
             PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
             ;;
@@ -16967,6 +17077,13 @@ runRegressionAllSelector() {
         routing)
             if [[ -n "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" ]]; then
                 PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        runtime)
+            if [[ -n "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
             else
                 PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
             fi
@@ -17063,6 +17180,8 @@ runRegressionAll() (
     PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
     PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_ROUTING_CHILD_PARALLEL_JOBS:-1}"
     PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE:-}"
+    PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_RUNTIME_CHILD_PARALLEL_JOBS:-1}"
+    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE:-}"
     PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}"
 
     runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
@@ -17289,14 +17408,23 @@ runtime)
 runtime-core)
     regressionRunner=runRuntimeAndRealityRegression
     ;;
+runtime-autoread-unset-auto-install)
+    regressionRunner=runAutoReadUnsetAutoInstallRegression
+    ;;
 runtime-auto-install-reality-route)
     regressionRunner=runAutoInstallRealityRouteRegression
+    ;;
+runtime-tempdir)
+    regressionRunner=runRuntimeTempDirRegression
     ;;
 reality-candidates)
     regressionRunner=runRegressionRealityCandidates
     ;;
 reality-candidates-fast)
     regressionRunner=runRealityCandidateFastRegression
+    ;;
+reality-asn-scan-plan)
+    regressionRunner=runRealityAsnScanPlanRegression
     ;;
 reality-candidates-full)
     regressionRunner=runRealityCandidateFullRegression
@@ -17438,6 +17566,9 @@ regression-subscription-remote-fetch-parallel-composition)
     ;;
 regression-routing-parallel-composition)
     regressionRunner=runRegressionRoutingParallelCompositionRegression
+    ;;
+regression-runtime-parallel-composition)
+    regressionRunner=runRegressionRuntimeParallelCompositionRegression
     ;;
 regression-transaction-core-parallel-composition)
     regressionRunner=runRegressionTransactionCoreParallelCompositionRegression
@@ -17596,7 +17727,7 @@ all|full|ci)
     printf 'routing leaf selectors: routing-core|routing-core-unsafe-config-dir|routing-access-control-failure-return|routing-access-control-config-transaction|routing-access-control-unsafe-backup-dir|routing-access-control-unsafe-config-dir|routing-bt-failure-return|routing-ipv6-failure-return|routing-warp-failure-return|routing-socks5-failure-return|routing-dns-failure-return|routing-dns-unsafe-backup-dir|routing-dns-unsafe-config-dir|routing-dns-restore-scope|routing-port-panel\n' >&2
     printf 'ui leaf selectors: menu-smoke-full-subscription-main-publish-user-empty|menu-smoke-full-subscription-main-publish-user-create|menu-smoke-full-subscription-main-publish-user-inspect|menu-smoke-full-subscription-main-publish-sync-skip|menu-smoke-full-subscription-main-publish-sync-enable|wireguard-menu-flow-peer-rollback-apply-service|wireguard-menu-flow-peer-rollback-apply-restore|wireguard-menu-flow-peer-rollback-credential-write|wireguard-menu-flow-peer-rollback-credential-groups-restore|wireguard-menu-flow-peer-source-control-toggle|wireguard-menu-flow-peer-source-control-clear-error|wireguard-menu-flow-peer-source-control-status\n' >&2
     printf 'subscription remote fetch leaf selectors: subscription-remote-fetch-unique|subscription-remote-fetch-rollback|subscription-remote-fetch-merge|subscription-remote-fetch-controlled|subscription-remote-fetch-append-failure|subscription-remote-fetch-commit-failure|subscription-remote-fetch-idempotent\n' >&2
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-subscription-remote-fetch-parallel-composition|regression-routing-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|runtime-autoread-unset-auto-install|runtime-auto-install-reality-route|runtime-tempdir|reality-candidates|reality-candidates-fast|reality-asn-scan-plan|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-subscription-remote-fetch-parallel-composition|regression-routing-parallel-composition|regression-runtime-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
