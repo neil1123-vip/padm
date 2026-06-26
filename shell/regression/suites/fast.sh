@@ -15,4 +15,7 @@ eval "${_fast_root_suite_def}"
 unset _fast_platform_suite_def _fast_root_suite_def
 
 registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot
+registerRegressionAggregateSequential fast-reality \
+    fast \
+    reality-candidates-fast
 registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot

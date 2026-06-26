@@ -34,7 +34,6 @@ restoreLegacyRealityRegressionStubs
 while read -r selector runner; do
     registerRegressionScriptLeaf "${selector}" "${REGRESSION_LEGACY_SCRIPT}" "${runner}"
 done <<'EOF'
-fast-reality fast-reality
 ui ui
 routing routing
 subscription subscription
