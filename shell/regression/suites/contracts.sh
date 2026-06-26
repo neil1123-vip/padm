@@ -173,6 +173,8 @@ runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
     done <<'EOF'
 ui-smoke runRegressionMenuSmoke
 routing-socks5-udp-associate runSocks5UdpAssociateRegression
+routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
+routing-access-control-config-transaction runAccessControlConfigTransactionRegression
 subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
