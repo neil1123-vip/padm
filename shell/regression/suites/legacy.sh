@@ -108,6 +108,7 @@ registerRegressionFunctionLeaf clean-last-installation-acme-home runCleanLastIns
 registerRegressionFunctionLeaf clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
 registerRegressionFunctionLeaf alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 registerRegressionFunctionLeaf alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
+registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
 registerRegressionAggregateSequential transaction \
     transaction-core \
     transaction-subscription \
