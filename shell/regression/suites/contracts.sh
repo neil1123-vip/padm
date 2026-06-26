@@ -144,6 +144,24 @@ runLegacySuiteUsesFunctionRegistryContract() {
     grep -q '^    transaction-core \\' "${suiteFile}"
     grep -q '^    transaction-subscription \\' "${suiteFile}"
     grep -q '^    transaction-system$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateParallel transaction-system \\' "${suiteFile}"
+    grep -q '^    nginx-service-failure \\' "${suiteFile}"
+    grep -q '^    uninstall-nginx-cleanup \\' "${suiteFile}"
+    grep -q '^    clean-agent-nginx-managed-remove \\' "${suiteFile}"
+    grep -q '^    fail2ban-managed-cleanup \\' "${suiteFile}"
+    grep -q '^    fail2ban-apply-transaction \\' "${suiteFile}"
+    grep -q '^    uninstall-wireguard-cleanup \\' "${suiteFile}"
+    grep -q '^    wireguard-key-transaction \\' "${suiteFile}"
+    grep -q '^    wireguard-control-safe-dir \\' "${suiteFile}"
+    grep -q '^    warp-config-safe-dir \\' "${suiteFile}"
+    grep -q '^    warp-config-file-cleanup \\' "${suiteFile}"
+    grep -q '^    uninstall-service-stop-failure \\' "${suiteFile}"
+    grep -q '^    clean-last-installation-failure \\' "${suiteFile}"
+    grep -q '^    clean-last-installation-acme-home \\' "${suiteFile}"
+    grep -q '^    clean-last-installation-acme-relative-home \\' "${suiteFile}"
+    grep -q '^    alone-nginx-write-transaction \\' "${suiteFile}"
+    grep -q '^    alone-nginx-update-transaction$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIo$' "${suiteFile}"
     grep -q '^registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
@@ -186,7 +204,6 @@ routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
 subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
-transaction-system runRegressionTransactionSystem
 transaction-subscription runRegressionTransactionSubscription
 nginx-service-failure runNginxServiceFailureRegression
 config-transaction runConfigTransactionRegression
@@ -241,6 +258,40 @@ EOF
     return "${status}"
 }
 
+runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract() (
+    local callLog="${TMP_DIR}/transaction-system-aggregate-dispatch.log"
+    local selector
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=1 PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-system
+
+    for selector in \
+        nginx-service-failure \
+        uninstall-nginx-cleanup \
+        clean-agent-nginx-managed-remove \
+        fail2ban-managed-cleanup \
+        fail2ban-apply-transaction \
+        uninstall-wireguard-cleanup \
+        wireguard-key-transaction \
+        wireguard-control-safe-dir \
+        warp-config-safe-dir \
+        warp-config-file-cleanup \
+        uninstall-service-stop-failure \
+        clean-last-installation-failure \
+        clean-last-installation-acme-home \
+        clean-last-installation-acme-relative-home \
+        alone-nginx-write-transaction \
+        alone-nginx-update-transaction; do
+        grep -qx "${selector}" "${callLog}"
+        [[ "$(grep -c "^${selector}$" "${callLog}")" == "1" ]]
+    done
+)
+
 runLegacyRealityStubsSurviveSuiteLoadContract() {
     declare -f realityTargetDetector | grep -q "fake-xray"
     declare -f currentRealityNetworkProfile | grep -q "203.0.113.10"
@@ -285,6 +336,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
         runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
         runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract
 }
 

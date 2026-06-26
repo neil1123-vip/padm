@@ -59,7 +59,6 @@ registerRegressionFunctionLeaf routing-socks5-failure-return runSocks5RoutingFai
 registerRegressionFunctionLeaf subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
-registerRegressionFunctionLeaf transaction-system runRegressionTransactionSystem
 registerRegressionFunctionLeaf transaction-subscription runRegressionTransactionSubscription
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
 registerRegressionFunctionLeaf config-transaction runConfigTransactionRegression
@@ -113,6 +112,24 @@ registerRegressionAggregateSequential transaction \
     transaction-core \
     transaction-subscription \
     transaction-system
+
+registerRegressionAggregateParallel transaction-system \
+    nginx-service-failure \
+    uninstall-nginx-cleanup \
+    clean-agent-nginx-managed-remove \
+    fail2ban-managed-cleanup \
+    fail2ban-apply-transaction \
+    uninstall-wireguard-cleanup \
+    wireguard-key-transaction \
+    wireguard-control-safe-dir \
+    warp-config-safe-dir \
+    warp-config-file-cleanup \
+    uninstall-service-stop-failure \
+    clean-last-installation-failure \
+    clean-last-installation-acme-home \
+    clean-last-installation-acme-relative-home \
+    alone-nginx-write-transaction \
+    alone-nginx-update-transaction
 
 registerRegressionAggregateSequential all \
     routing \

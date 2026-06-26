@@ -16404,6 +16404,8 @@ runRegressionTransactionSystemParallelCompositionRegression() (
         alone-nginx-update-transaction; do
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
+        [[ "$(grep -c "^${selector}-start$" "${callLog}")" == "1" ]]
+        [[ "$(grep -c "^${selector}-finish$" "${callLog}")" == "1" ]]
     done
     awk '
         $0 == "nginx-service-failure-start" { firstStart = NR }
@@ -17240,6 +17242,7 @@ runRegressionAllSelector() {
 runParallelRegressionSelectors() {
     local orchestrationRoot=$1
     shift
+    local -a rawArgs=("$@")
     local -a selectors=()
     local -a logs=()
     local -a pids=()
@@ -17258,12 +17261,33 @@ runParallelRegressionSelectors() {
     fi
 
     mkdir -p "${orchestrationRoot}"
-    while [[ $# -gt 0 ]]; do
-        selectors+=("$1")
-        logs+=("${orchestrationRoot}/$1.log")
-        rcFiles+=("${orchestrationRoot}/$1.rc")
-        shift
-    done
+    if declare -p PADM_REGRESSION_SELECTOR_KIND >/dev/null 2>&1 && (( ${#rawArgs[@]} % 2 == 0 )); then
+        local maybePaired=true
+        local selectorIndex
+        for ((selectorIndex = 1; selectorIndex < ${#rawArgs[@]}; selectorIndex += 2)); do
+            if [[ -z "${PADM_REGRESSION_SELECTOR_KIND[${rawArgs[$selectorIndex]}]:-}" ]]; then
+                maybePaired=false
+                break
+            fi
+        done
+        if [[ "${maybePaired}" == "true" ]]; then
+            while [[ $# -gt 0 ]]; do
+                selectors+=("$2")
+                logs+=("${orchestrationRoot}/$1.log")
+                rcFiles+=("${orchestrationRoot}/$1.rc")
+                shift 2
+            done
+        fi
+    fi
+
+    if [[ "${#selectors[@]}" -eq 0 ]]; then
+        while [[ $# -gt 0 ]]; do
+            selectors+=("$1")
+            logs+=("${orchestrationRoot}/$1.log")
+            rcFiles+=("${orchestrationRoot}/$1.rc")
+            shift
+        done
+    fi
 
     if ! [[ "${maxJobs}" =~ ^[0-9]+$ ]] || [[ "${maxJobs}" -le 0 ]]; then
         maxJobs=${#selectors[@]}
