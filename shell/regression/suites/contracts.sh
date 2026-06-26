@@ -166,10 +166,11 @@ runLegacyTlsUsesFunctionRegistryContract() {
 
 runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local status=0
 
     while read -r selector runner; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}"
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}"
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
 ui-smoke runRegressionMenuSmoke
 routing-socks5-udp-associate runSocks5UdpAssociateRegression
@@ -177,6 +178,10 @@ routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
 routing-access-control-config-transaction runAccessControlConfigTransactionRegression
 routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
 routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
+routing-access-control-failure-return runAccessControlFailureReturnRegression
+routing-bt-failure-return runBTRoutingFailureReturnRegression
+routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
+routing-warp-failure-return runWARPRoutingFailureReturnRegression
 subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
@@ -215,6 +220,8 @@ tls-failure-return runTlsFailureReturnRegression
 tls-reinstall-rollback runTlsReinstallRollbackRegression
 tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 EOF
+
+    return "${status}"
 }
 
 runLegacyRealityStubsSurviveSuiteLoadContract() {
