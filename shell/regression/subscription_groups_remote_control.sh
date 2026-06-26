@@ -1918,88 +1918,11 @@ runRegressionRemoteControlContractServerResponseSteps() {
     runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
 
-runParallelRemoteControlTotals() {
-    local orchestrationRoot=$1
-    local -a logs=()
-    local -a pids=()
-    local -a statuses=()
-    local status=0
-    local index=0
-
-    shift
-    if [[ $# -eq 0 || $(( $# % 2 )) -ne 0 ]]; then
-        printf 'runParallelRemoteControlTotals expects mode/runner pairs\n' >&2
-        return 2
-    fi
-
-    mkdir -p "${orchestrationRoot}"
-    set +e
-    while [[ $# -gt 0 ]]; do
-        local modeName=$1
-        local runner=$2
-        local logFile="${orchestrationRoot}/${modeName}.log"
-        shift 2
-
-        (
-            trap - EXIT INT TERM
-            set -e
-            runRegressionStep "total:${modeName}" "${runner}"
-        ) >"${logFile}" 2>&1 &
-        pids+=("$!")
-        logs+=("${logFile}")
-    done
-
-    for index in "${!pids[@]}"; do
-        wait "${pids[$index]}"
-        statuses[$index]=$?
-    done
-    set -e
-
-    for index in "${!logs[@]}"; do
-        [[ -f "${logs[$index]}" ]] && cat "${logs[$index]}"
-        if [[ "${statuses[$index]}" -ne 0 && "${status}" -eq 0 ]]; then
-            status=${statuses[$index]}
-        fi
-    done
-
-    return "${status}"
-}
-
-runParallelRemoteControlModes() {
-    local orchestrationRoot=$1
-    local firstLabel=$2
-    local firstMode=$3
-    local secondLabel=$4
-    local secondMode=$5
-    local firstLog="${orchestrationRoot}/${firstLabel}.log"
-    local secondLog="${orchestrationRoot}/${secondLabel}.log"
-    local firstStatus secondStatus
-    local firstPid secondPid
-
-    mkdir -p "${orchestrationRoot}"
-    set +e
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" "${firstMode}" >"${firstLog}" 2>&1 &
-    firstPid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" "${secondMode}" >"${secondLog}" 2>&1 &
-    secondPid=$!
-    wait "${firstPid}"
-    firstStatus=$?
-    wait "${secondPid}"
-    secondStatus=$?
-    set -e
-
-    cat "${firstLog}"
-    cat "${secondLog}"
-
-    [[ "${firstStatus}" -eq 0 ]]
-    [[ "${secondStatus}" -eq 0 ]]
-}
-
 runRegressionRemoteControl() {
-    runParallelRemoteControlModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/remote-control-default" \
-        smoke remote-control-smoke \
-        contract remote-control-contract
+        smoke runRegressionRemoteControlSmoke \
+        contract runRegressionRemoteControlContract
 }
 
 runRegressionRemoteControlLight() {
@@ -2011,69 +1934,19 @@ runRegressionRemoteControlSmokeCore() {
 }
 
 runRegressionRemoteControlSmokeRefresh() {
-    local orchestrationRoot="${TMP_DIR}/remote-control-smoke-refresh"
-    local applyLog="${orchestrationRoot}/apply.log"
-    local restoreLog="${orchestrationRoot}/restore.log"
-    local reconcileLog="${orchestrationRoot}/reconcile.log"
-    local applyStatus restoreStatus reconcileStatus
-    local applyPid restorePid reconcilePid
-
-    mkdir -p "${orchestrationRoot}"
-    set +e
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply >"${applyLog}" 2>&1 &
-    applyPid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-restore >"${restoreLog}" 2>&1 &
-    restorePid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-reconcile >"${reconcileLog}" 2>&1 &
-    reconcilePid=$!
-    wait "${applyPid}"
-    applyStatus=$?
-    wait "${restorePid}"
-    restoreStatus=$?
-    wait "${reconcilePid}"
-    reconcileStatus=$?
-    set -e
-
-    cat "${applyLog}"
-    cat "${restoreLog}"
-    cat "${reconcileLog}"
-
-    [[ "${applyStatus}" -eq 0 ]]
-    [[ "${restoreStatus}" -eq 0 ]]
-    [[ "${reconcileStatus}" -eq 0 ]]
+    runParallelRegressionRunners \
+        "${TMP_DIR}/remote-control-smoke-refresh" \
+        apply runRegressionRemoteControlSmokeRefreshApply \
+        restore runRegressionRemoteControlSmokeRefreshRestore \
+        reconcile runRegressionRemoteControlSmokeRefreshReconcile
 }
 
 runRegressionRemoteControlSmokeRefreshApply() {
-    local orchestrationRoot="${TMP_DIR}/remote-control-smoke-refresh-apply"
-    local basicLog="${orchestrationRoot}/basic.log"
-    local prepareLog="${orchestrationRoot}/prepare.log"
-    local failureLog="${orchestrationRoot}/failure.log"
-    local basicStatus prepareStatus failureStatus
-    local basicPid preparePid failurePid
-
-    mkdir -p "${orchestrationRoot}"
-    set +e
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-basic >"${basicLog}" 2>&1 &
-    basicPid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-prepare >"${prepareLog}" 2>&1 &
-    preparePid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-failure >"${failureLog}" 2>&1 &
-    failurePid=$!
-    wait "${basicPid}"
-    basicStatus=$?
-    wait "${preparePid}"
-    prepareStatus=$?
-    wait "${failurePid}"
-    failureStatus=$?
-    set -e
-
-    cat "${basicLog}"
-    cat "${prepareLog}"
-    cat "${failureLog}"
-
-    [[ "${basicStatus}" -eq 0 ]]
-    [[ "${prepareStatus}" -eq 0 ]]
-    [[ "${failureStatus}" -eq 0 ]]
+    runParallelRegressionRunners \
+        "${TMP_DIR}/remote-control-smoke-refresh-apply" \
+        basic runRegressionRemoteControlSmokeRefreshApplyBasic \
+        prepare runRegressionRemoteControlSmokeRefreshApplyPrepare \
+        failure runRegressionRemoteControlSmokeRefreshApplyFailure
 }
 
 runRegressionRemoteControlSmokeRefreshApplyBasic() {
@@ -2097,21 +1970,21 @@ runRegressionRemoteControlSmokeRefreshReconcile() {
 }
 
 runRegressionRemoteControlSmoke() {
-    runParallelRemoteControlModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/remote-control-smoke" \
-        smoke-core remote-control-smoke-core \
-        smoke-refresh remote-control-smoke-refresh
+        smoke-core runRegressionRemoteControlSmokeCore \
+        smoke-refresh runRegressionRemoteControlSmokeRefresh
 }
 
 runRegressionRemoteControlContract() {
-    runParallelRemoteControlModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/remote-control-contract" \
-        service-install remote-control-contract-service-install \
-        server-response remote-control-contract-server-response
+        service-install runRegressionRemoteControlContractServiceInstall \
+        server-response runRegressionRemoteControlContractServerResponse
 }
 
 runRegressionRemoteControlContractServiceInstall() {
-    runParallelRemoteControlTotals \
+    runParallelRegressionRunners \
         "${TMP_DIR}/remote-control-contract-service-install" \
         remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess \
         remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail \
