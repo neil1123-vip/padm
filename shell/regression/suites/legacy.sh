@@ -82,6 +82,8 @@ registerRegressionFunctionLeaf core-first-install-commit-rollback runCoreFirstIn
 registerRegressionFunctionLeaf sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
 registerRegressionFunctionLeaf network-check-return-failure runNetworkCheckReturnFailureRegression
 registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnRegression
+registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackRegression
+registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 registerRegressionAggregateSequential transaction \
     transaction-core \
     transaction-subscription \

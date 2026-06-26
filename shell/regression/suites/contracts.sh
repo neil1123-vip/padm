@@ -208,6 +208,8 @@ core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegre
 sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
 network-check-return-failure runNetworkCheckReturnFailureRegression
 tls-failure-return runTlsFailureReturnRegression
+tls-reinstall-rollback runTlsReinstallRollbackRegression
+tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 EOF
 }
 
