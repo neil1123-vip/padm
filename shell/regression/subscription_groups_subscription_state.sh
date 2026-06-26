@@ -239,6 +239,10 @@ runRegressionSubscriptionState() {
         sync-rollback subscription-state-sync-rollback
 }
 
+if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 regressionName=${1:-subscription-state}
 case "${regressionName}" in
 subscription-state)
@@ -361,8 +365,57 @@ subscription-state-remote-restore-legacy-menu)
 subscription-state-remote-restore-serial)
     regressionRunner=runRegressionSubscriptionStateRemoteRestoreSerial
     ;;
+subscription-state-support)
+    regressionRunner=runRegressionSubscriptionStateSupport
+    ;;
+subscription-state-sync-rollback)
+    regressionRunner=runRegressionSubscriptionStateSyncRollback
+    ;;
+subscription-state-sync-rollback-serial)
+    regressionRunner=runRegressionSubscriptionStateSyncRollbackSerial
+    ;;
+subscription-sync-tempdir)
+    regressionRunner=runRegressionSubscriptionSyncTempDir
+    ;;
+subscription-sync-rollback-failure)
+    regressionRunner=runRegressionSubscriptionStateSyncRollback
+    ;;
+subscription-sync-rollback-failure-serial)
+    regressionRunner=runRegressionSubscriptionStateSyncRollbackSerial
+    ;;
+subscription-sync-rollback-config-restore-failure)
+    regressionRunner=runRegressionSubscriptionSyncRollbackConfigRestoreFailure
+    ;;
+subscription-sync-restore-dir-failure)
+    regressionRunner=runRegressionSubscriptionSyncRollbackRestoreDirFailure
+    ;;
+subscription-sync-reload-rollback)
+    regressionRunner=runRegressionSubscriptionSyncRollbackReloadRollback
+    ;;
+subscription-group-sync-rollback)
+    regressionRunner=runRegressionSubscriptionGroupSyncRollback
+    ;;
+subscription-group-sync-rollback-serial)
+    regressionRunner=runRegressionSubscriptionGroupSyncRollbackSerial
+    ;;
+subscription-group-sync-apply-failure)
+    regressionRunner=runRegressionSubscriptionGroupSyncApplyFailure
+    ;;
+subscription-group-sync-reconcile-rollback)
+    regressionRunner=runRegressionSubscriptionGroupSyncReconcileRollback
+    ;;
+subscription-group-sync-remote-failure)
+    regressionRunner=runRegressionSubscriptionGroupSyncRemoteFailure
+    ;;
+subscription-sync-reconcile-early-exit)
+    regressionRunner=runRegressionSubscriptionSyncReconcileEarlyExit
+    ;;
+subscription-groups-restore-failure)
+    regressionRunner=runRegressionSubscriptionGroupsRestoreFailure
+    ;;
 *)
-    exec bash "${SUBSCRIPTION_STATE_FULL_SCRIPT_PATH}" "$@"
+    printf 'usage: %s [subscription-state|subscription-state-core|subscription-state-structure|subscription-state-structure-foundation|subscription-state-structure-foundation-add-remove|subscription-state-structure-foundation-credential|subscription-state-structure-foundation-normalize|subscription-state-structure-foundation-init-transaction|subscription-state-structure-foundation-serial|subscription-state-structure-migration|subscription-state-structure-source|subscription-state-structure-source-credential|subscription-state-structure-source-status|subscription-state-structure-source-remove|subscription-state-structure-source-serial|subscription-state-structure-serial|subscription-state-quota|subscription-state-quota-traffic|subscription-state-quota-traffic-summary|subscription-state-quota-traffic-invalid-input|subscription-state-quota-traffic-apply|subscription-state-quota-traffic-serial|subscription-state-quota-menu-preview-fail|subscription-state-quota-menu-tx|subscription-state-quota-menu-tx-rollback|subscription-state-quota-menu-tx-serial|subscription-state-quota-partial-sync|subscription-state-quota-partial-sync-apply-failure|subscription-state-quota-partial-sync-plan|subscription-state-quota-partial-sync-config|subscription-state-quota-partial-sync-serial|subscription-state-quota-serial|subscription-state-remote-restore|subscription-state-remote-restore-self-reference|subscription-state-remote-restore-self-reference-plan|subscription-state-remote-restore-self-reference-sync|subscription-state-remote-restore-self-reference-serial|subscription-state-remote-restore-state-write|subscription-state-remote-restore-legacy-menu|subscription-state-remote-restore-serial]\n' "$0" >&2
+    exit 2
     ;;
 esac
 

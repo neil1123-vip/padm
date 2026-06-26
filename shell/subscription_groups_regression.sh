@@ -2,22 +2,22 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-regressionName=${1:-fast}
 
-case "${regressionName}" in
-fast | platform)
-    exec bash "${SCRIPT_DIR}/regression/subscription_groups_fast.sh" "$@"
-    ;;
-remote-control)
-    exec bash "${SCRIPT_DIR}/regression/subscription_groups_remote_control.sh" remote-control
-    ;;
-remote-control-*)
-    exec bash "${SCRIPT_DIR}/regression/subscription_groups_remote_control.sh" "$@"
-    ;;
-subscription-state | subscription-state-* | subscription-sync-* | subscription-group-sync-* | subscription-groups-restore-failure)
-    exec bash "${SCRIPT_DIR}/regression/subscription_groups_subscription_state.sh" "$@"
-    ;;
-*)
-    exec bash "${SCRIPT_DIR}/regression/subscription_groups_legacy.sh" "$@"
-    ;;
-esac
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/framework/env.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/framework/runtime.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/framework/registry.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/suites/fast.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/suites/contracts.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/suites/legacy.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/suites/remote_control.sh"
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/suites/subscription_state.sh"
+
+runRegisteredRegressionMain "${1:-fast}"
