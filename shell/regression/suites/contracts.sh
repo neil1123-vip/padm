@@ -276,6 +276,58 @@ runTransactionCoreSelectorHelpersStayAlignedContract() (
     cmp -s "${TMP_DIR}/transaction-core-default-selectors.unique.txt" "${TMP_DIR}/transaction-core-wave-selectors.unique.txt"
 )
 
+runTransactionCoreRegisteredChildSelectorsAlignedContract() (
+    local expectedSelectorsFile="${TMP_DIR}/transaction-core-registered-child-selectors.expected.txt"
+    local actualSelectorsFile="${TMP_DIR}/transaction-core-registered-child-selectors.actual.txt"
+    local selector
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
+            printf '%s\n' "${selector}"
+        fi
+    done < <(listRegressionTransactionCoreChildSelectors) >"${actualSelectorsFile}"
+
+    cat <<'EOF' >"${expectedSelectorsFile}"
+config-transaction
+core-port-unsafe-config-dir
+check-port-open-nginx-directory-target
+alone-nginx-directory-target
+xray-reality-port-failure
+reality-profile-failure
+sing-box-reality-key-transaction
+core-template-return-failure
+core-template-managed-remove
+core-binary-install-copy-failure
+sing-box-cronet-rollback
+finalize-sing-box-rollback
+core-upgrade-directory-target
+legacy-core-upgrade-keeps-existing
+core-first-install-failure-clean
+core-first-install-commit-rollback
+core-install-unsafe-binary-path
+sing-box-download-artifacts-cleanup
+network-check-return-failure
+tls-failure-return
+tls-reinstall-rollback
+tls-renew-failure-propagation
+service-queue-apply-propagation
+core-install-service-action-failure
+sing-box-merge-start-failure
+sing-box-merge-config-transaction
+sing-box-uninstall-failure-propagation
+sing-box-uninstall-rejects-unsafe-config-path
+sing-box-managed-cleanup
+sing-box-protocol-reload-failure
+geo-update-reload-failure
+core-cleanup-failure-propagation
+reload-core-propagation
+sing-box-log-transaction
+EOF
+
+    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
+)
+
 runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract() (
     local callLog="${TMP_DIR}/transaction-system-aggregate-dispatch.log"
     local selector
@@ -340,6 +392,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
+        runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
         runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract
 }

@@ -93,6 +93,8 @@ registerRegressionFunctionLeaf network-check-return-failure runNetworkCheckRetur
 registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnRegression
 registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackRegression
 registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
+registerRegressionScriptLeaf sing-box-merge-config-transaction "${REGRESSION_LEGACY_SCRIPT}" sing-box-merge-config-transaction
+registerRegressionScriptLeaf reload-core-propagation "${REGRESSION_LEGACY_SCRIPT}" reload-core-propagation
 registerRegressionFunctionLeaf wireguard-control-safe-dir runWireGuardControlSafeDirRegression
 registerRegressionFunctionLeaf warp-config-safe-dir runWarpConfigSafeDirRegression
 registerRegressionFunctionLeaf warp-config-file-cleanup runWarpConfigFileCleanupRegression
