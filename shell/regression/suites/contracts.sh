@@ -191,7 +191,6 @@ routing-bt-failure-return runBTRoutingFailureReturnRegression
 routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
 routing-warp-failure-return runWARPRoutingFailureReturnRegression
 routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
-subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 transaction-subscription runRegressionTransactionSubscription
@@ -243,6 +242,43 @@ clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureR
 clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
 alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
+EOF
+
+    return "${status}"
+}
+
+runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local status=0
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+    done <<'EOF'
+subscription-output runRegressionSubscriptionOutput
+subscription-remote-fetch-unique runRemoteSubscribeFetchUniqueRegression
+subscription-remote-fetch-rollback runRemoteSubscribeFetchRollbackRegression
+subscription-remote-fetch-merge runRemoteSubscribeFetchMergeRegression
+subscription-remote-fetch-controlled runRemoteSubscribeFetchControlledRegression
+subscription-remote-fetch-append-failure runRemoteSubscribeFetchAppendFailureRegression
+subscription-remote-fetch-commit-failure runRemoteSubscribeFetchCommitFailureRegression
+subscription-remote-fetch-idempotent runRemoteSubscribeFetchIdempotentRegression
+sing-box-subscribe-write runSingBoxSubscribeWriteRegression
+cdn-address-write-transaction runCdnAddressTransactionRegression
+subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
+subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
+subscribe-server-name runSubscribeServerNameRegression
+subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
+subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
+sing-box-port-failure runSingBoxPortFailureRegression
+subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
+subscribe-local-rollback runSubscribeLocalRollbackRegression
+subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegression
+subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
+refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
+subscribe-return-failure runSubscribeReturnFailureRegression
+remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
+user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
 EOF
 
     return "${status}"
@@ -345,6 +381,136 @@ runTransactionCoreAggregateRunnerRegistrationContract() {
     [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction-core"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction-core"]:-}" == "parallel" ]]
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-core"]:-}" == "runRegressionTransactionCore" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runSubscriptionSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/subscription-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/subscription-default-selectors.sorted.txt"
+    local waveSelectorsFile="${TMP_DIR}/subscription-wave-selectors.txt"
+    local waveSortedFile="${TMP_DIR}/subscription-wave-selectors.sorted.txt"
+
+    declare -F listRegressionSubscriptionChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionLightChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionHeavyChildSelectors >/dev/null
+
+    listRegressionSubscriptionChildSelectors >"${defaultSelectorsFile}"
+    {
+        listRegressionSubscriptionLightChildSelectors
+        listRegressionSubscriptionHeavyChildSelectors
+    } >"${waveSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/subscription-default-selectors.unique.txt"
+    sort "${waveSelectorsFile}" >"${waveSortedFile}"
+    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/subscription-wave-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/subscription-default-selectors.unique.txt"
+    cmp -s "${waveSortedFile}" "${TMP_DIR}/subscription-wave-selectors.unique.txt"
+    cmp -s "${TMP_DIR}/subscription-default-selectors.unique.txt" "${TMP_DIR}/subscription-wave-selectors.unique.txt"
+)
+
+runSubscriptionRemoteFetchRegisteredChildSelectorsAlignedContract() (
+    local expectedSelectorsFile="${TMP_DIR}/subscription-remote-fetch-registered-child-selectors.expected.txt"
+    local actualSelectorsFile="${TMP_DIR}/subscription-remote-fetch-registered-child-selectors.actual.txt"
+    local selector
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
+            printf '%s\n' "${selector}"
+        fi
+    done < <(listRegressionSubscriptionRemoteFetchChildSelectors) >"${actualSelectorsFile}"
+
+    cat <<'EOF' >"${expectedSelectorsFile}"
+subscription-remote-fetch-unique
+subscription-remote-fetch-rollback
+subscription-remote-fetch-merge
+subscription-remote-fetch-controlled
+subscription-remote-fetch-append-failure
+subscription-remote-fetch-commit-failure
+subscription-remote-fetch-idempotent
+EOF
+
+    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
+)
+
+runSubscriptionWriteTransactionRegisteredChildSelectorsAlignedContract() (
+    local expectedSelectorsFile="${TMP_DIR}/subscription-write-transaction-registered-child-selectors.expected.txt"
+    local actualSelectorsFile="${TMP_DIR}/subscription-write-transaction-registered-child-selectors.actual.txt"
+    local selector
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
+            printf '%s\n' "${selector}"
+        fi
+    done < <(listRegressionSubscriptionWriteTransactionChildSelectors) >"${actualSelectorsFile}"
+
+    cat <<'EOF' >"${expectedSelectorsFile}"
+sing-box-subscribe-write
+cdn-address-write-transaction
+subscribe-local-output-transaction
+subscribe-salt-write-transaction
+subscribe-server-name
+subscribe-nginx-config-write
+subscribe-nginx-service-failure
+sing-box-port-failure
+subscribe-user-output-transaction
+subscribe-local-rollback
+subscription-groups-migration-backup
+subscription-groups-backup-failure
+refresh-local-subscriptions-rollback
+subscribe-return-failure
+remove-user-subscription-menu-failure
+user-subscription-menu-mutation-failure
+EOF
+
+    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
+)
+
+runSubscriptionAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["subscription"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf subscription ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscription \\' "${suiteFile}"
+    expectedChildren=$(listRegressionSubscriptionChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription"]:-}" == "runRegressionSubscription" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runSubscriptionRemoteFetchAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["subscription-remote-fetch"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf subscription-remote-fetch ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-remote-fetch runRegressionSubscriptionRemoteFetch \\' "${suiteFile}"
+    expectedChildren=$(listRegressionSubscriptionRemoteFetchChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote-fetch"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-remote-fetch"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-remote-fetch"]:-}" == "runRegressionSubscriptionRemoteFetch" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runSubscriptionWriteTransactionAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["subscription-write-transaction"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-write-transaction runRegressionSubscriptionWriteTransaction \\' "${suiteFile}"
+    expectedChildren=$(listRegressionSubscriptionWriteTransactionChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-write-transaction"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-write-transaction"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-write-transaction"]:-}" == "runRegressionSubscriptionWriteTransaction" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
@@ -477,9 +643,16 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
         runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
+        runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
+        runRegressionStep subscription-remote-fetch-registered-child-selectors-aligned runSubscriptionRemoteFetchRegisteredChildSelectorsAlignedContract &&
+        runRegressionStep subscription-write-transaction-registered-child-selectors-aligned runSubscriptionWriteTransactionRegisteredChildSelectorsAlignedContract &&
+        runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract &&
+        runRegressionStep subscription-remote-fetch-aggregate-runner-registration runSubscriptionRemoteFetchAggregateRunnerRegistrationContract &&
+        runRegressionStep subscription-write-transaction-aggregate-runner-registration runSubscriptionWriteTransactionAggregateRunnerRegistrationContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
         runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&

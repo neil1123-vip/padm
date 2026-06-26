@@ -15989,6 +15989,57 @@ runRegressionRouting() {
         routing-port-panel
 }
 
+listRegressionSubscriptionRemoteFetchChildSelectors() {
+    printf '%s\n' \
+        subscription-remote-fetch-unique \
+        subscription-remote-fetch-rollback \
+        subscription-remote-fetch-merge \
+        subscription-remote-fetch-controlled \
+        subscription-remote-fetch-append-failure \
+        subscription-remote-fetch-commit-failure \
+        subscription-remote-fetch-idempotent
+}
+
+listRegressionSubscriptionWriteTransactionChildSelectors() {
+    printf '%s\n' \
+        sing-box-subscribe-write \
+        cdn-address-write-transaction \
+        subscribe-local-output-transaction \
+        subscribe-salt-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        sing-box-port-failure \
+        subscribe-user-output-transaction \
+        subscribe-local-rollback \
+        subscription-groups-migration-backup \
+        subscription-groups-backup-failure \
+        refresh-local-subscriptions-rollback \
+        subscribe-return-failure \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure
+}
+
+listRegressionSubscriptionLightChildSelectors() {
+    printf '%s\n' \
+        subscription-output \
+        subscription-state
+}
+
+listRegressionSubscriptionHeavyChildSelectors() {
+    printf '%s\n' \
+        subscription-write-transaction \
+        subscription-remote-fetch
+}
+
+listRegressionSubscriptionChildSelectors() {
+    printf '%s\n' \
+        subscription-output \
+        subscription-state \
+        subscription-remote-fetch \
+        subscription-write-transaction
+}
+
 runRegressionSubscriptionOutput() {
     runRegressionStep subscription-output runSubscriptionOutputRegression &&
         runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
@@ -15999,15 +16050,17 @@ runRegressionSubscriptionState() {
 }
 
 runRegressionSubscriptionRemoteFetch() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    mapfile -t selectors < <(listRegressionSubscriptionRemoteFetchChildSelectors)
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
         runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-fetch-parallel-${BASHPID:-$$}" \
-        subscription-remote-fetch-unique \
-        subscription-remote-fetch-rollback \
-        subscription-remote-fetch-merge \
-        subscription-remote-fetch-controlled \
-        subscription-remote-fetch-append-failure \
-        subscription-remote-fetch-commit-failure \
-        subscription-remote-fetch-idempotent
+        "${selectorPairs[@]}"
 }
 
 runRemoteSubscribeFetchUniqueRegression() {
@@ -16061,17 +16114,11 @@ runRegressionSubscriptionRemoteFetchParallelCompositionRegression() (
 
     runRegressionSubscriptionRemoteFetch
 
-    for selector in \
-        subscription-remote-fetch-unique \
-        subscription-remote-fetch-rollback \
-        subscription-remote-fetch-merge \
-        subscription-remote-fetch-controlled \
-        subscription-remote-fetch-append-failure \
-        subscription-remote-fetch-commit-failure \
-        subscription-remote-fetch-idempotent; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
-    done
+    done < <(listRegressionSubscriptionRemoteFetchChildSelectors)
     awk '
         $0 == "subscription-remote-fetch-unique-start" { uniqueStart = NR }
         $0 == "subscription-remote-fetch-merge-start" { mergeStart = NR }
@@ -16095,23 +16142,16 @@ runRegressionSubscriptionRemoteFetchParallelCompositionRegression() (
 )
 
 runRegressionSubscriptionWriteTransaction() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    mapfile -t selectors < <(listRegressionSubscriptionWriteTransactionChildSelectors)
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
     runParallelRegressionSelectors "${TMP_DIR}/subscription-write-transaction-parallel-${BASHPID:-$$}" \
-        sing-box-subscribe-write \
-        cdn-address-write-transaction \
-        subscribe-local-output-transaction \
-        subscribe-salt-write-transaction \
-        subscribe-server-name \
-        subscribe-nginx-config-write \
-        subscribe-nginx-service-failure \
-        sing-box-port-failure \
-        subscribe-user-output-transaction \
-        subscribe-local-rollback \
-        subscription-groups-migration-backup \
-        subscription-groups-backup-failure \
-        refresh-local-subscriptions-rollback \
-        subscribe-return-failure \
-        remove-user-subscription-menu-failure \
-        user-subscription-menu-mutation-failure
+        "${selectorPairs[@]}"
 }
 
 runRegressionSubscriptionWriteTransactionParallelCompositionRegression() (
@@ -16152,26 +16192,11 @@ runRegressionSubscriptionWriteTransactionParallelCompositionRegression() (
 
     runRegressionSubscriptionWriteTransaction
 
-    for selector in \
-        sing-box-subscribe-write \
-        cdn-address-write-transaction \
-        subscribe-local-output-transaction \
-        subscribe-salt-write-transaction \
-        subscribe-server-name \
-        subscribe-nginx-config-write \
-        subscribe-nginx-service-failure \
-        sing-box-port-failure \
-        subscribe-user-output-transaction \
-        subscribe-local-rollback \
-        subscription-groups-migration-backup \
-        subscription-groups-backup-failure \
-        refresh-local-subscriptions-rollback \
-        subscribe-return-failure \
-        remove-user-subscription-menu-failure \
-        user-subscription-menu-mutation-failure; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
-    done
+    done < <(listRegressionSubscriptionWriteTransactionChildSelectors)
     awk '
         $0 == "sing-box-subscribe-write-start" { singboxStart = NR }
         $0 == "subscribe-user-output-transaction-start" { userOutputStart = NR }
@@ -16206,10 +16231,11 @@ runRegressionSubscriptionParallelCompositionRegression() (
 
     runRegressionSubscription
 
-    for selector in subscription-output subscription-state subscription-remote-fetch subscription-write-transaction; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
-    done
+    done < <(listRegressionSubscriptionChildSelectors)
     awk '
         $0 == "subscription-output-start" { outputStart = NR }
         $0 == "subscription-state-start" { stateStart = NR }
@@ -16221,10 +16247,11 @@ runRegressionSubscriptionParallelCompositionRegression() (
     rm -f "${TMP_DIR}/subscription-state-started"
     PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionSubscription
 
-    for selector in subscription-output subscription-state subscription-remote-fetch subscription-write-transaction; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
-    done
+    done < <(listRegressionSubscriptionChildSelectors)
     awk '
         $0 == "subscription-output-start" { outputStart = NR }
         $0 == "subscription-state-start" { stateStart = NR }
@@ -16242,24 +16269,37 @@ runRegressionSubscriptionParallelCompositionRegression() (
 )
 
 runRegressionSubscription() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
     if [[ "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" == "all" ]]; then
+        mapfile -t selectors < <(listRegressionSubscriptionLightChildSelectors)
+        selectorPairs=()
+        for selector in "${selectors[@]}"; do
+            selectorPairs+=("${selector}" "${selector}")
+        done
         runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
-            subscription-output \
-            subscription-state
+            "${selectorPairs[@]}"
         (
             export PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-2}"
+            mapfile -t selectors < <(listRegressionSubscriptionHeavyChildSelectors)
+            selectorPairs=()
+            for selector in "${selectors[@]}"; do
+                selectorPairs+=("${selector}" "${selector}")
+            done
             runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
-                subscription-write-transaction \
-                subscription-remote-fetch
+                "${selectorPairs[@]}"
         )
         return
     fi
 
+    mapfile -t selectors < <(listRegressionSubscriptionChildSelectors)
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
     runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
-        subscription-output \
-        subscription-state \
-        subscription-remote-fetch \
-        subscription-write-transaction
+        "${selectorPairs[@]}"
 }
 
 runRegressionRealityCandidates() {
