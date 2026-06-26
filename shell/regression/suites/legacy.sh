@@ -2,12 +2,12 @@
 
 REGRESSION_LEGACY_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REGRESSION_LEGACY_SCRIPT="${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"
+PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"
 
 while read -r selector runner; do
     registerRegressionScriptLeaf "${selector}" "${REGRESSION_LEGACY_SCRIPT}" "${runner}"
 done <<'EOF'
 fast-reality fast-reality
-platform-io platform-io
 tls tls
 ui ui
 ui-smoke menu-smoke
@@ -31,6 +31,8 @@ transaction-core transaction-core
 transaction-subscription transaction-subscription
 transaction-system transaction-system
 EOF
+
+registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
 
 registerRegressionAggregateSequential all \
     routing \

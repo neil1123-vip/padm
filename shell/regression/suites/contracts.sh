@@ -120,6 +120,24 @@ runFastPlatformSourceOnlyExecutionContract() (
     declare -F runRegressionPlatform >/dev/null
 )
 
+runLegacySuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIo$' "${suiteFile}"
+    grep -q '^registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
+    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+}
+
+runLegacyPlatformIoSupportsSourceOnlyExecutionContract() (
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${scriptFile}"
+    declare -F runRegressionPlatformIo >/dev/null
+)
+
 runLegacyRegressionScriptsRequireDispatcherContract() {
     local root="${TMP_DIR}/legacy-entry-contract"
     local scriptPath
@@ -152,7 +170,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
-        runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract
+        runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
+        runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
+        runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts
