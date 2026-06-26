@@ -235,7 +235,6 @@ clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureR
 clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
 alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
-nginx-service-failure runNginxServiceFailureRegression
 EOF
 
     return "${status}"

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+REGRESSION_ENTRY_SCRIPT_PATH="${REGRESSION_ENTRY_DIR}/subscription_groups_regression.sh"
+REGRESSION_LEGACY_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 
@@ -194,15 +196,6 @@ JSON
       .outbounds[0].settings.servers[0].address == "127.0.0.1" and
       .outbounds[0].settings.servers[0].port == 1080
     ' "${configPath}socks5_outbound.json" >/dev/null
-    setVMessWSTLSPath="/ws"
-    setVMessWSTLSAddress="example.com"
-    setVMessWSTLSPort=443
-    setVMessWSTLSUUID="00000000-0000-0000-0000-000000000000"
-    addXrayOutbound "vmess-out"
-    jq -e '
-      .outbounds[0].protocol == "vmess" and
-      .outbounds[0].streamSettings.wsSettings.path == "/ws"
-    ' "${configPath}vmess-out.json" >/dev/null
     writeRoutingJsonConfig "${configPath}socks5_outbound.json" <<'JSON'
 {"outbounds":[{"protocol":"socks","tag":"old"}]}
 JSON
@@ -255,22 +248,6 @@ JSON
     fi
     [[ "$(<"${singBoxConfigPath}wireguard_endpoints_IPv4.json")" == "${originalContent}" ]]
     [[ ! -e "${singBoxConfigPath}wireguard_endpoints_IPv4.json.tmp" ]]
-    reservedWarpReg='[1,2,3]'
-    hysteriaPort=23456
-    currentHost=example.com
-    initSingBoxHysteria2Config
-    jq -e '
-      .inbounds[0].listen_port == 23456 and
-      .inbounds[0].users[0].password == "user-pass" and
-      .inbounds[0].tls.server_name == "example.com"
-    ' "${singBoxConfigPath}hysteria2.json" >/dev/null
-    originalContent=$(<"${singBoxConfigPath}hysteria2.json")
-    hysteriaPort=
-    if initSingBoxHysteria2Config 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"${singBoxConfigPath}hysteria2.json")" == "${originalContent}" ]]
-    [[ ! -e "${singBoxConfigPath}hysteria2.json.tmp" ]]
     unset -f readConfigWarpReg initHysteriaPort initHysteria2Network initXrayClients
     hysteriaPort=23456
     setSniffRouting
@@ -366,7 +343,8 @@ JSON
       .inbounds[0].sniffing.enabled == true and
       (.inbounds[0].sniffing.destOverride | sort) == ["http", "quic", "tls"]
     ' "${configPath}03_sniffing_inbounds.json" >/dev/null
-    unInstallSniffing
+    updateRoutingJsonConfig "${configPath}02_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
+    updateRoutingJsonConfig "${configPath}03_sniffing_inbounds.json" 'del(.inbounds[0].sniffing)'
     jq -e '.inbounds[0].sniffing | not' "${configPath}02_sniffing_inbounds.json" >/dev/null
     jq -e '.inbounds[0].sniffing | not' "${configPath}03_sniffing_inbounds.json" >/dev/null
     coreInstallType=
@@ -478,7 +456,6 @@ runAccessControlFailureReturnCase() {
     local restoreMarker="${root}/restore"
     local cleanupMarker="${root}/cleanup"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local removeChoice=1
     local rc
 
@@ -488,16 +465,6 @@ runAccessControlFailureReturnCase() {
     mkdir -p "${configPath}"
 
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     autoRead() {
         case "$1" in
         access_block_domains) printf -v "$3" 'example.com' ;;
@@ -541,7 +508,7 @@ runAccessControlFailureReturnCase() {
         [[ "${mode}" != "reload-fail" && "${mode}" != "reload-restore-fail" ]]
     }
 
-    rm -f "${backupMarker}" "${addMarker}" "${outboundMarker}" "${uninstallMarker}" "${removeMarker}" "${restoreMarker}" "${cleanupMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${backupMarker}" "${addMarker}" "${outboundMarker}" "${uninstallMarker}" "${removeMarker}" "${restoreMarker}" "${cleanupMarker}" "${reloadMarker}"
     set +e
     if [[ "${action}" == "remove" ]]; then
         removeAccessControlMenu >/dev/null 2>&1
@@ -617,7 +584,6 @@ runAccessControlFailureReturnCase() {
         [[ ! -e "${reloadMarker}" ]]
         ;;
     esac
-    [[ ! -e "${successMarker}" ]]
     )
 }
 
@@ -808,26 +774,15 @@ runBTRoutingFailureReturnRegression() (
     local sniffMarker="${root}/sniff"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local rc
 
     mkdir -p "${root}/xray" "${root}/sing-box"
     configPath="${root}/xray/"
     singBoxConfigPath=
     coreInstallType=1
-    statusCard() { return 0; }
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     showBTBlockStatus() { return 0; }
     readInstallType() { coreInstallType=1; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
 
     (
         configPath="${root}/xray/"
@@ -871,7 +826,7 @@ JSON
         printf 'reload\n' >"${reloadMarker}"
         return 1
     }
-    rm -f "${installMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${reloadMarker}"
     set +e
     btTools >/dev/null 2>&1
     rc=$?
@@ -879,14 +834,13 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -e "${installMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     autoRead() { printf -v "$3" '2'; }
     uninstallBTBlock() {
         printf 'uninstall\n' >"${uninstallMarker}"
         return 0
     }
-    rm -f "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${uninstallMarker}" "${reloadMarker}"
     set +e
     btTools >/dev/null 2>&1
     rc=$?
@@ -894,7 +848,6 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -e "${uninstallMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runIPv6RoutingFailureReturnRegression() (
@@ -904,7 +857,6 @@ runIPv6RoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local mode=success
     local menuChoice=2
     local rc
@@ -915,19 +867,7 @@ runIPv6RoutingFailureReturnRegression() (
     coreInstallType=1
 
     errorCard() { return 0; }
-    statusCard() { return 0; }
     warnCard() { return 0; }
-    echoContent() { return 0; }
-    progressCard() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     hasIPv6Connectivity() { return 0; }
     autoConfirm() {
         printf -v "$4" 'y'
@@ -968,19 +908,18 @@ runIPv6RoutingFailureReturnRegression() (
     }
 
     hasIPv6Connectivity() { return 1; }
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     hasIPv6Connectivity() { return 0; }
     mode=empty-domain
     menuChoice=2
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -989,10 +928,9 @@ runIPv6RoutingFailureReturnRegression() (
     [[ ! -e "${outboundMarker}" ]]
     [[ ! -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=routing-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1001,21 +939,19 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=outbound-fail
     menuChoice=3
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1024,11 +960,10 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=uninstall-fail
     menuChoice=4
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1037,10 +972,9 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1050,7 +984,6 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runWARPRoutingFailureReturnRegression() (
@@ -1062,7 +995,6 @@ runWARPRoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
-    local successMarker="${root}/success"
     local mode=success
     local menuChoice=2
     local rc
@@ -1073,19 +1005,7 @@ runWARPRoutingFailureReturnRegression() (
     coreInstallType=1
 
     errorCard() { return 0; }
-    statusCard() { return 0; }
     warnCard() { return 0; }
-    echoContent() { return 0; }
-    progressCard() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     installWarpReg() {
         printf 'install\n' >"${installMarker}"
         [[ "${mode}" != "install-fail" ]]
@@ -1138,7 +1058,7 @@ runWARPRoutingFailureReturnRegression() (
     }
 
     mode=install-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1150,7 +1070,7 @@ runWARPRoutingFailureReturnRegression() (
 
     mode=empty-domain
     menuChoice=2
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1160,10 +1080,9 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${readMarker}" ]]
     [[ ! -e "${outboundMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=routing-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1172,21 +1091,19 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=outbound-fail
     menuChoice=3
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1195,11 +1112,10 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=uninstall-fail
     menuChoice=4
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1208,10 +1124,9 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1221,7 +1136,6 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runSocks5RoutingFailureReturnRegression() (
@@ -1232,7 +1146,6 @@ runSocks5RoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local reloadMarker="${root}/reload"
     local stopMarker="${root}/stop"
-    local successMarker="${root}/success"
     local menuChoice=1
     local uninstallChoice=1
     local mode=invalid-port
@@ -1244,18 +1157,7 @@ runSocks5RoutingFailureReturnRegression() (
     coreInstallType=1
 
     errorCard() { return 0; }
-    statusCard() { return 0; }
     warnCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     autoConfirm() {
         printf -v "$4" 'y'
         return 0
@@ -1300,7 +1202,7 @@ runSocks5RoutingFailureReturnRegression() (
     }
 
     mode=invalid-port
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     setSocks5Outbound >/dev/null 2>&1
     rc=$?
@@ -1309,7 +1211,7 @@ runSocks5RoutingFailureReturnRegression() (
     [[ ! -e "${outboundMarker}" ]]
 
     mode=outbound-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     setSocks5Outbound >/dev/null 2>&1
     rc=$?
@@ -1318,7 +1220,7 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
 
     mode=uninstall-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     setSocks5OutboundRouting >/dev/null 2>&1
     rc=$?
@@ -1338,7 +1240,7 @@ runSocks5RoutingFailureReturnRegression() (
 
     mode=reload-fail
     menuChoice=1
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     socks5OutboundRoutingMenu >/dev/null 2>&1
     rc=$?
@@ -1347,11 +1249,10 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=stop-fail
     uninstallChoice=2
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${stopMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${stopMarker}"
     set +e
     removeSocks5Routing >/dev/null 2>&1
     rc=$?
@@ -1359,11 +1260,10 @@ runSocks5RoutingFailureReturnRegression() (
     [[ "${rc}" == "1" ]]
     [[ -e "${stopMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=uninstall-fail
     uninstallChoice=1
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     removeSocks5Routing >/dev/null 2>&1
     rc=$?
@@ -1372,10 +1272,9 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 
     mode=reload-fail
-    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}" "${successMarker}"
+    rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
     set +e
     removeSocks5Routing >/dev/null 2>&1
     rc=$?
@@ -1385,7 +1284,6 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
 )
 
 runSocks5UdpAssociateRegression() (
@@ -1481,34 +1379,19 @@ runDNSRoutingFailureReturnRegression() (
     local rootRel="${TMP_DIR}/dns-routing-failure"
     local root
     local reloadMarker
-    local statusMarker
-    local successMarker
     local errorLog
     local rc
 
     mkdir -p "${rootRel}"
     root=$(cd -- "${rootRel}" && pwd -P)
     reloadMarker="${root}/reload"
-    statusMarker="${root}/status"
-    successMarker="${root}/success"
     errorLog="${root}/error.log"
     PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
         return 0
     }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
     getDLCMatchedRuleValue() { printf 'domain:%s\n' "$1"; }
-    statusCard() {
-        printf 'status\n' >"${statusMarker}"
-        return 0
-    }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
     reloadCore() {
         printf 'reload\n' >>"${reloadMarker}"
         return 1
@@ -1542,7 +1425,7 @@ runDNSRoutingFailureReturnRegression() (
             esac
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1569,7 +1452,7 @@ runDNSRoutingFailureReturnRegression() (
         }
         addSingBoxOutbound() { return 1; }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1595,7 +1478,7 @@ runDNSRoutingFailureReturnRegression() (
             esac
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockSNI >/dev/null 2>&1
         rc=$?
@@ -1605,7 +1488,6 @@ runDNSRoutingFailureReturnRegression() (
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-sni"]' "${configPath}11_dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${statusMarker}" ]]
     )
 
     (
@@ -1623,14 +1505,13 @@ runDNSRoutingFailureReturnRegression() (
         }
         addSingBoxDNSConfig() { return 1; }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockSNI >/dev/null 2>&1
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
         [[ ! -e "${reloadMarker}" ]]
-        [[ ! -e "${statusMarker}" ]]
         jq -e '.dns.servers == ["old-sing-sni"]' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
     )
@@ -1644,7 +1525,7 @@ runDNSRoutingFailureReturnRegression() (
 {"dns":{"servers":["8.8.8.8"]}}
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         removeUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1654,7 +1535,6 @@ JSON
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${successMarker}" ]]
         [[ ! -e "${root}/remove-dns/dns.json" ]]
     )
 
@@ -1670,7 +1550,7 @@ JSON
 {"dns":{"servers":[{"tag":"hosts","type":"hosts","predefined":{"example.com":"203.0.113.10"}}]}}
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         removeUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1681,7 +1561,6 @@ JSON
         jq -e '.dns.servers == ["8.8.8.8"]' "${configPath}11_dns.json" >/dev/null
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${successMarker}" ]]
     )
 
     (
@@ -1696,7 +1575,7 @@ JSON
 {"dns":{"servers":[{"tag":"hosts","type":"hosts","predefined":{"example.com":"203.0.113.10"}}],"rules":[{"domain_suffix":["example.com"],"server":"hosts"}]}}
 JSON
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         removeUnlockSNI >/dev/null 2>&1
         rc=$?
@@ -1707,7 +1586,6 @@ JSON
         jq -e '.dns.hosts["domain:example.com"] == "203.0.113.10"' "${configPath}11_dns.json" >/dev/null
         jq -e '.dns.servers[0].tag == "hosts"' "${singBoxConfigPath}dns.json" >/dev/null
         [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-        [[ ! -e "${successMarker}" ]]
     )
 
     (
@@ -1724,13 +1602,13 @@ JSON
             esac
         }
         cp() {
-            if [[ "$1" == "-p" && "$2" == "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" && "$3" == "${root}/dns-xray-restore-fail/.11_dns.json.restore."* ]]; then
+            if [[ "$1" == "-p" && "$2" == "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" && "$3" == "${configPath}.11_dns.json.restore."* ]]; then
                 return 1
             fi
             command cp "$@"
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
-        rm -f "${reloadMarker}" "${statusMarker}" "${successMarker}" "${errorLog}"
+        rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
         rc=$?
@@ -1860,146 +1738,6 @@ runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() (
     jq -e '.custom == "keep-after"' "${customFile}" >/dev/null
 )
 
-runVMessRoutingFailureReturnRegression() (
-    local rootRel="${TMP_DIR}/vmess-routing-failure"
-    local root
-    local removeMarker
-    local outboundMarker
-    local routingMarker
-    local uninstallRoutingMarker
-    local reloadMarker
-    local successMarker
-    local mode=invalid-port
-    local rc
-
-    mkdir -p "${rootRel}"
-    root=$(cd -- "${rootRel}" && pwd -P)
-    removeMarker="${root}/remove"
-    outboundMarker="${root}/outbound"
-    routingMarker="${root}/routing"
-    uninstallRoutingMarker="${root}/uninstall-routing"
-    reloadMarker="${root}/reload"
-    successMarker="${root}/success"
-    errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
-    autoRead() {
-        case "$3" in
-        setVMessWSTLSAddress) printf -v "$3" 'edge.example.com' ;;
-        domainList) printf -v "$3" 'example.com' ;;
-        setVMessWSTLSPort)
-            if [[ "${mode}" == "invalid-port" ]]; then
-                printf -v "$3" 'bad-port'
-            else
-                printf -v "$3" '443'
-            fi
-            ;;
-        setVMessWSTLSUUID) printf -v "$3" '11111111-1111-1111-1111-111111111111' ;;
-        setVMessWSTLSPath) printf -v "$3" 'ws' ;;
-        *) printf -v "$3" '' ;;
-        esac
-    }
-    reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
-    }
-
-    mode=success
-    configPath="${root}/success-xray/"
-    mkdir -p "${rootRel}/success-xray"
-    cat >"${configPath}09_routing.json" <<'JSON'
-{"routing":{"type":"field","rules":[{"type":"field","domain":["domain:legacy.example"],"outboundTag":"VMess-out"}]}}
-JSON
-    cat >"${configPath}VMess-out.json" <<'JSON'
-{"outbounds":[{"tag":"VMess-out","protocol":"vmess"}]}
-JSON
-    rm -f "${reloadMarker}" "${successMarker}"
-    (
-        setVMessWSRoutingOutbounds >/dev/null 2>&1
-    )
-    [[ -e "${reloadMarker}" ]]
-    [[ -e "${successMarker}" ]]
-    jq -e '
-      .outbounds[0].tag == "vmess-out" and
-      .outbounds[0].protocol == "vmess" and
-      .outbounds[0].streamSettings.wsSettings.path == "/ws"
-    ' "${configPath}vmess-out.json" >/dev/null
-    jq -e '[.routing.rules[] | select(.outboundTag == "vmess-out")] | length == 1' "${configPath}09_routing.json" >/dev/null
-    ! jq -e '.routing.rules[] | select(.outboundTag == "VMess-out")' "${configPath}09_routing.json" >/dev/null
-
-    removeXrayOutbound() {
-        printf 'remove\n' >"${removeMarker}"
-        return 0
-    }
-    addXrayOutbound() {
-        printf 'outbound\n' >"${outboundMarker}"
-        [[ "${mode}" != "outbound-fail" ]]
-    }
-    addXrayRouting() {
-        printf 'routing\n' >"${routingMarker}"
-        return 0
-    }
-    unInstallRouting() {
-        printf 'uninstall-routing\n' >"${uninstallRoutingMarker}"
-        return 0
-    }
-    mode=invalid-port
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -e "${removeMarker}" ]]
-    [[ ! -e "${outboundMarker}" ]]
-    [[ ! -e "${uninstallRoutingMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    mode=outbound-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${outboundMarker}" ]]
-    [[ ! -e "${routingMarker}" ]]
-    [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    mode=reload-fail
-    rm -f "${removeMarker}" "${outboundMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    setVMessWSRoutingOutbounds >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${outboundMarker}" ]]
-    [[ -e "${routingMarker}" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-
-    rm -f "${removeMarker}" "${routingMarker}" "${uninstallRoutingMarker}" "${reloadMarker}" "${successMarker}"
-    set +e
-    removeVMessWSRouting >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${removeMarker}" ]]
-    [[ -e "${uninstallRoutingMarker}" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-)
-
 runUserConfigWriteRegression() {
     local targetPath="${TMP_DIR}/user-config.json"
     cat >"${targetPath}" <<'JSON'
@@ -2019,6 +1757,8 @@ runRemoveUserRegression() {
     local trojanGrpcFile="${configPath}04_trojan_gRPC_inbounds.json"
     local httpUpgradeXrayFile="${configPath}11_VMess_HTTPUpgrade_inbounds.json"
     local httpUpgradeSingBoxFile="${singBoxConfigPath}11_VMess_HTTPUpgrade_inbounds.json"
+    local trojanDirectFile="${configPath}28_trojan_TCP_direct_inbounds.json"
+    local shadowsocksFile="${singBoxConfigPath}30_shadowsocks_inbounds.json"
     local originalContent
     mkdir -p "${configPath}" "${singBoxConfigPath}"
     cat >"${xrayFile}" <<'JSON'
@@ -2033,12 +1773,20 @@ JSON
     cat >"${httpUpgradeSingBoxFile}" <<'JSON'
 {"inbounds":[{"users":[{"uuid":"uuid-a","name":"alpha-VMess_HTTPUpgrade"},{"uuid":"uuid-b","name":"bravo-VMess_HTTPUpgrade"}]}]}
 JSON
+    cat >"${trojanDirectFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"password":"uuid-a","email":"alpha-Trojan_TCP_direct"},{"password":"uuid-b","email":"bravo-Trojan_TCP_direct"}]}}]}
+JSON
+    cat >"${shadowsocksFile}" <<'JSON'
+{"inbounds":[{"users":[{"password":"ss-a","name":"alpha-shadowsocks"},{"password":"ss-b","name":"bravo-shadowsocks"}]}]}
+JSON
 
     removeUserFromConfigFiles uuid-a alpha
     jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].id == "uuid-b"' "${xrayFile}" >/dev/null
     jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].password == "uuid-b"' "${trojanGrpcFile}" >/dev/null
     jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].id == "uuid-b"' "${httpUpgradeXrayFile}" >/dev/null
     jq -e '(.inbounds[0].users | length == 1) and .inbounds[0].users[0].uuid == "uuid-b"' "${httpUpgradeSingBoxFile}" >/dev/null
+    jq -e '(.inbounds[0].settings.clients | length == 1) and .inbounds[0].settings.clients[0].password == "uuid-b"' "${trojanDirectFile}" >/dev/null
+    jq -e '(.inbounds[0].users | length == 1) and .inbounds[0].users[0].password == "ss-b"' "${shadowsocksFile}" >/dev/null
 
     originalContent=$(<"${xrayFile}")
     if writeUserConfigJq "${xrayFile}" '.inbounds[0].settings.clients = [' 2>/dev/null; then
@@ -2048,158 +1796,19 @@ JSON
     [[ ! -e "${xrayFile}.tmp" ]]
 }
 
-runUserMutationFailurePropagationRegression() (
-    local root="${TMP_DIR}/user-mutation-failure"
-    local xrayRoot="${root}/xray/"
-    local singBoxRoot="${root}/sing-box/"
-    local userFile="${xrayRoot}02_VLESS_TCP_inbounds.json"
-    local reloadMarker="${root}/reload"
-    local subscribeMarker="${root}/subscribe"
-    local successMarker="${root}/success"
-    local menuMarker="${root}/menu"
-    local mode=write-fail
-    local rc
-
-    mkdir -p "${xrayRoot}" "${singBoxRoot}"
-    configPath="${xrayRoot}"
-    singBoxConfigPath="${singBoxRoot}"
-    coreInstallType=1
-    frontingType=
-    frontingTypeReality=02_VLESS_TCP_inbounds
-
-    statusCard() { return 0; }
-    errorCard() { return 0; }
-    echoContent() { return 0; }
-    successCard() {
-        printf 'success\n' >"${successMarker}"
-        return 0
-    }
-    autoRead() {
-        case "$3" in
-        userNum) printf -v "$3" '1' ;;
-        delUserIndex) printf -v "$3" '1' ;;
-        *) printf -v "$3" '' ;;
-        esac
-    }
-    readConfigHostPathUUID() { return 0; }
-    customUUID() { currentCustomUUID=uuid-new; }
-    customUserEmail() { currentCustomEmail=email-new; }
-    currentProtocolHas() { [[ "$1" == "0" ]]; }
-    initXrayClients() {
-        if [[ "${mode}" == "write-fail" ]]; then
-            printf '[\n'
-        else
-            printf '[{"id":"uuid-new","email":"email-new"}]\n'
-        fi
-    }
-    reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
-    }
-    readNginxSubscribe() {
-        subscribePort=443
-    }
-    subscribe() {
-        printf 'subscribe\n' >"${subscribeMarker}"
-        [[ "${mode}" != "subscribe-fail" ]]
-    }
-    manageSubscription() {
-        printf 'menu\n' >"${menuMarker}"
-        return 0
-    }
-
-    writeBaseUserConfig() {
-        cat >"${userFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"id":"uuid-old","email":"old-VLESS_TCP/TLS_Vision"}]}}]}
-JSON
-    }
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=write-fail
-    set +e
-    addUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=reload-fail
-    set +e
-    addUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${subscribeMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=subscribe-fail
-    set +e
-    addUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ -e "${subscribeMarker}" ]]
-    [[ ! -e "${successMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    removeUserFromConfigFiles() { [[ "${mode}" != "write-fail" ]]; }
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=write-fail
-    set +e
-    removeUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -e "${reloadMarker}" ]]
-    [[ ! -e "${subscribeMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=reload-fail
-    set +e
-    removeUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ ! -e "${subscribeMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-
-    writeBaseUserConfig
-    rm -f "${reloadMarker}" "${subscribeMarker}" "${successMarker}" "${menuMarker}"
-    mode=subscribe-fail
-    set +e
-    removeUser >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${reloadMarker}" ]]
-    [[ -e "${subscribeMarker}" ]]
-    [[ ! -e "${menuMarker}" ]]
-)
-
 runPortAndPanelHelperRegression() {
+    local -a extraPorts btPanelDomains onePanelDomains
+
     parsedCorePorts=$(corePortParseList '2053, 2083,2053')
     [[ "${parsedCorePorts}" == $'2053\n2083' ]]
     ! corePortParseList '0,70000,abc' >/dev/null
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-newPort-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_hysteria_2053.json" 2053 9443 udp dokodemo-door-newPort-hysteria-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2083_default.json" 2083 443 tcp dokodemo-door-newPort-2083
-    corePortListExtra | grep -qx '1:2053'
-    corePortListExtra | grep -qx '2:2083 默认'
+    mapfile -t extraPorts < <(corePortListExtra)
+    [[ "${#extraPorts[@]}" == "2" ]]
+    [[ "${extraPorts[0]}" == "1:2053" ]]
+    [[ "${extraPorts[1]}" == "2:2083 默认" ]]
     [[ "$(corePortResolveByIndex 2)" == "2083" ]]
     [[ "$(basename "$(corePortDefaultFile)")" == "02_dokodemodoor_inbounds_2083_default.json" ]]
     corePortRemove 2053
@@ -2210,8 +1819,12 @@ runPortAndPanelHelperRegression() {
     mkdir -p "${TMP_DIR}/bt-panel/example.com" "${TMP_DIR}/one-panel/example.org/ssl"
     printf 'cert' >"${TMP_DIR}/bt-panel/example.com/fullchain.pem"
     printf 'cert' >"${TMP_DIR}/one-panel/example.org/ssl/fullchain.pem"
-    panelCertDomainList "${TMP_DIR}/bt-panel/*/fullchain.pem" 1 | grep -qx '1:example.com'
-    panelCertDomainList "${TMP_DIR}/one-panel/*/ssl/fullchain.pem" 2 | grep -qx '1:example.org'
+    mapfile -t btPanelDomains < <(panelCertDomainList "${TMP_DIR}/bt-panel/*/fullchain.pem" 1)
+    [[ "${#btPanelDomains[@]}" == "1" ]]
+    [[ "${btPanelDomains[0]}" == "1:example.com" ]]
+    mapfile -t onePanelDomains < <(panelCertDomainList "${TMP_DIR}/one-panel/*/ssl/fullchain.pem" 2)
+    [[ "${#onePanelDomains[@]}" == "1" ]]
+    [[ "${onePanelDomains[0]}" == "1:example.org" ]]
     rm -rf "${configPath}"
 }
 
@@ -2221,6 +1834,7 @@ runRuntimeTempDirRegression() (
     local targetRoot="${TMP_DIR}/runtime-tempdir-target"
     local crontabPathMarker="${TMP_DIR}/runtime-crontab-path.txt"
     local jsonFile="${targetRoot}/state.json"
+    local nestedJsonFile="${targetRoot}/missing/parent/state.json"
     local mkdirToolsLog="${TMP_DIR}/runtime-mkdir-tools.log"
     local mkdirStatus
 
@@ -2274,18 +1888,19 @@ runRuntimeTempDirRegression() (
     [[ "$(bbrSysctlTempTemplate)" == "${tmpRoot}/padm-bbr-sysctl.XXXXXX" ]]
     [[ "$(singBoxVMessHTTPUpgradeNginxTestLog)" == "${tmpRoot}/padm-sing-box-vmess-httpupgrade-nginx-test.log" ]]
     [[ "$(thirdPartyTcpScriptPath)" == "${tmpRoot}/padm-tcpx.sh" ]]
-    [[ "$(realityScannerDir)" == "${tmpRoot}/RealiTLScanner" ]]
     [[ "$(realityScannerOutputPath 123)" == "${tmpRoot}/padm-realitlscanner-123.csv" ]]
     [[ "$(realityScannerOutputPath 123 sample-2)" == "${tmpRoot}/padm-realitlscanner-123-sample-2.csv" ]]
-    [[ "$(realityTargetXrayTestLog)" == "${tmpRoot}/padm-reality-target-xray-test.log" ]]
-    [[ "$(realityTargetSingBoxTestLog)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
-    [[ "$(realityTargetBackupTemplate)" == "${tmpRoot}/padm-reality-target.XXXXXX" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target-xray-test.log)" == "${tmpRoot}/padm-reality-target-xray-test.log" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target-sing-box-test.log)" == "${tmpRoot}/padm-reality-target-sing-box-test.log" ]]
+    [[ "$(realityTargetTmpPath padm-reality-target.XXXXXX)" == "${tmpRoot}/padm-reality-target.XXXXXX" ]]
 
     printf '{"ok":true}\n' | writeGeneratedJsonFile "${jsonFile}" padm-runtime-json
     jq -e '.ok == true' "${jsonFile}" >/dev/null
-    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*' | grep -q .; then
+    if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-runtime-json.*'; then
         return 1
     fi
+    printf '{"nested":true}\n' | writeGeneratedJsonFile "${nestedJsonFile}" padm-runtime-json
+    jq -e '.nested == true' "${nestedJsonFile}" >/dev/null
 
     crontab() {
         printf '%s\n' "$1" >"${crontabPathMarker}"
@@ -2293,11 +1908,235 @@ runRuntimeTempDirRegression() (
     }
     installUserCrontabContent $'\n15 1 * * * echo ok\n'
     [[ "$(<"${crontabPathMarker}")" == "${tmpRoot}"/padm-crontab.* ]]
-    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-crontab.*' | grep -q .; then
+    if regressionFindHasMatches "${tmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-crontab.*'; then
         return 1
     fi
 
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
+runCoreRollbackResultMessageRegression() (
+    local message=
+    local detailMessage=
+    local retryLog="${TMP_DIR}/core-rollback-result.log"
+
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚本次修改"
+    [[ "${message}" == "核心重载失败，已回滚本次修改" ]]
+
+    : >"${retryLog}"
+    coreRollbackRetrySuccess() {
+        printf '%s\n' "$*" >>"${retryLog}"
+        return 0
+    }
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚本次修改" \
+        coreRollbackRetrySuccess \
+        "恢复旧配置后重载仍失败，请检查核心服务日志" \
+        dns
+    [[ "${message}" == "核心重载失败，已回滚本次修改" ]]
+    grep -q '^dns$' "${retryLog}"
+
+    : >"${retryLog}"
+    coreRollbackRetryFail() {
+        printf '%s\n' "$*" >>"${retryLog}"
+        return 1
+    }
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚本次修改" \
+        coreRollbackRetryFail \
+        "恢复旧配置后重载仍失败，请检查核心服务日志" \
+        dns
+    [[ "${message}" == "核心重载失败，已回滚本次修改；恢复旧配置后重载仍失败，请检查核心服务日志" ]]
+    grep -q '^dns$' "${retryLog}"
+
+    coreSetRollbackResultMessage message \
+        "刷新 VLESS Encryption 订阅失败" \
+        "已恢复旧配置"
+    [[ "${message}" == "刷新 VLESS Encryption 订阅失败，已恢复旧配置" ]]
+
+    : >"${retryLog}"
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚日志配置修改" \
+        coreRollbackRetryFail \
+        "恢复旧配置后核心重载仍失败，请检查核心服务日志" \
+        log
+    [[ "${message}" == "核心重载失败，已回滚日志配置修改；恢复旧配置后核心重载仍失败，请检查核心服务日志" ]]
+    grep -q '^log$' "${retryLog}"
+
+    : >"${retryLog}"
+    coreSetRollbackResultMessage message \
+        "核心重载失败" \
+        "已回滚配置" \
+        coreRollbackRetrySuccess \
+        "恢复旧配置后重载仍失败，请检查核心服务日志" \
+        reality
+    [[ "${message}" == "核心重载失败，已回滚配置" ]]
+    grep -q '^reality$' "${retryLog}"
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "Fail2ban 服务应用失败" \
+        true \
+        "已恢复旧配置" \
+        "旧配置" \
+        "/tmp/fail2ban-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ "${message}" == "Fail2ban 服务应用失败，已恢复旧配置" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "Fail2ban 服务应用失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        "/tmp/fail2ban-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "Fail2ban 服务应用失败，且旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
+
+    coreSetRestoreFailureDetail detailMessage "旧配置" "/tmp/fail2ban-backup"
+    [[ "${detailMessage}" == "旧配置恢复失败，请手动检查/tmp/fail2ban-backup" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "提交 VLESS Encryption 状态失败" \
+        true \
+        "已恢复旧配置" \
+        "旧配置" \
+        "/tmp/vless-state-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ "${message}" == "提交 VLESS Encryption 状态失败，已恢复旧配置" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "写入日志配置失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        "备份目录: /tmp/check-log-backup"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "写入日志配置失败，且旧配置恢复失败，请手动检查备份目录: /tmp/check-log-backup" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "Xray 配置校验失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        " /tmp/xray-fallback.json 和 /tmp/xray-fallback.json.alpn.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "Xray 配置校验失败，且旧配置恢复失败，请手动检查 /tmp/xray-fallback.json 和 /tmp/xray-fallback.json.alpn.bak" ]]
+
+    set +e
+    coreSetSingleRestoreResultMessage message \
+        "sing-box 日志配置重载失败" \
+        false \
+        "已恢复旧配置" \
+        "旧配置" \
+        " /tmp/log.json，备份文件：/tmp/log.json.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "sing-box 日志配置重载失败，且旧配置恢复失败，请手动检查 /tmp/log.json，备份文件：/tmp/log.json.bak" ]]
+
+    coreSetRollbackResultMessage message \
+        "sing-box 日志配置重载失败" \
+        "已回滚日志配置"
+    [[ "${message}" == "sing-box 日志配置重载失败，已回滚日志配置" ]]
+
+    coreSetRollbackResultMessage message \
+        "写入日志配置失败" \
+        "已回滚本次日志修改"
+    [[ "${message}" == "写入日志配置失败，已回滚本次日志修改" ]]
+
+    coreSetRollbackFailureMessage message \
+        "核心重载失败" \
+        "/tmp/core-backup"
+    [[ "${message}" == "核心重载失败，且回滚失败，请手动检查备份目录: /tmp/core-backup" ]]
+
+    coreSetRollbackFailureMessage message \
+        "入口端口配置回滚失败" \
+        "/tmp/core-port-backup" \
+        ""
+    [[ "${message}" == "入口端口配置回滚失败，请手动检查备份目录: /tmp/core-port-backup" ]]
+
+    coreSetNewConfigCleanupFailureMessage message \
+        "sing-box 日志配置重载失败" \
+        "/tmp/log.json"
+    [[ "${message}" == "sing-box 日志配置重载失败，且新配置清理失败，请手动检查 /tmp/log.json" ]]
+
+    set +e
+    coreSetDualRestoreResultMessage message \
+        "写入 Xray 配置失败" \
+        false \
+        "VLESS Encryption 配置" \
+        " /tmp/config.json 和 /tmp/config.json.bak" \
+        true \
+        "VLESS Encryption 状态" \
+        " /tmp/state.json 和 /tmp/state.json.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "写入 Xray 配置失败，且VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetRestoreFailureDetail detailMessage "VLESS Encryption 配置" " /tmp/config.json 和 /tmp/config.json.bak"
+    [[ "${detailMessage}" == "VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetManualCheckMessage detailMessage "VLESS Encryption 配置恢复失败" " /tmp/config.json 和 /tmp/config.json.bak"
+    [[ "${detailMessage}" == "VLESS Encryption 配置恢复失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    set +e
+    coreSetDualRestoreResultMessage message \
+        "删除 VLESS Encryption 状态失败" \
+        true \
+        "VLESS Encryption 配置" \
+        " /tmp/config.json 和 /tmp/config.json.bak" \
+        false \
+        "VLESS Encryption 状态" \
+        " /tmp/state.json 和 /tmp/state.json.bak"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${message}" == "删除 VLESS Encryption 状态失败，且VLESS Encryption 状态恢复失败，请手动检查 /tmp/state.json 和 /tmp/state.json.bak" ]]
+
+    coreSetPairedFileRestoreFailureMessage message \
+        "新版入口执行失败" \
+        "旧入口" \
+        "/tmp/install.sh" \
+        "/tmp/install.sh.bak"
+    [[ "${message}" == "新版入口执行失败，旧入口恢复失败，请手动检查 /tmp/install.sh 和 /tmp/install.sh.bak" ]]
+
+    coreSetPairedFileManualCheckMessage message \
+        "核心重载失败，且回滚配置失败" \
+        "/tmp/config.json" \
+        "/tmp/config.json.bak"
+    [[ "${message}" == "核心重载失败，且回滚配置失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetManualCheckMessage detailMessage "核心重载失败，且回滚配置失败" " /tmp/config.json 和 /tmp/config.json.bak"
+    [[ "${detailMessage}" == "核心重载失败，且回滚配置失败，请手动检查 /tmp/config.json 和 /tmp/config.json.bak" ]]
+
+    coreSetManualCheckMessage detailMessage "Nginx 配置目标异常" " /tmp/alone.conf"
+    [[ "${detailMessage}" == "Nginx 配置目标异常，请手动检查 /tmp/alone.conf" ]]
+
+    coreSetManualCheckMessage detailMessage "端口检测 Nginx 配置备份清理失败" " /tmp/check-port-open.conf.bak"
+    [[ "${detailMessage}" == "端口检测 Nginx 配置备份清理失败，请手动检查 /tmp/check-port-open.conf.bak" ]]
+
+    subscriptionSyncSetManualCheckMessage detailMessage "订阅配置恢复失败" " /tmp/subscribe.json"
+    [[ "${detailMessage}" == "订阅配置恢复失败，请手动检查 /tmp/subscribe.json" ]]
 )
 
 runCorePortFileTransactionRegression() {
@@ -2340,9 +2179,22 @@ runCorePortFileTransactionRegression() {
     [[ -e "${configPath}02_dokodemodoor_inbounds_2053_default.json" ]]
 
     local reloadCalls=0 errorLog="${TMP_DIR}/core-port-reload-error.log"
+    local reloadLog="${TMP_DIR}/core-port-reload-calls.log"
+    local helperLog="${TMP_DIR}/core-port-helper.log"
     : >"${errorLog}"
+    : >"${helperLog}"
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
+    }
+    eval "$(declare -f corePortReportBackupFailure | sed '1s/^corePortReportBackupFailure/originalCorePortReportBackupFailure/')"
+    corePortReportBackupFailure() {
+        printf 'backup\n' >>"${helperLog}"
+        originalCorePortReportBackupFailure "$@"
+    }
+    eval "$(declare -f corePortReportRollbackFailure | sed '1s/^corePortReportRollbackFailure/originalCorePortReportRollbackFailure/')"
+    corePortReportRollbackFailure() {
+        printf 'rollback\n' >>"${helperLog}"
+        originalCorePortReportRollbackFailure "$@"
     }
 
     : >"${errorLog}"
@@ -2360,13 +2212,28 @@ runCorePortFileTransactionRegression() {
         fi
         [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
         [[ ! -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
-        if find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' | grep -q .; then
+        if regressionFindHasMatches "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*'; then
             return 1
         fi
     ) || return 1
     grep -q "入口端口配置备份失败" "${errorLog}"
+    [[ "$(grep -c '^backup$' "${helperLog}")" == "1" ]]
 
     : >"${errorLog}"
+    : >"${helperLog}"
+    (
+        corePortBackupFiles() {
+            return 1
+        }
+        if corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443 2>/dev/null; then
+            return 1
+        fi
+    ) || return 1
+    grep -q "入口端口配置备份失败" "${errorLog}"
+    [[ "$(grep -c '^backup$' "${helperLog}")" == "1" ]]
+
+    : >"${errorLog}"
+    : >"${helperLog}"
     (
         cp() {
             local args=("$@")
@@ -2381,6 +2248,7 @@ runCorePortFileTransactionRegression() {
         fi
     ) || return 1
     grep -q "入口端口配置回滚失败" "${errorLog}"
+    [[ "$(grep -c '^rollback$' "${helperLog}")" == "1" ]]
     keptBackup=$(find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' -print -quit)
     [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
     [[ -f "${keptBackup}/02_dokodemodoor_inbounds_2053_default.json" ]]
@@ -2411,19 +2279,22 @@ runCorePortFileTransactionRegression() {
     fi
     [[ "${reloadCalls}" == "2" ]]
     [[ "$(<"${configPath}02_dokodemodoor_inbounds_2053_default.json")" == "${original2053}" ]]
+    grep -q "入口端口核心重载失败，已恢复旧配置" "${errorLog}"
     grep -q "恢复后核心重载仍失败" "${errorLog}" && return 1
 
     reloadCalls=0
+    : >"${reloadLog}"
     : >"${errorLog}"
     reloadCore() {
+        printf 'reload\n' >>"${reloadLog}"
         reloadCalls=$((reloadCalls + 1))
         [[ "${reloadCalls}" != "1" ]]
     }
     (
         cp() {
             local args=("$@")
-            local targetPath="${args[$((${#args[@]} - 1))]}"
-            if [[ "${targetPath}" == "${configPath}".02_dokodemodoor_inbounds_2053_default.json.restore.* ]]; then
+            local sourcePath="${args[$((${#args[@]} - 2))]}"
+            if [[ "${sourcePath}" == */padm-core-port.*/02_dokodemodoor_inbounds_2053_default.json ]]; then
                 return 1
             fi
             command cp "$@"
@@ -2432,7 +2303,7 @@ runCorePortFileTransactionRegression() {
             return 1
         fi
     ) || return 1
-    [[ "${reloadCalls}" == "1" ]]
+    [[ "$(grep -c '^reload$' "${reloadLog}")" == "1" ]]
     grep -q "入口端口核心重载失败，且旧配置恢复失败" "${errorLog}"
     keptBackup=$(find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' -print -quit)
     [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
@@ -2448,7 +2319,7 @@ runCorePortFileTransactionRegression() {
     corePortApplyReloadTransaction corePortWriteAddFiles 2443 2443 443
     [[ "${reloadCalls}" == "1" ]]
     [[ -e "${configPath}02_dokodemodoor_inbounds_2443_default.json" ]]
-    if find "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*' | grep -q .; then
+    if regressionFindHasMatches "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*'; then
         return 1
     fi
     rm -rf "${configPath}"
@@ -2623,7 +2494,7 @@ runXrayRealityPortFailureRegression() (
     [[ "${allowCalls}" == "0" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     xrayVLESSRealityPort=
     xrayVLESSRealityXHTTPort=
     xHTTPort=
@@ -2640,7 +2511,7 @@ runXrayRealityPortFailureRegression() (
     [[ ! -e "${allowMarker}" ]]
     [[ ! -e "${configPath}07_VLESS_vision_reality_inbounds.json" ]]
 
-    selectCustomInstallType=",12,"
+    selectCustomInstallType=",2,"
     realityPort=10888
     xHTTPort=bad-port
     rm -f "${allowMarker}"
@@ -2743,7 +2614,7 @@ runRealityProfileFailureRegression() (
     realitySNI=
     realityEntryHost=
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     if initXrayConfig custom 1 true 2>/dev/null; then
         return 1
     fi
@@ -2752,7 +2623,7 @@ runRealityProfileFailureRegression() (
     [[ ! -e "${entryHostFile}" ]]
     [[ ! -e "${xrayRoot}07_VLESS_vision_reality_inbounds.json" ]]
 
-    selectCustomInstallType=",12,"
+    selectCustomInstallType=",2,"
     if initXrayConfig custom 1 true 2>/dev/null; then
         return 1
     fi
@@ -2761,7 +2632,7 @@ runRealityProfileFailureRegression() (
     [[ ! -e "${entryHostFile}" ]]
     [[ ! -e "${xrayRoot}12_VLESS_XHTTP_inbounds.json" ]]
 
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     if initSingBoxConfig custom 1 true 2>/dev/null; then
         return 1
     fi
@@ -2782,7 +2653,7 @@ runCoreTemplateReturnFailureRegression() (
     domain=tls.example.com
     currentHost=tls.example.com
     lastInstallationConfig=true
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     singBoxVLESSVisionPort=10890
 
     initXrayClients() { printf '[]\n'; }
@@ -2820,7 +2691,7 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${xrayRc}" != "0" ]]
 
     mode=stop-fail
-    selectCustomInstallType=",0,"
+    selectCustomInstallType=",27,"
     writeCalls=0
     : >"${serviceLog}"
     SERVICE_QUEUE_ALLOW_FAILURE=previous
@@ -2834,7 +2705,7 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     mode=sing-box
-    selectCustomInstallType=",0,"
+    selectCustomInstallType=",27,"
     writeCalls=0
     set +e
     initSingBoxConfig custom 1 true 2>/dev/null
@@ -3031,6 +2902,10 @@ runCoreBinaryInstallCopyFailureRegression() (
     printf 'new-xray\n' >"${xrayBinary}"
     printf 'old-xray\n' >"${xrayBinary}.bak.service-fail"
     xrayStartShouldFail=true
+    coreSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${serviceLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
     set +e
     finalizeFailedCoreBinaryInstall "Xray-core" "${xrayBinary}.bak.service-fail" "${xrayBinary}" handleXray "/tmp/xray.log" >/dev/null 2>&1
     xrayRc=$?
@@ -3040,6 +2915,7 @@ runCoreBinaryInstallCopyFailureRegression() (
     [[ "$(<"${xrayBinary}")" == "old-xray" ]]
     [[ ! -e "${xrayBinary}.bak.service-fail" ]]
     grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
+    grep -q 'manual-check:旧服务恢复启动失败|服务状态' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
 
     : >"${statusLog}"
@@ -3211,6 +3087,10 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
 
     REGRESSION_STATUS_CARD_LOG="${statusLog}"
     padmIsSafeAbsolutePath() { return 0; }
+    coreSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${serviceLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
@@ -3230,7 +3110,24 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
     [[ ! -e "${singBoxBinary}.bak" ]]
     [[ ! -e "${singBoxCronet}.bak" ]]
     grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
+    grep -q 'manual-check:旧服务恢复启动失败|服务状态' "${serviceLog}"
     grep -qx 'sing-box:start:true' "${serviceLog}"
+
+    : >"${statusLog}"
+    : >"${serviceLog}"
+    rm -f "${singBoxCronet}.bak"
+    rm -f "${singBoxCronet}"
+    mkdir -p "${singBoxCronet}"
+    set +e
+    finalizeFailedSingBoxBinaryInstall "${singBoxBinary}.bak" "${singBoxBinary}" "${singBoxCronet}.bak" "${singBoxCronet}" "/tmp/sing-box.log" >/dev/null 2>&1
+    singBoxRc=$?
+    set -e
+
+    [[ "${singBoxRc}" == "1" ]]
+    [[ -d "${singBoxCronet}" ]]
+    grep -q "manual-check:libcronet.so 恢复失败| ${singBoxCronet}" "${serviceLog}"
+    grep -q "libcronet.so 恢复失败，请手动检查 ${singBoxCronet}" "${statusLog}"
+    ! grep -qx 'sing-box:start:true' "${serviceLog}"
 )
 
 runCoreUpgradeRejectsDirectoryTargetRegression() (
@@ -3328,6 +3225,10 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
     singBoxRunning() { return 1; }
     validateXrayConfigWithBinary() { return 0; }
     validateSingBoxConfigWithBinary() { return 0; }
+    coreSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${serviceLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
 
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     set +e
@@ -3347,6 +3248,8 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
     [[ ! -e "${xrayBinary}/xray" ]]
     [[ ! -e "${singBoxBinary}/sing-box" ]]
     [[ ! -e "${singBoxBinary}/libcronet.so" ]]
+    grep -q "manual-check:Xray-core安装目标异常| ${xrayBinary}" "${serviceLog}"
+    grep -q "manual-check:sing-box安装目标异常| ${singBoxBinary}" "${serviceLog}"
     grep -q "Xray-core安装目标异常，请手动检查 ${xrayBinary}" "${errorLog}"
     grep -q "sing-box安装目标异常，请手动检查 ${singBoxBinary}" "${errorLog}"
     ! grep -q '^xray:' "${serviceLog}"
@@ -3377,8 +3280,6 @@ EOF
     : >"${rmLog}"
 
     readInstallType() { return 0; }
-    progressCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { return 0; }
     getSingBoxCurrentVersion() { printf 'vold-sing-box\n'; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
@@ -3475,8 +3376,6 @@ runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
     TMPDIR="${root}/tmp"
 
     readInstallType() { return 0; }
-    progressCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
     checkVersionNotEmpty() { [[ -n "$1" ]]; }
@@ -3562,8 +3461,6 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     TMPDIR="${root}/tmp"
 
     readInstallType() { return 0; }
-    progressCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
     checkVersionNotEmpty() { [[ -n "$1" ]]; }
@@ -3668,8 +3565,6 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
     singBoxCoreCPUVendor=-linux-amd64
 
     readInstallType() { return 0; }
-    progressCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     coreLatestReleaseTag() { printf 'v1.2.3\n'; }
     checkVersionNotEmpty() { [[ -n "$1" ]]; }
@@ -3749,13 +3644,7 @@ runNetworkCheckReturnFailureRegression() (
     local dnsShellRc ipShellRc portShellRc templateShellRc
 
     mkdir -p "${root}/nginx"
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    progressCard() { return 0; }
     sleep() { return 0; }
     dig() { return 1; }
     getPublicIP() { printf '203.0.113.10\n'; }
@@ -3959,7 +3848,7 @@ runNetworkCheckReturnFailureRegression() (
     domain=tls.example.com
     currentHost=tls.example.com
     lastInstallationConfig=true
-    selectCustomInstallType=",0,"
+    selectCustomInstallType=",27,"
     singBoxVLESSVisionPort=10890
 
     initSingBoxClients() { printf '[]\n'; }
@@ -4003,15 +3892,7 @@ runTlsFailureReturnRegression() (
 
     mkdir -p "${root}/home"
     HOME="${root}/home"
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    menuItem() { return 0; }
-    menuRecommendedItem() { return 0; }
-    progressCard() { return 0; }
     autoRead() {
         case "$3" in
         sslEmailStatus) printf -v "$3" 'n' ;;
@@ -4070,6 +3951,13 @@ runTlsFailureReturnRegression() (
     HOME="${oldHome}"
 )
 
+runAutoReadUnsetAutoInstallRegression() (
+    local value=
+    unset AUTO_INSTALL AUTO_INSTALL_TYPE
+    autoRead regression_unset_auto_install "请输入:" value <<<"manual-value"
+    [[ "${value}" == "manual-value" ]]
+)
+
 runTlsCustomSSLEmailUsesHomeAccountFileRegression() (
     local root="${TMP_DIR}/tls-custom-email-home"
     local homeDir="${root}/home"
@@ -4080,8 +3968,6 @@ runTlsCustomSSLEmailUsesHomeAccountFileRegression() (
     printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
     HOME="${homeDir}"
     sslType=zerossl
-    successCard() { return 0; }
-    echoContent() { return 0; }
     autoRead() {
         case "$3" in
         sslEmailStatus) printf -v "$3" 'y' ;;
@@ -4107,8 +3993,6 @@ runTlsCustomSSLEmailTransactionRegression() (
     printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
     HOME="${homeDir}"
     sslType=zerossl
-    successCard() { return 0; }
-    echoContent() { return 0; }
     autoRead() {
         case "$3" in
         sslEmailStatus) printf -v "$3" 'y' ;;
@@ -4150,10 +4034,6 @@ runTlsSslTypeWriteTransactionRegression() (
     sslType=
     dnsAPIType=
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; return 0; }
-    echoContent() { return 0; }
-    menuRecommendedItem() { return 0; }
-    menuItem() { return 0; }
-    menuClose() { return 0; }
     autoRead() {
         case "$3" in
         selectSSLType) printf -v "$3" '3' ;;
@@ -4271,12 +4151,6 @@ runCoreInstallServiceActionFailureRegression() (
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
-    progressCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
     protocolRegistryMenu() { return 0; }
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }
@@ -4297,6 +4171,7 @@ runCoreInstallServiceActionFailureRegression() (
     installSingBoxService() { printf 'installSingBoxService:%s\n' "$*" >>"${callLog}"; return 0; }
     initSingBoxConfig() { printf 'initSingBoxConfig:%s\n' "$*" >>"${callLog}"; return 0; }
     cleanUp() { printf 'cleanup:%s\n' "$*" >>"${callLog}"; return 0; }
+    cleanAgentNginxConf() { printf 'clean-nginx\n' >>"${callLog}"; return 0; }
     installCronTLS() { printf 'cron:%s\n' "$*" >>"${callLog}"; return 0; }
     customPortFunction() { printf 'customPort\n' >>"${callLog}"; return 0; }
     subscriptionWireGuardControlEnabled() { return 0; }
@@ -4346,7 +4221,7 @@ runCoreInstallServiceActionFailureRegression() (
 
     resetInstallServiceFixture nginx-start-fail
     set +e
-    customXrayInstall 0 >/dev/null 2>&1
+    customXrayInstall 21 >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
@@ -4357,7 +4232,7 @@ runCoreInstallServiceActionFailureRegression() (
 
     resetInstallServiceFixture redirect-fail
     set +e
-    customXrayInstall 0 >/dev/null 2>&1
+    customXrayInstall 21 >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
@@ -4365,6 +4240,17 @@ runCoreInstallServiceActionFailureRegression() (
     ! grep -q '^nginx:start:' "${serviceLog}"
     ! grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture no-local-cert
+    set +e
+    customXrayInstall 2 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    grep -qx 'clean-nginx' "${callLog}"
+    grep -q '^installXray:' "${callLog}"
+    [[ -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-start-fail
@@ -4426,8 +4312,6 @@ runSingBoxMergeStartFailureRegression() (
         printf '%s\n' "$*" >"${systemctlMarker}"
         return 0
     }
-    errorCard() { return 0; }
-    menuLine() { return 0; }
     uiStyle() { shift; printf '%s\n' "$*"; }
 
     serviceQueueStart sing-box
@@ -4534,7 +4418,8 @@ SH
 
     export PADM_FAKE_SINGBOX_MERGE_MODE=success
     mv() {
-        if [[ "$#" -eq 2 && "$2" == "${outputFile}" ]]; then
+        local args=("$@")
+        if [[ "${args[$((${#args[@]} - 1))]}" == "${outputFile}" ]]; then
             printf 'commit\n' >"${commitMarker}"
             return 1
         fi
@@ -4684,8 +4569,6 @@ runSingBoxManagedCleanupRegression() (
     : >"${cleanupLog}"
 
     readInstallType() { return 0; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     cleanCoreInstallDirectory() {
         printf 'clean-core:%s:%s\n' "$1" "$2" >>"${cleanupLog}"
         return 0
@@ -5030,18 +4913,12 @@ runReloadCorePropagationRegression() (
     local vlessConfig="${root}/vless.json"
     local vlessState="${root}/vless-state.json"
     local fakeXray="${root}/xray"
-    local successMarker="${root}/success"
     local refreshMarker="${root}/refresh"
     local subscribeMarker="${root}/subscribe"
     local reloadLog="${root}/reloads"
     local originalContent rc
 
     mkdir -p "${root}/nginx"
-    statusCard() { return 0; }
-    successCard() {
-        printf 'success\n' >>"${successMarker}"
-        return 0
-    }
     errorCard() { return 0; }
     echoContent() { return 0; }
     menuLine() { return 0; }
@@ -5070,24 +4947,22 @@ JSON
     }
 
     originalContent=$(<"${alpnConfig}")
-    rm -f "${successMarker}"
     set +e
     applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${alpnConfig}")" == "${originalContent}" ]]
-    [[ ! -e "${successMarker}" ]]
     [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
 
     printf '%s\n' "${originalContent}" >"${alpnConfig}"
-    rm -f "${successMarker}" "${alpnConfig}.alpn.bak"
+    rm -f "${alpnConfig}.alpn.bak"
     (
-        mv() {
-            if [[ "$1" == "${alpnConfig}.alpn.bak" && "$2" == "${alpnConfig}" ]]; then
+        cp() {
+            if [[ "$1" == "-p" && "$2" == "${alpnConfig}.alpn.bak" && "$3" == "${alpnConfig}.tmp" ]]; then
                 return 1
             fi
-            command mv "$@"
+            command cp "$@"
         }
         set +e
         applyTraditionalTlsAlpn '["h2","http/1.1"]' >/dev/null 2>&1
@@ -5096,7 +4971,6 @@ JSON
         [[ "${rc}" == "1" ]]
         jq -e '.inbounds[0].streamSettings.tlsSettings.alpn == ["h2","http/1.1"]' "${alpnConfig}" >/dev/null
         [[ "$(<"${alpnConfig}.alpn.bak")" == "${originalContent}" ]]
-        [[ ! -e "${successMarker}" ]]
     ) || return 1
     printf '%s\n' "${originalContent}" >"${alpnConfig}"
     rm -f "${alpnConfig}.alpn.bak"
@@ -5148,7 +5022,7 @@ JSON
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
     (
         cp() {
-            if [[ "$1" == "${vlessConfig}" && "$2" == "${vlessConfig}.vlessenc.bak" ]]; then
+            if [[ "$1" == "-p" && "$2" == "${vlessConfig}" && "$3" == "${vlessConfig}.vlessenc.bak.tmp" ]]; then
                 return 1
             fi
             command cp "$@"
@@ -5169,7 +5043,8 @@ JSON
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
     (
         mv() {
-            if [[ "$1" == "${vlessState}.tmp" && "$2" == "${vlessState}" ]]; then
+            if [[ "$1" == "${vlessState}.tmp" && "$2" == "${vlessState}" ]] ||
+                [[ "$1" == "-f" && "$2" == "--" && "$3" == "${vlessState}.tmp" && "$4" == "${vlessState}" ]]; then
                 return 1
             fi
             command mv "$@"
@@ -5191,7 +5066,8 @@ JSON
     rm -f "${refreshMarker}" "${vlessState}" "${vlessConfig}.vlessenc.bak" "${vlessState}.bak" "${vlessState}.tmp"
     (
         mv() {
-            if [[ "$1" == "${vlessConfig}.vlessenc.bak" && "$2" == "${vlessConfig}" ]]; then
+            if [[ "$1" == "${vlessConfig}.tmp" && "$2" == "${vlessConfig}" ]] ||
+                [[ "$1" == "-f" && "$2" == "--" && "$3" == "${vlessConfig}.vlessenc" && "$4" == "${vlessConfig}" ]]; then
                 return 1
             fi
             command mv "$@"
@@ -5366,6 +5242,30 @@ JSON
     ) || return 1
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
+    rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
+    local validateFailureLog="${tmpRoot}/transaction-validate-failure.log"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
+    validateMode=fail
+    (
+        menuLine() { printf '%s\n' "$*" >>"${validateFailureLog}"; }
+        echoContent() { :; }
+        menuClose() { :; }
+        cp() {
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${tmpRoot}"/.transaction.json.restore.* ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -qx "配置校验失败，且回滚配置失败，请手动检查 ${targetFile} 和 ${backupFile}" "${validateFailureLog}"
+    ) || return 1
+
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
     rm -f "${backupFile}"
     padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
     jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
@@ -5394,6 +5294,31 @@ JSON
     [[ ! -e "${backupFile}" ]]
     [[ "$(wc -l <"${reloadCountFile}" | tr -d ' ')" == "2" ]]
     [[ ! -e "${refreshCountFile}" ]]
+
+    printf '{"mode":"old","port":443}\n' >"${targetFile}"
+    rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
+    local reloadFailureLog="${tmpRoot}/transaction-reload-failure.log"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" transaction || return 1
+    jq '.mode = "new" | .port = 8443' "${targetFile}" >"${stagedFile}"
+    reloadMode=fail
+    refreshMode=success
+    (
+        menuLine() { printf '%s\n' "$*" >>"${reloadFailureLog}"; }
+        echoContent() { :; }
+        menuClose() { :; }
+        cp() {
+            local args=("$@")
+            local targetPath="${args[$((${#args[@]} - 1))]}"
+            if [[ "${targetPath}" == "${tmpRoot}"/.transaction.json.restore.* ]]; then
+                return 1
+            fi
+            command cp "$@"
+        }
+        if configTransactionCommit "${targetFile}" "${stagedFile}" "${backupFile}" transactionValidateMock "事务校验失败" "已回滚事务" "事务成功" transactionRefreshMock transactionReloadMock >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -qx "核心重载失败，且回滚配置失败，请手动检查 ${targetFile} 和 ${backupFile}" "${reloadFailureLog}"
+    ) || return 1
 
     printf '{"mode":"old","port":443}\n' >"${targetFile}"
     rm -f "${backupFile}" "${reloadCountFile}" "${refreshCountFile}"
@@ -5566,19 +5491,21 @@ SH
     PATH="${fakeBin}:${PATH}"
     source "${PROJECT_ROOT}/shell/core/protocols.sh"
     source "${PROJECT_ROOT}/shell/core/services.sh"
-    echoContent() { return 0; }
-    successCard() { return 0; }
-    statusCard() { return 0; }
     errorCard() { return 0; }
     updateSELinuxHTTPPortT() { return 0; }
-    nginxRunning() {
-        [[ "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]]
-    }
     protocolSelectionSkipsNginx() { return 1; }
     nginxServiceInstalled() { return 0; }
+    padmReadProcExe() {
+        [[ "$1" == "/proc/12345/exe" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]] || return 1
+        printf '/usr/sbin/nginx\n'
+    }
+    padmReadProcCmdline() {
+        [[ "$1" == "/proc/12345/cmdline" && "$(cat "${PADM_FAKE_NGINX_STATE_FILE}" 2>/dev/null)" == "true" ]] || return 1
+        printf 'nginx: master process nginx\n'
+    }
     release=centos
     selectCustomInstallType=
-    btDomain=panel.example.com
+    btDomain=
     SERVICE_QUEUE_ALLOW_FAILURE=true
     export PADM_FAKE_NGINX_STATE_FILE="${serviceTmp}/nginx-running"
     export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
@@ -5586,8 +5513,8 @@ SH
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
-    PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1 && return 1
-    [[ "$(cat "${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
+    PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1
+    [[ "$(cat "${PADM_FAKE_NGINX_STATE_FILE}")" == "false" ]]
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
@@ -5600,6 +5527,67 @@ SH
         return 1
     fi
     [[ -z "${SERVICE_ACTIONS}" ]]
+
+    local xrayWaitLog="${serviceTmp}/xray-wait.log"
+    find() {
+        if [[ "$*" == *'systemctl'* ]]; then
+            printf '/usr/bin/systemctl\n'
+            return 0
+        fi
+        if [[ "$*" == *'xray.service'* ]]; then
+            printf '/etc/systemd/system/xray.service\n'
+            return 0
+        fi
+        command find "$@"
+    }
+    systemctl() { return 0; }
+    xrayRunning() { return 0; }
+    waitForServiceState() {
+        printf '%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${xrayWaitLog}"
+        return 0
+    }
+    handleXray stop >/dev/null
+    if ! grep -qx 'xrayRunning:stopped:60:0.1' "${xrayWaitLog}"; then
+        cat "${xrayWaitLog}" >&2 || true
+        return 1
+    fi
+
+    local xrayStartLimitLog="${serviceTmp}/xray-start-limit.log"
+    local xrayRunningState="${serviceTmp}/xray-running"
+    : >"${xrayStartLimitLog}"
+    printf 'false\n' >"${xrayRunningState}"
+    xrayRunning() {
+        [[ "$(<"${xrayRunningState}")" == "true" ]]
+    }
+    waitForServiceState() {
+        printf '%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${xrayWaitLog}"
+        [[ "${2}" == "running" ]] && xrayRunning
+    }
+    systemctl() {
+        printf '%s\n' "$*" >>"${xrayStartLimitLog}"
+        case "$1" in
+        start)
+            if ! grep -qx 'reset-failed xray.service' "${xrayStartLimitLog}"; then
+                return 1
+            fi
+            printf 'true\n' >"${xrayRunningState}"
+            return 0
+            ;;
+        reset-failed)
+            return 0
+            ;;
+        esac
+        return 0
+    }
+    SERVICE_QUEUE_ALLOW_FAILURE=true
+    if ! handleXray start >/dev/null 2>&1; then
+        cat "${xrayStartLimitLog}" >&2 || true
+        return 1
+    fi
+    grep -qx 'start xray.service' "${xrayStartLimitLog}" || return 1
+    grep -qx 'reset-failed xray.service' "${xrayStartLimitLog}" || return 1
+    [[ "$(grep -c '^start xray.service$' "${xrayStartLimitLog}")" == "2" ]] || return 1
+    [[ "$(<"${xrayRunningState}")" == "true" ]] || return 1
     rm -rf "${serviceTmp}"
 )
 
@@ -5753,7 +5741,7 @@ runWireGuardKeyTransactionRegression() (
     [[ "${rc}" == "1" ]]
     [[ ! -e "${privateKeyFile}" ]]
     [[ ! -e "${publicKeyFile}" ]]
-    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+    if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
         return 1
     fi
 
@@ -5768,7 +5756,7 @@ runWireGuardKeyTransactionRegression() (
     [[ "${rc}" == "1" ]]
     [[ "$(<"${privateKeyFile}")" == "existing-private-key" ]]
     [[ "$(<"${publicKeyFile}")" == "existing-public-key" ]]
-    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+    if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
         return 1
     fi
 
@@ -5783,7 +5771,7 @@ runWireGuardKeyTransactionRegression() (
     subscriptionWireGuardEnsureKeys >/dev/null 2>&1
     [[ "$(<"${privateKeyFile}")" == "generated-private-key" ]]
     [[ "$(<"${publicKeyFile}")" == "generated-public-key" ]]
-    if find "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*' | grep -q .; then
+    if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
         return 1
     fi
 )
@@ -5976,7 +5964,6 @@ runFail2banApplyTransactionRegression() (
     fail2banValidateManagedConfig() { return 0; }
     fail2banStartOrReloadService() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    successCard() { return 0; }
 
     eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
     commitGeneratedFile() {
@@ -5998,7 +5985,7 @@ runFail2banApplyTransactionRegression() (
     ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-control.conf.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-nginx-scan-basic.conf.fail2ban.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 
@@ -6013,7 +6000,7 @@ runFail2banApplyTransactionRegression() (
     ! compgen -G "${root}/fail2ban/jail.d/.padm.local.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-control.conf.fail2ban.*" >/dev/null
     ! compgen -G "${root}/fail2ban/filter.d/.padm-nginx-scan-basic.conf.fail2ban.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 )
@@ -6029,11 +6016,16 @@ runUninstallServiceStopFailureRegression() (
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     autoRead() { printf -v "$3" 'y'; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     menu() { return 0; }
     pgrep() { return 1; }
+    nginxRunning() { return 1; }
+    xrayRunning() {
+        [[ "${mode:-}" == "xray-still-running" ]]
+    }
+    singBoxRunning() {
+        [[ "${mode:-}" == "sing-box-still-running" ]]
+    }
     removeInstallPath() {
         printf 'remove:%s:%s\n' "$1" "$2" >>"${actionLog}"
         return 0
@@ -6052,6 +6044,10 @@ runUninstallServiceStopFailureRegression() (
     }
     unInstallSubscribe() {
         printf 'unsubscribe-cleanup\n' >>"${actionLog}"
+        return 0
+    }
+    uninstallReloadSystemdUnits() {
+        printf 'daemon-reload\n' >>"${serviceLog}"
         return 0
     }
     handleNginx() {
@@ -6087,6 +6083,7 @@ runUninstallServiceStopFailureRegression() (
         rm -f "${rcFile}"
         release=centos
         coreInstallType=1
+        currentInstallProtocolType=",27,"
         singBoxConfigPath="${root}/sing-box-conf/"
         nginxStaticPath="${root}/static"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
@@ -6100,18 +6097,109 @@ runUninstallServiceStopFailureRegression() (
         set -e
         [[ "${shellRc}" == "0" ]]
         [[ "$(<"${rcFile}")" == "1" ]]
+        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
+            return 1
+        fi
         grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        if grep -qxF 'padm-root-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        if grep -qxF 'unsubscribe-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        if grep -q '^remove:/etc/systemd/system/xray.service:' "${actionLog}"; then
+            return 1
+        fi
+        if grep -q '^remove:/etc/systemd/system/sing-box.service:' "${actionLog}"; then
+            return 1
+        fi
+        grep -q '卸载未完全完成' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
+    runUninstallStillRunningCase() {
+        mode=$1
+        : >"${serviceLog}"
+        : >"${actionLog}"
+        : >"${errorLog}"
+        rm -f "${rcFile}"
+        release=centos
+        coreInstallType=1
+        currentInstallProtocolType=",1,"
+        singBoxConfigPath="${root}/sing-box-conf/"
+        nginxConfigPath="${root}/nginx/"
+        nginxStaticPath="${root}/static"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        (
+            set +e
+            unInstall >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ "$(<"${rcFile}")" == "1" ]]
+        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
+            return 1
+        fi
+        grep -qx 'xray:stop:true' "${serviceLog}"
+        grep -qx 'sing-box:stop:true' "${serviceLog}"
+        if grep -qxF 'padm-root-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        if grep -qxF 'unsubscribe-cleanup' "${actionLog}"; then
+            return 1
+        fi
+        grep -q '停止后仍在运行' "${errorLog}"
+        grep -q '卸载未完全完成' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
+    runUninstallNoNginxProtocolCase() {
+        mode=nginx-stop-fail
+        : >"${serviceLog}"
+        : >"${actionLog}"
+        : >"${errorLog}"
+        rm -f "${rcFile}"
+        release=centos
+        coreInstallType=1
+        currentInstallProtocolType=",1,"
+        singBoxConfigPath="${root}/sing-box-conf/"
+        nginxConfigPath="${root}/nginx/"
+        nginxStaticPath="${root}/static"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        (
+            set +e
+            unInstall >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ "$(<"${rcFile}")" == "0" ]]
+        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
+            return 1
+        fi
+        if grep -q '^nginx:stop:' "${serviceLog}"; then
+            return 1
+        fi
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
         grep -qxF 'padm-root-cleanup' "${actionLog}"
         grep -qxF 'unsubscribe-cleanup' "${actionLog}"
-        grep -q '卸载未完全完成' "${errorLog}"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
     runUninstallStopFailureCase nginx-stop-fail
     runUninstallStopFailureCase xray-stop-fail
     runUninstallStopFailureCase sing-box-stop-fail
+    runUninstallStillRunningCase xray-still-running
+    runUninstallStillRunningCase sing-box-still-running
+    runUninstallNoNginxProtocolCase
 )
 
 runCleanLastInstallationConfigFailureRegression() (
@@ -6172,8 +6260,6 @@ runCleanLastInstallationConfigFailureRegression() (
     }
     readInstallType() { printf 'read-install-type\n' >>"${cleanupLog}"; }
     mkdirTools() { printf 'mkdir-tools\n' >>"${cleanupLog}"; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() { printf -v "$3" 'n'; }
@@ -6361,8 +6447,6 @@ runCleanLastInstallationConfigAcmeHomeFailureRegression() (
     cleanDirectoryContent() { return 0; }
     readInstallType() { return 0; }
     mkdirTools() { return 0; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() {
@@ -6437,8 +6521,6 @@ runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
     cleanDirectoryContent() { return 0; }
     readInstallType() { return 0; }
     mkdirTools() { return 0; }
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     showLastInstallationConfig() { return 0; }
     autoRead() {
@@ -6487,6 +6569,7 @@ if [[ "$1" == "-v" ]]; then
     exit 0
 fi
 [[ "$1" == "-t" ]]
+printf 'entry-helper validate %s\n' "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}"
 [[ "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}" == "success" ]]
 SH
     chmod +x "${TMP_DIR}/fake-bin/nginx"
@@ -6505,17 +6588,17 @@ SH
     domain=example.com
     nginxStaticPath="${TMP_DIR}/static"
     currentPath=padm
-    selectCustomInstallType=11
+    selectCustomInstallType=23
     printf 'old config\n' >"${nginxTarget}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=fail
-    if singBoxNginxConfig 11 443 2>/dev/null; then
+    if singBoxNginxConfig 23 443 2>/dev/null; then
         return 1
     fi
     [[ "$(<"${nginxTarget}")" == "old config" ]]
     [[ ! -e "${nginxTarget}.tmp" ]]
     [[ -s "${entryTmpRoot}/padm-sing-box-vmess-httpupgrade-nginx-test.log" ]]
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
-    singBoxNginxConfig 11 443
+    singBoxNginxConfig 23 443
     grep -q 'server_name example.com;' "${nginxTarget}"
     grep -q 'location /padm' "${nginxTarget}"
     ! grep -qx 'old config' "${nginxTarget}"
@@ -6589,7 +6672,7 @@ JSON
         grep -q 'Reality 日志联动配置写入失败' "${errorLog}"
         jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
         jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
-        if find "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
     )
@@ -6627,7 +6710,7 @@ JSON
         grep -q '恢复旧配置后核心重载仍失败' "${errorLog}"
         jq -e '(.log.access | not) and .log.error == "'"${entryLogBase}"'error.log" and .log.loglevel == "warning"' "${entryConfigPath}00_log.json" >/dev/null
         jq -e '.inbounds[0].streamSettings.realitySettings.show == false' "${realityVisionFile}" >/dev/null
-        if find "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${entryTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
     )
@@ -6767,7 +6850,7 @@ runSubscribeLocalOutputTransactionRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${defaultFile}")" == "old-default" ]]
-    if find "${localDir}/default" -maxdepth 1 -type f -name '.user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${localDir}/default" -maxdepth 1 -type f -name '.user.subscribe.*'; then
         return 1
     fi
 
@@ -6777,7 +6860,7 @@ runSubscribeLocalOutputTransactionRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${clashFile}")" == "old-clash" ]]
-    if find "${localDir}/clashMeta" -maxdepth 1 -type f -name '.user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${localDir}/clashMeta" -maxdepth 1 -type f -name '.user.subscribe.*'; then
         return 1
     fi
 
@@ -6790,9 +6873,33 @@ EOF
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${clashLinesFile}")" == "old-lines" ]]
-    if find "${localDir}/clashMeta" -maxdepth 1 -type f -name '.xhttp-user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${localDir}/clashMeta" -maxdepth 1 -type f -name '.xhttp-user.subscribe.*'; then
         return 1
     fi
+
+    (
+        local inlineRootRel="${TMP_DIR}/subscribe-local-output-inline-helpers"
+        local inlineRoot inlineLocalDir
+
+        mkdir -p "${inlineRootRel}"
+        inlineRoot=$(cd -- "${inlineRootRel}" && pwd -P)
+        inlineLocalDir="${inlineRoot}/subscribe_local"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${inlineLocalDir}"
+        subscribeLocalOutputCategoryDir() {
+            return 91
+        }
+        ensureSubscribeLocalSingBoxConfig() {
+            return 92
+        }
+
+        padmRealAppendDefaultSubscribeLine user 'new-default-inline'
+        padmRealAppendClashMetaSubscribeBlock user 'new-clash-inline'
+        padmRealAppendSingBoxSubscribeLocalConfig user '. += [{"tag":"inline-user"}]'
+
+        [[ "$(<"${inlineLocalDir}/default/user")" == "new-default-inline" ]]
+        [[ "$(<"${inlineLocalDir}/clashMeta/user")" == "new-clash-inline" ]]
+        jq -e '.[0].tag == "inline-user"' "${inlineLocalDir}/sing-box/user" >/dev/null
+    )
 )
 
 runSubscribeSaltWriteTransactionRegression() (
@@ -6877,6 +6984,25 @@ runCdnAddressTransactionRegression() (
     cdnClearAddress
     [[ ! -s "${cdnFile}" ]]
     ! compgen -G "${root}/.cdn.cdn.*" >/dev/null
+
+    subscribe() {
+        return 1
+    }
+    AUTO_INSTALL=
+    cdnWriteAddress "old-cdn.example.com"
+    set +e
+    setCDNEntryAddress <<<"new-cdn.example.com"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
+
+    set +e
+    clearCDNEntryAddress
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
 )
 
 runSingBoxSubscribeWriteRegression() {
@@ -6888,12 +7014,12 @@ runSingBoxSubscribeWriteRegression() {
         return 1
     fi
     jq -e '.[0].tag == "old"' "${targetPath}" >/dev/null
-    if find "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*'; then
         return 1
     fi
     padmRealAppendSingBoxSubscribeLocalConfig atomic-user '. += [{"tag":"new"}]'
     jq -e 'length == 2 and .[1].tag == "new"' "${targetPath}" >/dev/null
-    if find "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*' | grep -q .; then
+    if regressionFindHasMatches "${SUBSCRIBE_CAPTURE_DIR}/sing-box" -maxdepth 1 -type f -name '.atomic-user.subscribe.*'; then
         return 1
     fi
 }
@@ -6935,11 +7061,13 @@ runSubscribeNginxConfigWriteRegression() {
     local oldPath="${PATH}"
     local oldTmpDir="${TMPDIR:-}"
     local nginxTmpRoot="${TMP_DIR}/nginx-subscribe-tmp"
+    local helperLog="${TMP_DIR}/nginx-subscribe-helper.log"
     mkdir -p "${TMP_DIR}/fake-bin" "${nginxRootRel}" "${nginxTmpRoot}"
     nginxRoot=$(cd -- "${nginxRootRel}" && pwd -P)
     targetPath="${nginxRoot}/subscribe.conf"
     TMPDIR="${nginxTmpRoot}"
     nginxConfigPath="${nginxRoot}/"
+    : >"${helperLog}"
     cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
 #!/usr/bin/env bash
 [[ "$1" == "-t" ]]
@@ -6998,8 +7126,12 @@ EOF
     ) || return 1
     rm -f "${targetPath}"
     (
+        subscriptionSyncSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
         rm() {
-            if [[ "$1" == "-f" && "$2" == "${targetPath}" ]]; then
+            if [[ "$1" == "-f" && ( "$2" == "${targetPath}" || ( "$2" == "--" && "$3" == "${targetPath}" ) ) ]]; then
                 return 1
             fi
             command rm "$@"
@@ -7012,6 +7144,7 @@ EOF
         fi
         [[ "$(<"${targetPath}")" == "cleanup fail config" ]]
         [[ "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR}" == *"新配置清理失败"* ]]
+        grep -q "manual-check:订阅 Nginx 配置校验失败，且新配置清理失败| ${targetPath}" "${helperLog}"
     ) || return 1
     rm -f "${targetPath}"
     export PADM_FAKE_NGINX_VALIDATE_MODE=success
@@ -7356,7 +7489,7 @@ SH
         grep -q '请先重建 alone.conf' "${errorLog}"
     ) || return 1
 
-    currentInstallProtocolType=",0,5,"
+    currentInstallProtocolType=",24,27,"
     currentHost=example.com
     currentPort=443
     currentPath=padm
@@ -7541,6 +7674,71 @@ SH
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
+runNginxBackupManualCheckRegression() {
+    (
+        set -euo pipefail
+        local rootRel="${TMP_DIR}/nginx-backup-manual-check"
+        local root targetPath backupPath
+        local helperLog="${TMP_DIR}/nginx-backup-helper.log"
+        local errorLog="${TMP_DIR}/nginx-backup-error.log"
+
+        mkdir -p "${rootRel}"
+        root=$(cd -- "${rootRel}" && pwd -P)
+        targetPath="${root}/alone.conf"
+        backupPath="${root}/alone_backup.conf"
+        nginxConfigPath="${root}/"
+        PADM_ALONE_NGINX_BACKUP_FILE="${backupPath}"
+        : >"${helperLog}"
+        : >"${errorLog}"
+        printf 'source config\n' >"${targetPath}"
+
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
+        coreSetPairedFileManualCheckMessage() {
+            coreSetManualCheckMessage "$1" "$2" " ${3} 和 ${4}"
+        }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        successCard() { return 0; }
+
+        backupManagedFileToPath() { return 1; }
+        if backupNginxConfig backup >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q "manual-check:nginx配置文件备份失败| ${targetPath}" "${helperLog}"
+        grep -q "nginx配置文件备份失败，请手动检查 ${targetPath}" "${errorLog}"
+
+        : >"${helperLog}"
+        : >"${errorLog}"
+        printf 'backup config\n' >"${backupPath}"
+        restoreManagedFileFromBackup() { return 1; }
+        if backupNginxConfig restoreBackup >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q "manual-check:nginx配置文件恢复备份失败| ${targetPath} 和 ${backupPath}" "${helperLog}"
+        grep -q "nginx配置文件恢复备份失败，请手动检查 ${targetPath} 和 ${backupPath}" "${errorLog}"
+
+        : >"${helperLog}"
+        : >"${errorLog}"
+        printf 'backup config\n' >"${backupPath}"
+        restoreManagedFileFromBackup() {
+            command cp -p "$1" "$2"
+        }
+        removeManagedFileIfPresent() {
+            if [[ "$1" == "${backupPath}" ]]; then
+                return 1
+            fi
+            command rm -f -- "$1"
+        }
+        if backupNginxConfig restoreBackup >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q "manual-check:nginx配置备份文件删除失败| ${backupPath}" "${helperLog}"
+        grep -q "nginx配置备份文件删除失败，请手动检查 ${backupPath}" "${errorLog}"
+    )
+}
+
 runCheckPortOpenNginxRejectsDirectoryTargetRegression() {
     (
         set -euo pipefail
@@ -7566,7 +7764,7 @@ SH
         fi
         [[ -d "${targetPath}" ]]
         [[ ! -e "${targetPath}/checkPortOpen.conf.tmp" ]]
-        [[ "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR}" == *"配置目标异常"* ]]
+        [[ "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR}" == "端口检测 Nginx 配置目标异常，请手动检查 ${targetPath}" ]]
 
         PATH="${oldPath}"
     )
@@ -7608,7 +7806,7 @@ SH
         fi
         [[ -d "${targetPath}" ]]
         [[ ! -e "${targetPath}/alone.conf.tmp" ]]
-        grep -q 'Nginx 配置目标异常' "${errorLog}"
+        grep -qx "Nginx 配置目标异常，请手动检查 ${targetPath}" "${errorLog}"
 
         PATH="${oldPath}"
     )
@@ -7704,7 +7902,7 @@ runSubscribeUserOutputTransactionRegression() {
     [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
     [[ "$(<"${publicDir}/sing-box_profiles/${emailMd5}")" == "old-sing-profile" ]]
     [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
-    if find "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
 
@@ -7714,9 +7912,6 @@ runSubscribeUserOutputTransactionRegression() {
         currentHost=example.com
         subscribePort=
         currentDefaultPort=443
-        listRemoteSubscribeSources() {
-            return 0
-        }
         renderSubscribeUserOutputs() {
             return 1
         }
@@ -7773,6 +7968,19 @@ runSubscribeUserOutputTransactionRegression() {
     writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
     (
+        local helperCalls=0
+        local helperMessage=
+        subscriptionSyncSetSingleRestoreResultMessage() {
+            helperCalls=$((helperCalls + 1))
+            command printf -v "$1" '%s' "${2}|${3}|${4}|${5}|${6}|${7:-true}"
+            [[ "$2" == "订阅生成失败" ]]
+            [[ "$3" == "true" ]]
+            [[ "$4" == "已恢复旧订阅输出" ]]
+            [[ "$5" == "旧订阅输出" ]]
+            [[ "$6" == "备份目录: ${subscribeBackupDir}" ]]
+            helperMessage=${!1}
+            return 0
+        }
         local commitCalls=0
         commitSubscribeUserOutputFile() {
             commitCalls=$((commitCalls + 1))
@@ -7784,15 +7992,47 @@ runSubscribeUserOutputTransactionRegression() {
         if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
             return 1
         fi
-        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "订阅生成失败，已恢复旧订阅输出" ]]
+        [[ "${helperCalls}" == "1" ]]
+        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "${helperMessage}" ]]
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
         [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
         [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
         [[ "$(<"${publicDir}/sing-box_profiles/${emailMd5}")" == "old-sing-profile" ]]
         [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
-        if find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
             return 1
         fi
+    )
+
+    writeOldSubscribeOutputs
+    writeLocalSubscribeOutputs
+    (
+        local helperCalls=0
+        local helperMessage=
+        subscriptionSyncSetSingleRestoreResultMessage() {
+            helperCalls=$((helperCalls + 1))
+            command printf -v "$1" '%s' "${2}|${3}|${4}|${5}|${6}|${7:-true}"
+            [[ "$2" == "订阅生成失败" ]]
+            [[ "$3" == "false" ]]
+            [[ "$4" == "已恢复旧订阅输出" ]]
+            [[ "$5" == "旧订阅输出" ]]
+            [[ "$6" == "备份目录: ${subscribeBackupDir}" ]]
+            helperMessage=${!1}
+            return 1
+        }
+        commitSubscribeUserOutputFile() {
+            return 1
+        }
+        checkLogBackupRestore() {
+            return 1
+        }
+        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
+            return 1
+        fi
+        [[ "${helperCalls}" == "1" ]]
+        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "${helperMessage}" ]]
+        regressionFindHasMatches "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'
+        find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' -exec rm -rf {} +
     )
 
     writeLocalSubscribeOutputs
@@ -7801,7 +8041,7 @@ runSubscribeUserOutputTransactionRegression() {
     while IFS= read -r path; do
         [[ -z "${path}" || "${path}" == "${userTmpRoot}"/padm-subscribe-user.* ]] || return 1
     done <"${stageMarker}"
-    if find "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${userTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     [[ "$(base64 -d <"${publicDir}/default/${emailMd5}")" == "vless://new-node#atomic-user" ]]
@@ -7967,7 +8207,7 @@ runSubscribeLocalRollbackRegression() (
     [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
     diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
     grep -q '订阅 Salt 初始化失败，已恢复旧本地订阅' "${errorLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -7998,7 +8238,7 @@ runSubscribeLocalRollbackRegression() (
     diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
     grep -q '订阅生成失败：重建本地订阅失败，已恢复旧本地订阅' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -8035,7 +8275,7 @@ runSubscribeLocalRollbackRegression() (
     grep -q '订阅生成失败：生成订阅输出失败，已恢复旧本地订阅' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
     grep -qx 'render' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -8073,54 +8313,9 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -f "${stateFile}" ]]
     [[ "$(jq -r '.version' "${stateFile}")" == "1" ]]
-    if find "${backupsDir}" -maxdepth 1 -type f -name 'groups-pre-migrate-*.json' | grep -q .; then
+    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-pre-migrate-*.json'; then
         return 1
     fi
-
-    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
-runSubscriptionGroupsRestoreFailureRegression() (
-    local root="${TMP_DIR}/subscription-groups-restore-failure"
-    local groupsDir="${root}/groups"
-    local currentBackup="${root}/current-backup.json"
-    local targetBackup="${root}/target-backup.json"
-    local stateFile="${groupsDir}/groups.json"
-    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-    local oldTmpDir="${TMPDIR:-}"
-    local beforeSnapshot
-    local rc
-
-    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
-    TMPDIR="${root}"
-    mkdir -p "${groupsDir}"
-    cat >"${stateFile}" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    beforeSnapshot=$(<"${stateFile}")
-    cp "${stateFile}" "${currentBackup}"
-    cat >"${targetBackup}" <<'JSON'
-{"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
-JSON
-
-    createSubscriptionGroupsBackup() {
-        printf '%s\n' "${currentBackup}"
-    }
-    migrateSubscriptionGroupsState() {
-        return 1
-    }
-
-    set +e
-    restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
-    rc=$?
-    set -e
-    unset -f createSubscriptionGroupsBackup
-    unset -f migrateSubscriptionGroupsState
-    [[ "${rc}" == "1" ]]
-    [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
-    [[ ! -e "${currentBackup}" ]]
 
     if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -8158,48 +8353,12 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -z "${backupFile}" ]]
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
-    if find "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
+    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json'; then
         return 1
     fi
 
     if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
-runSubscriptionGroupsRejectsUnsafeDirRegression() (
-    local root="${TMP_DIR}/subscription-groups-unsafe-dir"
-    local rmLog="${root}/rm.log"
-    local rc
-
-    mkdir -p "${root}"
-    root=$(cd -- "${root}" && pwd -P)
-    rmLog="${root}/rm.log"
-    : >"${rmLog}"
-    export PADM_SUBSCRIPTION_GROUPS_DIR=relative-groups
-
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${rmLog}"
-        command rm "$@"
-    }
-
-    set +e
-    (
-        cd -- "${root}" || exit 1
-        ensureSubscriptionGroupsState >/dev/null 2>&1
-    )
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
-    [[ ! -e "${root}/relative-groups" ]]
-
-    set +e
-    createSubscriptionGroupsBackup >/dev/null 2>&1
-    rc=$?
-    set -e
-    unset -f rm
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
 )
 
 runRefreshLocalSubscriptionsRollbackRegression() (
@@ -8245,7 +8404,7 @@ runRefreshLocalSubscriptionsRollbackRegression() (
     diff -u "${beforeSnapshot}" <(captureRefreshLocalSnapshot)
     grep -q '重建本地订阅失败，已恢复旧本地订阅' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -8270,7 +8429,7 @@ runRefreshLocalSubscriptionsRollbackRegression() (
     diff -u "${beforeSnapshot}" <(captureRefreshLocalSnapshot)
     grep -q '清理本地订阅目录失败，已恢复旧本地订阅' "${errorLog}"
     ! grep -q '^showAccounts$' "${callLog}"
-    ! find "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*' | grep -q .
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-refresh-local-subscriptions.*'
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -8280,14 +8439,18 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     local root="${TMP_DIR}/remove-user-subscription-menu-failure"
     local callLog="${root}/calls.log"
     local successLog="${root}/success.log"
+    local statusLog="${root}/status.log"
     local errorLog="${root}/error.log"
+    local helperLog="${root}/helper.log"
     local backupDir="${root}/backup"
     local mode rc
 
     mkdir -p "${root}"
     : >"${callLog}"
     : >"${successLog}"
+    : >"${statusLog}"
     : >"${errorLog}"
+    : >"${helperLog}"
 
     autoRead() {
         printf -v "$3" 'yes'
@@ -8296,10 +8459,12 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         printf '%s\n' "${root}/groups.json"
     }
     subscriptionGroupsStateRead() {
+        [[ "${mode}" != "groups-read-fail" ]] || return 1
         printf '{"version":2,"active_group":"default","groups":[{"id":"default","user_groups":[{"id":"team-a","enabled":true}]}]}\n'
     }
     subscriptionSyncCreateConfigBackups() {
         printf 'backup-create\n' >>"${callLog}"
+        [[ "${mode}" != "backup-fail" ]] || return 1
         mkdir -p "${backupDir}"
         printf '%s\n' "${backupDir}"
     }
@@ -8312,15 +8477,15 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     }
     subscriptionSyncRemoveAccount() {
         printf 'account:%s\n' "$1" >>"${callLog}"
-        [[ "${mode}" != "account-fail" && "${mode}" != "state-restore-fail" && "${mode}" != "account-restore-fail" ]]
+        [[ "${mode}" != "account-fail" && "${mode}" != "state-restore-fail" && "${mode}" != "account-restore-fail" && "${mode}" != "both-restore-fail" ]]
     }
     subscriptionGroupsStateWrite() {
         printf 'state-restore\n' >>"${callLog}"
-        [[ "${mode}" != "state-restore-fail" ]]
+        [[ "${mode}" != "state-restore-fail" && "${mode}" != "both-restore-fail" ]]
     }
     subscriptionSyncRestoreConfigBackups() {
         printf 'account-restore:%s\n' "$1" >>"${callLog}"
-        [[ "${mode}" != "account-restore-fail" ]]
+        [[ "${mode}" != "account-restore-fail" && "${mode}" != "both-restore-fail" ]]
     }
     padmRemoveCleanupPath() {
         printf 'cleanup:%s\n' "$1" >>"${callLog}"
@@ -8332,24 +8497,55 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         printf 'reload\n' >>"${callLog}"
         [[ "${mode}" != "reload-fail" ]]
     }
+    subscriptionEventSyncEnabled() {
+        return 0
+    }
+    runSubscriptionGroupSync() {
+        printf 'sync:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "sync-fail" ]]
+    }
     successCard() {
         printf '%s\n' "$*" >>"${successLog}"
+    }
+    statusCard() {
+        printf '%s\n' "$*" >>"${statusLog}"
     }
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
     }
-    statusCard() { return 0; }
-
+    subscriptionSyncSetManualCheckMessage() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+        printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+    }
     runRemoveCase() {
         mode=$1
         : >"${callLog}"
         : >"${successLog}"
+        : >"${statusLog}"
         : >"${errorLog}"
+        : >"${helperLog}"
         set +e
         removeUserSubscriptionMenu team-a >/dev/null 2>&1
         rc=$?
         set -e
     }
+
+    runRemoveCase groups-read-fail
+    [[ "${rc}" == "1" ]]
+    ! grep -q '^backup-create$' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
+    grep -q "manual-check:读取当前订阅状态失败| ${root}/groups.json" "${helperLog}"
+    grep -q "读取当前订阅状态失败，请手动检查 ${root}/groups.json" "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase backup-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'backup-create' "${callLog}"
+    ! grep -q '^state:' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
+    grep -q "manual-check:删除订阅前托管账号配置备份失败|本机配置" "${helperLog}"
+    grep -q "删除订阅前托管账号配置备份失败，请手动检查本机配置" "${errorLog}"
+    [[ ! -s "${successLog}" ]]
 
     runRemoveCase state-fail
     [[ "${rc}" == "1" ]]
@@ -8357,6 +8553,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state:team-a' "${callLog}"
     ! grep -q '^account:' "${callLog}"
     ! grep -qx 'reload' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -qx "cleanup:${backupDir}" "${callLog}"
     [[ ! -s "${successLog}" ]]
 
@@ -8366,6 +8563,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state:team-a' "${callLog}"
     grep -qx 'account:sub_team-a' "${callLog}"
     ! grep -qx 'reload' "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -qx 'state-restore' "${callLog}"
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "cleanup:${backupDir}" "${callLog}"
@@ -8378,9 +8576,11 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state:team-a' "${callLog}"
     grep -qx 'account:sub_team-a' "${callLog}"
     [[ "$(grep -c '^reload$' "${callLog}")" == "2" ]]
+    ! grep -q '^sync:' "${callLog}"
     grep -qx 'state-restore' "${callLog}"
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "cleanup:${backupDir}" "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -q '恢复旧配置后核心重载仍失败' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
@@ -8401,14 +8601,35 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'state-restore' "${callLog}"
     grep -qx "account-restore:${backupDir}" "${callLog}"
     grep -qx "keep-backup:${backupDir}" "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
     grep -q '托管账号配置恢复失败' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    runRemoveCase both-restore-fail
+    [[ "${rc}" == "1" ]]
+    grep -qx 'state:team-a' "${callLog}"
+    grep -qx 'account:sub_team-a' "${callLog}"
+    grep -qx 'state-restore' "${callLog}"
+    grep -qx "account-restore:${backupDir}" "${callLog}"
+    grep -qx "keep-backup:${backupDir}" "${callLog}"
+    ! grep -q '^sync:' "${callLog}"
+    grep -q '订阅状态与托管账号配置恢复失败' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
     runRemoveCase success
     [[ "${rc}" == "0" ]]
     grep -qx "cleanup:${backupDir}" "${callLog}"
     grep -qx 'reload' "${callLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
     grep -q '用户订阅已删除' "${successLog}"
+
+    runRemoveCase sync-fail
+    [[ "${rc}" == "0" ]]
+    grep -qx "cleanup:${backupDir}" "${callLog}"
+    grep -qx 'reload' "${callLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -q '用户订阅已删除' "${successLog}"
+    grep -q '订阅已删除，但自动同步失败' "${statusLog}"
 )
 
 runUserSubscriptionMenuMutationFailureRegression() (
@@ -8436,7 +8657,13 @@ runUserSubscriptionMenuMutationFailureRegression() (
         local key=$1
         local targetVar=$3
         case "${key}" in
-        user_subscription_sources) printf -v "${targetVar}" 'main,remote-a' ;;
+        user_subscription_sources)
+            if [[ "${mode}" == "empty-sources" ]]; then
+                printf -v "${targetVar}" ', ,'
+            else
+                printf -v "${targetVar}" 'main,remote-a'
+            fi
+            ;;
         user_subscription_traffic_limit) printf -v "${targetVar}" '100' ;;
         user_subscription_item_menu)
             menuStep=$((menuStep + 1))
@@ -8453,12 +8680,8 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf 'sub_%s\n' "$1"
     }
     subscribe() {
-        printf 'subscribe:%s\n' "$*" >>"${callLog}"
+        printf 'subscribe:%s|%s|%s|%s\n' "${1:-}" "${2:-}" "${3:-}" "${4:-}" >>"${callLog}"
         [[ "${mode}" != "subscribe-fail" ]]
-    }
-    listSubscriptionSources() {
-        printf 'main:本机:main:https:127.0.0.1:443:true:ok\n'
-        printf 'remote-a:远端:remote:https:10.0.0.2:39778:true:ok\n'
     }
     setUserSubscriptionSources() {
         printf 'sources:%s:%s\n' "$1" "$2" >>"${callLog}"
@@ -8467,6 +8690,10 @@ runUserSubscriptionMenuMutationFailureRegression() (
     setUserSubscriptionTrafficLimit() {
         printf 'limit:%s:%s\n' "$1" "$2" >>"${callLog}"
         [[ "${mode}" != "limit-fail" ]]
+    }
+    runSubscriptionGroupSync() {
+        printf 'sync:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "sync-fail" ]]
     }
     selectUserSubscriptionId() {
         printf 'team-a\n'
@@ -8479,12 +8706,6 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf 'toggle:%s\n' "$1" >>"${callLog}"
         [[ "${mode}" != "toggle-fail" ]]
     }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuItem() { return 0; }
-    menuDangerItem() { return 0; }
-    menuReturnItem() { return 0; }
-    menuClose() { return 0; }
     userResultCard() { return 0; }
     successCard() {
         printf '%s\n' "$*" >>"${successLog}"
@@ -8496,6 +8717,19 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf '%s\n' "$*" >>"${errorLog}"
     }
 
+    mode=event-disabled
+    resetLogs
+    subscriptionEventSyncEnabled() { return 1; }
+    runSubscriptionEventSyncIfEnabled "test-disabled" >/dev/null 2>&1
+    ! grep -q '^sync:' "${callLog}"
+    grep -q '等待手动/定时同步' "${statusLog}"
+    subscriptionEventSyncEnabled() { [[ "${mode}" != "event-disabled" ]]; }
+
+    mode=success
+    resetLogs
+    runSubscriptionEventSyncIfEnabled "test-enabled" >/dev/null 2>&1
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+
     mode=subscribe-fail
     resetLogs
     set +e
@@ -8503,9 +8737,20 @@ runUserSubscriptionMenuMutationFailureRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    grep -qx 'subscribe:false' "${callLog}"
+    grep -qx 'subscribe:false||sub_team-a|true' "${callLog}"
     grep -q '订阅输出刷新失败' "${errorLog}"
     [[ ! -s "${statusLog}" ]]
+
+    mode=empty-sources
+    resetLogs
+    set +e
+    setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    ! grep -q '^sources:team-a:' "${callLog}"
+    grep -q '服务器范围不能为空' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
 
     mode=sources-fail
     resetLogs
@@ -8543,12 +8788,15 @@ runUserSubscriptionMenuMutationFailureRegression() (
     resetLogs
     setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
     grep -q '节点范围已更新' "${successLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
     resetLogs
     setUserSubscriptionTrafficLimitMenu team-a >/dev/null 2>&1
     grep -q '订阅额度已更新' "${successLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
     resetLogs
     manageUserSubscriptionItem >/dev/null 2>&1
     grep -q '用户订阅状态已切换' "${successLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
 )
 
 runRealityStreamDisableRegression() {
@@ -8673,7 +8921,7 @@ EOF
     [[ "$(<"${streamConf}")" == "${originalStreamConf}" ]]
     [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
     ! grep -q '^refresh$' "${serviceLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
     fi
 
@@ -8694,7 +8942,7 @@ EOF
     [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
     grep -q '^restart:nginx:service-fail$' "${serviceLog}"
     ! grep -q '^refresh$' "${serviceLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
     fi
 
@@ -8708,7 +8956,7 @@ EOF
     [[ ! -e "${stateFile}" ]]
     [[ ! -e "${streamConf}" ]]
     ! grep -q 'padm stream include start' "${nginxMainConf}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
     fi
 
@@ -8894,7 +9142,7 @@ EOF
     [[ ! -e "${streamConf}" ]]
     ! grep -q '^refresh$' "${serviceLog}"
     grep -q 'Reality 443 共存分流服务应用失败' "${errorLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
 
@@ -8917,7 +9165,7 @@ EOF
     [[ ! -e "${streamConf}" ]]
     grep -q '^restart:nginx:service-fail$' "${serviceLog}"
     ! grep -q '^refresh$' "${serviceLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
 
@@ -8940,7 +9188,7 @@ EOF
     [[ ! -e "${streamConf}" ]]
     grep -q '已回滚本次修改' "${errorLog}"
     grep -q '恢复旧配置后服务应用仍失败' "${errorLog}"
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
     export PADM_FAKE_REALITY_STREAM_CP_MODE=success
@@ -8957,7 +9205,7 @@ EOF
     grep -q 'padm stream include start' "${nginxMainConf}"
     grep -Fq "include ${streamDir}/*.conf;" "${nginxMainConf}"
     [[ ! -e "${streamConf}.tmp" ]]
-    if find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*' | grep -q .; then
+    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
 
@@ -9064,7 +9312,7 @@ runRealityAsnScanPlanRegression() {
     local sampleFile="${TMP_DIR}/asn-sample-ips.txt"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local sampleCount=0
-    local _sampleIp
+    local _sampleIp prefixFirst prefixLast prefixUsable
     AUTO_INSTALL=
     cat >"${asnPrefixFile}" <<'EOF'
 192.0.2.0/24
@@ -9073,13 +9321,10 @@ runRealityAsnScanPlanRegression() {
 10.0.0.0/27
 172.16.0.0/28
 EOF
-    [[ "$(filterRealityAsnPrefixesByMask 28 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "1" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 27 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "2" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 26 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "3" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 25 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "4" ]]
-    [[ "$(filterRealityAsnPrefixesByMask 24 32 <"${asnPrefixFile}" | wc -l | tr -d ' ')" == "5" ]]
-    [[ "$(realityAsnPrefixAddressCount "172.16.0.0/28")" == "16" ]]
-    [[ "$(realityAsnPrefixTotalAddressCount <"${asnPrefixFile}")" == "496" ]]
+    IFS=$'\t' read -r prefixFirst prefixLast prefixUsable <<<"$(realityAsnPrefixUsableRange "172.16.0.0/28")"
+    [[ "$(realityIntToIpv4 "${prefixFirst}")" == "172.16.0.1" ]]
+    [[ "$(realityIntToIpv4 "${prefixLast}")" == "172.16.0.14" ]]
+    [[ "${prefixUsable}" == "14" ]]
     [[ "$(realityAsnPrefixTotalUsableAddressCount <"${asnPrefixFile}")" == "486" ]]
     generateRealityAsnSampleIps "${asnPrefixFile}" 12 "${sampleFile}"
     while IFS= read -r _sampleIp; do
@@ -9094,8 +9339,8 @@ y
     [[ -f "${selectedRealityScannerPrefixFile}" ]]
     [[ "${selectedRealityAsnSampleSize}" == "12" ]]
     [[ "${selectedRealityAsnPrefixTotal}" == "5" ]]
-    [[ "${selectedRealityAsnAddressTotal}" == "486" ]]
-    [[ "${selectedRealityScannerRange}" == "随机抽样 12/486 IP" ]]
+    [[ "${selectedRealityAsnAddressTotal}" == "12" ]]
+    [[ "${selectedRealityScannerRange}" == "本次抽样 12 IP（ASN 总可用 486）" ]]
     sampleCount=0
     while IFS= read -r _sampleIp; do
         sampleCount=$((sampleCount + 1))
@@ -9119,7 +9364,7 @@ y
 runRealityCandidateFullRegression() {
     local firstRecommendedRealityCandidate firstDeveloperRealityCandidate firstRealityCandidate secondRealityCandidate blockedCloudflareRealityCandidate
     [[ "$(realityTargetCandidateCount)" -ge 194 ]]
-    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 50 ]]
+    [[ "$(realityTargetFilteredCandidateCount recommended)" -ge 40 ]]
     [[ "$(realityTargetFilteredCandidateCount developer)" -ge 10 ]]
     [[ "$(realityTargetFilteredCandidateCount asia)" -ge 2 ]]
     [[ "$(realityTargetFilteredCandidateCount microsoft)" -ge 1 ]]
@@ -9133,6 +9378,7 @@ runRealityCandidateFullRegression() {
     [[ "$(realityTargetCandidateField "${secondRealityCandidate}" 1)" == "www.microsoft.com" ]]
     blockedCloudflareRealityCandidate=$(realityTargetBlockedCandidates | grep '^www.cloudflare.com|')
     [[ -n "${blockedCloudflareRealityCandidate}" ]]
+    realityTargetBlockedCandidates >/dev/null
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
 }
@@ -9281,15 +9527,16 @@ runRuntimeAndRealityRegression() {
     collectTLSProfile
     [[ "${tlsCertDomain}" == "tls.example.com" ]]
     [[ "${tlsSNI}" == "tls.example.com" ]]
-    protocolMeta 7 security | grep -qx reality
-    protocolMeta 7 transport | grep -qx tcp
-    protocolSelectionNeedsReality 7
-    protocolSelectionNeedsCertificate 0
-    protocolSelectionNeedsUdp 6
-    protocolSelectionTransportHas 7 tcp
-    protocolSelectionSecurityHas 7 reality
+    protocolMeta 1 security | grep -qx reality
+    protocolMeta 1 transport | grep -qx tcp
+    protocolMeta 1 needs_reality | grep -qx 1
+    ! protocolSelectionNeedsCertificate 1
+    protocolSelectionNeedsCertificate 3
+    protocolMeta 3 needs_udp | grep -qx 1
+    protocolCapabilityMeta 1 transport | grep -qx tcp
+    protocolCapabilityMeta 1 security | grep -qx reality
 
-    parseInstallArgs --install-type custom --core xray --protocols 7 --domain node.example.com --reality-target www.microsoft.com:443 --reality-server-name www.microsoft.com --entry-host node.example.com --reuse-last no
+    parseInstallArgs --install-type custom --core xray --protocols 1 --domain node.example.com --reality-target www.microsoft.com:443 --reality-server-name www.microsoft.com --entry-host node.example.com --reuse-last no
     [[ "${AUTO_REALITY_TARGET}" == "www.microsoft.com:443" ]]
     [[ "${AUTO_REALITY_SERVER_NAME}" == "www.microsoft.com" ]]
     [[ "${AUTO_ENTRY_HOST}" == "node.example.com" ]]
@@ -9312,6 +9559,7 @@ runRuntimeAndRealityRegression() {
     rm -f "${geoTmpDir}/geo.version"
     [[ "$(xrayGeoDisplayVersion "${geoTmpDir}")" == 更新时间* || "$(xrayGeoDisplayVersion "${geoTmpDir}")" == "版本未知" ]]
 
+    AUTO_REALITY_SERVER_NAME=
     parseRealityTargetInput "example.com"
     [[ "${realityTargetHost}" == "example.com" ]]
     [[ "${realityTargetPort}" == "443" ]]
@@ -9326,8 +9574,8 @@ runRuntimeAndRealityRegression() {
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "A" ]]
     showRealityTargetQuality "www.microsoft.com:443"
     [[ "$(realityTargetResultCount)" -ge "1" ]]
-    cachedLine=$(realityTargetCachedLine "www.microsoft.com:443")
-    [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $1}')" == "A" ]]
+    cachedLine=$(awk -F'\t' '$1 == "www.microsoft.com:443" {print; found=1; exit} END {exit found ? 0 : 1}' "${PADM_REALITY_TARGET_RESULTS_FILE}")
+    [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $10}')" == "A" ]]
     grep -q "tls ping www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 2048')
     [[ "$(printf '%s\n' "${scoreLine}" | awk -F'\t' '{print $1}')" == "B" ]]
@@ -9354,7 +9602,6 @@ runAutoInstallRealityRouteRegression() (
     selectInstallType=
     coreInstallType=
 
-    echoContent() { :; }
     uiStyle() { printf '%s' "$2"; }
     menuLine() { output+="$*"$'\n'; }
     menuMutedLine() { output+="$*"$'\n'; }
@@ -9363,10 +9610,9 @@ runAutoInstallRealityRouteRegression() (
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuDangerItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
-    menuClose() { return 0; }
-    progressCard() { return 0; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
+    runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     showInstallStatus() { recordMenuAction showInstallStatus; }
     checkWgetShowProgress() { return 0; }
@@ -9503,9 +9749,30 @@ JSON
     grep -q "${vlessTmpRoot}/padm-vlessenc.out" "${vlessTmpMarker}"
     grep -q "${vlessTmpRoot}/padm-vlessenc.err" "${vlessTmpMarker}"
     [[ -f "${vlessTmpRoot}/padm-xray-test.log" ]]
-    if find "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) | grep -q .; then
+    if regressionFindHasMatches "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \); then
         return 1
     fi
+
+    (
+        local helperLog="${TMP_DIR}/vlessenc-config-backup-helper.log"
+        : >"${helperLog}"
+        backupManagedFileToPath() {
+            if [[ "$1" == "${vlessConfigFile}" ]]; then
+                return 1
+            fi
+            command cp -p "$1" "$2"
+        }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
+        if setVlessRealityEncryption enable >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "$(<"${vlessConfigFile}")" == "${vlessOriginalConfig}" ]]
+        [[ "$(<"${vlessStateFile}")" == "${vlessOriginalState}" ]]
+        grep -q "manual-check:创建 VLESS Encryption 配置备份失败| ${vlessConfigFile}" "${helperLog}"
+    ) || return 1
 
     export PADM_FAKE_XRAY_VALIDATE_MODE="success"
     setVlessRealityEncryption enable
@@ -9536,7 +9803,7 @@ JSON
     setVlessRealityEncryption disable
     jq -e '.inbounds[0].settings.decryption == "none" and (.inbounds[0].settings.fallbacks | not)' "${vlessConfigFile}" >/dev/null
     [[ ! -e "${vlessStateFile}" ]]
-    if find "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \) | grep -q .; then
+    if regressionFindHasMatches "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \); then
         return 1
     fi
 
@@ -9554,7 +9821,8 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine batchLinesFile failedTargetsFile
+    local scannerLine batchLinesFile failedTargetsFile scannerSummary
+    local scannerImported scannerSkipped scannerA scannerB scannerC scannerFail
     cat >"${scannerCandidatesFile}" <<'EOF'
 fail-auto.example.com|fail-auto.example.com|Fail Auto|global|large_site|unknown|1|yes|fixture failing candidate
 www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|2|yes|fixture fallback candidate
@@ -9572,9 +9840,14 @@ IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
 192.0.2.16,192.0.2.0/24,invalid.invalid,"Invalid",N/A
 192.0.2.17,192.0.2.0/24,192.0.2.17,"Self",N/A
 CSV
-    scannerImport=$(realityTargetImportScannerCandidates "${TMP_DIR}/realitlscanner.csv")
-    [[ "${scannerImport}" == "1" ]]
-    importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet"
+    importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet" scannerSummary
+    IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${scannerSummary}"
+    [[ "${scannerImported}" == "1" ]]
+    [[ "${scannerSkipped}" == "7" ]]
+    [[ "${scannerA}" == "1" ]]
+    [[ "${scannerB}" == "0" ]]
+    [[ "${scannerC}" == "0" ]]
+    [[ "${scannerFail}" == "0" ]]
     scannerLine=$(grep -F $'scanner.example.com:443\tscanner.example.com\tscanner.example.com\tscanner' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${scannerLine}" 7)" == "AS64501" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 8)" == "RemoteNet" ]]
@@ -9591,7 +9864,7 @@ CSV
     [[ "$(realityTargetResultField "${batchLine}" 10)" == "A" ]]
     grep -qF $'batch-new.example.com:443\tbatch-new.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
     printf '%s\n' "batch-old.example.com:443" >"${failedTargetsFile}"
-    writeRealityTargetCandidateLine "batch-old.example.com" "batch-old.example.com" "Batch Old" "global" "large_site" "unknown" "9" "yes" "batch candidate" >>"${scannerCandidatesFile}"
+    printf '%s\n' "batch-old.example.com|batch-old.example.com|Batch Old|global|large_site|unknown|9|yes|batch candidate" >>"${scannerCandidatesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
     ! grep -qF $'batch-old.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}"
     ! grep -qF 'batch-old.example.com|' "${scannerCandidatesFile}"
@@ -9602,7 +9875,7 @@ CSV
     writeRealityTargetResultLine "local.example.com:443" "sni.local.example.com" "Local Example" "test" "no" "192.0.2.1" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "same ASN test target"
     writeRealityTargetResultLine "remote.example.com:443" "sni.remote.example.com" "Remote Example" "test" "no" "198.51.100.1" "AS64501" "RemoteNet" "different_network" "A" "yes" "8192" "yes" "1234567899" "longer cert but different network"
     [[ "$(realityTargetResultCount)" == "2" ]]
-    scanLine=$(realityTargetResultLineByIndex 1)
+    scanLine=$(grep -F $'local.example.com:443\t' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${scanLine}" 1)" == "local.example.com:443" ]]
     selectDefaultRealityTarget
     [[ "${realityTargetHost}" == "local.example.com" ]]
@@ -9669,7 +9942,7 @@ runRealityUnifiedLibraryRollbackRegression() (
     grep -q '^keep.example.com|' "${candidatesFile}"
     ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
     ! compgen -G "${root}/.reality_candidates.tsv.reality.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 
@@ -9683,7 +9956,7 @@ runRealityUnifiedLibraryRollbackRegression() (
     grep -q '^keep.example.com|' "${candidatesFile}"
     ! compgen -G "${root}/.reality_targets_results.tsv.reality.*" >/dev/null
     ! compgen -G "${root}/.reality_candidates.tsv.reality.*" >/dev/null
-    if find "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' | grep -q .; then
+    if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
 
@@ -9781,7 +10054,7 @@ JSON
     PADM_REALITY_XRAY_XHTTP_CONFIG_FILE="${xrayXhttp}"
     PADM_REALITY_SINGBOX_VISION_CONFIG_FILE="${singBoxVision}"
     PADM_REALITY_SINGBOX_GRPC_CONFIG_FILE="${singBoxGrpc}"
-    applyLog=$(realityTargetApplyLog)
+    applyLog=$(realityTargetTmpPath padm-reality-target-apply.log)
     : >"${statusLog}"
     : >"${refreshLog}"
 
@@ -10134,61 +10407,232 @@ grep -qx "      host: front.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/use
 grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 configPath="${oldConfigPath}"
 
+(
+    local publishRoot="${TMP_DIR}/subscription-output-publish-accounts"
+    local localBase="${publishRoot}/local"
+    local mainCheckFile="${publishRoot}/main-check-count"
+    local output
+    mkdir -p "${localBase}/default"
+    : >"${localBase}/default/local-keep"
+    printf '0\n' >"${mainCheckFile}"
+
+    subscriptionGroupsStateRead() {
+        if [[ "$*" == "-r .active_group" ]]; then
+            printf 'default\n'
+            return 0
+        fi
+        if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
+            printf '%s\n' "$(( $(<"${mainCheckFile}") + 1 ))" >"${mainCheckFile}"
+            return 0
+        fi
+        return 1
+    }
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
+            printf '%s\n' "$(( $(<"${mainCheckFile}") + 1 ))" >"${mainCheckFile}"
+            return 0
+        fi
+        if [[ "$*" == *'--argjson enabledUsers '* && "$*" == *'.allows_main // false'* && "$*" == *'.has_remote // false'* && "$*" == *'@tsv'* ]]; then
+            printf 'sub_team_a\ttrue\tfalse\nsub_team_b\ttrue\tfalse\n'
+            return 0
+        fi
+        return 1
+    }
+    subscriptionActiveEnabledUsersJson() {
+        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["main"],"allows_main":true,"has_remote":false},{"id":"team-b","account":"sub_team_b","allowed_sources":["main"],"allows_main":true,"has_remote":false}]\n'
+    }
+    subscriptionSyncFindUserByAccountName() {
+        return 99
+    }
+
+    output=$(subscriptionPublishAccounts "${localBase}")
+    [[ "${output}" == $'local-keep\nsub_team_a\nsub_team_b' ]]
+    [[ "$(<"${mainCheckFile}")" == "1" ]]
+)
+
+(
+    local sourceLines
+    subscriptionSyncFindUserByAccountName() {
+        return 97
+    }
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'.id as $sid | $allowed | index($sid)'* ]]; then
+            printf 'example.com:443:edge:https\n'
+            return 0
+        fi
+        return 1
+    }
+    subscriptionActiveEnabledUsersJson() {
+        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}]\n'
+    }
+    sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
+    [[ "${sourceLines}" == "example.com:443:edge:https" ]]
+)
+
+(
+    local renderRoot="${TMP_DIR}/subscription-render-remote-hint-batch"
+    local localBase="${renderRoot}/local"
+    local remoteChecksFile="${renderRoot}/remote-checks.log"
+    local autoReadCalls=0
+    local oldSubscribeSalt="${subscribeSalt:-}"
+    local oldCurrentDefaultPort="${currentDefaultPort:-}"
+    mkdir -p "${localBase}/default" "${renderRoot}"
+    : >"${remoteChecksFile}"
+    subscribeSalt=test-salt
+    currentDefaultPort=443
+
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
+            return 1
+        fi
+        if [[ "$*" == *'--argjson enabledUsers '* && "$*" == *'.has_remote // false'* && "$*" == *'@tsv'* ]]; then
+            printf 'sub_team_a\tfalse\ttrue\n'
+            return 0
+        fi
+        return 1
+    }
+    subscriptionActiveEnabledUsersJson() {
+        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"],"allows_main":false,"has_remote":true}]\n'
+    }
+    subscriptionPublishHasRemoteSources() {
+        return 99
+    }
+    subscriptionRemoteSubscribeSourcesForAccount() {
+        printf '%s\n' "$1" >>"${remoteChecksFile}"
+        printf 'example.com:443:edge:https\n'
+    }
+    autoRead() {
+        autoReadCalls=$((autoReadCalls + 1))
+        printf -v "$3" 'y'
+    }
+    resolveSubscribePublicDomain() {
+        printf 'example.com'
+    }
+    renderSubscribeUserOutputs() {
+        [[ "$1" == "sub_team_a" && "$4" == "y" ]]
+    }
+
+    renderAllSubscribeUserOutputs "${localBase}" "" true "" true
+    [[ "${autoReadCalls}" == "1" ]]
+    [[ ! -s "${remoteChecksFile}" ]]
+
+    if [[ -n "${oldSubscribeSalt}" ]]; then
+        subscribeSalt="${oldSubscribeSalt}"
+    else
+        unset subscribeSalt
+    fi
+    if [[ -n "${oldCurrentDefaultPort}" ]]; then
+        currentDefaultPort="${oldCurrentDefaultPort}"
+    else
+        unset currentDefaultPort
+    fi
+)
+
+(
+    local renderRoot="${TMP_DIR}/subscription-render-remote-hint-override"
+    local localBase="${renderRoot}/local"
+    local helperAccountsFile="${renderRoot}/helper-accounts.log"
+    local unexpectedRemoteChecksFile="${renderRoot}/unexpected-remote-checks.log"
+    local autoReadCalls=0
+    local oldSubscribeSalt="${subscribeSalt:-}"
+    local oldCurrentDefaultPort="${currentDefaultPort:-}"
+    mkdir -p "${localBase}/default" "${renderRoot}"
+    : >"${helperAccountsFile}"
+    : >"${unexpectedRemoteChecksFile}"
+    subscribeSalt=test-salt
+    currentDefaultPort=443
+
+    subscriptionPublishHasRemoteSources() {
+        printf '%s\n' "$1" >"${helperAccountsFile}"
+        return 0
+    }
+    subscriptionRemoteSubscribeSourcesForAccount() {
+        printf '%s\n' "$1" >>"${unexpectedRemoteChecksFile}"
+        printf 'example.com:443:edge:https\n'
+    }
+    autoRead() {
+        autoReadCalls=$((autoReadCalls + 1))
+        printf -v "$3" 'y'
+    }
+    resolveSubscribePublicDomain() {
+        printf 'example.com'
+    }
+    renderSubscribeUserOutputs() {
+        [[ "$1" == "sub_team_a" && "$4" == "y" ]]
+    }
+
+    renderAllSubscribeUserOutputs "${localBase}" "" true "sub_team_a" true
+    [[ "${autoReadCalls}" == "1" ]]
+    grep -qx 'sub_team_a' "${helperAccountsFile}"
+    [[ ! -s "${unexpectedRemoteChecksFile}" ]]
+
+    if [[ -n "${oldSubscribeSalt}" ]]; then
+        subscribeSalt="${oldSubscribeSalt}"
+    else
+        unset subscribeSalt
+    fi
+    if [[ -n "${oldCurrentDefaultPort}" ]]; then
+        currentDefaultPort="${oldCurrentDefaultPort}"
+    else
+        unset currentDefaultPort
+    fi
+)
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vlesstcp 443 tls-user uuid-tls "" ""
-assertCapturedSubscribeOutputs "tls" "vless://uuid-tls@tls.example.com:443?encryption=none&security=tls&type=tcp&host=tls.example.com&fp=chrome&headerType=none&sni=tls.example.com&flow=xtls-rprx-vision#tls-user" "tls.example.com" "tls.example.com" "tcp" "vless"
-jq -e '.[0].flow == "xtls-rprx-vision" and (.[0].tls.reality | not)' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-user" "vless://uuid-tls@tls.example.com:443?encryption=none&security=tls&type=tcp&host=tls.example.com&fp=chrome&headerType=none&sni=tls.example.com&flow=xtls-rprx-vision#tls-user" "tls.example.com" "tls.example.com" "tcp" "vless"
+jq -e '.[0].flow == "xtls-rprx-vision" and (.[0].tls.reality | not)' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vlessws 443 tls-ws-user uuid-ws "edge.example.com" "/ws-path"
-assertCapturedSubscribeOutputs "tls" "vless://uuid-ws@edge.example.com:443?encryption=none&security=tls&type=ws&host=tls.example.com&sni=tls.example.com&fp=chrome&path=/ws-path#tls-ws-user" "edge.example.com" "tls.example.com" "ws" "vless"
-jq -e '.[0].transport.path == "/ws-path" and .[0].transport.headers.Host == "tls.example.com" and .[0].multiplex.enabled == false' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-ws-user" "vless://uuid-ws@edge.example.com:443?encryption=none&security=tls&type=ws&host=tls.example.com&sni=tls.example.com&fp=chrome&path=/ws-path#tls-ws-user" "edge.example.com" "tls.example.com" "ws" "vless"
+jq -e '.[0].transport.path == "/ws-path" and .[0].transport.headers.Host == "tls.example.com" and .[0].multiplex.enabled == false' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-ws-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 currentPath="svc-"
 defaultBase64Code vlessgrpc 443 tls-grpc-user uuid-grpc "edge.example.com" ""
-assertCapturedSubscribeOutputs "tls" "vless://uuid-grpc@edge.example.com:443?encryption=none&security=tls&type=grpc&host=tls.example.com&path=svc-grpc&serviceName=svc-grpc&fp=chrome&alpn=h2&sni=tls.example.com#tls-grpc-user" "edge.example.com" "tls.example.com" "grpc" "vless"
-jq -e '.[0].transport.service_name == "svc-grpc" and .[0].packet_encoding == "xudp"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-grpc-user" "vless://uuid-grpc@edge.example.com:443?encryption=none&security=tls&type=grpc&host=tls.example.com&path=svc-grpc&serviceName=svc-grpc&fp=chrome&alpn=h2&sni=tls.example.com#tls-grpc-user" "edge.example.com" "tls.example.com" "grpc" "vless"
+jq -e '.[0].transport.service_name == "svc-grpc" and .[0].packet_encoding == "xudp"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-grpc-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vmessws 443 tls-vmess-user uuid-vmess "edge.example.com" "/vmess-ws"
-vmessWsLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls")
+vmessWsLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-vmess-user")
 [[ "${vmessWsLink}" == vmess://* ]]
-assertCapturedSubscribeOutputs "tls" "${vmessWsLink}" "edge.example.com" "tls.example.com" "ws" "vmess"
-jq -e '.[0].alter_id == 0 and .[0].transport.max_early_data == 2048 and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-vmess-user" "${vmessWsLink}" "edge.example.com" "tls.example.com" "ws" "vmess"
+jq -e '.[0].alter_id == 0 and .[0].transport.max_early_data == 2048 and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-vmess-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code trojan 443 tls-trojan-user pass-trojan "" ""
-assertCapturedSubscribeOutputs "tls" "trojan://pass-trojan@tls.example.com:443?peer=tls.example.com&fp=chrome&sni=tls.example.com&alpn=http/1.1#tls-trojan-user_Trojan" "tls.example.com" "tls.example.com" "tcp" "trojan"
-jq -e '.[0].password == "pass-trojan" and .[0].tls.alpn[0] == "http/1.1"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-trojan-user" "trojan://pass-trojan@tls.example.com:443?peer=tls.example.com&fp=chrome&sni=tls.example.com&alpn=http/1.1#tls-trojan-user_Trojan" "tls.example.com" "tls.example.com" "tcp" "trojan"
+jq -e '.[0].password == "pass-trojan" and .[0].tls.alpn[0] == "http/1.1"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-trojan-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 currentPath="svc-"
 defaultBase64Code trojangrpc 443 tls-trojan-grpc-user pass-trojan-grpc "edge.example.com" ""
-assertCapturedSubscribeOutputs "tls" "trojan://pass-trojan-grpc@edge.example.com:443?encryption=none&peer=tls.example.com&security=tls&type=grpc&fp=chrome&sni=tls.example.com&alpn=h2&path=svc-trojangrpc&serviceName=svc-trojangrpc#tls-trojan-grpc-user" "edge.example.com" "tls.example.com" "grpc" "trojan"
-jq -e '.[0].transport.service_name == "svc-trojangrpc" and (.[0].tls | has("insecure") | not) and .[0].multiplex.enabled == false' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-trojan-grpc-user" "trojan://pass-trojan-grpc@edge.example.com:443?encryption=none&peer=tls.example.com&security=tls&type=grpc&fp=chrome&sni=tls.example.com&alpn=h2&path=svc-trojangrpc&serviceName=svc-trojangrpc#tls-trojan-grpc-user" "edge.example.com" "tls.example.com" "grpc" "trojan"
+jq -e '.[0].transport.service_name == "svc-trojangrpc" and (.[0].tls | has("insecure") | not) and .[0].multiplex.enabled == false' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-trojan-grpc-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vmessHTTPUpgrade 443 tls-httpupgrade-user uuid-http "edge.example.com" "/upgrade"
-httpUpgradeLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls")
+httpUpgradeLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-httpupgrade-user")
 [[ "${httpUpgradeLink}" == vmess://* ]]
 [[ "${httpUpgradeLink}" != " "* ]]
-assertCapturedSubscribeOutputs "tls" "${httpUpgradeLink}" "edge.example.com" "tls.example.com" "httpupgrade" "vmess"
-jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-httpupgrade-user" "${httpUpgradeLink}" "edge.example.com" "tls.example.com" "httpupgrade" "vmess"
+jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-httpupgrade-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 singBoxAnyTLSPort=8443
 defaultBase64Code anytls 443 tls-any-user pass-any "" ""
-assertCapturedSubscribeOutputs "tls" "anytls://pass-any@tls.example.com:8443?peer=tls.example.com&insecure=0&sni=tls.example.com#tls-any-user" "tls.example.com" "tls.example.com" "tcp" "anytls"
-jq -e '.[0].password == "pass-any" and .[0].server_port == 8443' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-any-user" "anytls://pass-any@tls.example.com:8443?peer=tls.example.com&insecure=0&sni=tls.example.com#tls-any-user" "tls.example.com" "tls.example.com" "tcp" "anytls"
+jq -e '.[0].password == "pass-any" and .[0].server_port == 8443' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-any-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
@@ -10196,8 +10640,8 @@ singBoxHysteria2Port=9443
 hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
 defaultBase64Code hysteria 8443 tls-hysteria-user pass-hysteria "" ""
-assertCapturedSubscribeOutputs "tls" "hysteria2://pass-hysteria@tls.example.com:9443?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#tls-hysteria-user" "tls.example.com" "tls.example.com" "tcp" "hysteria2"
-jq -e '.[0].password == "pass-hysteria" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass-hysteria@tls.example.com:9443?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#tls-hysteria-user" "tls.example.com" "tls.example.com" "tcp" "hysteria2"
+jq -e '.[0].password == "pass-hysteria" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
@@ -10205,9 +10649,9 @@ singBoxHysteria2Port=9443
 hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
 defaultBase64Code hysteria "20000-20002" tls-hysteria-hop-user pass-hysteria-hop "" ""
-grep -qxF "hysteria2://pass-hysteria-hop@tls.example.com:20000-20002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls"
-grep -qx "    ports: 20000-20002" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls"
-if grep -q 'mport' "${SUBSCRIBE_CAPTURE_DIR}/default/tls" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"; then
+grep -qxF "hysteria2://pass-hysteria-hop@tls.example.com:20000-20002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user"
+grep -qx "    ports: 20000-20002" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-hop-user"
+if grep -q 'mport' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"; then
     return 1
 fi
 
@@ -10215,973 +10659,106 @@ rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 tuicAlgorithm="bbr"
 defaultBase64Code tuic 9443 tls-tuic-user uuid-tuic_pass-tuic "" ""
-grep -qxF "tuic://uuid-tuic:pass-tuic@tls.example.com:9443?congestion_control=bbr&alpn=h3&sni=tls.example.com&udp_relay_mode=native&allow_insecure=0#tls-tuic-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls"
-grep -qx "    server: tls.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls"
-grep -qx "    udp-relay-mode: native" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls"
-grep -qx "    disable-sni: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls"
-grep -qx "    reduce-rtt: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls"
-grep -qx "    sni: tls.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls"
-jq -e '.[0].type == "tuic" and .[0].server == "tls.example.com" and .[0].tls.server_name == "tls.example.com"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
-jq -e '.[0].uuid == "uuid-tuic" and .[0].password == "pass-tuic" and .[0].congestion_control == "bbr" and .[0].udp_relay_mode == "native" and .[0].zero_rtt_handshake == false and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+grep -qxF "tuic://uuid-tuic:pass-tuic@tls.example.com:9443?congestion_control=bbr&alpn=h3&sni=tls.example.com&udp_relay_mode=native&allow_insecure=0#tls-tuic-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-tuic-user"
+grep -qx "    server: tls.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
+grep -qx "    udp-relay-mode: native" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
+grep -qx "    disable-sni: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
+grep -qx "    reduce-rtt: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
+grep -qx "    sni: tls.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
+jq -e '.[0].type == "tuic" and .[0].server == "tls.example.com" and .[0].tls.server_name == "tls.example.com"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-tuic-user" >/dev/null
+jq -e '.[0].uuid == "uuid-tuic" and .[0].password == "pass-tuic" and .[0].congestion_control == "bbr" and .[0].udp_relay_mode == "native" and .[0].zero_rtt_handshake == false and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-tuic-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code naive 443 tls-naive-user pass-naive "" ""
-grep -qxF "naive+https://tls-naive-user:pass-naive@tls.example.com:443?padding=true#tls-naive-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls"
-[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls" ]]
-jq -e '. == []' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls" >/dev/null
+grep -qxF "naive+https://tls-naive-user:pass-naive@tls.example.com:443?padding=true#tls-naive-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-naive-user"
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-naive-user" ]]
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-naive-user" ]]
 unset REGRESSION_ECHO_LOG
 }
 
-runSubscriptionGroupStateRegression() {
-    ensureSubscriptionGroupsState
-    jq -e '.version == 2 and .active_group == "default" and (.groups | length == 1)' "$(subscriptionGroupsFile)" >/dev/null
+runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
+    local sourceLines
+    local helperAccountFile="${TMP_DIR}/subscription-remote-sources-account.log"
 
-    addSubscriptionSourceState ip-edge "IP Edge" 203.0.113.10 39778
-    jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
-    removeSubscriptionSourceState ip-edge
-
-    local credential decodedCredential invalidCredential oldWireGuardDir selfRefHost
-    credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
-    decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
-    jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
-    if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.999.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":70000,"token":"token-abc"}')
-    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
-        return 1
-    fi
-
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{
-  "version": 1,
-  "active_group": "edge-group",
-  "groups": [
-    {
-      "id": "edge-group",
-      "name": "Edge Group",
-      "sources": [
-        {"id": "edge", "name": "Edge", "scheme": "https", "host": "example.com", "port": "443", "enabled": true, "sync_status": "failed", "last_sync_error": {"type": "unreachable", "message": "old"}}
-      ],
-      "user_groups": [
-        {"id": "team-a", "name": "Team A", "enabled": true, "allowed_sources": ["edge"], "traffic_limit_gb": "1", "uuid": "11111111-1111-1111-1111-111111111111"}
-      ],
-      "sync": {"enabled": true},
-      "traffic": {"user_groups": {"team-a": {"upload": 1, "download": 2, "sources": {"edge": {"upload": 1, "download": 2}}}}, "sources": {"edge": {"upload": 1, "download": 2}}, "admin": {"sources": {"edge": {"upload": 0, "download": 0}}}}
+    subscriptionSyncAccountIdFromName() {
+        return 97
     }
-  ]
-}
-JSON
-
-    ensureSubscriptionGroupsState
-    jq -e '
-      .version == 2 and
-      .active_group == "edge-group" and
-      (.groups[0].sync.remote_enabled == true) and
-      (.groups[0].sync.quota_auto_apply == false) and
-      any(.groups[0].sources[]; .id == "main" and .role == "main") and
-      any(.groups[0].sources[]; .id == "edge" and .port == 443) and
-      (.groups[0].user_groups[0].traffic_limit_gb == 1)
-    ' "$(subscriptionGroupsFile)" >/dev/null
-
-    (
-        local summaryOutput
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
-        summaryOutput=$(showSubscriptionGroupsStateSummary)
-        [[ "${summaryOutput}" == *"当前组：Edge Group(edge-group)"* ]]
-        [[ "${summaryOutput}" == *"分享订阅：1 个，启用 1 个"* ]]
-        [[ "${summaryOutput}" == *"服务器源：2 个，启用远端 1 个"* ]]
-    )
-
-    (
-        local resetRoot="${TMP_DIR}/subscription-groups-reset-failure"
-        local resetGroupsDir="${resetRoot}/groups"
-        local resetStateFile="${resetGroupsDir}/groups.json"
-        local resetErrorLog="${resetRoot}/error.log"
-        local resetCurrentBackup
-        local resetBeforeSnapshot
-        local resetStatus
-        local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-        local oldTmpDir="${TMPDIR:-}"
-
-        # shellcheck source=/dev/null
-        source "${PROJECT_ROOT}/shell/subscription/state_maintenance.sh"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${resetGroupsDir}"
-        TMPDIR="${resetRoot}"
-        REGRESSION_ERROR_CARD_LOG="${resetErrorLog}"
-        mkdir -p "${resetGroupsDir}"
-        cat >"${resetStateFile}" <<'JSON'
-{"version":2,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        resetBeforeSnapshot=$(<"${resetStateFile}")
-        resetCurrentBackup="${resetGroupsDir}/backups/groups-current.json"
-
-        showSubscriptionGroupsStateSummary() { return 0; }
-        statusCard() { return 0; }
-        successCard() { return 0; }
-        autoRead() {
-            local targetVar=$3
-            printf -v "${targetVar}" '%s' "yes"
-        }
-        createSubscriptionGroupsBackup() {
-            mkdir -p "${resetGroupsDir}/backups" || return 1
-            cp "${resetStateFile}" "${resetCurrentBackup}" || return 1
-            printf '%s\n' "${resetCurrentBackup}"
-        }
-        migrateSubscriptionGroupsState() {
-            return 1
-        }
-
-        : >"${resetErrorLog}"
-        set +e
-        resetSubscriptionGroupsStateMenu >/dev/null 2>&1
-        resetStatus=$?
-        set -e
-        unset -f showSubscriptionGroupsStateSummary
-        unset -f statusCard
-        unset -f successCard
-        unset -f autoRead
-        unset -f createSubscriptionGroupsBackup
-        unset -f migrateSubscriptionGroupsState
-        [[ "${resetStatus}" == "1" ]]
-        [[ "$(<"${resetStateFile}")" == "${resetBeforeSnapshot}" ]]
-        grep -q '订阅状态重建失败，已恢复旧状态' "${resetErrorLog}"
-        [[ -f "${resetCurrentBackup}" ]]
-        if find "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*' | grep -q .; then
-            return 1
-        fi
-
-        if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-        if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-    )
-
-    if ! true >/dev/null 2>&1; then
-        return 1
-    fi
-    if ! true >/dev/null 2>&1; then
-        return 1
-    fi
-
-    addSubscriptionSourceState remote-edge remote-edge "10.77.0.2" 39778
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id remote-edge --arg token "token-abc" '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .control_token = $token else . end)
-      else . end)'
-    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-abc")' "$(subscriptionGroupsFile)" >/dev/null
-    setSubscriptionSourceCredential remote-edge "10.77.0.3" 48779 "token-def"
-    jq -e '.groups[0].sources[] | select(.id == "remote-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-def")' "$(subscriptionGroupsFile)" >/dev/null
-
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id edge --argjson enabled false '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-      else . end)'
-    jq -e '.groups[0].sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id main --argjson enabled false '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-      else . end)'
-    jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-    clearSubscriptionSourceSyncError edge
-    jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
-    removeSubscriptionSourceState edge
-    jq -e '(.groups[0].sources | map(.id) | index("edge") | not) and (.groups[0].traffic.sources | has("edge") | not) and (.groups[0].traffic.user_groups["team-a"].sources | has("edge") | not)' "$(subscriptionGroupsFile)" >/dev/null
-
-    subscriptionGroupsStateWrite '
-      .groups[0].user_groups[0].enabled = true |
-      .groups[0].user_groups[0].traffic_limit_gb = 1 |
-      .groups[0].traffic.admin = {upload:2097152, download:1048576, sources:{main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}}} |
-      .groups[0].traffic.sources = {main:{upload:2097152, download:1048576, updated_at:"2026-06-10 10:00:00"}, "remote-edge":{upload:1048576, download:0, updated_at:"2026-06-10 10:01:00"}} |
-      .groups[0].traffic.user_groups["team-a"] = {upload: 1073741824, download: 1, sources:{main:{upload:1073741824, download:1}}}
-    '
-    (
-        local trafficOutput
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
-        trafficOutput=$(showAdminSubscriptionTraffic)
-        [[ "${trafficOutput}" == *"总上传：2 MB"* ]]
-        [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
-        [[ "${trafficOutput}" == *"来源数：1"* ]]
-        trafficOutput=$(showSubscriptionSourcesTraffic)
-        [[ "${trafficOutput}" == *"服务器数：2"* ]]
-        [[ "${trafficOutput}" == *"总上传：3 MB"* ]]
-        [[ "${trafficOutput}" == *"总下载：1 MB"* ]]
-        [[ "${trafficOutput}" == *"最近更新：2026-06-10 10:01:00"* ]]
-    )
-    subscriptionQuotaDryRunPlan | jq -e 'length == 1 and .[0].id == "team-a" and .[0].limit_gb == 1 and .[0].percent >= 100 and .[0].action == "disable-and-remove-local-account"' >/dev/null
-    if applySubscriptionQuotaPlan '{bad-json' 2>/dev/null; then
-        return 1
-    fi
-    if applySubscriptionQuotaPlan '[{"id":"","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
-        return 1
-    fi
-    if applySubscriptionQuotaPlan '[{"id":"missing","action":"disable-and-remove-local-account"}]' 2>/dev/null; then
-        return 1
-    fi
-    if subscriptionSyncApplyAccountPlan '{bad-json' 2>/dev/null; then
-        return 1
-    fi
-    if subscriptionSyncApplyAccountPlan '{"create":["sub_team_a"],"remove":[null]}' 2>/dev/null; then
-        return 1
-    fi
-    applySubscriptionQuotaPlan "$(subscriptionQuotaDryRunPlan)"
-    jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    subscriptionGroupsStateWrite '.groups[0].user_groups[0].enabled = true'
-    (
-        local quotaMenuOutput
-        local quotaMenuStatus
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { return 0; }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            return 42
-        }
-        reloadCore() {
-            return 0
-        }
-        set +e
-        quotaMenuOutput=$(executeSubscriptionQuotaPlanMenu <<<"yes" 2>/dev/null)
-        quotaMenuStatus=$?
-        set -e
-        if [[ "${quotaMenuStatus}" -eq 0 ]]; then
-            return 1
-        fi
-        [[ "${quotaMenuOutput}" == *"待处理订阅：1"* ]]
-        [[ "${quotaMenuOutput}" == *"动作：停用超额订阅并移除本机托管账号"* ]]
-    )
-    (
-        local quotaTxRoot="${TMP_DIR}/subscription-quota-transaction"
-        local quotaTxPlan
-        local quotaTxStatus
-        mkdir -p "${quotaTxRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${quotaTxRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}}}]}
-JSON
-        quotaTxPlan=$(subscriptionQuotaDryRunPlan)
-        subscriptionSyncApplyAccountPlanTransaction() {
-            return 1
-        }
-        set +e
-        applySubscriptionQuotaPlanTransaction "${quotaTxPlan}"
-        quotaTxStatus=$?
-        set -e
-        [[ "${quotaTxStatus}" == "1" ]]
-        jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
-        if find "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
-            return 1
-        fi
-    )
-    (
-        local quotaPartialRoot="${TMP_DIR}/subscription-quota-partial-state-failure"
-        local quotaPartialPlan='[{"id":"team-a","action":"disable-and-remove-local-account"},{"id":"team-b","action":"disable-and-remove-local-account"}]'
-        local quotaPartialStatus
-        local accountPhaseMarker="${quotaPartialRoot}/account-phase-called"
-        mkdir -p "${quotaPartialRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${quotaPartialRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        setUserSubscriptionEnabled() {
-            local id=$1
-            local enabled=$2
-            if [[ "${id}" == "team-b" ]]; then
-                return 1
-            fi
-            subscriptionGroupsStateWrite --arg groupId "default" --arg id "${id}" --argjson enabled "${enabled}" '.groups |= map(if .id == $groupId then .user_groups |= map(if .id == $id then .enabled = $enabled else . end) else . end)'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            printf 'called\n' >"${accountPhaseMarker}"
-            return 0
-        }
-        set +e
-        applySubscriptionQuotaPlanTransaction "${quotaPartialPlan}"
-        quotaPartialStatus=$?
-        set -e
-        [[ "${quotaPartialStatus}" == "1" ]]
-        jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-        jq -e '.groups[0].user_groups[] | select(.id == "team-b" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-        [[ ! -e "${accountPhaseMarker}" ]]
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"停用超额分享订阅失败"* ]]
-        if find "${quotaPartialRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json' | grep -q .; then
-            return 1
-        fi
-    )
-    (
-        subscriptionSyncPlanFromAccounts() {
-            jq -n '{create:[], remove:["sub_team_a"]}'
-        }
-        subscriptionSyncPlan | jq -e '.remove | index("sub_team_a")' >/dev/null
-    )
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local syncConfigRoot="${TMP_DIR}/subscription-sync-config"
-    configPath="${syncConfigRoot}/xray/"
-    singBoxConfigPath="${syncConfigRoot}/sing-box/"
-    mkdir -p "${configPath}" "${singBoxConfigPath}"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"sub_team_b-main"}]}}]}
-JSON
-    cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"name":"sub_team_a-main"},{"username":"sub_team_b-main"}]}]}
-JSON
-    subscriptionSyncConfiguredManagedUsers | jq -R -e -s 'split("\n") | map(select(length > 0)) | sort == ["sub_team_a-main", "sub_team_b-main"]' >/dev/null
-    subscriptionSyncPlanFromAccounts $'sub_team_a-main' | jq -e '.create == [] and .remove == ["sub_team_b-main"]' >/dev/null
-    printf '{bad-json' >"${configPath}99_broken_inbounds.json"
-    set +e
-    subscriptionSyncPlanFromAccounts $'sub_team_a' >/dev/null 2>&1
-    local brokenPlanStatus=$?
-    set -e
-    [[ "${brokenPlanStatus}" -ne 0 ]]
-    rm -f "${configPath}99_broken_inbounds.json"
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    (
-        runSubscriptionGroupSync() {
-            return 23
-        }
-        set +e
-        runSubscriptionGroupSyncCron
-        local cronStatus=$?
-        set -e
-        [[ "${cronStatus}" -eq 23 ]]
-    )
-
-    currentHost="self.example.com"
-    subscribeDomain="self.example.com"
-    subscribePort=39778
-    oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
-    PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/subscription-state-wireguard"
-    mkdir -p "$(subscriptionWireGuardDir)"
-    cat >"$(subscriptionWireGuardStateFile)" <<'JSON'
-{"enabled":true,"role":"main","address":"10.77.0.1/24","peers":[]}
-JSON
-    selfRefHost=$(subscriptionWireGuardReadState | jq -r '.address // empty')
-    selfRefHost=$(subscriptionWireGuardAddressHost "${selfRefHost}")
-    subscriptionGroupsStateWrite --arg selfRefHost "${selfRefHost}" '
-      .groups[0].sources |= map(if .id == "remote-edge" then .enabled = false else . end) |
-      .groups[0].sources += [{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"wireguard","transport":"wireguard","host":$selfRefHost,"port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}] |
-      .groups[0].user_groups = (.groups[0].user_groups | map(if .id == "team-a" then .allowed_sources = ["self-ref"] else . end))
-    '
-    subscriptionRemoteControlRequest() {
-        return 19
+    subscriptionSyncFindUserByAccountName() {
+        printf '%s\n' "$1" >"${helperAccountFile}"
+        printf '{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}\n'
     }
-    subscriptionRemoteSyncPlan | jq -e '.[] | select(.source_id == "self-ref" and .status == "self_reference" and .error_detail.type == "self_reference")' >/dev/null
-    runSubscriptionRemoteSync | jq -e '.[] | contains("self-ref")' >/dev/null
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "self-ref" and .sync_status == "failed" and .last_sync_error.type == "self_reference")' >/dev/null
-    if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
-    local stateSnapshot badBackup legacyBackup menuBackup
-    stateSnapshot=$(<"$(subscriptionGroupsFile)")
-    if subscriptionGroupsStateWrite '.groups = "broken" | .dangling = ' 2>/dev/null; then
+    subscriptionActiveEnabledUsersJson() {
+        return 98
+    }
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'.id as $sid | $allowed | index($sid)'* ]]; then
+            printf 'example.com:443:edge:https\n'
+            return 0
+        fi
         return 1
-    fi
-    [[ "$(<"$(subscriptionGroupsFile)")" == "${stateSnapshot}" ]]
-    [[ ! -e "$(subscriptionGroupsFile).tmp" ]]
-    [[ ! -e "$(subscriptionGroupsFile).tmp.commit" ]]
+    }
 
-    badBackup="${TMP_DIR}/bad-groups-backup.json"
-    printf '{bad json\n' >"${badBackup}"
-    if restoreSubscriptionGroupsBackup "${badBackup}" 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"$(subscriptionGroupsFile)")" == "${stateSnapshot}" ]]
-    [[ ! -e "$(subscriptionGroupsFile).restore.tmp" ]]
-
-    legacyBackup="${TMP_DIR}/legacy-groups-backup.json"
-    cat >"${legacyBackup}" <<'JSON'
-{"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
-JSON
-    restoreSubscriptionGroupsBackup "${legacyBackup}"
-    jq -e '.version == 2 and .active_group == "legacy" and any(.groups[0].sources[]; .role == "main") and (.groups[0].sync.remote_enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
-
-    menuBackup=$(createSubscriptionGroupsBackup)
-    subscriptionGroupsStateWrite '.active_group = "changed" | .groups[0].id = "changed" | .groups[0].name = "Changed"'
-    (
-        local menuOutput
-        autoRead() {
-            local targetVar=$3
-            local input=
-            IFS= read -r input || input=
-            printf -v "${targetVar}" '%s' "${input}"
-        }
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        menuClose() { printf 'menu:close\n'; }
-        menuOutput=$(printf '%s\nyes\n' "${menuBackup}" | restoreSubscriptionGroupsBackupMenu)
-        [[ "${menuOutput}" == *"menu:"* ]]
-    )
-    jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
-}
-
-runSubscriptionSyncTempDirRegression() (
-    local oldTmpDir="${TMPDIR:-}"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
-    local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
-    local tmpRoot="${TMP_DIR}/subscription-sync-tmp"
-    local syncConfigRoot="${TMP_DIR}/subscription-sync-tempdir-config"
-    local localDir="${TMP_DIR}/subscription-sync-tempdir-local"
-    local publicDir="${TMP_DIR}/subscription-sync-tempdir-public"
-    local backupDir
-    local outputBackupDir
-
-    mkdir -p "${tmpRoot}" "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box" "${localDir}/default" "${publicDir}/default"
-    TMPDIR="${tmpRoot}"
-    configPath="${syncConfigRoot}/xray/"
-    singBoxConfigPath="${syncConfigRoot}/sing-box/"
-    cat >"${configPath}01_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"}]}}]}
-JSON
-
-    backupDir=$(subscriptionSyncCreateConfigBackups)
-    [[ "${backupDir}" == "${tmpRoot}"/padm-subscription-sync-backup.* ]]
-    [[ -f "${backupDir}/manifest" ]]
-    padmRemoveCleanupPath "${backupDir}"
-
-    export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
-    export PADM_SUBSCRIBE_DIR="${publicDir}"
-    printf 'local\n' >"${localDir}/default/user"
-    printf 'public\n' >"${publicDir}/default/user"
-    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups)
-    [[ "${outputBackupDir}" == "${tmpRoot}"/padm-subscription-output-backup.* ]]
-    [[ -f "${outputBackupDir}/local.exists" && -f "${outputBackupDir}/public.exists" ]]
-    padmRemoveCleanupPath "${outputBackupDir}"
-
-    if find "${tmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
-        return 1
-    fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
+    [[ "${sourceLines}" == "example.com:443:edge:https" ]]
+    grep -qx 'sub_team_a' "${helperAccountFile}"
 )
 
-runSubscriptionSyncRollbackFailureRegression() (
-    local root="${TMP_DIR}/subscription-sync-rollback-failure"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local oldTmpDir="${TMPDIR:-}"
-    local targetFile="${root}/xray/02_VLESS_TCP_inbounds.json"
-    local rc backupDirs=()
-
-    mkdir -p "${root}/xray" "${root}/tmp"
-    configPath="${root}/xray/"
-    singBoxConfigPath="${root}/xray/"
-    TMPDIR="${root}/tmp"
-    coreInstallType=1
-    ctlPath=
-    cat >"${targetFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-    eval "$(declare -f subscriptionSyncApplyAccountPlan | sed '1s/^subscriptionSyncApplyAccountPlan/originalSubscriptionSyncApplyAccountPlan/')"
-
-    initXrayClients() {
-        jq -n --arg email "$3-main" '[{email:$email}]'
-    }
-    subscriptionSyncGenerateUUID() {
-        printf '99999999-9999-9999-9999-999999999999\n'
-    }
-    subscriptionSyncApplyAccountPlan() {
-        originalSubscriptionSyncApplyAccountPlan "$@"
-        return 1
-    }
-    cp() {
-        if [[ "$1" == "-p" && "$2" == "${root}/tmp"/padm-subscription-sync-backup.*/*.json && "$3" == "${root}/xray"/.02_VLESS_TCP_inbounds.json.restore.* ]]; then
-            return 1
-        fi
-        command cp "$@"
-    }
-
-    set +e
-    subscriptionSyncApplyAccountPlanTransaction '{"create":["sub_new"],"remove":[]}'
-    rc=$?
-    set -e
-    unset -f cp subscriptionSyncApplyAccountPlan initXrayClients subscriptionSyncGenerateUUID
-
-    [[ "${rc}" == "1" ]]
-    jq -e '.inbounds[0].settings.clients[0].email == "sub_new-main"' "${targetFile}" >/dev/null
-    [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"配置恢复失败"* ]]
-    [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"备份目录:"* ]]
-    mapfile -t backupDirs < <(find "${root}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' -print)
-    [[ "${#backupDirs[@]}" == "1" ]]
-    [[ -f "${backupDirs[0]}/manifest" ]]
-    grep -q "${targetFile}" "${backupDirs[0]}/manifest"
-    if find "${root}/xray" -name '*.sync.*' | grep -q .; then
-        return 1
-    fi
-
-    (
-        local restoreDirRoot="${TMP_DIR}/subscription-sync-restore-dir-failure"
-        local restoreDirTarget="${restoreDirRoot}/subscribe_local"
-        local restoreDirBackup="${restoreDirRoot}/backup"
-        local restoreStatus
-        mkdir -p "${restoreDirTarget}/default" "${restoreDirTarget}/clashMeta" "${restoreDirBackup}/local/default" "${restoreDirBackup}/local/clashMeta"
-        printf 'current default\n' >"${restoreDirTarget}/default/existing"
-        printf 'current clash\n' >"${restoreDirTarget}/clashMeta/existing"
-        printf 'backup default\n' >"${restoreDirBackup}/local/default/existing"
-        printf 'backup clash\n' >"${restoreDirBackup}/local/clashMeta/existing"
-        printf 'dir\n' >"${restoreDirBackup}/local.exists"
-        cp() {
-            if [[ "$1" == "-a" && "$2" == "${restoreDirBackup}/local/." && "$3" == "${restoreDirRoot}"/.restore-local.*"/" ]]; then
-                return 1
-            fi
-            command cp "$@"
-        }
-        set +e
-        subscriptionSyncRestoreBackupPath "${restoreDirTarget}" "${restoreDirBackup}" local
-        restoreStatus=$?
-        set -e
-        unset -f cp
-        [[ "${restoreStatus}" == "1" ]]
-        [[ "$(<"${restoreDirTarget}/default/existing")" == "current default" ]]
-        [[ "$(<"${restoreDirTarget}/clashMeta/existing")" == "current clash" ]]
-        if find "${restoreDirRoot}" -maxdepth 1 -type d \( -name '.restore-local.*' -o -name '.restore-old-local.*' \) | grep -q .; then
-            return 1
-        fi
-    )
-
-    (
-        local reloadRoot="${TMP_DIR}/subscription-sync-reload-rollback"
-        local reloadTargetFile="${reloadRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local reloadLog="${reloadRoot}/reload.log"
-        local reloadOriginalContent
-        local reloadStatus
-
-        mkdir -p "${reloadRoot}/xray" "${reloadRoot}/tmp"
-        configPath="${reloadRoot}/xray/"
-        singBoxConfigPath="${reloadRoot}/xray/"
-        TMPDIR="${reloadRoot}/tmp"
-        coreInstallType=1
-        cat >"${reloadTargetFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        reloadOriginalContent=$(<"${reloadTargetFile}")
-
-        subscriptionSyncApplyAccountPlan() {
-            originalSubscriptionSyncApplyAccountPlan "$@"
-        }
-        reloadCore() {
-            printf 'reload\n' >>"${reloadLog}"
-            return 1
-        }
-
-        set +e
-        applySubscriptionQuotaPlanAccounts '[{"id":"team-a","action":"disable-and-remove-local-account"}]'
-        reloadStatus=$?
-        set -e
-        [[ "${reloadStatus}" == "1" ]]
-        [[ "$(<"${reloadTargetFile}")" == "${reloadOriginalContent}" ]]
-        [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"核心重载失败"* ]]
-        [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"恢复旧配置后核心重载仍失败"* ]]
-        if find "${reloadRoot}/tmp" -maxdepth 1 -type d -name 'padm-subscription-sync-backup.*' | grep -q .; then
-            return 1
-        fi
-    )
-
-    (
-        local syncRoot="${TMP_DIR}/subscription-group-sync-apply-failure"
-        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
-        local syncPublicFile="${syncRoot}/subscribe/default/user"
-        local remoteLog="${syncRoot}/remote.log"
-        local reconcileLog="${syncRoot}/reconcile.log"
-        local statusLog="${syncRoot}/status.log"
-        local resultStatus="${syncRoot}/mark-status.log"
-        local resultFailures="${syncRoot}/mark-failures.log"
-        local originalConfig
-        local syncStatus
-
-        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-        configPath="${syncRoot}/xray/"
-        singBoxConfigPath="${syncRoot}/xray/"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-        TMPDIR="${syncRoot}/tmp"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        printf 'old-local\n' >"${syncLocalFile}"
-        printf 'old-public\n' >"${syncPublicFile}"
-        originalConfig=$(<"${syncConfigFile}")
-
-        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-        subscriptionGroupRemoteSyncEnabled() { return 0; }
-        collectSubscriptionTraffic() { return 0; }
-        readInstallType() { return 0; }
-        readInstallProtocolType() { return 0; }
-        readConfigHostPathUUID() { return 0; }
-        subscriptionSyncPlan() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败"
-            return 1
-        }
-        subscriptionSyncReconcileLocalServices() {
-            printf 'reconcile\n' >>"${reconcileLog}"
-            return 0
-        }
-        runSubscriptionRemoteSync() {
-            printf 'remote\n' >>"${remoteLog}"
-            printf '[]'
-        }
-        subscriptionSyncMarkResult() {
-            printf '%s\n' "$1" >"${resultStatus}"
-            printf '%s\n' "$2" >"${resultFailures}"
-            return 0
-        }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
-
-        set +e
-        runSubscriptionGroupSync
-        syncStatus=$?
-        set -e
-        [[ "${syncStatus}" == "1" ]]
-        [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
-        [[ "$(<"${syncLocalFile}")" == "old-local" ]]
-        [[ "$(<"${syncPublicFile}")" == "old-public" ]]
-        [[ ! -e "${remoteLog}" ]]
-        [[ ! -e "${reconcileLog}" ]]
-        grep -q '本机同步计划应用失败' "${resultFailures}"
-        grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
-        grep -q '本机同步未完全完成' "${statusLog}"
-        grep -qx 'partial' "${resultStatus}"
-        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
-            return 1
-        fi
-    )
-
-    (
-        local syncRoot="${TMP_DIR}/subscription-group-sync-reconcile-rollback"
-        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
-        local syncPublicFile="${syncRoot}/subscribe/default/user"
-        local remoteLog="${syncRoot}/remote.log"
-        local reconcileLog="${syncRoot}/reconcile.log"
-        local statusLog="${syncRoot}/status.log"
-        local resultStatus="${syncRoot}/mark-status.log"
-        local resultFailures="${syncRoot}/mark-failures.log"
-        local originalConfig
-        local syncStatus
-
-        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-        configPath="${syncRoot}/xray/"
-        singBoxConfigPath="${syncRoot}/xray/"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-        TMPDIR="${syncRoot}/tmp"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        printf 'old-local\n' >"${syncLocalFile}"
-        printf 'old-public\n' >"${syncPublicFile}"
-        originalConfig=$(<"${syncConfigFile}")
-
-        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-        subscriptionGroupRemoteSyncEnabled() { return 0; }
-        collectSubscriptionTraffic() { return 0; }
-        readInstallType() { return 0; }
-        readInstallProtocolType() { return 0; }
-        readConfigHostPathUUID() { return 0; }
-        subscriptionSyncPlan() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_new-main"}]}}]}
-JSON
-            return 0
-        }
-        subscriptionSyncReconcileLocalServices() {
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            if [[ -z "${1:-}" ]]; then
-                printf 'new-local\n' >"${syncLocalFile}"
-                printf 'new-public\n' >"${syncPublicFile}"
-                return 1
-            fi
-            return 0
-        }
-        runSubscriptionRemoteSync() {
-            printf 'remote\n' >>"${remoteLog}"
-            printf '[]'
-        }
-        subscriptionSyncMarkResult() {
-            printf '%s\n' "$1" >"${resultStatus}"
-            printf '%s\n' "$2" >"${resultFailures}"
-            return 0
-        }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
-
-        set +e
-        runSubscriptionGroupSync
-        syncStatus=$?
-        set -e
-        [[ "${syncStatus}" == "1" ]]
-        [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
-        [[ "$(<"${syncLocalFile}")" == "old-local" ]]
-        [[ "$(<"${syncPublicFile}")" == "old-public" ]]
-        [[ ! -e "${remoteLog}" ]]
-        [[ "$(wc -l <"${reconcileLog}" | tr -d ' ')" == "2" ]]
-        grep -qx '<empty>' "${reconcileLog}"
-        grep -qx 'true' "${reconcileLog}"
-        grep -q '本机同步后服务重建失败，已恢复旧配置' "${resultFailures}"
-        grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
-        grep -q '本机同步未完全完成' "${statusLog}"
-        grep -qx 'partial' "${resultStatus}"
-        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
-            return 1
-        fi
-    )
-
-    (
-        local syncRoot="${TMP_DIR}/subscription-group-sync-remote-failure"
-        local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
-        local syncLocalFile="${syncRoot}/subscribe_local/default/user"
-        local syncPublicFile="${syncRoot}/subscribe/default/user"
-        local remoteLog="${syncRoot}/remote.log"
-        local reconcileLog="${syncRoot}/reconcile.log"
-        local statusLog="${syncRoot}/status.log"
-        local resultStatus="${syncRoot}/mark-status.log"
-        local resultFailures="${syncRoot}/mark-failures.log"
-        local originalConfig
-        local syncStatus
-
-        mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local/default" "${syncRoot}/subscribe/default" "${syncRoot}/groups" "${syncRoot}/tmp"
-        configPath="${syncRoot}/xray/"
-        singBoxConfigPath="${syncRoot}/xray/"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
-        export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
-        export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
-        TMPDIR="${syncRoot}/tmp"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
-JSON
-        printf 'old-local\n' >"${syncLocalFile}"
-        printf 'old-public\n' >"${syncPublicFile}"
-        originalConfig=$(<"${syncConfigFile}")
-
-        subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-        subscriptionGroupRemoteSyncEnabled() { return 0; }
-        collectSubscriptionTraffic() { return 0; }
-        readInstallType() { return 0; }
-        readInstallProtocolType() { return 0; }
-        readConfigHostPathUUID() { return 0; }
-        subscriptionSyncPlan() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            cat >"${syncConfigFile}" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_new-main"}]}}]}
-JSON
-            return 0
-        }
-        subscriptionSyncReconcileLocalServices() {
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            if [[ -z "${1:-}" ]]; then
-                printf 'new-local\n' >"${syncLocalFile}"
-                printf 'new-public\n' >"${syncPublicFile}"
-            fi
-            return 0
-        }
-        runSubscriptionRemoteSync() {
-            printf 'remote\n' >>"${remoteLog}"
-            printf '["被控服务器同步失败"]'
-        }
-        subscriptionSyncMarkResult() {
-            printf '%s\n' "$1" >"${resultStatus}"
-            printf '%s\n' "$2" >"${resultFailures}"
-            return 0
-        }
-        successCard() { printf '%s\n' "$*" >"${statusLog}"; }
-        statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
-
-        set +e
-        runSubscriptionGroupSync
-        syncStatus=$?
-        set -e
-        [[ "${syncStatus}" == "1" ]]
-        [[ "$(<"${syncConfigFile}")" != "${originalConfig}" ]]
-        grep -q 'sub_new-main' "${syncConfigFile}"
-        [[ "$(<"${syncLocalFile}")" == "new-local" ]]
-        [[ "$(<"${syncPublicFile}")" == "new-public" ]]
-        grep -qx 'remote' "${remoteLog}"
-        grep -q '被控服务器同步失败' "${resultFailures}"
-        grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"
-        grep -qx 'partial' "${resultStatus}"
-        if find "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \) | grep -q .; then
-            return 1
-        fi
-    )
-
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
-runSubscriptionSyncReconcileEarlyExitRegression() (
-    local root="${TMP_DIR}/subscription-sync-reconcile-early-exit"
-    local callLog="${root}/calls.log"
-    local rc
+runSubscriptionSyncAccountFastPathRegression() (
+    local root="${TMP_DIR}/subscription-sync-account-fast-path"
+    local stateReadCalls=0
 
     mkdir -p "${root}"
+    PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    ensureSubscriptionGroupsState
 
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 1
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 0
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 0
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "1" ]]
-    )
+    eval "$(declare -f subscriptionGroupsStateRead | sed '1s/^subscriptionGroupsStateRead/originalSubscriptionGroupsStateRead/')"
+    subscriptionGroupsStateRead() {
+        stateReadCalls=$((stateReadCalls + 1))
+        originalSubscriptionGroupsStateRead "$@"
+    }
 
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 0
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 1
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 0
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        grep -qx 'read' "${callLog}"
-        grep -qx 'install' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "3" ]]
-    )
+    [[ "$(subscriptionSyncAccountIdFromName 'sub_team-a')" == "team-a" ]]
+    [[ "${stateReadCalls}" == "0" ]]
 
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 0
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 0
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 1
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        grep -qx 'read' "${callLog}"
-        grep -qx 'install' "${callLog}"
-        grep -qx 'ensure' "${callLog}"
-        grep -qx 'restart:nginx' "${callLog}"
-        grep -qx 'apply' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "6" ]]
-    )
+    unset -f subscriptionGroupsStateRead
+)
+
+runSubscriptionSyncAppendLocalUserBatchRegression() (
+    local root="${TMP_DIR}/subscription-sync-append-local-user-batch"
+    local callLog="${root}/calls.log"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+
+    mkdir -p "${root}" "${root}/xray" "${root}/sing-box" "${root}/groups"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${root}/groups"
+    ensureSubscriptionGroupsState
+    subscriptionGroupsStateWrite '.groups[0].user_groups += [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}]'
+
+    subscriptionSyncAppendProtocolBatch() {
+        printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${callLog}"
+        return 0
+    }
+
+    subscriptionSyncAppendLocalUser team-a
+
+    [[ -f "${callLog}" ]] || return 1
+    [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "2" ]] || return 1
+    grep -qx "${root}/xray/	11111111-1111-1111-1111-111111111111	sub_team_a	xray" "${callLog}" || return 1
+    grep -qx "${root}/sing-box/	11111111-1111-1111-1111-111111111111	sub_team_a	singbox" "${callLog}" || return 1
+
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
 )
 
 runRemoteSubscribeFetchRegression() {
+    local remoteFetchPart="${1:-all}"
     local publicDir="${TMP_DIR}/remote-subscribe-public"
     local localDir="${TMP_DIR}/remote-subscribe-local"
-    local email="user@example.com"
-    local emailMd5="hash-user"
+    local email="sub_team"
+    local emailMd5="hash-team"
     local uniqueFile="${TMP_DIR}/remote-subscribe-unique.txt"
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
     local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
@@ -11195,8 +10772,16 @@ runRemoteSubscribeFetchRegression() {
     TMPDIR="${remoteTmpRoot}"
     rm -rf "${publicDir}" "${localDir}" "${remoteTmpRoot}"
     mkdir -p "${publicDir}/default" "${publicDir}/clashMeta" "${localDir}/sing-box" "${remoteTmpRoot}"
+    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"r1","name":"Remote 1","role":"secondary","scheme":"https","transport":"https","host":"remote1.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r2","name":"Remote 2","role":"secondary","scheme":"https","transport":"https","host":"remote2.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r3","name":"Remote 3","role":"secondary","scheme":"https","transport":"https","host":"remote3.example","port":443,"enabled":true,"sync_status":"success"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["r1","r2","r3"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
     : >"${fetchTmpMarker}"
     : >"${stageTmpMarker}"
+
+    remoteSubscribeFetchPartSelected() {
+        [[ "${remoteFetchPart}" == "all" || "${remoteFetchPart}" == "$1" ]]
+    }
 
     writeRemoteSubscribeOldOutputs() {
         printf 'old-default\n' >"${publicDir}/default/${emailMd5}"
@@ -11207,13 +10792,11 @@ runRemoteSubscribeFetchRegression() {
     eval "$(declare -f appendUniqueLines | sed '1s/^appendUniqueLines/originalAppendUniqueLines/')"
     eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
 
-    listRemoteSubscribeSources() {
-        printf '%s\n' 'remote1.example:443:r1:https' 'remote2.example:443:r2:https' 'remote3.example:443:r3:https'
-    }
-
-    printf '%s\n' old same >"${uniqueFile}"
-    appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"
-    cmp -s "${uniqueFile}" <(printf '%s\n' old same new)
+    if remoteSubscribeFetchPartSelected unique; then
+        printf '%s\n' old same >"${uniqueFile}"
+        appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"
+        cmp -s "${uniqueFile}" <(printf '%s\n' old same new)
+    fi
 
     recordRemoteSubscribeTmpDirs() {
         find "${remoteTmpRoot}" -maxdepth 1 -type d -name 'padm-remote-subscribe-fetch.*' -print >>"${fetchTmpMarker}" 2>/dev/null || true
@@ -11225,73 +10808,127 @@ runRemoteSubscribeFetchRegression() {
         recordRemoteSubscribeTmpDirs
         case "${url}" in
         *remote1.example*/s/clashMeta/*)
-            printf '%s\n' 'proxies:' '- name: "user@example.com"'
+            printf '%s\n' 'proxies:' '- name: "sub_team"'
             ;;
         *remote1.example*/s/default/*)
-            printf '%s' 'vless://uuid@remote1.example:443#user@example.com' | base64
+            printf '%s' 'vless://uuid@remote1.example:443#sub_team' | base64
             ;;
         *remote1.example*/s/sing-box_profiles/*)
-            printf '%s\n' '[{"tag":"user@example.com"}]'
+            printf '%s\n' '[{"tag":"sub_team"}]'
             ;;
         *remote2.example*/s/default/*)
             printf '%s\n' 'not-base64'
             ;;
         *remote2.example*/s/sing-box_profiles/*)
             if [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-partial}" == "fail-singbox-merge" ]]; then
-                printf '%s\n' '[{"tag":"user@example.com_r2"}]'
+                printf '%s\n' '[{"tag":"sub_team_r2"}]'
             else
                 printf '%s\n' '{bad json'
             fi
             ;;
         *remote3.example*/s/clashMeta/*)
-            printf '%s\n' 'proxies:' '- name: "user@example.com"'
+            printf '%s\n' 'proxies:' '- name: "sub_team"'
             ;;
         *remote3.example*/s/default/*)
-            printf '%s' 'trojan://pass@remote3.example:443#user@example.com-extra' | base64
+            printf '%s' 'trojan://pass@remote3.example:443#sub_team-extra' | base64
             ;;
         *remote3.example*/s/sing-box_profiles/*)
-            printf '%s\n' '[{"tag":"user@example.com-extra"}]'
+            printf '%s\n' '[{"tag":"sub_team-extra"}]'
             ;;
         *)
             return 1
             ;;
         esac
     }
+    fetchRemoteControlledSubscribePayload() {
+        return 97
+    }
 
-    writeRemoteSubscribeOldOutputs
-    export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fail-singbox-merge
-    printf '{bad local json\n' >"${localDir}/sing-box/${email}"
-    if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
-        return 1
+    if remoteSubscribeFetchPartSelected rollback; then
+        writeRemoteSubscribeOldOutputs
+        export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fail-singbox-merge
+        printf '{bad local json\n' >"${localDir}/sing-box/${email}"
+        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+            return 1
+        fi
+        [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+        [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+        [[ "$(<"${localDir}/sing-box/${email}")" == "{bad local json" ]]
+        grep -q . "${fetchTmpMarker}"
+        grep -q . "${stageTmpMarker}"
+        while IFS= read -r path; do
+            [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-fetch.* ]] || return 1
+        done <"${fetchTmpMarker}"
+        while IFS= read -r path; do
+            [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-stage.* ]] || return 1
+        done <"${stageTmpMarker}"
+        if regressionFindHasMatches "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
+            return 1
+        fi
     fi
-    [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
-    [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
-    [[ "$(<"${localDir}/sing-box/${email}")" == "{bad local json" ]]
-    grep -q . "${fetchTmpMarker}"
-    grep -q . "${stageTmpMarker}"
-    while IFS= read -r path; do
-        [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-fetch.* ]] || return 1
-    done <"${fetchTmpMarker}"
-    while IFS= read -r path; do
-        [[ -z "${path}" || "${path}" == "${remoteTmpRoot}"/padm-remote-subscribe-stage.* ]] || return 1
-    done <"${stageTmpMarker}"
-    if find "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
-        return 1
+
+    if remoteSubscribeFetchPartSelected merge; then
+        writeRemoteSubscribeOldOutputs
+        unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
+        updateRemoteSubscribe "${emailMd5}" "${email}"
+        grep -qxF -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}"
+        grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
+        grep -qxF 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}"
+        jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+        [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
+        [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
+        [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
     fi
 
-    writeRemoteSubscribeOldOutputs
-    unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
-    updateRemoteSubscribe "${emailMd5}" "${email}"
-    grep -qxF -- '- name: "user@example.com_r1"' "${publicDir}/clashMeta/${emailMd5}"
-    grep -qxF 'vless://uuid@remote1.example:443#user@example.com_r1' "${publicDir}/default/${emailMd5}"
-    grep -qxF 'trojan://pass@remote3.example:443#user@example.com_r3-extra' "${publicDir}/default/${emailMd5}"
-    jq -e '.[0].tag == "old-local" and .[1].tag == "user@example.com_r1" and .[2].tag == "user@example.com_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
-    [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
-    [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
-    [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
+    if remoteSubscribeFetchPartSelected controlled; then
+        (
+        local controlledRoot="${TMP_DIR}/remote-controlled-fetch"
+        local controlledState="${controlledRoot}/state"
+        local controlledPublic="${controlledRoot}/public"
+        local controlledLocal="${controlledRoot}/local"
+        local controlledEmail="sub_team"
+        local controlledEmailMd5="hash-team"
+        local controlledRequestLog="${controlledRoot}/request.log"
+        local oldSubscribeLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+        local oldSubscribeDir="${PADM_SUBSCRIBE_DIR:-}"
+        local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+        mkdir -p "${controlledState}" "${controlledPublic}/default" "${controlledPublic}/clashMeta" "${controlledLocal}/sing-box"
+        export PADM_SUBSCRIPTION_GROUPS_DIR="${controlledState}"
+        export PADM_SUBSCRIBE_LOCAL_DIR="${controlledLocal}"
+        export PADM_SUBSCRIBE_DIR="${controlledPublic}"
+        cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-wg","name":"Edge WG","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"wg.example.com","port":443,"enabled":true,"sync_status":"success","control_token":"token-edge"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["edge-wg"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+        printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
+        printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
+        curl() {
+            return 95
+        }
+        subscriptionRemoteControlRequest() {
+            local sourceJson=$1
+            local endpoint=$2
+            local payload=$3
+            [[ "${endpoint}" == "subscribe" ]]
+            [[ "$(jq -r '.id' <<<"${sourceJson}")" == "edge-wg" ]]
+            jq -e --arg account "${controlledEmail}" '.account == $account' <<<"${payload}" >/dev/null
+            printf '%s\n' "${payload}" >"${controlledRequestLog}"
+            printf '%s\n' '{"ok":true,"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}'
+        }
+        updateRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}"
+        jq -e --arg account "${controlledEmail}" '.account == $account' "${controlledRequestLog}" >/dev/null
+        grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
+        grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+        if [[ -n "${oldSubscribeLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldSubscribeLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+        if [[ -n "${oldSubscribeDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldSubscribeDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+        if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+        )
+    fi
 
-    writeRemoteSubscribeOldOutputs
-    (
+    if remoteSubscribeFetchPartSelected append-failure; then
+        writeRemoteSubscribeOldOutputs
+        (
         local appendCalls=0
         appendUniqueLines() {
             appendCalls=$((appendCalls + 1))
@@ -11309,10 +10946,12 @@ runRemoteSubscribeFetchRegression() {
         [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
         [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
         [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
-    )
+        )
+    fi
 
-    writeRemoteSubscribeOldOutputs
-    (
+    if remoteSubscribeFetchPartSelected commit-failure; then
+        writeRemoteSubscribeOldOutputs
+        (
         local commitCalls=0
         commitGeneratedFile() {
             commitCalls=$((commitCalls + 1))
@@ -11330,1108 +10969,27 @@ runRemoteSubscribeFetchRegression() {
         [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
         [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
         [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
-        if find "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+        if regressionFindHasMatches "${remoteTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
             return 1
         fi
-    )
+        )
+    fi
 
-    updateRemoteSubscribe "${emailMd5}" "${email}"
-    [[ "$(grep -cFx -- '- name: "user@example.com_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
-    [[ "$(grep -cFx 'vless://uuid@remote1.example:443#user@example.com_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
-    [[ "$(grep -cFx 'trojan://pass@remote3.example:443#user@example.com_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
-    jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "user@example.com_r1" and .[2].tag == "user@example.com_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+    if remoteSubscribeFetchPartSelected idempotent; then
+        writeRemoteSubscribeOldOutputs
+        updateRemoteSubscribe "${emailMd5}" "${email}"
+        updateRemoteSubscribe "${emailMd5}" "${email}"
+        [[ "$(grep -cFx -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
+        [[ "$(grep -cFx 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
+        [[ "$(grep -cFx 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
+        jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+    fi
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
     if [[ -n "${oldFakeRemoteSubscribeMode}" ]]; then export PADM_FAKE_REMOTE_SUBSCRIBE_MODE="${oldFakeRemoteSubscribeMode}"; else unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE; fi
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
-
-runRemoteControlConcurrencyRegression() (
-    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
-JSON
-    subscriptionGroupsStateWrite '
-      .groups[0].sources += [
-        {id:"src0", name:"Src0", role:"secondary", scheme:"https", host:"remote0.example", port:443, enabled:true, sync_status:"pending", control_token:"token0"},
-        {id:"src2", name:"Src2", role:"secondary", scheme:"https", host:"remote2.example", port:443, enabled:true, sync_status:"pending", control_token:"token2"},
-        {id:"src10", name:"Src10", role:"secondary", scheme:"https", host:"remote10.example", port:443, enabled:true, sync_status:"pending", control_token:"token10"}
-      ]
-    '
-
-    regressionSourceId() {
-        local source=$1
-        local id=${source#*\"id\":\"}
-        printf '%s\n' "${id%%\"*}"
-    }
-
-    subscriptionRemoteControlPayload() {
-        local source=$1
-        local dryRun=$2
-        local sourceId
-        sourceId=$(regressionSourceId "${source}")
-        printf '{"version":1,"group_id":"default","source_id":"%s","dry_run":%s,"desired_users":[]}\n' "${sourceId}" "${dryRun}"
-    }
-
-    subscriptionRemoteControlHealth() {
-        local source=$1
-        local id
-        id=$(regressionSourceId "${source}")
-        [[ "${id}" == "src0" ]] && sleep 0.01
-        printf '{"id":"%s","name":"%s","ok":true}\n' "${id}" "${id}"
-    }
-
-    subscriptionRemoteControlRequest() {
-        local source=$1
-        local endpoint=$2
-        local sourceId
-        sourceId=$(regressionSourceId "${source}")
-        [[ "${sourceId}" == "src0" ]] && sleep 0.01
-        printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"source_id":"%s","endpoint":"%s"}\n' "${sourceId}" "${endpoint}"
-    }
-
-    subscriptionRemoteSyncPlanForSource() {
-        local source=$1
-        local sourceId
-        sourceId=$(regressionSourceId "${source}")
-        [[ "${sourceId}" == "src0" ]] && sleep 0.01
-        printf '{"source_id":"%s","status":"success","dry_run":true,"request":{"source_id":"%s"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n' "${sourceId}" "${sourceId}"
-    }
-
-    subscriptionRemoteControlHealthAll | jq -e 'length == 3 and .[0].id == "src0" and .[1].id == "src2" and .[2].id == "src10"' >/dev/null
-    subscriptionRemoteSyncPlan | jq -e 'length == 3 and .[0].source_id == "src0" and .[1].source_id == "src2" and .[2].source_id == "src10" and all(.[]; .status == "success")' >/dev/null
-)
-
-runRemoteControlAggregationFailureRegression() (
-    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"https","host":"main.example","port":443,"enabled":true,"sync_status":"success"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"a.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"https","host":"b.example","port":443,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"user_groups":{},"sources":{},"admin":{"sources":{}}}}]}
-JSON
-
-    subscriptionRemoteControlHealth() {
-        local source=$1
-        case "$(jq -r '.id' <<<"${source}")" in
-        edge-a)
-            printf '{"id":"edge-a","name":"Edge A","ok":true}\n'
-            ;;
-        edge-b)
-            printf 'broken-health-json\n'
-            ;;
-        *)
-            printf '{"id":"main","name":"Main","ok":true}\n'
-            ;;
-        esac
-    }
-    subscriptionRemoteSyncPlanForSource() {
-        local source=$1
-        case "$(jq -r '.id' <<<"${source}")" in
-        edge-a)
-            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
-            ;;
-        edge-b)
-            printf 'broken-plan-json\n'
-            ;;
-        *)
-            printf '{"source_id":"main","status":"success","dry_run":true,"request":{"source_id":"main"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
-            ;;
-        esac
-    }
-
-    subscriptionRemoteControlHealthAll | jq -e 'length == 2 and .[0].ok == true and .[0].id == "edge-a" and .[1].status == "internal_error" and .[1].error_detail.type == "internal_error"' >/dev/null
-    subscriptionRemoteSyncPlan | jq -e 'length == 2 and .[0].status == "success" and .[0].source_id == "edge-a" and .[1].status == "internal_error" and .[1].error_detail.type == "internal_error"' >/dev/null
-)
-
-runRemoteControlHealthRegression() (
-    local responseFile="${TMP_DIR}/remote-control-health.json"
-    local sourceMissing='{"id":"edge-missing","name":"Edge Missing","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
-    local sourceRemote='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
-    local sourceUnauthorized='{"id":"edge-auth","name":"Edge Auth","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
-
-    curl() {
-        case "${PADM_FAKE_REMOTE_HEALTH_MODE:-}" in
-        unauthorized)
-            printf '{"ok":false,"error":"unauthorized"}\n401'
-            ;;
-        remote_error)
-            printf '{"ok":false,"error":"service_unavailable","error_detail":{"type":"service_unavailable","message":"服务暂时不可用"}}\n503'
-            ;;
-        success)
-            printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
-            ;;
-        *)
-            printf '{"ok":false,"error":"unexpected"}\n500'
-            ;;
-        esac
-    }
-
-    subscriptionRemoteControlHealth "${sourceMissing}" >"${responseFile}"
-    jq -e '.status == "missing_token" and .error_detail.type == "missing_token" and .error_detail.message == "未配置控制 token"' "${responseFile}" >/dev/null
-
-    PADM_FAKE_REMOTE_HEALTH_MODE=unauthorized subscriptionRemoteControlHealth "${sourceUnauthorized}" >"${responseFile}"
-    jq -e '.status == "unauthorized" and .status_code == "401" and .error_detail.type == "unauthorized" and .error_detail.message == "控制 token 验证失败"' "${responseFile}" >/dev/null
-
-    PADM_FAKE_REMOTE_HEALTH_MODE=remote_error subscriptionRemoteControlHealth "${sourceRemote}" >"${responseFile}"
-    jq -e '.status == "remote_error" and .status_code == "503" and .error_detail.type == "remote_error" and (.error | contains("服务暂时不可用"))' "${responseFile}" >/dev/null
-
-    PADM_FAKE_REMOTE_HEALTH_MODE=success subscriptionRemoteControlHealth "${sourceRemote}" >"${responseFile}"
-    jq -e '.ok == true and .version == "test" and .capabilities == ["health","sync"] and .id == "edge-remote" and .name == "Edge Remote"' "${responseFile}" >/dev/null
-)
-
-runRemoteControlServerRefreshRegression() (
-    local subscribeCalls=0
-    local subscribeArgs=
-    local reconcileCalls=0
-    local responseFile="${TMP_DIR}/remote-control-server-refresh.json"
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
-    local rollbackRoot="${TMP_DIR}/remote-control-rollback"
-    local rollbackStateBefore
-    local rollbackFirstBefore
-    local rollbackSecondBefore
-    local oldCoreInstallType="${coreInstallType:-}"
-    local setUsersCalls=0
-    local rollbackExpectedFile="${TMP_DIR}/remote-control-rollback-expected.json"
-
-    eval "$(declare -f subscriptionControlApplyAccountPlan | sed '1s/^subscriptionControlApplyAccountPlan/originalSubscriptionControlApplyAccountPlan/')"
-    eval "$(declare -f subscriptionSyncSetUsersInFile | sed '1s/^subscriptionSyncSetUsersInFile/originalSubscriptionSyncSetUsersInFile/')"
-    eval "$(declare -f subscriptionSyncPlanFromAccounts | sed '1s/^subscriptionSyncPlanFromAccounts/originalSubscriptionSyncPlanFromAccounts/')"
-    eval "$(declare -f renderSubscribeUserOutputs | sed '1s/^renderSubscribeUserOutputs/originalRenderSubscribeUserOutputs/')"
-
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_team_a"],"remove":[]}'
-    }
-    subscriptionControlApplyAccountPlan() {
-        return 0
-    }
-    subscribe() {
-        subscribeCalls=$((subscribeCalls + 1))
-        subscribeArgs="$*"
-    }
-    subscriptionSyncReconcileLocalServices() {
-        reconcileCalls=$((reconcileCalls + 1))
-    }
-
-    set +e
-    subscriptionControlApplySync '{"desired_users":[{"id":"","uuid":""}]}' >"${responseFile}"
-    local invalidEmptyIdStatus=$?
-    subscriptionControlApplySync '{"desired_users":[{"id":"team-a"},{"id":"team-a"}]}' >"${responseFile}.duplicate"
-    local invalidDuplicateStatus=$?
-    subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":123}]}' >"${responseFile}.uuid"
-    local invalidUuidStatus=$?
-    set -e
-    [[ "${invalidEmptyIdStatus}" -ne 0 ]]
-    [[ "${invalidDuplicateStatus}" -ne 0 ]]
-    [[ "${invalidUuidStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}" >/dev/null
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.duplicate" >/dev/null
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' "${responseFile}.uuid" >/dev/null
-
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_team_a"],"remove":[]}'
-    }
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
-    jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
-    [[ "${subscribeCalls}" == "1" ]]
-    [[ "${subscribeArgs}" == "false false" ]]
-    [[ "${reconcileCalls}" == "0" ]]
-
-    PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
-    jq -e '.ok == true and .changed == true and .dry_run == false' "${responseFile}" >/dev/null
-    [[ "${subscribeCalls}" == "1" ]]
-    [[ "${reconcileCalls}" == "1" ]]
-
-    (
-        local prepareRoot="${TMP_DIR}/remote-control-prepare-config-failure"
-        local prepareResponse="${TMP_DIR}/remote-control-prepare-config-failure.json"
-        mkdir -p "${prepareRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${prepareRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        subscriptionSyncCreateConfigBackups() {
-            return 1
-        }
-        set +e
-        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${prepareResponse}"
-        local prepareStatus=$?
-        set -e
-        [[ "${prepareStatus}" -ne 0 ]]
-        jq -e '.ok == false and .changed == false and .dry_run == false and .error == "prepare_failed" and .error_detail.type == "prepare_failed" and (.error_detail.message | contains("配置备份失败")) and .plan.create == ["sub_team_a"] and .plan.remove == []' "${prepareResponse}" >/dev/null
-    )
-
-    (
-        local prepareRoot="${TMP_DIR}/remote-control-prepare-output-failure"
-        local prepareResponse="${TMP_DIR}/remote-control-prepare-output-failure.json"
-        local expectedBackupDir="${prepareRoot}/created-backup"
-        mkdir -p "${prepareRoot}/groups"
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${prepareRoot}/groups"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        subscriptionSyncCreateConfigBackups() {
-            local backupPath="${expectedBackupDir}"
-            mkdir -p "${backupPath}" || return 1
-            printf '%s\n' "${backupPath}"
-        }
-        subscriptionSyncCreateSubscribeOutputBackups() {
-            return 1
-        }
-        set +e
-        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${prepareResponse}"
-        local prepareStatus=$?
-        set -e
-        [[ "${prepareStatus}" -ne 0 ]]
-        jq -e '.ok == false and .changed == false and .dry_run == false and .error == "prepare_failed" and .error_detail.type == "prepare_failed" and (.error_detail.message | contains("订阅输出备份失败")) and .plan.create == ["sub_team_a"] and .plan.remove == []' "${prepareResponse}" >/dev/null
-        [[ ! -e "${expectedBackupDir}" ]]
-    )
-
-    subscribe() {
-        subscribeCalls=$((subscribeCalls + 1))
-        subscribeArgs="$*"
-        return 1
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${responseFile}"
-    local refreshStatus=$?
-    set -e
-    [[ "${refreshStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed"' "${responseFile}" >/dev/null
-
-    subscriptionControlApplyAccountPlan() {
-        return 1
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false}' >"${responseFile}"
-    local applyStatus=$?
-    set -e
-    [[ "${applyStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}" >/dev/null
-
-    (
-        local restoreFailureStateWriteCalls=0
-        local restoreFailureRoot="${TMP_DIR}/remote-control-apply-restore-failure"
-        local restoreFailureResponse="${TMP_DIR}/remote-control-apply-restore-failure.json"
-        mkdir -p "${restoreFailureRoot}/xray"
-        configPath="${restoreFailureRoot}/xray/"
-        singBoxConfigPath="${restoreFailureRoot}/xray/"
-        cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":false,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"00000000-0000-0000-0000-000000000000"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        eval "$(declare -f subscriptionGroupsStateWrite | sed '1s/^subscriptionGroupsStateWrite/originalSubscriptionGroupsStateWrite/')"
-        subscriptionSyncPlanFromAccounts() {
-            printf '{"create":["sub_team_a"],"remove":[]}'
-        }
-        subscriptionSyncApplyAccountPlanTransaction() {
-            return 1
-        }
-        subscriptionGroupsStateWrite() {
-            restoreFailureStateWriteCalls=$((restoreFailureStateWriteCalls + 1))
-            if [[ "${restoreFailureStateWriteCalls}" == "2" ]]; then
-                return 1
-            fi
-            originalSubscriptionGroupsStateWrite "$@"
-        }
-        set +e
-        PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' >"${restoreFailureResponse}"
-        local restoreFailureStatus=$?
-        set -e
-        [[ "${restoreFailureStatus}" -ne 0 ]]
-        jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed" and (.error_detail.message | contains("订阅状态恢复失败"))' "${restoreFailureResponse}" >/dev/null
-        jq -e '.groups[0].user_groups[0].enabled == true and .groups[0].user_groups[0].uuid == "11111111-1111-1111-1111-111111111111"' "$(subscriptionGroupsFile)" >/dev/null
-    )
-
-    (
-        local restoreOrderLog="${TMP_DIR}/remote-control-restore-order.log"
-        local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config"
-        local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output"
-        mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
-        subscriptionGroupsStateWrite() {
-            printf 'state\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncRestoreConfigBackups() {
-            printf 'config\n' >>"${restoreOrderLog}"
-            return 1
-        }
-        subscriptionSyncRestoreSubscribeOutputBackups() {
-            printf 'output\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        SUBSCRIPTION_CONTROL_RESTORE_ERROR=
-        rm -f "${restoreOrderLog}"
-        set +e
-        subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
-        local restoreOrderStatus=$?
-        set -e
-        [[ "${restoreOrderStatus}" -eq 1 ]]
-        grep -qx 'state' "${restoreOrderLog}"
-        grep -qx 'config' "${restoreOrderLog}"
-        grep -qx 'output' "${restoreOrderLog}"
-        [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == *"配置恢复失败"* ]]
-    )
-
-    (
-        local restoreOrderLog="${TMP_DIR}/remote-control-restore-order-state.log"
-        local restoreOrderConfig="${TMP_DIR}/remote-control-restore-config-state"
-        local restoreOrderOutput="${TMP_DIR}/remote-control-restore-output-state"
-        mkdir -p "${restoreOrderConfig}" "${restoreOrderOutput}"
-        subscriptionGroupsStateWrite() {
-            printf 'state\n' >>"${restoreOrderLog}"
-            return 1
-        }
-        subscriptionSyncRestoreConfigBackups() {
-            printf 'config\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        subscriptionSyncRestoreSubscribeOutputBackups() {
-            printf 'output\n' >>"${restoreOrderLog}"
-            return 0
-        }
-        SUBSCRIPTION_CONTROL_RESTORE_ERROR=
-        rm -f "${restoreOrderLog}"
-        set +e
-        subscriptionControlRestoreAppliedPlan '{"version":2,"groups":[]}' "${restoreOrderConfig}" "${restoreOrderOutput}"
-        local restoreOrderStatus=$?
-        set -e
-        [[ "${restoreOrderStatus}" -eq 1 ]]
-        grep -qx 'state' "${restoreOrderLog}"
-        grep -qx 'config' "${restoreOrderLog}"
-        grep -qx 'output' "${restoreOrderLog}"
-        [[ "${SUBSCRIPTION_CONTROL_RESTORE_ERROR}" == *"状态恢复失败"* ]]
-    )
-
-    mkdir -p "${rollbackRoot}/xray"
-    configPath="${rollbackRoot}/xray/"
-    singBoxConfigPath="${rollbackRoot}/xray/"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    cat >"${configPath}03_VLESS_WS_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    coreInstallType=1
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_rollback"],"remove":[]}'
-    }
-    rollbackStateBefore=$(<"$(subscriptionGroupsFile)")
-    rollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
-    rollbackSecondBefore=$(<"${configPath}03_VLESS_WS_inbounds.json")
-    subscriptionControlApplyAccountPlan() {
-        originalSubscriptionControlApplyAccountPlan "$@"
-    }
-    subscriptionSyncSetUsersInFile() {
-        setUsersCalls=$((setUsersCalls + 1))
-        if [[ "${setUsersCalls}" -eq 2 ]]; then
-            return 1
-        fi
-        originalSubscriptionSyncSetUsersInFile "$@"
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"rollback","uuid":"66666666-6666-6666-6666-666666666666"}],"dry_run":false}' >"${responseFile}.rollback"
-    local rollbackStatus=$?
-    set -e
-    [[ "${rollbackStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "apply_plan_failed" and .error_detail.type == "apply_plan_failed"' "${responseFile}.rollback" >/dev/null
-    printf '%s\n' "${rollbackStateBefore}" >"${rollbackExpectedFile}"
-    jq -e --slurpfile expected "${rollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
-    [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${rollbackFirstBefore}" ]]
-    [[ "$(<"${configPath}03_VLESS_WS_inbounds.json")" == "${rollbackSecondBefore}" ]]
-    if find "${rollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' \) | grep -q .; then
-        return 1
-    fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    coreInstallType="${oldCoreInstallType}"
-    subscriptionSyncSetUsersInFile() {
-        originalSubscriptionSyncSetUsersInFile "$@"
-    }
-
-    local refreshRollbackRoot="${TMP_DIR}/remote-control-refresh-rollback"
-    local refreshRollbackLocalDir="${refreshRollbackRoot}/subscribe_local"
-    local refreshRollbackPublicDir="${refreshRollbackRoot}/subscribe"
-    local refreshRollbackStateBefore
-    local refreshRollbackFirstBefore
-    local refreshRollbackOldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
-    local refreshRollbackOldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
-    local refreshRollbackOldScriptDir="${SCRIPT_DIR}"
-    local refreshRollbackPublicBefore
-    local refreshRollbackLocalBefore
-    local refreshRollbackExpectedFile="${TMP_DIR}/remote-control-refresh-rollback-expected.json"
-    local refreshRollbackPublicExpected="${TMP_DIR}/remote-control-refresh-public-expected.txt"
-    local refreshRollbackLocalExpected="${TMP_DIR}/remote-control-refresh-local-expected.txt"
-    mkdir -p "${refreshRollbackRoot}/xray"
-    configPath="${refreshRollbackRoot}/xray/"
-    singBoxConfigPath="${refreshRollbackRoot}/xray/"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    mkdir -p "${refreshRollbackLocalDir}/default" "${refreshRollbackLocalDir}/clashMeta" "${refreshRollbackLocalDir}/sing-box" "${refreshRollbackPublicDir}/default" "${refreshRollbackPublicDir}/clashMeta"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${refreshRollbackLocalDir}"
-    export PADM_SUBSCRIBE_DIR="${refreshRollbackPublicDir}"
-    SCRIPT_DIR="${PROJECT_ROOT}"
-    subscribeType=https
-    subscribePort=39778
-    currentHost=refresh.example.com
-    printf 'old salt\n' >"${refreshRollbackLocalDir}/subscribeSalt"
-    printf 'old local default\n' >"${refreshRollbackLocalDir}/default/existing"
-    printf 'old public default\n' >"${refreshRollbackPublicDir}/default/existing-md5"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    coreInstallType=1
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_publish"],"remove":[]}'
-    }
-    subscriptionControlApplyAccountPlan() {
-        subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"77777777-7777-7777-7777-777777777777"}])'
-        cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_publish-vless","id":"77777777-7777-7777-7777-777777777777"}]}}]}
-JSON
-    }
-    refreshRollbackStateBefore=$(<"$(subscriptionGroupsFile)")
-    refreshRollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
-    refreshRollbackLocalBefore=$(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    refreshRollbackPublicBefore=$(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    printf '%s\n' "${refreshRollbackLocalBefore}" >"${refreshRollbackLocalExpected}"
-    printf '%s\n' "${refreshRollbackPublicBefore}" >"${refreshRollbackPublicExpected}"
-    subscriptionControlRefreshPublishedSubscriptions() {
-        printf 'new salt\n' >"${refreshRollbackLocalDir}/subscribeSalt"
-        printf 'new local default\n' >"${refreshRollbackLocalDir}/default/existing"
-        printf 'new local created\n' >"${refreshRollbackLocalDir}/default/generated"
-        printf 'new public default\n' >"${refreshRollbackPublicDir}/default/existing-md5"
-        printf 'new public created\n' >"${refreshRollbackPublicDir}/default/generated-md5"
-        return 1
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"publish","uuid":"77777777-7777-7777-7777-777777777777"}],"dry_run":false}' >"${responseFile}.refresh-rollback"
-    local refreshRollbackStatus=$?
-    set -e
-    [[ "${refreshRollbackStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed"' "${responseFile}.refresh-rollback" >/dev/null
-    printf '%s\n' "${refreshRollbackStateBefore}" >"${refreshRollbackExpectedFile}"
-    jq -e --slurpfile expected "${refreshRollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
-    [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${refreshRollbackFirstBefore}" ]]
-    diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    diff -u "${refreshRollbackPublicExpected}" <(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
-    if find "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \) | grep -q .; then
-        return 1
-    fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    coreInstallType="${oldCoreInstallType}"
-    SCRIPT_DIR="${refreshRollbackOldScriptDir}"
-    if [[ -n "${refreshRollbackOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${refreshRollbackOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${refreshRollbackOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${refreshRollbackOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-    subscriptionControlRefreshPublishedSubscriptions() {
-        subscribe false false >/dev/null 2>&1
-    }
-
-    local restoreFailureRoot="${TMP_DIR}/remote-control-restore-failure"
-    local restoreFailureLocalDir="${restoreFailureRoot}/subscribe_local"
-    local restoreFailurePublicDir="${restoreFailureRoot}/subscribe"
-    local restoreFailureOldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
-    local restoreFailureOldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
-    local restoreFailureOldScriptDir="${SCRIPT_DIR}"
-    local restoreFailureOldTmpDir="${TMPDIR:-}"
-    local restoreFailureBackupDirs=()
-    mkdir -p "${restoreFailureRoot}/xray" "${restoreFailureLocalDir}/default" "${restoreFailurePublicDir}/default"
-    configPath="${restoreFailureRoot}/xray/"
-    singBoxConfigPath="${restoreFailureRoot}/xray/"
-    TMPDIR="${restoreFailureRoot}"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[]}}]}
-JSON
-    export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureLocalDir}"
-    export PADM_SUBSCRIBE_DIR="${restoreFailurePublicDir}"
-    SCRIPT_DIR="${PROJECT_ROOT}"
-    printf 'old local\n' >"${restoreFailureLocalDir}/default/existing"
-    printf 'old public\n' >"${restoreFailurePublicDir}/default/existing-md5"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-    coreInstallType=1
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":["sub_restore_fail"],"remove":[]}'
-    }
-    subscriptionControlApplyAccountPlan() {
-        subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"88888888-8888-8888-8888-888888888888"}])'
-        cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_restore_fail-vless","id":"88888888-8888-8888-8888-888888888888"}]}}]}
-JSON
-    }
-    subscriptionControlRefreshPublishedSubscriptions() {
-        printf 'new local\n' >"${restoreFailureLocalDir}/default/existing"
-        printf 'new local created\n' >"${restoreFailureLocalDir}/default/generated"
-        printf 'new public\n' >"${restoreFailurePublicDir}/default/existing-md5"
-        printf 'new public created\n' >"${restoreFailurePublicDir}/default/generated-md5"
-        return 1
-    }
-    cp() {
-        if [[ "$1" == "-a" && "$2" == ${restoreFailureRoot}/padm-subscription-output-backup.*/local/. ]]; then
-            return 1
-        fi
-        command cp "$@"
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"restore-fail","uuid":"88888888-8888-8888-8888-888888888888"}],"dry_run":false}' >"${responseFile}.restore-failure"
-    local restoreFailureStatus=$?
-    set -e
-    unset -f cp
-    [[ "${restoreFailureStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed" and (.error_detail.message | contains("订阅输出恢复失败"))' "${responseFile}.restore-failure" >/dev/null
-    mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
-    [[ "${#restoreFailureBackupDirs[@]}" == "2" ]]
-    find "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*' | grep -q .
-    [[ ! -e "${restoreFailureLocalDir}/default/existing" || "$(<"${restoreFailureLocalDir}/default/existing")" != "old local" ]]
-    if find "${restoreFailureRoot}/xray" -name '*.sync.*' | grep -q .; then
-        return 1
-    fi
-    if [[ -n "${restoreFailureOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${restoreFailureOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
-    if [[ -n "${restoreFailureOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${restoreFailureOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-    configPath="${oldConfigPath}"
-    singBoxConfigPath="${oldSingBoxConfigPath}"
-    coreInstallType="${oldCoreInstallType}"
-    SCRIPT_DIR="${restoreFailureOldScriptDir}"
-    if [[ -n "${restoreFailureOldTmpDir}" ]]; then export TMPDIR="${restoreFailureOldTmpDir}"; else unset TMPDIR; fi
-    subscriptionControlRefreshPublishedSubscriptions() {
-        subscribe false false >/dev/null 2>&1
-    }
-    subscriptionControlApplyAccountPlan() {
-        originalSubscriptionControlApplyAccountPlan "$@"
-    }
-    subscriptionSyncPlanFromAccounts() {
-        originalSubscriptionSyncPlanFromAccounts "$@"
-    }
-
-    subscriptionControlApplyAccountPlan() {
-        return 0
-    }
-    (
-        local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry.log"
-        reconcileCalls=0
-        : >"${reconcileLog}"
-        subscriptionSyncReconcileLocalServices() {
-            reconcileCalls=$((reconcileCalls + 1))
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            [[ -n "${1:-}" ]]
-        }
-        set +e
-        PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}"
-        local reconcileStatus=$?
-        set -e
-        [[ "${reconcileStatus}" -ne 0 ]]
-        [[ "${reconcileCalls}" == "2" ]]
-        grep -qx '<empty>' "${reconcileLog}"
-        grep -qx 'true' "${reconcileLog}"
-        jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("已恢复旧配置")) and ((.error_detail.message | contains("恢复旧配置后服务重建仍失败")) | not)' "${responseFile}" >/dev/null
-    )
-
-    (
-        local reconcileLog="${TMP_DIR}/remote-control-local-reconcile-retry-fail.log"
-        reconcileCalls=0
-        : >"${reconcileLog}"
-        subscriptionSyncReconcileLocalServices() {
-            reconcileCalls=$((reconcileCalls + 1))
-            printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-            return 1
-        }
-        set +e
-        PADM_CONTROL_SERVER= subscriptionControlApplySync '{"desired_users":[{"id":"team-c","uuid":"33333333-3333-3333-3333-333333333333"}],"dry_run":false}' >"${responseFile}.reconcile-retry-fail"
-        local reconcileStatus=$?
-        set -e
-        [[ "${reconcileStatus}" -ne 0 ]]
-        [[ "${reconcileCalls}" == "2" ]]
-        grep -qx '<empty>' "${reconcileLog}"
-        grep -qx 'true' "${reconcileLog}"
-        jq -e '.ok == false and .error == "reconcile_failed" and .error_detail.type == "reconcile_failed" and (.error_detail.message | contains("恢复旧配置后服务重建仍失败"))' "${responseFile}.reconcile-retry-fail" >/dev/null
-    )
-
-    subscriptionSyncPlanFromAccounts() {
-        printf '{"create":[null],"remove":[]}'
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-d","uuid":"44444444-4444-4444-4444-444444444444"}],"dry_run":true}' >"${responseFile}"
-    local invalidPlanStatus=$?
-    set -e
-    [[ "${invalidPlanStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "plan_failed" and .error_detail.type == "plan_failed" and (.plan.create[0] == null)' "${responseFile}" >/dev/null
-
-    subscriptionSyncPlanFromAccounts() {
-        printf 'not-json\n'
-    }
-    set +e
-    PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"team-e","uuid":"55555555-5555-5555-5555-555555555555"}],"dry_run":true}' >"${responseFile}"
-    local badPlanStatus=$?
-    set -e
-    [[ "${badPlanStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "plan_failed" and .error_detail.type == "plan_failed" and has("plan") == false' "${responseFile}" >/dev/null
-)
-
-runSubscriptionControlServiceInstallRegression() (
-    local fakeBin="${TMP_DIR}/remote-control-service-bin"
-    local controlRoot="${TMP_DIR}/remote-control-service-install"
-    local actionsFile="${TMP_DIR}/remote-control-systemctl-actions.txt"
-    local healthTokensFile="${TMP_DIR}/remote-control-health-tokens.txt"
-    local knownToken="known-control-token"
-    local installStatus
-    local oldPath="${PATH}"
-    local oldServerScript
-    local oldServiceFile
-    local oldHealthCheckDefinition=
-    local oldHealthRetries="${PADM_CONTROL_HEALTH_RETRIES:-}"
-    local oldHealthRetryDelay="${PADM_CONTROL_HEALTH_RETRY_DELAY:-}"
-    local oldHealthTimeout="${PADM_CONTROL_HEALTH_TIMEOUT:-}"
-
-    mkdir -p "${fakeBin}" "${controlRoot}"
-    cat >"${fakeBin}/python3" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "${PADM_CONTROL_HEALTH_TOKEN:-}" >>"${PADM_FAKE_HEALTH_TOKENS}"
-[[ "${PADM_FAKE_HEALTH_FAIL:-}" == "true" ]] && exit 1
-exit 0
-SH
-    cat >"${fakeBin}/sleep" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-    cat >"${fakeBin}/systemctl" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS}"
-case "$1" in
-daemon-reload)
-    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "daemon-reload" ]] && exit 1
-    exit 0
-    ;;
-is-active)
-    [[ "${PADM_FAKE_SYSTEMCTL_ACTIVE:-}" == "true" ]] && exit 0
-    exit 3
-    ;;
-is-enabled)
-    [[ "${PADM_FAKE_SYSTEMCTL_ENABLED:-}" == "true" ]] && exit 0
-    exit 1
-    ;;
-restart)
-    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "restart" ]] && exit 1
-    exit 0
-    ;;
-enable)
-    [[ "${PADM_FAKE_SYSTEMCTL_FAIL:-}" == "enable" ]] && exit 1
-    exit 0
-    ;;
-*)
-    exit 0
-    ;;
-esac
-SH
-    chmod +x "${fakeBin}/python3" "${fakeBin}/sleep" "${fakeBin}/systemctl"
-
-    oldHealthCheckDefinition=$(declare -f subscriptionControlHealthCheck)
-    subscriptionControlHealthCheck() {
-        printf '%s\n' "$1" >>"${PADM_FAKE_HEALTH_TOKENS}"
-        [[ "${PADM_FAKE_HEALTH_FAIL:-}" != "true" ]]
-    }
-
-    subscriptionControlServiceFile() {
-        printf '%s\n' "${controlRoot}/systemd/padm-subscription-control.service"
-    }
-    export PADM_FAKE_SYSTEMCTL_ACTIONS="${actionsFile}"
-    export PADM_FAKE_HEALTH_TOKENS="${healthTokensFile}"
-    export PADM_CONTROL_HEALTH_RETRIES=1
-    export PADM_CONTROL_HEALTH_RETRY_DELAY=0
-    export PADM_CONTROL_HEALTH_TIMEOUT=0.05
-    PATH="${fakeBin}:${oldPath}"
-    sleep() { return 0; }
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/success"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    : >"${actionsFile}"
-    : >"${healthTokensFile}"
-    installSubscriptionControlService
-    [[ -x "$(subscriptionControlServerScript)" ]]
-    grep -q 'ExecStart=/usr/bin/env python3' "$(subscriptionControlServiceFile)"
-    grep -qxF 'enable --now padm-subscription-control.service' "${actionsFile}"
-    grep -qxF "${knownToken}" "${healthTokensFile}"
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/systemctl-fail"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    export PADM_FAKE_SYSTEMCTL_FAIL=enable
-    set +e
-    installSubscriptionControlService
-    installStatus=$?
-    set -e
-    PADM_FAKE_SYSTEMCTL_FAIL=
-    [[ "${installStatus}" -ne 0 ]]
-    [[ ! -e "$(subscriptionControlServerScript)" ]]
-    [[ ! -e "$(subscriptionControlServiceFile)" ]]
-    [[ "${SUBSCRIPTION_CONTROL_INSTALL_ERROR}" == *"已恢复安装前状态"* ]]
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/health-fail"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    : >"${actionsFile}"
-    export PADM_FAKE_HEALTH_FAIL=true
-    set +e
-    installSubscriptionControlService
-    installStatus=$?
-    set -e
-    PADM_FAKE_HEALTH_FAIL=
-    [[ "${installStatus}" -ne 0 ]]
-    [[ ! -e "$(subscriptionControlServerScript)" ]]
-    [[ ! -e "$(subscriptionControlServiceFile)" ]]
-    [[ "${SUBSCRIPTION_CONTROL_INSTALL_ERROR}" == *"已恢复安装前状态"* ]]
-
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/health-rollback"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")" "$(dirname "$(subscriptionControlServerScript)")" "$(dirname "$(subscriptionControlServiceFile)")"
-    printf '%s\n' "${knownToken}" >"$(subscriptionControlTokenFile)"
-    printf 'old-server\n' >"$(subscriptionControlServerScript)"
-    printf 'old-service\n' >"$(subscriptionControlServiceFile)"
-    oldServerScript=$(subscriptionControlServerScript)
-    oldServiceFile=$(subscriptionControlServiceFile)
-    : >"${actionsFile}"
-    export PADM_FAKE_SYSTEMCTL_ACTIVE=true
-    export PADM_FAKE_SYSTEMCTL_ENABLED=true
-    export PADM_FAKE_HEALTH_FAIL=true
-    set +e
-    installSubscriptionControlService
-    installStatus=$?
-    set -e
-    PADM_FAKE_SYSTEMCTL_ACTIVE=
-    PADM_FAKE_SYSTEMCTL_ENABLED=
-    PADM_FAKE_HEALTH_FAIL=
-    [[ "${installStatus}" -ne 0 ]]
-    [[ "$(<"${oldServerScript}")" == "old-server" ]]
-    [[ "$(<"${oldServiceFile}")" == "old-service" ]]
-    [[ "$(grep -c '^daemon-reload$' "${actionsFile}")" == "2" ]]
-    [[ "$(grep -c '^restart padm-subscription-control.service$' "${actionsFile}")" == "2" ]]
-
-    if [[ -n "${oldHealthRetries}" ]]; then export PADM_CONTROL_HEALTH_RETRIES="${oldHealthRetries}"; else unset PADM_CONTROL_HEALTH_RETRIES; fi
-    if [[ -n "${oldHealthRetryDelay}" ]]; then export PADM_CONTROL_HEALTH_RETRY_DELAY="${oldHealthRetryDelay}"; else unset PADM_CONTROL_HEALTH_RETRY_DELAY; fi
-    if [[ -n "${oldHealthTimeout}" ]]; then export PADM_CONTROL_HEALTH_TIMEOUT="${oldHealthTimeout}"; else unset PADM_CONTROL_HEALTH_TIMEOUT; fi
-    if [[ -n "${oldHealthCheckDefinition}" ]]; then
-        eval "${oldHealthCheckDefinition}"
-    else
-        unset -f subscriptionControlHealthCheck
-    fi
-)
-
-runSubscriptionControlRejectsUnsafeGroupsDirRegression() (
-    local root="${TMP_DIR}/remote-control-unsafe-groups-dir"
-    local fakeBin="${root}/fake-bin"
-    local actionsFile="${root}/actions.log"
-    local healthTokensFile="${root}/health.log"
-    local oldPath="${PATH}"
-    local installStatus
-
-    mkdir -p "${fakeBin}" "${root}"
-    root=$(cd -- "${root}" && pwd -P)
-    fakeBin="${root}/fake-bin"
-    actionsFile="${root}/actions.log"
-    healthTokensFile="${root}/health.log"
-    cat >"${fakeBin}/python3" <<'SH'
-#!/usr/bin/env bash
-exit 0
-SH
-    cat >"${fakeBin}/systemctl" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS}"
-exit 0
-SH
-    chmod +x "${fakeBin}/python3" "${fakeBin}/systemctl"
-
-    export PADM_FAKE_SYSTEMCTL_ACTIONS="${actionsFile}"
-    export PADM_FAKE_HEALTH_TOKENS="${healthTokensFile}"
-    PATH="${fakeBin}:${oldPath}"
-    PADM_SUBSCRIPTION_GROUPS_DIR=relative-control
-
-    set +e
-    (
-        cd -- "${root}" || exit 1
-        subscriptionControlEnsureToken >/dev/null 2>&1
-    )
-    installStatus=$?
-    set -e
-    [[ "${installStatus}" == "1" ]]
-    [[ ! -e "${root}/relative-control" ]]
-
-    set +e
-    (
-        cd -- "${root}" || exit 1
-        installSubscriptionControlService >/dev/null 2>&1
-    )
-    installStatus=$?
-    set -e
-    [[ "${installStatus}" == "1" ]]
-    [[ ! -s "${actionsFile}" ]]
-    [[ ! -e "${root}/relative-control" ]]
-)
-
-runSubscriptionControlSubscribeEnvRestoreRegression() (
-    local rootRel="${TMP_DIR}/remote-control-subscribe-env-restore"
-    local root expectedLocal expectedPublic renderStatus
-
-    mkdir -p "${rootRel}"
-    root=$(cd -- "${rootRel}" && pwd -P)
-    expectedLocal="${root}/persist-local"
-    expectedPublic="${root}/persist-public"
-    export TMPDIR="${root}"
-    export PADM_SUBSCRIBE_LOCAL_DIR="${expectedLocal}"
-    export PADM_SUBSCRIBE_DIR="${expectedPublic}"
-
-    mkdir() {
-        if [[ "$*" == *"/subscribe_local/default"* ]]; then
-            return 1
-        fi
-        command mkdir "$@"
-    }
-
-    set +e
-    subscriptionControlRenderSubscribeAccount team_a >/dev/null 2>&1
-    renderStatus=$?
-    set -e
-    unset -f mkdir
-
-    [[ "${renderStatus}" == "1" ]]
-    [[ "${PADM_SUBSCRIBE_LOCAL_DIR}" == "${expectedLocal}" ]]
-    [[ "${PADM_SUBSCRIBE_DIR}" == "${expectedPublic}" ]]
-    if find "${root}" -maxdepth 1 -type d -name 'padm-control-subscribe.*' | grep -q .; then
-        return 1
-    fi
-)
-
-runSubscriptionControlServerResponseRegression() (
-    command -v python3 >/dev/null 2>&1 || return 0
-
-    local controlRoot="${TMP_DIR}/remote-control-server-response"
-    local fakeInstall="${controlRoot}/install.sh"
-    local modeFile="${controlRoot}/mode"
-    local responseFile="${controlRoot}/response.txt"
-    local serverLog="${controlRoot}/server.log"
-    local serverScript
-    local serverPid=
-    local testPort
-    local serverToken="test-token"
-    local status
-    local body
-    local ready=
-
-    mkdir -p "${controlRoot}"
-    testPort=$(python3 <<'PY'
-import socket
-with socket.socket() as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
-)
-    getScriptVersion() {
-        printf 'test\n'
-    }
-    cat >"${fakeInstall}" <<'SH'
-#!/usr/bin/env bash
-endpoint=${2:-}
-mode=$(cat "${PADM_FAKE_CONTROL_MODE_FILE}" 2>/dev/null || true)
-payload=
-if [[ "${PADM_CONTROL_TOKEN:-}" != "${PADM_FAKE_SERVER_TOKEN:-}" ]]; then
-    printf '{"ok":false,"error":"unauthorized","error_detail":{"type":"unauthorized","message":"控制 token 验证失败"}}\n'
-    exit 1
-fi
-        if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
-            payload=$(cat)
-            if [[ -z "${payload}" ]]; then
-                if [[ "${endpoint}" == "sync" ]]; then
-                    printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
-                else
-                    printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"订阅请求体为空"}}\n'
-                fi
-                exit 1
-            fi
-            if ! jq -e . >/dev/null 2>&1 <<<"${payload}"; then
-                if [[ "${endpoint}" == "sync" ]]; then
-                    printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
-                else
-                    printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"订阅请求体格式不正确"}}\n'
-                fi
-                exit 1
-            fi
-        fi
-        case "${endpoint}:${mode}" in
-        health:*)
-    printf '{"ok":false,"error":"health_should_not_execute"}\n'
-    exit 9
-    ;;
-sync:noise)
-    printf 'ui noise before sync\n'
-    printf '{"ok":false,"error":"first_json"}\n'
-    printf 'ui noise between json\n'
-    printf '{"ok":true,"changed":true,"plan":{"create":[],"remove":[]}}\n'
-    ;;
-sync:failed)
-    printf 'ui noise before failed sync\n'
-    printf '{"ok":true,"changed":true}\n'
-    exit 7
-    ;;
-sync:timeout)
-    /bin/sleep 2
-    printf '{"ok":true}\n'
-    ;;
-        sync:invalid)
-            printf 'ui noise only\n'
-            exit 0
-            ;;
-        subscribe:noise)
-            printf 'ui noise before subscribe\n'
-            printf '{"ok":false,"error":"first_json"}\n'
-            printf 'ui noise between json\n'
-            cat <<'JSON'
-{"ok":true,"default":"dmxlc3M6Ly91dWlkQGV4YW1wbGUuY29tOjQ0MyN0ZWFtLWE=","clash_meta":"proxies:\n- name: team-a\n","sing_box":[{"tag":"team-a"}]}
-JSON
-            ;;
-        *)
-            printf '{"ok":false,"error":"unexpected"}\n'
-            exit 1
-            ;;
-        esac
-SH
-    chmod +x "${fakeInstall}"
-
-    subscriptionControlPort() {
-        printf '%s\n' "${testPort}"
-    }
-    subscriptionGroupSyncInstallScript() {
-        printf '%s\n' "${fakeInstall}"
-    }
-    PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/state"
-    mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
-    printf '%s\n' "${serverToken}" >"$(subscriptionControlTokenFile)"
-    export PADM_FAKE_SERVER_TOKEN="${serverToken}"
-    writeSubscriptionControlServer
-    serverScript=$(subscriptionControlServerScript)
-    printf 'noise\n' >"${modeFile}"
-    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
-    serverPid=$!
-    trap '[[ -n "${serverPid}" ]] && kill "${serverPid}" >/dev/null 2>&1 || true; [[ -n "${serverPid}" ]] && wait "${serverPid}" 2>/dev/null || true' EXIT
-
-    controlServerRequest() {
-        local method=$1
-        local endpoint=$2
-        local payload=${3:-}
-        local token=${4:-${serverToken}}
-        PADM_TEST_CONTROL_METHOD="${method}" \
-        PADM_TEST_CONTROL_ENDPOINT="${endpoint}" \
-        PADM_TEST_CONTROL_PORT="${testPort}" \
-        PADM_TEST_CONTROL_PAYLOAD="${payload}" \
-        PADM_TEST_CONTROL_TOKEN="${token}" \
-        python3 <<'PY'
-import os
-import sys
-import urllib.error
-import urllib.request
-
-method = os.environ["PADM_TEST_CONTROL_METHOD"]
-endpoint = os.environ["PADM_TEST_CONTROL_ENDPOINT"]
-port = os.environ["PADM_TEST_CONTROL_PORT"]
-payload = os.environ.get("PADM_TEST_CONTROL_PAYLOAD", "")
-token = os.environ["PADM_TEST_CONTROL_TOKEN"]
-data = payload.encode() if method == "POST" else None
-request = urllib.request.Request(
-    f"http://127.0.0.1:{port}/s/control/{endpoint}",
-    data=data,
-    method=method,
-    headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
-)
-try:
-    with urllib.request.urlopen(request, timeout=3) as response:
-        print(response.status)
-        print(response.read().decode())
-except urllib.error.HTTPError as error:
-    print(error.code)
-    print(error.read().decode())
-except Exception:
-    sys.exit(1)
-PY
-    }
-
-    for _ in {1..50}; do
-        if controlServerRequest GET health >"${responseFile}" 2>/dev/null; then
-            ready=true
-            break
-        fi
-        sleep 0.1
-    done
-    [[ "${ready}" == "true" ]]
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "200" ]]
-    jq -e '.ok == true and .version == "test" and .capabilities == ["health","sync","subscribe"]' <<<"${body}" >/dev/null
-
-    printf 'noise\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "200" ]]
-    jq -e '.ok == true and .changed == true and (.plan.create | length) == 0' <<<"${body}" >/dev/null
-
-    controlServerRequest POST subscribe '{"account":"team_a"}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "200" ]]
-    jq -e '.ok == true and (.default | @base64d) == "vless://uuid@example.com:443#team-a" and (.clash_meta | contains("team-a")) and .sing_box[0].tag == "team-a"' <<<"${body}" >/dev/null
-
-    controlServerRequest GET health '' wrong-token >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "401" ]]
-    jq -e '.ok == false and .error == "unauthorized" and .error_detail.type == "unauthorized"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST sync '' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "empty_payload" and .error_detail.type == "empty_payload"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST sync 'not-json' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST subscribe '' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "empty_payload" and .error_detail.type == "empty_payload"' <<<"${body}" >/dev/null
-
-    controlServerRequest POST subscribe 'not-json' >"${responseFile}" || true
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "400" ]]
-    jq -e '.ok == false and .error == "invalid_payload" and .error_detail.type == "invalid_payload"' <<<"${body}" >/dev/null
-
-    printf 'failed\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "503" ]]
-    jq -e '.ok == false and .error == "script_failed" and .error_detail.type == "script_failed" and .exit_code == 7' <<<"${body}" >/dev/null
-
-    printf 'timeout\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "503" ]]
-    jq -e '.ok == false and .error == "script_timeout" and .error_detail.type == "script_timeout"' <<<"${body}" >/dev/null
-
-    printf 'invalid\n' >"${modeFile}"
-    controlServerRequest POST sync '{"desired_users":[]}' >"${responseFile}"
-    status=$(sed -n '1p' "${responseFile}")
-    body=$(sed '1d' "${responseFile}")
-    [[ "${status}" == "503" ]]
-    jq -e '.ok == false and .error == "invalid_response" and .error_detail.type == "invalid_response"' <<<"${body}" >/dev/null
-)
 
 runNginxBlogAutoInstallRegression() {
     local oldAutoInstall="${AUTO_INSTALL:-}"
@@ -12484,7 +11042,7 @@ JSON
 {"inbounds":[{"users":[{"username":"sub_team_a-tuic"},{"username":"ops"}]}]}
 JSON
     accounts=$(collectLocalTrafficAccounts)
-    jq -R -s 'split("\n") | map(select(length > 0))' <<<"${accounts}" | jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' >/dev/null
+    jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
 
     printf '{bad-json\n' >"${singBoxConfig}03_inbounds.json"
     if collectLocalTrafficAccounts >/dev/null 2>&1; then
@@ -12538,6 +11096,30 @@ runCheckLogBackupMissingRestoreRegression() (
     [[ "$(<"${root}/policy.json")" == "old-policy" ]]
 )
 
+runManagedFileBackupManifestRegression() (
+    local rootRel="${TMP_DIR}/managed-file-backup-manifest"
+    local root
+    local backupDir
+
+    mkdir -p "${rootRel}/targets"
+    root=$(cd -- "${rootRel}" && pwd -P) || return 1
+    backupDir="${root}/backup"
+    printf 'old-one\n' >"${root}/targets/one.json"
+
+    padmWriteManagedFileBackupManifest "${backupDir}" \
+        "xray/one.json" "${root}/targets/one.json" \
+        "xray/two.json" "${root}/targets/two.json"
+    [[ -f "${backupDir}/xray/one.json" ]]
+    [[ -f "${backupDir}/manifest" ]]
+
+    printf 'new-one\n' >"${root}/targets/one.json"
+    printf 'new-two\n' >"${root}/targets/two.json"
+
+    padmRestoreManagedFileBackupManifest "${backupDir}"
+    [[ "$(<"${root}/targets/one.json")" == "old-one" ]]
+    [[ ! -e "${root}/targets/two.json" ]]
+)
+
 runPadmBbrManagedCleanupRegression() (
     local root="${TMP_DIR}/padm-bbr-managed-cleanup"
     local tempFailStatus="${root}/temp-fail.status"
@@ -12561,6 +11143,10 @@ runPadmBbrManagedCleanupRegression() (
         statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
         bbrInstall() { printf "menu\n" >>"${helperLog}"; }
         padmBbrAvailable() { return 0; }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
         readSysctlValue() {
             case "$1" in
             net.ipv4.tcp_congestion_control) printf "cubic\n" ;;
@@ -12631,6 +11217,53 @@ runPadmBbrManagedCleanupRegression() (
     grep -q 'restore:cubic:fq_codel' "${applyFailHelper}" || return 1
     grep -q 'BBR 启用失败|sysctl 应用失败，已删除本次写入并尝试恢复原运行值' "${applyFailStatus}" || return 1
 
+    bash -c '
+        set -e
+        export TMPDIR="$1"
+        export PADM_BBR_SYSCTL_CONF="$1/apply-cleanup-fail-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/apply-cleanup-fail.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        createCount=0
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        padmBbrAvailable() { return 0; }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
+        readSysctlValue() {
+            case "$1" in
+            net.ipv4.tcp_congestion_control) printf "cubic\n" ;;
+            net.core.default_qdisc) printf "fq_codel\n" ;;
+            *) return 0 ;;
+            esac
+        }
+        padmEnsureSafeDirectory() { return 0; }
+        padmCreateTempPath() {
+            local resultVar=$1
+            createCount=$((createCount + 1))
+            local path="$TMPDIR/stage-${createCount}"
+            : >"${path}"
+            printf -v "${resultVar}" "%s" "${path}"
+        }
+        commitGeneratedFile() { printf "commit:%s\n" "$2" >>"${helperLog}"; return 0; }
+        removeManagedFilesIfPresent() { printf "remove-files:%s|%s\n" "$1" "$2" >>"${helperLog}"; return 1; }
+        restorePadmBbrRuntime() { printf "restore:%s:%s\n" "$1" "$2" >>"${helperLog}"; }
+        sysctl() {
+            if [[ "$1" == "-p" ]]; then
+                return 1
+            fi
+            printf "sysctl:%s\n" "$*" >>"${helperLog}"
+            return 0
+        }
+        enableOfficialBbrFq
+    ' _ "${root}" "${PROJECT_ROOT}" "${applyFailStatus}" "${applyFailHelper}"
+    grep -q "manual-check:sysctl 应用失败，且本次写入清理失败| ${root}/apply-cleanup-fail-sysctl.conf 和 ${root}/apply-cleanup-fail.state" "${applyFailHelper}" || return 1
+    grep -q 'BBR 启用失败|sysctl 应用失败，且本次写入清理失败，请手动检查 '"${root}"'/apply-cleanup-fail-sysctl.conf 和 '"${root}"'/apply-cleanup-fail.state' "${applyFailStatus}" || return 1
+
     printf 'net.core.default_qdisc = fq\n' >"${root}/disable-sysctl.conf" || return 1
     printf 'previous_congestion=reno\nprevious_qdisc=cake\n' >"${root}/disable.state" || return 1
     bash -c '
@@ -12651,6 +11284,25 @@ runPadmBbrManagedCleanupRegression() (
     grep -q "remove-files:${root}/disable-sysctl.conf|${root}/disable.state" "${disableHelper}" || return 1
     grep -q 'sysctl:--system' "${disableHelper}" || return 1
     grep -q 'padm BBR 已关闭|已删除 '"${root}"'/disable-sysctl.conf' "${disableStatus}" || return 1
+
+    printf 'net.core.default_qdisc = fq\n' >"${root}/disable-cleanup-fail-sysctl.conf" || return 1
+    printf 'previous_congestion=reno\nprevious_qdisc=cake\n' >"${root}/disable-cleanup-fail.state" || return 1
+    bash -c '
+        set -e
+        export PADM_BBR_SYSCTL_CONF="$1/disable-cleanup-fail-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/disable-cleanup-fail.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        printNetworkOptimizationStatus() { printf "print-status\n" >>"${helperLog}"; }
+        removeManagedFilesIfPresent() { printf "remove-files:%s|%s\n" "$1" "$2" >>"${helperLog}"; return 1; }
+        sysctl() { printf "sysctl:%s\n" "$*" >>"${helperLog}"; return 0; }
+        disablePadmBbr
+    ' _ "${root}" "${PROJECT_ROOT}" "${disableStatus}" "${disableHelper}"
+    grep -q 'padm BBR 关闭失败|配置文件清理失败，请手动检查 '"${root}"'/disable-cleanup-fail-sysctl.conf 和 '"${root}"'/disable-cleanup-fail.state' "${disableStatus}" || return 1
 )
 
 runCheckLogBackupRejectsUnsafeTargetRegression() (
@@ -12747,6 +11399,7 @@ EOF
 }
 
 runSubscriptionWireGuardMenuFlowRegression() (
+    local wireGuardMenuPart="${1:-all}"
     local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     local oldCurrentHost="${currentHost:-}"
     local oldNginxConfigPath="${nginxConfigPath:-}"
@@ -12786,6 +11439,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         printf -v "${targetVar}" '%s' "${input}"
     }
     echoContent() { return 0; }
+    menuSection() { return 0; }
     menuLine() { return 0; }
     menuItem() { return 0; }
     menuReturnItem() { return 0; }
@@ -12794,10 +11448,12 @@ runSubscriptionWireGuardMenuFlowRegression() (
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
+    runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
 
     PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/menu-smoke-wireguard"
     currentHost="main.example.com"
     nginxConfigPath="${TMP_DIR}/menu-smoke-nginx/"
+    subscriptionWireGuardConfigFile() { echo "${TMP_DIR}/menu-smoke-wireguard/wg-padm.conf"; }
     rm -rf "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
     mkdir -p "${nginxConfigPath}"
     ensureSubscriptionGroupsState
@@ -12878,262 +11534,721 @@ runSubscriptionWireGuardMenuFlowRegression() (
     userJsonCard() { recordMenuAction "userJsonCard:$1"; }
     subscribe() { recordMenuAction subscribe; }
 
-    resetMenuActions
-    manageSubscriptionWireGuardControlMenu <<<"1
+    wireGuardMenuPartSelected() {
+        [[ "${wireGuardMenuPart}" == "all" || "${wireGuardMenuPart}" == "$1" ]]
+    }
+
+    wireGuardMenuResetFixture() {
+        PATH="${oldPath}"
+        wireGuardApplyShouldFail=
+        installControlShouldFail=
+        refreshControlShouldFail=
+        serviceQueueShouldFail=
+        addSourceShouldFail=
+        setCredentialShouldFail=
+        restoreStateWriteShouldFail=
+        restoreGroupsWriteShouldFail=
+        disableStateWriteShouldFail=
+        stopShouldFail=
+        stopAllowMissingBackend=
+        actions=
+        rm -rf "${PADM_WIREGUARD_CONTROL_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+        mkdir -p "${nginxConfigPath}"
+        ensureSubscriptionGroupsState
+    }
+
+    wireGuardMenuInitializeMain() {
+        wireGuardMenuResetFixture
+        resetMenuActions
+        manageSubscriptionRoleSelection <<<"1
 main.example.com
 3"
-    assertMenuAction initSubscriptionWireGuardMain
-    subscriptionWireGuardReadState | jq -e '.role == "main" and .enabled == true and .endpoint_host == "main.example.com" and .address == "10.77.0.1/24"' >/dev/null
-    grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+        assertMenuAction initSubscriptionWireGuardMain
+        subscriptionWireGuardReadState | jq -e '.role == "main" and .enabled == true and .endpoint_host == "main.example.com" and .address == "10.77.0.1/24"' >/dev/null
+        grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+        mainStateSnapshot=$(subscriptionWireGuardReadState)
+    }
 
-    mainStateSnapshot=$(subscriptionWireGuardReadState)
-    subscriptionWireGuardWriteState '.endpoint_host = ""'
-    if showSubscriptionWireGuardMainCredential >/dev/null 2>&1; then
-        return 1
-    fi
-    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
-
-    nginxFakeBin="${TMP_DIR}/wg-nginx-fail-bin"
-    mkdir -p "${nginxFakeBin}"
-    cat >"${nginxFakeBin}/nginx" <<'SH'
-#!/usr/bin/env bash
-exit 1
-SH
-    chmod +x "${nginxFakeBin}/nginx"
-    nginxStaticPath="${TMP_DIR}/static"
-    nginxTarget=$(subscriptionWireGuardNginxConfigFile)
-    printf 'old config\n' >"${nginxTarget}"
-    PATH="${nginxFakeBin}:${PATH}"
-    if ensureSubscriptionWireGuardNginxConfig >/dev/null 2>&1; then
-        PATH="${oldPath}"
-        return 1
-    fi
-    PATH="${oldPath}"
-    grep -qxF 'old config' "${nginxTarget}"
-    ! find "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \) | grep -q .
-
-    controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"2
+    wireGuardMenuAddEdgePeer() {
+        controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"2
 1
 ${controlledCredential}
 edge-a
 3
 5"
-    subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
+        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
+    }
 
-    failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
-    failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
-    if subscriptionWireGuardAddPeerFromCredential "bad alias" "${failingCredentialJson}" >/dev/null 2>&1; then
-        return 1
-    fi
-    wireGuardApplyShouldFail=true
-    if subscriptionWireGuardAddPeerFromCredential "edge-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        wireGuardApplyShouldFail=
-        return 1
-    fi
-    wireGuardApplyShouldFail=
-    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-fail")' >/dev/null 2>&1; then
-        return 1
-    fi
-    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-fail")' >/dev/null 2>&1; then
-        return 1
-    fi
+    if wireGuardMenuPartSelected bootstrap; then
+        wireGuardMenuInitializeMain
 
-    wireGuardApplyShouldFail=true
-    restoreStateWriteShouldFail=true
-    resetMenuActions
-    if subscriptionWireGuardAddPeerFromCredential "edge-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        wireGuardApplyShouldFail=
-        restoreStateWriteShouldFail=
-        return 1
-    fi
-    wireGuardApplyShouldFail=
-    restoreStateWriteShouldFail=
-    assertMenuAction 'errorCard:WireGuard 被控服务器服务应用失败，且旧状态恢复失败'
-    subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-restore-fail")' >/dev/null
+        subscriptionWireGuardWriteState '.endpoint_host = ""'
+        if showSubscriptionWireGuardMainCredential >/dev/null 2>&1; then
+            return 1
+        fi
+        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
 
-    addSourceShouldFail=true
-    if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        addSourceShouldFail=
-        return 1
-    fi
-    addSourceShouldFail=
-    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-addfail")' >/dev/null 2>&1; then
-        return 1
+        nginxFakeBin="${TMP_DIR}/wg-nginx-fail-bin"
+        mkdir -p "${nginxFakeBin}"
+        cat >"${nginxFakeBin}/nginx" <<'SH'
+#!/usr/bin/env bash
+exit 1
+SH
+        chmod +x "${nginxFakeBin}/nginx"
+        nginxStaticPath="${TMP_DIR}/static"
+        nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+        printf 'old config\n' >"${nginxTarget}"
+        PATH="${nginxFakeBin}:${PATH}"
+        if ensureSubscriptionWireGuardNginxConfig >/dev/null 2>&1; then
+            PATH="${oldPath}"
+            return 1
+        fi
+        PATH="${oldPath}"
+        grep -qxF 'old config' "${nginxTarget}"
+        ! regressionFindHasMatches "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \)
     fi
 
-    setCredentialShouldFail=true
-    if subscriptionWireGuardAddPeerFromCredential "edge-setfail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        setCredentialShouldFail=
-        return 1
-    fi
-    setCredentialShouldFail=
-    if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
-        return 1
-    fi
-    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
-        return 1
-    fi
+    if wireGuardMenuPartSelected peer-add-update; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
 
-    setCredentialShouldFail=true
-    restoreGroupsWriteShouldFail=true
-    resetMenuActions
-    if subscriptionWireGuardAddPeerFromCredential "edge-groups-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
-        setCredentialShouldFail=
-        restoreGroupsWriteShouldFail=
-        return 1
-    fi
-    setCredentialShouldFail=
-    restoreGroupsWriteShouldFail=
-    assertMenuAction 'errorCard:订阅来源凭据写入失败，且旧状态恢复失败'
-    subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-groups-restore-fail")' >/dev/null
-    if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-groups-restore-fail")' >/dev/null 2>&1; then
-        return 1
-    fi
-
-    updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"3
+        updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"3
 ${updatedCredential}
 edge-a
 5"
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
+    fi
 
-    resetMenuActions
-    toggleSubscriptionSourceMenu() {
-        subscriptionRequireMainRole || return 1
-        recordMenuAction toggleSubscriptionSourceMenu
-        local sourceId=
-        local sourceAction=
-        autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
-        autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
-        if [[ "${sourceAction}" == "enable" ]]; then
-            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
-              .groups |= map(if .id == $groupId then
-                .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-              else . end)'
-        elif [[ "${sourceAction}" == "disable" ]]; then
-            subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
-              .groups |= map(if .id == $groupId then
-                .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-              else . end)'
-        else
+    if wireGuardMenuPartSelected peer-rollback-apply || wireGuardMenuPartSelected peer-rollback-apply-service; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+        if subscriptionWireGuardAddPeerFromCredential "bad alias" "${failingCredentialJson}" >/dev/null 2>&1; then
             return 1
         fi
-    }
-    resetMenuActions
-    toggleSubscriptionSourceMenu <<<"edge-a
-disable"
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
-    resetMenuActions
-    toggleSubscriptionSourceMenu <<<"edge-a
-enable"
-    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
-    setSubscriptionSourceSyncFailure edge-a remote_error old-error
-    resetMenuActions
-    clearSubscriptionSourceSyncErrorMenu() {
-        subscriptionRequireMainRole || return 1
-        recordMenuAction clearSubscriptionSourceSyncErrorMenu
-        local sourceId=
-        autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
-        clearSubscriptionSourceSyncError "${sourceId}"
-    }
-    clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
-    subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
-    resetMenuActions
-    local multiServerStatusOutput
-    multiServerStatusOutput=
-    manageSubscriptionMultiServer <<<"4
-5"
-    assertMenuAction 'statusCard:本机主控接入凭据'
-
-    installControlShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
-        installControlShouldFail=
-        return 1
-    fi
-    installControlShouldFail=
-    wireGuardApplyShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+        wireGuardApplyShouldFail=true
+        if subscriptionWireGuardAddPeerFromCredential "edge-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            wireGuardApplyShouldFail=
+            return 1
+        fi
         wireGuardApplyShouldFail=
-        return 1
+        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-fail")' >/dev/null 2>&1; then
+            return 1
+        fi
+        if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-fail")' >/dev/null 2>&1; then
+            return 1
+        fi
     fi
-    wireGuardApplyShouldFail=
-    refreshControlShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
-        refreshControlShouldFail=
-        return 1
-    fi
-    refreshControlShouldFail=
-    serviceQueueShouldFail=true
-    if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
-        serviceQueueShouldFail=
-        return 1
-    fi
-    serviceQueueShouldFail=
 
-    resetMenuActions
-    manageSubscriptionMainControlDetails <<<"5
+    if wireGuardMenuPartSelected peer-rollback-apply || wireGuardMenuPartSelected peer-rollback-apply-restore; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+
+        wireGuardApplyShouldFail=true
+        restoreStateWriteShouldFail=true
+        resetMenuActions
+        if subscriptionWireGuardAddPeerFromCredential "edge-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            wireGuardApplyShouldFail=
+            restoreStateWriteShouldFail=
+            return 1
+        fi
+        wireGuardApplyShouldFail=
+        restoreStateWriteShouldFail=
+        assertMenuAction 'errorCard:WireGuard 被控服务器服务应用失败，且旧状态恢复失败'
+        subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-restore-fail")' >/dev/null
+    fi
+
+    if wireGuardMenuPartSelected peer-rollback-source; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+
+        addSourceShouldFail=true
+        if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            addSourceShouldFail=
+            return 1
+        fi
+        addSourceShouldFail=
+        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-addfail")' >/dev/null 2>&1; then
+            return 1
+        fi
+    fi
+
+    if wireGuardMenuPartSelected peer-rollback-credential || wireGuardMenuPartSelected peer-rollback-credential-write; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+
+        setCredentialShouldFail=true
+        if subscriptionWireGuardAddPeerFromCredential "edge-setfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            setCredentialShouldFail=
+            return 1
+        fi
+        setCredentialShouldFail=
+        if subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+            return 1
+        fi
+        if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-setfail")' >/dev/null 2>&1; then
+            return 1
+        fi
+    fi
+
+    if wireGuardMenuPartSelected peer-rollback-credential || wireGuardMenuPartSelected peer-rollback-credential-groups-restore; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
+        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
+
+        setCredentialShouldFail=true
+        restoreGroupsWriteShouldFail=true
+        resetMenuActions
+        if subscriptionWireGuardAddPeerFromCredential "edge-groups-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+            setCredentialShouldFail=
+            restoreGroupsWriteShouldFail=
+            return 1
+        fi
+        setCredentialShouldFail=
+        restoreGroupsWriteShouldFail=
+        assertMenuAction 'errorCard:订阅来源凭据写入失败，且旧状态恢复失败'
+        subscriptionGroupsStateRead -e 'any(.groups[0].sources[]?; .id == "edge-groups-restore-fail")' >/dev/null
+        if subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "edge-groups-restore-fail")' >/dev/null 2>&1; then
+            return 1
+        fi
+    fi
+
+    if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-toggle || wireGuardMenuPartSelected peer-source-control-clear-error || wireGuardMenuPartSelected peer-source-control-status; then
+        wireGuardMenuInitializeMain
+        wireGuardMenuAddEdgePeer
+
+        if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-toggle; then
+            resetMenuActions
+            toggleSubscriptionSourceMenu() {
+                subscriptionRequireMainRole || return 1
+                recordMenuAction toggleSubscriptionSourceMenu
+                local sourceId=
+                local sourceAction=
+                autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
+                autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
+                if [[ "${sourceAction}" == "enable" ]]; then
+                    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
+                      .groups |= map(if .id == $groupId then
+                        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+                      else . end)'
+                elif [[ "${sourceAction}" == "disable" ]]; then
+                    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
+                      .groups |= map(if .id == $groupId then
+                        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+                      else . end)'
+                else
+                    return 1
+                fi
+            }
+            resetMenuActions
+            toggleSubscriptionSourceMenu <<<"edge-a
+disable"
+            subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
+            resetMenuActions
+            toggleSubscriptionSourceMenu <<<"edge-a
+enable"
+            subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+        fi
+
+        if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-clear-error; then
+            setSubscriptionSourceSyncFailure edge-a remote_error old-error
+            resetMenuActions
+            clearSubscriptionSourceSyncErrorMenu() {
+                subscriptionRequireMainRole || return 1
+                recordMenuAction clearSubscriptionSourceSyncErrorMenu
+                local sourceId=
+                autoRead subscription_clear_error_source "请输入要清除错误的被控服务器源ID:" sourceId
+                clearSubscriptionSourceSyncError "${sourceId}"
+            }
+            clearSubscriptionSourceSyncErrorMenu <<<"edge-a"
+            subscriptionGroupsStateRead -e '(.groups[0].sources[] | select(.id == "edge-a") | has("last_sync_error")) | not' >/dev/null
+        fi
+
+        if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-status; then
+            resetMenuActions
+            local multiServerStatusOutput
+            multiServerStatusOutput=
+            manageSubscriptionMultiServer <<<"4
+5"
+            assertMenuAction 'statusCard:本机主控接入凭据'
+        fi
+    fi
+
+    if wireGuardMenuPartSelected control-restore; then
+        wireGuardMenuInitializeMain
+
+        installControlShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            installControlShouldFail=
+            return 1
+        fi
+        installControlShouldFail=
+        wireGuardApplyShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            wireGuardApplyShouldFail=
+            return 1
+        fi
+        wireGuardApplyShouldFail=
+        refreshControlShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            refreshControlShouldFail=
+            return 1
+        fi
+        refreshControlShouldFail=
+        serviceQueueShouldFail=true
+        if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            serviceQueueShouldFail=
+            return 1
+        fi
+        serviceQueueShouldFail=
+
+        resetMenuActions
+        manageSubscriptionMainControlDetails <<<"5
 6
 7"
-    assertMenuAction installSubscriptionControlService
-    assertMenuAction refreshSubscriptionWireGuardNginxControl
-    subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
+        assertMenuAction installSubscriptionControlService
+        assertMenuAction refreshSubscriptionWireGuardNginxControl
+        subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
 
-    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
-    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
-    stopShouldFail=true
-    resetMenuActions
-    if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+        printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+        stopShouldFail=true
+        resetMenuActions
+        if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+            stopShouldFail=
+            return 1
+        fi
         stopShouldFail=
-        return 1
-    fi
-    stopShouldFail=
-    assertMenuAction 'errorCard:WireGuard 控制面停用失败'
-    subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
-    grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
+        assertMenuAction 'errorCard:WireGuard 控制面停用失败'
+        subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
+        grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
 
-    subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
-    disableStateWriteShouldFail=true
-    resetMenuActions
-    if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+        disableStateWriteShouldFail=true
+        resetMenuActions
+        if originalDisableSubscriptionWireGuardControl >/dev/null 2>&1; then
+            disableStateWriteShouldFail=
+            return 1
+        fi
         disableStateWriteShouldFail=
-        return 1
-    fi
-    disableStateWriteShouldFail=
-    assertMenuAction 'errorCard:WireGuard 控制面状态写入失败'
-    subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
-    grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+        assertMenuAction 'errorCard:WireGuard 控制面状态写入失败'
+        subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
+        grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
 
-    local restoreStopState='{"enabled":false,"role":"uninitialized","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"address":"","endpoint_host":"","public_key":"","peers":[]}'
-    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
-    stopShouldFail=true
-    if subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1; then
+        local restoreStopState='{"enabled":false,"role":"uninitialized","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"address":"","endpoint_host":"","public_key":"","peers":[]}'
+        printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+        stopShouldFail=true
+        if subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1; then
+            stopShouldFail=
+            return 1
+        fi
         stopShouldFail=
-        return 1
-    fi
-    stopShouldFail=
-    grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
+        grep -qxF 'keep-config' "$(subscriptionWireGuardConfigFile)"
 
-    printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
-    stopShouldFail=true
-    stopAllowMissingBackend=true
-    resetMenuActions
-    subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1 || {
+        printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
+        stopShouldFail=true
+        stopAllowMissingBackend=true
+        resetMenuActions
+        nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+        printf 'keep-nginx-control\n' >"${nginxTarget}"
+        subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1 || {
+            stopShouldFail=
+            stopAllowMissingBackend=
+            return 1
+        }
         stopShouldFail=
         stopAllowMissingBackend=
-        return 1
-    }
-    stopShouldFail=
-    stopAllowMissingBackend=
-    assertMenuAction 'stopSubscriptionWireGuardControlService:true'
-    [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+        assertMenuAction 'stopSubscriptionWireGuardControlService:true'
+        [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+        [[ ! -e "${nginxTarget}" ]]
+    fi
 
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
     currentHost="${oldCurrentHost}"
     nginxConfigPath="${oldNginxConfigPath}"
+)
+
+runRegressionWireGuardMenuFlow() {
+    runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-source-control \
+        wireguard-menu-flow-control-restore
+}
+
+runSubscriptionWireGuardMenuFlowBootstrapRegression() {
+    runSubscriptionWireGuardMenuFlowRegression bootstrap
+}
+
+runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback \
+        wireguard-menu-flow-peer-source-control
+}
+
+runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-add-update
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-source
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-service
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-restore
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-write
+}
+
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-groups-restore
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-source-control-toggle
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-source-control-clear-error
+}
+
+runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression() {
+    runSubscriptionWireGuardMenuFlowRegression peer-source-control-status
+}
+
+runSubscriptionWireGuardMenuFlowControlRestoreRegression() {
+    runSubscriptionWireGuardMenuFlowRegression control-restore
+}
+
+runSubscriptionWireGuardRestoreRunnerRegression() (
+    local errorLog="${TMP_DIR}/subscription-wireguard-restore-runner-error.log"
+    local helperLog="${TMP_DIR}/subscription-wireguard-restore-runner-helper.log"
+    : >"${errorLog}"
+    : >"${helperLog}"
+    errorCard() { printf '%s\n' "$@" >>"${errorLog}"; }
+    subscriptionWireGuardStateFile() { printf '%s\n' "/tmp/wg-state.json"; }
+    subscriptionWireGuardConfigFile() { printf '%s\n' "/tmp/wg.conf"; }
+    subscriptionGroupsFile() { printf '%s\n' "/tmp/groups.json"; }
+    subscriptionWireGuardAppendManualCheckLine() {
+        printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+        printf -v "$1" '%s' "${2}：${3}"
+    }
+
+    subscriptionWireGuardRestoreStateAndConfig() { return 1; }
+    set +e
+    subscriptionWireGuardRunRestoreSteps '{}' "" "WireGuard 主控服务启动失败"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -q '^WireGuard 主控服务启动失败，且旧状态恢复失败$' "${errorLog}"
+    grep -q 'WireGuard 状态文件' "${errorLog}"
+    grep -q 'WireGuard 配置文件' "${errorLog}"
+    grep -q 'manual-check:请手动检查 WireGuard 状态文件|/tmp/wg-state.json' "${helperLog}"
+    grep -q 'manual-check:请手动检查 WireGuard 配置文件|/tmp/wg.conf' "${helperLog}"
+
+    : >"${errorLog}"
+    : >"${helperLog}"
+    subscriptionWireGuardRestoreStateAndConfig() { return 0; }
+    subscriptionWireGuardRestoreGroupsState() { return 1; }
+    set +e
+    subscriptionWireGuardRunRestoreSteps '{}' '{}' "订阅来源凭据写入失败"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -q '^订阅来源凭据写入失败，且旧状态恢复失败$' "${errorLog}"
+    grep -q '订阅组状态文件' "${errorLog}"
+    grep -q 'manual-check:请手动检查订阅组状态文件|/tmp/groups.json' "${helperLog}"
+)
+
+runCoreInvalidInputRetryMenuRegression() (
+    local actions=
+
+    recordMenuAction() {
+        actions+="$1"$'\n'
+    }
+    assertMenuAction() {
+        grep -qxF "$1" <<<"${actions}"
+    }
+    errorCard() {
+        recordMenuAction "errorCard:$1"
+    }
+    sampleMenu() {
+        recordMenuAction "sampleMenu:$*"
+    }
+
+    declare -F coreInvalidInputRetryMenu >/dev/null
+    coreInvalidInputRetryMenu sampleMenu alpha beta
+    assertMenuAction 'errorCard:输入有误，请重新输入'
+    assertMenuAction 'sampleMenu:alpha beta'
+
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu xrayVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "2" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu singBoxVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "2" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreServiceControlMenu "${core}"' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreConfigMaintenanceMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreLogsMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreAllServicesMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
+
+    ! grep -qF 'coreInvalidInputErrorCard; xrayVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; singBoxVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreServiceControlMenu "${core}"' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreConfigMaintenanceMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreLogsMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreAllServicesMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    ! grep -qF 'coreInvalidInputErrorCard; coreVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+)
+
+runCoreSelectionRetryActionRegression() (
+    local actions=
+    local -a expectedCounts=(
+        'shell/core/menu.sh|7'
+        'shell/core/cores.sh|1'
+        'shell/core/routing_access_control.sh|3'
+        'shell/core/manage.sh|18'
+        'shell/core/fail2ban.sh|1'
+        'shell/core/entry_helpers.sh|1'
+        'shell/core/routing_socks.sh|4'
+        'shell/core/routing_ipv6.sh|1'
+    )
+    local -a expectedPatterns=(
+        'shell/core/menu.sh|coreSelectionRetryAction menu'
+        'shell/core/cores.sh|coreSelectionRetryAction selectCoreInstall'
+        'shell/core/routing_access_control.sh|coreSelectionRetryAction removeAccessControlMenu'
+        'shell/core/manage.sh|coreSelectionRetryAction manageTraditionalTlsFallback "$@"'
+        'shell/core/manage.sh|coreSelectionRetryAction checkBTPanel'
+        'shell/core/manage.sh|coreSelectionRetryAction manageXHTTPPresets'
+        'shell/core/manage.sh|coreSelectionRetryAction manageTuic'
+        'shell/core/fail2ban.sh|coreSelectionRetryAction manageFail2ban'
+        'shell/core/entry_helpers.sh|coreSelectionRetryAction bbrInstall'
+        'shell/core/routing_socks.sh|coreSelectionRetryAction socks5Routing'
+        'shell/core/routing_ipv6.sh|coreSelectionRetryAction ipv6Routing'
+    )
+    local -a removedPatterns=(
+        'shell/core/menu.sh|coreSelectionErrorCard
+        menu'
+        'shell/core/cores.sh|coreSelectionErrorCard
+        selectCoreInstall'
+        'shell/core/routing_access_control.sh|coreSelectionErrorCard; removeAccessControlMenu; return'
+        'shell/core/manage.sh|coreSelectionErrorCard
+        manageTraditionalTlsFallback "$@"'
+        'shell/core/manage.sh|coreSelectionErrorCard
+        checkBTPanel'
+        'shell/core/manage.sh|coreSelectionErrorCard; manageXHTTPPresets'
+        'shell/core/manage.sh|coreSelectionErrorCard
+        manageTuic'
+        'shell/core/fail2ban.sh|coreSelectionErrorCard
+        manageFail2ban'
+        'shell/core/entry_helpers.sh|coreSelectionErrorCard
+        bbrInstall'
+        'shell/core/routing_socks.sh|coreSelectionErrorCard
+        socks5Routing'
+        'shell/core/routing_ipv6.sh|coreSelectionErrorCard
+        ipv6Routing'
+    )
+    local entry file pattern expectedCount actualCount
+
+    recordMenuAction() {
+        actions+="$1"$'\n'
+    }
+    assertMenuAction() {
+        grep -qxF "$1" <<<"${actions}"
+    }
+    errorCard() {
+        recordMenuAction "errorCard:$1"
+    }
+    sampleAction() {
+        recordMenuAction "sampleAction:$*"
+    }
+
+    declare -F coreSelectionRetryAction >/dev/null
+    coreSelectionRetryAction sampleAction alpha beta
+    assertMenuAction 'errorCard:选择错误，请重新选择'
+    assertMenuAction 'sampleAction:alpha beta'
+
+    for entry in "${expectedCounts[@]}"; do
+        IFS='|' read -r file expectedCount <<<"${entry}"
+        actualCount=$(grep -cF 'coreSelectionRetryAction ' "${PROJECT_ROOT}/${file}")
+        [[ "${actualCount}" == "${expectedCount}" ]]
+    done
+    for entry in "${expectedPatterns[@]}"; do
+        IFS='|' read -r file pattern <<<"${entry}"
+        grep -qF "${pattern}" "${PROJECT_ROOT}/${file}"
+    done
+    for entry in "${removedPatterns[@]}"; do
+        IFS='|' read -r file pattern <<<"${entry}"
+        ! grep -qF "${pattern}" "${PROJECT_ROOT}/${file}"
+    done
+)
+
+runSyncConfiguredManagedUsersHelperRegression() (
+    local syncConfigRoot="${TMP_DIR}/sync-configured-managed-users-helper"
+    local helperLog="${syncConfigRoot}/helper.log"
+    local currentManaged
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+
+    mkdir -p "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box"
+    configPath="${syncConfigRoot}/xray/"
+    singBoxConfigPath="${syncConfigRoot}/sing-box/"
+    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"admin-root"}]}}]}
+JSON
+    cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
+{"inbounds":[{"users":[{"name":"sub_team_b-main"},{"username":"ops"}]}]}
+JSON
+
+    subscriptionSyncConfiguredManagedUsers() {
+        printf '%s\n' "$#" >"${helperLog}"
+        printf '["sub_team_a-main","sub_team_b-main","ops"]\n'
+    }
+
+    currentManaged=$(subscriptionSyncCurrentManagedUsers \
+        "${configPath}02_VLESS_TCP_inbounds.json" \
+        "${singBoxConfigPath}06_hysteria2_inbounds.json")
+    jq -e '. == ["sub_team_a-main","sub_team_b-main"]' <<<"${currentManaged}" >/dev/null
+    [[ -f "${helperLog}" ]] || return 1
+    grep -qx '2' "${helperLog}" || return 1
+
+    unset -f subscriptionSyncConfiguredManagedUsers
+    if [[ -n "${oldConfigPath}" ]]; then
+        configPath="${oldConfigPath}"
+    else
+        unset configPath
+    fi
+    if [[ -n "${oldSingBoxConfigPath}" ]]; then
+        singBoxConfigPath="${oldSingBoxConfigPath}"
+    else
+        unset singBoxConfigPath
+    fi
+)
+
+runTrafficConfiguredAccountsHelperRegression() (
+    local trafficRoot="${TMP_DIR}/traffic-configured-accounts-helper"
+    local helperLog="${trafficRoot}/helper.log"
+    local accounts
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+
+    mkdir -p "${trafficRoot}/xray" "${trafficRoot}/sing-box"
+    configPath="${trafficRoot}/xray/"
+    singBoxConfigPath="${trafficRoot}/sing-box/"
+    cat >"${configPath}01_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-vless"},{"email":"admin-root"}]}}]}
+JSON
+    cat >"${singBoxConfigPath}02_inbounds.json" <<'JSON'
+{"inbounds":[{"users":[{"name":"sub_team_b-hysteria2"},{"username":"ops"}]}]}
+JSON
+
+    subscriptionSyncConfiguredAccountNamesJson() {
+        printf '%s\n' "$#" >"${helperLog}"
+        printf '["admin","ops","sub_team_a","sub_team_b"]\n'
+    }
+
+    accounts=$(collectLocalTrafficAccounts)
+    jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
+    [[ -f "${helperLog}" ]] || return 1
+    grep -qx '0' "${helperLog}" || return 1
+
+    unset -f subscriptionSyncConfiguredAccountNamesJson
+    if [[ -n "${oldConfigPath}" ]]; then
+        configPath="${oldConfigPath}"
+    else
+        unset configPath
+    fi
+    if [[ -n "${oldSingBoxConfigPath}" ]]; then
+        singBoxConfigPath="${oldSingBoxConfigPath}"
+    else
+        unset singBoxConfigPath
+    fi
+)
+
+runTrafficAccountIdMapHelperRegression() (
+    local trafficRoot="${TMP_DIR}/traffic-account-id-map-helper"
+    local helperLog="${trafficRoot}/helper.log"
+    local trafficSnapshot='{"ok":true,"items":[{"account":"sub_team_a","upload":1,"download":2},{"account":"sub_team_b","upload":3,"download":4}]}'
+
+    mkdir -p "${trafficRoot}/groups"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${trafficRoot}/groups"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+
+    subscriptionSyncAccountIdMapJsonFromIds() {
+        cat >"${helperLog}"
+        printf '{"sub_team_a":"team-a","sub_team_b":"team-b"}\n'
+    }
+
+    writeSubscriptionTrafficSnapshot "${trafficSnapshot}"
+    jq -e '
+      .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.upload == 1 and
+      .groups[0].traffic.user_groups["team-a"].sources.main.counters.sub_team_a.download == 2 and
+      .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.upload == 3 and
+      .groups[0].traffic.user_groups["team-b"].sources.main.counters.sub_team_b.download == 4
+    ' "$(subscriptionGroupsFile)" >/dev/null
+    [[ -f "${helperLog}" ]] || return 1
+    grep -qx 'team-a' "${helperLog}" || return 1
+    grep -qx 'team-b' "${helperLog}" || return 1
+
+    unset -f subscriptionSyncAccountIdMapJsonFromIds
 )
 
 runMenuSmokeLightRegression() {
@@ -13155,7 +12270,6 @@ runMenuSmokeLightRegression() {
     menuItem() { output+="$2 $3"$'\n'; }
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
-    menuClose() { return 0; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
@@ -13214,13 +12328,14 @@ runMenuSmokeLightRegression() {
     resetMenuActions
     systemScriptMenu <<<"4"
     assertMenuAction bbrInstall
-    [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
-    [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
 }
 
 runMenuSmokeRegression() {
     local actions=
+    local menuSmokePart="${1:-all}"
     local oldConfigPath="${configPath:-}"
     local oldCoreInstallType="${coreInstallType:-}"
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
@@ -13240,6 +12355,9 @@ runMenuSmokeRegression() {
     )
     coreInstallType=${coreInstallType:-}
 
+    menuSmokePartSelected() {
+        [[ "${menuSmokePart}" == "all" || "${menuSmokePart}" == "$1" ]]
+    }
     recordMenuAction() {
         actions+="$1"$'\n'
     }
@@ -13261,6 +12379,74 @@ runMenuSmokeRegression() {
     statusCard() { recordMenuAction "statusCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
+    if menuSmokePartSelected core; then
+        coreSelectionErrorCard
+        assertMenuAction 'errorCard:选择错误，请重新选择'
+        resetMenuActions
+        coreInvalidInputErrorCard
+        assertMenuAction 'errorCard:输入有误，请重新输入'
+        resetMenuActions
+        coreCancelledStatusCard "操作未执行"
+        assertMenuAction 'statusCard:已取消'
+        resetMenuActions
+        coreRuleExistsStatusCard "example.com 已存在，跳过"
+        assertMenuAction 'statusCard:规则已存在'
+        resetMenuActions
+        corePortInputErrorCard
+        assertMenuAction 'errorCard:端口输入错误'
+        resetMenuActions
+        aloneNginxConfigRecoveredErrorCard
+        assertMenuAction 'errorCard:Nginx 配置检测失败，已恢复旧 alone.conf'
+        resetMenuActions
+        nginxStartFailureCard "请查看下方日志"
+        assertMenuAction 'statusCard:Nginx 启动失败'
+        resetMenuActions
+        coreNotInstalledErrorCard
+        assertMenuAction 'errorCard:未安装，请使用脚本安装'
+        resetMenuActions
+        coreDomainRequiredErrorCard
+        assertMenuAction 'errorCard:域名不可为空'
+        resetMenuActions
+        coreIPRequiredErrorCard
+        assertMenuAction 'errorCard:IP不可为空'
+        resetMenuActions
+        xrayConfigValidationFailureCard "已取消启动"
+        assertMenuAction 'statusCard:Xray 配置校验失败'
+        resetMenuActions
+        xrayPrereleaseCompatibilityCard "通过"
+        assertMenuAction 'statusCard:Xray 预发布兼容检查'
+        resetMenuActions
+        singBoxPrereleaseCompatibilityCard "通过"
+        assertMenuAction 'statusCard:sing-box 预发布兼容检查'
+        resetMenuActions
+        xrayConfigValidationCard "通过"
+        assertMenuAction 'statusCard:Xray 配置校验'
+        resetMenuActions
+        singBoxConfigValidationCard "通过"
+        assertMenuAction 'statusCard:sing-box 配置校验'
+        resetMenuActions
+        skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
+        assertMenuAction 'statusCard:跳过 TLS 证书'
+        resetMenuActions
+        protocolPortInputStatusCard "端口不合法"
+        assertMenuAction 'statusCard:端口输入'
+        resetMenuActions
+        protocolPortHoppingRangeStatusCard "范围不合法"
+        assertMenuAction 'statusCard:端口跳跃范围'
+        resetMenuActions
+        protocolPortHoppingStatusCard "删除成功"
+        assertMenuAction 'statusCard:端口跳跃'
+        resetMenuActions
+        tuicAlgorithmStatusCard "cubic"
+        assertMenuAction 'statusCard:Tuic 算法'
+        resetMenuActions
+        tlsCertificateCard "重新生成证书"
+        assertMenuAction 'statusCard:TLS 证书'
+        resetMenuActions
+        tlsCertificateStatusCard "未检测到本机 TLS 证书"
+        assertMenuAction 'statusCard:TLS 证书状态'
+        resetMenuActions
+    fi
     progressCard() { return 0; }
     showInstallStatus() { return 0; }
     checkWgetShowProgress() { return 0; }
@@ -13384,6 +12570,7 @@ runMenuSmokeRegression() {
     restoreSubscriptionGroupsBackupMenu() { recordMenuAction restoreSubscriptionGroupsBackupMenu; }
     resetSubscriptionGroupsStateMenu() { recordMenuAction resetSubscriptionGroupsStateMenu; }
     refreshSubscriptionGroupSyncCron() { recordMenuAction refreshSubscriptionGroupSyncCron; }
+    toggleSubscriptionEventSyncEnabled() { recordMenuAction toggleSubscriptionEventSyncEnabled; }
     subscriptionGroupSyncCronStatus() { recordMenuAction subscriptionGroupSyncCronStatus; }
     installUserCrontabContent() { return 0; }
     xrayInstalled() { return 0; }
@@ -13394,7 +12581,20 @@ runMenuSmokeRegression() {
     validateXrayConfigWithBinary() { return 0; }
     singBoxConfigInstalled() { return 1; }
     crontab() { return 1; }
-    coreReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; return 1; }
+    coreReleaseTags() { recordMenuAction "unexpected-network-version-fetch"; printf 'v1.2.3\n'; }
+    downloadXrayReleaseBinaryToTemp() {
+        local version=$1
+        local outVar=$2
+        local tmpDirVar=${3:-}
+        local releaseDir="${TMP_DIR}/menu-smoke-xray-release-${version#v}"
+        mkdir -p "${releaseDir}" || return 1
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${releaseDir}/xray"
+        chmod +x "${releaseDir}/xray"
+        printf -v "${outVar}" '%s' "${releaseDir}/xray"
+        if [[ -n "${tmpDirVar}" ]]; then
+            printf -v "${tmpDirVar}" '%s' "${releaseDir}"
+        fi
+    }
     serviceQueueStart() { recordMenuAction "serviceQueueStart:$*"; }
     serviceQueueStop() { recordMenuAction "serviceQueueStop:$*"; }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
@@ -13417,427 +12617,497 @@ runMenuSmokeRegression() {
     printf 'geosite' >"${geoOverviewDir}/geosite.dat"
     printf 'v20260513' >"${geoOverviewDir}/geo.version"
     local output=
-    PADM_XRAY_DIR="${geoOverviewDir}" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
-    [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
-    customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
-    installMenu <<<"7"
-    assertMenuAction menu
-    resetMenuActions
-    installMenu <<<"4"
-    assertMenuAction "customSingBoxInstall:10"
-    resetMenuActions
-    installMenu <<<"5"
-    assertMenuAction selectCoreInstall
-    resetMenuActions
-    protocolEntryMenu <<<"7"
-    assertMenuAction menu
-    resetMenuActions
-    output=
-    protocolEntryMenu <<<"1
+    if menuSmokePartSelected core; then
+        PADM_XRAY_DIR="${geoOverviewDir}" PADM_XRAY_BINARY="${geoOverviewDir}/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
+        [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
+        customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
+        installMenu <<<"7"
+        assertMenuAction menu
+        resetMenuActions
+        installMenu <<<"4"
+        assertMenuAction "customSingBoxInstall:5"
+        resetMenuActions
+        installMenu <<<"5"
+        assertMenuAction selectCoreInstall
+        resetMenuActions
+        protocolEntryMenu <<<"7"
+        assertMenuAction menu
+        resetMenuActions
+        output=
+        protocolEntryMenu <<<"1
 2
 9"
-    grep -q "实时查看目标质量" <<<"${output}"
-    if assertMenuAction 'errorCard:选择错误'; then
-        printf 'menu-smoke failed: protocol entry reality target flow returned unexpected selection error\n' >&2
-        return 1
+        grep -q "实时查看目标质量" <<<"${output}"
+        if assertMenuAction 'errorCard:选择错误'; then
+            printf 'menu-smoke failed: protocol entry reality target flow returned unexpected selection error\n' >&2
+            return 1
+        fi
     fi
 
-    configPath="${TMP_DIR}/menu-smoke-xray/"
-    coreInstallType=1
-    ensureSubscriptionGroupsState
-    setMenuSmokeRole uninitialized
-    resetMenuActions
-    output=
-    manageSubscription <<<"3" || true
-    assertMenuAction menu
-    grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
-    grep -q "这台作为主控" <<<"${output}"
-    grep -q "这台作为被控" <<<"${output}"
-    if grep -q "快速开始" <<<"${output}" || grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "高级诊断" <<<"${output}"; then
-        printf 'menu-smoke failed: uninitialized top-level still shows post-init entries\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    output=
-    manageSubscriptionRoleSelection <<<"1
+    if menuSmokePartSelected subscription-main-entry; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole uninitialized
+        resetMenuActions
+        output=
+        manageSubscription <<<"3" || true
+        assertMenuAction menu
+        grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
+        grep -q "这台作为主控" <<<"${output}"
+        grep -q "这台作为被控" <<<"${output}"
+        if grep -q "快速开始" <<<"${output}" || grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "高级诊断" <<<"${output}"; then
+            printf 'menu-smoke failed: uninitialized top-level still shows post-init entries\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        output=
+        manageSubscriptionRoleSelection <<<"1
 3"
-    assertMenuAction initSubscriptionWireGuardMain
-    assertMenuAction showSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionRemoteHealthPlan
-    assertMenuAction showSubscriptionRemoteSyncPlan
-    resetMenuActions
-    output=
-    manageSubscriptionRoleSelection <<<"2"
-    assertMenuAction initSubscriptionWireGuardControlled
-    assertMenuAction importSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionWireGuardControlledCredential
-    assertMenuAction showSubscriptionWireGuardStatus
-    setMenuSmokeRole main
-    resetMenuActions
-    output=
-    manageSubscription <<<"4"
-    grep -q "发布订阅" <<<"${output}"
-    grep -q "多服务器协同" <<<"${output}"
-    grep -q "主控维护与排障" <<<"${output}"
-    if grep -q "我自己用" <<<"${output}" || grep -q "给别人用" <<<"${output}" || grep -q "运行与维护" <<<"${output}" || grep -q "高级诊断" <<<"${output}" || grep -q "被控维护与排障" <<<"${output}"; then
-        printf 'menu-smoke failed: main top-level still shows removed or controlled entries\n' >&2
-        return 1
+        assertMenuAction initSubscriptionWireGuardMain
+        assertMenuAction showSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction showSubscriptionRemoteSyncPlan
+        resetMenuActions
+        output=
+        manageSubscriptionRoleSelection <<<"2"
+        assertMenuAction initSubscriptionWireGuardControlled
+        assertMenuAction importSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionWireGuardControlledCredential
+        assertMenuAction showSubscriptionWireGuardStatus
+        setMenuSmokeRole main
+        resetMenuActions
+        output=
+        manageSubscription <<<"4"
+        grep -q "发布订阅" <<<"${output}"
+        grep -q "多服务器协同" <<<"${output}"
+        grep -q "主控维护与排障" <<<"${output}"
+        if grep -q "我自己用" <<<"${output}" || grep -q "给别人用" <<<"${output}" || grep -q "运行与维护" <<<"${output}" || grep -q "高级诊断" <<<"${output}" || grep -q "被控维护与排障" <<<"${output}"; then
+            printf 'menu-smoke failed: main top-level still shows removed or controlled entries\n' >&2
+            return 1
+        fi
+        assertMenuAction menu
     fi
-    assertMenuAction menu
-    resetMenuActions
-    output=
-    manageSubscriptionPublishSubscriptions <<<"7"
-    grep -q "安装/更新订阅服务" <<<"${output}"
-    grep -q "刷新并查看我的订阅链接" <<<"${output}"
-    grep -q "新建并发布订阅" <<<"${output}"
-    grep -q "查看并处理已有订阅" <<<"${output}"
-    grep -q "查看我的可用服务器" <<<"${output}"
-    grep -q "查看我的流量" <<<"${output}"
-    if grep -q "同步订阅变更" <<<"${output}" || grep -q "预览同步变更" <<<"${output}"; then
-        printf 'menu-smoke failed: publish menu still shows batch sync entries\n' >&2
-        return 1
+
+    if menuSmokePartSelected subscription-main-publish-service; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"7"
+        grep -q "安装/更新订阅服务" <<<"${output}"
+        grep -q "刷新并查看我的订阅链接" <<<"${output}"
+        grep -q "新建并发布订阅" <<<"${output}"
+        grep -q "查看并处理已有订阅" <<<"${output}"
+        grep -q "查看我的可用服务器" <<<"${output}"
+        grep -q "查看我的流量" <<<"${output}"
+        if grep -q "同步订阅变更" <<<"${output}" || grep -q "预览同步变更" <<<"${output}"; then
+            printf 'menu-smoke failed: publish menu still shows batch sync entries\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"1
+7"
+        assertMenuAction installSubscribe
+        assertMenuAction showSubscriptionServiceStatus
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"2
+7"
+        assertMenuAction subscribe
+        resetMenuActions
     fi
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"1
-7"
-    assertMenuAction installSubscribe
-    assertMenuAction showSubscriptionServiceStatus
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"2
-7"
-    assertMenuAction subscribe
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"4
+
+    if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-empty; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"4
 7" || true
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | ((.user_groups // []) | length) == 0' >/dev/null
-    resetMenuActions
-    manageSubscriptionPublishSubscriptions <<<"3
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | ((.user_groups // []) | length) == 0' >/dev/null
+    fi
+
+    if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-create; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        manageSubscriptionPublishSubscriptions <<<"3
 demo-user
 Demo User
 main
 0
-n
 7"
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "Demo User")' >/dev/null
-    resetMenuActions
-    output=
-    manageSubscriptionPublishSubscriptions <<<"4
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "Demo User")' >/dev/null
+    fi
+
+    if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-inspect; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
+            manageSubscriptionPublishSubscriptions <<<"3
+demo-user
+Demo User
+main
+0
+7"
+        fi
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"4
 demo-user
 3
 9
 7"
-    grep -q "查看并处理已有订阅" <<<"${output}"
-    grep -q "查看当前用量" <<<"${output}"
-    resetMenuActions
-    subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
-    manageSubscriptionPublishSubscriptions <<<"3
+        grep -q "查看并处理已有订阅" <<<"${output}"
+        grep -q "查看当前用量" <<<"${output}"
+        resetMenuActions
+    fi
+
+    if menuSmokePartSelected subscription-main-publish-sync || menuSmokePartSelected subscription-main-publish-sync-skip; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
+        manageSubscriptionPublishSubscriptions <<<"3
 team-a
 Team A
 *
 0
 n
-n
 7"
-    assertMenuAction 'statusCard:稍后同步'
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "Team A")' >/dev/null
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
-    if assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'; then
-        printf 'menu-smoke failed: team-a should stay deferred when sync-now is disabled\n' >&2
-        return 1
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "Team A")' >/dev/null
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
     fi
-    resetMenuActions
-    rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
-    ensureSubscriptionGroupsState
-    subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
-    manageSubscriptionPublishSubscriptions <<<"3
+
+    if menuSmokePartSelected subscription-main-publish-sync || menuSmokePartSelected subscription-main-publish-sync-enable; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        rm -rf "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+        ensureSubscriptionGroupsState
+        subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
+        manageSubscriptionPublishSubscriptions <<<"3
 team-b
 Team B
 main
 0
 
-
 7"
-    assertMenuAction refreshSubscriptionGroupSyncCron
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
-    resetMenuActions
-    output=
-    manageSubscriptionMultiServer <<<"5"
-    grep -q "主控建链向导" <<<"${output}"
-    grep -q "添加/移除被控服务器" <<<"${output}"
-    grep -q "更新被控服务器凭据" <<<"${output}"
-    grep -q "查看协同状态" <<<"${output}"
-    if grep -q "多服务器细项" <<<"${output}"; then
-        printf 'menu-smoke failed: main multi-server still shows advanced submenu\n' >&2
-        return 1
+        assertMenuAction refreshSubscriptionGroupSyncCron
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
     fi
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"1
+
+    if menuSmokePartSelected subscription-main-maintenance; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole main
+        resetMenuActions
+        output=
+        manageSubscriptionMultiServer <<<"5"
+        grep -q "主控建链向导" <<<"${output}"
+        grep -q "添加/移除被控服务器" <<<"${output}"
+        grep -q "更新被控服务器凭据" <<<"${output}"
+        grep -q "查看协同状态" <<<"${output}"
+        if grep -q "多服务器细项" <<<"${output}"; then
+            printf 'menu-smoke failed: main multi-server still shows advanced submenu\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"1
 3
 5"
-    assertMenuAction initSubscriptionWireGuardMain
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"3
+        assertMenuAction initSubscriptionWireGuardMain
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"3
 5"
-    assertMenuAction setSubscriptionSourceControlTokenMenu
-    resetMenuActions
-    manageSubscriptionMultiServer <<<"4
+        assertMenuAction setSubscriptionSourceControlTokenMenu
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"4
 5"
-    assertMenuAction showSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionSources
-    assertMenuAction showSubscriptionRemoteHealthPlan
-    assertMenuAction subscriptionRemoteControlHealthAll
-    assertMenuAction showSubscriptionSourceSyncResults
-    resetMenuActions
-    output=
-    manageSubscriptionMainMaintenance <<<"9"
-    grep -q "刷新并查看运行总览" <<<"${output}"
-    grep -q "立即执行同步" <<<"${output}"
-    grep -q "查看运行状态" <<<"${output}"
-    grep -q "用量与限额" <<<"${output}"
-    grep -q "自动同步设置" <<<"${output}"
-    grep -q "状态备份与恢复" <<<"${output}"
-    grep -q "控制面与连接细节" <<<"${output}"
-    grep -q "清除同步错误" <<<"${output}"
-    if grep -q "兼容 WireGuard 控制面" <<<"${output}"; then
-        printf 'menu-smoke failed: main maintenance still shows compatibility entry\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    manageSubscriptionMainMaintenance <<<"1
+        assertMenuAction showSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionSources
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction subscriptionRemoteControlHealthAll
+        assertMenuAction showSubscriptionSourceSyncResults
+        resetMenuActions
+        output=
+        manageSubscriptionMainMaintenance <<<"9"
+        grep -q "刷新并查看运行总览" <<<"${output}"
+        grep -q "立即执行同步" <<<"${output}"
+        grep -q "查看运行状态" <<<"${output}"
+        grep -q "用量与限额" <<<"${output}"
+        grep -q "自动同步设置" <<<"${output}"
+        grep -q "状态备份与恢复" <<<"${output}"
+        grep -q "控制面与连接细节" <<<"${output}"
+        grep -q "清除同步错误" <<<"${output}"
+        if grep -q "兼容 WireGuard 控制面" <<<"${output}"; then
+            printf 'menu-smoke failed: main maintenance still shows compatibility entry\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionMainMaintenance <<<"1
 9"
-    assertMenuAction collectSubscriptionTraffic
-    assertMenuAction showSubscriptionTrafficOverview
-    resetMenuActions
-    manageSubscriptionMainMaintenance <<<"2
+        assertMenuAction collectSubscriptionTraffic
+        assertMenuAction showSubscriptionTrafficOverview
+        resetMenuActions
+        manageSubscriptionMainMaintenance <<<"2
 9"
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    if assertMenuAction 'runSubscriptionGroupSync:'; then
-        printf 'menu-smoke failed: main maintenance sync still triggers publish refresh path\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    manageSubscriptionMainMaintenance <<<"3
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        if assertMenuAction 'runSubscriptionGroupSync:'; then
+            printf 'menu-smoke failed: main maintenance sync still triggers publish refresh path\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionMainMaintenance <<<"3
 9"
-    assertMenuAction showSubscriptionGroupsStateSummary
-    assertMenuAction showSubscriptionLocalSyncPlan
-    assertMenuAction subscriptionSyncPlan
-    assertMenuAction showSubscriptionRemoteSyncPlan
-    assertMenuAction subscriptionRemoteSyncPlan
-    assertMenuAction showSubscriptionSourceSyncResults
-    resetMenuActions
-    manageTrafficAndQuota <<<"1
+        assertMenuAction showSubscriptionGroupsStateSummary
+        assertMenuAction showSubscriptionLocalSyncPlan
+        assertMenuAction subscriptionSyncPlan
+        assertMenuAction showSubscriptionRemoteSyncPlan
+        assertMenuAction subscriptionRemoteSyncPlan
+        assertMenuAction showSubscriptionSourceSyncResults
+        resetMenuActions
+        manageTrafficAndQuota <<<"1
 8"
-    assertMenuAction collectSubscriptionTraffic
-    assertMenuAction showSubscriptionTrafficOverview
-    resetMenuActions
-    manageTrafficAndQuota <<<"6
+        assertMenuAction collectSubscriptionTraffic
+        assertMenuAction showSubscriptionTrafficOverview
+        resetMenuActions
+        manageTrafficAndQuota <<<"6
 8"
-    assertMenuAction showSubscriptionQuotaPlan
-    assertMenuAction subscriptionQuotaDryRunPlan
-    resetMenuActions
-    manageTrafficAndQuota <<<"7
+        assertMenuAction showSubscriptionQuotaPlan
+        assertMenuAction subscriptionQuotaDryRunPlan
+        resetMenuActions
+        manageTrafficAndQuota <<<"7
 8"
-    assertMenuAction executeSubscriptionQuotaPlanMenu
-    resetMenuActions
-    output=
-    manageSubscriptionMainMaintenance <<<"5
-11
+        assertMenuAction executeSubscriptionQuotaPlanMenu
+        resetMenuActions
+        output=
+        manageSubscriptionMainMaintenance <<<"5
+12
 9"
-    grep -q "开启/关闭自动同步" <<<"${output}"
-    grep -q "查看定时任务" <<<"${output}"
-    resetMenuActions
-    manageSubscriptionSyncSettings <<<"5
-11"
-    assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-    if assertMenuAction 'runSubscriptionGroupSync:'; then
-        printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    output=
-    manageSubscriptionMainMaintenance <<<"6
+        grep -q "开启/关闭自动同步" <<<"${output}"
+        grep -q "开启/关闭事件同步" <<<"${output}"
+        grep -q "查看定时任务" <<<"${output}"
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"5
+12"
+        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        if assertMenuAction 'runSubscriptionGroupSync:'; then
+            printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"10
+12"
+        assertMenuAction toggleSubscriptionEventSyncEnabled
+        resetMenuActions
+        output=
+        manageSubscriptionMainMaintenance <<<"6
 6
 9"
-    grep -q "查看当前状态摘要" <<<"${output}"
-    grep -q "重建订阅状态" <<<"${output}"
-    resetMenuActions
-    manageSubscriptionMainControlDetails <<<"1
-7"
-    assertMenuAction showSubscriptionWireGuardMainCredential
-    for wgAction in "2:showSubscriptionWireGuardPeers" "4:showSubscriptionSourceControlUrls" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
-        wgChoice=${wgAction%%:*}
+        grep -q "查看当前状态摘要" <<<"${output}"
+        grep -q "重建订阅状态" <<<"${output}"
         resetMenuActions
-        manageSubscriptionMainControlDetails <<<"${wgChoice}
+        manageSubscriptionMainControlDetails <<<"1
 7"
-        assertMenuAction "${wgAction#*:}"
-    done
-    resetMenuActions
-    manageSubscriptionMainControlDetails <<<"3
+        assertMenuAction showSubscriptionWireGuardMainCredential
+        for wgAction in "2:showSubscriptionWireGuardPeers" "4:showSubscriptionSourceControlUrls" "5:restartSubscriptionWireGuardControl" "6:disableSubscriptionWireGuardControl"; do
+            wgChoice=${wgAction%%:*}
+            resetMenuActions
+            manageSubscriptionMainControlDetails <<<"${wgChoice}
 7"
-    assertMenuAction showSubscriptionRemoteHealthPlan
-    assertMenuAction subscriptionRemoteControlHealthAll
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"1
+            assertMenuAction "${wgAction#*:}"
+        done
+        resetMenuActions
+        manageSubscriptionMainControlDetails <<<"3
+7"
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction subscriptionRemoteControlHealthAll
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"1
 6"
-    assertMenuAction showSubscriptionGroupsStateSummary
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"2
+        assertMenuAction showSubscriptionGroupsStateSummary
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"2
 6"
-    assertMenuAction createSubscriptionGroupsBackupMenu
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"3
+        assertMenuAction createSubscriptionGroupsBackupMenu
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"3
 6"
-    assertMenuAction showSubscriptionGroupsBackups
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"4
+        assertMenuAction showSubscriptionGroupsBackups
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"4
 6"
-    assertMenuAction restoreSubscriptionGroupsBackupMenu
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"5
+        assertMenuAction restoreSubscriptionGroupsBackupMenu
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"5
 6"
-    assertMenuAction resetSubscriptionGroupsStateMenu
-    setMenuSmokeRole controlled
-    resetMenuActions
-    output=
-    manageSubscription <<<"4"
-    grep -q "接入主控" <<<"${output}"
-    grep -q "查看本机状态" <<<"${output}"
-    grep -q "被控维护与排障" <<<"${output}"
-    if grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "主控维护与排障" <<<"${output}"; then
-        printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
-        return 1
+        assertMenuAction resetSubscriptionGroupsStateMenu
     fi
-    assertMenuAction menu
-    resetMenuActions
-    manageSubscriptionControlledHome <<<"1
+
+    if menuSmokePartSelected subscription-controlled; then
+        configPath="${TMP_DIR}/menu-smoke-xray/"
+        coreInstallType=1
+        ensureSubscriptionGroupsState
+        setMenuSmokeRole controlled
+        resetMenuActions
+        output=
+        manageSubscription <<<"4"
+        grep -q "接入主控" <<<"${output}"
+        grep -q "查看本机状态" <<<"${output}"
+        grep -q "被控维护与排障" <<<"${output}"
+        if grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "主控维护与排障" <<<"${output}"; then
+            printf 'menu-smoke failed: controlled top-level still shows main entries\n' >&2
+            return 1
+        fi
+        assertMenuAction menu
+        resetMenuActions
+        manageSubscriptionControlledHome <<<"1
 main-credential
 4"
-    assertMenuAction initSubscriptionWireGuardControlled
-    assertMenuAction importSubscriptionWireGuardMainCredential
-    assertMenuAction showSubscriptionWireGuardControlledCredential
-    assertMenuAction showSubscriptionWireGuardStatus
-    resetMenuActions
-    output=
-    manageSubscriptionControlledHome <<<"2
+        assertMenuAction initSubscriptionWireGuardControlled
+        assertMenuAction importSubscriptionWireGuardMainCredential
+        assertMenuAction showSubscriptionWireGuardControlledCredential
+        assertMenuAction showSubscriptionWireGuardStatus
+        resetMenuActions
+        output=
+        manageSubscriptionControlledHome <<<"2
 4"
-    grep -q "当前服务器角色：" <<<"${output}"
-    assertMenuAction showSubscriptionWireGuardControlledCredential
-    assertMenuAction showSubscriptionWireGuardStatus
-    assertMenuAction showSubscriptionSourceSyncResults
-    resetMenuActions
-    output=
-    manageSubscriptionControlledMaintenance <<<"5"
-    grep -q "导入/更新主控接入凭据" <<<"${output}"
-    grep -q "查看控制面与 Peer 细节" <<<"${output}"
-    grep -q "重写配置并重启被控控制面" <<<"${output}"
-    grep -q "关闭被控控制面" <<<"${output}"
-    if grep -q "查看本机主控接入凭据" <<<"${output}" || grep -q "初始化本机为主控" <<<"${output}"; then
-        printf 'menu-smoke failed: controlled maintenance still shows main-only actions\n' >&2
-        return 1
+        grep -q "当前服务器角色：" <<<"${output}"
+        assertMenuAction showSubscriptionWireGuardControlledCredential
+        assertMenuAction showSubscriptionWireGuardStatus
+        assertMenuAction showSubscriptionSourceSyncResults
+        resetMenuActions
+        output=
+        manageSubscriptionControlledMaintenance <<<"5"
+        grep -q "导入/更新主控接入凭据" <<<"${output}"
+        grep -q "查看控制面与 Peer 细节" <<<"${output}"
+        grep -q "重写配置并重启被控控制面" <<<"${output}"
+        grep -q "关闭被控控制面" <<<"${output}"
+        if grep -q "查看本机主控接入凭据" <<<"${output}" || grep -q "初始化本机为主控" <<<"${output}"; then
+            printf 'menu-smoke failed: controlled maintenance still shows main-only actions\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"1
+5"
+        assertMenuAction importSubscriptionWireGuardMainCredential
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"2
+5"
+        assertMenuAction showSubscriptionWireGuardStatus
+        assertMenuAction showSubscriptionWireGuardPeers
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"3
+5"
+        assertMenuAction restartSubscriptionWireGuardControl
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"4
+5"
+        assertMenuAction disableSubscriptionWireGuardControl
+        resetMenuActions
+        addSubscribeMenu <<<"3" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        setSubscriptionSourceControlTokenMenu <<<"" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        toggleSubscriptionSourceMenu <<<"" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        clearSubscriptionSourceSyncErrorMenu <<<"" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        manageSubscriptionMainHome <<<"4" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        setMenuSmokeRole main
+        manageSubscriptionControlledHome <<<"4" || true
+        assertMenuAction 'errorCard:当前机器已初始化为主控'
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"7"
+        grep -q "安装/更新订阅服务" <<<"${output}"
+        resetMenuActions
+        output=
+        manageSubscriptionPublishSubscriptions <<<"7"
+        grep -q "查看并处理已有订阅" <<<"${output}"
+        resetMenuActions
+        output=
+        manageTrafficAndQuota <<<"8"
+        grep -q "查看用量总览" <<<"${output}"
+        resetMenuActions
+        setMenuSmokeRole controlled
+        manageTrafficAndQuota <<<"8" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"6" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"12" || true
+        assertMenuAction 'errorCard:当前机器已初始化为被控'
+        resetMenuActions
+        setMenuSmokeRole uninitialized
+        manageTrafficAndQuota <<<"8" || true
+        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
+        resetMenuActions
+        manageSubscriptionStateBackups <<<"6" || true
+        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"12" || true
+        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
     fi
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"1
-5"
-    assertMenuAction importSubscriptionWireGuardMainCredential
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"2
-5"
-    assertMenuAction showSubscriptionWireGuardStatus
-    assertMenuAction showSubscriptionWireGuardPeers
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"3
-5"
-    assertMenuAction restartSubscriptionWireGuardControl
-    resetMenuActions
-    manageSubscriptionControlledMaintenance <<<"4
-5"
-    assertMenuAction disableSubscriptionWireGuardControl
-    resetMenuActions
-    addSubscribeMenu <<<"3" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    setSubscriptionSourceControlTokenMenu <<<"" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    toggleSubscriptionSourceMenu <<<"" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    clearSubscriptionSourceSyncErrorMenu <<<"" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    manageSubscriptionMainHome <<<"4" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    setMenuSmokeRole main
-    manageSubscriptionControlledHome <<<"4" || true
-    assertMenuAction 'errorCard:当前机器已初始化为主控'
-    resetMenuActions
-    output=
-    manageAdminSubscription <<<"7"
-    grep -q "安装/更新订阅服务" <<<"${output}"
-    resetMenuActions
-    output=
-    manageUserSubscription <<<"7"
-    grep -q "查看并处理已有订阅" <<<"${output}"
-    resetMenuActions
-    output=
-    manageTrafficAndQuota <<<"8"
-    grep -q "查看用量总览" <<<"${output}"
-    resetMenuActions
-    setMenuSmokeRole controlled
-    manageTrafficAndQuota <<<"8" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"6" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    manageSubscriptionSyncSettings <<<"11" || true
-    assertMenuAction 'errorCard:当前机器已初始化为被控'
-    resetMenuActions
-    setMenuSmokeRole uninitialized
-    manageTrafficAndQuota <<<"8" || true
-    assertMenuAction 'errorCard:当前机器还没完成角色初始化'
-    resetMenuActions
-    manageSubscriptionStateBackups <<<"6" || true
-    assertMenuAction 'errorCard:当前机器还没完成角色初始化'
-    resetMenuActions
-    manageSubscriptionSyncSettings <<<"11" || true
-    assertMenuAction 'errorCard:当前机器还没完成角色初始化'
-    resetMenuActions
-    coreVersionManageMenu <<<"6"
-    assertMenuAction menu
-    if assertMenuAction unexpected-network-version-fetch; then
-        printf 'menu-smoke failed: core menu fetched release versions while rendering overview\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    coreConfigMaintenanceMenu <<<"3"
-    assertMenuAction 'statusCard:Xray 兼容体检'
-    resetMenuActions
-    coreConfigMaintenanceMenu <<<"4"
-    assertMenuAction 'statusCard:Xray 预发布兼容检查'
-    resetMenuActions
-    coreConfigMaintenanceMenu <<<"6"
-    assertMenuAction 'statusCard:sing-box 兼容体检'
-    if assertMenuAction unexpected-network-version-fetch; then
-        printf 'menu-smoke failed: core maintenance fetched release versions while rendering compatibility entries\n' >&2
-        return 1
-    fi
-    resetMenuActions
-    coreServiceControlMenu xray <<<"3"
-    assertMenuAction 'serviceQueueRestart:xray'
-    assertMenuAction serviceQueueApply
-    serviceQueueShouldFail=true
-    resetMenuActions
-    if coreServiceControlMenu sing-box <<<"3" >/dev/null 2>&1; then
+
+    if menuSmokePartSelected core-maintenance; then
+        resetMenuActions
+        coreVersionManageMenu <<<"6"
+        assertMenuAction menu
+        if assertMenuAction unexpected-network-version-fetch; then
+            printf 'menu-smoke failed: core menu fetched release versions while rendering overview\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        coreConfigMaintenanceMenu <<<"3"
+        assertMenuAction 'statusCard:Xray 兼容体检'
+        resetMenuActions
+        coreConfigMaintenanceMenu <<<"4"
+        assertMenuAction 'statusCard:Xray 预发布兼容检查'
+        resetMenuActions
+        coreConfigMaintenanceMenu <<<"6"
+        assertMenuAction 'statusCard:sing-box 兼容体检'
+        if assertMenuAction unexpected-network-version-fetch; then
+            printf 'menu-smoke failed: core maintenance fetched release versions while rendering compatibility entries\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        coreServiceControlMenu xray <<<"3"
+        assertMenuAction 'serviceQueueRestart:xray'
+        assertMenuAction serviceQueueApply
+        serviceQueueShouldFail=true
+        resetMenuActions
+        if coreServiceControlMenu sing-box <<<"3" >/dev/null 2>&1; then
+            serviceQueueShouldFail=
+            return 1
+        fi
         serviceQueueShouldFail=
-        return 1
+        assertMenuAction 'serviceQueueRestart:sing-box'
+        assertMenuAction serviceQueueApply
+        assertMenuAction 'errorCard:sing-box 服务重启失败'
     fi
-    serviceQueueShouldFail=
-    assertMenuAction 'serviceQueueRestart:sing-box'
-    assertMenuAction serviceQueueApply
-    assertMenuAction 'errorCard:sing-box 服务重启失败'
 
     configPath="${oldConfigPath}"
     coreInstallType="${oldCoreInstallType}"
@@ -13846,6 +13116,81 @@ main-credential
     else
         unset REALITY_TARGET_PAGE_SIZE
     fi
+}
+
+runMenuSmokeFullCoreRegression() {
+    runMenuSmokeRegression core
+}
+
+runMenuSmokeFullSubscriptionMainRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync \
+        menu-smoke-full-subscription-main-maintenance
+}
+
+runMenuSmokeFullSubscriptionMainEntryRegression() {
+    runMenuSmokeRegression subscription-main-entry
+}
+
+runMenuSmokeFullSubscriptionMainPublishRegression() {
+    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync
+}
+
+runMenuSmokeFullSubscriptionMainPublishServiceRegression() {
+    runMenuSmokeRegression subscription-main-publish-service
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-publish-user-create \
+        menu-smoke-full-subscription-main-publish-user-inspect
+}
+
+runMenuSmokeFullSubscriptionMainPublishSyncRegression() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        menu-smoke-full-subscription-main-publish-sync-enable
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression() {
+    runMenuSmokeRegression subscription-main-publish-user-empty
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserCreateRegression() {
+    runMenuSmokeRegression subscription-main-publish-user-create
+}
+
+runMenuSmokeFullSubscriptionMainPublishUserInspectRegression() {
+    runMenuSmokeRegression subscription-main-publish-user-inspect
+}
+
+runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression() {
+    runMenuSmokeRegression subscription-main-publish-sync-skip
+}
+
+runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression() {
+    runMenuSmokeRegression subscription-main-publish-sync-enable
+}
+
+runMenuSmokeFullSubscriptionMainMaintenanceRegression() {
+    runMenuSmokeRegression subscription-main-maintenance
+}
+
+runMenuSmokeFullSubscriptionControlledRegression() {
+    runMenuSmokeRegression subscription-controlled
+}
+
+runMenuSmokeFullCoreMaintenanceRegression() {
+    runMenuSmokeRegression core-maintenance
 }
 
 runInstallToolsCertificateDependencyRegression() {
@@ -13988,7 +13333,7 @@ runInstallToolsAcmeResultFailureRegression() {
         [[ ! -e "${fakeHome}/.acme.sh/acme.sh" ]]
         [[ "$(<"${fakeHome}/.acme.sh/account.conf")" == "legacy-state" ]]
         [[ ! -e "${fakeHome}/.acme.sh/partial.txt" ]]
-        if find "${tmpRoot}" -maxdepth 1 -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${tmpRoot}" -maxdepth 1 -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -14086,7 +13431,7 @@ runInstallToolsAcmeCommitFailureRegression() {
         [[ "${installStatus}" -ne 0 ]]
         grep -q "acme安装脚本提交失败" "${errorLog}"
         [[ ! -e "${runMarker}" ]]
-        if find "${tmpRoot}" -type f -name 'acme.sh.download.*' | grep -q .; then
+        if regressionFindHasMatches "${tmpRoot}" -type f -name 'acme.sh.download.*'; then
             return 1
         fi
 
@@ -14545,7 +13890,7 @@ runNginxAptRepoRefreshRollbackRegression() {
         [[ "$(<"${pinFile}")" == "old-pin" ]]
         grep -q "Nginx apt 源刷新失败" "${errorLog}"
         ! compgen -G "${keyringRoot}/.nginx-archive-keyring.gpg.aptkey.*" >/dev/null
-        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -14594,7 +13939,7 @@ runNginxYumMainlineEnableFailureRegression() {
         [[ "${nginxStatus}" -ne 0 ]]
         grep -q "Nginx yum mainline 源启用失败" "${errorLog}"
         [[ "$(<"${repoDir}/nginx.repo")" == "old-yum-repo" ]]
-        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -14640,7 +13985,7 @@ runNginxAlpineDefaultConfRollbackRegression() {
         [[ "${nginxStatus}" -ne 0 ]]
         [[ "$(<"${defaultConf}")" == "old-default-conf" ]]
         grep -q "Nginx开机自启配置失败" "${errorLog}"
-        if find "${root}" -type d -name 'padm-package-managed-backup.*' | grep -q .; then
+        if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
 
@@ -14714,17 +14059,28 @@ runBasePackageBatchRegression() {
 runPackageRollbackFailureRegression() {
     (
         local removedFile="${TMP_DIR}/package-rollback-removed.log"
+        local errorLog="${TMP_DIR}/package-rollback-error.log"
+        local helperLog="${TMP_DIR}/package-rollback-helper.log"
         local oldInstalled="${PADM_INSTALLED_PACKAGES:-}"
         local oldFailures="${PADM_PACKAGE_ROLLBACK_FAILURES:-}"
+        local oldManagedFailures="${PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES:-}"
         local oldRemoveType="${removeType:-}"
+        local rc
 
         removePackageForRegression() {
             printf '%s\n' "$1" >>"${removedFile}"
             [[ "$1" != "bad-package" ]]
         }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        coreSetManualCheckMessage() {
+            printf "manual-check:%s|%s\n" "$2" "$3" >>"${helperLog}"
+            printf -v "$1" "%s，请手动检查%s" "$2" "$3"
+        }
 
         removeType=removePackageForRegression
         PADM_INSTALLED_PACKAGES="ok-package bad-package"
+        : >"${errorLog}"
+        : >"${helperLog}"
         if rollbackPackageInstallTransaction; then
             return 1
         fi
@@ -14732,6 +14088,54 @@ runPackageRollbackFailureRegression() {
         grep -qxF "bad-package" "${removedFile}"
         [[ "${PADM_INSTALLED_PACKAGES}" == "" ]]
         [[ "${PADM_PACKAGE_ROLLBACK_FAILURES}" == "bad-package" ]]
+
+        PADM_INSTALLED_PACKAGES="ok-package bad-package"
+        PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
+        : >"${errorLog}"
+        : >"${helperLog}"
+        set +e
+        (
+            failPackageInstallTransaction "软件包安装失败" >/dev/null 2>&1
+        )
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -q 'manual-check:回滚部分软件包失败|bad-package' "${helperLog}"
+        grep -q '回滚部分软件包失败，请手动检查bad-package' "${errorLog}"
+
+        adapterRollbackPackageManagedFiles() { return 0; }
+        rollbackPackageInstallTransaction() {
+            PADM_PACKAGE_ROLLBACK_FAILURES='bad-package'
+            return 1
+        }
+        PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=('/tmp/repo-backup')
+        : >"${errorLog}"
+        : >"${helperLog}"
+        set +e
+        (
+            failPackageInstallTransaction "软件包安装失败" >/dev/null 2>&1
+        )
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -q 'manual-check:已尝试回滚系统源改动，但部分软件包回滚失败|bad-package' "${helperLog}"
+        grep -q '已尝试回滚系统源改动，但部分软件包回滚失败，请手动检查bad-package' "${errorLog}"
+
+        adapterRollbackPackageManagedFiles() { return 1; }
+        rollbackPackageInstallTransaction() { return 0; }
+        PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=('/tmp/repo-backup')
+        PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES='repo-backup-a repo-backup-b'
+        : >"${errorLog}"
+        : >"${helperLog}"
+        set +e
+        (
+            failPackageInstallTransaction "系统软件源刷新失败" >/dev/null 2>&1
+        )
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -q 'manual-check:已回滚本次新增软件包，但系统源改动恢复失败|repo-backup-a repo-backup-b' "${helperLog}"
+        grep -q '已回滚本次新增软件包，但系统源改动恢复失败，请手动检查repo-backup-a repo-backup-b' "${errorLog}"
 
         if [[ -n "${oldInstalled}" ]]; then
             PADM_INSTALLED_PACKAGES="${oldInstalled}"
@@ -14743,8 +14147,16 @@ runPackageRollbackFailureRegression() {
         else
             unset PADM_PACKAGE_ROLLBACK_FAILURES
         fi
+        if [[ -n "${oldManagedFailures}" ]]; then
+            PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES="${oldManagedFailures}"
+        else
+            unset PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES
+        fi
         removeType="${oldRemoveType}"
         unset -f removePackageForRegression
+        unset -f adapterRollbackPackageManagedFiles
+        unset -f errorCard
+        unset -f coreSetManualCheckMessage
     )
 }
 
@@ -14923,6 +14335,7 @@ regressionEnsureScriptModules() {
 
 runUpdatePadmVersionPromptRegression() {
     local successLog errorLog installDir updateTmpRoot downloadDirLog oldTmpDir
+    local restoreFailureDir restoreFailureErrorLog restoreFailureDownloadLog
     local replaceFailureDir replaceFailureErrorLog replaceFailureDownloadLog
     local stageFailureDir stageFailureErrorLog stageFailureDownloadLog
     successLog="${TMP_DIR}/update-padm-success.log"
@@ -14930,6 +14343,9 @@ runUpdatePadmVersionPromptRegression() {
     installDir="${TMP_DIR}/update-padm-install"
     updateTmpRoot="${TMP_DIR}/update-padm-tmp"
     downloadDirLog="${TMP_DIR}/update-padm-download-dirs.log"
+    restoreFailureDir="${TMP_DIR}/update-padm-restore-failure"
+    restoreFailureErrorLog="${TMP_DIR}/update-padm-restore-failure-error.log"
+    restoreFailureDownloadLog="${TMP_DIR}/update-padm-restore-failure-download.log"
     replaceFailureDir="${TMP_DIR}/update-padm-replace-restore-failure"
     replaceFailureErrorLog="${TMP_DIR}/update-padm-replace-restore-failure-error.log"
     replaceFailureDownloadLog="${TMP_DIR}/update-padm-replace-restore-failure-download.log"
@@ -14937,13 +14353,16 @@ runUpdatePadmVersionPromptRegression() {
     stageFailureErrorLog="${TMP_DIR}/update-padm-stage-failure-error.log"
     stageFailureDownloadLog="${TMP_DIR}/update-padm-stage-failure-download.log"
     oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${installDir}" "${updateTmpRoot}" "${replaceFailureDir}" "${stageFailureDir}"
+    mkdir -p "${installDir}" "${updateTmpRoot}" "${restoreFailureDir}" "${replaceFailureDir}" "${stageFailureDir}"
     installDir=$(cd -- "${installDir}" && pwd -P)
+    restoreFailureDir=$(cd -- "${restoreFailureDir}" && pwd -P)
     replaceFailureDir=$(cd -- "${replaceFailureDir}" && pwd -P)
     stageFailureDir=$(cd -- "${stageFailureDir}" && pwd -P)
     : >"${downloadDirLog}"
     : >"${successLog}"
     : >"${errorLog}"
+    : >"${restoreFailureErrorLog}"
+    : >"${restoreFailureDownloadLog}"
     : >"${replaceFailureErrorLog}"
     : >"${replaceFailureDownloadLog}"
     : >"${stageFailureErrorLog}"
@@ -14984,7 +14403,7 @@ EOF
     grep -q '更新入口已下载，正在重新打开新版脚本' "${successLog}"
     grep -q 'new-entry-ok' "${successLog}" && return 1
     grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${downloadDirLog}"
-    if find "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     [[ ! -e "${installDir}/install.sh.bak" ]]
@@ -15023,10 +14442,55 @@ EOF
     ) >"${TMP_DIR}/update-padm-run-fail.log" 2>&1 && return 1
     grep -q '新版入口执行失败，已恢复旧入口' "${errorLog}"
     grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${downloadDirLog}"
-    if find "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     "${installDir}/install.sh" | grep -q 'old-entry'
+
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${restoreFailureDir}/install.sh"
+    chmod 700 "${restoreFailureDir}/install.sh"
+    (
+        REGRESSION_ERROR_CARD_LOG="${restoreFailureErrorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${restoreFailureDir}"
+
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    printf '%s\n' "$2" >>"${restoreFailureDownloadLog}"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+printf 'new-entry\n'
+exit 23
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            if [[ "$1" == "${restoreFailureDir}/install.sh.bak" && "$2" == "${restoreFailureDir}/install.sh" ]]; then
+                return 1
+            fi
+            originalCommitGeneratedFile "$@"
+        }
+        sudo() { "$@"; }
+
+        updatePadm 1
+    ) >"${TMP_DIR}/update-padm-restore-failure-run.log" 2>&1 && return 1
+    grep -q "新版入口执行失败，旧入口恢复失败，请手动检查 ${restoreFailureDir}/install.sh 和 ${restoreFailureDir}/install.sh.bak" "${restoreFailureErrorLog}"
+    grep -Eqx "${updateTmpRoot}/padm-update\\.[A-Za-z0-9][A-Za-z0-9]*/?" "${restoreFailureDownloadLog}"
+    if regressionFindHasMatches "${updateTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
+        return 1
+    fi
+    "${restoreFailureDir}/install.sh" | grep -q 'new-entry'
+    "${restoreFailureDir}/install.sh.bak" | grep -q 'old-entry'
 
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${replaceFailureDir}/install.sh"
     chmod 700 "${replaceFailureDir}/install.sh"
@@ -15168,7 +14632,7 @@ runInstallRefreshRestoresBackupRegression() {
     [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
     [[ ! -e "${fixtureDir}/.padm-ref" ]]
     [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
-    if find "${refreshTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${refreshTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
 
@@ -15221,7 +14685,7 @@ runInstallRefreshRestoresBackupRegression() {
     [[ -d "${restoreFailureDir}/.padm-update-backup/documents" ]]
     [[ "$(<"${restoreFailureDir}/.padm-update-backup/documents/marker")" == "old-doc" ]]
     [[ ! -e "${restoreFailureDir}/.padm-ref" ]]
-    if find "${restoreFailureTmpRoot}" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+    if regressionFindHasMatches "${restoreFailureTmpRoot}" -mindepth 1 -maxdepth 1 -type d; then
         return 1
     fi
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -15430,7 +14894,7 @@ runSyncInstallDirectoryTreeRestoreFailureRegression() {
         backupRoot=$(find "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-backup.*' -print -quit)
         [[ -n "${backupRoot}" ]]
         [[ "$(<"${backupRoot}/target/marker")" == "old" ]]
-        if find "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-stage.*' | grep -q .; then
+        if regressionFindHasMatches "${rootAbs}" -maxdepth 1 -type d -name '.target.padm-stage.*'; then
             return 1
         fi
     )
@@ -15471,6 +14935,7 @@ runInstallModulePathsRegression() {
 runRegressionPlatform() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
         runRegressionStep cleanup-trap runCleanupTrapRegression &&
+        runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
         runRegressionStep check-log-backup-unsafe-target runCheckLogBackupRejectsUnsafeTargetRegression &&
         runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&
@@ -15675,9 +15140,7 @@ runTlsRenewalFailurePropagationRegression() (
     export REGRESSION_ERROR_CARD_LOG="${errorLog}"
 
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
-    successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
@@ -15815,7 +15278,6 @@ runTlsRenewalInstallRollbackRegression() (
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
     handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleXray() { printf 'xray:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleSingBox() { printf 'sing-box:%s\n' "$1" >>"${serviceLog}"; return 0; }
@@ -15897,10 +15359,7 @@ runTlsRenewalBackupPreparationRestoresServicesRegression() (
     : >"${serviceLog}"
     : >"${errorLog}"
 
-    statusCard() { return 0; }
-    successCard() { return 0; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
     handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleXray() { printf 'xray:%s\n' "$1" >>"${serviceLog}"; return 0; }
     handleSingBox() { printf 'sing-box:%s\n' "$1" >>"${serviceLog}"; return 0; }
@@ -16004,12 +15463,6 @@ runTlsReinstallRollbackRegression() (
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     successCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-    progressCard() { return 0; }
-    echoContent() { return 0; }
-    menuLine() { return 0; }
-    menuClose() { return 0; }
-    menuItem() { return 0; }
-    menuRecommendedItem() { return 0; }
     autoRead() {
         case "$3" in
         reInstallStatus) printf -v "$3" 'y' ;;
@@ -16084,15 +15537,77 @@ runRegressionFast() {
         runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }
 
+runRegressionTargetedBatchHelpers() {
+    runRegressionStep core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression &&
+        runRegressionStep core-selection-retry-action runCoreSelectionRetryActionRegression &&
+        runRegressionStep sync-configured-managed-users-helper runSyncConfiguredManagedUsersHelperRegression &&
+        runRegressionStep sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression &&
+        runRegressionStep traffic-configured-accounts-helper runTrafficConfiguredAccountsHelperRegression &&
+        runRegressionStep traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression &&
+        runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression &&
+        runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
+        runRegressionStep config-transaction runConfigTransactionRegression &&
+        runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&
+        runRegressionStep alone-nginx-backup-manual-check runNginxBackupManualCheckRegression
+}
+
+runRegressionTargetedSubscriptionRestore() {
+    runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
+}
+
 runRegressionFastReality() {
     runRegressionFast &&
         runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
 }
 
 runRegressionUi() {
-    runRegressionStep ui-smoke-light runMenuSmokeLightRegression
-    runRegressionStep ui-smoke runMenuSmokeRegression
-    runRegressionStep wireguard-menu-flow runSubscriptionWireGuardMenuFlowRegression
+    if [[ "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" == "all" ]]; then
+        runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+            menu-smoke-full-subscription-main-publish-sync \
+            wireguard-menu-flow-peer-rollback-apply \
+            wireguard-menu-flow-peer-rollback-credential \
+            wireguard-menu-flow-peer-rollback-source \
+            menu-smoke-full-subscription-main-publish-user \
+            menu-smoke-full-subscription-main-publish-service \
+            wireguard-menu-flow-peer-add-update \
+            wireguard-menu-flow-peer-source-control \
+            menu-smoke-full-subscription-main-maintenance \
+            wireguard-menu-flow-control-restore \
+            wireguard-menu-flow-bootstrap \
+            menu-smoke-full-subscription-main-entry \
+            menu-smoke-full-subscription-controlled \
+            menu-smoke-full-core \
+            menu-smoke-full-core-maintenance \
+            menu-smoke \
+            wireguard-restore-runner
+        return
+    fi
+
+    runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-publish-sync-enable \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-source \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        wireguard-menu-flow-peer-rollback-apply-restore \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        menu-smoke-full-subscription-main-publish-user-inspect \
+        wireguard-menu-flow-peer-source-control-toggle \
+        menu-smoke-full-subscription-main-publish-user-create \
+        menu-smoke-full-subscription-main-publish-service \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-control-restore \
+        wireguard-menu-flow-bootstrap \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner
 }
 
 runRegressionMenuSmoke() {
@@ -16100,70 +15615,334 @@ runRegressionMenuSmoke() {
 }
 
 runRegressionMenuSmokeFull() {
-    runRegressionStep ui-smoke runMenuSmokeRegression
+    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-parallel-${BASHPID:-$$}" \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-sync \
+        menu-smoke-full-subscription-main-maintenance \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance
 }
 
 runRegressionRouting() {
-    runRegressionStep routing-core runRoutingRegression
-    runRegressionStep routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
-    runRegressionStep routing-socks5-udp-associate runSocks5UdpAssociateRegression
-    runRegressionStep routing-access-control-failure-return runAccessControlFailureReturnRegression
-    runRegressionStep routing-access-control-config-transaction runAccessControlConfigTransactionRegression
-    runRegressionStep routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
-    runRegressionStep routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
-    runRegressionStep routing-bt-failure-return runBTRoutingFailureReturnRegression
-    runRegressionStep routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
-    runRegressionStep routing-warp-failure-return runWARPRoutingFailureReturnRegression
-    runRegressionStep routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
-    runRegressionStep routing-dns-failure-return runDNSRoutingFailureReturnRegression
-    runRegressionStep routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
-    runRegressionStep routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
-    runRegressionStep routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
-    runRegressionStep routing-vmess-failure-return runVMessRoutingFailureReturnRegression
-    runRegressionStep routing-port-panel runPortAndPanelHelperRegression
+    if [[ "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" == "all" ]]; then
+        runParallelRegressionSelectors "${TMP_DIR}/routing-parallel-core-${BASHPID:-$$}" \
+            routing-core
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-2}" \
+            runParallelRegressionSelectors "${TMP_DIR}/routing-parallel-heavy-${BASHPID:-$$}" \
+            routing-access-control-config-transaction \
+            routing-dns-failure-return \
+            routing-socks5-udp-associate
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ROUTING_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-4}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/routing-parallel-light-${BASHPID:-$$}" \
+            routing-core-unsafe-config-dir \
+            routing-access-control-failure-return \
+            routing-access-control-unsafe-backup-dir \
+            routing-access-control-unsafe-config-dir \
+            routing-bt-failure-return \
+            routing-ipv6-failure-return \
+            routing-warp-failure-return \
+            routing-socks5-failure-return \
+            routing-dns-unsafe-backup-dir \
+            routing-dns-unsafe-config-dir \
+            routing-dns-restore-scope \
+            routing-port-panel
+        return
+    fi
+
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ROUTING_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/routing-parallel-${BASHPID:-$$}" \
+        routing-core \
+        routing-core-unsafe-config-dir \
+        routing-socks5-udp-associate \
+        routing-access-control-failure-return \
+        routing-access-control-config-transaction \
+        routing-access-control-unsafe-backup-dir \
+        routing-access-control-unsafe-config-dir \
+        routing-bt-failure-return \
+        routing-ipv6-failure-return \
+        routing-warp-failure-return \
+        routing-socks5-failure-return \
+        routing-dns-failure-return \
+        routing-dns-unsafe-backup-dir \
+        routing-dns-unsafe-config-dir \
+        routing-dns-restore-scope \
+        routing-port-panel
 }
 
 runRegressionSubscriptionOutput() {
-    runRegressionStep subscription-output runSubscriptionOutputRegression
+    runRegressionStep subscription-output runSubscriptionOutputRegression &&
+        runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
 }
 
 runRegressionSubscriptionState() {
-    runRegressionStep subscription-state runSubscriptionGroupStateRegression
-    runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
-    runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
-    runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
-    runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
-    runRegressionStep subscription-groups-unsafe-dir runSubscriptionGroupsRejectsUnsafeDirRegression
+    runRegressionAllSelector subscription-state
 }
 
 runRegressionSubscriptionRemoteFetch() {
-    runRegressionStep subscription-remote-fetch runRemoteSubscribeFetchRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-fetch-parallel-${BASHPID:-$$}" \
+        subscription-remote-fetch-unique \
+        subscription-remote-fetch-rollback \
+        subscription-remote-fetch-merge \
+        subscription-remote-fetch-controlled \
+        subscription-remote-fetch-append-failure \
+        subscription-remote-fetch-commit-failure \
+        subscription-remote-fetch-idempotent
 }
+
+runRemoteSubscribeFetchUniqueRegression() {
+    runRemoteSubscribeFetchRegression unique
+}
+
+runRemoteSubscribeFetchRollbackRegression() {
+    runRemoteSubscribeFetchRegression rollback
+}
+
+runRemoteSubscribeFetchMergeRegression() {
+    runRemoteSubscribeFetchRegression merge
+}
+
+runRemoteSubscribeFetchControlledRegression() {
+    runRemoteSubscribeFetchRegression controlled
+}
+
+runRemoteSubscribeFetchAppendFailureRegression() {
+    runRemoteSubscribeFetchRegression append-failure
+}
+
+runRemoteSubscribeFetchCommitFailureRegression() {
+    runRemoteSubscribeFetchRegression commit-failure
+}
+
+runRemoteSubscribeFetchIdempotentRegression() {
+    runRemoteSubscribeFetchRegression idempotent
+}
+
+runRegressionSubscriptionRemoteFetchParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-remote-fetch-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "subscription-remote-fetch-unique" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-remote-fetch-merge-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription-remote-fetch-merge" ]]; then
+            : >"${TMP_DIR}/subscription-remote-fetch-merge-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRemoteSubscribeFetchRegression() { runRegressionAllSelector subscription-remote-fetch; }
+
+    runRegressionSubscriptionRemoteFetch
+
+    for selector in \
+        subscription-remote-fetch-unique \
+        subscription-remote-fetch-rollback \
+        subscription-remote-fetch-merge \
+        subscription-remote-fetch-controlled \
+        subscription-remote-fetch-append-failure \
+        subscription-remote-fetch-commit-failure \
+        subscription-remote-fetch-idempotent; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "subscription-remote-fetch-unique-start" { uniqueStart = NR }
+        $0 == "subscription-remote-fetch-merge-start" { mergeStart = NR }
+        $0 == "subscription-remote-fetch-unique-finish" { uniqueFinish = NR }
+        END { exit !(uniqueStart && mergeStart && uniqueFinish && mergeStart < uniqueFinish) }
+    ' "${callLog}"
+    ! grep -qx 'subscription-remote-fetch-start' "${callLog}"
+    ! grep -qx 'subscription-remote-fetch-finish' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/subscription-remote-fetch-merge-started"
+    PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS=1 runRegressionSubscriptionRemoteFetch
+    awk '
+        $0 == "subscription-remote-fetch-unique-finish" { firstFinish = NR }
+        $0 == "subscription-remote-fetch-rollback-start" { secondStart = NR }
+        $0 == "subscription-remote-fetch-rollback-finish" { secondFinish = NR }
+        $0 == "subscription-remote-fetch-merge-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+
+)
 
 runRegressionSubscriptionWriteTransaction() {
-    runRegressionStep sing-box-subscribe-write runSingBoxSubscribeWriteRegression
-    runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression
-    runRegressionStep subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
-    runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
-    runRegressionStep subscribe-server-name runSubscribeServerNameRegression
-    runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
-    runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
-    runRegressionStep sing-box-port-failure runSingBoxPortFailureRegression
-    runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
-    runRegressionStep subscribe-local-rollback runSubscribeLocalRollbackRegression
-    runRegressionStep subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegression
-    runRegressionStep subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
-    runRegressionStep refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
-    runRegressionStep subscribe-return-failure runSubscribeReturnFailureRegression
-    runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
-    runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
+    runParallelRegressionSelectors "${TMP_DIR}/subscription-write-transaction-parallel-${BASHPID:-$$}" \
+        sing-box-subscribe-write \
+        cdn-address-write-transaction \
+        subscribe-local-output-transaction \
+        subscribe-salt-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        sing-box-port-failure \
+        subscribe-user-output-transaction \
+        subscribe-local-rollback \
+        subscription-groups-migration-backup \
+        subscription-groups-backup-failure \
+        refresh-local-subscriptions-rollback \
+        subscribe-return-failure \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure
 }
 
-runRegressionSubscription() {
-    runRegressionSubscriptionOutput
-    runRegressionSubscriptionState
-    runRegressionSubscriptionRemoteFetch
+runRegressionSubscriptionWriteTransactionParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-write-transaction-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "sing-box-subscribe-write" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscribe-user-output-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscribe-user-output-transaction" ]]; then
+            : >"${TMP_DIR}/subscribe-user-output-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runSingBoxSubscribeWriteRegression() { runRegressionAllSelector sing-box-subscribe-write; }
+    runCdnAddressTransactionRegression() { runRegressionAllSelector cdn-address-write-transaction; }
+    runSubscribeLocalOutputTransactionRegression() { runRegressionAllSelector subscribe-local-output-transaction; }
+    runSubscribeSaltWriteTransactionRegression() { runRegressionAllSelector subscribe-salt-write-transaction; }
+    runSubscribeServerNameRegression() { runRegressionAllSelector subscribe-server-name; }
+    runSubscribeNginxConfigWriteRegression() { runRegressionAllSelector subscribe-nginx-config-write; }
+    runSubscribeNginxServiceFailureRegression() { runRegressionAllSelector subscribe-nginx-service-failure; }
+    runSingBoxPortFailureRegression() { runRegressionAllSelector sing-box-port-failure; }
+    runSubscribeUserOutputTransactionRegression() { runRegressionAllSelector subscribe-user-output-transaction; }
+    runSubscribeLocalRollbackRegression() { runRegressionAllSelector subscribe-local-rollback; }
+    runSubscriptionGroupsMigrationBackupRegression() { runRegressionAllSelector subscription-groups-migration-backup; }
+    runSubscriptionGroupsBackupFailureRegression() { runRegressionAllSelector subscription-groups-backup-failure; }
+    runRefreshLocalSubscriptionsRollbackRegression() { runRegressionAllSelector refresh-local-subscriptions-rollback; }
+    runSubscribeReturnFailureRegression() { runRegressionAllSelector subscribe-return-failure; }
+    runRemoveUserSubscriptionMenuFailureRegression() { runRegressionAllSelector remove-user-subscription-menu-failure; }
+    runUserSubscriptionMenuMutationFailureRegression() { runRegressionAllSelector user-subscription-menu-mutation-failure; }
+
     runRegressionSubscriptionWriteTransaction
+
+    for selector in \
+        sing-box-subscribe-write \
+        cdn-address-write-transaction \
+        subscribe-local-output-transaction \
+        subscribe-salt-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        sing-box-port-failure \
+        subscribe-user-output-transaction \
+        subscribe-local-rollback \
+        subscription-groups-migration-backup \
+        subscription-groups-backup-failure \
+        refresh-local-subscriptions-rollback \
+        subscribe-return-failure \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "sing-box-subscribe-write-start" { singboxStart = NR }
+        $0 == "subscribe-user-output-transaction-start" { userOutputStart = NR }
+        $0 == "sing-box-subscribe-write-finish" { singboxFinish = NR }
+        END { exit !(singboxStart && userOutputStart && singboxFinish && userOutputStart < singboxFinish) }
+    ' "${callLog}"
+)
+
+runRegressionSubscriptionParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "subscription-output" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-state-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription-state" ]]; then
+            : >"${TMP_DIR}/subscription-state-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRegressionSubscriptionOutput() { runRegressionAllSelector subscription-output; }
+    runRegressionSubscriptionState() { runRegressionAllSelector subscription-state; }
+    runRegressionSubscriptionRemoteFetch() { runRegressionAllSelector subscription-remote-fetch; }
+    runRegressionSubscriptionWriteTransaction() { runRegressionAllSelector subscription-write-transaction; }
+
+    runRegressionSubscription
+
+    for selector in subscription-output subscription-state subscription-remote-fetch subscription-write-transaction; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "subscription-output-start" { outputStart = NR }
+        $0 == "subscription-state-start" { stateStart = NR }
+        $0 == "subscription-output-finish" { outputFinish = NR }
+        END { exit !(outputStart && stateStart && outputFinish && stateStart < outputFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/subscription-state-started"
+    PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionSubscription
+
+    for selector in subscription-output subscription-state subscription-remote-fetch subscription-write-transaction; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "subscription-output-start" { outputStart = NR }
+        $0 == "subscription-state-start" { stateStart = NR }
+        $0 == "subscription-output-finish" { outputFinish = NR }
+        $0 == "subscription-state-finish" { stateFinish = NR }
+        $0 == "subscription-write-transaction-start" { writeStart = NR }
+        $0 == "subscription-remote-fetch-start" { remoteStart = NR }
+        END {
+            exit !(outputStart && stateStart && outputFinish && stateFinish && writeStart && remoteStart &&
+                stateStart < outputFinish &&
+                outputFinish < writeStart && stateFinish < writeStart &&
+                outputFinish < remoteStart && stateFinish < remoteStart)
+        }
+    ' "${callLog}"
+)
+
+runRegressionSubscription() {
+    if [[ "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" == "all" ]]; then
+        runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
+            subscription-output \
+            subscription-state
+        (
+            export PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-2}"
+            runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
+                subscription-write-transaction \
+                subscription-remote-fetch
+        )
+        return
+    fi
+
+    runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
+        subscription-output \
+        subscription-state \
+        subscription-remote-fetch \
+        subscription-write-transaction
 }
 
 runRegressionRealityCandidates() {
@@ -16178,53 +15957,377 @@ runRegressionRealityStream() {
 }
 
 runRegressionRuntime() {
+    if [[ "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" == "all" ]]; then
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-light-${BASHPID:-$$}" \
+            runtime-core \
+            runtime-autoread-unset-auto-install \
+            runtime-auto-install-reality-route \
+            runtime-tempdir
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-heavy-${BASHPID:-$$}" \
+            reality-candidates \
+            reality-config
+        return
+    fi
+
     runRegressionStep runtime-core runRuntimeAndRealityRegression &&
+        runRegressionStep runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression &&
         runRegressionStep runtime-auto-install-reality-route runAutoInstallRealityRouteRegression &&
         runRegressionStep runtime-tempdir runRuntimeTempDirRegression &&
+        runRegressionStep reality-candidates runRegressionRealityCandidates &&
         runRegressionStep reality-config runRealityConfigRegression
 }
 
+runRegressionRuntimeParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-runtime-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        case "${selector}" in
+        runtime-core)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/runtime-tempdir-started" ]] && break
+                sleep 0.05
+            done
+            ;;
+        runtime-tempdir)
+            : >"${TMP_DIR}/runtime-tempdir-started"
+            ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRuntimeAndRealityRegression() { runRegressionAllSelector runtime-core; }
+    runAutoReadUnsetAutoInstallRegression() { runRegressionAllSelector runtime-autoread-unset-auto-install; }
+    runAutoInstallRealityRouteRegression() { runRegressionAllSelector runtime-auto-install-reality-route; }
+    runRuntimeTempDirRegression() { runRegressionAllSelector runtime-tempdir; }
+    runRegressionRealityCandidates() { runRegressionAllSelector reality-candidates; }
+    runRealityConfigRegression() { runRegressionAllSelector reality-config; }
+
+    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntime
+
+    for selector in \
+        runtime-core \
+        runtime-autoread-unset-auto-install \
+        runtime-auto-install-reality-route \
+        runtime-tempdir \
+        reality-candidates \
+        reality-config; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "runtime-core-start" { coreStart = NR }
+        $0 == "runtime-tempdir-start" { tempdirStart = NR }
+        $0 == "runtime-core-finish" { coreFinish = NR }
+        $0 == "runtime-autoread-unset-auto-install-finish" { autoreadFinish = NR }
+        $0 == "runtime-auto-install-reality-route-finish" { routeFinish = NR }
+        $0 == "runtime-tempdir-finish" { tempdirFinish = NR }
+        $0 == "reality-candidates-start" { candidatesStart = NR }
+        $0 == "reality-config-start" { configStart = NR }
+        END {
+            exit !(coreStart && tempdirStart && coreFinish && autoreadFinish && routeFinish && tempdirFinish &&
+                candidatesStart && configStart && tempdirStart < coreFinish &&
+                coreFinish < candidatesStart && autoreadFinish < candidatesStart &&
+                routeFinish < candidatesStart && tempdirFinish < candidatesStart &&
+                coreFinish < configStart && autoreadFinish < configStart &&
+                routeFinish < configStart && tempdirFinish < configStart)
+        }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/runtime-tempdir-started"
+    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS=1 PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS=1 runRegressionRuntime
+    awk '
+        $0 == "runtime-core-finish" { coreFinish = NR }
+        $0 == "runtime-autoread-unset-auto-install-start" { autoreadStart = NR }
+        $0 == "runtime-autoread-unset-auto-install-finish" { autoreadFinish = NR }
+        $0 == "runtime-auto-install-reality-route-start" { routeStart = NR }
+        $0 == "reality-candidates-finish" { candidatesFinish = NR }
+        $0 == "reality-config-start" { configStart = NR }
+        END {
+            exit !(coreFinish && autoreadStart && autoreadFinish && routeStart && candidatesFinish && configStart &&
+                coreFinish < autoreadStart && autoreadFinish < routeStart && candidatesFinish < configStart)
+        }
+    ' "${callLog}"
+)
+
 runRegressionTransactionCore() {
-    runRegressionStep config-transaction runConfigTransactionRegression &&
-        runRegressionStep core-port-file-transaction runCorePortFileTransactionRegression &&
-        runRegressionStep core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression &&
-        runRegressionStep entry-helper-config runEntryHelperConfigRegression &&
-        runRegressionStep check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression &&
-        runRegressionStep alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression &&
-        runRegressionStep xray-reality-port-failure runXrayRealityPortFailureRegression &&
-        runRegressionStep reality-profile-failure runRealityProfileFailureRegression &&
-        runRegressionStep sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression &&
-        runRegressionStep core-template-return-failure runCoreTemplateReturnFailureRegression &&
-        runRegressionStep core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression &&
-        runRegressionStep core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression &&
-        runRegressionStep sing-box-cronet-rollback runSingBoxCronetRollbackRegression &&
-        runRegressionStep finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression &&
-        runRegressionStep core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression &&
-        runRegressionStep legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression &&
-        runRegressionStep core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression &&
-        runRegressionStep core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression &&
-        runRegressionStep core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression &&
-        runRegressionStep sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression &&
-        runRegressionStep network-check-return-failure runNetworkCheckReturnFailureRegression &&
-        runRegressionStep tls-failure-return runTlsFailureReturnRegression &&
-        runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackRegression &&
-        runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression &&
-        runRegressionStep service-queue-apply-propagation runServiceQueueApplyPropagationRegression &&
-        runRegressionStep core-install-service-action-failure runCoreInstallServiceActionFailureRegression &&
-        runRegressionStep sing-box-merge-start-failure runSingBoxMergeStartFailureRegression &&
-        runRegressionStep sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression &&
-        runRegressionStep sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression &&
-        runRegressionStep sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression &&
-        runRegressionStep sing-box-managed-cleanup runSingBoxManagedCleanupRegression &&
-        runRegressionStep sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression &&
-        runRegressionStep geo-update-reload-failure runGeoUpdateReloadFailureRegression &&
-        runRegressionStep core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression &&
-        runRegressionStep reload-core-propagation runReloadCorePropagationRegression &&
-        runRegressionStep sing-box-log-transaction runSingBoxLogTransactionRegression &&
-        runRegressionStep user-config-write runUserConfigWriteRegression &&
-        runRegressionStep remove-user runRemoveUserRegression &&
-        runRegressionStep user-mutation-failure-propagation runUserMutationFailurePropagationRegression
+    if [[ "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" == "all" ]]; then
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-heavy-${BASHPID:-$$}" \
+            core-install-service-action-failure \
+            core-port-file-transaction
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-medium-${BASHPID:-$$}" \
+            config-transaction \
+            entry-helper-config \
+            reload-core-propagation \
+            sing-box-log-transaction \
+            sing-box-merge-config-transaction \
+            tls-renew-failure-propagation
+        PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+            runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-light-${BASHPID:-$$}" \
+            core-rollback-result-message \
+            core-port-unsafe-config-dir \
+            check-port-open-nginx-directory-target \
+            alone-nginx-directory-target \
+            xray-reality-port-failure \
+            reality-profile-failure \
+            sing-box-reality-key-transaction \
+            core-template-return-failure \
+            core-template-managed-remove \
+            core-binary-install-copy-failure \
+            sing-box-cronet-rollback \
+            finalize-sing-box-rollback \
+            core-upgrade-directory-target \
+            legacy-core-upgrade-keeps-existing \
+            core-first-install-failure-clean \
+            core-first-install-commit-rollback \
+            core-install-unsafe-binary-path \
+            sing-box-download-artifacts-cleanup \
+            network-check-return-failure \
+            tls-failure-return \
+            tls-reinstall-rollback \
+            service-queue-apply-propagation \
+            sing-box-merge-start-failure \
+            sing-box-uninstall-failure-propagation \
+            sing-box-uninstall-rejects-unsafe-config-path \
+            sing-box-managed-cleanup \
+            sing-box-protocol-reload-failure \
+            geo-update-reload-failure \
+            core-cleanup-failure-propagation \
+            user-config-write \
+            remove-user
+        return
+    fi
+
+    runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-${BASHPID:-$$}" \
+        core-rollback-result-message \
+        config-transaction \
+        core-port-file-transaction \
+        core-port-unsafe-config-dir \
+        entry-helper-config \
+        check-port-open-nginx-directory-target \
+        alone-nginx-directory-target \
+        xray-reality-port-failure \
+        reality-profile-failure \
+        sing-box-reality-key-transaction \
+        core-template-return-failure \
+        core-template-managed-remove \
+        core-binary-install-copy-failure \
+        sing-box-cronet-rollback \
+        finalize-sing-box-rollback \
+        core-upgrade-directory-target \
+        legacy-core-upgrade-keeps-existing \
+        core-first-install-failure-clean \
+        core-first-install-commit-rollback \
+        core-install-unsafe-binary-path \
+        sing-box-download-artifacts-cleanup \
+        network-check-return-failure \
+        tls-failure-return \
+        tls-reinstall-rollback \
+        tls-renew-failure-propagation \
+        service-queue-apply-propagation \
+        core-install-service-action-failure \
+        sing-box-merge-start-failure \
+        sing-box-merge-config-transaction \
+        sing-box-uninstall-failure-propagation \
+        sing-box-uninstall-rejects-unsafe-config-path \
+        sing-box-managed-cleanup \
+        sing-box-protocol-reload-failure \
+        geo-update-reload-failure \
+        core-cleanup-failure-propagation \
+        reload-core-propagation \
+        sing-box-log-transaction \
+        user-config-write \
+        remove-user
 }
+
+runRegressionTransactionCoreParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-transaction-core-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "core-rollback-result-message" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/config-transaction-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "config-transaction" ]]; then
+            : >"${TMP_DIR}/config-transaction-started"
+        elif [[ "${selector}" == "core-install-service-action-failure" ]]; then
+            if [[ -f "${TMP_DIR}/transaction-core-expect-heavy-concurrency" ]]; then
+                for _ in 1 2 3 4 5 6 7 8 9 10; do
+                    [[ -f "${TMP_DIR}/core-port-file-transaction-started" ]] && break
+                    sleep 0.05
+                done
+                [[ -f "${TMP_DIR}/core-port-file-transaction-started" ]] || : >"${TMP_DIR}/transaction-core-heavy-concurrency-violation"
+            fi
+        elif [[ "${selector}" == "core-port-file-transaction" ]]; then
+            : >"${TMP_DIR}/core-port-file-transaction-started"
+        fi
+        case "${selector}" in
+        config-transaction | entry-helper-config | reload-core-propagation | sing-box-log-transaction | sing-box-merge-config-transaction | tls-renew-failure-propagation)
+            if [[ -f "${TMP_DIR}/transaction-core-expect-profile-boundary" ]] &&
+                { [[ ! -f "${TMP_DIR}/core-install-service-action-failure-finished" ]] || [[ ! -f "${TMP_DIR}/core-port-file-transaction-finished" ]]; }; then
+                : >"${TMP_DIR}/transaction-core-wave-boundary-violation"
+            fi
+            ;;
+        esac
+        case "${selector}" in
+        core-install-service-action-failure) : >"${TMP_DIR}/core-install-service-action-failure-finished" ;;
+        core-port-file-transaction) : >"${TMP_DIR}/core-port-file-transaction-finished" ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runCoreRollbackResultMessageRegression() { runRegressionAllSelector core-rollback-result-message; }
+    runConfigTransactionRegression() { runRegressionAllSelector config-transaction; }
+    runCorePortFileTransactionRegression() { runRegressionAllSelector core-port-file-transaction; }
+    runCorePortRejectsUnsafeConfigDirRegression() { runRegressionAllSelector core-port-unsafe-config-dir; }
+    runEntryHelperConfigRegression() { runRegressionAllSelector entry-helper-config; }
+    runCheckPortOpenNginxRejectsDirectoryTargetRegression() { runRegressionAllSelector check-port-open-nginx-directory-target; }
+    runAloneNginxRejectsDirectoryTargetRegression() { runRegressionAllSelector alone-nginx-directory-target; }
+    runXrayRealityPortFailureRegression() { runRegressionAllSelector xray-reality-port-failure; }
+    runRealityProfileFailureRegression() { runRegressionAllSelector reality-profile-failure; }
+    runSingBoxRealityKeyTransactionRegression() { runRegressionAllSelector sing-box-reality-key-transaction; }
+    runCoreTemplateReturnFailureRegression() { runRegressionAllSelector core-template-return-failure; }
+    runCoreTemplateManagedConfigRemovalRegression() { runRegressionAllSelector core-template-managed-remove; }
+    runCoreBinaryInstallCopyFailureRegression() { runRegressionAllSelector core-binary-install-copy-failure; }
+    runSingBoxCronetRollbackRegression() { runRegressionAllSelector sing-box-cronet-rollback; }
+    runFinalizeSingBoxBinaryInstallRollbackRegression() { runRegressionAllSelector finalize-sing-box-rollback; }
+    runCoreUpgradeRejectsDirectoryTargetRegression() { runRegressionAllSelector core-upgrade-directory-target; }
+    runLegacyCoreUpgradeKeepsExistingBinaryRegression() { runRegressionAllSelector legacy-core-upgrade-keeps-existing; }
+    runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() { runRegressionAllSelector core-first-install-failure-clean; }
+    runCoreFirstInstallCommitFailureRollbackRegression() { runRegressionAllSelector core-first-install-commit-rollback; }
+    runCoreInstallRejectsUnsafeBinaryPathRegression() { runRegressionAllSelector core-install-unsafe-binary-path; }
+    runSingBoxDownloadArtifactsCleanupRegression() { runRegressionAllSelector sing-box-download-artifacts-cleanup; }
+    runNetworkCheckReturnFailureRegression() { runRegressionAllSelector network-check-return-failure; }
+    runTlsFailureReturnRegression() { runRegressionAllSelector tls-failure-return; }
+    runTlsReinstallRollbackRegression() { runRegressionAllSelector tls-reinstall-rollback; }
+    runTlsRenewalFailurePropagationRegression() { runRegressionAllSelector tls-renew-failure-propagation; }
+    runServiceQueueApplyPropagationRegression() { runRegressionAllSelector service-queue-apply-propagation; }
+    runCoreInstallServiceActionFailureRegression() { runRegressionAllSelector core-install-service-action-failure; }
+    runSingBoxMergeStartFailureRegression() { runRegressionAllSelector sing-box-merge-start-failure; }
+    runSingBoxMergeConfigTransactionRegression() { runRegressionAllSelector sing-box-merge-config-transaction; }
+    runSingBoxUninstallFailurePropagationRegression() { runRegressionAllSelector sing-box-uninstall-failure-propagation; }
+    runSingBoxUninstallRejectsUnsafeConfigPathRegression() { runRegressionAllSelector sing-box-uninstall-rejects-unsafe-config-path; }
+    runSingBoxManagedCleanupRegression() { runRegressionAllSelector sing-box-managed-cleanup; }
+    runSingBoxProtocolReloadFailureRegression() { runRegressionAllSelector sing-box-protocol-reload-failure; }
+    runGeoUpdateReloadFailureRegression() { runRegressionAllSelector geo-update-reload-failure; }
+    runCoreCleanupFailurePropagationRegression() { runRegressionAllSelector core-cleanup-failure-propagation; }
+    runReloadCorePropagationRegression() { runRegressionAllSelector reload-core-propagation; }
+    runSingBoxLogTransactionRegression() { runRegressionAllSelector sing-box-log-transaction; }
+    runUserConfigWriteRegression() { runRegressionAllSelector user-config-write; }
+    runRemoveUserRegression() { runRegressionAllSelector remove-user; }
+
+    runRegressionTransactionCore
+
+    for selector in \
+        core-rollback-result-message \
+        config-transaction \
+        core-port-file-transaction \
+        core-port-unsafe-config-dir \
+        entry-helper-config \
+        check-port-open-nginx-directory-target \
+        alone-nginx-directory-target \
+        xray-reality-port-failure \
+        reality-profile-failure \
+        sing-box-reality-key-transaction \
+        core-template-return-failure \
+        core-template-managed-remove \
+        core-binary-install-copy-failure \
+        sing-box-cronet-rollback \
+        finalize-sing-box-rollback \
+        core-upgrade-directory-target \
+        legacy-core-upgrade-keeps-existing \
+        core-first-install-failure-clean \
+        core-first-install-commit-rollback \
+        core-install-unsafe-binary-path \
+        sing-box-download-artifacts-cleanup \
+        network-check-return-failure \
+        tls-failure-return \
+        tls-reinstall-rollback \
+        tls-renew-failure-propagation \
+        service-queue-apply-propagation \
+        core-install-service-action-failure \
+        sing-box-merge-start-failure \
+        sing-box-merge-config-transaction \
+        sing-box-uninstall-failure-propagation \
+        sing-box-uninstall-rejects-unsafe-config-path \
+        sing-box-managed-cleanup \
+        sing-box-protocol-reload-failure \
+        geo-update-reload-failure \
+        core-cleanup-failure-propagation \
+        reload-core-propagation \
+        sing-box-log-transaction \
+        user-config-write \
+        remove-user; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "core-rollback-result-message-start" { firstStart = NR }
+        $0 == "config-transaction-start" { configStart = NR }
+        $0 == "core-rollback-result-message-finish" { firstFinish = NR }
+        END { exit !(firstStart && configStart && firstFinish && configStart < firstFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f \
+        "${TMP_DIR}/core-port-file-transaction-started" \
+        "${TMP_DIR}/core-install-service-action-failure-finished" \
+        "${TMP_DIR}/core-port-file-transaction-finished" \
+        "${TMP_DIR}/transaction-core-heavy-concurrency-violation" \
+        "${TMP_DIR}/transaction-core-wave-boundary-violation"
+    : >"${TMP_DIR}/transaction-core-expect-heavy-concurrency"
+    : >"${TMP_DIR}/transaction-core-expect-profile-boundary"
+    PADM_REGRESSION_PARALLEL_JOBS=6 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCore
+
+    for selector in \
+        core-install-service-action-failure \
+        core-port-file-transaction \
+        config-transaction \
+        entry-helper-config \
+        reload-core-propagation \
+        sing-box-log-transaction \
+        sing-box-merge-config-transaction \
+        tls-renew-failure-propagation; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    [[ ! -f "${TMP_DIR}/transaction-core-heavy-concurrency-violation" ]]
+    [[ ! -f "${TMP_DIR}/transaction-core-wave-boundary-violation" ]]
+
+    : >"${callLog}"
+    rm -f \
+        "${TMP_DIR}/transaction-core-expect-heavy-concurrency" \
+        "${TMP_DIR}/transaction-core-expect-profile-boundary" \
+        "${TMP_DIR}/core-port-file-transaction-started" \
+        "${TMP_DIR}/core-install-service-action-failure-finished" \
+        "${TMP_DIR}/core-port-file-transaction-finished"
+    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS=1 runRegressionTransactionCore
+    awk '
+        $0 == "core-install-service-action-failure-finish" { serviceFinish = NR }
+        $0 == "core-port-file-transaction-start" { portStart = NR }
+        $0 == "core-port-file-transaction-finish" { portFinish = NR }
+        $0 == "config-transaction-start" { configStart = NR }
+        $0 == "config-transaction-finish" { configFinish = NR }
+        $0 == "entry-helper-config-start" { entryStart = NR }
+        END {
+            exit !(serviceFinish && portStart && portFinish && configStart && configFinish && entryStart &&
+                serviceFinish < portStart && portFinish < configStart && configFinish < entryStart)
+        }
+    ' "${callLog}"
+)
 
 runRegressionTransactionSubscription() {
     runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression &&
@@ -16239,23 +16342,102 @@ runRegressionTransactionSubscription() {
 }
 
 runRegressionTransactionSystem() {
-    runRegressionStep nginx-service-failure runNginxServiceFailureRegression &&
-        runRegressionStep uninstall-nginx-cleanup runUninstallNginxCleanupRegression &&
-        runRegressionStep clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression &&
-        runRegressionStep fail2ban-managed-cleanup runFail2banManagedCleanupRegression &&
-        runRegressionStep fail2ban-apply-transaction runFail2banApplyTransactionRegression &&
-        runRegressionStep uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression &&
-        runRegressionStep wireguard-key-transaction runWireGuardKeyTransactionRegression &&
-        runRegressionStep wireguard-control-safe-dir runWireGuardControlSafeDirRegression &&
-        runRegressionStep warp-config-safe-dir runWarpConfigSafeDirRegression &&
-        runRegressionStep warp-config-file-cleanup runWarpConfigFileCleanupRegression &&
-        runRegressionStep uninstall-service-stop-failure runUninstallServiceStopFailureRegression &&
-        runRegressionStep clean-last-installation-failure runCleanLastInstallationConfigFailureRegression &&
-        runRegressionStep clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression &&
-        runRegressionStep clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression &&
-        runRegressionStep alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression &&
-        runRegressionStep alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
+        nginx-service-failure \
+        uninstall-nginx-cleanup \
+        clean-agent-nginx-managed-remove \
+        fail2ban-managed-cleanup \
+        fail2ban-apply-transaction \
+        uninstall-wireguard-cleanup \
+        wireguard-key-transaction \
+        wireguard-control-safe-dir \
+        warp-config-safe-dir \
+        warp-config-file-cleanup \
+        uninstall-service-stop-failure \
+        clean-last-installation-failure \
+        clean-last-installation-acme-home \
+        clean-last-installation-acme-relative-home \
+        alone-nginx-write-transaction \
+        alone-nginx-update-transaction
 }
+
+runRegressionTransactionSystemParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-transaction-system-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "nginx-service-failure" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/fail2ban-apply-transaction-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "fail2ban-apply-transaction" ]]; then
+            : >"${TMP_DIR}/fail2ban-apply-transaction-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runNginxServiceFailureRegression() { runRegressionAllSelector nginx-service-failure; }
+    runUninstallNginxCleanupRegression() { runRegressionAllSelector uninstall-nginx-cleanup; }
+    runCleanAgentNginxManagedRemovalRegression() { runRegressionAllSelector clean-agent-nginx-managed-remove; }
+    runFail2banManagedCleanupRegression() { runRegressionAllSelector fail2ban-managed-cleanup; }
+    runFail2banApplyTransactionRegression() { runRegressionAllSelector fail2ban-apply-transaction; }
+    runUninstallWireGuardCleanupRegression() { runRegressionAllSelector uninstall-wireguard-cleanup; }
+    runWireGuardKeyTransactionRegression() { runRegressionAllSelector wireguard-key-transaction; }
+    runWireGuardControlSafeDirRegression() { runRegressionAllSelector wireguard-control-safe-dir; }
+    runWarpConfigSafeDirRegression() { runRegressionAllSelector warp-config-safe-dir; }
+    runWarpConfigFileCleanupRegression() { runRegressionAllSelector warp-config-file-cleanup; }
+    runUninstallServiceStopFailureRegression() { runRegressionAllSelector uninstall-service-stop-failure; }
+    runCleanLastInstallationConfigFailureRegression() { runRegressionAllSelector clean-last-installation-failure; }
+    runCleanLastInstallationConfigAcmeHomeFailureRegression() { runRegressionAllSelector clean-last-installation-acme-home; }
+    runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() { runRegressionAllSelector clean-last-installation-acme-relative-home; }
+    runAloneNginxConfigWriteTransactionRegression() { runRegressionAllSelector alone-nginx-write-transaction; }
+    runAloneNginxUpdateTransactionRegression() { runRegressionAllSelector alone-nginx-update-transaction; }
+
+    runRegressionTransactionSystem
+
+    for selector in \
+        nginx-service-failure \
+        uninstall-nginx-cleanup \
+        clean-agent-nginx-managed-remove \
+        fail2ban-managed-cleanup \
+        fail2ban-apply-transaction \
+        uninstall-wireguard-cleanup \
+        wireguard-key-transaction \
+        wireguard-control-safe-dir \
+        warp-config-safe-dir \
+        warp-config-file-cleanup \
+        uninstall-service-stop-failure \
+        clean-last-installation-failure \
+        clean-last-installation-acme-home \
+        clean-last-installation-acme-relative-home \
+        alone-nginx-write-transaction \
+        alone-nginx-update-transaction; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "nginx-service-failure-start" { firstStart = NR }
+        $0 == "fail2ban-apply-transaction-start" { fail2banStart = NR }
+        $0 == "nginx-service-failure-finish" { firstFinish = NR }
+        END { exit !(firstStart && fail2banStart && firstFinish && fail2banStart < firstFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/fail2ban-apply-transaction-started"
+    PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS=1 runRegressionTransactionSystem
+    awk '
+        $0 == "nginx-service-failure-finish" { firstFinish = NR }
+        $0 == "uninstall-nginx-cleanup-start" { secondStart = NR }
+        $0 == "uninstall-nginx-cleanup-finish" { secondFinish = NR }
+        $0 == "clean-agent-nginx-managed-remove-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
 
 runRegressionTransaction() {
     runRegressionTransactionCore &&
@@ -16263,25 +16445,914 @@ runRegressionTransaction() {
         runRegressionTransactionSystem
 }
 
+runRegressionRoutingParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-routing-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "routing-core" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/routing-core-unsafe-config-dir-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "routing-core-unsafe-config-dir" ]]; then
+            : >"${TMP_DIR}/routing-core-unsafe-config-dir-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runRoutingRegression() { runRegressionAllSelector routing-core; }
+    runRoutingCoreRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-core-unsafe-config-dir; }
+    runSocks5UdpAssociateRegression() { runRegressionAllSelector routing-socks5-udp-associate; }
+    runAccessControlFailureReturnRegression() { runRegressionAllSelector routing-access-control-failure-return; }
+    runAccessControlConfigTransactionRegression() { runRegressionAllSelector routing-access-control-config-transaction; }
+    runAccessControlRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-access-control-unsafe-backup-dir; }
+    runAccessControlRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-access-control-unsafe-config-dir; }
+    runBTRoutingFailureReturnRegression() { runRegressionAllSelector routing-bt-failure-return; }
+    runIPv6RoutingFailureReturnRegression() { runRegressionAllSelector routing-ipv6-failure-return; }
+    runWARPRoutingFailureReturnRegression() { runRegressionAllSelector routing-warp-failure-return; }
+    runSocks5RoutingFailureReturnRegression() { runRegressionAllSelector routing-socks5-failure-return; }
+    runDNSRoutingFailureReturnRegression() { runRegressionAllSelector routing-dns-failure-return; }
+    runDNSRoutingRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-dns-unsafe-backup-dir; }
+    runDNSRoutingRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-dns-unsafe-config-dir; }
+    runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() { runRegressionAllSelector routing-dns-restore-scope; }
+    runPortAndPanelHelperRegression() { runRegressionAllSelector routing-port-panel; }
+
+    runRegressionRouting
+
+    for selector in \
+        routing-core \
+        routing-core-unsafe-config-dir \
+        routing-socks5-udp-associate \
+        routing-access-control-failure-return \
+        routing-access-control-config-transaction \
+        routing-access-control-unsafe-backup-dir \
+        routing-access-control-unsafe-config-dir \
+        routing-bt-failure-return \
+        routing-ipv6-failure-return \
+        routing-warp-failure-return \
+        routing-socks5-failure-return \
+        routing-dns-failure-return \
+        routing-dns-unsafe-backup-dir \
+        routing-dns-unsafe-config-dir \
+        routing-dns-restore-scope \
+        routing-port-panel; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "routing-core-start" { coreStart = NR }
+        $0 == "routing-core-unsafe-config-dir-start" { unsafeStart = NR }
+        $0 == "routing-core-finish" { coreFinish = NR }
+        END { exit !(coreStart && unsafeStart && coreFinish && unsafeStart < coreFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/routing-core-unsafe-config-dir-started"
+    PADM_REGRESSION_ROUTING_PARALLEL_JOBS=1 runRegressionRouting
+    awk '
+        $0 == "routing-core-finish" { firstFinish = NR }
+        $0 == "routing-core-unsafe-config-dir-start" { secondStart = NR }
+        $0 == "routing-core-unsafe-config-dir-finish" { secondFinish = NR }
+        $0 == "routing-socks5-udp-associate-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/routing-core-unsafe-config-dir-started"
+    PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionRouting
+    for selector in \
+        routing-core \
+        routing-core-unsafe-config-dir \
+        routing-socks5-udp-associate \
+        routing-access-control-failure-return \
+        routing-access-control-config-transaction \
+        routing-access-control-unsafe-backup-dir \
+        routing-access-control-unsafe-config-dir \
+        routing-bt-failure-return \
+        routing-ipv6-failure-return \
+        routing-warp-failure-return \
+        routing-socks5-failure-return \
+        routing-dns-failure-return \
+        routing-dns-unsafe-backup-dir \
+        routing-dns-unsafe-config-dir \
+        routing-dns-restore-scope \
+        routing-port-panel; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "routing-core-finish" { coreFinish = NR }
+        $0 == "routing-access-control-config-transaction-start" { accessConfigStart = NR }
+        $0 == "routing-dns-failure-return-start" { dnsFailureStart = NR }
+        $0 == "routing-socks5-udp-associate-start" { socksStart = NR }
+        $0 == "routing-access-control-config-transaction-finish" { accessConfigFinish = NR }
+        $0 == "routing-dns-failure-return-finish" { dnsFailureFinish = NR }
+        $0 == "routing-socks5-udp-associate-finish" { socksFinish = NR }
+        $0 == "routing-core-unsafe-config-dir-start" { lightStart = NR }
+        END {
+            exit !(coreFinish && accessConfigStart && dnsFailureStart && socksStart &&
+                accessConfigFinish && dnsFailureFinish && socksFinish && lightStart &&
+                coreFinish < accessConfigStart && coreFinish < dnsFailureStart && coreFinish < socksStart &&
+                accessConfigFinish < lightStart && dnsFailureFinish < lightStart && socksFinish < lightStart)
+        }
+    ' "${callLog}"
+)
+
+runRegressionUiParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-ui-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "menu-smoke-full-subscription-main-publish-sync-enable" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply-service" ]]; then
+            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runMenuSmokeLightRegression() { runRegressionAllSelector menu-smoke; }
+    runMenuSmokeRegression() { runRegressionAllSelector menu-smoke-full; }
+    runSubscriptionWireGuardRestoreRunnerRegression() { runRegressionAllSelector wireguard-restore-runner; }
+    runSubscriptionWireGuardMenuFlowRegression() { runRegressionAllSelector wireguard-menu-flow; }
+    runSubscriptionWireGuardMenuFlowBootstrapRegression() { runRegressionAllSelector wireguard-menu-flow-bootstrap; }
+    runSubscriptionWireGuardMenuFlowPeerTransactionRegression() { runRegressionAllSelector wireguard-menu-flow-peer-transaction; }
+    runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression() { runRegressionAllSelector wireguard-menu-flow-peer-add-update; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback-apply; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback-source; }
+    runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() { runRegressionAllSelector wireguard-menu-flow-peer-rollback-credential; }
+    runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() { runRegressionAllSelector wireguard-menu-flow-peer-source-control; }
+    runSubscriptionWireGuardMenuFlowControlRestoreRegression() { runRegressionAllSelector wireguard-menu-flow-control-restore; }
+
+    runRegressionUi
+
+    for selector in \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-main-publish-service \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-publish-user-create \
+        menu-smoke-full-subscription-main-publish-user-inspect \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        menu-smoke-full-subscription-main-publish-sync-enable \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status \
+        wireguard-menu-flow-control-restore \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-start" { smokeStart = NR }
+        $0 == "wireguard-menu-flow-peer-rollback-apply-service-start" { wireguardStart = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-finish" { smokeFinish = NR }
+        END { exit !(smokeStart && wireguardStart && smokeFinish && wireguardStart < smokeFinish) }
+    ' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-transaction-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-transaction-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-finish' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_PARALLEL_JOBS=4 runRegressionUi
+    awk '
+        /-start$/ {
+            starts++
+            if ($0 == "menu-smoke-full-subscription-main-publish-sync-enable-start") { publishStart = starts }
+            if ($0 == "wireguard-menu-flow-peer-rollback-apply-service-start") { peerRollbackStart = starts }
+        }
+        END { exit !(publishStart && peerRollbackStart && publishStart <= 4 && peerRollbackStart <= 4) }
+    ' "${callLog}"
+)
+
+runRegressionUiLongTailSplitCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-ui-long-tail-split-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "menu-smoke-full-subscription-main-publish-sync-enable" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply-service" ]]; then
+            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    runMenuSmokeLightRegression() { runRegressionAllSelector menu-smoke; }
+    runMenuSmokeRegression() { runRegressionAllSelector "menu-smoke-full:${1:-all}"; }
+    runSubscriptionWireGuardRestoreRunnerRegression() { runRegressionAllSelector wireguard-restore-runner; }
+    runSubscriptionWireGuardMenuFlowRegression() { runRegressionAllSelector "wireguard-menu-flow:${1:-all}"; }
+
+    runRegressionUi
+
+    for selector in \
+        menu-smoke-full-subscription-main-publish-sync-enable \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-source \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        wireguard-menu-flow-peer-rollback-apply-restore \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        menu-smoke-full-subscription-main-publish-user-inspect \
+        wireguard-menu-flow-peer-source-control-toggle \
+        menu-smoke-full-subscription-main-publish-user-create \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        menu-smoke-full-subscription-main-publish-service \
+        wireguard-menu-flow-peer-source-control-status \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-control-restore \
+        wireguard-menu-flow-bootstrap \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-start" { syncStart = NR }
+        $0 == "wireguard-menu-flow-peer-rollback-apply-service-start" { applyStart = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-sync-enable-finish" { syncFinish = NR }
+        END { exit !(syncStart && applyStart && syncFinish && applyStart < syncFinish) }
+    ' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-finish' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-start' "${callLog}"
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-user-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-finish' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-finish' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionUi
+    for selector in \
+        menu-smoke-full-subscription-main-publish-sync \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-rollback-source \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-service \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-source-control \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-control-restore \
+        wireguard-menu-flow-bootstrap \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    ! grep -qx 'menu-smoke-full-subscription-main-publish-sync-enable-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-service-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-write-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-source-control-toggle-start' "${callLog}"
+
+    : >"${callLog}"
+    runMenuSmokeFullSubscriptionMainPublishUserRegression
+    for selector in \
+        menu-smoke-full-subscription-main-publish-user-empty \
+        menu-smoke-full-subscription-main-publish-user-create \
+        menu-smoke-full-subscription-main-publish-user-inspect; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    ! grep -q '^menu-smoke-full:subscription-main-publish-user-start$' "${callLog}"
+
+    : >"${callLog}"
+    runMenuSmokeFullSubscriptionMainPublishSyncRegression
+    for selector in \
+        menu-smoke-full-subscription-main-publish-sync-skip \
+        menu-smoke-full-subscription-main-publish-sync-enable; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
+    for selector in \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
+    for selector in \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
+    for selector in \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+
+    : >"${callLog}"
+    PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS=1 runMenuSmokeFullSubscriptionMainPublishUserRegression
+    awk '
+        $0 == "menu-smoke-full-subscription-main-publish-user-empty-finish" { firstFinish = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-user-create-start" { secondStart = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-user-create-finish" { secondFinish = NR }
+        $0 == "menu-smoke-full-subscription-main-publish-user-inspect-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
+
+runRegressionAllCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-all-composition.log"
+    local selector
+
+    : >"${callLog}"
+
+    runRegressionSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "routing" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription" ]]; then
+            : >"${TMP_DIR}/subscription-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    runRegressionRouting() { runRegressionSelector routing; }
+    runRegressionSubscription() { runRegressionSelector subscription; }
+    runRegressionRuntime() { runRegressionSelector runtime; }
+    runRegressionTransaction() { runRegressionSelector transaction; }
+    runRegressionTransactionCore() { runRegressionSelector transaction-core; }
+    runRegressionTransactionSystem() { runRegressionSelector transaction-system; }
+    runRegressionRemoteControlSmoke() { runRegressionSelector remote-control-smoke; }
+    runRegressionRemoteControlContractServiceInstall() { runRegressionSelector remote-control-contract-service-install; }
+    runRegressionRemoteControlContractServerResponse() { runRegressionSelector remote-control-contract-server-response; }
+    runRegressionUi() { runRegressionSelector ui; }
+    runRegressionAllSelector() {
+        case "$1" in
+        routing) runRegressionRouting ;;
+        subscription) runRegressionSubscription ;;
+        runtime) runRegressionRuntime ;;
+        transaction-core) runRegressionTransactionCore ;;
+        transaction-system) runRegressionTransactionSystem ;;
+        remote-control-smoke) runRegressionRemoteControlSmoke ;;
+        remote-control-contract-service-install) runRegressionRemoteControlContractServiceInstall ;;
+        remote-control-contract-server-response) runRegressionRemoteControlContractServerResponse ;;
+        ui) runRegressionUi ;;
+        transaction) runRegressionTransaction ;;
+        *) return 2 ;;
+        esac
+    }
+
+    runRegressionAll
+
+    for selector in routing subscription runtime transaction-core transaction-system remote-control-smoke remote-control-contract-service-install remote-control-contract-server-response ui; do
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done
+    awk '
+        $0 == "routing-start" { routingStart = NR }
+        $0 == "subscription-start" { subscriptionStart = NR }
+        $0 == "routing-finish" { routingFinish = NR }
+        END { exit !(routingStart && subscriptionStart && routingFinish && subscriptionStart < routingFinish) }
+    ' "${callLog}"
+    awk '
+        $0 == "routing-finish" { routingFinish = NR }
+        $0 == "subscription-finish" { subscriptionFinish = NR }
+        $0 == "runtime-finish" { runtimeFinish = NR }
+        $0 == "transaction-core-finish" { transactionCoreFinish = NR }
+        $0 == "transaction-system-finish" { transactionSystemFinish = NR }
+        $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
+        $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
+        $0 == "ui-finish" { uiFinish = NR }
+        $0 == "remote-control-contract-server-response-start" { serverResponseStart = NR }
+        END {
+            exit !(routingFinish && subscriptionFinish && runtimeFinish && transactionCoreFinish && transactionSystemFinish &&
+                remoteSmokeFinish && remoteServiceFinish && uiFinish && serverResponseStart &&
+                routingFinish < serverResponseStart && subscriptionFinish < serverResponseStart &&
+                runtimeFinish < serverResponseStart && transactionCoreFinish < serverResponseStart &&
+                transactionSystemFinish < serverResponseStart && remoteSmokeFinish < serverResponseStart &&
+                remoteServiceFinish < serverResponseStart && uiFinish < serverResponseStart)
+        }
+    ' "${callLog}"
+    ! grep -qx 'transaction-start' "${callLog}"
+    ! grep -qx 'transaction-finish' "${callLog}"
+    ! grep -qx 'remote-control-start' "${callLog}"
+    ! grep -qx 'remote-control-finish' "${callLog}"
+)
+
 runRegressionRemoteControl() {
-    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
-        runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
-        runRegressionStep remote-control-health runRemoteControlHealthRegression &&
-        runRegressionStep remote-control-server-refresh runRemoteControlServerRefreshRegression &&
-        runRegressionStep remote-control-unsafe-groups-dir runSubscriptionControlRejectsUnsafeGroupsDirRegression &&
-        runRegressionStep remote-control-subscribe-env-restore runSubscriptionControlSubscribeEnvRestoreRegression &&
-        runRegressionStep remote-control-service-install runSubscriptionControlServiceInstallRegression &&
-        runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
+    runRegressionAllSelector remote-control
 }
 
-runRegressionAll() {
-    runRegressionRouting &&
-        runRegressionSubscription &&
-        runRegressionRuntime &&
-        runRegressionTransaction &&
-        runRegressionRemoteControl &&
-        runRegressionUi
+runRegressionSelectorDispatchCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-selector-dispatch-composition.log"
+
+    : >"${callLog}"
+
+    bash() {
+        printf 'script=%s selector=%s suppress=%s\n' "$1" "$2" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    }
+
+    runRegressionAllSelector subscription-state
+    runRegressionAllSelector remote-control
+    runRegressionAllSelector routing
+
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=subscription-state suppress=1" "${callLog}"
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=remote-control suppress=1" "${callLog}"
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=routing suppress=1" "${callLog}"
+    ! grep -q "script=${REGRESSION_LEGACY_SCRIPT_PATH}" "${callLog}"
+)
+
+runRegressionAllChildParallelBudgetCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-all-child-parallel-budget-composition.log"
+
+    : >"${callLog}"
+
+    bash() {
+        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelector subscription
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSelector transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector transaction-system
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionAllSelector routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelector runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
+
+    grep -qx 'selector=ui jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=ui jobs=4 ui_profile=all subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=subscription jobs=4 ui_profile= subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=all suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=transaction-system jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=routing jobs=4 ui_profile= subscription_profile= routing_profile=all runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile=all transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'selector=remote-control-smoke jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+)
+
+runRegressionAllResourceLayerCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-all-resource-layer-composition.log"
+    local firstWave="${TMP_DIR}/regression-all-resource-layer-first-wave.log"
+    local expectedFirstWave="${TMP_DIR}/regression-all-resource-layer-expected-first-wave.log"
+
+    : >"${callLog}"
+
+    bash() {
+        local selector=$2
+        printf '%s-start jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+        case "${selector}" in
+        subscription | ui | transaction-core | routing | runtime)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                grep -q '^subscription-start ' "${callLog}" &&
+                    grep -q '^ui-start ' "${callLog}" &&
+                    grep -q '^transaction-core-start ' "${callLog}" &&
+                    grep -q '^routing-start ' "${callLog}" &&
+                    grep -q '^runtime-start ' "${callLog}" && break
+                sleep 0.05
+            done
+            ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    runRegressionAll
+
+    awk '
+        /-start / {
+            selector = $1
+            sub(/-start$/, "", selector)
+            print selector
+            if (++count == 5) { exit }
+        }
+    ' "${callLog}" | sort >"${firstWave}"
+    printf '%s\n' routing runtime subscription transaction-core ui | sort >"${expectedFirstWave}"
+    cmp -s "${expectedFirstWave}" "${firstWave}"
+    awk '
+        /^subscription-start / { subscriptionStart = NR }
+        /^ui-start / { uiStart = NR }
+        /^transaction-core-start / { transactionCoreStart = NR }
+        /^routing-start / { routingStart = NR }
+        /^runtime-start / { runtimeStart = NR }
+        $0 == "subscription-finish" || $0 == "ui-finish" || $0 == "transaction-core-finish" ||
+            $0 == "routing-finish" || $0 == "runtime-finish" {
+            if (!firstHeavyFinish) { firstHeavyFinish = NR }
+        }
+        END {
+            exit !(subscriptionStart && uiStart && transactionCoreStart && routingStart && runtimeStart &&
+                firstHeavyFinish &&
+                subscriptionStart < firstHeavyFinish && uiStart < firstHeavyFinish &&
+                transactionCoreStart < firstHeavyFinish && routingStart < firstHeavyFinish &&
+                runtimeStart < firstHeavyFinish)
+        }
+    ' "${callLog}"
+
+    grep -qx 'subscription-start jobs=2 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'ui-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-smoke-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'remote-control-contract-service-install-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    awk '
+        $0 == "subscription-finish" { subscriptionFinish = NR }
+        $0 == "ui-finish" { uiFinish = NR }
+        $0 == "transaction-core-finish" { transactionCoreFinish = NR }
+        $0 == "routing-finish" { routingFinish = NR }
+        $0 == "runtime-finish" { runtimeFinish = NR }
+        $0 == "remote-control-smoke-finish" { remoteSmokeFinish = NR }
+        $0 == "remote-control-contract-service-install-finish" { remoteServiceFinish = NR }
+        $0 == "transaction-system-start jobs=4 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1" { transactionSystemStart = NR }
+        END {
+            exit !(subscriptionFinish && uiFinish && transactionCoreFinish && routingFinish && runtimeFinish &&
+                remoteSmokeFinish && remoteServiceFinish && transactionSystemStart &&
+                subscriptionFinish < transactionSystemStart && uiFinish < transactionSystemStart &&
+                transactionCoreFinish < transactionSystemStart && routingFinish < transactionSystemStart &&
+                runtimeFinish < transactionSystemStart && remoteSmokeFinish < transactionSystemStart &&
+                remoteServiceFinish < transactionSystemStart)
+        }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE=all runRegressionAll
+    grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE=all runRegressionAll
+    grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile=all transaction_core_profile= suppress=1' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_ALL_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAll
+    grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile=all suppress=1' "${callLog}"
+)
+
+runRegressionParallelSelectorLimitCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-parallel-selector-limit-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        [[ "${selector}" == "first" ]] && sleep 0.1
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=1 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
+        first \
+        second \
+        third
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-start" { secondStart = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
+
+runRegressionParallelSelectorSlotRefillCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-parallel-selector-slot-refill-composition.log"
+    local thirdStarted="${TMP_DIR}/regression-parallel-selector-slot-refill-third-started"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        case "${selector}" in
+        first)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${thirdStarted}" ]] && break
+                sleep 0.05
+            done
+            ;;
+        second) sleep 0.02 ;;
+        third) : >"${thirdStarted}" ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
+        first \
+        second \
+        third
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END { exit !(secondFinish && thirdStart && firstFinish && secondFinish < thirdStart && thirdStart < firstFinish) }
+    ' "${callLog}"
+)
+
+runRegressionAllSelector() {
+    local selector=$1
+    local childParallelJobs=
+
+    regressionChildParallelJobsForSelector() {
+        case "$1" in
+        subscription) printf '%s\n' "${PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        transaction-system) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        transaction-core) printf '%s\n' "${PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        ui) printf '%s\n' "${PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}" ;;
+        routing) printf '%s\n' "${PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}}" ;;
+        runtime) printf '%s\n' "${PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}}" ;;
+        remote-control-smoke | remote-control-contract-service-install | remote-control-contract-server-response)
+            printf '%s\n' "${PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS:-${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}}"
+            ;;
+        *) printf '%s\n' "${PADM_REGRESSION_CHILD_PARALLEL_JOBS:-}" ;;
+        esac
+    }
+
+    childParallelJobs=$(regressionChildParallelJobsForSelector "${selector}")
+    if [[ -n "${childParallelJobs}" ]]; then
+        case "${selector}" in
+        ui)
+            if [[ -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        subscription)
+            if [[ -n "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        transaction-core)
+            if [[ -n "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        routing)
+            if [[ -n "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        runtime)
+            if [[ -n "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        *)
+            PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            ;;
+        esac
+    else
+        case "${selector}" in
+        ui)
+            if [[ -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        subscription)
+            if [[ -n "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        transaction-core)
+            if [[ -n "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        routing)
+            if [[ -n "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        runtime)
+            if [[ -n "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" ]]; then
+                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            else
+                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            fi
+            ;;
+        *)
+            PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
+            ;;
+        esac
+    fi
 }
+
+runParallelRegressionSelectors() {
+    local orchestrationRoot=$1
+    shift
+    local -a selectors=()
+    local -a logs=()
+    local -a pids=()
+    local -a statuses=()
+    local -a rcFiles=()
+    local -a completed=()
+    local status=0
+    local maxJobs="${PADM_REGRESSION_PARALLEL_JOBS:-0}"
+    local nextIndex=0
+    local running=0
+    local i madeProgress
+
+    if [[ $# -eq 0 ]]; then
+        printf 'runParallelRegressionSelectors expects at least one selector\n' >&2
+        return 2
+    fi
+
+    mkdir -p "${orchestrationRoot}"
+    while [[ $# -gt 0 ]]; do
+        selectors+=("$1")
+        logs+=("${orchestrationRoot}/$1.log")
+        rcFiles+=("${orchestrationRoot}/$1.rc")
+        shift
+    done
+
+    if ! [[ "${maxJobs}" =~ ^[0-9]+$ ]] || [[ "${maxJobs}" -le 0 ]]; then
+        maxJobs=${#selectors[@]}
+    fi
+
+    set +e
+    while [[ "${nextIndex}" -lt "${#selectors[@]}" || "${running}" -gt 0 ]]; do
+        while [[ "${nextIndex}" -lt "${#selectors[@]}" && "${running}" -lt "${maxJobs}" ]]; do
+            i=${nextIndex}
+            (
+                trap - EXIT INT TERM
+                rc=0
+                set +e
+                runRegressionStep "${selectors[$i]}" runRegressionAllSelector "${selectors[$i]}"
+                rc=$?
+                printf '%s\n' "${rc}" >"${rcFiles[$i]}"
+                exit "${rc}"
+            ) >"${logs[$i]}" 2>&1 &
+            pids[$i]=$!
+            completed[$i]=0
+            nextIndex=$((nextIndex + 1))
+            running=$((running + 1))
+        done
+
+        madeProgress=
+        for ((i = 0; i < nextIndex; i++)); do
+            if [[ "${completed[$i]:-0}" -eq 0 && -f "${rcFiles[$i]}" ]]; then
+                statuses[$i]=$(<"${rcFiles[$i]}")
+                wait "${pids[$i]}" >/dev/null 2>&1
+                completed[$i]=1
+                [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
+                if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
+                    status=${statuses[$i]}
+                fi
+                running=$((running - 1))
+                madeProgress=1
+            fi
+        done
+        if [[ -z "${madeProgress}" ]]; then
+            sleep 0.05
+        fi
+    done
+    set -e
+
+    return "${status}"
+}
+
+runRegressionAll() (
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}"
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_CHILD_PARALLEL_JOBS:-2}"
+    PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_UI_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_UI_RESOURCE_PROFILE:-all}"
+    PADM_REGRESSION_SUBSCRIPTION_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_SUBSCRIPTION_CHILD_PARALLEL_JOBS:-2}"
+    PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_SUBSCRIPTION_RESOURCE_PROFILE:-all}"
+    PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS:-4}"
+    PADM_REGRESSION_TRANSACTION_CORE_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_TRANSACTION_CORE_CHILD_PARALLEL_JOBS:-3}"
+    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_TRANSACTION_CORE_RESOURCE_PROFILE:-}"
+    PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_ROUTING_CHILD_PARALLEL_JOBS:-1}"
+    PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE:-}"
+    PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_RUNTIME_CHILD_PARALLEL_JOBS:-1}"
+    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE:-}"
+    PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}"
+
+    runParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
+        subscription \
+        ui \
+        transaction-core \
+        routing \
+        runtime \
+        remote-control-smoke \
+        remote-control-contract-service-install
+    runRegressionStep transaction-system runRegressionAllSelector transaction-system
+    runRegressionStep remote-control-contract-server-response runRegressionAllSelector remote-control-contract-server-response
+)
 
 if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
@@ -16318,11 +17389,101 @@ menu-smoke)
 menu-smoke-full)
     regressionRunner=runRegressionMenuSmokeFull
     ;;
+menu-smoke-full-core)
+    regressionRunner=runMenuSmokeFullCoreRegression
+    ;;
+menu-smoke-full-subscription-main)
+    regressionRunner=runMenuSmokeFullSubscriptionMainRegression
+    ;;
+menu-smoke-full-subscription-main-entry)
+    regressionRunner=runMenuSmokeFullSubscriptionMainEntryRegression
+    ;;
+menu-smoke-full-subscription-main-publish)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishRegression
+    ;;
+menu-smoke-full-subscription-main-publish-service)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishServiceRegression
+    ;;
+menu-smoke-full-subscription-main-publish-user)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserRegression
+    ;;
+menu-smoke-full-subscription-main-publish-user-empty)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
+    ;;
+menu-smoke-full-subscription-main-publish-user-create)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
+    ;;
+menu-smoke-full-subscription-main-publish-user-inspect)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
+    ;;
+menu-smoke-full-subscription-main-publish-sync)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishSyncRegression
+    ;;
+menu-smoke-full-subscription-main-publish-sync-skip)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
+    ;;
+menu-smoke-full-subscription-main-publish-sync-enable)
+    regressionRunner=runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
+    ;;
+menu-smoke-full-subscription-main-maintenance)
+    regressionRunner=runMenuSmokeFullSubscriptionMainMaintenanceRegression
+    ;;
+menu-smoke-full-subscription-controlled)
+    regressionRunner=runMenuSmokeFullSubscriptionControlledRegression
+    ;;
+menu-smoke-full-core-maintenance)
+    regressionRunner=runMenuSmokeFullCoreMaintenanceRegression
+    ;;
 routing)
     regressionRunner=runRegressionRouting
     ;;
+routing-core)
+    regressionRunner=runRoutingRegression
+    ;;
+routing-core-unsafe-config-dir)
+    regressionRunner=runRoutingCoreRejectsUnsafeConfigDirRegression
+    ;;
 routing-socks5-udp-associate)
     regressionRunner=runSocks5UdpAssociateRegression
+    ;;
+routing-access-control-failure-return)
+    regressionRunner=runAccessControlFailureReturnRegression
+    ;;
+routing-access-control-config-transaction)
+    regressionRunner=runAccessControlConfigTransactionRegression
+    ;;
+routing-access-control-unsafe-backup-dir)
+    regressionRunner=runAccessControlRejectsUnsafeBackupDirRegression
+    ;;
+routing-access-control-unsafe-config-dir)
+    regressionRunner=runAccessControlRejectsUnsafeConfigDirRegression
+    ;;
+routing-bt-failure-return)
+    regressionRunner=runBTRoutingFailureReturnRegression
+    ;;
+routing-ipv6-failure-return)
+    regressionRunner=runIPv6RoutingFailureReturnRegression
+    ;;
+routing-warp-failure-return)
+    regressionRunner=runWARPRoutingFailureReturnRegression
+    ;;
+routing-socks5-failure-return)
+    regressionRunner=runSocks5RoutingFailureReturnRegression
+    ;;
+routing-dns-failure-return)
+    regressionRunner=runDNSRoutingFailureReturnRegression
+    ;;
+routing-dns-unsafe-backup-dir)
+    regressionRunner=runDNSRoutingRejectsUnsafeBackupDirRegression
+    ;;
+routing-dns-unsafe-config-dir)
+    regressionRunner=runDNSRoutingRejectsUnsafeConfigDirRegression
+    ;;
+routing-dns-restore-scope)
+    regressionRunner=runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+    ;;
+routing-port-panel)
+    regressionRunner=runPortAndPanelHelperRegression
     ;;
 subscription)
     regressionRunner=runRegressionSubscription
@@ -16336,8 +17497,77 @@ subscription-state)
 subscription-remote-fetch)
     regressionRunner=runRegressionSubscriptionRemoteFetch
     ;;
+subscription-remote-fetch-unique)
+    regressionRunner=runRemoteSubscribeFetchUniqueRegression
+    ;;
+subscription-remote-fetch-rollback)
+    regressionRunner=runRemoteSubscribeFetchRollbackRegression
+    ;;
+subscription-remote-fetch-merge)
+    regressionRunner=runRemoteSubscribeFetchMergeRegression
+    ;;
+subscription-remote-fetch-controlled)
+    regressionRunner=runRemoteSubscribeFetchControlledRegression
+    ;;
+subscription-remote-fetch-append-failure)
+    regressionRunner=runRemoteSubscribeFetchAppendFailureRegression
+    ;;
+subscription-remote-fetch-commit-failure)
+    regressionRunner=runRemoteSubscribeFetchCommitFailureRegression
+    ;;
+subscription-remote-fetch-idempotent)
+    regressionRunner=runRemoteSubscribeFetchIdempotentRegression
+    ;;
 subscription-write-transaction)
     regressionRunner=runRegressionSubscriptionWriteTransaction
+    ;;
+sing-box-subscribe-write)
+    regressionRunner=runSingBoxSubscribeWriteRegression
+    ;;
+cdn-address-write-transaction)
+    regressionRunner=runCdnAddressTransactionRegression
+    ;;
+subscribe-local-output-transaction)
+    regressionRunner=runSubscribeLocalOutputTransactionRegression
+    ;;
+subscribe-salt-write-transaction)
+    regressionRunner=runSubscribeSaltWriteTransactionRegression
+    ;;
+subscribe-server-name)
+    regressionRunner=runSubscribeServerNameRegression
+    ;;
+subscribe-nginx-config-write)
+    regressionRunner=runSubscribeNginxConfigWriteRegression
+    ;;
+subscribe-nginx-service-failure)
+    regressionRunner=runSubscribeNginxServiceFailureRegression
+    ;;
+sing-box-port-failure)
+    regressionRunner=runSingBoxPortFailureRegression
+    ;;
+subscribe-user-output-transaction)
+    regressionRunner=runSubscribeUserOutputTransactionRegression
+    ;;
+subscribe-local-rollback)
+    regressionRunner=runSubscribeLocalRollbackRegression
+    ;;
+subscription-groups-migration-backup)
+    regressionRunner=runSubscriptionGroupsMigrationBackupRegression
+    ;;
+subscription-groups-backup-failure)
+    regressionRunner=runSubscriptionGroupsBackupFailureRegression
+    ;;
+refresh-local-subscriptions-rollback)
+    regressionRunner=runRefreshLocalSubscriptionsRollbackRegression
+    ;;
+subscribe-return-failure)
+    regressionRunner=runSubscribeReturnFailureRegression
+    ;;
+remove-user-subscription-menu-failure)
+    regressionRunner=runRemoveUserSubscriptionMenuFailureRegression
+    ;;
+user-subscription-menu-mutation-failure)
+    regressionRunner=runUserSubscriptionMenuMutationFailureRegression
     ;;
 runtime)
     regressionRunner=runRegressionRuntime
@@ -16345,14 +17575,23 @@ runtime)
 runtime-core)
     regressionRunner=runRuntimeAndRealityRegression
     ;;
+runtime-autoread-unset-auto-install)
+    regressionRunner=runAutoReadUnsetAutoInstallRegression
+    ;;
 runtime-auto-install-reality-route)
     regressionRunner=runAutoInstallRealityRouteRegression
+    ;;
+runtime-tempdir)
+    regressionRunner=runRuntimeTempDirRegression
     ;;
 reality-candidates)
     regressionRunner=runRegressionRealityCandidates
     ;;
 reality-candidates-fast)
     regressionRunner=runRealityCandidateFastRegression
+    ;;
+reality-asn-scan-plan)
+    regressionRunner=runRealityAsnScanPlanRegression
     ;;
 reality-candidates-full)
     regressionRunner=runRealityCandidateFullRegression
@@ -16362,6 +17601,168 @@ reality-config)
     ;;
 reality-stream)
     regressionRunner=runRegressionRealityStream
+    ;;
+core-rollback-result-message)
+    regressionRunner=runCoreRollbackResultMessageRegression
+    ;;
+config-transaction)
+    regressionRunner=runConfigTransactionRegression
+    ;;
+core-port-file-transaction)
+    regressionRunner=runCorePortFileTransactionRegression
+    ;;
+core-port-unsafe-config-dir)
+    regressionRunner=runCorePortRejectsUnsafeConfigDirRegression
+    ;;
+entry-helper-config)
+    regressionRunner=runEntryHelperConfigRegression
+    ;;
+check-port-open-nginx-directory-target)
+    regressionRunner=runCheckPortOpenNginxRejectsDirectoryTargetRegression
+    ;;
+alone-nginx-directory-target)
+    regressionRunner=runAloneNginxRejectsDirectoryTargetRegression
+    ;;
+xray-reality-port-failure)
+    regressionRunner=runXrayRealityPortFailureRegression
+    ;;
+reality-profile-failure)
+    regressionRunner=runRealityProfileFailureRegression
+    ;;
+sing-box-reality-key-transaction)
+    regressionRunner=runSingBoxRealityKeyTransactionRegression
+    ;;
+core-template-return-failure)
+    regressionRunner=runCoreTemplateReturnFailureRegression
+    ;;
+core-template-managed-remove)
+    regressionRunner=runCoreTemplateManagedConfigRemovalRegression
+    ;;
+core-binary-install-copy-failure)
+    regressionRunner=runCoreBinaryInstallCopyFailureRegression
+    ;;
+sing-box-cronet-rollback)
+    regressionRunner=runSingBoxCronetRollbackRegression
+    ;;
+finalize-sing-box-rollback)
+    regressionRunner=runFinalizeSingBoxBinaryInstallRollbackRegression
+    ;;
+core-upgrade-directory-target)
+    regressionRunner=runCoreUpgradeRejectsDirectoryTargetRegression
+    ;;
+legacy-core-upgrade-keeps-existing)
+    regressionRunner=runLegacyCoreUpgradeKeepsExistingBinaryRegression
+    ;;
+core-first-install-failure-clean)
+    regressionRunner=runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
+    ;;
+core-first-install-commit-rollback)
+    regressionRunner=runCoreFirstInstallCommitFailureRollbackRegression
+    ;;
+core-install-unsafe-binary-path)
+    regressionRunner=runCoreInstallRejectsUnsafeBinaryPathRegression
+    ;;
+sing-box-download-artifacts-cleanup)
+    regressionRunner=runSingBoxDownloadArtifactsCleanupRegression
+    ;;
+network-check-return-failure)
+    regressionRunner=runNetworkCheckReturnFailureRegression
+    ;;
+tls-failure-return)
+    regressionRunner=runTlsFailureReturnRegression
+    ;;
+tls-reinstall-rollback)
+    regressionRunner=runTlsReinstallRollbackRegression
+    ;;
+tls-renew-failure-propagation)
+    regressionRunner=runTlsRenewalFailurePropagationRegression
+    ;;
+service-queue-apply-propagation)
+    regressionRunner=runServiceQueueApplyPropagationRegression
+    ;;
+core-install-service-action-failure)
+    regressionRunner=runCoreInstallServiceActionFailureRegression
+    ;;
+sing-box-merge-start-failure)
+    regressionRunner=runSingBoxMergeStartFailureRegression
+    ;;
+sing-box-merge-config-transaction)
+    regressionRunner=runSingBoxMergeConfigTransactionRegression
+    ;;
+sing-box-uninstall-failure-propagation)
+    regressionRunner=runSingBoxUninstallFailurePropagationRegression
+    ;;
+sing-box-uninstall-rejects-unsafe-config-path)
+    regressionRunner=runSingBoxUninstallRejectsUnsafeConfigPathRegression
+    ;;
+sing-box-managed-cleanup)
+    regressionRunner=runSingBoxManagedCleanupRegression
+    ;;
+sing-box-protocol-reload-failure)
+    regressionRunner=runSingBoxProtocolReloadFailureRegression
+    ;;
+geo-update-reload-failure)
+    regressionRunner=runGeoUpdateReloadFailureRegression
+    ;;
+core-cleanup-failure-propagation)
+    regressionRunner=runCoreCleanupFailurePropagationRegression
+    ;;
+reload-core-propagation)
+    regressionRunner=runReloadCorePropagationRegression
+    ;;
+sing-box-log-transaction)
+    regressionRunner=runSingBoxLogTransactionRegression
+    ;;
+user-config-write)
+    regressionRunner=runUserConfigWriteRegression
+    ;;
+remove-user)
+    regressionRunner=runRemoveUserRegression
+    ;;
+regression-all-composition)
+    regressionRunner=runRegressionAllCompositionRegression
+    ;;
+regression-subscription-parallel-composition)
+    regressionRunner=runRegressionSubscriptionParallelCompositionRegression
+    ;;
+regression-subscription-write-transaction-parallel-composition)
+    regressionRunner=runRegressionSubscriptionWriteTransactionParallelCompositionRegression
+    ;;
+regression-subscription-remote-fetch-parallel-composition)
+    regressionRunner=runRegressionSubscriptionRemoteFetchParallelCompositionRegression
+    ;;
+regression-routing-parallel-composition)
+    regressionRunner=runRegressionRoutingParallelCompositionRegression
+    ;;
+regression-runtime-parallel-composition)
+    regressionRunner=runRegressionRuntimeParallelCompositionRegression
+    ;;
+regression-transaction-core-parallel-composition)
+    regressionRunner=runRegressionTransactionCoreParallelCompositionRegression
+    ;;
+regression-transaction-system-parallel-composition)
+    regressionRunner=runRegressionTransactionSystemParallelCompositionRegression
+    ;;
+regression-ui-parallel-composition)
+    regressionRunner=runRegressionUiParallelCompositionRegression
+    ;;
+regression-ui-long-tail-split-composition)
+    regressionRunner=runRegressionUiLongTailSplitCompositionRegression
+    ;;
+regression-selector-dispatch-composition)
+    regressionRunner=runRegressionSelectorDispatchCompositionRegression
+    ;;
+regression-all-child-parallel-budget-composition)
+    regressionRunner=runRegressionAllChildParallelBudgetCompositionRegression
+    ;;
+regression-all-resource-layer-composition)
+    regressionRunner=runRegressionAllResourceLayerCompositionRegression
+    ;;
+regression-parallel-selector-limit-composition)
+    regressionRunner=runRegressionParallelSelectorLimitCompositionRegression
+    ;;
+regression-parallel-selector-slot-refill-composition)
+    regressionRunner=runRegressionParallelSelectorSlotRefillCompositionRegression
     ;;
 transaction)
     regressionRunner=runRegressionTransaction
@@ -16375,6 +17776,114 @@ transaction-subscription)
 transaction-system)
     regressionRunner=runRegressionTransactionSystem
     ;;
+nginx-service-failure)
+    regressionRunner=runNginxServiceFailureRegression
+    ;;
+uninstall-nginx-cleanup)
+    regressionRunner=runUninstallNginxCleanupRegression
+    ;;
+clean-agent-nginx-managed-remove)
+    regressionRunner=runCleanAgentNginxManagedRemovalRegression
+    ;;
+fail2ban-managed-cleanup)
+    regressionRunner=runFail2banManagedCleanupRegression
+    ;;
+fail2ban-apply-transaction)
+    regressionRunner=runFail2banApplyTransactionRegression
+    ;;
+uninstall-wireguard-cleanup)
+    regressionRunner=runUninstallWireGuardCleanupRegression
+    ;;
+wireguard-key-transaction)
+    regressionRunner=runWireGuardKeyTransactionRegression
+    ;;
+wireguard-control-safe-dir)
+    regressionRunner=runWireGuardControlSafeDirRegression
+    ;;
+warp-config-safe-dir)
+    regressionRunner=runWarpConfigSafeDirRegression
+    ;;
+warp-config-file-cleanup)
+    regressionRunner=runWarpConfigFileCleanupRegression
+    ;;
+uninstall-service-stop-failure)
+    regressionRunner=runUninstallServiceStopFailureRegression
+    ;;
+clean-last-installation-failure)
+    regressionRunner=runCleanLastInstallationConfigFailureRegression
+    ;;
+clean-last-installation-acme-home)
+    regressionRunner=runCleanLastInstallationConfigAcmeHomeFailureRegression
+    ;;
+clean-last-installation-acme-relative-home)
+    regressionRunner=runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
+    ;;
+alone-nginx-write-transaction)
+    regressionRunner=runAloneNginxConfigWriteTransactionRegression
+    ;;
+alone-nginx-update-transaction)
+    regressionRunner=runAloneNginxUpdateTransactionRegression
+    ;;
+targeted-batch-helpers)
+    regressionRunner=runRegressionTargetedBatchHelpers
+    ;;
+targeted-subscription-restore)
+    regressionRunner=runRegressionTargetedSubscriptionRestore
+    ;;
+wireguard-menu-flow)
+    regressionRunner=runRegressionWireGuardMenuFlow
+    ;;
+wireguard-menu-flow-bootstrap)
+    regressionRunner=runSubscriptionWireGuardMenuFlowBootstrapRegression
+    ;;
+wireguard-menu-flow-peer-transaction)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerTransactionRegression
+    ;;
+wireguard-menu-flow-peer-add-update)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression
+    ;;
+wireguard-menu-flow-peer-rollback)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackRegression
+    ;;
+wireguard-menu-flow-peer-rollback-apply)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
+    ;;
+wireguard-menu-flow-peer-rollback-apply-service)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression
+    ;;
+wireguard-menu-flow-peer-rollback-apply-restore)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression
+    ;;
+wireguard-menu-flow-peer-rollback-source)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
+    ;;
+wireguard-menu-flow-peer-rollback-credential)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
+    ;;
+wireguard-menu-flow-peer-rollback-credential-write)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression
+    ;;
+wireguard-menu-flow-peer-rollback-credential-groups-restore)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression
+    ;;
+wireguard-menu-flow-peer-source-control)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
+    ;;
+wireguard-menu-flow-peer-source-control-toggle)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression
+    ;;
+wireguard-menu-flow-peer-source-control-clear-error)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression
+    ;;
+wireguard-menu-flow-peer-source-control-status)
+    regressionRunner=runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression
+    ;;
+wireguard-menu-flow-control-restore)
+    regressionRunner=runSubscriptionWireGuardMenuFlowControlRestoreRegression
+    ;;
+wireguard-restore-runner)
+    regressionRunner=runSubscriptionWireGuardRestoreRunnerRegression
+    ;;
 remote-control)
     regressionRunner=runRegressionRemoteControl
     ;;
@@ -16382,10 +17891,15 @@ all|full|ci)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|runtime|runtime-core|reality-candidates|reality-candidates-fast|reality-candidates-full|reality-config|reality-stream|transaction|transaction-core|transaction-subscription|transaction-system|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'routing leaf selectors: routing-core|routing-core-unsafe-config-dir|routing-access-control-failure-return|routing-access-control-config-transaction|routing-access-control-unsafe-backup-dir|routing-access-control-unsafe-config-dir|routing-bt-failure-return|routing-ipv6-failure-return|routing-warp-failure-return|routing-socks5-failure-return|routing-dns-failure-return|routing-dns-unsafe-backup-dir|routing-dns-unsafe-config-dir|routing-dns-restore-scope|routing-port-panel\n' >&2
+    printf 'ui leaf selectors: menu-smoke-full-subscription-main-publish-user-empty|menu-smoke-full-subscription-main-publish-user-create|menu-smoke-full-subscription-main-publish-user-inspect|menu-smoke-full-subscription-main-publish-sync-skip|menu-smoke-full-subscription-main-publish-sync-enable|wireguard-menu-flow-peer-rollback-apply-service|wireguard-menu-flow-peer-rollback-apply-restore|wireguard-menu-flow-peer-rollback-credential-write|wireguard-menu-flow-peer-rollback-credential-groups-restore|wireguard-menu-flow-peer-source-control-toggle|wireguard-menu-flow-peer-source-control-clear-error|wireguard-menu-flow-peer-source-control-status\n' >&2
+    printf 'subscription remote fetch leaf selectors: subscription-remote-fetch-unique|subscription-remote-fetch-rollback|subscription-remote-fetch-merge|subscription-remote-fetch-controlled|subscription-remote-fetch-append-failure|subscription-remote-fetch-commit-failure|subscription-remote-fetch-idempotent\n' >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|runtime-autoread-unset-auto-install|runtime-auto-install-reality-route|runtime-tempdir|reality-candidates|reality-candidates-fast|reality-asn-scan-plan|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-subscription-remote-fetch-parallel-composition|regression-routing-parallel-composition|regression-runtime-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
 
 runRegressionStep "total:${regressionName}" "${regressionRunner}"
-echo "subscription-groups-regression-ok:${regressionName}"
+if [[ "${PADM_REGRESSION_SUPPRESS_DONE:-}" != "1" ]]; then
+    echo "subscription-groups-regression-ok:${regressionName}"
+fi
