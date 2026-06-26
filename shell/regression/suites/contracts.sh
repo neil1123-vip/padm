@@ -179,6 +179,10 @@ runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 transaction-system runRegressionTransactionSystem
 transaction-subscription runRegressionTransactionSubscription
 config-transaction runConfigTransactionRegression
+core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression
+check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression
+alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression
+sing-box-managed-cleanup runSingBoxManagedCleanupRegression
 EOF
 }
 
