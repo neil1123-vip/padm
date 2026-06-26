@@ -50,6 +50,7 @@ registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke
 registerRegressionFunctionLeaf routing-socks5-udp-associate runSocks5UdpAssociateRegression
 registerRegressionFunctionLeaf subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
+registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 
 registerRegressionAggregateSequential all \
     routing \
