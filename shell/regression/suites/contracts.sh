@@ -226,6 +226,9 @@ warp-config-file-cleanup runWarpConfigFileCleanupRegression
 uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
 fail2ban-managed-cleanup runFail2banManagedCleanupRegression
+fail2ban-apply-transaction runFail2banApplyTransactionRegression
+uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression
+wireguard-key-transaction runWireGuardKeyTransactionRegression
 EOF
 
     return "${status}"
