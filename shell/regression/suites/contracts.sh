@@ -195,6 +195,10 @@ service-queue-apply-propagation runServiceQueueApplyPropagationRegression
 core-install-service-action-failure runCoreInstallServiceActionFailureRegression
 sing-box-merge-start-failure runSingBoxMergeStartFailureRegression
 sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression
+sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression
+sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
+geo-update-reload-failure runGeoUpdateReloadFailureRegression
+core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression
 EOF
 }
 
