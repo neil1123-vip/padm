@@ -35,13 +35,13 @@ while read -r selector runner; do
     registerRegressionScriptLeaf "${selector}" "${REGRESSION_LEGACY_SCRIPT}" "${runner}"
 done <<'EOF'
 ui ui
-routing routing
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
 registerRegressionFunctionLeaf tls runRegressionTls
 registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke
 registerRegressionFunctionLeaf routing-socks5-udp-associate runSocks5UdpAssociateRegression
+registerRegressionFunctionLeaf routing-core runRoutingRegression
 registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
 registerRegressionFunctionLeaf routing-access-control-config-transaction runAccessControlConfigTransactionRegression
 registerRegressionFunctionLeaf routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
@@ -51,6 +51,11 @@ registerRegressionFunctionLeaf routing-bt-failure-return runBTRoutingFailureRetu
 registerRegressionFunctionLeaf routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
 registerRegressionFunctionLeaf routing-warp-failure-return runWARPRoutingFailureReturnRegression
 registerRegressionFunctionLeaf routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-dns-failure-return runDNSRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
+registerRegressionFunctionLeaf routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
+registerRegressionFunctionLeaf routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+registerRegressionFunctionLeaf routing-port-panel runPortAndPanelHelperRegression
 registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput
 registerRegressionFunctionLeaf subscription-remote-fetch-unique runRemoteSubscribeFetchUniqueRegression
 registerRegressionFunctionLeaf subscription-remote-fetch-rollback runRemoteSubscribeFetchRollbackRegression
@@ -169,6 +174,9 @@ registerRegressionAggregateRunnerParallel subscription-write-transaction runRegr
 
 registerRegressionAggregateRunnerParallel subscription runRegressionSubscription \
     $(listRegressionSubscriptionChildSelectors)
+
+registerRegressionAggregateRunnerParallel routing runRegressionRouting \
+    $(listRegressionRoutingChildSelectors)
 
 registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidates \
     $(listRegressionRealityCandidatesChildSelectors)

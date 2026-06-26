@@ -182,6 +182,7 @@ runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
     done <<'EOF'
 ui-smoke runRegressionMenuSmoke
 routing-socks5-udp-associate runSocks5UdpAssociateRegression
+routing-core runRoutingRegression
 routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
 routing-access-control-config-transaction runAccessControlConfigTransactionRegression
 routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
@@ -191,6 +192,11 @@ routing-bt-failure-return runBTRoutingFailureReturnRegression
 routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
 routing-warp-failure-return runWARPRoutingFailureReturnRegression
 routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
+routing-dns-failure-return runDNSRoutingFailureReturnRegression
+routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
+routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
+routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+routing-port-panel runPortAndPanelHelperRegression
 reality-candidates-fast runRealityCandidateFastRegression
 reality-asn-scan-plan runRealityAsnScanPlanRegression
 reality-candidates-full runRealityCandidateFullRegression
@@ -290,6 +296,49 @@ user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRe
 EOF
 
     return "${status}"
+}
+
+runRoutingSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/routing-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/routing-default-selectors.sorted.txt"
+    local waveSelectorsFile="${TMP_DIR}/routing-wave-selectors.txt"
+    local waveSortedFile="${TMP_DIR}/routing-wave-selectors.sorted.txt"
+
+    declare -F listRegressionRoutingChildSelectors >/dev/null
+    declare -F listRegressionRoutingCoreChildSelectors >/dev/null
+    declare -F listRegressionRoutingHeavyChildSelectors >/dev/null
+    declare -F listRegressionRoutingLightChildSelectors >/dev/null
+
+    listRegressionRoutingChildSelectors >"${defaultSelectorsFile}"
+    {
+        listRegressionRoutingCoreChildSelectors
+        listRegressionRoutingHeavyChildSelectors
+        listRegressionRoutingLightChildSelectors
+    } >"${waveSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/routing-default-selectors.unique.txt"
+    sort "${waveSelectorsFile}" >"${waveSortedFile}"
+    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/routing-wave-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/routing-default-selectors.unique.txt"
+    cmp -s "${waveSortedFile}" "${TMP_DIR}/routing-wave-selectors.unique.txt"
+    cmp -s "${TMP_DIR}/routing-default-selectors.unique.txt" "${TMP_DIR}/routing-wave-selectors.unique.txt"
+)
+
+runRoutingAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["routing"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf routing ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRouting \\' "${suiteFile}"
+    expectedChildren=$(listRegressionRoutingChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["routing"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["routing"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["routing"]:-}" == "runRegressionRouting" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
 runTransactionCoreSelectorHelpersStayAlignedContract() (
@@ -779,6 +828,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
+        runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
