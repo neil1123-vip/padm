@@ -8,7 +8,6 @@ while read -r selector runner; do
     registerRegressionScriptLeaf "${selector}" "${REGRESSION_LEGACY_SCRIPT}" "${runner}"
 done <<'EOF'
 fast-reality fast-reality
-tls tls
 ui ui
 ui-smoke menu-smoke
 ui-full menu-smoke-full
@@ -33,6 +32,7 @@ transaction-system transaction-system
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
+registerRegressionFunctionLeaf tls runRegressionTls
 
 registerRegressionAggregateSequential all \
     routing \

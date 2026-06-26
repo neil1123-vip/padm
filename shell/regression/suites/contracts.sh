@@ -138,6 +138,13 @@ runLegacyPlatformIoSupportsSourceOnlyExecutionContract() (
     declare -F runRegressionPlatformIo >/dev/null
 )
 
+runLegacyTlsUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+
+    ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls runRegressionTls$' "${suiteFile}"
+}
+
 runLegacyRegressionScriptsRequireDispatcherContract() {
     local root="${TMP_DIR}/legacy-entry-contract"
     local scriptPath
@@ -172,7 +179,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
-        runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract
+        runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
+        runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts
