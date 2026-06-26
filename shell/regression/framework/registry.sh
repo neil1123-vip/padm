@@ -44,6 +44,30 @@ registerRegressionFunctionLeaf() {
     PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=${runner}
 }
 
+registerRegressionAggregateRunnerParallel() {
+    local selector=$1
+    local runner=$2
+    shift 2
+
+    registerRegressionSelector "${selector}" || return 1
+    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=aggregate-runner
+    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=parallel
+    PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=${runner}
+    PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
+}
+
+registerRegressionAggregateRunnerSequential() {
+    local selector=$1
+    local runner=$2
+    shift 2
+
+    registerRegressionSelector "${selector}" || return 1
+    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=aggregate-runner
+    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=sequential
+    PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=${runner}
+    PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
+}
+
 registerRegressionAggregateParallel() {
     local selector=$1
     shift
@@ -89,6 +113,17 @@ validateRegressionRegistry() {
             ;;
         function)
             [[ -n "${PADM_REGRESSION_SELECTOR_RUNNER[${selector}]:-}" ]]
+            ;;
+        aggregate-runner)
+            [[ -n "${PADM_REGRESSION_SELECTOR_RUNNER[${selector}]:-}" ]]
+            children=${PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]:-}
+            while IFS= read -r child; do
+                [[ -n "${child}" ]] || continue
+                if [[ -z "${PADM_REGRESSION_SELECTOR_KIND[${child}]:-}" ]]; then
+                    printf 'missing child selector for %s: %s\n' "${selector}" "${child}" >&2
+                    return 1
+                fi
+            done <<<"${children}"
             ;;
         aggregate)
             children=${PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]:-}
@@ -142,6 +177,10 @@ runRegisteredRegressionSelector() {
         PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${scriptPath}" "${runner}"
         ;;
     function)
+        runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
+        "${runner}"
+        ;;
+    aggregate-runner)
         runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
         "${runner}"
         ;;

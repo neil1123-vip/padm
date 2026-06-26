@@ -17660,6 +17660,16 @@ runParallelRegressionSelectors() {
                 fi
                 running=$((running - 1))
                 madeProgress=1
+            elif [[ "${completed[$i]:-0}" -eq 0 ]] && ! kill -0 "${pids[$i]}" 2>/dev/null; then
+                wait "${pids[$i]}"
+                statuses[$i]=$?
+                completed[$i]=1
+                [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
+                if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
+                    status=${statuses[$i]}
+                fi
+                running=$((running - 1))
+                madeProgress=1
             fi
         done
         if [[ -z "${madeProgress}" ]]; then

@@ -333,6 +333,72 @@ EOF
     cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
 )
 
+runTransactionCoreAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-core"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction-core ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCore \\' "${suiteFile}"
+    expectedChildren=$(listRegressionTransactionCoreChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction-core"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction-core"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-core"]:-}" == "runRegressionTransactionCore" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runParallelSelectorCollectsExitedChildWithoutRcContract() (
+    local root="${TMP_DIR}/parallel-selector-exit-without-rc"
+    local statusFile="${root}/status"
+    local callLog="${root}/call.log"
+    local workerPid=
+
+    mkdir -p "${root}"
+    : >"${callLog}"
+
+    cleanupParallelSelectorExitWithoutRcContract() {
+        if [[ -n "${workerPid}" ]]; then
+            kill "${workerPid}" 2>/dev/null || true
+            wait "${workerPid}" 2>/dev/null || true
+        fi
+    }
+    trap cleanupParallelSelectorExitWithoutRcContract EXIT
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        case "${selector}" in
+        exit-fast)
+            exit 1
+            ;;
+        finish)
+            sleep 0.1
+            ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    (
+        set +e
+        PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionSelectors "${root}/orchestration" exit-fast finish
+        printf '%s\n' "$?" >"${statusFile}"
+    ) &
+    workerPid=$!
+
+    for _ in $(seq 1 40); do
+        [[ -f "${statusFile}" ]] && break
+        sleep 0.05
+    done
+
+    [[ -f "${statusFile}" ]]
+    wait "${workerPid}"
+    workerPid=
+    [[ "$(<"${statusFile}")" == "1" ]]
+    grep -qx 'finish-start' "${callLog}"
+    grep -qx 'finish-finish' "${callLog}"
+)
+
 runTransactionCoreCompatibleDispatcherLeavesExecutionContract() (
     local selector
 
@@ -413,6 +479,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
+        runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
+        runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
         runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
         runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract

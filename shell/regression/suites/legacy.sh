@@ -40,7 +40,6 @@ subscription subscription
 runtime runtime
 reality-candidates reality-candidates
 reality-stream reality-stream
-transaction-core transaction-core
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
@@ -122,6 +121,9 @@ registerRegressionAggregateSequential transaction \
 
 registerRegressionAggregateParallel transaction-system \
     $(listRegressionTransactionSystemChildSelectors)
+
+registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCore \
+    $(listRegressionTransactionCoreChildSelectors)
 
 registerRegressionAggregateSequential all \
     routing \
