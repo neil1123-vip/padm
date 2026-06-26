@@ -183,6 +183,10 @@ core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression
 check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression
 alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression
 sing-box-managed-cleanup runSingBoxManagedCleanupRegression
+xray-reality-port-failure runXrayRealityPortFailureRegression
+reality-profile-failure runRealityProfileFailureRegression
+sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression
+core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression
 EOF
 }
 
