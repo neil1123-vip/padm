@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 
 REGRESSION_REMOTE_CONTROL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-REGRESSION_REMOTE_CONTROL_SCRIPT="${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
+PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
 
 while read -r selector runner; do
-    registerRegressionScriptLeaf "${selector}" "${REGRESSION_REMOTE_CONTROL_SCRIPT}" "${runner}"
+    registerRegressionFunctionLeaf "${selector}" "${runner}"
 done <<'EOF'
-remote-control-smoke-core remote-control-smoke-core
-remote-control-smoke-refresh-apply-basic remote-control-smoke-refresh-apply-basic
-remote-control-smoke-refresh-apply-prepare remote-control-smoke-refresh-apply-prepare
-remote-control-smoke-refresh-apply-failure remote-control-smoke-refresh-apply-failure
-remote-control-smoke-refresh-restore remote-control-smoke-refresh-restore
-remote-control-smoke-refresh-reconcile remote-control-smoke-refresh-reconcile
-remote-control-contract-service-install-success remote-control-contract-service-install-success
-remote-control-contract-service-install-systemctl-fail remote-control-contract-service-install-systemctl-fail
-remote-control-contract-service-install-health-fail remote-control-contract-service-install-health-fail
-remote-control-contract-service-install-health-rollback remote-control-contract-service-install-health-rollback
-remote-control-contract-service-install-token-transaction remote-control-contract-service-install-token-transaction
-remote-control-contract-server-response remote-control-contract-server-response
-remote-control-deep remote-control-deep
+remote-control-smoke-core runRegressionRemoteControlSmokeCore
+remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic
+remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare
+remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure
+remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore
+remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile
+remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess
+remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail
+remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail
+remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback
+remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction
+remote-control-contract-server-response runRegressionRemoteControlContractServerResponse
+remote-control-deep runRegressionRemoteControlDeep
 EOF
 
 registerRegressionAggregateParallel remote-control-smoke-refresh-apply \
