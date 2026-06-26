@@ -16302,6 +16302,12 @@ runRegressionSubscription() {
         "${selectorPairs[@]}"
 }
 
+listRegressionRealityStreamChildSelectors() {
+    printf '%s\n' \
+        reality-stream-enable \
+        reality-stream-disable
+}
+
 runRegressionRealityCandidates() {
     runRegressionStep reality-candidates-fast runRealityCandidateFastRegression &&
         runRegressionStep reality-asn-scan-plan runRealityAsnScanPlanRegression &&

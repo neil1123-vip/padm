@@ -38,7 +38,6 @@ ui ui
 routing routing
 runtime runtime
 reality-candidates reality-candidates
-reality-stream reality-stream
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
@@ -79,6 +78,8 @@ registerRegressionFunctionLeaf subscribe-return-failure runSubscribeReturnFailur
 registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
 registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
 registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
+registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression
+registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 registerRegressionFunctionLeaf transaction-subscription runRegressionTransactionSubscription
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
@@ -164,6 +165,9 @@ registerRegressionAggregateRunnerParallel subscription-write-transaction runRegr
 
 registerRegressionAggregateRunnerParallel subscription runRegressionSubscription \
     $(listRegressionSubscriptionChildSelectors)
+
+registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStream \
+    $(listRegressionRealityStreamChildSelectors)
 
 registerRegressionAggregateParallel transaction-system \
     $(listRegressionTransactionSystemChildSelectors)

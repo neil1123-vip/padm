@@ -192,6 +192,8 @@ routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
 routing-warp-failure-return runWARPRoutingFailureReturnRegression
 routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
 reality-candidates-fast runRealityCandidateFastRegression
+reality-stream-enable runRealityStreamEnableRegression
+reality-stream-disable runRealityStreamDisableRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 transaction-subscription runRegressionTransactionSubscription
 nginx-service-failure runNginxServiceFailureRegression
@@ -514,6 +516,46 @@ runSubscriptionWriteTransactionAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runRealityStreamAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["reality-stream"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStream \\' "${suiteFile}"
+    expectedChildren=$(listRegressionRealityStreamChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-stream"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-stream"]:-}" == "sequential" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-stream"]:-}" == "runRegressionRealityStream" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
+    local callLog="${TMP_DIR}/reality-stream-aggregate-dispatch.log"
+
+    : >"${callLog}"
+
+    runRealityStreamEnableRegression() {
+        printf 'reality-stream-enable\n' >>"${callLog}"
+    }
+
+    runRealityStreamDisableRegression() {
+        printf 'reality-stream-disable\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-stream
+
+    grep -qx 'reality-stream-enable' "${callLog}"
+    grep -qx 'reality-stream-disable' "${callLog}"
+    [[ "$(wc -l <"${callLog}")" -eq 2 ]]
+    awk '
+        $0 == "reality-stream-enable" { enableLine = NR }
+        $0 == "reality-stream-disable" { disableLine = NR }
+        END { exit !(enableLine && disableLine && enableLine < disableLine) }
+    ' "${callLog}"
+)
+
 runParallelSelectorCollectsExitedChildWithoutRcContract() (
     local root="${TMP_DIR}/parallel-selector-exit-without-rc"
     local statusFile="${root}/status"
@@ -653,6 +695,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-remote-fetch-aggregate-runner-registration runSubscriptionRemoteFetchAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-write-transaction-aggregate-runner-registration runSubscriptionWriteTransactionAggregateRunnerRegistrationContract &&
+        runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
+        runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
         runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
