@@ -93,6 +93,9 @@ registerRegressionFunctionLeaf network-check-return-failure runNetworkCheckRetur
 registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnRegression
 registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackRegression
 registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
+registerRegressionFunctionLeaf wireguard-control-safe-dir runWireGuardControlSafeDirRegression
+registerRegressionFunctionLeaf warp-config-safe-dir runWarpConfigSafeDirRegression
+registerRegressionFunctionLeaf warp-config-file-cleanup runWarpConfigFileCleanupRegression
 registerRegressionAggregateSequential transaction \
     transaction-core \
     transaction-subscription \

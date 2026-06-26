@@ -220,6 +220,9 @@ network-check-return-failure runNetworkCheckReturnFailureRegression
 tls-failure-return runTlsFailureReturnRegression
 tls-reinstall-rollback runTlsReinstallRollbackRegression
 tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
+wireguard-control-safe-dir runWireGuardControlSafeDirRegression
+warp-config-safe-dir runWarpConfigSafeDirRegression
+warp-config-file-cleanup runWarpConfigFileCleanupRegression
 EOF
 
     return "${status}"
