@@ -114,22 +114,7 @@ registerRegressionAggregateSequential transaction \
     transaction-system
 
 registerRegressionAggregateParallel transaction-system \
-    nginx-service-failure \
-    uninstall-nginx-cleanup \
-    clean-agent-nginx-managed-remove \
-    fail2ban-managed-cleanup \
-    fail2ban-apply-transaction \
-    uninstall-wireguard-cleanup \
-    wireguard-key-transaction \
-    wireguard-control-safe-dir \
-    warp-config-safe-dir \
-    warp-config-file-cleanup \
-    uninstall-service-stop-failure \
-    clean-last-installation-failure \
-    clean-last-installation-acme-home \
-    clean-last-installation-acme-relative-home \
-    alone-nginx-write-transaction \
-    alone-nginx-update-transaction
+    $(listRegressionTransactionSystemChildSelectors)
 
 registerRegressionAggregateSequential all \
     routing \

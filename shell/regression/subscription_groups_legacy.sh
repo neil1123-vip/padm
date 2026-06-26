@@ -16326,9 +16326,8 @@ runRegressionTransactionSubscription() {
         runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
 }
 
-runRegressionTransactionSystem() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        runParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
+listRegressionTransactionSystemChildSelectors() {
+    printf '%s\n' \
         nginx-service-failure \
         uninstall-nginx-cleanup \
         clean-agent-nginx-managed-remove \
@@ -16345,6 +16344,15 @@ runRegressionTransactionSystem() {
         clean-last-installation-acme-relative-home \
         alone-nginx-write-transaction \
         alone-nginx-update-transaction
+}
+
+runRegressionTransactionSystem() {
+    local -a selectors=()
+
+    mapfile -t selectors < <(listRegressionTransactionSystemChildSelectors)
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+        runParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
+        "${selectors[@]}"
 }
 
 runRegressionTransactionSystemParallelCompositionRegression() (
@@ -16385,28 +16393,13 @@ runRegressionTransactionSystemParallelCompositionRegression() (
 
     runRegressionTransactionSystem
 
-    for selector in \
-        nginx-service-failure \
-        uninstall-nginx-cleanup \
-        clean-agent-nginx-managed-remove \
-        fail2ban-managed-cleanup \
-        fail2ban-apply-transaction \
-        uninstall-wireguard-cleanup \
-        wireguard-key-transaction \
-        wireguard-control-safe-dir \
-        warp-config-safe-dir \
-        warp-config-file-cleanup \
-        uninstall-service-stop-failure \
-        clean-last-installation-failure \
-        clean-last-installation-acme-home \
-        clean-last-installation-acme-relative-home \
-        alone-nginx-write-transaction \
-        alone-nginx-update-transaction; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
         [[ "$(grep -c "^${selector}-start$" "${callLog}")" == "1" ]]
         [[ "$(grep -c "^${selector}-finish$" "${callLog}")" == "1" ]]
-    done
+    done < <(listRegressionTransactionSystemChildSelectors)
     awk '
         $0 == "nginx-service-failure-start" { firstStart = NR }
         $0 == "fail2ban-apply-transaction-start" { fail2banStart = NR }

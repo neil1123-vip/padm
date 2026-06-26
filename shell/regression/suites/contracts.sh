@@ -137,6 +137,7 @@ runFastPlatformSourceOnlyExecutionContract() (
 runLegacySuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local expectedChildren actualChildren
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
@@ -145,27 +146,16 @@ runLegacySuiteUsesFunctionRegistryContract() {
     grep -q '^    transaction-subscription \\' "${suiteFile}"
     grep -q '^    transaction-system$' "${suiteFile}"
     grep -q '^registerRegressionAggregateParallel transaction-system \\' "${suiteFile}"
-    grep -q '^    nginx-service-failure \\' "${suiteFile}"
-    grep -q '^    uninstall-nginx-cleanup \\' "${suiteFile}"
-    grep -q '^    clean-agent-nginx-managed-remove \\' "${suiteFile}"
-    grep -q '^    fail2ban-managed-cleanup \\' "${suiteFile}"
-    grep -q '^    fail2ban-apply-transaction \\' "${suiteFile}"
-    grep -q '^    uninstall-wireguard-cleanup \\' "${suiteFile}"
-    grep -q '^    wireguard-key-transaction \\' "${suiteFile}"
-    grep -q '^    wireguard-control-safe-dir \\' "${suiteFile}"
-    grep -q '^    warp-config-safe-dir \\' "${suiteFile}"
-    grep -q '^    warp-config-file-cleanup \\' "${suiteFile}"
-    grep -q '^    uninstall-service-stop-failure \\' "${suiteFile}"
-    grep -q '^    clean-last-installation-failure \\' "${suiteFile}"
-    grep -q '^    clean-last-installation-acme-home \\' "${suiteFile}"
-    grep -q '^    clean-last-installation-acme-relative-home \\' "${suiteFile}"
-    grep -q '^    alone-nginx-write-transaction \\' "${suiteFile}"
-    grep -q '^    alone-nginx-update-transaction$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIo$' "${suiteFile}"
     grep -q '^registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+    declare -F listRegressionTransactionSystemChildSelectors >/dev/null
+    expectedChildren=$(listRegressionTransactionSystemChildSelectors)
+    actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-system"]:-}
+    [[ -n "${expectedChildren}" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
 runLegacyPlatformIoSupportsSourceOnlyExecutionContract() (
@@ -270,26 +260,11 @@ runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract() (
 
     PADM_REGRESSION_PARALLEL_JOBS=1 PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-system
 
-    for selector in \
-        nginx-service-failure \
-        uninstall-nginx-cleanup \
-        clean-agent-nginx-managed-remove \
-        fail2ban-managed-cleanup \
-        fail2ban-apply-transaction \
-        uninstall-wireguard-cleanup \
-        wireguard-key-transaction \
-        wireguard-control-safe-dir \
-        warp-config-safe-dir \
-        warp-config-file-cleanup \
-        uninstall-service-stop-failure \
-        clean-last-installation-failure \
-        clean-last-installation-acme-home \
-        clean-last-installation-acme-relative-home \
-        alone-nginx-write-transaction \
-        alone-nginx-update-transaction; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}" "${callLog}"
         [[ "$(grep -c "^${selector}$" "${callLog}")" == "1" ]]
-    done
+    done < <(listRegressionTransactionSystemChildSelectors)
 )
 
 runLegacyRealityStubsSurviveSuiteLoadContract() {
