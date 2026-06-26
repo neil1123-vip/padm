@@ -204,6 +204,10 @@ core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression
 legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression
 core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
 core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
+core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression
+sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
+network-check-return-failure runNetworkCheckReturnFailureRegression
+tls-failure-return runTlsFailureReturnRegression
 EOF
 }
 
