@@ -171,6 +171,7 @@ routing-socks5-udp-associate runSocks5UdpAssociateRegression
 subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
+transaction-system runRegressionTransactionSystem
 EOF
 }
 

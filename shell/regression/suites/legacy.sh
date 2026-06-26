@@ -41,7 +41,6 @@ runtime runtime
 reality-candidates reality-candidates
 reality-stream reality-stream
 transaction transaction
-transaction-system transaction-system
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
@@ -51,6 +50,7 @@ registerRegressionFunctionLeaf routing-socks5-udp-associate runSocks5UdpAssociat
 registerRegressionFunctionLeaf subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
+registerRegressionFunctionLeaf transaction-system runRegressionTransactionSystem
 
 registerRegressionAggregateSequential all \
     routing \
