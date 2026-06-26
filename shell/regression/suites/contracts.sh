@@ -187,6 +187,10 @@ xray-reality-port-failure runXrayRealityPortFailureRegression
 reality-profile-failure runRealityProfileFailureRegression
 sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression
 core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression
+core-template-return-failure runCoreTemplateReturnFailureRegression
+core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression
+sing-box-cronet-rollback runSingBoxCronetRollbackRegression
+finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression
 EOF
 }
 
