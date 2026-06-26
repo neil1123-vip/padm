@@ -200,6 +200,10 @@ sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
 geo-update-reload-failure runGeoUpdateReloadFailureRegression
 core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression
 sing-box-log-transaction runSingBoxLogTransactionRegression
+core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression
+legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression
+core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
+core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
 EOF
 }
 
