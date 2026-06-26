@@ -16042,95 +16042,27 @@ runRegressionRuntimeParallelCompositionRegression() (
 )
 
 runRegressionTransactionCore() {
+    local -a selectors=()
+
     if [[ "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" == "all" ]]; then
+        mapfile -t selectors < <(listRegressionTransactionCoreHeavyChildSelectors)
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
             runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-heavy-${BASHPID:-$$}" \
-            core-install-service-action-failure \
-            core-port-file-transaction
+            "${selectors[@]}"
+        mapfile -t selectors < <(listRegressionTransactionCoreMediumChildSelectors)
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
             runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-medium-${BASHPID:-$$}" \
-            config-transaction \
-            entry-helper-config \
-            reload-core-propagation \
-            sing-box-log-transaction \
-            sing-box-merge-config-transaction \
-            tls-renew-failure-propagation
+            "${selectors[@]}"
+        mapfile -t selectors < <(listRegressionTransactionCoreLightChildSelectors)
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
             runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-light-${BASHPID:-$$}" \
-            core-rollback-result-message \
-            core-port-unsafe-config-dir \
-            check-port-open-nginx-directory-target \
-            alone-nginx-directory-target \
-            xray-reality-port-failure \
-            reality-profile-failure \
-            sing-box-reality-key-transaction \
-            core-template-return-failure \
-            core-template-managed-remove \
-            core-binary-install-copy-failure \
-            sing-box-cronet-rollback \
-            finalize-sing-box-rollback \
-            core-upgrade-directory-target \
-            legacy-core-upgrade-keeps-existing \
-            core-first-install-failure-clean \
-            core-first-install-commit-rollback \
-            core-install-unsafe-binary-path \
-            sing-box-download-artifacts-cleanup \
-            network-check-return-failure \
-            tls-failure-return \
-            tls-reinstall-rollback \
-            service-queue-apply-propagation \
-            sing-box-merge-start-failure \
-            sing-box-uninstall-failure-propagation \
-            sing-box-uninstall-rejects-unsafe-config-path \
-            sing-box-managed-cleanup \
-            sing-box-protocol-reload-failure \
-            geo-update-reload-failure \
-            core-cleanup-failure-propagation \
-            user-config-write \
-            remove-user
+            "${selectors[@]}"
         return
     fi
 
+    mapfile -t selectors < <(listRegressionTransactionCoreChildSelectors)
     runParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-${BASHPID:-$$}" \
-        core-rollback-result-message \
-        config-transaction \
-        core-port-file-transaction \
-        core-port-unsafe-config-dir \
-        entry-helper-config \
-        check-port-open-nginx-directory-target \
-        alone-nginx-directory-target \
-        xray-reality-port-failure \
-        reality-profile-failure \
-        sing-box-reality-key-transaction \
-        core-template-return-failure \
-        core-template-managed-remove \
-        core-binary-install-copy-failure \
-        sing-box-cronet-rollback \
-        finalize-sing-box-rollback \
-        core-upgrade-directory-target \
-        legacy-core-upgrade-keeps-existing \
-        core-first-install-failure-clean \
-        core-first-install-commit-rollback \
-        core-install-unsafe-binary-path \
-        sing-box-download-artifacts-cleanup \
-        network-check-return-failure \
-        tls-failure-return \
-        tls-reinstall-rollback \
-        tls-renew-failure-propagation \
-        service-queue-apply-propagation \
-        core-install-service-action-failure \
-        sing-box-merge-start-failure \
-        sing-box-merge-config-transaction \
-        sing-box-uninstall-failure-propagation \
-        sing-box-uninstall-rejects-unsafe-config-path \
-        sing-box-managed-cleanup \
-        sing-box-protocol-reload-failure \
-        geo-update-reload-failure \
-        core-cleanup-failure-propagation \
-        reload-core-propagation \
-        sing-box-log-transaction \
-        user-config-write \
-        remove-user
+        "${selectors[@]}"
 }
 
 runRegressionTransactionCoreParallelCompositionRegression() (
@@ -16216,49 +16148,11 @@ runRegressionTransactionCoreParallelCompositionRegression() (
 
     runRegressionTransactionCore
 
-    for selector in \
-        core-rollback-result-message \
-        config-transaction \
-        core-port-file-transaction \
-        core-port-unsafe-config-dir \
-        entry-helper-config \
-        check-port-open-nginx-directory-target \
-        alone-nginx-directory-target \
-        xray-reality-port-failure \
-        reality-profile-failure \
-        sing-box-reality-key-transaction \
-        core-template-return-failure \
-        core-template-managed-remove \
-        core-binary-install-copy-failure \
-        sing-box-cronet-rollback \
-        finalize-sing-box-rollback \
-        core-upgrade-directory-target \
-        legacy-core-upgrade-keeps-existing \
-        core-first-install-failure-clean \
-        core-first-install-commit-rollback \
-        core-install-unsafe-binary-path \
-        sing-box-download-artifacts-cleanup \
-        network-check-return-failure \
-        tls-failure-return \
-        tls-reinstall-rollback \
-        tls-renew-failure-propagation \
-        service-queue-apply-propagation \
-        core-install-service-action-failure \
-        sing-box-merge-start-failure \
-        sing-box-merge-config-transaction \
-        sing-box-uninstall-failure-propagation \
-        sing-box-uninstall-rejects-unsafe-config-path \
-        sing-box-managed-cleanup \
-        sing-box-protocol-reload-failure \
-        geo-update-reload-failure \
-        core-cleanup-failure-propagation \
-        reload-core-propagation \
-        sing-box-log-transaction \
-        user-config-write \
-        remove-user; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
-    done
+    done < <(listRegressionTransactionCoreChildSelectors)
     awk '
         $0 == "core-rollback-result-message-start" { firstStart = NR }
         $0 == "config-transaction-start" { configStart = NR }
@@ -16277,18 +16171,14 @@ runRegressionTransactionCoreParallelCompositionRegression() (
     : >"${TMP_DIR}/transaction-core-expect-profile-boundary"
     PADM_REGRESSION_PARALLEL_JOBS=6 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCore
 
-    for selector in \
-        core-install-service-action-failure \
-        core-port-file-transaction \
-        config-transaction \
-        entry-helper-config \
-        reload-core-propagation \
-        sing-box-log-transaction \
-        sing-box-merge-config-transaction \
-        tls-renew-failure-propagation; do
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
-    done
+    done < <(
+        listRegressionTransactionCoreHeavyChildSelectors
+        listRegressionTransactionCoreMediumChildSelectors
+    )
     [[ ! -f "${TMP_DIR}/transaction-core-heavy-concurrency-violation" ]]
     [[ ! -f "${TMP_DIR}/transaction-core-wave-boundary-violation" ]]
 
@@ -16324,6 +16214,127 @@ runRegressionTransactionSubscription() {
         runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression &&
         runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression &&
         runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
+}
+
+listRegressionTransactionCoreSelectorEntries() {
+    printf '%s\n' \
+        'default light core-rollback-result-message' \
+        'default medium config-transaction' \
+        'default heavy core-port-file-transaction' \
+        'default light core-port-unsafe-config-dir' \
+        'default medium entry-helper-config' \
+        'default light check-port-open-nginx-directory-target' \
+        'default light alone-nginx-directory-target' \
+        'default light xray-reality-port-failure' \
+        'default light reality-profile-failure' \
+        'default light sing-box-reality-key-transaction' \
+        'default light core-template-return-failure' \
+        'default light core-template-managed-remove' \
+        'default light core-binary-install-copy-failure' \
+        'default light sing-box-cronet-rollback' \
+        'default light finalize-sing-box-rollback' \
+        'default light core-upgrade-directory-target' \
+        'default light legacy-core-upgrade-keeps-existing' \
+        'default light core-first-install-failure-clean' \
+        'default light core-first-install-commit-rollback' \
+        'default light core-install-unsafe-binary-path' \
+        'default light sing-box-download-artifacts-cleanup' \
+        'default light network-check-return-failure' \
+        'default light tls-failure-return' \
+        'default light tls-reinstall-rollback' \
+        'default medium tls-renew-failure-propagation' \
+        'default light service-queue-apply-propagation' \
+        'default heavy core-install-service-action-failure' \
+        'default light sing-box-merge-start-failure' \
+        'default medium sing-box-merge-config-transaction' \
+        'default light sing-box-uninstall-failure-propagation' \
+        'default light sing-box-uninstall-rejects-unsafe-config-path' \
+        'default light sing-box-managed-cleanup' \
+        'default light sing-box-protocol-reload-failure' \
+        'default light geo-update-reload-failure' \
+        'default light core-cleanup-failure-propagation' \
+        'default medium reload-core-propagation' \
+        'default medium sing-box-log-transaction' \
+        'default light user-config-write' \
+        'default light remove-user' \
+        'heavy heavy core-install-service-action-failure' \
+        'heavy heavy core-port-file-transaction' \
+        'medium medium config-transaction' \
+        'medium medium entry-helper-config' \
+        'medium medium reload-core-propagation' \
+        'medium medium sing-box-log-transaction' \
+        'medium medium sing-box-merge-config-transaction' \
+        'medium medium tls-renew-failure-propagation' \
+        'light light core-rollback-result-message' \
+        'light light core-port-unsafe-config-dir' \
+        'light light check-port-open-nginx-directory-target' \
+        'light light alone-nginx-directory-target' \
+        'light light xray-reality-port-failure' \
+        'light light reality-profile-failure' \
+        'light light sing-box-reality-key-transaction' \
+        'light light core-template-return-failure' \
+        'light light core-template-managed-remove' \
+        'light light core-binary-install-copy-failure' \
+        'light light sing-box-cronet-rollback' \
+        'light light finalize-sing-box-rollback' \
+        'light light core-upgrade-directory-target' \
+        'light light legacy-core-upgrade-keeps-existing' \
+        'light light core-first-install-failure-clean' \
+        'light light core-first-install-commit-rollback' \
+        'light light core-install-unsafe-binary-path' \
+        'light light sing-box-download-artifacts-cleanup' \
+        'light light network-check-return-failure' \
+        'light light tls-failure-return' \
+        'light light tls-reinstall-rollback' \
+        'light light service-queue-apply-propagation' \
+        'light light sing-box-merge-start-failure' \
+        'light light sing-box-uninstall-failure-propagation' \
+        'light light sing-box-uninstall-rejects-unsafe-config-path' \
+        'light light sing-box-managed-cleanup' \
+        'light light sing-box-protocol-reload-failure' \
+        'light light geo-update-reload-failure' \
+        'light light core-cleanup-failure-propagation' \
+        'light light user-config-write' \
+        'light light remove-user'
+}
+
+listRegressionTransactionCoreSelectors() {
+    local profile=${1:-default}
+    local sourceProfile wave selector
+
+    while read -r sourceProfile wave selector; do
+        [[ -n "${selector}" ]] || continue
+        if [[ "${sourceProfile}" != "${profile}" ]]; then
+            continue
+        fi
+        case "${profile}" in
+        default | heavy | medium | light)
+            printf '%s\n' "${selector}"
+            ;;
+        *)
+            printf 'unknown transaction-core selector profile: %s\n' "${profile}" >&2
+            return 2
+            ;;
+        esac
+    done < <(listRegressionTransactionCoreSelectorEntries)
+
+    return 0
+}
+
+listRegressionTransactionCoreChildSelectors() {
+    listRegressionTransactionCoreSelectors default
+}
+
+listRegressionTransactionCoreHeavyChildSelectors() {
+    listRegressionTransactionCoreSelectors heavy
+}
+
+listRegressionTransactionCoreMediumChildSelectors() {
+    listRegressionTransactionCoreSelectors medium
+}
+
+listRegressionTransactionCoreLightChildSelectors() {
+    listRegressionTransactionCoreSelectors light
 }
 
 listRegressionTransactionSystemChildSelectors() {

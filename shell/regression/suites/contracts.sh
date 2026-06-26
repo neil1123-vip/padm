@@ -248,6 +248,34 @@ EOF
     return "${status}"
 }
 
+runTransactionCoreSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/transaction-core-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/transaction-core-default-selectors.sorted.txt"
+    local waveSelectorsFile="${TMP_DIR}/transaction-core-wave-selectors.txt"
+    local waveSortedFile="${TMP_DIR}/transaction-core-wave-selectors.sorted.txt"
+
+    declare -F listRegressionTransactionCoreChildSelectors >/dev/null
+    declare -F listRegressionTransactionCoreHeavyChildSelectors >/dev/null
+    declare -F listRegressionTransactionCoreMediumChildSelectors >/dev/null
+    declare -F listRegressionTransactionCoreLightChildSelectors >/dev/null
+
+    listRegressionTransactionCoreChildSelectors >"${defaultSelectorsFile}"
+    {
+        listRegressionTransactionCoreHeavyChildSelectors
+        listRegressionTransactionCoreMediumChildSelectors
+        listRegressionTransactionCoreLightChildSelectors
+    } >"${waveSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/transaction-core-default-selectors.unique.txt"
+    sort "${waveSelectorsFile}" >"${waveSortedFile}"
+    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/transaction-core-wave-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/transaction-core-default-selectors.unique.txt"
+    cmp -s "${waveSortedFile}" "${TMP_DIR}/transaction-core-wave-selectors.unique.txt"
+    cmp -s "${TMP_DIR}/transaction-core-default-selectors.unique.txt" "${TMP_DIR}/transaction-core-wave-selectors.unique.txt"
+)
+
 runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract() (
     local callLog="${TMP_DIR}/transaction-system-aggregate-dispatch.log"
     local selector
@@ -311,6 +339,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
         runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
         runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract
 }
