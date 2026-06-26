@@ -107,9 +107,10 @@ runFastSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
-    grep -q '^registerRegressionScriptLeaf fast "\${REGRESSION_FAST_SCRIPT}" fast$' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatform$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
 }
 
@@ -117,7 +118,16 @@ runFastPlatformSourceOnlyExecutionContract() (
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
 
     PADM_REGRESSION_SOURCE_ONLY=1 source "${scriptFile}"
-    declare -F runRegressionPlatform >/dev/null
+    local platformDef fastDef
+    platformDef=$(declare -f runRegressionPlatform)
+    platformDef="${platformDef/runRegressionPlatform/runRegressionPlatformSuiteRoot}"
+    eval "${platformDef}"
+    fastDef=$(declare -f runRegressionFast)
+    fastDef="${fastDef/runRegressionFast/runRegressionFastSuiteRoot}"
+    fastDef="${fastDef/runRegressionPlatform/runRegressionPlatformSuiteRoot}"
+    eval "${fastDef}"
+    declare -F runRegressionFastSuiteRoot >/dev/null
+    declare -F runRegressionPlatformSuiteRoot >/dev/null
 )
 
 runLegacySuiteUsesFunctionRegistryContract() {
