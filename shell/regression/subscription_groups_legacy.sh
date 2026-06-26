@@ -16308,6 +16308,13 @@ listRegressionRealityStreamChildSelectors() {
         reality-stream-disable
 }
 
+listRegressionRealityCandidatesChildSelectors() {
+    printf '%s\n' \
+        reality-candidates-fast \
+        reality-asn-scan-plan \
+        reality-candidates-full
+}
+
 runRegressionRealityCandidates() {
     runRegressionStep reality-candidates-fast runRealityCandidateFastRegression &&
         runRegressionStep reality-asn-scan-plan runRealityAsnScanPlanRegression &&

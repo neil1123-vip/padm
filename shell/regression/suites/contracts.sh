@@ -192,6 +192,8 @@ routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
 routing-warp-failure-return runWARPRoutingFailureReturnRegression
 routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
 reality-candidates-fast runRealityCandidateFastRegression
+reality-asn-scan-plan runRealityAsnScanPlanRegression
+reality-candidates-full runRealityCandidateFullRegression
 reality-stream-enable runRealityStreamEnableRegression
 reality-stream-disable runRealityStreamDisableRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
@@ -516,6 +518,52 @@ runSubscriptionWriteTransactionAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runRealityCandidatesAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["reality-candidates"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidates \\' "${suiteFile}"
+    expectedChildren=$(listRegressionRealityCandidatesChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-candidates"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-candidates"]:-}" == "sequential" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-candidates"]:-}" == "runRegressionRealityCandidates" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
+    local callLog="${TMP_DIR}/reality-candidates-aggregate-dispatch.log"
+
+    : >"${callLog}"
+
+    runRealityCandidateFastRegression() {
+        printf 'reality-candidates-fast\n' >>"${callLog}"
+    }
+
+    runRealityAsnScanPlanRegression() {
+        printf 'reality-asn-scan-plan\n' >>"${callLog}"
+    }
+
+    runRealityCandidateFullRegression() {
+        printf 'reality-candidates-full\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-candidates
+
+    grep -qx 'reality-candidates-fast' "${callLog}"
+    grep -qx 'reality-asn-scan-plan' "${callLog}"
+    grep -qx 'reality-candidates-full' "${callLog}"
+    [[ "$(wc -l <"${callLog}")" -eq 3 ]]
+    awk '
+        $0 == "reality-candidates-fast" { fastLine = NR }
+        $0 == "reality-asn-scan-plan" { asnLine = NR }
+        $0 == "reality-candidates-full" { fullLine = NR }
+        END { exit !(fastLine && asnLine && fullLine && fastLine < asnLine && asnLine < fullLine) }
+    ' "${callLog}"
+)
+
 runRealityStreamAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
     local expectedChildren
@@ -695,6 +743,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-remote-fetch-aggregate-runner-registration runSubscriptionRemoteFetchAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-write-transaction-aggregate-runner-registration runSubscriptionWriteTransactionAggregateRunnerRegistrationContract &&
+        runRegressionStep reality-candidates-aggregate-runner-registration runRealityCandidatesAggregateRunnerRegistrationContract &&
+        runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
         runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
