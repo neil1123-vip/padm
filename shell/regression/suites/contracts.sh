@@ -102,6 +102,24 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
     [[ "${calls[5]}" == "${TMP_DIR}/remote-control-contract-service-install remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction" ]]
 )
 
+runFastSuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
+    grep -q '^registerRegressionScriptLeaf fast "\${REGRESSION_FAST_SCRIPT}" fast$' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatform$' "${suiteFile}"
+    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+}
+
+runFastPlatformSourceOnlyExecutionContract() (
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${scriptFile}"
+    declare -F runRegressionPlatform >/dev/null
+)
+
 runLegacyRegressionScriptsRequireDispatcherContract() {
     local root="${TMP_DIR}/legacy-entry-contract"
     local scriptPath
@@ -132,7 +150,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
-        runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract
+        runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
+        runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
+        runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts
