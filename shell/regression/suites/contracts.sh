@@ -289,6 +289,7 @@ runTransactionCoreRegisteredChildSelectorsAlignedContract() (
     done < <(listRegressionTransactionCoreChildSelectors) >"${actualSelectorsFile}"
 
     cat <<'EOF' >"${expectedSelectorsFile}"
+core-rollback-result-message
 config-transaction
 core-port-unsafe-config-dir
 check-port-open-nginx-directory-target
@@ -323,9 +324,24 @@ geo-update-reload-failure
 core-cleanup-failure-propagation
 reload-core-propagation
 sing-box-log-transaction
+user-config-write
+remove-user
 EOF
 
     cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
+)
+
+runTransactionCoreCompatibleDispatcherLeavesExecutionContract() (
+    local selector
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+    done <<'EOF'
+core-rollback-result-message
+user-config-write
+remove-user
+EOF
 )
 
 runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract() (
@@ -393,6 +409,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
+        runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
         runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract
 }
