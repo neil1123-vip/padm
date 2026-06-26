@@ -291,6 +291,7 @@ runTransactionCoreRegisteredChildSelectorsAlignedContract() (
     cat <<'EOF' >"${expectedSelectorsFile}"
 core-rollback-result-message
 config-transaction
+core-port-file-transaction
 core-port-unsafe-config-dir
 entry-helper-config
 check-port-open-nginx-directory-target
@@ -340,6 +341,7 @@ runTransactionCoreCompatibleDispatcherLeavesExecutionContract() (
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
     done <<'EOF'
 core-rollback-result-message
+core-port-file-transaction
 entry-helper-config
 user-config-write
 remove-user

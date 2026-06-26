@@ -158,6 +158,35 @@ if ! declare -F coreSetNewConfigCleanupFailureMessage >/dev/null 2>&1; then
     }
 fi
 
+if ! declare -F padmCreateTmpRootPath >/dev/null 2>&1; then
+    padmCreateTmpRootPath() {
+        local outputVar=$1
+        local template=$2
+        local tmpBase="${TMPDIR:-/tmp}"
+
+        shift 2
+        padmCreateTempPath "${outputVar}" "$@" "${tmpBase%/}/${template}"
+    }
+fi
+
+if ! declare -F corePortReportBackupFailure >/dev/null 2>&1; then
+    corePortReportBackupFailure() {
+        local backupDir=$1
+        padmRemoveCleanupPath "${backupDir}"
+        errorCard "入口端口配置备份失败"
+    }
+fi
+
+if ! declare -F corePortReportRollbackFailure >/dev/null 2>&1; then
+    corePortReportRollbackFailure() {
+        local backupDir=$1
+        local rollbackMessage
+        padmForgetCleanupPath "${backupDir}"
+        coreSetRollbackFailureMessage rollbackMessage "入口端口配置回滚失败" "${backupDir}" ""
+        errorCard "${rollbackMessage}"
+    }
+fi
+
 if ! declare -F subscriptionSyncSetManualCheckMessage >/dev/null 2>&1; then
     subscriptionSyncSetManualCheckMessage() {
         coreSetManualCheckMessage "$@"
@@ -2396,6 +2425,60 @@ runCorePortFileTransactionRegression() {
     mkdir -p "${configPath}"
     configRoot=$(cd -- "${configPath}" && pwd -P) || return 1
     configPath="${configRoot%/}/"
+    corePortApplyFileTransaction() {
+        local action=$1
+        local backupDir
+        padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
+        if ! corePortBackupFiles "${backupDir}"; then
+            corePortReportBackupFailure "${backupDir}"
+            return 1
+        fi
+        shift
+        if ! "${action}" "$@" || ! corePortValidateFiles; then
+            if corePortRollbackFiles "${backupDir}"; then
+                padmRemoveCleanupPath "${backupDir}"
+            else
+                corePortReportRollbackFailure "${backupDir}"
+            fi
+            return 1
+        fi
+        padmRemoveCleanupPath "${backupDir}"
+    }
+    corePortApplyReloadTransaction() {
+        local action=$1
+        local backupDir
+        local restoreMessage
+        local rollbackMessage
+        padmCreateTmpRootPath backupDir padm-core-port.XXXXXX -d || return 1
+        if ! corePortBackupFiles "${backupDir}"; then
+            corePortReportBackupFailure "${backupDir}"
+            return 1
+        fi
+        shift
+        if ! "${action}" "$@" || ! corePortValidateFiles; then
+            if corePortRollbackFiles "${backupDir}"; then
+                padmRemoveCleanupPath "${backupDir}"
+            else
+                corePortReportRollbackFailure "${backupDir}"
+            fi
+            return 1
+        fi
+        if reloadCore; then
+            padmRemoveCleanupPath "${backupDir}"
+            return 0
+        fi
+
+        if ! corePortRollbackFiles "${backupDir}"; then
+            padmForgetCleanupPath "${backupDir}"
+            coreSetSingleRestoreResultMessage restoreMessage "入口端口核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
+            errorCard "${restoreMessage}"
+            return 1
+        fi
+        coreSetRollbackResultMessage rollbackMessage "入口端口核心重载失败" "已恢复旧配置" reloadCore "恢复后核心重载仍失败，请检查核心服务日志"
+        errorCard "${rollbackMessage}"
+        padmRemoveCleanupPath "${backupDir}"
+        return 1
+    }
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2053.json" 2053 443 tcp dokodemo-door-newPort-2053
     writeCoreDokodemoInbound "${configPath}02_dokodemodoor_inbounds_2083_default.json" 2083 443 tcp dokodemo-door-newPort-2083
     local original2053 original2083 keptBackup
