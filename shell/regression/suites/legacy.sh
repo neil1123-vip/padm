@@ -9,30 +9,19 @@ while read -r selector runner; do
 done <<'EOF'
 fast-reality fast-reality
 ui ui
-ui-smoke menu-smoke
-ui-full menu-smoke-full
 routing routing
-routing-socks5-udp-associate routing-socks5-udp-associate
 subscription subscription
-subscription-output subscription-output
-subscription-remote subscription-remote-fetch
-subscription-tx subscription-write-transaction
 runtime runtime
-runtime-core runtime-core
-runtime-auto-install-reality-route runtime-auto-install-reality-route
 reality-candidates reality-candidates
-reality-candidates-fast reality-candidates-fast
-reality-candidates-full reality-candidates-full
-reality-config reality-config
 reality-stream reality-stream
 transaction transaction
-transaction-core transaction-core
-transaction-subscription transaction-subscription
 transaction-system transaction-system
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
 registerRegressionFunctionLeaf tls runRegressionTls
+registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke
+registerRegressionFunctionLeaf routing-socks5-udp-associate runSocks5UdpAssociateRegression
 
 registerRegressionAggregateSequential all \
     routing \

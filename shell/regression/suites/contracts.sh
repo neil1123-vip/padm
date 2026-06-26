@@ -145,6 +145,18 @@ runLegacyTlsUsesFunctionRegistryContract() {
     grep -q '^registerRegressionFunctionLeaf tls runRegressionTls$' "${suiteFile}"
 }
 
+runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}"
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}"
+    done <<'EOF'
+ui-smoke runRegressionMenuSmoke
+routing-socks5-udp-associate runSocks5UdpAssociateRegression
+EOF
+}
+
 runLegacyRegressionScriptsRequireDispatcherContract() {
     local root="${TMP_DIR}/legacy-entry-contract"
     local scriptPath
@@ -180,7 +192,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
-        runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract
+        runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
+        runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts
