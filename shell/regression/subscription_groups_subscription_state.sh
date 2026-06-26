@@ -54,7 +54,7 @@ runParallelSubscriptionStateModes() {
 
     set +e
     for i in "${!modes[@]}"; do
-        PADM_REGRESSION_SUPPRESS_DONE=1 bash "${SUBSCRIPTION_STATE_SCRIPT_PATH}" "${modes[$i]}" >"${logs[$i]}" 2>&1 &
+        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${SUBSCRIPTION_STATE_SCRIPT_PATH}" "${modes[$i]}" >"${logs[$i]}" 2>&1 &
         pids[$i]=$!
     done
     for i in "${!pids[@]}"; do
@@ -239,8 +239,9 @@ runRegressionSubscriptionState() {
         sync-rollback subscription-state-sync-rollback
 }
 
-if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
-    return 0 2>/dev/null || exit 0
+if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
+    printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
+    exit 2
 fi
 
 regressionName=${1:-subscription-state}

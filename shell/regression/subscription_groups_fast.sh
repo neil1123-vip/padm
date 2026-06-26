@@ -2255,13 +2255,17 @@ runInstallRefreshSingleArchiveGuardRegression() {
     [[ "${archiveGuardCount}" == "1" ]]
 }
 
-runRegressionDispatcherSingleLegacyFallbackRegression() {
-    local legacyDispatchCount
-    legacyDispatchCount=$(awk '
-        /exec bash "\$\{SCRIPT_DIR\}\/regression\/subscription_groups_legacy\.sh" "\$@"/ { count++ }
+runRemoteControlSystemctlStubDefaultStopDisableRegression() {
+    local explicitStopDisableCount
+    explicitStopDisableCount=$(awk '
+        /runSubscriptionControlServiceInstallRegression\(\) \(/ { capture = 1 }
+        capture && /cat >"\$\{fakeBin\}\/systemctl" <<'SH'/ { in_stub = 1 }
+        in_stub && /^stop\)$/ { count++ }
+        in_stub && /^disable\)$/ { count++ }
+        in_stub && /^SH$/ { in_stub = 0; capture = 0 }
         END { print count + 0 }
-    ' "${PROJECT_ROOT}/shell/subscription_groups_regression.sh")
-    [[ "${legacyDispatchCount}" == "1" ]]
+    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh")
+    [[ "${explicitStopDisableCount}" == "0" ]]
 }
 
 runRegressionFastParallelCompositionRegression() (
@@ -4235,7 +4239,7 @@ runRegressionPlatformRest() {
         runRegressionStep remove-managed-files-ignore-failure runRemoveManagedFilesIgnoreFailureRegression &&
         runRegressionStep remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression &&
         runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
-        runRegressionStep regression-dispatcher-single-legacy-fallback runRegressionDispatcherSingleLegacyFallbackRegression &&
+        runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
         runRegressionStep regression-fast-parallel-composition runRegressionFastParallelCompositionRegression &&
         runRegressionStep regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression &&
         runRegressionStep regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression &&
@@ -4420,6 +4424,11 @@ runRegressionFast() {
         platform runRegressionPlatform \
         fast-only runRegressionFastOnly
 }
+
+if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
+    printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
+    exit 2
+fi
 
 regressionName=${1:-fast}
 case "${regressionName}" in

@@ -139,7 +139,7 @@ runRegisteredRegressionSelector() {
     script)
         scriptPath=${PADM_REGRESSION_SELECTOR_SCRIPT["${selector}"]}
         runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
-        PADM_REGRESSION_SUPPRESS_DONE=1 bash "${scriptPath}" "${runner}"
+        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${scriptPath}" "${runner}"
         ;;
     function)
         runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}

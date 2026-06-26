@@ -1978,9 +1978,9 @@ runParallelRemoteControlModes() {
 
     mkdir -p "${orchestrationRoot}"
     set +e
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" "${firstMode}" >"${firstLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" "${firstMode}" >"${firstLog}" 2>&1 &
     firstPid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" "${secondMode}" >"${secondLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" "${secondMode}" >"${secondLog}" 2>&1 &
     secondPid=$!
     wait "${firstPid}"
     firstStatus=$?
@@ -2020,11 +2020,11 @@ runRegressionRemoteControlSmokeRefresh() {
 
     mkdir -p "${orchestrationRoot}"
     set +e
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply >"${applyLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply >"${applyLog}" 2>&1 &
     applyPid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-restore >"${restoreLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-restore >"${restoreLog}" 2>&1 &
     restorePid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-reconcile >"${reconcileLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-reconcile >"${reconcileLog}" 2>&1 &
     reconcilePid=$!
     wait "${applyPid}"
     applyStatus=$?
@@ -2053,11 +2053,11 @@ runRegressionRemoteControlSmokeRefreshApply() {
 
     mkdir -p "${orchestrationRoot}"
     set +e
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-basic >"${basicLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-basic >"${basicLog}" 2>&1 &
     basicPid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-prepare >"${prepareLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-prepare >"${prepareLog}" 2>&1 &
     preparePid=$!
-    PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-failure >"${failureLog}" 2>&1 &
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}" remote-control-smoke-refresh-apply-failure >"${failureLog}" 2>&1 &
     failurePid=$!
     wait "${basicPid}"
     basicStatus=$?
@@ -2147,6 +2147,11 @@ runRegressionRemoteControlContractServerResponse() {
 runRegressionRemoteControlDeep() {
     runRegressionStep remote-control-server-refresh-deep runRemoteControlServerRefreshDeepRegression
 }
+
+if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
+    printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
+    exit 2
+fi
 
 regressionName=${1:-remote-control}
 case "${regressionName}" in
