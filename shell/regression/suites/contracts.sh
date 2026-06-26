@@ -155,6 +155,7 @@ runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
 ui-smoke runRegressionMenuSmoke
 routing-socks5-udp-associate runSocks5UdpAssociateRegression
 subscription-remote-fetch runRegressionSubscriptionRemoteFetch
+reality-candidates-fast runRealityCandidateFastRegression
 EOF
 }
 

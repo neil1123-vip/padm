@@ -50,6 +50,7 @@ registerRegressionFunctionLeaf tls runRegressionTls
 registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke
 registerRegressionFunctionLeaf routing-socks5-udp-associate runSocks5UdpAssociateRegression
 registerRegressionFunctionLeaf subscription-remote-fetch runRegressionSubscriptionRemoteFetch
+registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
 
 registerRegressionAggregateSequential all \
     routing \
