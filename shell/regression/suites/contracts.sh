@@ -191,6 +191,10 @@ core-template-return-failure runCoreTemplateReturnFailureRegression
 core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression
 sing-box-cronet-rollback runSingBoxCronetRollbackRegression
 finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression
+service-queue-apply-propagation runServiceQueueApplyPropagationRegression
+core-install-service-action-failure runCoreInstallServiceActionFailureRegression
+sing-box-merge-start-failure runSingBoxMergeStartFailureRegression
+sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression
 EOF
 }
 
