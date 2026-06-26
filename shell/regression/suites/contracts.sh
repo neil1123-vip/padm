@@ -182,6 +182,7 @@ routing-access-control-failure-return runAccessControlFailureReturnRegression
 routing-bt-failure-return runBTRoutingFailureReturnRegression
 routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
 routing-warp-failure-return runWARPRoutingFailureReturnRegression
+routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
 subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
