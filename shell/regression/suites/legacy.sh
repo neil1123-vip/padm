@@ -96,6 +96,9 @@ registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailur
 registerRegressionFunctionLeaf wireguard-control-safe-dir runWireGuardControlSafeDirRegression
 registerRegressionFunctionLeaf warp-config-safe-dir runWarpConfigSafeDirRegression
 registerRegressionFunctionLeaf warp-config-file-cleanup runWarpConfigFileCleanupRegression
+registerRegressionFunctionLeaf uninstall-nginx-cleanup runUninstallNginxCleanupRegression
+registerRegressionFunctionLeaf clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
+registerRegressionFunctionLeaf fail2ban-managed-cleanup runFail2banManagedCleanupRegression
 registerRegressionAggregateSequential transaction \
     transaction-core \
     transaction-subscription \

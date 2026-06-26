@@ -223,6 +223,9 @@ tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 wireguard-control-safe-dir runWireGuardControlSafeDirRegression
 warp-config-safe-dir runWarpConfigSafeDirRegression
 warp-config-file-cleanup runWarpConfigFileCleanupRegression
+uninstall-nginx-cleanup runUninstallNginxCleanupRegression
+clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
+fail2ban-managed-cleanup runFail2banManagedCleanupRegression
 EOF
 
     return "${status}"
