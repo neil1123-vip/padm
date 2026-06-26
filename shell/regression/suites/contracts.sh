@@ -173,6 +173,7 @@ reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 transaction-system runRegressionTransactionSystem
 transaction-subscription runRegressionTransactionSubscription
+config-transaction runConfigTransactionRegression
 EOF
 }
 

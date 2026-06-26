@@ -52,6 +52,7 @@ registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRe
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 registerRegressionFunctionLeaf transaction-system runRegressionTransactionSystem
 registerRegressionFunctionLeaf transaction-subscription runRegressionTransactionSubscription
+registerRegressionFunctionLeaf config-transaction runConfigTransactionRegression
 
 registerRegressionAggregateSequential all \
     routing \
