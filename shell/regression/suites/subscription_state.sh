@@ -1,66 +1,66 @@
 #!/usr/bin/env bash
 
 REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-REGRESSION_SUBSCRIPTION_STATE_FULL_SCRIPT="${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"
+PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"
 
 while read -r selector runner; do
-    registerRegressionScriptLeaf "${selector}" "${REGRESSION_SUBSCRIPTION_STATE_FULL_SCRIPT}" "${runner}"
+    registerRegressionFunctionLeaf "${selector}" "${runner}"
 done <<'EOF'
-subscription-state-serial subscription-state-serial
-subscription-state-structure subscription-state-structure
-subscription-state-structure-foundation subscription-state-structure-foundation
-subscription-state-structure-foundation-add-remove subscription-state-structure-foundation-add-remove
-subscription-state-structure-foundation-credential subscription-state-structure-foundation-credential
-subscription-state-structure-foundation-normalize subscription-state-structure-foundation-normalize
-subscription-state-structure-foundation-init-transaction subscription-state-structure-foundation-init-transaction
-subscription-state-structure-foundation-serial subscription-state-structure-foundation-serial
-subscription-state-structure-migration subscription-state-structure-migration
-subscription-state-structure-source subscription-state-structure-source
-subscription-state-structure-source-credential subscription-state-structure-source-credential
-subscription-state-structure-source-status subscription-state-structure-source-status
-subscription-state-structure-source-remove subscription-state-structure-source-remove
-subscription-state-structure-source-serial subscription-state-structure-source-serial
-subscription-state-structure-serial subscription-state-structure-serial
-subscription-state-quota subscription-state-quota
-subscription-state-quota-traffic subscription-state-quota-traffic
-subscription-state-quota-traffic-summary subscription-state-quota-traffic-summary
-subscription-state-quota-traffic-invalid-input subscription-state-quota-traffic-invalid-input
-subscription-state-quota-traffic-apply subscription-state-quota-traffic-apply
-subscription-state-quota-traffic-serial subscription-state-quota-traffic-serial
-subscription-state-quota-menu-preview-fail subscription-state-quota-menu-preview-fail
-subscription-state-quota-menu-tx subscription-state-quota-menu-tx
-subscription-state-quota-menu-tx-rollback subscription-state-quota-menu-tx-rollback
-subscription-state-quota-menu-tx-serial subscription-state-quota-menu-tx-serial
-subscription-state-quota-partial-sync subscription-state-quota-partial-sync
-subscription-state-quota-partial-sync-apply-failure subscription-state-quota-partial-sync-apply-failure
-subscription-state-quota-partial-sync-plan subscription-state-quota-partial-sync-plan
-subscription-state-quota-partial-sync-config subscription-state-quota-partial-sync-config
-subscription-state-quota-partial-sync-serial subscription-state-quota-partial-sync-serial
-subscription-state-quota-serial subscription-state-quota-serial
-subscription-state-remote-restore subscription-state-remote-restore
-subscription-state-remote-restore-self-reference subscription-state-remote-restore-self-reference
-subscription-state-remote-restore-self-reference-plan subscription-state-remote-restore-self-reference-plan
-subscription-state-remote-restore-self-reference-sync subscription-state-remote-restore-self-reference-sync
-subscription-state-remote-restore-self-reference-serial subscription-state-remote-restore-self-reference-serial
-subscription-state-remote-restore-state-write subscription-state-remote-restore-state-write
-subscription-state-remote-restore-legacy-menu subscription-state-remote-restore-legacy-menu
-subscription-state-remote-restore-serial subscription-state-remote-restore-serial
-subscription-state-support subscription-state-support
-subscription-state-sync-rollback subscription-state-sync-rollback
-subscription-state-sync-rollback-serial subscription-state-sync-rollback-serial
-subscription-sync-tempdir subscription-sync-tempdir
-subscription-sync-rollback-failure subscription-sync-rollback-failure
-subscription-sync-rollback-failure-serial subscription-sync-rollback-failure-serial
-subscription-sync-rollback-config-restore-failure subscription-sync-rollback-config-restore-failure
-subscription-sync-restore-dir-failure subscription-sync-restore-dir-failure
-subscription-sync-reload-rollback subscription-sync-reload-rollback
-subscription-group-sync-rollback subscription-group-sync-rollback
-subscription-group-sync-rollback-serial subscription-group-sync-rollback-serial
-subscription-group-sync-apply-failure subscription-group-sync-apply-failure
-subscription-group-sync-reconcile-rollback subscription-group-sync-reconcile-rollback
-subscription-group-sync-remote-failure subscription-group-sync-remote-failure
-subscription-sync-reconcile-early-exit subscription-sync-reconcile-early-exit
-subscription-groups-restore-failure subscription-groups-restore-failure
+subscription-state-serial runRegressionSubscriptionStateSerial
+subscription-state-structure runRegressionSubscriptionStateStructure
+subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation
+subscription-state-structure-foundation-add-remove runRegressionSubscriptionStateStructureFoundationAddRemove
+subscription-state-structure-foundation-credential runRegressionSubscriptionStateStructureFoundationCredential
+subscription-state-structure-foundation-normalize runRegressionSubscriptionStateStructureFoundationNormalize
+subscription-state-structure-foundation-init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
+subscription-state-structure-foundation-serial runRegressionSubscriptionStateStructureFoundationSerial
+subscription-state-structure-migration runRegressionSubscriptionStateStructureMigration
+subscription-state-structure-source runRegressionSubscriptionStateStructureSource
+subscription-state-structure-source-credential runRegressionSubscriptionStateStructureSourceCredential
+subscription-state-structure-source-status runRegressionSubscriptionStateStructureSourceStatus
+subscription-state-structure-source-remove runRegressionSubscriptionStateStructureSourceRemove
+subscription-state-structure-source-serial runRegressionSubscriptionStateStructureSourceSerial
+subscription-state-structure-serial runRegressionSubscriptionStateStructureSerial
+subscription-state-quota runRegressionSubscriptionStateQuota
+subscription-state-quota-traffic runRegressionSubscriptionStateQuotaTraffic
+subscription-state-quota-traffic-summary runRegressionSubscriptionStateQuotaTrafficSummary
+subscription-state-quota-traffic-invalid-input runRegressionSubscriptionStateQuotaTrafficInvalidInput
+subscription-state-quota-traffic-apply runRegressionSubscriptionStateQuotaTrafficApply
+subscription-state-quota-traffic-serial runRegressionSubscriptionStateQuotaTrafficSerial
+subscription-state-quota-menu-preview-fail runRegressionSubscriptionStateQuotaMenuPreviewFailure
+subscription-state-quota-menu-tx runRegressionSubscriptionStateQuotaMenuTransaction
+subscription-state-quota-menu-tx-rollback runRegressionSubscriptionStateQuotaTransactionRollback
+subscription-state-quota-menu-tx-serial runRegressionSubscriptionStateQuotaMenuTransactionSerial
+subscription-state-quota-partial-sync runRegressionSubscriptionStateQuotaPartialSync
+subscription-state-quota-partial-sync-apply-failure runRegressionSubscriptionStateQuotaPartialSyncApplyFailure
+subscription-state-quota-partial-sync-plan runRegressionSubscriptionStateQuotaPartialSyncPlan
+subscription-state-quota-partial-sync-config runRegressionSubscriptionStateQuotaPartialSyncConfig
+subscription-state-quota-partial-sync-serial runRegressionSubscriptionStateQuotaPartialSyncSerial
+subscription-state-quota-serial runRegressionSubscriptionStateQuotaSerial
+subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore
+subscription-state-remote-restore-self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference
+subscription-state-remote-restore-self-reference-plan runRegressionSubscriptionStateRemoteRestoreSelfReferencePlan
+subscription-state-remote-restore-self-reference-sync runRegressionSubscriptionStateRemoteRestoreSelfReferenceSync
+subscription-state-remote-restore-self-reference-serial runRegressionSubscriptionStateRemoteRestoreSelfReferenceSerial
+subscription-state-remote-restore-state-write runRegressionSubscriptionStateRemoteRestoreStateWrite
+subscription-state-remote-restore-legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
+subscription-state-remote-restore-serial runRegressionSubscriptionStateRemoteRestoreSerial
+subscription-state-support runRegressionSubscriptionStateSupport
+subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback
+subscription-state-sync-rollback-serial runRegressionSubscriptionStateSyncRollbackSerial
+subscription-sync-tempdir runRegressionSubscriptionSyncTempDir
+subscription-sync-rollback-failure runRegressionSubscriptionStateSyncRollback
+subscription-sync-rollback-failure-serial runRegressionSubscriptionStateSyncRollbackSerial
+subscription-sync-rollback-config-restore-failure runRegressionSubscriptionSyncRollbackConfigRestoreFailure
+subscription-sync-restore-dir-failure runRegressionSubscriptionSyncRollbackRestoreDirFailure
+subscription-sync-reload-rollback runRegressionSubscriptionSyncRollbackReloadRollback
+subscription-group-sync-rollback runRegressionSubscriptionGroupSyncRollback
+subscription-group-sync-rollback-serial runRegressionSubscriptionGroupSyncRollbackSerial
+subscription-group-sync-apply-failure runRegressionSubscriptionGroupSyncApplyFailure
+subscription-group-sync-reconcile-rollback runRegressionSubscriptionGroupSyncReconcileRollback
+subscription-group-sync-remote-failure runRegressionSubscriptionGroupSyncRemoteFailure
+subscription-sync-reconcile-early-exit runRegressionSubscriptionSyncReconcileEarlyExit
+subscription-groups-restore-failure runRegressionSubscriptionGroupsRestoreFailure
 EOF
 
 registerRegressionAggregateParallel subscription-state-core \
