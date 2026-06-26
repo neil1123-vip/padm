@@ -73,6 +73,7 @@ registerRegressionFunctionLeaf sing-box-uninstall-failure-propagation runSingBox
 registerRegressionFunctionLeaf sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
 registerRegressionFunctionLeaf geo-update-reload-failure runGeoUpdateReloadFailureRegression
 registerRegressionFunctionLeaf core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression
+registerRegressionFunctionLeaf sing-box-log-transaction runSingBoxLogTransactionRegression
 registerRegressionAggregateSequential transaction \
     transaction-core \
     transaction-subscription \

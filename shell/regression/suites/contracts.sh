@@ -199,6 +199,7 @@ sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegr
 sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
 geo-update-reload-failure runGeoUpdateReloadFailureRegression
 core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression
+sing-box-log-transaction runSingBoxLogTransactionRegression
 EOF
 }
 
