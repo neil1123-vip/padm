@@ -229,6 +229,12 @@ fail2ban-managed-cleanup runFail2banManagedCleanupRegression
 fail2ban-apply-transaction runFail2banApplyTransactionRegression
 uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression
 wireguard-key-transaction runWireGuardKeyTransactionRegression
+uninstall-service-stop-failure runUninstallServiceStopFailureRegression
+clean-last-installation-failure runCleanLastInstallationConfigFailureRegression
+clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression
+clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
+alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
+alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
 EOF
 
     return "${status}"
