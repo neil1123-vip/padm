@@ -36,7 +36,6 @@ while read -r selector runner; do
 done <<'EOF'
 ui ui
 routing routing
-runtime runtime
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
@@ -81,7 +80,11 @@ registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegres
 registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression
 registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression
 registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression
+registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression
+registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
+registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression
+registerRegressionFunctionLeaf reality-config runRealityConfigRegression
 registerRegressionFunctionLeaf transaction-subscription runRegressionTransactionSubscription
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
 registerRegressionFunctionLeaf core-rollback-result-message runCoreRollbackResultMessageRegression
@@ -172,6 +175,9 @@ registerRegressionAggregateRunnerSequential reality-candidates runRegressionReal
 
 registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStream \
     $(listRegressionRealityStreamChildSelectors)
+
+registerRegressionAggregateRunnerParallel runtime runRegressionRuntime \
+    $(listRegressionRuntimeChildSelectors)
 
 registerRegressionAggregateParallel transaction-system \
     $(listRegressionTransactionSystemChildSelectors)

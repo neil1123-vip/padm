@@ -196,7 +196,11 @@ reality-asn-scan-plan runRealityAsnScanPlanRegression
 reality-candidates-full runRealityCandidateFullRegression
 reality-stream-enable runRealityStreamEnableRegression
 reality-stream-disable runRealityStreamDisableRegression
+runtime-core runRuntimeAndRealityRegression
+runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
+runtime-tempdir runRuntimeTempDirRegression
+reality-config runRealityConfigRegression
 transaction-subscription runRegressionTransactionSubscription
 nginx-service-failure runNginxServiceFailureRegression
 config-transaction runConfigTransactionRegression
@@ -604,6 +608,47 @@ runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
     ' "${callLog}"
 )
 
+runRuntimeSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/runtime-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/runtime-default-selectors.sorted.txt"
+    local waveSelectorsFile="${TMP_DIR}/runtime-wave-selectors.txt"
+    local waveSortedFile="${TMP_DIR}/runtime-wave-selectors.sorted.txt"
+
+    declare -F listRegressionRuntimeChildSelectors >/dev/null
+    declare -F listRegressionRuntimeLightChildSelectors >/dev/null
+    declare -F listRegressionRuntimeHeavyChildSelectors >/dev/null
+
+    listRegressionRuntimeChildSelectors >"${defaultSelectorsFile}"
+    {
+        listRegressionRuntimeLightChildSelectors
+        listRegressionRuntimeHeavyChildSelectors
+    } >"${waveSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/runtime-default-selectors.unique.txt"
+    sort "${waveSelectorsFile}" >"${waveSortedFile}"
+    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/runtime-wave-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/runtime-default-selectors.unique.txt"
+    cmp -s "${waveSortedFile}" "${TMP_DIR}/runtime-wave-selectors.unique.txt"
+    cmp -s "${TMP_DIR}/runtime-default-selectors.unique.txt" "${TMP_DIR}/runtime-wave-selectors.unique.txt"
+)
+
+runRuntimeAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["runtime"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf runtime ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf runtime ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntime \\' "${suiteFile}"
+    expectedChildren=$(listRegressionRuntimeChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["runtime"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["runtime"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["runtime"]:-}" == "runRegressionRuntime" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
 runParallelSelectorCollectsExitedChildWithoutRcContract() (
     local root="${TMP_DIR}/parallel-selector-exit-without-rc"
     local statusFile="${root}/status"
@@ -747,6 +792,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
         runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract &&
+        runRegressionStep runtime-selector-helpers-stay-aligned runRuntimeSelectorHelpersStayAlignedContract &&
+        runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
         runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&

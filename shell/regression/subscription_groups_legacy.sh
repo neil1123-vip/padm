@@ -16315,6 +16315,25 @@ listRegressionRealityCandidatesChildSelectors() {
         reality-candidates-full
 }
 
+listRegressionRuntimeLightChildSelectors() {
+    printf '%s\n' \
+        runtime-core \
+        runtime-autoread-unset-auto-install \
+        runtime-auto-install-reality-route \
+        runtime-tempdir
+}
+
+listRegressionRuntimeHeavyChildSelectors() {
+    printf '%s\n' \
+        reality-candidates \
+        reality-config
+}
+
+listRegressionRuntimeChildSelectors() {
+    listRegressionRuntimeLightChildSelectors
+    listRegressionRuntimeHeavyChildSelectors
+}
+
 runRegressionRealityCandidates() {
     runRegressionStep reality-candidates-fast runRealityCandidateFastRegression &&
         runRegressionStep reality-asn-scan-plan runRealityAsnScanPlanRegression &&
@@ -16327,17 +16346,27 @@ runRegressionRealityStream() {
 }
 
 runRegressionRuntime() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
     if [[ "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" == "all" ]]; then
+        mapfile -t selectors < <(listRegressionRuntimeLightChildSelectors)
+        selectorPairs=()
+        for selector in "${selectors[@]}"; do
+            selectorPairs+=("${selector}" "${selector}")
+        done
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
             runParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-light-${BASHPID:-$$}" \
-            runtime-core \
-            runtime-autoread-unset-auto-install \
-            runtime-auto-install-reality-route \
-            runtime-tempdir
+            "${selectorPairs[@]}"
+        mapfile -t selectors < <(listRegressionRuntimeHeavyChildSelectors)
+        selectorPairs=()
+        for selector in "${selectors[@]}"; do
+            selectorPairs+=("${selector}" "${selector}")
+        done
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
             runParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-heavy-${BASHPID:-$$}" \
-            reality-candidates \
-            reality-config
+            "${selectorPairs[@]}"
         return
     fi
 
