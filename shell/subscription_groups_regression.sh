@@ -20,4 +20,6 @@ source "${SCRIPT_DIR}/regression/suites/remote_control.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/regression/suites/subscription_state.sh"
 
+restoreLegacyRealityRegressionStubs
+
 runRegisteredRegressionMain "${1:-fast}"

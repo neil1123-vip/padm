@@ -158,6 +158,13 @@ subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 EOF
 }
 
+runLegacyRealityStubsSurviveSuiteLoadContract() {
+    declare -f realityTargetDetector | grep -q "fake-xray"
+    declare -f currentRealityNetworkProfile | grep -q "203.0.113.10"
+    declare -f resolveRealityTargetIPv4 | grep -q "192.0.2.1"
+    declare -f lookupRealityTargetAsn | grep -q "AS64501"
+}
+
 runLegacyRegressionScriptsRequireDispatcherContract() {
     local root="${TMP_DIR}/legacy-entry-contract"
     local scriptPath
@@ -194,7 +201,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
         runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
-        runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract
+        runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts
