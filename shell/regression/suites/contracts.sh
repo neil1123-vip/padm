@@ -139,6 +139,11 @@ runLegacySuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateSequential transaction \\' "${suiteFile}"
+    grep -q '^    transaction-core \\' "${suiteFile}"
+    grep -q '^    transaction-subscription \\' "${suiteFile}"
+    grep -q '^    transaction-system$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIo$' "${suiteFile}"
     grep -q '^registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"

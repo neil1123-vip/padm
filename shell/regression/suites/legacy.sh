@@ -40,7 +40,7 @@ subscription subscription
 runtime runtime
 reality-candidates reality-candidates
 reality-stream reality-stream
-transaction transaction
+transaction-core transaction-core
 EOF
 
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
@@ -53,6 +53,10 @@ registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstall
 registerRegressionFunctionLeaf transaction-system runRegressionTransactionSystem
 registerRegressionFunctionLeaf transaction-subscription runRegressionTransactionSubscription
 registerRegressionFunctionLeaf config-transaction runConfigTransactionRegression
+registerRegressionAggregateSequential transaction \
+    transaction-core \
+    transaction-subscription \
+    transaction-system
 
 registerRegressionAggregateSequential all \
     routing \
