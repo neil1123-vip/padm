@@ -188,6 +188,7 @@ reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 transaction-system runRegressionTransactionSystem
 transaction-subscription runRegressionTransactionSubscription
+nginx-service-failure runNginxServiceFailureRegression
 config-transaction runConfigTransactionRegression
 core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression
 check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression

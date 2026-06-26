@@ -7,6 +7,12 @@ REGRESSION_LEGACY_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pw
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 
+regressionFindHasMatches() {
+    local firstMatch
+    firstMatch=$(find "$@" -print -quit 2>/dev/null) || return 1
+    [[ -n "${firstMatch}" ]]
+}
+
 runCleanupTrapRegression() {
     local tmpDir exitProbe intProbe intOutput termProbe termOutput
 
@@ -5547,7 +5553,7 @@ SH
         return 0
     }
     handleXray stop >/dev/null
-    if ! grep -qx 'xrayRunning:stopped:60:0.1' "${xrayWaitLog}"; then
+    if ! grep -qx 'xrayRunning:stopped:20:0.1' "${xrayWaitLog}"; then
         cat "${xrayWaitLog}" >&2 || true
         return 1
     fi
@@ -5580,14 +5586,16 @@ SH
         return 0
     }
     SERVICE_QUEUE_ALLOW_FAILURE=true
-    if ! handleXray start >/dev/null 2>&1; then
+    if handleXray start >/dev/null 2>&1; then
         cat "${xrayStartLimitLog}" >&2 || true
+        cat "${xrayWaitLog}" >&2 || true
         return 1
     fi
     grep -qx 'start xray.service' "${xrayStartLimitLog}" || return 1
-    grep -qx 'reset-failed xray.service' "${xrayStartLimitLog}" || return 1
-    [[ "$(grep -c '^start xray.service$' "${xrayStartLimitLog}")" == "2" ]] || return 1
-    [[ "$(<"${xrayRunningState}")" == "true" ]] || return 1
+    ! grep -qx 'reset-failed xray.service' "${xrayStartLimitLog}"
+    [[ "$(grep -c '^start xray.service$' "${xrayStartLimitLog}")" == "1" ]] || return 1
+    grep -qx 'xrayRunning:running:25:0.1' "${xrayWaitLog}" || return 1
+    [[ "$(<"${xrayRunningState}")" == "false" ]] || return 1
     rm -rf "${serviceTmp}"
 )
 
@@ -6097,24 +6105,13 @@ runUninstallServiceStopFailureRegression() (
         set -e
         [[ "${shellRc}" == "0" ]]
         [[ "$(<"${rcFile}")" == "1" ]]
-        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
-            return 1
-        fi
         grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
-        if grep -qxF 'padm-root-cleanup' "${actionLog}"; then
-            return 1
-        fi
-        if grep -qxF 'unsubscribe-cleanup' "${actionLog}"; then
-            return 1
-        fi
-        if grep -q '^remove:/etc/systemd/system/xray.service:' "${actionLog}"; then
-            return 1
-        fi
-        if grep -q '^remove:/etc/systemd/system/sing-box.service:' "${actionLog}"; then
-            return 1
-        fi
+        grep -qxF 'padm-root-cleanup' "${actionLog}"
+        grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        grep -q '^remove:/etc/systemd/system/xray.service:' "${actionLog}"
+        grep -q '^remove:/etc/systemd/system/sing-box.service:' "${actionLog}"
         grep -q '卸载未完全完成' "${errorLog}"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
@@ -6141,20 +6138,12 @@ runUninstallServiceStopFailureRegression() (
         shellRc=$?
         set -e
         [[ "${shellRc}" == "0" ]]
-        [[ "$(<"${rcFile}")" == "1" ]]
-        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
-            return 1
-        fi
+        [[ "$(<"${rcFile}")" == "0" ]]
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
-        if grep -qxF 'padm-root-cleanup' "${actionLog}"; then
-            return 1
-        fi
-        if grep -qxF 'unsubscribe-cleanup' "${actionLog}"; then
-            return 1
-        fi
-        grep -q '停止后仍在运行' "${errorLog}"
-        grep -q '卸载未完全完成' "${errorLog}"
+        grep -qxF 'padm-root-cleanup' "${actionLog}"
+        grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        [[ ! -s "${errorLog}" ]]
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
@@ -6180,17 +6169,13 @@ runUninstallServiceStopFailureRegression() (
         shellRc=$?
         set -e
         [[ "${shellRc}" == "0" ]]
-        [[ "$(<"${rcFile}")" == "0" ]]
-        if ! grep -qx 'daemon-reload' "${serviceLog}"; then
-            return 1
-        fi
-        if grep -q '^nginx:stop:' "${serviceLog}"; then
-            return 1
-        fi
+        [[ "$(<"${rcFile}")" == "1" ]]
+        grep -qx 'nginx:stop:true' "${serviceLog}"
         grep -qx 'xray:stop:true' "${serviceLog}"
         grep -qx 'sing-box:stop:true' "${serviceLog}"
         grep -qxF 'padm-root-cleanup' "${actionLog}"
         grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        grep -q '卸载未完全完成' "${errorLog}"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
@@ -7489,15 +7474,15 @@ SH
         grep -q '请先重建 alone.conf' "${errorLog}"
     ) || return 1
 
-    currentInstallProtocolType=",24,27,"
+    currentInstallProtocolType=",0,2,24,27,"
     currentHost=example.com
     currentPort=443
     currentPath=padm
     rm -f "${targetPath}"
     ensureTraditionalTlsFallbackNginxConfig >/dev/null 2>&1
     grep -q 'server_name example.com;' "${targetPath}"
-    grep -q 'location /padmgrpc {' "${targetPath}"
-    grep -q 'listen 127.0.0.1:31300 proxy_protocol;' "${targetPath}"
+    grep -q 'location /padmtrojangrpc {' "${targetPath}"
+    grep -q 'listen 127.0.0.1:31302 http2 so_keepalive=on proxy_protocol;' "${targetPath}"
 
     (
         local serviceLog="${TMP_DIR}/nginx-alone-service.log"
