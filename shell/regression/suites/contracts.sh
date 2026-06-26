@@ -292,6 +292,7 @@ runTransactionCoreRegisteredChildSelectorsAlignedContract() (
 core-rollback-result-message
 config-transaction
 core-port-unsafe-config-dir
+entry-helper-config
 check-port-open-nginx-directory-target
 alone-nginx-directory-target
 xray-reality-port-failure
@@ -339,6 +340,7 @@ runTransactionCoreCompatibleDispatcherLeavesExecutionContract() (
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
     done <<'EOF'
 core-rollback-result-message
+entry-helper-config
 user-config-write
 remove-user
 EOF

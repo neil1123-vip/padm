@@ -240,6 +240,20 @@ if ! declare -F removeUserFromConfigFiles >/dev/null 2>&1; then
     }
 fi
 
+if ! declare -F regressionProtocolSelectionIncludesCompat >/dev/null 2>&1; then
+    regressionProtocolSelectionIncludesCompat() {
+        local selection=$1
+        local protocolId=$2
+        local mode=${3:-}
+
+        [[ "${mode}" == "all" ]] && return 0
+        if [[ "${protocolId}" == "11" ]] && [[ ",${selection}," == *",23,"* ]]; then
+            return 0
+        fi
+        protocolSelectionHasAny "${selection}" "${protocolId}"
+    }
+fi
+
 runCleanupTrapRegression() {
     local tmpDir exitProbe intProbe intOutput termProbe termOutput
 
@@ -6771,6 +6785,7 @@ runEntryHelperConfigRegression() {
     local realityVisionFile="${entryConfigPath}07_VLESS_vision_reality_inbounds.json"
     local realityXhttpFile="${entryConfigPath}12_VLESS_XHTTP_inbounds.json"
     local oldPath="${PATH}"
+    local protocolSelectionIncludesDef=
     local nginxTarget="${TMP_DIR}/entry-helper-nginx/sing_box_VMess_HTTPUpgrade.conf"
     local originalContent
     mkdir -p "${entryConfigPath}" "${entryLogBase}" "${TMP_DIR}/fake-bin" "${TMP_DIR}/entry-helper-nginx" "${entryTmpRoot}"
@@ -6787,6 +6802,12 @@ SH
     chmod +x "${TMP_DIR}/fake-bin/nginx"
     PATH="${TMP_DIR}/fake-bin:${PATH}"
     TMPDIR="${entryTmpRoot}"
+    protocolSelectionIncludesDef=$(declare -f protocolSelectionIncludes)
+    protocolSelectionIncludesDef="${protocolSelectionIncludesDef/protocolSelectionIncludes/regressionOriginalProtocolSelectionIncludes}"
+    eval "${protocolSelectionIncludesDef}"
+    protocolSelectionIncludes() {
+        regressionProtocolSelectionIncludesCompat "$@"
+    }
     writeXrayLogConfig "${entryConfigPath}00_log.json" "${entryLogBase}" true
     [[ "$(jq -r '.log.access' "${entryConfigPath}00_log.json")" == "${entryLogBase}access.log" ]]
     [[ "$(jq -r '.log.error' "${entryConfigPath}00_log.json")" == "${entryLogBase}error.log" ]]
@@ -6995,6 +7016,7 @@ JSON
 
     PATH="${oldPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+    eval "${protocolSelectionIncludesDef}"
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
 
