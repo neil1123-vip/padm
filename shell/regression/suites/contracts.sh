@@ -175,6 +175,8 @@ ui-smoke runRegressionMenuSmoke
 routing-socks5-udp-associate runSocks5UdpAssociateRegression
 routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
 routing-access-control-config-transaction runAccessControlConfigTransactionRegression
+routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
+routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
 subscription-remote-fetch runRegressionSubscriptionRemoteFetch
 reality-candidates-fast runRealityCandidateFastRegression
 runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
