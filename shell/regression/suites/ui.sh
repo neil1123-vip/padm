@@ -29,8 +29,7 @@ runRegressionUiSuiteRoot() {
 }
 
 registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke
-registerRegressionFunctionLeaf menu-smoke runRegressionMenuSmoke
-registerRegressionFunctionLeaf menu-smoke-full runRegressionMenuSmokeFull
+registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull
 registerRegressionFunctionLeaf menu-smoke-full-core runMenuSmokeFullCoreRegression
 registerRegressionFunctionLeaf menu-smoke-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
 registerRegressionFunctionLeaf menu-smoke-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression

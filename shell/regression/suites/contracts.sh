@@ -599,12 +599,17 @@ runUiPublicSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local status=0
 
+    ! grep -q '^registerRegressionScriptLeaf menu-smoke ' "${suiteFile}" || status=1
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke ' "${suiteFile}" || status=1
+    ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}" || status=1
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}" || status=1
+
     while read -r selector runner; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
-menu-smoke runRegressionMenuSmoke
-menu-smoke-full runRegressionMenuSmokeFull
+ui-smoke runRegressionMenuSmoke
+ui-full runRegressionMenuSmokeFull
 menu-smoke-full-core runMenuSmokeFullCoreRegression
 menu-smoke-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
 menu-smoke-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
@@ -640,6 +645,11 @@ wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowControlResto
 wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
 EOF
 
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]] || status=1
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]] || status=1
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]] || status=1
+
     return "${status}"
 }
 
@@ -650,8 +660,17 @@ runUiSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf ui ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf menu-smoke ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}"
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]]
 }
 
 runUiSelectorHelpersStayAlignedContract() (
@@ -691,7 +710,7 @@ menu-smoke-full-subscription-main-entry
 menu-smoke-full-subscription-controlled
 menu-smoke-full-core
 menu-smoke-full-core-maintenance
-menu-smoke
+ui-smoke
 wireguard-restore-runner
 EOF
 
@@ -711,7 +730,7 @@ menu-smoke-full-subscription-main-entry
 menu-smoke-full-subscription-controlled
 menu-smoke-full-core
 menu-smoke-full-core-maintenance
-menu-smoke
+ui-smoke
 wireguard-restore-runner
 EOF
 
@@ -734,11 +753,17 @@ runUiAggregateRunnerRegistrationContract() {
 
     ! grep -q '^ui ui$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionUiChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["ui"]:-}" == "parallel" ]]
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["ui"]:-}" == "runRegressionUiSuiteRoot" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
