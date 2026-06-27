@@ -148,5 +148,3 @@ listRegressionAllChildSelectors() {
 
 registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \
     $(listRegressionAllChildSelectors)
-registerRegressionAlias full all
-registerRegressionAlias ci all

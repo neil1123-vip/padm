@@ -351,8 +351,23 @@ runAllSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAlias full all$' "${suiteFile}"
-    grep -q '^registerRegressionAlias ci all$' "${suiteFile}"
+    ! grep -q '^registerRegressionAlias full all$' "${suiteFile}"
+    ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}"
+}
+
+runAllPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    ! grep -q '^registerRegressionAlias full all$' "${suiteFile}"
+    ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}"
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["all"]:-}" == "aggregate-runner" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["full"]:-}" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["ci"]:-}" ]]
+    ! grep -Eq '^[[:space:]]*all\|full\|ci\)$' "${legacyFile}"
+    grep -Eq '^[[:space:]]*all\)$' "${legacyFile}"
+    ! grep -Fq '|all|full|ci]' "${legacyFile}"
+    grep -Fq '|remote-control|all]' "${legacyFile}"
 }
 
 runLegacySuiteUsesFunctionRegistryContract() {
@@ -1723,6 +1738,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
         runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
+        runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
