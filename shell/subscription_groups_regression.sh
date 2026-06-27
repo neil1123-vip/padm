@@ -14,6 +14,8 @@ source "${SCRIPT_DIR}/regression/suites/fast.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/regression/suites/all.sh"
 # shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/suites/runtime.sh"
+# shellcheck source=/dev/null
 source "${SCRIPT_DIR}/regression/suites/contracts.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/regression/suites/legacy.sh"
