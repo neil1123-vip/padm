@@ -476,7 +476,8 @@ runAllPublicSelectorRetirementContract() {
     grep -Fq '|remote-control|all]' "${legacyFile}"
 }
 
-runLegacySuiteUsesFunctionRegistryContract() {
+runLegacySuiteUsesFunctionRegistryContract() (
+    set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local expectedChildren actualChildren
@@ -484,11 +485,11 @@ runLegacySuiteUsesFunctionRegistryContract() {
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \\' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateRunnerSequential transaction ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateRunnerParallel transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}"
-    grep -q '^registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
+    grep -Eq '^[[:space:]]*registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
     declare -F listRegressionTransactionSystemChildSelectors >/dev/null
     declare -F listRegressionTransactionChildSelectors >/dev/null
@@ -496,7 +497,7 @@ runLegacySuiteUsesFunctionRegistryContract() {
     actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-system"]:-}
     [[ -n "${expectedChildren}" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
-}
+)
 
 runPlatformSuiteUsesSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/platform-suite-root-dispatch.log"
@@ -1319,7 +1320,8 @@ EOF
     cmp -s "${systemSortedFile}" "${TMP_DIR}/transaction-system-selectors.unique.txt"
 )
 
-runTransactionAggregateRunnerRegistrationContract() {
+runTransactionAggregateRunnerRegistrationContract() (
+    set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction"]:-}
@@ -1327,15 +1329,16 @@ runTransactionAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential transaction \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction"]:-}" == "runRegressionTransaction" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction"]:-}" == "runRegressionTransactionSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
-}
+)
 
-runTransactionSystemAggregateRunnerRegistrationContract() {
+runTransactionSystemAggregateRunnerRegistrationContract() (
+    set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-system"]:-}
@@ -1343,26 +1346,51 @@ runTransactionSystemAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel transaction-system \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionSystemChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction-system"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction-system"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-system"]:-}" == "runRegressionTransactionSystem" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-system"]:-}" == "runRegressionTransactionSystemSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
-}
+)
 
-runTransactionSuiteUsesFunctionRegistryContract() {
+runTransactionSuiteUsesFunctionRegistryContract() (
+    set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^listRegressionTransactionChildSelectors() {$' "${suiteFile}"
+    grep -q '^runRegressionTransactionSubscription() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionCoreSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionCoreChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionCoreHeavyChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionCoreMediumChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionCoreLightChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionSystemChildSelectors() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionCoreSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionSystemSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionTransactionCoreParallelCompositionRegression() ' "${suiteFile}"
+    grep -q '^runRegressionTransactionSystemParallelCompositionRegression() ' "${suiteFile}"
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-' "${suiteFile}"
+    ! grep -q '^runRegressionTransactionCore() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionTransactionSubscription() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionCoreSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionCoreChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionCoreHeavyChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionCoreMediumChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionCoreLightChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionSystemChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionTransactionSystem() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionTransactionCoreParallelCompositionRegression() ' "${legacyScriptFile}"
+    ! grep -q '^runRegressionTransactionSystemParallelCompositionRegression() ' "${legacyScriptFile}"
+    ! grep -q '^runRegressionTransaction() {$' "${legacyScriptFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
@@ -1372,7 +1400,7 @@ runTransactionSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
-}
+)
 
 runTransactionSuiteUsesSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/transaction-suite-root-dispatch.log"
