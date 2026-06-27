@@ -3,6 +3,14 @@
 REGRESSION_REMOTE_CONTROL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
 
+runRegressionRemoteControl() {
+    runParallelRegressionRunners \
+        "${TMP_DIR}/remote-control-default" \
+        smoke runRegressionRemoteControlSmoke \
+        contract runRegressionRemoteControlContract \
+        deep runRegressionRemoteControlDeep
+}
+
 runRegressionRemoteControlSuiteRoot() {
     runRegressionRemoteControl
 }

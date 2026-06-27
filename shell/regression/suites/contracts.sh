@@ -158,6 +158,9 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControlSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
     grep -q 'registerRegressionFunctionLeaf "\${selector}" "\${runner}"' "${suiteFile}"
     grep -q '^remote-control-smoke-core runRegressionRemoteControlSmokeCore$' "${suiteFile}"
@@ -176,14 +179,12 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q 'registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \\' "${suiteFile}"
     ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
 
     ! grep -q '^runParallelRemoteControlModes()' "${scriptFile}"
     ! grep -q '^runParallelRemoteControlTotals()' "${scriptFile}"
     ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${REMOTE_CONTROL_SCRIPT_PATH}"' "${scriptFile}"
-    grep -q 'smoke runRegressionRemoteControlSmoke' "${scriptFile}"
-    grep -q 'contract runRegressionRemoteControlContract' "${scriptFile}"
     grep -q 'apply runRegressionRemoteControlSmokeRefreshApply' "${scriptFile}"
     grep -q 'reconcile runRegressionRemoteControlSmokeRefreshReconcile' "${scriptFile}"
     grep -q 'service-install runRegressionRemoteControlContractServiceInstall' "${scriptFile}"
@@ -202,17 +203,21 @@ runRemoteControlPublicSelectorRetirementContract() {
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract"]:-}" == "aggregate" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-deep"]:-}" == "function" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["remote-control-light"]:-}" ]]
+    ! grep -Eq '^[[:space:]]*remote-control\)$' "${scriptFile}"
     ! grep -Eq '^[[:space:]]*remote-control-light\)$' "${scriptFile}"
     ! grep -Fq 'remote-control-light|' "${scriptFile}"
-    grep -Fq 'usage: %s [remote-control|remote-control-smoke|remote-control-contract|remote-control-deep]' "${scriptFile}"
+    ! grep -Fq 'usage: %s [remote-control|' "${scriptFile}"
+    grep -Fq 'usage: %s [remote-control-smoke|remote-control-contract|remote-control-deep]' "${scriptFile}"
 }
 
 runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
-    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local callsFile="${TMP_DIR}/remote-control-aggregate-runner-calls"
     local -a calls=()
 
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${scriptFile}"
+    if ! declare -F runRegressionRemoteControl >/dev/null; then
+        PADM_REGRESSION_SOURCE_ONLY=1 source "${suiteFile}"
+    fi
 
     runParallelRegressionSelectors() {
         printf 'remote-control aggregate should not require selector registry in source-only mode\n' >&2

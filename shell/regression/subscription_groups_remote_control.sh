@@ -1918,14 +1918,6 @@ runRegressionRemoteControlContractServerResponseSteps() {
     runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
 
-runRegressionRemoteControl() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/remote-control-default" \
-        smoke runRegressionRemoteControlSmoke \
-        contract runRegressionRemoteControlContract \
-        deep runRegressionRemoteControlDeep
-}
-
 runRegressionRemoteControlSmokeCore() {
     runRegressionRemoteControlSmokeCoreSteps
 }
@@ -2027,11 +2019,8 @@ if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
     exit 2
 fi
 
-regressionName=${1:-remote-control}
+regressionName=${1:-remote-control-smoke}
 case "${regressionName}" in
-remote-control)
-    regressionRunner=runRegressionRemoteControl
-    ;;
 remote-control-smoke)
     regressionRunner=runRegressionRemoteControlSmoke
     ;;
@@ -2087,7 +2076,7 @@ remote-control-deep)
     regressionRunner=runRegressionRemoteControlDeep
     ;;
 *)
-    printf 'usage: %s [remote-control|remote-control-smoke|remote-control-contract|remote-control-deep]\n' "$0" >&2
+    printf 'usage: %s [remote-control-smoke|remote-control-contract|remote-control-deep]\n' "$0" >&2
     exit 2
     ;;
 esac
