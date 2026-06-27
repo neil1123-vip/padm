@@ -402,14 +402,18 @@ runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
 runAllSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
 
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_ALL_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^runRegressionAllSelectorSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionAllSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}"
-    ! grep -q '^registerRegressionAlias full all$' "${suiteFile}"
-    ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}"
+    ! grep -q 'subscription_groups_legacy\.sh' "${suiteFile}" || return 1
+    grep -q 'source "\${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
+    grep -q '^REGRESSION_ENTRY_SCRIPT_PATH=' "${suiteFile}" || return 1
+    grep -q '^runRegressionAllSelectorSuiteRoot() {$' "${suiteFile}" || return 1
+    grep -Eq '^runRegressionAllSuiteRoot\(\) \($|^runRegressionAllSuiteRoot\(\) {$' "${suiteFile}" || return 1
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors' "${suiteFile}" || return 1
+    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/all-parallel-' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAlias full all$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}" || return 1
 }
 
 runAllPublicSelectorRetirementContract() {
@@ -1237,7 +1241,7 @@ runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
 
     : >"${callLog}"
 
-    runParallelRegressionSelectors() {
+    runFrameworkParallelRegressionSelectors() {
         printf 'parallel:%s\n' "$*" >>"${callLog}"
     }
 
@@ -1256,6 +1260,91 @@ runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
     grep -qx 'suite-helper:transaction-system' "${callLog}"
     grep -qx 'suite-helper:remote-control-contract-server-response' "${callLog}"
     ! grep -q '^legacy-helper:' "${callLog}"
+)
+
+runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/framework-parallel-selector-limit.log"
+
+    : >"${callLog}"
+
+    runRegisteredRegressionMain() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        [[ "${selector}" == "first" ]] && sleep 0.1
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+    PADM_REGRESSION_SELECTOR_KIND[second]=function
+    PADM_REGRESSION_SELECTOR_KIND[fourth]=function
+
+    PADM_REGRESSION_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/framework-parallel-selector-limit" \
+        first \
+        second \
+        third \
+        fourth
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    grep -qx 'fourth-start' "${callLog}"
+    grep -qx 'fourth-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-start" { secondStart = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        $0 == "third-finish" { thirdFinish = NR }
+        $0 == "fourth-start" { fourthStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && thirdFinish && fourthStart && firstFinish < secondStart && secondFinish < thirdStart && thirdFinish < fourthStart) }
+    ' "${callLog}"
+)
+
+runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/framework-parallel-selector-slot-refill.log"
+    local thirdStarted="${TMP_DIR}/framework-parallel-selector-third-started"
+
+    : >"${callLog}"
+    rm -f "${thirdStarted}"
+
+    runRegisteredRegressionMain() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        case "${selector}" in
+        first)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${thirdStarted}" ]] && break
+                sleep 0.05
+            done
+            ;;
+        second) sleep 0.02 ;;
+        third) : >"${thirdStarted}" ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=2 PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/framework-parallel-selector-slot-refill" \
+        first \
+        second \
+        third
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END { exit !(secondFinish && thirdStart && firstFinish && secondFinish < thirdStart && thirdStart < firstFinish) }
+    ' "${callLog}"
 )
 
 runRuntimeSuiteUsesFunctionRegistryContract() {
@@ -1803,6 +1892,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
+        runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
+        runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
