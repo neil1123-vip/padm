@@ -615,12 +615,15 @@ runCompositionLeafSelectorsUseSuiteLocalRegistryContract() {
     local runner
     local suiteFile
     local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     while read -r selector runner suiteFile; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${suiteFile}" || status=1
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
         ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${legacyScriptFile}" || status=1
         [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
     done <<EOF
 regression-all-composition runRegressionAllCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
@@ -2321,6 +2324,101 @@ ${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state.sh
 ${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh
 EOF
 }
+
+runRegressionSelectorDispatchCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-selector-dispatch-composition.log"
+
+    : >"${callLog}"
+
+    bash() {
+        printf 'script=%s selector=%s suppress=%s\n' "$1" "$2" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    }
+
+    runRegressionAllSelector subscription-state
+    runRegressionAllSelector remote-control
+    runRegressionAllSelector routing
+
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=subscription-state suppress=1" "${callLog}"
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=remote-control suppress=1" "${callLog}"
+    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=routing suppress=1" "${callLog}"
+    ! grep -q "script=${REGRESSION_LEGACY_SCRIPT_PATH}" "${callLog}"
+)
+
+runRegressionParallelSelectorLimitCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-parallel-selector-limit-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        [[ "${selector}" == "first" ]] && sleep 0.1
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=1 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
+        first \
+        second \
+        third
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-start" { secondStart = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
+
+runRegressionParallelSelectorSlotRefillCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-parallel-selector-slot-refill-composition.log"
+    local thirdStarted="${TMP_DIR}/regression-parallel-selector-slot-refill-third-started"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        case "${selector}" in
+        first)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${thirdStarted}" ]] && break
+                sleep 0.05
+            done
+            ;;
+        second) sleep 0.02 ;;
+        third) : >"${thirdStarted}" ;;
+        esac
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
+        first \
+        second \
+        third
+
+    grep -qx 'first-start' "${callLog}"
+    grep -qx 'first-finish' "${callLog}"
+    grep -qx 'second-start' "${callLog}"
+    grep -qx 'second-finish' "${callLog}"
+    grep -qx 'third-start' "${callLog}"
+    grep -qx 'third-finish' "${callLog}"
+    awk '
+        $0 == "first-finish" { firstFinish = NR }
+        $0 == "second-finish" { secondFinish = NR }
+        $0 == "third-start" { thirdStart = NR }
+        END { exit !(secondFinish && thirdStart && firstFinish && secondFinish < thirdStart && thirdStart < firstFinish) }
+    ' "${callLog}"
+)
 
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
