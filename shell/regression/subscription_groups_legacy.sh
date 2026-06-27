@@ -16867,11 +16867,16 @@ listRegressionTransactionSystemChildSelectors() {
 
 runRegressionTransactionSystem() {
     local -a selectors=()
+    local -a selectorPairs=()
+    local selector
 
     mapfile -t selectors < <(listRegressionTransactionSystemChildSelectors)
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
         runParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
-        "${selectors[@]}"
+        "${selectorPairs[@]}"
 }
 
 runRegressionTransactionSystemParallelCompositionRegression() (

@@ -246,17 +246,15 @@ runLegacySuiteUsesFunctionRegistryContract() {
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateSequential transaction \\' "${suiteFile}"
-    grep -q '^    transaction-core \\' "${suiteFile}"
-    grep -q '^    transaction-subscription \\' "${suiteFile}"
-    grep -q '^    transaction-system$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateParallel transaction-system \\' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \\' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIo$' "${suiteFile}"
     grep -q '^registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
     declare -F listRegressionTransactionSystemChildSelectors >/dev/null
+    declare -F listRegressionTransactionChildSelectors >/dev/null
     expectedChildren=$(listRegressionTransactionSystemChildSelectors)
     actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-system"]:-}
     [[ -n "${expectedChildren}" ]]
@@ -684,6 +682,68 @@ runTransactionCoreAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runTransactionSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/transaction-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/transaction-default-selectors.sorted.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/transaction-default-selectors.expected.txt"
+    local systemSelectorsFile="${TMP_DIR}/transaction-system-selectors.txt"
+    local systemSortedFile="${TMP_DIR}/transaction-system-selectors.sorted.txt"
+
+    declare -F listRegressionTransactionChildSelectors >/dev/null
+    declare -F listRegressionTransactionSystemChildSelectors >/dev/null
+
+    listRegressionTransactionChildSelectors >"${defaultSelectorsFile}"
+    listRegressionTransactionSystemChildSelectors >"${systemSelectorsFile}"
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+transaction-core
+transaction-subscription
+transaction-system
+EOF
+
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/transaction-default-selectors.unique.txt"
+    sort "${systemSelectorsFile}" >"${systemSortedFile}"
+    sort -u "${systemSelectorsFile}" >"${TMP_DIR}/transaction-system-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/transaction-default-selectors.unique.txt"
+    cmp -s "${systemSortedFile}" "${TMP_DIR}/transaction-system-selectors.unique.txt"
+)
+
+runTransactionAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateSequential transaction \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \\' "${suiteFile}"
+    expectedChildren=$(listRegressionTransactionChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction"]:-}" == "sequential" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction"]:-}" == "runRegressionTransaction" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runTransactionSystemAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-system"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateParallel transaction-system \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \\' "${suiteFile}"
+    expectedChildren=$(listRegressionTransactionSystemChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction-system"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction-system"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-system"]:-}" == "runRegressionTransactionSystem" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
 runSubscriptionSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/subscription-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/subscription-default-selectors.sorted.txt"
@@ -1084,6 +1144,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
+        runRegressionStep transaction-selector-helpers-stay-aligned runTransactionSelectorHelpersStayAlignedContract &&
+        runRegressionStep transaction-aggregate-runner-registration runTransactionAggregateRunnerRegistrationContract &&
+        runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-remote-fetch-registered-child-selectors-aligned runSubscriptionRemoteFetchRegisteredChildSelectorsAlignedContract &&
         runRegressionStep subscription-write-transaction-registered-child-selectors-aligned runSubscriptionWriteTransactionRegisteredChildSelectorsAlignedContract &&
