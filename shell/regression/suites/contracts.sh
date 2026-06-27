@@ -995,6 +995,16 @@ runUiSuiteUsesFunctionRegistryContract() {
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]] || return 1
 }
 
+runUiSmokeLegacyWrapperRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionMenuSmoke\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*ui-smoke\)$' "${legacyScriptFile}" || return 1
+    ! grep -Fq '|ui-smoke|' "${legacyScriptFile}" || return 1
+}
+
 runUiSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/ui-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/ui-default-selectors.sorted.txt"
@@ -2578,6 +2588,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
+        runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
