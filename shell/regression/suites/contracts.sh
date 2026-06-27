@@ -234,6 +234,18 @@ runPlatformSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
 }
 
+runPlatformPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf platform runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    ! grep -Eq '^[[:space:]]*platform\)$' "${legacyFile}"
+    grep -Eq '^[[:space:]]*platform-hot\)$' "${legacyFile}"
+    ! grep -Fq 'usage: %s [fast|fast-reality|platform|platform-io|' "${legacyFile}"
+    grep -Fq 'usage: %s [fast|fast-reality|platform-hot|platform-io|' "${legacyFile}"
+}
+
 runFastRealitySelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/fast-reality-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/fast-reality-default-selectors.sorted.txt"
@@ -1693,6 +1705,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
+        runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
