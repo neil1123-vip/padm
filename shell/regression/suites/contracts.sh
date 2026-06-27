@@ -833,7 +833,7 @@ EOF
 )
 
 runTransactionCoreAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-core"]:-}
 
@@ -878,7 +878,7 @@ EOF
 )
 
 runTransactionAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction"]:-}
 
@@ -894,7 +894,7 @@ runTransactionAggregateRunnerRegistrationContract() {
 }
 
 runTransactionSystemAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-system"]:-}
 
@@ -908,6 +908,48 @@ runTransactionSystemAggregateRunnerRegistrationContract() {
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-system"]:-}" == "runRegressionTransactionSystem" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
+
+runTransactionSuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^listRegressionTransactionChildSelectors() {$' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction-core ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCore \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \\' "${suiteFile}"
+}
+
+runTransactionSuiteUsesSuiteLocalHelpersContract() (
+    local callLog="${TMP_DIR}/transaction-suite-root-dispatch.log"
+
+    : >"${callLog}"
+
+    runRegressionTransaction() {
+        printf 'suite-transaction\n' >>"${callLog}"
+    }
+
+    runRegressionTransactionCore() {
+        printf 'suite-transaction-core\n' >>"${callLog}"
+    }
+
+    runRegressionTransactionSystem() {
+        printf 'suite-transaction-system\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-core
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-system
+
+    grep -qx 'suite-transaction' "${callLog}"
+    grep -qx 'suite-transaction-core' "${callLog}"
+    grep -qx 'suite-transaction-system' "${callLog}"
+)
 
 runAllSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/all-default-selectors.txt"
@@ -1478,12 +1520,14 @@ runRegressionDispatcherContracts() {
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
         runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
+        runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-selector-helpers-stay-aligned runTransactionSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-aggregate-runner-registration runTransactionAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract &&
+        runRegressionStep transaction-suite-uses-suite-local-helpers runTransactionSuiteUsesSuiteLocalHelpersContract &&
         runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract &&
         runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
         runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&

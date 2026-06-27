@@ -180,13 +180,6 @@ registerRegressionFunctionLeaf regression-all-resource-layer-composition runRegr
 registerRegressionFunctionLeaf regression-parallel-selector-limit-composition runRegressionParallelSelectorLimitCompositionRegression
 registerRegressionFunctionLeaf regression-parallel-selector-slot-refill-composition runRegressionParallelSelectorSlotRefillCompositionRegression
 
-listRegressionTransactionChildSelectors() {
-    printf '%s\n' \
-        transaction-core \
-        transaction-subscription \
-        transaction-system
-}
-
 registerRegressionAggregateRunnerParallel subscription-remote-fetch runRegressionSubscriptionRemoteFetch \
     $(listRegressionSubscriptionRemoteFetchChildSelectors)
 
@@ -201,12 +194,3 @@ registerRegressionAggregateRunnerParallel ui runRegressionUi \
 
 registerRegressionAggregateRunnerParallel routing runRegressionRouting \
     $(listRegressionRoutingChildSelectors)
-
-registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \
-    $(listRegressionTransactionSystemChildSelectors)
-
-registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCore \
-    $(listRegressionTransactionCoreChildSelectors)
-
-registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \
-    $(listRegressionTransactionChildSelectors)
