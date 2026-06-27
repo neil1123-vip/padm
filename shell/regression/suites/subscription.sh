@@ -17,12 +17,12 @@ runRegressionSubscriptionRemoteSuiteRoot() {
         "${selectorPairs[@]}"
 }
 
-runRegressionSubscriptionWriteTransactionSuiteRoot() {
+runRegressionSubscriptionTxSuiteRoot() {
     local -a selectors=()
     local -a selectorPairs=()
     local selector
 
-    mapfile -t selectors < <(listRegressionSubscriptionWriteTransactionChildSelectors)
+    mapfile -t selectors < <(listRegressionSubscriptionTxChildSelectors)
     for selector in "${selectors[@]}"; do
         selectorPairs+=("${selector}" "${selector}")
     done
@@ -89,14 +89,14 @@ registerRegressionFunctionLeaf subscribe-return-failure runSubscribeReturnFailur
 registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
 registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
 registerRegressionFunctionLeaf regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
-registerRegressionFunctionLeaf regression-subscription-write-transaction-parallel-composition runRegressionSubscriptionWriteTransactionParallelCompositionRegression
+registerRegressionFunctionLeaf regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
 
 registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \
     $(listRegressionSubscriptionRemoteChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionWriteTransactionSuiteRoot \
-    $(listRegressionSubscriptionWriteTransactionChildSelectors)
+registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \
+    $(listRegressionSubscriptionTxChildSelectors)
 
 registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \
     $(listRegressionSubscriptionChildSelectors)

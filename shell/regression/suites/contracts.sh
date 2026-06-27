@@ -602,7 +602,7 @@ runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract() {
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
 regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
-regression-subscription-write-transaction-parallel-composition runRegressionSubscriptionWriteTransactionParallelCompositionRegression
+regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
 regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
 EOF
 
@@ -615,7 +615,7 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionWriteTransactionSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-remote ' "${suiteFile}"
@@ -627,9 +627,10 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch-' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionWriteTransactionSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}"
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote"]:-}" == "aggregate-runner" ]]
@@ -1305,7 +1306,7 @@ runSubscriptionTxRegisteredChildSelectorsAlignedContract() (
         if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
             printf '%s\n' "${selector}"
         fi
-    done < <(listRegressionSubscriptionWriteTransactionChildSelectors) >"${actualSelectorsFile}"
+    done < <(listRegressionSubscriptionTxChildSelectors) >"${actualSelectorsFile}"
 
     cat <<'EOF' >"${expectedSelectorsFile}"
 sing-box-subscribe-write
@@ -1373,11 +1374,12 @@ runSubscriptionTxAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionFunctionLeaf subscription-tx ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionWriteTransactionSuiteRoot \\' "${suiteFile}"
-    expectedChildren=$(listRegressionSubscriptionWriteTransactionChildSelectors)
+    ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionSubscriptionTxChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-tx"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-tx"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-tx"]:-}" == "runRegressionSubscriptionWriteTransactionSuiteRoot" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-tx"]:-}" == "runRegressionSubscriptionTxSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
@@ -1396,7 +1398,7 @@ runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
         return 97
     }
 
-    runRegressionSubscriptionWriteTransaction() {
+    runRegressionSubscriptionTx() {
         printf 'legacy-subscription-tx\n' >>"${callLog}"
         return 97
     }
@@ -1409,7 +1411,7 @@ runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
         printf 'suite-subscription-remote\n' >>"${callLog}"
     }
 
-    runRegressionSubscriptionWriteTransactionSuiteRoot() {
+    runRegressionSubscriptionTxSuiteRoot() {
         printf 'suite-subscription-tx\n' >>"${callLog}"
     }
 
