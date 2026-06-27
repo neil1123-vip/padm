@@ -3,6 +3,14 @@
 REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"
 
+runRegressionSubscriptionStateCoreSuiteRoot() {
+    runRegressionSubscriptionStateCore
+}
+
+runRegressionSubscriptionStateSuiteRoot() {
+    runRegressionSubscriptionState
+}
+
 while read -r selector runner; do
     registerRegressionFunctionLeaf "${selector}" "${runner}"
 done <<'EOF'
@@ -77,7 +85,7 @@ listRegressionSubscriptionStateChildSelectors() {
         subscription-state-sync-rollback
 }
 
-registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCore \
+registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCoreSuiteRoot \
     $(listRegressionSubscriptionStateCoreChildSelectors)
-registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionState \
+registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionStateSuiteRoot \
     $(listRegressionSubscriptionStateChildSelectors)

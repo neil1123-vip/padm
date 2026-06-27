@@ -102,11 +102,11 @@ runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-core ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel subscription-state-core \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCore \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCoreSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionStateCoreChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-state-core"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-state-core"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state-core"]:-}" == "runRegressionSubscriptionStateCore" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state-core"]:-}" == "runRegressionSubscriptionStateCoreSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
@@ -117,11 +117,11 @@ runSubscriptionStateAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf subscription-state ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel subscription-state \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionState \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionStateSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionStateChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-state"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-state"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state"]:-}" == "runRegressionSubscriptionState" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state"]:-}" == "runRegressionSubscriptionStateSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
@@ -271,11 +271,11 @@ runRemoteControlAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf remote-control ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRemoteControlChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["remote-control"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["remote-control"]:-}" == "runRegressionRemoteControl" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["remote-control"]:-}" == "runRegressionRemoteControlSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 

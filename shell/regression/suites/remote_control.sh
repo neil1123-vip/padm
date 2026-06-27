@@ -3,6 +3,10 @@
 REGRESSION_REMOTE_CONTROL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
 
+runRegressionRemoteControlSuiteRoot() {
+    runRegressionRemoteControl
+}
+
 while read -r selector runner; do
     registerRegressionFunctionLeaf "${selector}" "${runner}"
 done <<'EOF'
@@ -48,5 +52,5 @@ registerRegressionAggregateParallel remote-control-contract-service-install \
 registerRegressionAggregateParallel remote-control-contract \
     remote-control-contract-service-install \
     remote-control-contract-server-response
-registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \
+registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \
     $(listRegressionRemoteControlChildSelectors)
