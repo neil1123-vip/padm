@@ -120,7 +120,8 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q '^remote-control-deep runRegressionRemoteControlDeep$' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
-    grep -q 'registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \\' "${suiteFile}"
     ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
 
     ! grep -q '^runParallelRemoteControlModes()' "${scriptFile}"
@@ -177,7 +178,7 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
 
     mapfile -t calls <"${callsFile}"
     [[ "${#calls[@]}" -eq 6 ]]
-    [[ "${calls[0]}" == "${TMP_DIR}/remote-control-default smoke runRegressionRemoteControlSmoke contract runRegressionRemoteControlContract" ]]
+    [[ "${calls[0]}" == "${TMP_DIR}/remote-control-default smoke runRegressionRemoteControlSmoke contract runRegressionRemoteControlContract deep runRegressionRemoteControlDeep" ]]
     [[ "${calls[1]}" == "${TMP_DIR}/remote-control-smoke-refresh apply runRegressionRemoteControlSmokeRefreshApply restore runRegressionRemoteControlSmokeRefreshRestore reconcile runRegressionRemoteControlSmokeRefreshReconcile" ]]
     [[ "${calls[2]}" == "${TMP_DIR}/remote-control-smoke-refresh-apply basic runRegressionRemoteControlSmokeRefreshApplyBasic prepare runRegressionRemoteControlSmokeRefreshApplyPrepare failure runRegressionRemoteControlSmokeRefreshApplyFailure" ]]
     [[ "${calls[3]}" == "${TMP_DIR}/remote-control-smoke smoke-core runRegressionRemoteControlSmokeCore smoke-refresh runRegressionRemoteControlSmokeRefresh" ]]
@@ -197,6 +198,7 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
     cat <<'EOF' >"${expectedDefaultSelectorsFile}"
 remote-control-smoke
 remote-control-contract
+remote-control-deep
 EOF
 
     cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"

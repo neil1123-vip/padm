@@ -24,7 +24,8 @@ EOF
 listRegressionRemoteControlChildSelectors() {
     printf '%s\n' \
         remote-control-smoke \
-        remote-control-contract
+        remote-control-contract \
+        remote-control-deep
 }
 
 registerRegressionAggregateParallel remote-control-smoke-refresh-apply \

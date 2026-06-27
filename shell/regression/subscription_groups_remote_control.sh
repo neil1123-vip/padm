@@ -1922,7 +1922,8 @@ runRegressionRemoteControl() {
     runParallelRegressionRunners \
         "${TMP_DIR}/remote-control-default" \
         smoke runRegressionRemoteControlSmoke \
-        contract runRegressionRemoteControlContract
+        contract runRegressionRemoteControlContract \
+        deep runRegressionRemoteControlDeep
 }
 
 runRegressionRemoteControlSmokeCore() {
