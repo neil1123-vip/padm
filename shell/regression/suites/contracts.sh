@@ -102,6 +102,43 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
     [[ "${calls[5]}" == "${TMP_DIR}/remote-control-contract-service-install remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction" ]]
 )
 
+runRemoteControlSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/remote-control-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/remote-control-default-selectors.sorted.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/remote-control-default-selectors.expected.txt"
+
+    declare -F listRegressionRemoteControlChildSelectors >/dev/null
+
+    listRegressionRemoteControlChildSelectors >"${defaultSelectorsFile}"
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+remote-control-smoke
+remote-control-contract
+EOF
+
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/remote-control-default-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/remote-control-default-selectors.unique.txt"
+)
+
+runRemoteControlAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["remote-control"]:-}
+
+    ! grep -q '^registerRegressionFunctionLeaf remote-control ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \\' "${suiteFile}"
+    expectedChildren=$(listRegressionRemoteControlChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["remote-control"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["remote-control"]:-}" == "runRegressionRemoteControl" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
 runFastSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
@@ -957,6 +994,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
+        runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
+        runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&

@@ -21,6 +21,12 @@ remote-control-contract-server-response runRegressionRemoteControlContractServer
 remote-control-deep runRegressionRemoteControlDeep
 EOF
 
+listRegressionRemoteControlChildSelectors() {
+    printf '%s\n' \
+        remote-control-smoke \
+        remote-control-contract
+}
+
 registerRegressionAggregateParallel remote-control-smoke-refresh-apply \
     remote-control-smoke-refresh-apply-basic \
     remote-control-smoke-refresh-apply-prepare \
@@ -41,7 +47,6 @@ registerRegressionAggregateParallel remote-control-contract-service-install \
 registerRegressionAggregateParallel remote-control-contract \
     remote-control-contract-service-install \
     remote-control-contract-server-response
-registerRegressionAggregateParallel remote-control \
-    remote-control-smoke \
-    remote-control-contract
+registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \
+    $(listRegressionRemoteControlChildSelectors)
 registerRegressionAlias remote-control-light remote-control
