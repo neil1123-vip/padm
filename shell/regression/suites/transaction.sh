@@ -33,6 +33,9 @@ runRegressionTransactionSuiteRoot() {
         runRegressionTransactionSystemSuiteRoot
 }
 
+registerRegressionFunctionLeaf regression-transaction-core-parallel-composition runRegressionTransactionCoreParallelCompositionRegression
+registerRegressionFunctionLeaf regression-transaction-system-parallel-composition runRegressionTransactionSystemParallelCompositionRegression
+
 registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \
     $(listRegressionTransactionSystemChildSelectors)
 

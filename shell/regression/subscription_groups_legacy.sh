@@ -17181,7 +17181,7 @@ runRegressionUiParallelCompositionRegression() (
         ui-full-subscription-controlled \
         ui-full-core \
         ui-full-core-maintenance \
-        menu-smoke \
+        ui-smoke \
         wireguard-restore-runner; do
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
@@ -17276,7 +17276,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
         ui-full-subscription-controlled \
         ui-full-core \
         ui-full-core-maintenance \
-        menu-smoke \
+        ui-smoke \
         wireguard-restore-runner; do
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"
@@ -17316,7 +17316,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
         ui-full-subscription-controlled \
         ui-full-core \
         ui-full-core-maintenance \
-        menu-smoke \
+        ui-smoke \
         wireguard-restore-runner; do
         grep -qx "${selector}-start" "${callLog}"
         grep -qx "${selector}-finish" "${callLog}"

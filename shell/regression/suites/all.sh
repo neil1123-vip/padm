@@ -150,5 +150,9 @@ listRegressionAllChildSelectors() {
         ui
 }
 
+registerRegressionFunctionLeaf regression-all-composition runRegressionAllCompositionRegression
+registerRegressionFunctionLeaf regression-all-child-parallel-budget-composition runRegressionAllChildParallelBudgetCompositionRegression
+registerRegressionFunctionLeaf regression-all-resource-layer-composition runRegressionAllResourceLayerCompositionRegression
+
 registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \
     $(listRegressionAllChildSelectors)

@@ -662,6 +662,37 @@ EOF
     return "${status}"
 }
 
+runCompositionLeafSelectorsUseSuiteLocalRegistryContract() {
+    local status=0
+    local selector
+    local runner
+    local suiteFile
+    local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+
+    while read -r selector runner suiteFile; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
+    done <<EOF
+regression-all-composition runRegressionAllCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
+regression-all-child-parallel-budget-composition runRegressionAllChildParallelBudgetCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
+regression-all-resource-layer-composition runRegressionAllResourceLayerCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
+regression-routing-parallel-composition runRegressionRoutingParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/routing.sh
+regression-runtime-parallel-composition runRegressionRuntimeParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/runtime.sh
+regression-transaction-core-parallel-composition runRegressionTransactionCoreParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/transaction.sh
+regression-transaction-system-parallel-composition runRegressionTransactionSystemParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/transaction.sh
+regression-ui-parallel-composition runRegressionUiParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/ui.sh
+regression-ui-long-tail-split-composition runRegressionUiLongTailSplitCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/ui.sh
+regression-selector-dispatch-composition runRegressionSelectorDispatchCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/contracts.sh
+regression-parallel-selector-limit-composition runRegressionParallelSelectorLimitCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/contracts.sh
+regression-parallel-selector-slot-refill-composition runRegressionParallelSelectorSlotRefillCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/contracts.sh
+EOF
+
+    return "${status}"
+}
+
 runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
     local status=0
@@ -2178,6 +2209,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
         runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
@@ -2229,3 +2261,6 @@ runRegressionDispatcherContracts() {
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts
+registerRegressionFunctionLeaf regression-selector-dispatch-composition runRegressionSelectorDispatchCompositionRegression
+registerRegressionFunctionLeaf regression-parallel-selector-limit-composition runRegressionParallelSelectorLimitCompositionRegression
+registerRegressionFunctionLeaf regression-parallel-selector-slot-refill-composition runRegressionParallelSelectorSlotRefillCompositionRegression
