@@ -235,18 +235,3 @@ registerRegressionAggregateRunnerParallel transaction-core runRegressionTransact
 
 registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \
     $(listRegressionTransactionChildSelectors)
-
-listRegressionAllChildSelectors() {
-    printf '%s\n' \
-        routing \
-        subscription \
-        runtime \
-        transaction \
-        remote-control \
-        ui
-}
-
-registerRegressionAggregateRunnerSequential all runRegressionAll \
-    $(listRegressionAllChildSelectors)
-registerRegressionAlias full all
-registerRegressionAlias ci all

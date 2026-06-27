@@ -302,6 +302,19 @@ runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
     ' "${callLog}"
 )
 
+runAllSuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_ALL_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionAllSelectorSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionAllSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAlias full all$' "${suiteFile}"
+    grep -q '^registerRegressionAlias ci all$' "${suiteFile}"
+}
+
 runLegacySuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -834,20 +847,46 @@ EOF
 )
 
 runAllAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["all"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential all \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAll \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionAllChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["all"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["all"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["all"]:-}" == "runRegressionAll" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["all"]:-}" == "runRegressionAllSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
+
+runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
+    local callLog="${TMP_DIR}/all-aggregate-suite-root-dispatch.log"
+
+    : >"${callLog}"
+
+    runParallelRegressionSelectors() {
+        printf 'parallel:%s\n' "$*" >>"${callLog}"
+    }
+
+    runRegressionAllSelector() {
+        printf 'legacy-helper:%s\n' "$1" >>"${callLog}"
+        return 97
+    }
+
+    runRegressionAllSelectorSuiteRoot() {
+        printf 'suite-helper:%s\n' "$1" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain all
+
+    grep -qx 'parallel:'"${TMP_DIR}"'/all-parallel-[0-9][0-9]* subscription ui transaction-core routing runtime remote-control-smoke remote-control-contract-service-install' "${callLog}"
+    grep -qx 'suite-helper:transaction-system' "${callLog}"
+    grep -qx 'suite-helper:remote-control-contract-server-response' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
+)
 
 runSubscriptionSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/subscription-default-selectors.txt"
@@ -1238,6 +1277,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
+        runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
@@ -1257,6 +1297,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract &&
         runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract &&
         runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
+        runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&
         runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-remote-fetch-registered-child-selectors-aligned runSubscriptionRemoteFetchRegisteredChildSelectorsAlignedContract &&
         runRegressionStep subscription-write-transaction-registered-child-selectors-aligned runSubscriptionWriteTransactionRegisteredChildSelectorsAlignedContract &&
