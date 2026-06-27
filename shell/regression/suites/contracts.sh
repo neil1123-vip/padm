@@ -652,21 +652,21 @@ runUiPublicSelectorsUseFunctionRegistryContract() {
     done <<'EOF'
 ui-smoke runRegressionMenuSmoke
 ui-full runRegressionMenuSmokeFull
-menu-smoke-full-core runMenuSmokeFullCoreRegression
-menu-smoke-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
-menu-smoke-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
-menu-smoke-full-subscription-main-publish runMenuSmokeFullSubscriptionMainPublishRegression
-menu-smoke-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
-menu-smoke-full-subscription-main-publish-user runMenuSmokeFullSubscriptionMainPublishUserRegression
-menu-smoke-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
-menu-smoke-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
-menu-smoke-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
-menu-smoke-full-subscription-main-publish-sync runMenuSmokeFullSubscriptionMainPublishSyncRegression
-menu-smoke-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
-menu-smoke-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
-menu-smoke-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression
-menu-smoke-full-subscription-controlled runMenuSmokeFullSubscriptionControlledRegression
-menu-smoke-full-core-maintenance runMenuSmokeFullCoreMaintenanceRegression
+ui-full-core runMenuSmokeFullCoreRegression
+ui-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
+ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
+ui-full-subscription-main-publish runMenuSmokeFullSubscriptionMainPublishRegression
+ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
+ui-full-subscription-main-publish-user runMenuSmokeFullSubscriptionMainPublishUserRegression
+ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
+ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
+ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
+ui-full-subscription-main-publish-sync runMenuSmokeFullSubscriptionMainPublishSyncRegression
+ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
+ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
+ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression
+ui-full-subscription-controlled runMenuSmokeFullSubscriptionControlledRegression
+ui-full-core-maintenance runMenuSmokeFullCoreMaintenanceRegression
 wireguard-menu-flow runRegressionWireGuardMenuFlow
 wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapRegression
 wireguard-menu-flow-peer-transaction runSubscriptionWireGuardMenuFlowPeerTransactionRegression
@@ -730,48 +730,48 @@ runUiSelectorHelpersStayAlignedContract() (
     listRegressionUiAllProfileChildSelectors >"${allProfileSelectorsFile}"
 
     cat <<'EOF' >"${expectedDefaultSelectorsFile}"
-menu-smoke-full-subscription-main-publish-sync-enable
+ui-full-subscription-main-publish-sync-enable
 wireguard-menu-flow-peer-rollback-apply-service
 wireguard-menu-flow-peer-rollback-credential-write
 wireguard-menu-flow-peer-rollback-source
-menu-smoke-full-subscription-main-publish-sync-skip
+ui-full-subscription-main-publish-sync-skip
 wireguard-menu-flow-peer-rollback-apply-restore
 wireguard-menu-flow-peer-rollback-credential-groups-restore
-menu-smoke-full-subscription-main-publish-user-inspect
+ui-full-subscription-main-publish-user-inspect
 wireguard-menu-flow-peer-source-control-toggle
-menu-smoke-full-subscription-main-publish-user-create
-menu-smoke-full-subscription-main-publish-service
+ui-full-subscription-main-publish-user-create
+ui-full-subscription-main-publish-service
 wireguard-menu-flow-peer-add-update
 wireguard-menu-flow-peer-source-control-clear-error
 wireguard-menu-flow-peer-source-control-status
-menu-smoke-full-subscription-main-publish-user-empty
-menu-smoke-full-subscription-main-maintenance
+ui-full-subscription-main-publish-user-empty
+ui-full-subscription-main-maintenance
 wireguard-menu-flow-control-restore
 wireguard-menu-flow-bootstrap
-menu-smoke-full-subscription-main-entry
-menu-smoke-full-subscription-controlled
-menu-smoke-full-core
-menu-smoke-full-core-maintenance
+ui-full-subscription-main-entry
+ui-full-subscription-controlled
+ui-full-core
+ui-full-core-maintenance
 ui-smoke
 wireguard-restore-runner
 EOF
 
     cat <<'EOF' >"${expectedAllProfileSelectorsFile}"
-menu-smoke-full-subscription-main-publish-sync
+ui-full-subscription-main-publish-sync
 wireguard-menu-flow-peer-rollback-apply
 wireguard-menu-flow-peer-rollback-credential
 wireguard-menu-flow-peer-rollback-source
-menu-smoke-full-subscription-main-publish-user
-menu-smoke-full-subscription-main-publish-service
+ui-full-subscription-main-publish-user
+ui-full-subscription-main-publish-service
 wireguard-menu-flow-peer-add-update
 wireguard-menu-flow-peer-source-control
-menu-smoke-full-subscription-main-maintenance
+ui-full-subscription-main-maintenance
 wireguard-menu-flow-control-restore
 wireguard-menu-flow-bootstrap
-menu-smoke-full-subscription-main-entry
-menu-smoke-full-subscription-controlled
-menu-smoke-full-core
-menu-smoke-full-core-maintenance
+ui-full-subscription-main-entry
+ui-full-subscription-controlled
+ui-full-core
+ui-full-core-maintenance
 ui-smoke
 wireguard-restore-runner
 EOF
