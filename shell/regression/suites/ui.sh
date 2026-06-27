@@ -5,6 +5,89 @@ REGRESSION_UI_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"
 
+runRegressionUiSmokeSuiteRoot() {
+    local actions=
+    local output=
+    local oldCoreInstallType="${coreInstallType:-}"
+    coreInstallType=
+    recordMenuAction() {
+        actions+="$1"$'\n'
+    }
+    assertMenuAction() {
+        grep -qxF "$1" <<<"${actions}"
+    }
+    resetMenuActions() {
+        actions=
+    }
+    menu() { recordMenuAction menu; }
+    menuLine() { output+="$*"$'\n'; }
+    menuItem() { output+="$2 $3"$'\n'; }
+    menuRecommendedItem() { output+="$2 $3"$'\n'; }
+    menuReturnItem() { output+="$2 $3"$'\n'; }
+    statusCard() { recordMenuAction "statusCard:$1"; }
+    errorCard() { recordMenuAction "errorCard:$1"; }
+    successCard() { recordMenuAction "successCard:$1"; }
+    autoRead() {
+        local targetVar=$3
+        local input=
+        IFS= read -r input || input=
+        printf -v "${targetVar}" '%s' "${input}"
+    }
+    selectCoreInstall() { recordMenuAction selectCoreInstall; }
+    manageXHTTP() { recordMenuAction manageXHTTP; }
+    manageHysteria() { recordMenuAction manageHysteria; }
+    manageTuic() { recordMenuAction manageTuic; }
+    addCorePort() { recordMenuAction addCorePort; }
+    manageCDN() { recordMenuAction manageCDN; }
+    manageFail2ban() { recordMenuAction manageFail2ban; }
+    updatePadm() { recordMenuAction "updatePadm:$*"; }
+    showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
+    bbrInstall() { recordMenuAction bbrInstall; }
+
+    installMenu <<<"6"
+    assertMenuAction selectCoreInstall
+    grep -q "不知道怎么选时，建议直接选 1" <<<"${output}"
+    grep -q "entry 是客户端连接地址" <<<"${output}"
+
+    resetMenuActions
+    installXray() { recordMenuAction installXray; }
+    installXrayService() { recordMenuAction installXrayService; }
+    initXrayConfig() { recordMenuAction initXrayConfig; }
+    cleanUp() { recordMenuAction cleanUp; }
+    checkGFWStatue() { recordMenuAction checkGFWStatue; }
+    showAccounts() { recordMenuAction showAccounts; }
+    installTools() { recordMenuAction installTools; }
+    readLastInstallationConfig() { recordMenuAction readLastInstallationConfig; }
+    unInstallSubscribe() { recordMenuAction unInstallSubscribe; }
+    handleNginx() { recordMenuAction "handleNginx:$*"; }
+    serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
+    serviceQueueApply() { recordMenuAction serviceQueueApply; }
+    subscriptionWireGuardControlEnabled() { return 0; }
+    refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; }
+    installXrayReality
+    assertMenuAction 'handleNginx:stop'
+    assertMenuAction refreshSubscriptionWireGuardNginxControl
+    assertMenuAction serviceQueueApply
+
+    resetMenuActions
+    output=
+    systemScriptMenu <<<"3"
+    assertMenuAction manageFail2ban
+    grep -q "Fail2ban 防护" <<<"${output}"
+    resetMenuActions
+    systemScriptMenu <<<"1"
+    assertMenuAction 'updatePadm:1'
+    resetMenuActions
+    systemScriptMenu <<<"2"
+    assertMenuAction showPadmScriptInstallStatus
+    resetMenuActions
+    systemScriptMenu <<<"4"
+    assertMenuAction bbrInstall
+    [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
+    coreInstallType="${oldCoreInstallType}"
+}
+
 runRegressionUiSuiteRoot() {
     local -a selectors=()
     local -a selectorPairs=()
@@ -32,7 +115,7 @@ runRegressionUiSuiteRoot() {
         "${selectorPairs[@]}"
 }
 
-registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke
+registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
 registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull
 registerRegressionFunctionLeaf ui-full-core runMenuSmokeFullCoreRegression
 registerRegressionFunctionLeaf ui-full-subscription-main runMenuSmokeFullSubscriptionMainRegression

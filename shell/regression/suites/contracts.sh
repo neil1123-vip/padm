@@ -284,6 +284,8 @@ runFastSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
+    grep -q '^runRegressionFastSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionFastUiSmokeLightSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
@@ -292,6 +294,9 @@ runFastSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
+    ! grep -q 'declare -f runRegressionFast' "${suiteFile}"
+    ! grep -q '^eval ' "${suiteFile}"
+    grep -q 'runRegressionStep ui-smoke-light runRegressionFastUiSmokeLightSuiteRoot' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
 }
 
@@ -300,10 +305,15 @@ runPlatformSuiteUsesFunctionRegistryContract() {
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionPlatformSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionPlatformIoSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
+    ! grep -q 'declare -f runRegressionPlatform' "${suiteFile}"
+    ! grep -q 'declare -f runRegressionPlatformIo' "${suiteFile}"
+    ! grep -q '^eval ' "${suiteFile}"
 }
 
 runPlatformPublicSelectorRetirementContract() {
@@ -372,6 +382,9 @@ runFastPlatformSourceOnlyExecutionContract() (
     declare -F runRegressionFastSuiteRoot >/dev/null
     declare -F runRegressionPlatformSuiteRoot >/dev/null
     declare -F runRegressionPlatformIoSuiteRoot >/dev/null
+    ! declare -F _platform_hot_suite_def >/dev/null
+    ! declare -F _platform_io_suite_def >/dev/null
+    ! declare -F _fast_root_suite_def >/dev/null
 )
 
 runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
@@ -397,6 +410,38 @@ runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
         $0 == "reality-candidates-fast" { candidateLine = NR }
         END { exit !(fastLine && candidateLine && fastLine < candidateLine) }
     ' "${callLog}"
+)
+
+runFastSuiteUsesSuiteLocalHelperContract() (
+    local callLog="${TMP_DIR}/fast-suite-root-dispatch.log"
+
+    : >"${callLog}"
+
+    runMenuSmokeLightRegression() {
+        printf 'legacy-ui-smoke-light\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionFastUiSmokeLightSuiteRoot() {
+        printf 'suite-ui-smoke-light\n' >>"${callLog}"
+    }
+
+    runRegressionStep() {
+        local label=$1
+        local runner=$2
+
+        if [[ "${label}" == "ui-smoke-light" ]]; then
+            "${runner}"
+            return $?
+        fi
+
+        return 0
+    }
+
+    runRegressionFastSuiteRoot
+
+    grep -qx 'suite-ui-smoke-light' "${callLog}"
+    ! grep -q '^legacy-ui-smoke-light$' "${callLog}"
 )
 
 runAllSuiteUsesFunctionRegistryContract() {
@@ -716,7 +761,7 @@ runUiPublicSelectorsUseFunctionRegistryContract() {
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
-ui-smoke runRegressionMenuSmoke
+ui-smoke runRegressionUiSmokeSuiteRoot
 ui-full runRegressionMenuSmokeFull
 ui-full-core runMenuSmokeFullCoreRegression
 ui-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
@@ -766,6 +811,7 @@ runUiSuiteUsesFunctionRegistryContract() {
 
     grep -q 'source "\${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || return 1
+    grep -q '^runRegressionUiSmokeSuiteRoot() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}" || return 1
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}" || return 1
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-' "${suiteFile}" || return 1
@@ -775,7 +821,7 @@ runUiSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf menu-smoke ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull$' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}" || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]] || return 1
@@ -2117,6 +2163,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
+        runRegressionStep fast-suite-uses-suite-local-helper runFastSuiteUsesSuiteLocalHelperContract &&
         runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
         runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
