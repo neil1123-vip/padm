@@ -20,6 +20,8 @@ source "${SCRIPT_DIR}/regression/suites/reality.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/regression/suites/tls.sh"
 # shellcheck source=/dev/null
+source "${SCRIPT_DIR}/regression/suites/routing.sh"
+# shellcheck source=/dev/null
 source "${SCRIPT_DIR}/regression/suites/runtime.sh"
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/regression/suites/transaction.sh"

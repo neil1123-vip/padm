@@ -463,22 +463,6 @@ runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
 ui-smoke runRegressionMenuSmoke
-routing-socks5-udp-associate runSocks5UdpAssociateRegression
-routing-core runRoutingRegression
-routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
-routing-access-control-config-transaction runAccessControlConfigTransactionRegression
-routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
-routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
-routing-access-control-failure-return runAccessControlFailureReturnRegression
-routing-bt-failure-return runBTRoutingFailureReturnRegression
-routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
-routing-warp-failure-return runWARPRoutingFailureReturnRegression
-routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
-routing-dns-failure-return runDNSRoutingFailureReturnRegression
-routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
-routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
-routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
-routing-port-panel runPortAndPanelHelperRegression
 transaction-subscription runRegressionTransactionSubscription
 nginx-service-failure runNginxServiceFailureRegression
 config-transaction runConfigTransactionRegression
@@ -704,6 +688,41 @@ runUiAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runRoutingSuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
+    local status=0
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || status=1
+    grep -q '^runRegressionRoutingSuiteRoot() {$' "${suiteFile}" || status=1
+    ! grep -q '^registerRegressionScriptLeaf routing ' "${suiteFile}" || status=1
+    ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}" || status=1
+    grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}" || status=1
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+    done <<'EOF'
+routing-socks5-udp-associate runSocks5UdpAssociateRegression
+routing-core runRoutingRegression
+routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
+routing-access-control-config-transaction runAccessControlConfigTransactionRegression
+routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
+routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
+routing-access-control-failure-return runAccessControlFailureReturnRegression
+routing-bt-failure-return runBTRoutingFailureReturnRegression
+routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
+routing-warp-failure-return runWARPRoutingFailureReturnRegression
+routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
+routing-dns-failure-return runDNSRoutingFailureReturnRegression
+routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
+routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
+routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+routing-port-panel runPortAndPanelHelperRegression
+EOF
+
+    return "${status}"
+}
+
 runRoutingSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/routing-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/routing-default-selectors.sorted.txt"
@@ -733,19 +752,39 @@ runRoutingSelectorHelpersStayAlignedContract() (
 )
 
 runRoutingAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["routing"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf routing ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRouting \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRoutingChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["routing"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["routing"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["routing"]:-}" == "runRegressionRouting" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["routing"]:-}" == "runRegressionRoutingSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
+
+runRoutingAggregateRunnerUsesSuiteLocalHelperContract() (
+    local callLog="${TMP_DIR}/routing-aggregate-suite-root-dispatch.log"
+
+    : >"${callLog}"
+
+    runRegressionRouting() {
+        printf 'legacy-routing\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionRoutingSuiteRoot() {
+        printf 'suite-routing\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain routing
+
+    grep -qx 'suite-routing' "${callLog}"
+    ! grep -q '^legacy-routing$' "${callLog}"
+)
 
 runTransactionCoreSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/transaction-core-default-selectors.txt"
@@ -1518,8 +1557,10 @@ runRegressionDispatcherContracts() {
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
+        runRegressionStep routing-suite-uses-function-registry runRoutingSuiteUsesFunctionRegistryContract &&
         runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
+        runRegressionStep routing-aggregate-runner-uses-suite-local-helper runRoutingAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
