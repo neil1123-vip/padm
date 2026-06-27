@@ -344,12 +344,77 @@ runLegacyPlatformIoSupportsSourceOnlyExecutionContract() (
     declare -F runRegressionPlatformIo >/dev/null
 )
 
-runLegacyTlsUsesFunctionRegistryContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+runTlsSuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TLS_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionTlsSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}"
+}
+
+runTlsSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/tls-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/tls-default-selectors.sorted.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/tls-default-selectors.expected.txt"
+
+    declare -F listRegressionTlsChildSelectors >/dev/null
+
+    listRegressionTlsChildSelectors >"${defaultSelectorsFile}"
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+tls-failure-return
+tls-reinstall-rollback
+tls-renew-failure-propagation
+EOF
+
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/tls-default-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/tls-default-selectors.unique.txt"
+)
+
+runTlsAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["tls"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf tls runRegressionTls$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateSequential tls \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionTlsChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["tls"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["tls"]:-}" == "sequential" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["tls"]:-}" == "runRegressionTlsSuiteRoot" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
+
+runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
+    local callLog="${TMP_DIR}/tls-aggregate-suite-root-dispatch.log"
+
+    : >"${callLog}"
+
+    runRegressionTls() {
+        printf 'legacy-tls\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTlsSuiteRoot() {
+        printf 'suite-tls\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls
+
+    grep -qx 'suite-tls' "${callLog}"
+    ! grep -q '^legacy-tls$' "${callLog}"
+)
 
 runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
@@ -408,9 +473,6 @@ core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
 core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression
 sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
 network-check-return-failure runNetworkCheckReturnFailureRegression
-tls-failure-return runTlsFailureReturnRegression
-tls-reinstall-rollback runTlsReinstallRollbackRegression
-tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 wireguard-control-safe-dir runWireGuardControlSafeDirRegression
 warp-config-safe-dir runWarpConfigSafeDirRegression
 warp-config-file-cleanup runWarpConfigFileCleanupRegression
@@ -1366,7 +1428,10 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
-        runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
+        runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
+        runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
+        runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
+        runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
