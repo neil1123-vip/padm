@@ -610,8 +610,6 @@ runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
-transaction-subscription runRegressionTransactionSubscription
-nginx-service-failure runNginxServiceFailureRegression
 config-transaction runConfigTransactionRegression
 core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression
 check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression
@@ -642,21 +640,6 @@ core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
 core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression
 sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
 network-check-return-failure runNetworkCheckReturnFailureRegression
-wireguard-control-safe-dir runWireGuardControlSafeDirRegression
-warp-config-safe-dir runWarpConfigSafeDirRegression
-warp-config-file-cleanup runWarpConfigFileCleanupRegression
-uninstall-nginx-cleanup runUninstallNginxCleanupRegression
-clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
-fail2ban-managed-cleanup runFail2banManagedCleanupRegression
-fail2ban-apply-transaction runFail2banApplyTransactionRegression
-uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression
-wireguard-key-transaction runWireGuardKeyTransactionRegression
-uninstall-service-stop-failure runUninstallServiceStopFailureRegression
-clean-last-installation-failure runCleanLastInstallationConfigFailureRegression
-clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression
-clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
-alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
-alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
 EOF
 
     return "${status}"
@@ -688,6 +671,40 @@ regression-ui-long-tail-split-composition runRegressionUiLongTailSplitCompositio
 regression-selector-dispatch-composition runRegressionSelectorDispatchCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/contracts.sh
 regression-parallel-selector-limit-composition runRegressionParallelSelectorLimitCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/contracts.sh
 regression-parallel-selector-slot-refill-composition runRegressionParallelSelectorSlotRefillCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/contracts.sh
+EOF
+
+    return "${status}"
+}
+
+runTransactionDirectLeafSelectorsUseFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local status=0
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
+    done <<'EOF'
+transaction-subscription runRegressionTransactionSubscription
+nginx-service-failure runNginxServiceFailureRegression
+uninstall-nginx-cleanup runUninstallNginxCleanupRegression
+clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
+fail2ban-managed-cleanup runFail2banManagedCleanupRegression
+fail2ban-apply-transaction runFail2banApplyTransactionRegression
+uninstall-wireguard-cleanup runUninstallWireGuardCleanupRegression
+wireguard-key-transaction runWireGuardKeyTransactionRegression
+wireguard-control-safe-dir runWireGuardControlSafeDirRegression
+warp-config-safe-dir runWarpConfigSafeDirRegression
+warp-config-file-cleanup runWarpConfigFileCleanupRegression
+uninstall-service-stop-failure runUninstallServiceStopFailureRegression
+clean-last-installation-failure runCleanLastInstallationConfigFailureRegression
+clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureRegression
+clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
+alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
+alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
 EOF
 
     return "${status}"
@@ -2266,6 +2283,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract &&
+        runRegressionStep transaction-direct-leaf-selectors-use-function-registry runTransactionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
