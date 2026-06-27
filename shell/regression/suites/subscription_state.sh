@@ -63,11 +63,21 @@ subscription-sync-reconcile-early-exit runRegressionSubscriptionSyncReconcileEar
 subscription-groups-restore-failure runRegressionSubscriptionGroupsRestoreFailure
 EOF
 
-registerRegressionAggregateParallel subscription-state-core \
-    subscription-state-structure \
-    subscription-state-quota \
-    subscription-state-remote-restore
-registerRegressionAggregateParallel subscription-state \
-    subscription-state-core \
-    subscription-state-support \
-    subscription-state-sync-rollback
+listRegressionSubscriptionStateCoreChildSelectors() {
+    printf '%s\n' \
+        subscription-state-structure \
+        subscription-state-quota \
+        subscription-state-remote-restore
+}
+
+listRegressionSubscriptionStateChildSelectors() {
+    printf '%s\n' \
+        subscription-state-core \
+        subscription-state-support \
+        subscription-state-sync-rollback
+}
+
+registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCore \
+    $(listRegressionSubscriptionStateCoreChildSelectors)
+registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionState \
+    $(listRegressionSubscriptionStateChildSelectors)

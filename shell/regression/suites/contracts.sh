@@ -30,6 +30,74 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     grep -q '^subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback$' "${suiteFile}"
 }
 
+runSubscriptionStateSelectorHelpersStayAlignedContract() (
+    local coreSelectorsFile="${TMP_DIR}/subscription-state-core-selectors.txt"
+    local coreSortedFile="${TMP_DIR}/subscription-state-core-selectors.sorted.txt"
+    local expectedCoreSelectorsFile="${TMP_DIR}/subscription-state-core-selectors.expected.txt"
+    local defaultSelectorsFile="${TMP_DIR}/subscription-state-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/subscription-state-default-selectors.sorted.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/subscription-state-default-selectors.expected.txt"
+
+    declare -F listRegressionSubscriptionStateCoreChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateChildSelectors >/dev/null
+
+    listRegressionSubscriptionStateCoreChildSelectors >"${coreSelectorsFile}"
+    listRegressionSubscriptionStateChildSelectors >"${defaultSelectorsFile}"
+
+    cat <<'EOF' >"${expectedCoreSelectorsFile}"
+subscription-state-structure
+subscription-state-quota
+subscription-state-remote-restore
+EOF
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+subscription-state-core
+subscription-state-support
+subscription-state-sync-rollback
+EOF
+
+    cmp -s "${expectedCoreSelectorsFile}" "${coreSelectorsFile}"
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+
+    sort "${coreSelectorsFile}" >"${coreSortedFile}"
+    sort -u "${coreSelectorsFile}" >"${TMP_DIR}/subscription-state-core-selectors.unique.txt"
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/subscription-state-default-selectors.unique.txt"
+
+    cmp -s "${coreSortedFile}" "${TMP_DIR}/subscription-state-core-selectors.unique.txt"
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/subscription-state-default-selectors.unique.txt"
+)
+
+runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["subscription-state-core"]:-}
+
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-core ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateParallel subscription-state-core \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCore \\' "${suiteFile}"
+    expectedChildren=$(listRegressionSubscriptionStateCoreChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-state-core"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-state-core"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state-core"]:-}" == "runRegressionSubscriptionStateCore" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runSubscriptionStateAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["subscription-state"]:-}
+
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateParallel subscription-state \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionState \\' "${suiteFile}"
+    expectedChildren=$(listRegressionSubscriptionStateChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-state"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-state"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state"]:-}" == "runRegressionSubscriptionState" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
 runRemoteControlSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
@@ -992,6 +1060,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
+        runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
+        runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
+        runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
