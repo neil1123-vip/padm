@@ -9503,6 +9503,10 @@ EOF
 )
 
 runRuntimeAndRealityRegression() {
+    local oldCurrentClients="${currentClients:-}"
+    local xhttpClients
+    local visionClients
+
     visionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a")
     [[ "${visionLink}" == "vless://uuid-a@node.example.com:443?encryption=none&security=reality&pqv=pqv&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
     visionEncLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a" "mlkem768x25519plus.native.0rtt.test")
@@ -9510,9 +9514,15 @@ runRuntimeAndRealityRegression() {
     grpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "node.example.com" "8443" "www.microsoft.com" "pubkey" "pqv" "user-a")
     [[ "${grpcLink}" == "vless://uuid-a@node.example.com:8443?encryption=none&security=reality&pqv=pqv&type=grpc&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#user-a" ]]
     xhttpLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/xHTTP" "pubkey" "user-a")
-    [[ "${xhttpLink}" == "vless://uuid-a@cdn.example.com:443?encryption=none&security=reality&type=xhttp&sni=www.microsoft.com&host=www.microsoft.com&fp=chrome&path=/xHTTP&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
+    [[ "${xhttpLink}" == "vless://uuid-a@cdn.example.com:443?encryption=none&security=reality&type=xhttp&sni=www.microsoft.com&host=www.microsoft.com&fp=chrome&path=/xHTTP&pbk=pubkey&sid=6ba85179e30d4fc2#user-a" ]]
     xhttpLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom" "pubkey" "user-a" none "front.example.com" "stream-one")
-    [[ "${xhttpLink}" == "vless://uuid-a@cdn.example.com:443?encryption=none&security=reality&type=xhttp&sni=www.microsoft.com&host=front.example.com&fp=chrome&path=/custom&mode=stream-one&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
+    [[ "${xhttpLink}" == "vless://uuid-a@cdn.example.com:443?encryption=none&security=reality&type=xhttp&sni=www.microsoft.com&host=front.example.com&fp=chrome&path=/custom&mode=stream-one&pbk=pubkey&sid=6ba85179e30d4fc2#user-a" ]]
+    currentClients='[{"id":"uuid-a","email":"user-a"}]'
+    xhttpClients=$(initXrayClients 2)
+    jq -e '.[0].email == "user-a-VLESS_Reality_XHTTP" and (.[0].flow | not)' <<<"${xhttpClients}" >/dev/null
+    visionClients=$(initXrayClients 27)
+    jq -e '.[0].email == "user-a-VLESS_TCP/TLS_Vision" and .[0].flow == "xtls-rprx-vision"' <<<"${visionClients}" >/dev/null
+    currentClients="${oldCurrentClients}"
     domain=tls.example.com
     currentHost=
     collectTLSProfile
@@ -9680,6 +9690,7 @@ runRealityConfigVlessEncryptionRegression() {
     local fakeXrayBinary="${TMP_DIR}/fake-xray-vlessenc"
     local vlessConfigDir="${TMP_DIR}/vlessenc-xray-conf"
     local vlessConfigFile="${vlessConfigDir}/07_VLESS_vision_reality_inbounds.json"
+    local xhttpConfigFile="${vlessConfigDir}/12_VLESS_XHTTP_inbounds.json"
     local vlessStateFile="${TMP_DIR}/vlessenc-state.json"
     local oldTmpDir="${TMPDIR:-}"
     local vlessTmpRoot="${TMP_DIR}/vlessenc-tmp"
@@ -9688,6 +9699,7 @@ runRealityConfigVlessEncryptionRegression() {
     local vlessOriginalState
     local vlessEnabledConfig
     local vlessEnabledState
+    local xhttpOriginalConfig
     local vlessValidateMode=success
     mkdir -p "${vlessTmpRoot}"
     : >"${vlessTmpMarker}"
@@ -9797,6 +9809,21 @@ JSON
     if regressionFindHasMatches "${vlessTmpRoot}" -mindepth 1 -maxdepth 1 \( -name 'padm-vlessenc.out.*' -o -name 'padm-vlessenc.err.*' \); then
         return 1
     fi
+
+    cat >"${xhttpConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"decryption":"none","fallbacks":[{"dest":80}],"clients":[{"id":"uuid","flow":"xtls-rprx-vision"}]},"streamSettings":{"network":"xhttp"}}]}
+JSON
+    xhttpOriginalConfig=$(<"${xhttpConfigFile}")
+    export PADM_VLESS_XHTTP_CONFIG_FILE="${xhttpConfigFile}"
+    export PADM_FAKE_XRAY_VALIDATE_MODE="success"
+    setVlessRealityEncryption enable
+    jq -e '.inbounds[0].settings.decryption == "mlkem768x25519plus.native.0rtt.test" and (.inbounds[0].settings.fallbacks | not) and (.inbounds[0].settings.clients[0].flow | not)' "${xhttpConfigFile}" >/dev/null
+    jq -e '.enabled == true and .encryption == "mlkem768x25519plus.native.0rtt.test"' "${vlessStateFile}" >/dev/null
+    [[ ! -e "${xhttpConfigFile}.vlessenc.bak" ]]
+    setVlessRealityEncryption disable
+    jq -e '.inbounds[0].settings.decryption == "none" and (.inbounds[0].settings.fallbacks | not) and (.inbounds[0].settings.clients[0].flow | not)' "${xhttpConfigFile}" >/dev/null
+    [[ ! -e "${vlessStateFile}" ]]
+    printf '%s\n' "${xhttpOriginalConfig}" >"${xhttpConfigFile}"
 
     PADM_VLESS_ENCRYPTION_STATE_FILE="relative-vless-state.json"
     if setVlessRealityEncryption enable >/dev/null 2>&1; then
@@ -10391,11 +10418,14 @@ currentRealityXHTTPPublicKey="pubkey"
 defaultBase64Code vlessXHTTP 443 user-a-xhttp uuid-a "cdn.example.com" "/ignored"
 expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp" none "front.example.com" "packet-up")
 grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp"
+! grep -q 'flow=xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp"
 grep -qx "    server: cdn.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "    servername: www.microsoft.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "      path: /custom-xhttp" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "      host: front.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
+! grep -q 'flow: xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
+! grep -q '%26flow%3Dxtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 configPath="${oldConfigPath}"
 
 (

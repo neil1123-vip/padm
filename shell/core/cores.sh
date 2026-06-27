@@ -1785,7 +1785,7 @@ initXrayClients() {
         fi
         # VLESS XHTTP
         if protocolSelectionIncludes "${type}" 2; then
-            currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VLESS_Reality_XHTTP\",\"flow\":\"xtls-rprx-vision\"}"
+            currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-VLESS_Reality_XHTTP\"}"
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi
         # Trojan gRPC

@@ -107,7 +107,7 @@ serializeVlessRealityXHTTPLink() {
     local mode=${10:-}
     local modeParam=
     [[ -n "${mode}" ]] && modeParam="&mode=${mode}"
-    printf 'vless://%s@%s:%s?encryption=%s&security=reality&type=xhttp&sni=%s&host=%s&fp=chrome&path=%s%s&pbk=%s&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#%s' "${id}" "${add}" "${port}" "${encryption}" "${sni}" "${host}" "${path}" "${modeParam}" "${publicKey}" "${email}"
+    printf 'vless://%s@%s:%s?encryption=%s&security=reality&type=xhttp&sni=%s&host=%s&fp=chrome&path=%s%s&pbk=%s&sid=6ba85179e30d4fc2#%s' "${id}" "${add}" "${port}" "${encryption}" "${sni}" "${host}" "${path}" "${modeParam}" "${publicKey}" "${email}"
 }
 
 appendSingBoxSubscribeLocalConfig() {

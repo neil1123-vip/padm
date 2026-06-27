@@ -271,6 +271,8 @@ setVlessRealityEncryption() {
         if ! jq --arg decryption "${decryption}" '
             if has("inbounds") and (.inbounds | length) > 1 then
                 del(.inbounds[1].settings.fallbacks) | .inbounds[1].settings.decryption = $decryption
+            elif .inbounds[0].streamSettings.network == "xhttp" then
+                del(.inbounds[0].settings.fallbacks) | .inbounds[0].settings.decryption = $decryption | .inbounds[0].settings.clients |= map(del(.flow))
             else
                 del(.inbounds[0].settings.fallbacks) | .inbounds[0].settings.decryption = $decryption | .inbounds[0].settings.clients |= map(.flow = "xtls-rprx-vision")
             end
@@ -297,6 +299,8 @@ setVlessRealityEncryption() {
         if ! jq '
             if has("inbounds") and (.inbounds | length) > 1 then
                 .inbounds[1].settings.decryption = "none" | del(.inbounds[1].settings.fallbacks)
+            elif .inbounds[0].streamSettings.network == "xhttp" then
+                .inbounds[0].settings.decryption = "none" | del(.inbounds[0].settings.fallbacks) | .inbounds[0].settings.clients |= map(del(.flow))
             else
                 .inbounds[0].settings.decryption = "none" | del(.inbounds[0].settings.fallbacks)
             end
