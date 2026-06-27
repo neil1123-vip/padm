@@ -215,12 +215,50 @@ runFastSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateSequential fast-reality \\' "${suiteFile}"
-    grep -q '^    fast \\' "${suiteFile}"
-    grep -q '^    reality-candidates-fast$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
+    grep -q '^runRegressionFastRealitySuiteRoot() {$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+}
+
+runFastRealitySelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/fast-reality-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/fast-reality-default-selectors.sorted.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/fast-reality-default-selectors.expected.txt"
+
+    declare -F listRegressionFastRealityChildSelectors >/dev/null
+
+    listRegressionFastRealityChildSelectors >"${defaultSelectorsFile}"
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+fast
+reality-candidates-fast
+EOF
+
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/fast-reality-default-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/fast-reality-default-selectors.unique.txt"
+)
+
+runFastRealityAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast-reality"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateSequential fast-reality \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionFastRealityChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast-reality"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast-reality"]:-}" == "sequential" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast-reality"]:-}" == "runRegressionFastRealitySuiteRoot" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
 runFastPlatformSourceOnlyExecutionContract() (
@@ -237,6 +275,31 @@ runFastPlatformSourceOnlyExecutionContract() (
     eval "${fastDef}"
     declare -F runRegressionFastSuiteRoot >/dev/null
     declare -F runRegressionPlatformSuiteRoot >/dev/null
+)
+
+runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
+    local callLog="${TMP_DIR}/fast-reality-aggregate-dispatch.log"
+
+    : >"${callLog}"
+
+    runRegressionFastSuiteRoot() {
+        printf 'fast\n' >>"${callLog}"
+    }
+
+    runRealityCandidateFastRegression() {
+        printf 'reality-candidates-fast\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain fast-reality
+
+    grep -qx 'fast' "${callLog}"
+    grep -qx 'reality-candidates-fast' "${callLog}"
+    [[ "$(wc -l <"${callLog}")" -eq 2 ]]
+    awk '
+        $0 == "fast" { fastLine = NR }
+        $0 == "reality-candidates-fast" { candidateLine = NR }
+        END { exit !(fastLine && candidateLine && fastLine < candidateLine) }
+    ' "${callLog}"
 )
 
 runLegacySuiteUsesFunctionRegistryContract() {
@@ -1172,6 +1235,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
+        runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
+        runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
+        runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&

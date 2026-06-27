@@ -14,8 +14,19 @@ eval "${_fast_root_suite_def}"
 
 unset _fast_platform_suite_def _fast_root_suite_def
 
+runRegressionFastRealitySuiteRoot() {
+    runRegressionFastSuiteRoot &&
+        runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
+}
+
 registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot
-registerRegressionAggregateSequential fast-reality \
-    fast \
-    reality-candidates-fast
+
+listRegressionFastRealityChildSelectors() {
+    printf '%s\n' \
+        fast \
+        reality-candidates-fast
+}
+
+registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \
+    $(listRegressionFastRealityChildSelectors)
 registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot
