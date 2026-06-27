@@ -1249,11 +1249,11 @@ runTransactionCoreAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-core ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCore \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionCoreChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction-core"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction-core"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-core"]:-}" == "runRegressionTransactionCore" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-core"]:-}" == "runRegressionTransactionCoreSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
@@ -1326,8 +1326,10 @@ runTransactionSuiteUsesFunctionRegistryContract() {
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^listRegressionTransactionChildSelectors() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionTransactionCoreSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionSystemSuiteRoot() {$' "${suiteFile}"
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
@@ -1335,7 +1337,7 @@ runTransactionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf transaction-core ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCore \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
 }
@@ -1360,6 +1362,11 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
     }
 
     runRegressionTransactionCore() {
+        printf 'legacy-transaction-core\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTransactionCoreSuiteRoot() {
         printf 'suite-transaction-core\n' >>"${callLog}"
     }
 
@@ -1375,7 +1382,56 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
     grep -qx 'suite-transaction-core' "${callLog}"
     grep -qx 'suite-transaction-system' "${callLog}"
     ! grep -q '^legacy-transaction$' "${callLog}"
+    ! grep -q '^legacy-transaction-core$' "${callLog}"
     ! grep -q '^legacy-transaction-system$' "${callLog}"
+)
+
+runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/transaction-core-framework-helper-dispatch.log"
+
+    : >"${callLog}"
+
+    listRegressionTransactionCoreChildSelectors() {
+        printf '%s\n' \
+            core-rollback-result-message \
+            config-transaction
+    }
+
+    listRegressionTransactionCoreHeavyChildSelectors() {
+        printf '%s\n' \
+            core-install-service-action-failure \
+            core-port-file-transaction
+    }
+
+    listRegressionTransactionCoreMediumChildSelectors() {
+        printf '%s\n' \
+            config-transaction \
+            entry-helper-config
+    }
+
+    listRegressionTransactionCoreLightChildSelectors() {
+        printf '%s\n' \
+            core-rollback-result-message \
+            service-queue-apply-propagation
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:jobs=%s:%s\n' "${PADM_REGRESSION_PARALLEL_JOBS:-}" "$*" >>"${callLog}"
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTransactionCoreSuiteRoot
+    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCoreSuiteRoot
+
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/transaction-core-parallel-[0-9][0-9]* core-rollback-result-message core-rollback-result-message config-transaction config-transaction' "${callLog}"
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/transaction-core-parallel-heavy-[0-9][0-9]* core-install-service-action-failure core-install-service-action-failure core-port-file-transaction core-port-file-transaction' "${callLog}"
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}"':'"${TMP_DIR}"'/transaction-core-parallel-medium-[0-9][0-9]* config-transaction config-transaction entry-helper-config entry-helper-config' "${callLog}"
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-core-parallel-light-[0-9][0-9]* core-rollback-result-message core-rollback-result-message service-queue-apply-propagation service-queue-apply-propagation' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
 )
 
 runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -2231,6 +2287,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-aggregate-runner-registration runTransactionAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-suite-uses-suite-local-helpers runTransactionSuiteUsesSuiteLocalHelpersContract &&
+        runRegressionStep transaction-core-aggregate-runner-uses-framework-selector-helper runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract &&
         runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
         runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&

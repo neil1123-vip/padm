@@ -16687,7 +16687,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
     runUserConfigWriteRegression() { runRegressionAllSelector user-config-write; }
     runRemoveUserRegression() { runRegressionAllSelector remove-user; }
 
-    runRegressionTransactionCore
+    runRegressionTransactionCoreSuiteRoot
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -16710,7 +16710,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         "${TMP_DIR}/transaction-core-wave-boundary-violation"
     : >"${TMP_DIR}/transaction-core-expect-heavy-concurrency"
     : >"${TMP_DIR}/transaction-core-expect-profile-boundary"
-    PADM_REGRESSION_PARALLEL_JOBS=6 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCore
+    PADM_REGRESSION_PARALLEL_JOBS=6 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCoreSuiteRoot
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -16730,7 +16730,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         "${TMP_DIR}/core-port-file-transaction-started" \
         "${TMP_DIR}/core-install-service-action-failure-finished" \
         "${TMP_DIR}/core-port-file-transaction-finished"
-    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS=1 runRegressionTransactionCore
+    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS=1 PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS=1 runRegressionTransactionCoreSuiteRoot
     awk '
         $0 == "core-install-service-action-failure-finish" { serviceFinish = NR }
         $0 == "core-port-file-transaction-start" { portStart = NR }
