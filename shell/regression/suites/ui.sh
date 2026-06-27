@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 REGRESSION_UI_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=/dev/null
+source "${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"
 
 runRegressionUiSuiteRoot() {
@@ -14,7 +16,8 @@ runRegressionUiSuiteRoot() {
         for selector in "${selectors[@]}"; do
             selectorPairs+=("${selector}" "${selector}")
         done
-        runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+            runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
             "${selectorPairs[@]}"
         return
     fi
@@ -24,7 +27,8 @@ runRegressionUiSuiteRoot() {
     for selector in "${selectors[@]}"; do
         selectorPairs+=("${selector}" "${selector}")
     done
-    runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 

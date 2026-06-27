@@ -761,21 +761,24 @@ EOF
 runUiSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
 
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf ui ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf menu-smoke ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf menu-smoke ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}"
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]]
-    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]]
-    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]]
+    grep -q 'source "\${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || return 1
+    grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}" || return 1
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}" || return 1
+    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionScriptLeaf ui ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionScriptLeaf menu-smoke ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}" || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]] || return 1
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]] || return 1
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]] || return 1
 }
 
 runUiSelectorHelpersStayAlignedContract() (
@@ -890,6 +893,40 @@ runUiAggregateRunnerUsesSuiteLocalHelperContract() (
 
     grep -qx 'suite-ui' "${callLog}"
     ! grep -q '^legacy-ui$' "${callLog}"
+)
+
+runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/ui-framework-helper-dispatch.log"
+
+    : >"${callLog}"
+
+    listRegressionUiChildSelectors() {
+        printf '%s\n' \
+            ui-smoke \
+            ui-full-core
+    }
+
+    listRegressionUiAllProfileChildSelectors() {
+        printf '%s\n' \
+            ui-smoke \
+            wireguard-restore-runner
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:%s\n' "$*" >>"${callLog}"
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runRegressionUiSuiteRoot
+    PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionUiSuiteRoot
+
+    grep -qx 'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke ui-full-core ui-full-core' "${callLog}"
+    grep -qx 'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke wireguard-restore-runner wireguard-restore-runner' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
 )
 
 runRoutingSuiteUsesFunctionRegistryContract() {
@@ -1909,6 +1946,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
         runRegressionStep ui-aggregate-runner-uses-suite-local-helper runUiAggregateRunnerUsesSuiteLocalHelperContract &&
+        runRegressionStep ui-aggregate-runner-uses-framework-selector-helper runUiAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep routing-suite-uses-function-registry runRoutingSuiteUsesFunctionRegistryContract &&
         runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
