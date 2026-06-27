@@ -462,7 +462,6 @@ runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
-ui-smoke runRegressionMenuSmoke
 transaction-subscription runRegressionTransactionSubscription
 nginx-service-failure runNginxServiceFailureRegression
 config-transaction runConfigTransactionRegression
@@ -553,7 +552,7 @@ EOF
 }
 
 runUiPublicSelectorsUseFunctionRegistryContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local status=0
 
     while read -r selector runner; do
@@ -598,6 +597,17 @@ wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
 EOF
 
     return "${status}"
+}
+
+runUiSuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf ui ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}"
 }
 
 runUiSelectorHelpersStayAlignedContract() (
@@ -674,19 +684,39 @@ EOF
 )
 
 runUiAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["ui"]:-}
 
     ! grep -q '^ui ui$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUi \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionUiChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["ui"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["ui"]:-}" == "runRegressionUi" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["ui"]:-}" == "runRegressionUiSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
+
+runUiAggregateRunnerUsesSuiteLocalHelperContract() (
+    local callLog="${TMP_DIR}/ui-aggregate-suite-root-dispatch.log"
+
+    : >"${callLog}"
+
+    runRegressionUi() {
+        printf 'legacy-ui\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionUiSuiteRoot() {
+        printf 'suite-ui\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain ui
+
+    grep -qx 'suite-ui' "${callLog}"
+    ! grep -q '^legacy-ui$' "${callLog}"
+)
 
 runRoutingSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
@@ -1554,9 +1584,11 @@ runRegressionDispatcherContracts() {
         runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
+        runRegressionStep ui-aggregate-runner-uses-suite-local-helper runUiAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep routing-suite-uses-function-registry runRoutingSuiteUsesFunctionRegistryContract &&
         runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
