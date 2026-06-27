@@ -219,8 +219,19 @@ runFastSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionFastRealitySuiteRoot() {$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+}
+
+runPlatformSuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
 }
 
 runFastRealitySelectorHelpersStayAlignedContract() (
@@ -262,19 +273,21 @@ runFastRealityAggregateRunnerRegistrationContract() {
 }
 
 runFastPlatformSourceOnlyExecutionContract() (
-    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local platformSuite="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local fastSuite="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
 
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${scriptFile}"
-    local platformDef fastDef
-    platformDef=$(declare -f runRegressionPlatform)
-    platformDef="${platformDef/runRegressionPlatform/runRegressionPlatformSuiteRoot}"
-    eval "${platformDef}"
-    fastDef=$(declare -f runRegressionFast)
-    fastDef="${fastDef/runRegressionFast/runRegressionFastSuiteRoot}"
-    fastDef="${fastDef/runRegressionPlatform/runRegressionPlatformSuiteRoot}"
-    eval "${fastDef}"
+    registerRegressionFunctionLeaf() { :; }
+    registerRegressionAggregateRunnerSequential() { :; }
+    registerRegressionAggregateRunnerParallel() { :; }
+    registerRegressionAggregateSequential() { :; }
+    registerRegressionAggregateParallel() { :; }
+    registerRegressionAlias() { :; }
+
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${platformSuite}"
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${fastSuite}"
     declare -F runRegressionFastSuiteRoot >/dev/null
     declare -F runRegressionPlatformSuiteRoot >/dev/null
+    declare -F runRegressionPlatformIoSuiteRoot >/dev/null
 )
 
 runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
@@ -326,7 +339,7 @@ runLegacySuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \\' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIo$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}"
     grep -q '^registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
     declare -F listRegressionTransactionSystemChildSelectors >/dev/null
@@ -337,11 +350,36 @@ runLegacySuiteUsesFunctionRegistryContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
-runLegacyPlatformIoSupportsSourceOnlyExecutionContract() (
-    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+runPlatformSuiteUsesSuiteLocalHelpersContract() (
+    local callLog="${TMP_DIR}/platform-suite-root-dispatch.log"
 
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${scriptFile}"
-    declare -F runRegressionPlatformIo >/dev/null
+    : >"${callLog}"
+
+    runRegressionPlatform() {
+        printf 'legacy-platform-hot\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionPlatformSuiteRoot() {
+        printf 'suite-platform-hot\n' >>"${callLog}"
+    }
+
+    runRegressionPlatformIo() {
+        printf 'legacy-platform-io\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionPlatformIoSuiteRoot() {
+        printf 'suite-platform-io\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-hot
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-io
+
+    grep -qx 'suite-platform-hot' "${callLog}"
+    grep -qx 'suite-platform-io' "${callLog}"
+    ! grep -q '^legacy-platform-hot$' "${callLog}"
+    ! grep -q '^legacy-platform-io$' "${callLog}"
 )
 
 runTlsSuiteUsesFunctionRegistryContract() {
@@ -1424,10 +1462,11 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
+        runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
-        runRegressionStep legacy-platform-io-supports-source-only runLegacyPlatformIoSupportsSourceOnlyExecutionContract &&
+        runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
         runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
         runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
         runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&

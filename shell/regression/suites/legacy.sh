@@ -36,7 +36,6 @@ while read -r selector runner; do
 done <<'EOF'
 EOF
 
-registerRegressionFunctionLeaf platform-io runRegressionPlatformIo
 registerRegressionFunctionLeaf ui-smoke runRegressionMenuSmoke
 registerRegressionFunctionLeaf menu-smoke runRegressionMenuSmoke
 registerRegressionFunctionLeaf menu-smoke-full runRegressionMenuSmokeFull
