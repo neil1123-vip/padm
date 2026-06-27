@@ -71,6 +71,148 @@ runRegressionSubscriptionSuiteRoot() {
         "${selectorPairs[@]}"
 }
 
+runRegressionSubscriptionRemoteParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-remote-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "subscription-remote-unique" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-remote-merge-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription-remote-merge" ]]; then
+            : >"${TMP_DIR}/subscription-remote-merge-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionRemoteSuiteRoot
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done < <(listRegressionSubscriptionRemoteChildSelectors)
+    awk '
+        $0 == "subscription-remote-unique-start" { uniqueStart = NR }
+        $0 == "subscription-remote-merge-start" { mergeStart = NR }
+        $0 == "subscription-remote-unique-finish" { uniqueFinish = NR }
+        END { exit !(uniqueStart && mergeStart && uniqueFinish && mergeStart < uniqueFinish) }
+    ' "${callLog}"
+    ! grep -qx 'subscription-remote-start' "${callLog}"
+    ! grep -qx 'subscription-remote-finish' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/subscription-remote-merge-started"
+    PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionRemoteSuiteRoot
+    awk '
+        $0 == "subscription-remote-unique-finish" { firstFinish = NR }
+        $0 == "subscription-remote-rollback-start" { secondStart = NR }
+        $0 == "subscription-remote-rollback-finish" { secondFinish = NR }
+        $0 == "subscription-remote-merge-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
+
+runRegressionSubscriptionTxParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-tx-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "sing-box-subscribe-write" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscribe-user-output-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscribe-user-output-transaction" ]]; then
+            : >"${TMP_DIR}/subscribe-user-output-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionTxSuiteRoot
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done < <(listRegressionSubscriptionTxChildSelectors)
+    awk '
+        $0 == "sing-box-subscribe-write-start" { singboxStart = NR }
+        $0 == "subscribe-user-output-transaction-start" { userOutputStart = NR }
+        $0 == "sing-box-subscribe-write-finish" { singboxFinish = NR }
+        END { exit !(singboxStart && userOutputStart && singboxFinish && userOutputStart < singboxFinish) }
+    ' "${callLog}"
+)
+
+runRegressionSubscriptionParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "subscription-output" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-state-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription-state" ]]; then
+            : >"${TMP_DIR}/subscription-state-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionSuiteRoot
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done < <(listRegressionSubscriptionChildSelectors)
+    awk '
+        $0 == "subscription-output-start" { outputStart = NR }
+        $0 == "subscription-state-start" { stateStart = NR }
+        $0 == "subscription-output-finish" { outputFinish = NR }
+        END { exit !(outputStart && stateStart && outputFinish && stateStart < outputFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/subscription-state-started"
+    PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionSuiteRoot
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done < <(listRegressionSubscriptionChildSelectors)
+    awk '
+        $0 == "subscription-output-start" { outputStart = NR }
+        $0 == "subscription-state-start" { stateStart = NR }
+        $0 == "subscription-output-finish" { outputFinish = NR }
+        $0 == "subscription-state-finish" { stateFinish = NR }
+        $0 == "subscription-tx-start" { writeStart = NR }
+        $0 == "subscription-remote-start" { remoteStart = NR }
+        END {
+            exit !(outputStart && stateStart && outputFinish && stateFinish && writeStart && remoteStart &&
+                stateStart < outputFinish &&
+                outputFinish < writeStart && stateFinish < writeStart &&
+                outputFinish < remoteStart && stateFinish < remoteStart)
+        }
+    ' "${callLog}"
+)
+
 registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput
 registerRegressionFunctionLeaf subscription-remote-unique runRemoteSubscribeFetchUniqueRegression
 registerRegressionFunctionLeaf subscription-remote-rollback runRemoteSubscribeFetchRollbackRegression

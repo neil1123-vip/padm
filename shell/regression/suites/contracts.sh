@@ -768,11 +768,18 @@ EOF
 
 runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local status=0
 
     while read -r selector runner; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${suiteFile}" || status=1
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${legacyScriptFile}" || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
     done <<'EOF'
 regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
 regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
