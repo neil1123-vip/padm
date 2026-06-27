@@ -604,45 +604,8 @@ runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
 
 runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
-    local status=0
 
-    while read -r selector runner; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
-    done <<'EOF'
-config-transaction runConfigTransactionRegression
-core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression
-check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression
-alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression
-sing-box-managed-cleanup runSingBoxManagedCleanupRegression
-xray-reality-port-failure runXrayRealityPortFailureRegression
-sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression
-core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression
-core-template-return-failure runCoreTemplateReturnFailureRegression
-core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression
-sing-box-cronet-rollback runSingBoxCronetRollbackRegression
-finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression
-service-queue-apply-propagation runServiceQueueApplyPropagationRegression
-core-install-service-action-failure runCoreInstallServiceActionFailureRegression
-sing-box-merge-start-failure runSingBoxMergeStartFailureRegression
-sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression
-sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression
-sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression
-sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
-geo-update-reload-failure runGeoUpdateReloadFailureRegression
-core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression
-reload-core-propagation runReloadCorePropagationRegression
-sing-box-log-transaction runSingBoxLogTransactionRegression
-core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression
-legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression
-core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
-core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
-core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression
-sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
-network-check-return-failure runNetworkCheckReturnFailureRegression
-EOF
-
-    return "${status}"
+    ! grep -q '^registerRegressionFunctionLeaf ' "${suiteFile}"
 }
 
 runCompositionLeafSelectorsUseSuiteLocalRegistryContract() {
@@ -705,6 +668,58 @@ clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureR
 clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
 alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
+EOF
+
+    return "${status}"
+}
+
+runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local status=0
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
+    done <<'EOF'
+core-rollback-result-message runCoreRollbackResultMessageRegression
+config-transaction runConfigTransactionRegression
+core-port-file-transaction runCorePortFileTransactionRegression
+core-port-unsafe-config-dir runCorePortRejectsUnsafeConfigDirRegression
+entry-helper-config runEntryHelperConfigRegression
+user-config-write runUserConfigWriteRegression
+remove-user runRemoveUserRegression
+check-port-open-nginx-directory-target runCheckPortOpenNginxRejectsDirectoryTargetRegression
+alone-nginx-directory-target runAloneNginxRejectsDirectoryTargetRegression
+sing-box-managed-cleanup runSingBoxManagedCleanupRegression
+xray-reality-port-failure runXrayRealityPortFailureRegression
+sing-box-reality-key-transaction runSingBoxRealityKeyTransactionRegression
+core-template-managed-remove runCoreTemplateManagedConfigRemovalRegression
+core-template-return-failure runCoreTemplateReturnFailureRegression
+core-binary-install-copy-failure runCoreBinaryInstallCopyFailureRegression
+sing-box-cronet-rollback runSingBoxCronetRollbackRegression
+finalize-sing-box-rollback runFinalizeSingBoxBinaryInstallRollbackRegression
+service-queue-apply-propagation runServiceQueueApplyPropagationRegression
+core-install-service-action-failure runCoreInstallServiceActionFailureRegression
+sing-box-merge-start-failure runSingBoxMergeStartFailureRegression
+sing-box-uninstall-rejects-unsafe-config-path runSingBoxUninstallRejectsUnsafeConfigPathRegression
+sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression
+sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
+geo-update-reload-failure runGeoUpdateReloadFailureRegression
+core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression
+sing-box-log-transaction runSingBoxLogTransactionRegression
+core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression
+legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegression
+core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
+core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
+core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression
+sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
+network-check-return-failure runNetworkCheckReturnFailureRegression
+sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression
+reload-core-propagation runReloadCorePropagationRegression
 EOF
 
     return "${status}"
@@ -2284,6 +2299,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract &&
         runRegressionStep transaction-direct-leaf-selectors-use-function-registry runTransactionDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep transaction-core-direct-leaf-selectors-use-function-registry runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
