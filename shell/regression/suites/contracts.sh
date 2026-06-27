@@ -1440,8 +1440,11 @@ runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract() (
 runRuntimeSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
 
+    grep -q 'source "\${REGRESSION_RUNTIME_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^runRegressionRuntimeSuiteRoot() {$' "${suiteFile}"
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf runtime ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf runtime ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}"
@@ -1869,6 +1872,39 @@ runRuntimeAggregateRunnerUsesSuiteLocalHelperContract() (
     ! grep -q '^legacy-runtime$' "${callLog}"
 )
 
+runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/runtime-framework-helper-dispatch.log"
+
+    : >"${callLog}"
+
+    listRegressionRuntimeLightChildSelectors() {
+        printf '%s\n' \
+            runtime-core \
+            runtime-tempdir
+    }
+
+    listRegressionRuntimeHeavyChildSelectors() {
+        printf '%s\n' \
+            reality-candidates \
+            reality-config
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:jobs=%s:%s\n' "${PADM_REGRESSION_PARALLEL_JOBS:-}" "$*" >>"${callLog}"
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntimeSuiteRoot
+
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/runtime-parallel-light-[0-9][0-9]* runtime-core runtime-core runtime-tempdir runtime-tempdir' "${callLog}"
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/runtime-parallel-heavy-[0-9][0-9]* reality-candidates reality-candidates reality-config reality-config' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
+)
+
 runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/reality-aggregate-suite-root-dispatch.log"
 
@@ -2093,6 +2129,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep runtime-selector-helpers-stay-aligned runRuntimeSelectorHelpersStayAlignedContract &&
         runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract &&
         runRegressionStep runtime-aggregate-runner-uses-suite-local-helper runRuntimeAggregateRunnerUsesSuiteLocalHelperContract &&
+        runRegressionStep runtime-aggregate-runner-uses-framework-selector-helper runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep reality-aggregate-runners-use-suite-local-helpers runRealityAggregateRunnersUseSuiteLocalHelpersContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
         runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
