@@ -744,6 +744,48 @@ runTransactionSystemAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runAllSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/all-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/all-default-selectors.sorted.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/all-default-selectors.expected.txt"
+
+    declare -F listRegressionAllChildSelectors >/dev/null
+
+    listRegressionAllChildSelectors >"${defaultSelectorsFile}"
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+routing
+subscription
+runtime
+transaction
+remote-control
+ui
+EOF
+
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/all-default-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/all-default-selectors.unique.txt"
+)
+
+runAllAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["all"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateSequential all \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAll \\' "${suiteFile}"
+    expectedChildren=$(listRegressionAllChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["all"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["all"]:-}" == "sequential" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["all"]:-}" == "runRegressionAll" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
 runSubscriptionSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/subscription-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/subscription-default-selectors.sorted.txt"
@@ -1147,6 +1189,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-selector-helpers-stay-aligned runTransactionSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-aggregate-runner-registration runTransactionAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract &&
+        runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract &&
+        runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-remote-fetch-registered-child-selectors-aligned runSubscriptionRemoteFetchRegisteredChildSelectorsAlignedContract &&
         runRegressionStep subscription-write-transaction-registered-child-selectors-aligned runSubscriptionWriteTransactionRegisteredChildSelectorsAlignedContract &&
