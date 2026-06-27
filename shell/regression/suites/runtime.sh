@@ -32,21 +32,8 @@ runRegressionRuntimeSuiteRoot() {
         runRegressionStep runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression &&
         runRegressionStep runtime-auto-install-reality-route runAutoInstallRealityRouteRegression &&
         runRegressionStep runtime-tempdir runRuntimeTempDirRegression &&
-        runRegressionStep reality-candidates runRegressionRealityCandidates &&
+        runRegressionStep reality-candidates runRegressionRealityCandidatesSuiteRoot &&
         runRegressionStep reality-config runRealityConfigRegression
-}
-
-listRegressionRealityStreamChildSelectors() {
-    printf '%s\n' \
-        reality-stream-enable \
-        reality-stream-disable
-}
-
-listRegressionRealityCandidatesChildSelectors() {
-    printf '%s\n' \
-        reality-candidates-fast \
-        reality-asn-scan-plan \
-        reality-candidates-full
 }
 
 listRegressionRuntimeLightChildSelectors() {
@@ -68,21 +55,10 @@ listRegressionRuntimeChildSelectors() {
     listRegressionRuntimeHeavyChildSelectors
 }
 
-registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
-registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegression
-registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression
-registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression
-registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression
 registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression
 registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
 registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression
-registerRegressionFunctionLeaf reality-config runRealityConfigRegression
-registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression
 
-registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidates \
-    $(listRegressionRealityCandidatesChildSelectors)
-registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStream \
-    $(listRegressionRealityStreamChildSelectors)
 registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \
     $(listRegressionRuntimeChildSelectors)

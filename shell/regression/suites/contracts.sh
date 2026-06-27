@@ -885,17 +885,40 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf runtime ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf runtime ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-candidates-fast ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-candidates-full ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-stream-enable ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-stream-disable ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-config ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-profile-failure ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateRunnerSequential reality-candidates ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateRunnerSequential reality-stream ' "${suiteFile}"
+}
+
+runRealitySuiteUsesFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
+
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REALITY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-config runRealityConfigRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
 }
 
 runSubscriptionSelectorHelpersStayAlignedContract() (
@@ -1029,17 +1052,17 @@ runSubscriptionWriteTransactionAggregateRunnerRegistrationContract() {
 }
 
 runRealityCandidatesAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["reality-candidates"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidates \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealityCandidatesChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-candidates"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-candidates"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-candidates"]:-}" == "runRegressionRealityCandidates" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-candidates"]:-}" == "runRegressionRealityCandidatesSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
@@ -1075,17 +1098,17 @@ runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
 )
 
 runRealityStreamAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local expectedChildren
     local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["reality-stream"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStream \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealityStreamChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-stream"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-stream"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-stream"]:-}" == "runRegressionRealityStream" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-stream"]:-}" == "runRegressionRealityStreamSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
@@ -1173,6 +1196,38 @@ runRuntimeAggregateRunnerUsesSuiteLocalHelperContract() (
 
     grep -qx 'suite-runtime' "${callLog}"
     ! grep -q '^legacy-runtime$' "${callLog}"
+)
+
+runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
+    local callLog="${TMP_DIR}/reality-aggregate-suite-root-dispatch.log"
+
+    : >"${callLog}"
+
+    runRegressionRealityCandidates() {
+        printf 'legacy-reality-candidates\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionRealityCandidatesSuiteRoot() {
+        printf 'suite-reality-candidates\n' >>"${callLog}"
+    }
+
+    runRegressionRealityStream() {
+        printf 'legacy-reality-stream\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionRealityStreamSuiteRoot() {
+        printf 'suite-reality-stream\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-candidates
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-stream
+
+    grep -qx 'suite-reality-candidates' "${callLog}"
+    grep -qx 'suite-reality-stream' "${callLog}"
+    ! grep -q '^legacy-reality-candidates$' "${callLog}"
+    ! grep -q '^legacy-reality-stream$' "${callLog}"
 )
 
 runParallelSelectorCollectsExitedChildWithoutRcContract() (
@@ -1334,6 +1389,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-remote-fetch-aggregate-runner-registration runSubscriptionRemoteFetchAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-write-transaction-aggregate-runner-registration runSubscriptionWriteTransactionAggregateRunnerRegistrationContract &&
+        runRegressionStep reality-suite-uses-function-registry runRealitySuiteUsesFunctionRegistryContract &&
         runRegressionStep reality-candidates-aggregate-runner-registration runRealityCandidatesAggregateRunnerRegistrationContract &&
         runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
@@ -1342,6 +1398,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep runtime-selector-helpers-stay-aligned runRuntimeSelectorHelpersStayAlignedContract &&
         runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract &&
         runRegressionStep runtime-aggregate-runner-uses-suite-local-helper runRuntimeAggregateRunnerUsesSuiteLocalHelperContract &&
+        runRegressionStep reality-aggregate-runners-use-suite-local-helpers runRealityAggregateRunnersUseSuiteLocalHelpersContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
         runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
