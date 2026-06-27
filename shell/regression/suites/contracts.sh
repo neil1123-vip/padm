@@ -446,14 +446,19 @@ runFastSuiteUsesSuiteLocalHelperContract() (
 
 runAllSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     ! grep -q 'subscription_groups_legacy\.sh' "${suiteFile}" || return 1
     grep -q 'source "\${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
     grep -q '^REGRESSION_ENTRY_SCRIPT_PATH=' "${suiteFile}" || return 1
+    grep -q '^runRegressionAllSelector() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionAllSelectorSuiteRoot() {$' "${suiteFile}" || return 1
+    grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
     grep -Eq '^runRegressionAllSuiteRoot\(\) \($|^runRegressionAllSuiteRoot\(\) {$' "${suiteFile}" || return 1
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors' "${suiteFile}" || return 1
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/all-parallel-' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionAllSelector() {$' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${legacyScriptFile}" || return 1
     ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}" || return 1

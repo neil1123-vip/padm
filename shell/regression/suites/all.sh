@@ -140,6 +140,14 @@ runRegressionAllSuiteRoot() (
     runRegressionStep remote-control-contract-server-response runRegressionAllSelectorSuiteRoot remote-control-contract-server-response
 )
 
+runRegressionAllSelector() {
+    runRegressionAllSelectorSuiteRoot "$@"
+}
+
+runRegressionAll() {
+    runRegressionAllSuiteRoot
+}
+
 runRegressionAllCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-all-composition.log"
