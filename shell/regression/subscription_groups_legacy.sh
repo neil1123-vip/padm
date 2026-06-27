@@ -16067,17 +16067,6 @@ listRegressionRealityCandidatesChildSelectors() {
         reality-candidates-full
 }
 
-runRegressionRealityCandidates() {
-    runRegressionStep reality-candidates-fast runRealityCandidateFastRegression &&
-        runRegressionStep reality-asn-scan-plan runRealityAsnScanPlanRegression &&
-        runRegressionStep reality-candidates-full runRealityCandidateFullRegression
-}
-
-runRegressionRealityStream() {
-    runRegressionStep reality-stream-enable runRealityStreamEnableRegression &&
-        runRegressionStep reality-stream-disable runRealityStreamDisableRegression
-}
-
 runRegressionRemoteControl() {
     runRegressionAllSelector remote-control
 }

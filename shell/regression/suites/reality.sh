@@ -14,6 +14,14 @@ runRegressionRealityStreamSuiteRoot() {
         runRegressionStep reality-stream-disable runRealityStreamDisableRegression
 }
 
+runRegressionRealityCandidates() {
+    runRegressionRealityCandidatesSuiteRoot
+}
+
+runRegressionRealityStream() {
+    runRegressionRealityStreamSuiteRoot
+}
+
 listRegressionRealityStreamChildSelectors() {
     printf '%s\n' \
         reality-stream-enable \

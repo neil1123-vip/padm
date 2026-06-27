@@ -1755,21 +1755,27 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
 
 runRealitySuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REALITY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}"
+    ! grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${legacyScriptFile}"
+    ! grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${legacyScriptFile}"
     ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-config runRealityConfigRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression$' "${suiteFile}"
+    grep -q 'registerRegressionFunctionLeaf "${selector}" "${runner}"' "${suiteFile}"
+    grep -q '^reality-candidates-fast runRealityCandidateFastRegression$' "${suiteFile}"
+    grep -q '^reality-asn-scan-plan runRealityAsnScanPlanRegression$' "${suiteFile}"
+    grep -q '^reality-candidates-full runRealityCandidateFullRegression$' "${suiteFile}"
+    grep -q '^reality-stream-enable runRealityStreamEnableRegression$' "${suiteFile}"
+    grep -q '^reality-stream-disable runRealityStreamDisableRegression$' "${suiteFile}"
+    grep -q '^reality-config runRealityConfigRegression$' "${suiteFile}"
+    grep -q '^reality-profile-failure runRealityProfileFailureRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
 }
@@ -2208,9 +2214,17 @@ runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
 )
 
 runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
+    local status=0
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local callLog="${TMP_DIR}/reality-aggregate-suite-root-dispatch.log"
 
     : >"${callLog}"
+
+    grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    ! grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
+    ! grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
 
     runRegressionRealityCandidates() {
         printf 'legacy-reality-candidates\n' >>"${callLog}"
@@ -2233,10 +2247,11 @@ runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-candidates
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-stream
 
-    grep -qx 'suite-reality-candidates' "${callLog}"
-    grep -qx 'suite-reality-stream' "${callLog}"
-    ! grep -q '^legacy-reality-candidates$' "${callLog}"
-    ! grep -q '^legacy-reality-stream$' "${callLog}"
+    grep -qx 'suite-reality-candidates' "${callLog}" || status=1
+    grep -qx 'suite-reality-stream' "${callLog}" || status=1
+    ! grep -q '^legacy-reality-candidates$' "${callLog}" || status=1
+    ! grep -q '^legacy-reality-stream$' "${callLog}" || status=1
+    return "${status}"
 )
 
 runParallelSelectorCollectsExitedChildWithoutRcContract() (
