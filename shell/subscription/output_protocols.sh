@@ -153,7 +153,7 @@ emitVlessXHTTPSubscribeOutput() {
     echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：VLESS Reality XHTTP Vision XMUX"
-    echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2,serverNames：${xrayVLESSRealityXHTTPSNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${xrayVLESSRealityXHTTPSNI}，用户ID:${id}，传输方式:xhttp，flow:xtls-rprx-vision，账户名:${email}\n"
+    echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2,serverNames：${xrayVLESSRealityXHTTPSNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${xrayVLESSRealityXHTTPSNI}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"
 
     appendClashMetaSubscribeLines "${user}" <<EOF
@@ -165,7 +165,6 @@ emitVlessXHTTPSubscribeOutput() {
     udp: true
     tls: true
     network: xhttp
-    flow: xtls-rprx-vision
     client-fingerprint: chrome
     alpn:
       - h2
@@ -180,7 +179,7 @@ emitVlessXHTTPSubscribeOutput() {
 EOF
 
     subscribeOutputTitle "二维码：VLESS Reality XHTTP Vision XMUX"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3D${vlessEncryption}%26security%3Dreality%26type%3Dxhttp%26sni%3D${xrayVLESSRealityXHTTPSNI}%26fp%3Dchrome%26path%3D${path}%26mode%3D${xhttpMode}%26host%3D${xhttpHost}%26pbk%3D${currentRealityXHTTPPublicKey}%26sid%3D6ba85179e30d4fc2%26flow%3Dxtls-rprx-vision%23${email}\n"
+    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3D${vlessEncryption}%26security%3Dreality%26type%3Dxhttp%26sni%3D${xrayVLESSRealityXHTTPSNI}%26fp%3Dchrome%26path%3D${path}%26mode%3D${xhttpMode}%26host%3D${xhttpHost}%26pbk%3D${currentRealityXHTTPPublicKey}%26sid%3D6ba85179e30d4fc2%23${email}\n"
 
 }
 
