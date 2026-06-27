@@ -28,6 +28,24 @@ runSubscriptionStateShimUsesSourceOnlyFullContract() {
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${stateShim}"
 }
 
+runSubscriptionStateShimStaysThinContract() {
+    local stateShim="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state.sh"
+
+    ! grep -q '^runParallelSubscriptionStateModes()' "${stateShim}" || return 1
+    ! grep -q '^runRegressionSubscriptionStateCore()' "${stateShim}" || return 1
+    ! grep -q '^runRegressionSubscriptionStateStructure()' "${stateShim}" || return 1
+    ! grep -q '^runRegressionSubscriptionStateQuota()' "${stateShim}" || return 1
+    ! grep -q '^runRegressionSubscriptionStateRemoteRestore()' "${stateShim}" || return 1
+    ! grep -q '^runRegressionSubscriptionStateSupport()' "${stateShim}" || return 1
+    ! grep -q '^runRegressionSubscriptionStateSyncRollback()' "${stateShim}" || return 1
+    grep -q 'subscription-state-structure)' "${stateShim}"
+    grep -q 'subscription-state-quota)' "${stateShim}"
+    grep -q 'subscription-state-remote-restore)' "${stateShim}"
+    grep -q 'subscription-state-support)' "${stateShim}"
+    grep -q 'subscription-state-sync-rollback)' "${stateShim}"
+    grep -q 'runRegressionStep "total:\${regressionName}" "\${regressionRunner}"' "${stateShim}"
+}
+
 runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
 
@@ -1737,6 +1755,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
+        runRegressionStep subscription-state-shim-stays-thin runSubscriptionStateShimStaysThinContract &&
         runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
