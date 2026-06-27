@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 REGRESSION_SUBSCRIPTION_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=/dev/null
+source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"
 
 runRegressionSubscriptionRemoteSuiteRoot() {
@@ -13,7 +15,8 @@ runRegressionSubscriptionRemoteSuiteRoot() {
         selectorPairs+=("${selector}" "${selector}")
     done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 
@@ -26,7 +29,8 @@ runRegressionSubscriptionTxSuiteRoot() {
     for selector in "${selectors[@]}"; do
         selectorPairs+=("${selector}" "${selector}")
     done
-    runParallelRegressionSelectors "${TMP_DIR}/subscription-tx-parallel-${BASHPID:-$$}" \
+    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-tx-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 
@@ -41,7 +45,8 @@ runRegressionSubscriptionSuiteRoot() {
         for selector in "${selectors[@]}"; do
             selectorPairs+=("${selector}" "${selector}")
         done
-        runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+            runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
             "${selectorPairs[@]}"
         (
             export PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-2}"
@@ -50,7 +55,8 @@ runRegressionSubscriptionSuiteRoot() {
             for selector in "${selectors[@]}"; do
                 selectorPairs+=("${selector}" "${selector}")
             done
-            runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
+            PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+                runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
                 "${selectorPairs[@]}"
         )
         return
@@ -60,7 +66,8 @@ runRegressionSubscriptionSuiteRoot() {
     for selector in "${selectors[@]}"; do
         selectorPairs+=("${selector}" "${selector}")
     done
-    runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
+    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 

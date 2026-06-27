@@ -673,10 +673,13 @@ EOF
 runSubscriptionSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
 
+    grep -q 'source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-remote ' "${suiteFile}"
@@ -1660,6 +1663,65 @@ runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
     ! grep -q '^legacy-subscription-tx$' "${callLog}"
 )
 
+runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/subscription-framework-helper-dispatch.log"
+
+    : >"${callLog}"
+
+    listRegressionSubscriptionRemoteChildSelectors() {
+        printf '%s\n' \
+            subscription-remote-unique \
+            subscription-remote-merge
+    }
+
+    listRegressionSubscriptionTxChildSelectors() {
+        printf '%s\n' \
+            sing-box-subscribe-write \
+            subscribe-user-output-transaction
+    }
+
+    listRegressionSubscriptionLightChildSelectors() {
+        printf '%s\n' \
+            subscription-output \
+            subscription-state
+    }
+
+    listRegressionSubscriptionHeavyChildSelectors() {
+        printf '%s\n' \
+            subscription-tx \
+            subscription-remote
+    }
+
+    listRegressionSubscriptionChildSelectors() {
+        printf '%s\n' \
+            subscription-output \
+            subscription-state \
+            subscription-remote \
+            subscription-tx
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:jobs=%s:%s\n' "${PADM_REGRESSION_PARALLEL_JOBS:-}" "$*" >>"${callLog}"
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runRegressionSubscriptionRemoteSuiteRoot
+    runRegressionSubscriptionTxSuiteRoot
+    runRegressionSubscriptionSuiteRoot
+    PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionSubscriptionSuiteRoot
+
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-4}"':'"${TMP_DIR}"'/subscription-remote-parallel-[0-9][0-9]* subscription-remote-unique subscription-remote-unique subscription-remote-merge subscription-remote-merge' "${callLog}"
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-tx-parallel-[0-9][0-9]* sing-box-subscribe-write sing-box-subscribe-write subscribe-user-output-transaction subscribe-user-output-transaction' "${callLog}"
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-[0-9][0-9]* subscription-output subscription-output subscription-state subscription-state subscription-remote subscription-remote subscription-tx subscription-tx' "${callLog}"
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-light-[0-9][0-9]* subscription-output subscription-output subscription-state subscription-state' "${callLog}"
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-heavy-[0-9][0-9]* subscription-tx subscription-tx subscription-remote subscription-remote' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
+)
+
 runRealityCandidatesAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local expectedChildren
@@ -2021,6 +2083,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-remote-aggregate-runner-registration runSubscriptionRemoteAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-tx-aggregate-runner-registration runSubscriptionTxAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-aggregate-runners-use-suite-local-helpers runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract &&
+        runRegressionStep subscription-aggregate-runners-use-framework-selector-helper runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract &&
         runRegressionStep reality-suite-uses-function-registry runRealitySuiteUsesFunctionRegistryContract &&
         runRegressionStep reality-candidates-aggregate-runner-registration runRealityCandidatesAggregateRunnerRegistrationContract &&
         runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
