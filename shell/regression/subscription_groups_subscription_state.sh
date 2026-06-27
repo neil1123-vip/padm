@@ -7,32 +7,7 @@ SUBSCRIPTION_STATE_SCRIPT_PATH="${SUBSCRIPTION_STATE_SCRIPT_DIR}/$(basename -- "
 SUBSCRIPTION_STATE_FULL_SCRIPT_PATH="${SUBSCRIPTION_STATE_SCRIPT_DIR}/subscription_groups_subscription_state_full.sh"
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
-
-sourceSubscriptionStateHotSection() {
-    local section=$1
-    local tmpFile
-
-    tmpFile=$(mktemp "${TMP_DIR}/subscription-state-hot.${section}.XXXXXX")
-    if ! awk -v start="# PADM_SECTION_BEGIN: ${section}" -v end="# PADM_SECTION_END: ${section}" '
-        $0 == start { inSection=1; foundStart=1; next }
-        $0 == end { foundEnd=1; exit }
-        inSection { print }
-        END {
-            if (!foundStart || !foundEnd) {
-                exit 1
-            }
-        }
-    ' "${SUBSCRIPTION_STATE_FULL_SCRIPT_PATH}" >"${tmpFile}"; then
-        rm -f "${tmpFile}"
-        printf 'missing subscription-state hot section: %s\n' "${section}" >&2
-        return 1
-    fi
-    # shellcheck source=/dev/null
-    source "${tmpFile}"
-    rm -f "${tmpFile}"
-}
-
-sourceSubscriptionStateHotSection subscription-state-hot-regressions
+PADM_REGRESSION_SOURCE_ONLY=1 source "${SUBSCRIPTION_STATE_FULL_SCRIPT_PATH}"
 
 runParallelSubscriptionStateModes() {
     local orchestrationRoot=$1
@@ -238,6 +213,10 @@ runRegressionSubscriptionState() {
         support subscription-state-support \
         sync-rollback subscription-state-sync-rollback
 }
+
+if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
     printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2

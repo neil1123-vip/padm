@@ -19,6 +19,15 @@ runSubscriptionStateNoImplicitFullFallbackContract() {
     ! grep -q 'exec bash "\${SUBSCRIPTION_STATE_FULL_SCRIPT_PATH}" "\$@"' "${stateShim}"
 }
 
+runSubscriptionStateShimUsesSourceOnlyFullContract() {
+    local stateShim="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state.sh"
+
+    ! grep -q 'sourceSubscriptionStateHotSection' "${stateShim}"
+    ! grep -q 'awk ' "${stateShim}"
+    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${SUBSCRIPTION_STATE_FULL_SCRIPT_PATH}"' "${stateShim}"
+    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${stateShim}"
+}
+
 runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
 
@@ -1727,6 +1736,7 @@ EOF
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
+        runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
         runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
