@@ -3,16 +3,16 @@
 REGRESSION_SUBSCRIPTION_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"
 
-runRegressionSubscriptionRemoteFetchSuiteRoot() {
+runRegressionSubscriptionRemoteSuiteRoot() {
     local -a selectors=()
     local -a selectorPairs=()
     local selector
 
-    mapfile -t selectors < <(listRegressionSubscriptionRemoteFetchChildSelectors)
+    mapfile -t selectors < <(listRegressionSubscriptionRemoteChildSelectors)
     for selector in "${selectors[@]}"; do
         selectorPairs+=("${selector}" "${selector}")
     done
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
         runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
@@ -44,7 +44,7 @@ runRegressionSubscriptionSuiteRoot() {
         runParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
             "${selectorPairs[@]}"
         (
-            export PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-2}"
+            export PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-2}"
             mapfile -t selectors < <(listRegressionSubscriptionHeavyChildSelectors)
             selectorPairs=()
             for selector in "${selectors[@]}"; do
@@ -65,13 +65,13 @@ runRegressionSubscriptionSuiteRoot() {
 }
 
 registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput
-registerRegressionFunctionLeaf subscription-remote-fetch-unique runRemoteSubscribeFetchUniqueRegression
-registerRegressionFunctionLeaf subscription-remote-fetch-rollback runRemoteSubscribeFetchRollbackRegression
-registerRegressionFunctionLeaf subscription-remote-fetch-merge runRemoteSubscribeFetchMergeRegression
-registerRegressionFunctionLeaf subscription-remote-fetch-controlled runRemoteSubscribeFetchControlledRegression
-registerRegressionFunctionLeaf subscription-remote-fetch-append-failure runRemoteSubscribeFetchAppendFailureRegression
-registerRegressionFunctionLeaf subscription-remote-fetch-commit-failure runRemoteSubscribeFetchCommitFailureRegression
-registerRegressionFunctionLeaf subscription-remote-fetch-idempotent runRemoteSubscribeFetchIdempotentRegression
+registerRegressionFunctionLeaf subscription-remote-unique runRemoteSubscribeFetchUniqueRegression
+registerRegressionFunctionLeaf subscription-remote-rollback runRemoteSubscribeFetchRollbackRegression
+registerRegressionFunctionLeaf subscription-remote-merge runRemoteSubscribeFetchMergeRegression
+registerRegressionFunctionLeaf subscription-remote-controlled runRemoteSubscribeFetchControlledRegression
+registerRegressionFunctionLeaf subscription-remote-append-failure runRemoteSubscribeFetchAppendFailureRegression
+registerRegressionFunctionLeaf subscription-remote-commit-failure runRemoteSubscribeFetchCommitFailureRegression
+registerRegressionFunctionLeaf subscription-remote-idempotent runRemoteSubscribeFetchIdempotentRegression
 registerRegressionFunctionLeaf sing-box-subscribe-write runSingBoxSubscribeWriteRegression
 registerRegressionFunctionLeaf cdn-address-write-transaction runCdnAddressTransactionRegression
 registerRegressionFunctionLeaf subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
@@ -90,10 +90,10 @@ registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRemoveUs
 registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
 registerRegressionFunctionLeaf regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-write-transaction-parallel-composition runRegressionSubscriptionWriteTransactionParallelCompositionRegression
-registerRegressionFunctionLeaf regression-subscription-remote-fetch-parallel-composition runRegressionSubscriptionRemoteFetchParallelCompositionRegression
+registerRegressionFunctionLeaf regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
 
-registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteFetchSuiteRoot \
-    $(listRegressionSubscriptionRemoteFetchChildSelectors)
+registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \
+    $(listRegressionSubscriptionRemoteChildSelectors)
 
 registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionWriteTransactionSuiteRoot \
     $(listRegressionSubscriptionWriteTransactionChildSelectors)
