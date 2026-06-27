@@ -872,13 +872,23 @@ EOF
 
 runUiSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'source "\${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || return 1
+    grep -q '^listRegressionUiChildSelectors() {$' "${suiteFile}" || return 1
+    grep -q '^listRegressionUiAllProfileChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionUiSmokeSuiteRoot() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}" || return 1
+    grep -q '^runRegressionUiParallelCompositionRegression() ' "${suiteFile}" || return 1
+    grep -q '^runRegressionUiLongTailSplitCompositionRegression() ' "${suiteFile}" || return 1
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}" || return 1
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-' "${suiteFile}" || return 1
+    ! grep -q '^listRegressionUiChildSelectors() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^listRegressionUiAllProfileChildSelectors() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^runRegressionUi() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^runRegressionUiParallelCompositionRegression() ' "${legacyScriptFile}" || return 1
+    ! grep -q '^runRegressionUiLongTailSplitCompositionRegression() ' "${legacyScriptFile}" || return 1
     ! grep -q '^registerRegressionScriptLeaf ui ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionScriptLeaf menu-smoke ' "${suiteFile}" || return 1
