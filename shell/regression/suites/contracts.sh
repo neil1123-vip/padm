@@ -933,8 +933,11 @@ runRoutingSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
     local status=0
 
+    grep -q 'source "\${REGRESSION_ROUTING_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || status=1
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || status=1
     grep -q '^runRegressionRoutingSuiteRoot() {$' "${suiteFile}" || status=1
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}" || status=1
+    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/routing-parallel-' "${suiteFile}" || status=1
     ! grep -q '^registerRegressionScriptLeaf routing ' "${suiteFile}" || status=1
     ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}" || status=1
     grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}" || status=1
@@ -1025,6 +1028,53 @@ runRoutingAggregateRunnerUsesSuiteLocalHelperContract() (
 
     grep -qx 'suite-routing' "${callLog}"
     ! grep -q '^legacy-routing$' "${callLog}"
+)
+
+runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/routing-framework-helper-dispatch.log"
+
+    : >"${callLog}"
+
+    listRegressionRoutingChildSelectors() {
+        printf '%s\n' \
+            routing-core \
+            routing-port-panel
+    }
+
+    listRegressionRoutingCoreChildSelectors() {
+        printf '%s\n' \
+            routing-core
+    }
+
+    listRegressionRoutingHeavyChildSelectors() {
+        printf '%s\n' \
+            routing-access-control-config-transaction \
+            routing-dns-failure-return
+    }
+
+    listRegressionRoutingLightChildSelectors() {
+        printf '%s\n' \
+            routing-port-panel \
+            routing-core-unsafe-config-dir
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:jobs=%s:%s\n' "${PADM_REGRESSION_PARALLEL_JOBS:-}" "$*" >>"${callLog}"
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runRegressionRoutingSuiteRoot
+    PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionRoutingSuiteRoot
+
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_ROUTING_PARALLEL_JOBS:-4}"':'"${TMP_DIR}"'/routing-parallel-[0-9][0-9]* routing-core routing-core routing-port-panel routing-port-panel' "${callLog}"
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/routing-parallel-core-[0-9][0-9]* routing-core routing-core' "${callLog}"
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-2}"':'"${TMP_DIR}"'/routing-parallel-heavy-[0-9][0-9]* routing-access-control-config-transaction routing-access-control-config-transaction routing-dns-failure-return routing-dns-failure-return' "${callLog}"
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_ROUTING_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/routing-parallel-light-[0-9][0-9]* routing-port-panel routing-port-panel routing-core-unsafe-config-dir routing-core-unsafe-config-dir' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
 )
 
 runTransactionCoreSelectorHelpersStayAlignedContract() (
@@ -1951,6 +2001,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
         runRegressionStep routing-aggregate-runner-uses-suite-local-helper runRoutingAggregateRunnerUsesSuiteLocalHelperContract &&
+        runRegressionStep routing-aggregate-runner-uses-framework-selector-helper runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
