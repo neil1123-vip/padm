@@ -1687,12 +1687,22 @@ runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract() (
 
 runRuntimeSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'source "\${REGRESSION_RUNTIME_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^listRegressionRuntimeLightChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionRuntimeHeavyChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionRuntimeChildSelectors() {$' "${suiteFile}"
     grep -q '^runRegressionRuntimeSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionRuntimeParallelCompositionRegression() ' "${suiteFile}"
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-' "${suiteFile}"
+    ! grep -q '^listRegressionRuntimeLightChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionRuntimeHeavyChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionRuntimeChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionRuntime() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionRuntimeParallelCompositionRegression() ' "${legacyScriptFile}"
     ! grep -q '^registerRegressionScriptLeaf runtime ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf runtime ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}"
