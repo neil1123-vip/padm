@@ -5,8 +5,8 @@ REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 SUBSCRIPTION_STATE_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
-
-# PADM_SECTION_BEGIN: subscription-state-hot-regressions
+# shellcheck source=/dev/null
+source "${REGRESSION_ENTRY_DIR}/regression/framework/runtime.sh"
 writeSubscriptionStateDefaultFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
@@ -162,12 +162,12 @@ runSubscriptionGroupStateStructureFoundationSerialRegression() {
 }
 
 runSubscriptionGroupStateStructureFoundationRegression() {
-    runParallelSubscriptionStateModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-structure-foundation" \
-        add-remove subscription-state-structure-foundation-add-remove \
-        credential subscription-state-structure-foundation-credential \
-        normalize subscription-state-structure-foundation-normalize \
-        init-transaction subscription-state-structure-foundation-init-transaction
+        add-remove runRegressionSubscriptionStateStructureFoundationAddRemove \
+        credential runRegressionSubscriptionStateStructureFoundationCredential \
+        normalize runRegressionSubscriptionStateStructureFoundationNormalize \
+        init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
 }
 
 runSubscriptionGroupStateStructureMigrationRegression() {
@@ -335,11 +335,11 @@ runSubscriptionGroupStateStructureSerialRegression() {
 }
 
 runSubscriptionGroupStateStructureRegression() {
-    runParallelSubscriptionStateModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-structure" \
-        foundation subscription-state-structure-foundation \
-        migration subscription-state-structure-migration \
-        source subscription-state-structure-source
+        foundation runRegressionSubscriptionStateStructureFoundation \
+        migration runRegressionSubscriptionStateStructureMigration \
+        source runRegressionSubscriptionStateStructureSource
 }
 
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
@@ -611,11 +611,11 @@ runSubscriptionGroupStateQuotaSerialRegression() {
 }
 
 runSubscriptionGroupStateQuotaRegression() {
-    runParallelSubscriptionStateModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-quota" \
-        traffic subscription-state-quota-traffic \
-        menu-tx subscription-state-quota-menu-tx \
-        partial-sync subscription-state-quota-partial-sync
+        traffic runRegressionSubscriptionStateQuotaTraffic \
+        menu-tx runRegressionSubscriptionStateQuotaMenuTransaction \
+        partial-sync runRegressionSubscriptionStateQuotaPartialSync
 }
 
 prepareSubscriptionRemoteRestoreSelfReferenceFixture() {
@@ -728,11 +728,11 @@ runSubscriptionGroupStateRemoteRestoreSerialRegression() {
 }
 
 runSubscriptionGroupStateRemoteRestoreRegression() {
-    runParallelSubscriptionStateModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-remote-restore" \
-        self-reference subscription-state-remote-restore-self-reference \
-        state-write subscription-state-remote-restore-state-write \
-        legacy-menu subscription-state-remote-restore-legacy-menu
+        self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference \
+        state-write runRegressionSubscriptionStateRemoteRestoreStateWrite \
+        legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
 }
 
 runSubscriptionGroupStateRegression() {
@@ -740,7 +740,6 @@ runSubscriptionGroupStateRegression() {
         runRegressionStep subscription-state-quota-serial runSubscriptionGroupStateQuotaSerialRegression &&
         runRegressionStep subscription-state-remote-restore-serial runSubscriptionGroupStateRemoteRestoreSerialRegression
 }
-# PADM_SECTION_END: subscription-state-hot-regressions
 
 runSubscriptionSyncTempDirRegression() (
     local oldTmpDir="${TMPDIR:-}"
@@ -1573,12 +1572,12 @@ runSubscriptionGroupSyncRollbackSerialRegression() {
 }
 
 runSubscriptionSyncRollbackFailureRegression() {
-    runParallelSubscriptionStateModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/subscription-sync-rollback-failure" \
-        config-restore-fail subscription-sync-rollback-config-restore-failure \
-        restore-dir-fail subscription-sync-restore-dir-failure \
-        reload-rollback subscription-sync-reload-rollback \
-        group-sync subscription-group-sync-rollback
+        config-restore-fail runRegressionSubscriptionSyncRollbackConfigRestoreFailure \
+        restore-dir-fail runRegressionSubscriptionSyncRollbackRestoreDirFailure \
+        reload-rollback runRegressionSubscriptionSyncRollbackReloadRollback \
+        group-sync runRegressionSubscriptionGroupSyncRollback
 }
 
 runSubscriptionSyncRollbackFailureSerialRegression() {
@@ -1767,43 +1766,6 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
-runParallelSubscriptionStateModes() {
-    local orchestrationRoot=$1
-    shift
-    local -a labels=()
-    local -a modes=()
-    local -a logs=()
-    local -a pids=()
-    local -a statuses=()
-    local i
-
-    mkdir -p "${orchestrationRoot}"
-    while [[ $# -gt 0 ]]; do
-        labels+=("$1")
-        modes+=("$2")
-        logs+=("${orchestrationRoot}/$1.log")
-        shift 2
-    done
-
-    set +e
-    for i in "${!modes[@]}"; do
-        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${SUBSCRIPTION_STATE_SCRIPT_PATH}" "${modes[$i]}" >"${logs[$i]}" 2>&1 &
-        pids[$i]=$!
-    done
-    for i in "${!pids[@]}"; do
-        wait "${pids[$i]}"
-        statuses[$i]=$?
-    done
-    set -e
-
-    for i in "${!logs[@]}"; do
-        cat "${logs[$i]}"
-    done
-    for i in "${!statuses[@]}"; do
-        [[ "${statuses[$i]}" -eq 0 ]]
-    done
-}
-
 runRegressionSubscriptionStateStructure() {
     runRegressionStep subscription-state-structure runSubscriptionGroupStateStructureRegression
 }
@@ -1957,11 +1919,11 @@ runRegressionSubscriptionStateRemoteRestoreSerial() {
 }
 
 runRegressionSubscriptionStateCore() {
-    runParallelSubscriptionStateModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-core" \
-        structure subscription-state-structure \
-        quota subscription-state-quota \
-        remote-restore subscription-state-remote-restore
+        structure runRegressionSubscriptionStateStructure \
+        quota runRegressionSubscriptionStateQuota \
+        remote-restore runRegressionSubscriptionStateRemoteRestore
 }
 
 runRegressionSubscriptionStateSupport() {
@@ -2056,11 +2018,11 @@ runRegressionSubscriptionStateSerial() {
 }
 
 runRegressionSubscriptionState() {
-    runParallelSubscriptionStateModes \
+    runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-default" \
-        core subscription-state-core \
-        support subscription-state-support \
-        sync-rollback subscription-state-sync-rollback
+        core runRegressionSubscriptionStateCore \
+        support runRegressionSubscriptionStateSupport \
+        sync-rollback runRegressionSubscriptionStateSyncRollback
 }
 
 if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then

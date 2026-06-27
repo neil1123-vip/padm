@@ -125,6 +125,34 @@ runSubscriptionStateAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
+    local coreBody
+    local stateBody
+
+    ! grep -q 'PADM_SECTION_BEGIN: subscription-state-hot-regressions' "${scriptFile}"
+    ! grep -q 'PADM_SECTION_END: subscription-state-hot-regressions' "${scriptFile}"
+    ! grep -q '^runParallelSubscriptionStateModes()' "${scriptFile}"
+    grep -q 'source "${REGRESSION_ENTRY_DIR}/regression/framework/runtime.sh"' "${scriptFile}"
+
+    coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${scriptFile}")
+    stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${scriptFile}")
+
+    grep -q 'runParallelRegressionRunners \\' <<<"${coreBody}"
+    ! grep -q 'runParallelSubscriptionStateModes' <<<"${coreBody}"
+    ! grep -q 'PADM_REGRESSION_INTERNAL_CLI=1 bash' <<<"${coreBody}"
+    grep -q 'structure runRegressionSubscriptionStateStructure' <<<"${coreBody}"
+    grep -q 'quota runRegressionSubscriptionStateQuota' <<<"${coreBody}"
+    grep -q 'remote-restore runRegressionSubscriptionStateRemoteRestore' <<<"${coreBody}"
+
+    grep -q 'runParallelRegressionRunners \\' <<<"${stateBody}"
+    ! grep -q 'runParallelSubscriptionStateModes' <<<"${stateBody}"
+    ! grep -q 'PADM_REGRESSION_INTERNAL_CLI=1 bash' <<<"${stateBody}"
+    grep -q 'core runRegressionSubscriptionStateCore' <<<"${stateBody}"
+    grep -q 'support runRegressionSubscriptionStateSupport' <<<"${stateBody}"
+    grep -q 'sync-rollback runRegressionSubscriptionStateSyncRollback' <<<"${stateBody}"
+}
+
 runRemoteControlSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
@@ -1761,6 +1789,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
+        runRegressionStep subscription-state-full-uses-framework-parallel-helper runSubscriptionStateFullUsesFrameworkParallelHelperContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-public-selector-retirement runRemoteControlPublicSelectorRetirementContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
