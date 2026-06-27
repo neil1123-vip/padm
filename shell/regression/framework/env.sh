@@ -10,3 +10,14 @@ REGRESSION_FRAMEWORK_ROOT=$(cd -- "${REGRESSION_FRAMEWORK_DIR}/.." && pwd)
 
 # shellcheck source=/dev/null
 source "${REGRESSION_FRAMEWORK_ROOT}/bootstrap.sh"
+
+if [[ -z "${PADM_REGRESSION_PROTECT_WORKTREE+x}" ]]; then
+    export PADM_REGRESSION_PROTECT_WORKTREE=1
+else
+    export PADM_REGRESSION_PROTECT_WORKTREE
+fi
+if [[ -z "${PADM_REGRESSION_WORKTREE_ROOT:-}" ]]; then
+    export PADM_REGRESSION_WORKTREE_ROOT="${PROJECT_ROOT}"
+else
+    export PADM_REGRESSION_WORKTREE_ROOT
+fi

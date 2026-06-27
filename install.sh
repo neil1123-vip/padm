@@ -64,6 +64,23 @@ scriptCreateTempDir() {
     printf '%s\n' "${tempPath}"
 }
 
+protectedRegressionWorktreeRoot() {
+    local worktreeRoot=${PADM_REGRESSION_WORKTREE_ROOT:-}
+    [[ "${PADM_REGRESSION_PROTECT_WORKTREE:-}" == "1" ]] || return 1
+    [[ -n "${worktreeRoot}" ]] || return 1
+    worktreeRoot=$(cd -- "${worktreeRoot}" 2>/dev/null && pwd -P) || return 1
+    printf '%s\n' "${worktreeRoot}"
+}
+
+regressionWorktreeRefreshForbidden() {
+    local protectedRoot scriptDir
+    protectedRoot=$(protectedRegressionWorktreeRoot) || return 1
+    scriptDir=$(cd -- "${SCRIPT_DIR}" 2>/dev/null && pwd -P) || return 1
+    [[ "${scriptDir}" == "${protectedRoot}" ]] || return 1
+    printf '检测到回归工作区，已禁止完整安装包刷新: %s\n' "${scriptDir}" >&2
+    return 0
+}
+
 scriptArchiveEntryIsSafe() {
     local entryPath=$1
     local normalizedPath segment
@@ -272,6 +289,9 @@ resolveExtractedArchiveDir() {
 refreshScriptModules() {
     local remoteRef=$1
     local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl fallbackRef resolvedRef downloadStatus
+    if regressionWorktreeRefreshForbidden; then
+        exit 1
+    fi
     if ! scriptIsSafeAbsolutePath "${SCRIPT_DIR}"; then
         printf '脚本目录异常，已取消完整安装包替换\n'
         exit 1
@@ -468,6 +488,9 @@ writeModuleManifest() {
 ensureScriptModules() {
     local remoteRef= expectedRef=
     if [[ "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" == "1" ]]; then
+        if regressionWorktreeRefreshForbidden; then
+            return 1
+        fi
         remoteRef=$(fetchRemoteRef || true)
         refreshScriptModules "${remoteRef}"
         if [[ -s "${SCRIPT_REF_FILE}" ]]; then
@@ -477,6 +500,9 @@ ensureScriptModules() {
     fi
     if scriptModulesReady; then
         return 0
+    fi
+    if regressionWorktreeRefreshForbidden; then
+        return 1
     fi
     if [[ -f "${SCRIPT_EXPECTED_REF_FILE}" ]]; then
         expectedRef=$(cat "${SCRIPT_EXPECTED_REF_FILE}")

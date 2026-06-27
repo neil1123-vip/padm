@@ -17,8 +17,11 @@ runRegressionPlatformSuiteRoot() {
         runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
         runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
         runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
+        runRegressionStep install-refresh-rejects-protected-worktree runInstallRefreshRejectsProtectedWorktreeRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression &&
+        runRegressionStep install-ensure-modules-rejects-protected-worktree runInstallEnsureModulesRejectsProtectedWorktreeRegression &&
+        runRegressionStep regression-framework-exports-protected-worktree-env runRegressionFrameworkExportsProtectedWorktreeEnvRegression &&
         runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
         runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
         runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
