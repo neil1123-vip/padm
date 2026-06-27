@@ -53,12 +53,14 @@ runSubscriptionStateShimStaysThinContract() {
 runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh' "${suiteFile}"
     grep -q 'registerRegressionFunctionLeaf "\${selector}" "\${runner}"' "${suiteFile}"
     grep -q '^subscription-state-structure runRegressionSubscriptionStateStructure$' "${suiteFile}"
@@ -200,11 +202,13 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
 runRemoteControlSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControlSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
     grep -q 'registerRegressionFunctionLeaf "\${selector}" "\${runner}"' "${suiteFile}"
     grep -q '^remote-control-smoke-core runRegressionRemoteControlSmokeCore$' "${suiteFile}"
@@ -240,6 +244,7 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
 runRemoteControlPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]]
@@ -252,6 +257,21 @@ runRemoteControlPublicSelectorRetirementContract() {
     ! grep -Fq 'remote-control-light|' "${scriptFile}"
     ! grep -Fq 'usage: %s [remote-control|' "${scriptFile}"
     grep -Fq 'usage: %s [remote-control-smoke|remote-control-contract|remote-control-deep]' "${scriptFile}"
+    ! grep -Eq '^[[:space:]]*remote-control\)$' "${legacyFile}"
+}
+
+runLegacyRetiresSuiteOwnedWrappersContract() {
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local status=0
+
+    grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${legacyFile}" && status=1
+    grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${legacyFile}" && status=1
+    grep -Eq '^[[:space:]]*subscription-state\)$' "${legacyFile}" && status=1
+    grep -Eq '^[[:space:]]*remote-control\)$' "${legacyFile}" && status=1
+    grep -Fq '|subscription-state|' "${legacyFile}" && status=1
+    grep -Fq '|remote-control|' "${legacyFile}" && status=1
+
+    return "${status}"
 }
 
 runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
@@ -527,7 +547,7 @@ runAllPublicSelectorRetirementContract() {
     ! grep -Eq '^[[:space:]]*all\|full\|ci\)$' "${legacyFile}"
     grep -Eq '^[[:space:]]*all\)$' "${legacyFile}"
     ! grep -Fq '|all|full|ci]' "${legacyFile}"
-    grep -Fq '|remote-control|all]' "${legacyFile}"
+    grep -Fq '|all]' "${legacyFile}"
 }
 
 runLegacySuiteUsesFunctionRegistryContract() (
@@ -2529,6 +2549,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-aggregates-support-source-only runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-public-selector-retirement runRemoteControlPublicSelectorRetirementContract &&
+        runRegressionStep legacy-retires-suite-owned-wrappers runLegacyRetiresSuiteOwnedWrappersContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
