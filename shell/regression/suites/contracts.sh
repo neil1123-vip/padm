@@ -1245,8 +1245,13 @@ runTransactionSystemAggregateRunnerRegistrationContract() {
 runTransactionSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
 
+    grep -q 'source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^listRegressionTransactionChildSelectors() {$' "${suiteFile}"
+    grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionTransactionSystemSuiteRoot() {$' "${suiteFile}"
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
@@ -1254,8 +1259,8 @@ runTransactionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCore \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystem \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransaction \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
 }
 
 runTransactionSuiteUsesSuiteLocalHelpersContract() (
@@ -1264,6 +1269,16 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
     : >"${callLog}"
 
     runRegressionTransaction() {
+        printf 'legacy-transaction\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTransactionSystem() {
+        printf 'legacy-transaction-system\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTransactionSuiteRoot() {
         printf 'suite-transaction\n' >>"${callLog}"
     }
 
@@ -1271,7 +1286,7 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
         printf 'suite-transaction-core\n' >>"${callLog}"
     }
 
-    runRegressionTransactionSystem() {
+    runRegressionTransactionSystemSuiteRoot() {
         printf 'suite-transaction-system\n' >>"${callLog}"
     }
 
@@ -1282,6 +1297,34 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
     grep -qx 'suite-transaction' "${callLog}"
     grep -qx 'suite-transaction-core' "${callLog}"
     grep -qx 'suite-transaction-system' "${callLog}"
+    ! grep -q '^legacy-transaction$' "${callLog}"
+    ! grep -q '^legacy-transaction-system$' "${callLog}"
+)
+
+runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/transaction-framework-helper-dispatch.log"
+
+    : >"${callLog}"
+
+    listRegressionTransactionSystemChildSelectors() {
+        printf '%s\n' \
+            nginx-service-failure \
+            fail2ban-apply-transaction
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:jobs=%s:%s\n' "${PADM_REGRESSION_PARALLEL_JOBS:-}" "$*" >>"${callLog}"
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTransactionSystemSuiteRoot
+
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-system-parallel-[0-9][0-9]* nginx-service-failure nginx-service-failure fail2ban-apply-transaction fail2ban-apply-transaction' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
 )
 
 runAllSelectorHelpersStayAlignedContract() (
@@ -2009,16 +2052,17 @@ runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract() (
 
     : >"${callLog}"
 
-    runRegressionAllSelector() {
-        printf '%s\n' "$1" >>"${callLog}"
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:%s\n' "$*" >>"${callLog}"
     }
 
     PADM_REGRESSION_PARALLEL_JOBS=1 PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-system
 
+    grep -q '^framework:'"${TMP_DIR}"'/transaction-system-parallel-[0-9][0-9]* ' "${callLog}"
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
-        grep -qx "${selector}" "${callLog}"
-        [[ "$(grep -c "^${selector}$" "${callLog}")" == "1" ]]
+        grep -q " ${selector} ${selector}\(\|$\)" "${callLog}"
+        [[ "$(grep -o " ${selector} ${selector}" "${callLog}" | wc -l)" == "1" ]]
     done < <(listRegressionTransactionSystemChildSelectors)
 )
 
