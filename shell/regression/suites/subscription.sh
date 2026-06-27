@@ -13,7 +13,7 @@ runRegressionSubscriptionRemoteFetchSuiteRoot() {
         selectorPairs+=("${selector}" "${selector}")
     done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-fetch-parallel-${BASHPID:-$$}" \
+        runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 
@@ -26,7 +26,7 @@ runRegressionSubscriptionWriteTransactionSuiteRoot() {
     for selector in "${selectors[@]}"; do
         selectorPairs+=("${selector}" "${selector}")
     done
-    runParallelRegressionSelectors "${TMP_DIR}/subscription-write-transaction-parallel-${BASHPID:-$$}" \
+    runParallelRegressionSelectors "${TMP_DIR}/subscription-tx-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 
@@ -92,10 +92,10 @@ registerRegressionFunctionLeaf regression-subscription-parallel-composition runR
 registerRegressionFunctionLeaf regression-subscription-write-transaction-parallel-composition runRegressionSubscriptionWriteTransactionParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-remote-fetch-parallel-composition runRegressionSubscriptionRemoteFetchParallelCompositionRegression
 
-registerRegressionAggregateRunnerParallel subscription-remote-fetch runRegressionSubscriptionRemoteFetchSuiteRoot \
+registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteFetchSuiteRoot \
     $(listRegressionSubscriptionRemoteFetchChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-write-transaction runRegressionSubscriptionWriteTransactionSuiteRoot \
+registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionWriteTransactionSuiteRoot \
     $(listRegressionSubscriptionWriteTransactionChildSelectors)
 
 registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \

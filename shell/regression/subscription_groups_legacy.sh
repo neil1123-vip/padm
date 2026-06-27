@@ -16122,16 +16122,16 @@ listRegressionSubscriptionLightChildSelectors() {
 
 listRegressionSubscriptionHeavyChildSelectors() {
     printf '%s\n' \
-        subscription-write-transaction \
-        subscription-remote-fetch
+        subscription-tx \
+        subscription-remote
 }
 
 listRegressionSubscriptionChildSelectors() {
     printf '%s\n' \
         subscription-output \
         subscription-state \
-        subscription-remote-fetch \
-        subscription-write-transaction
+        subscription-remote \
+        subscription-tx
 }
 
 runRegressionSubscriptionOutput() {
@@ -16153,7 +16153,7 @@ runRegressionSubscriptionRemoteFetch() {
         selectorPairs+=("${selector}" "${selector}")
     done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_FETCH_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-fetch-parallel-${BASHPID:-$$}" \
+        runParallelRegressionSelectors "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 
@@ -16204,7 +16204,7 @@ runRegressionSubscriptionRemoteFetchParallelCompositionRegression() (
         fi
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
-    runRemoteSubscribeFetchRegression() { runRegressionAllSelector subscription-remote-fetch; }
+    runRemoteSubscribeFetchRegression() { runRegressionAllSelector subscription-remote; }
 
     runRegressionSubscriptionRemoteFetch
 
@@ -16219,8 +16219,8 @@ runRegressionSubscriptionRemoteFetchParallelCompositionRegression() (
         $0 == "subscription-remote-fetch-unique-finish" { uniqueFinish = NR }
         END { exit !(uniqueStart && mergeStart && uniqueFinish && mergeStart < uniqueFinish) }
     ' "${callLog}"
-    ! grep -qx 'subscription-remote-fetch-start' "${callLog}"
-    ! grep -qx 'subscription-remote-fetch-finish' "${callLog}"
+    ! grep -qx 'subscription-remote-start' "${callLog}"
+    ! grep -qx 'subscription-remote-finish' "${callLog}"
 
     : >"${callLog}"
     rm -f "${TMP_DIR}/subscription-remote-fetch-merge-started"
@@ -16244,7 +16244,7 @@ runRegressionSubscriptionWriteTransaction() {
     for selector in "${selectors[@]}"; do
         selectorPairs+=("${selector}" "${selector}")
     done
-    runParallelRegressionSelectors "${TMP_DIR}/subscription-write-transaction-parallel-${BASHPID:-$$}" \
+    runParallelRegressionSelectors "${TMP_DIR}/subscription-tx-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
 }
 
@@ -16320,8 +16320,8 @@ runRegressionSubscriptionParallelCompositionRegression() (
     }
     runRegressionSubscriptionOutput() { runRegressionAllSelector subscription-output; }
     runRegressionSubscriptionState() { runRegressionAllSelector subscription-state; }
-    runRegressionSubscriptionRemoteFetch() { runRegressionAllSelector subscription-remote-fetch; }
-    runRegressionSubscriptionWriteTransaction() { runRegressionAllSelector subscription-write-transaction; }
+    runRegressionSubscriptionRemoteFetch() { runRegressionAllSelector subscription-remote; }
+    runRegressionSubscriptionWriteTransaction() { runRegressionAllSelector subscription-tx; }
 
     runRegressionSubscription
 
@@ -16351,8 +16351,8 @@ runRegressionSubscriptionParallelCompositionRegression() (
         $0 == "subscription-state-start" { stateStart = NR }
         $0 == "subscription-output-finish" { outputFinish = NR }
         $0 == "subscription-state-finish" { stateFinish = NR }
-        $0 == "subscription-write-transaction-start" { writeStart = NR }
-        $0 == "subscription-remote-fetch-start" { remoteStart = NR }
+        $0 == "subscription-tx-start" { writeStart = NR }
+        $0 == "subscription-remote-start" { remoteStart = NR }
         END {
             exit !(outputStart && stateStart && outputFinish && stateFinish && writeStart && remoteStart &&
                 stateStart < outputFinish &&
@@ -18054,7 +18054,7 @@ subscription-output)
 subscription-state)
     regressionRunner=runRegressionSubscriptionState
     ;;
-subscription-remote-fetch)
+subscription-remote)
     regressionRunner=runRegressionSubscriptionRemoteFetch
     ;;
 subscription-remote-fetch-unique)
@@ -18078,7 +18078,7 @@ subscription-remote-fetch-commit-failure)
 subscription-remote-fetch-idempotent)
     regressionRunner=runRemoteSubscribeFetchIdempotentRegression
     ;;
-subscription-write-transaction)
+subscription-tx)
     regressionRunner=runRegressionSubscriptionWriteTransaction
     ;;
 sing-box-subscribe-write)
@@ -18454,7 +18454,7 @@ all|full|ci)
     printf 'routing leaf selectors: routing-core|routing-core-unsafe-config-dir|routing-access-control-failure-return|routing-access-control-config-transaction|routing-access-control-unsafe-backup-dir|routing-access-control-unsafe-config-dir|routing-bt-failure-return|routing-ipv6-failure-return|routing-warp-failure-return|routing-socks5-failure-return|routing-dns-failure-return|routing-dns-unsafe-backup-dir|routing-dns-unsafe-config-dir|routing-dns-restore-scope|routing-port-panel\n' >&2
     printf 'ui leaf selectors: menu-smoke-full-subscription-main-publish-user-empty|menu-smoke-full-subscription-main-publish-user-create|menu-smoke-full-subscription-main-publish-user-inspect|menu-smoke-full-subscription-main-publish-sync-skip|menu-smoke-full-subscription-main-publish-sync-enable|wireguard-menu-flow-peer-rollback-apply-service|wireguard-menu-flow-peer-rollback-apply-restore|wireguard-menu-flow-peer-rollback-credential-write|wireguard-menu-flow-peer-rollback-credential-groups-restore|wireguard-menu-flow-peer-source-control-toggle|wireguard-menu-flow-peer-source-control-clear-error|wireguard-menu-flow-peer-source-control-status\n' >&2
     printf 'subscription remote fetch leaf selectors: subscription-remote-fetch-unique|subscription-remote-fetch-rollback|subscription-remote-fetch-merge|subscription-remote-fetch-controlled|subscription-remote-fetch-append-failure|subscription-remote-fetch-commit-failure|subscription-remote-fetch-idempotent\n' >&2
-    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote-fetch|subscription-write-transaction|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|runtime-autoread-unset-auto-install|runtime-auto-install-reality-route|runtime-tempdir|reality-candidates|reality-candidates-fast|reality-asn-scan-plan|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-subscription-remote-fetch-parallel-composition|regression-routing-parallel-composition|regression-runtime-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
+    printf 'usage: %s [fast|fast-reality|platform|platform-io|tls|ui|menu-smoke|menu-smoke-full|menu-smoke-full-core|menu-smoke-full-subscription-main|menu-smoke-full-subscription-main-entry|menu-smoke-full-subscription-main-publish|menu-smoke-full-subscription-main-publish-service|menu-smoke-full-subscription-main-publish-user|menu-smoke-full-subscription-main-publish-sync|menu-smoke-full-subscription-main-maintenance|menu-smoke-full-subscription-controlled|menu-smoke-full-core-maintenance|routing|routing-socks5-udp-associate|subscription|subscription-output|subscription-state|subscription-remote|subscription-tx|sing-box-subscribe-write|cdn-address-write-transaction|subscribe-local-output-transaction|subscribe-salt-write-transaction|subscribe-server-name|subscribe-nginx-config-write|subscribe-nginx-service-failure|sing-box-port-failure|subscribe-user-output-transaction|subscribe-local-rollback|subscription-groups-migration-backup|subscription-groups-backup-failure|refresh-local-subscriptions-rollback|subscribe-return-failure|remove-user-subscription-menu-failure|user-subscription-menu-mutation-failure|runtime|runtime-core|runtime-autoread-unset-auto-install|runtime-auto-install-reality-route|runtime-tempdir|reality-candidates|reality-candidates-fast|reality-asn-scan-plan|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-subscription-parallel-composition|regression-subscription-write-transaction-parallel-composition|regression-subscription-remote-fetch-parallel-composition|regression-routing-parallel-composition|regression-runtime-parallel-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-ui-parallel-composition|regression-ui-long-tail-split-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|targeted-batch-helpers|targeted-subscription-restore|wireguard-menu-flow|wireguard-menu-flow-bootstrap|wireguard-menu-flow-peer-transaction|wireguard-menu-flow-peer-add-update|wireguard-menu-flow-peer-rollback|wireguard-menu-flow-peer-rollback-apply|wireguard-menu-flow-peer-rollback-source|wireguard-menu-flow-peer-rollback-credential|wireguard-menu-flow-peer-source-control|wireguard-menu-flow-control-restore|wireguard-restore-runner|remote-control|all|full|ci]\n' "$0" >&2
     exit 2
     ;;
 esac
