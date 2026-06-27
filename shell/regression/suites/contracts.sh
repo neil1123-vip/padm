@@ -791,14 +791,21 @@ EOF
 
 runSubscriptionSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionSubscription() {$' "${suiteFile}"
+    grep -q '^runRegressionSubscriptionRemote() {$' "${suiteFile}"
+    grep -q '^runRegressionSubscriptionTx() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-' "${suiteFile}"
+    ! grep -q '^runRegressionSubscription() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionSubscriptionRemote() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionSubscriptionTx() {$' "${legacyScriptFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-remote ' "${suiteFile}"
@@ -1901,9 +1908,19 @@ runSubscriptionTxAggregateRunnerRegistrationContract() {
 }
 
 runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
+    local status=0
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local callLog="${TMP_DIR}/subscription-suite-root-dispatch.log"
 
     : >"${callLog}"
+
+    grep -Eq '^runRegressionSubscription\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    grep -Eq '^runRegressionSubscriptionRemote\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    grep -Eq '^runRegressionSubscriptionTx\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    ! grep -Eq '^runRegressionSubscription\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
+    ! grep -Eq '^runRegressionSubscriptionRemote\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
+    ! grep -Eq '^runRegressionSubscriptionTx\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
 
     runRegressionSubscription() {
         printf 'legacy-subscription\n' >>"${callLog}"
@@ -1936,12 +1953,14 @@ runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-tx
 
-    grep -qx 'suite-subscription' "${callLog}"
-    grep -qx 'suite-subscription-remote' "${callLog}"
-    grep -qx 'suite-subscription-tx' "${callLog}"
-    ! grep -q '^legacy-subscription$' "${callLog}"
-    ! grep -q '^legacy-subscription-remote$' "${callLog}"
-    ! grep -q '^legacy-subscription-tx$' "${callLog}"
+    grep -qx 'suite-subscription' "${callLog}" || status=1
+    grep -qx 'suite-subscription-remote' "${callLog}" || status=1
+    grep -qx 'suite-subscription-tx' "${callLog}" || status=1
+    ! grep -q '^legacy-subscription$' "${callLog}" || status=1
+    ! grep -q '^legacy-subscription-remote$' "${callLog}" || status=1
+    ! grep -q '^legacy-subscription-tx$' "${callLog}" || status=1
+
+    return "${status}"
 )
 
 runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
