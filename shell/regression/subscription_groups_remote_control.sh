@@ -1925,10 +1925,6 @@ runRegressionRemoteControl() {
         contract runRegressionRemoteControlContract
 }
 
-runRegressionRemoteControlLight() {
-    runRegressionRemoteControl
-}
-
 runRegressionRemoteControlSmokeCore() {
     runRegressionRemoteControlSmokeCoreSteps
 }
@@ -2086,14 +2082,11 @@ remote-control-contract-service-install-token-transaction)
 remote-control-contract-server-response)
     regressionRunner=runRegressionRemoteControlContractServerResponse
     ;;
-remote-control-light)
-    regressionRunner=runRegressionRemoteControlLight
-    ;;
 remote-control-deep)
     regressionRunner=runRegressionRemoteControlDeep
     ;;
 *)
-    printf 'usage: %s [remote-control|remote-control-smoke|remote-control-contract|remote-control-light|remote-control-deep]\n' "$0" >&2
+    printf 'usage: %s [remote-control|remote-control-smoke|remote-control-contract|remote-control-deep]\n' "$0" >&2
     exit 2
     ;;
 esac

@@ -121,7 +121,7 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q 'registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
-    grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
+    ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
 
     ! grep -q '^runParallelRemoteControlModes()' "${scriptFile}"
     ! grep -q '^runParallelRemoteControlTotals()' "${scriptFile}"
@@ -134,6 +134,21 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q 'server-response runRegressionRemoteControlContractServerResponse' "${scriptFile}"
     grep -q 'remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess' "${scriptFile}"
     grep -q 'remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction' "${scriptFile}"
+}
+
+runRemoteControlPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
+
+    ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke"]:-}" == "aggregate" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract"]:-}" == "aggregate" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-deep"]:-}" == "function" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["remote-control-light"]:-}" ]]
+    ! grep -Eq '^[[:space:]]*remote-control-light\)$' "${scriptFile}"
+    ! grep -Fq 'remote-control-light|' "${scriptFile}"
+    grep -Fq 'usage: %s [remote-control|remote-control-smoke|remote-control-contract|remote-control-deep]' "${scriptFile}"
 }
 
 runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
@@ -1697,6 +1712,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
+        runRegressionStep remote-control-public-selector-retirement runRemoteControlPublicSelectorRetirementContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&

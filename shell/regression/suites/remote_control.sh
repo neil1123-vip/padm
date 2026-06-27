@@ -49,4 +49,3 @@ registerRegressionAggregateParallel remote-control-contract \
     remote-control-contract-server-response
 registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \
     $(listRegressionRemoteControlChildSelectors)
-registerRegressionAlias remote-control-light remote-control
