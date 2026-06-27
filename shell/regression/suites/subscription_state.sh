@@ -3,8 +3,24 @@
 REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"
 
+runRegressionSubscriptionStateCore() {
+    runParallelRegressionRunners \
+        "${TMP_DIR}/subscription-state-core" \
+        structure runRegressionSubscriptionStateStructure \
+        quota runRegressionSubscriptionStateQuota \
+        remote-restore runRegressionSubscriptionStateRemoteRestore
+}
+
 runRegressionSubscriptionStateCoreSuiteRoot() {
     runRegressionSubscriptionStateCore
+}
+
+runRegressionSubscriptionState() {
+    runParallelRegressionRunners \
+        "${TMP_DIR}/subscription-state-default" \
+        core runRegressionSubscriptionStateCore \
+        support runRegressionSubscriptionStateSupport \
+        sync-rollback runRegressionSubscriptionStateSyncRollback
 }
 
 runRegressionSubscriptionStateSuiteRoot() {

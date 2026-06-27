@@ -15,14 +15,8 @@ if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
     exit 2
 fi
 
-regressionName=${1:-subscription-state}
+regressionName=${1:-subscription-state-structure}
 case "${regressionName}" in
-subscription-state)
-    regressionRunner=runRegressionSubscriptionState
-    ;;
-subscription-state-core)
-    regressionRunner=runRegressionSubscriptionStateCore
-    ;;
 subscription-state-structure)
     regressionRunner=runRegressionSubscriptionStateStructure
     ;;
@@ -186,7 +180,7 @@ subscription-groups-restore-failure)
     regressionRunner=runRegressionSubscriptionGroupsRestoreFailure
     ;;
 *)
-    printf 'usage: %s [subscription-state|subscription-state-core|subscription-state-structure|subscription-state-structure-foundation|subscription-state-structure-foundation-add-remove|subscription-state-structure-foundation-credential|subscription-state-structure-foundation-normalize|subscription-state-structure-foundation-init-transaction|subscription-state-structure-foundation-serial|subscription-state-structure-migration|subscription-state-structure-source|subscription-state-structure-source-credential|subscription-state-structure-source-status|subscription-state-structure-source-remove|subscription-state-structure-source-serial|subscription-state-structure-serial|subscription-state-quota|subscription-state-quota-traffic|subscription-state-quota-traffic-summary|subscription-state-quota-traffic-invalid-input|subscription-state-quota-traffic-apply|subscription-state-quota-traffic-serial|subscription-state-quota-menu-preview-fail|subscription-state-quota-menu-tx|subscription-state-quota-menu-tx-rollback|subscription-state-quota-menu-tx-serial|subscription-state-quota-partial-sync|subscription-state-quota-partial-sync-apply-failure|subscription-state-quota-partial-sync-plan|subscription-state-quota-partial-sync-config|subscription-state-quota-partial-sync-serial|subscription-state-quota-serial|subscription-state-remote-restore|subscription-state-remote-restore-self-reference|subscription-state-remote-restore-self-reference-plan|subscription-state-remote-restore-self-reference-sync|subscription-state-remote-restore-self-reference-serial|subscription-state-remote-restore-state-write|subscription-state-remote-restore-legacy-menu|subscription-state-remote-restore-serial]\n' "$0" >&2
+    printf 'usage: %s [subscription-state-structure|subscription-state-structure-foundation|subscription-state-structure-foundation-add-remove|subscription-state-structure-foundation-credential|subscription-state-structure-foundation-normalize|subscription-state-structure-foundation-init-transaction|subscription-state-structure-foundation-serial|subscription-state-structure-migration|subscription-state-structure-source|subscription-state-structure-source-credential|subscription-state-structure-source-status|subscription-state-structure-source-remove|subscription-state-structure-source-serial|subscription-state-structure-serial|subscription-state-quota|subscription-state-quota-traffic|subscription-state-quota-traffic-summary|subscription-state-quota-traffic-invalid-input|subscription-state-quota-traffic-apply|subscription-state-quota-traffic-serial|subscription-state-quota-menu-preview-fail|subscription-state-quota-menu-tx|subscription-state-quota-menu-tx-rollback|subscription-state-quota-menu-tx-serial|subscription-state-quota-partial-sync|subscription-state-quota-partial-sync-apply-failure|subscription-state-quota-partial-sync-plan|subscription-state-quota-partial-sync-config|subscription-state-quota-partial-sync-serial|subscription-state-quota-serial|subscription-state-remote-restore|subscription-state-remote-restore-self-reference|subscription-state-remote-restore-self-reference-plan|subscription-state-remote-restore-self-reference-sync|subscription-state-remote-restore-self-reference-serial|subscription-state-remote-restore-state-write|subscription-state-remote-restore-legacy-menu|subscription-state-remote-restore-serial]\n' "$0" >&2
     exit 2
     ;;
 esac

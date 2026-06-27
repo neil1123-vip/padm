@@ -38,6 +38,10 @@ runSubscriptionStateShimStaysThinContract() {
     ! grep -q '^runRegressionSubscriptionStateRemoteRestore()' "${stateShim}" || return 1
     ! grep -q '^runRegressionSubscriptionStateSupport()' "${stateShim}" || return 1
     ! grep -q '^runRegressionSubscriptionStateSyncRollback()' "${stateShim}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-state\)$' "${stateShim}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-state-core\)$' "${stateShim}" || return 1
+    ! grep -Fq 'usage: %s [subscription-state|' "${stateShim}" || return 1
+    ! grep -Fq '|subscription-state-core|' "${stateShim}" || return 1
     grep -q 'subscription-state-structure)' "${stateShim}"
     grep -q 'subscription-state-quota)' "${stateShim}"
     grep -q 'subscription-state-remote-restore)' "${stateShim}"
@@ -48,8 +52,13 @@ runSubscriptionStateShimStaysThinContract() {
 
 runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh' "${suiteFile}"
     grep -q 'registerRegressionFunctionLeaf "\${selector}" "\${runner}"' "${suiteFile}"
     grep -q '^subscription-state-structure runRegressionSubscriptionStateStructure$' "${suiteFile}"
@@ -126,6 +135,7 @@ runSubscriptionStateAggregateRunnerRegistrationContract() {
 }
 
 runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
     local coreBody
     local stateBody
@@ -134,9 +144,15 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     ! grep -q 'PADM_SECTION_END: subscription-state-hot-regressions' "${scriptFile}"
     ! grep -q '^runParallelSubscriptionStateModes()' "${scriptFile}"
     grep -q 'source "${REGRESSION_ENTRY_DIR}/regression/framework/runtime.sh"' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^[[:space:]]*subscription-state\)$' "${scriptFile}"
+    ! grep -Eq '^[[:space:]]*subscription-state-core\)$' "${scriptFile}"
+    ! grep -Fq 'usage: %s [subscription-state|' "${scriptFile}"
+    ! grep -Fq '|subscription-state-core|' "${scriptFile}"
 
-    coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${scriptFile}")
-    stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${scriptFile}")
+    coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${suiteFile}")
+    stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${suiteFile}")
 
     grep -q 'runParallelRegressionRunners \\' <<<"${coreBody}"
     ! grep -q 'runParallelSubscriptionStateModes' <<<"${coreBody}"
@@ -152,6 +168,34 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     grep -q 'support runRegressionSubscriptionStateSupport' <<<"${stateBody}"
     grep -q 'sync-rollback runRegressionSubscriptionStateSyncRollback' <<<"${stateBody}"
 }
+
+runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local callsFile="${TMP_DIR}/subscription-state-aggregate-runner-calls"
+    local -a calls=()
+
+    if ! declare -F runRegressionSubscriptionStateCore >/dev/null; then
+        PADM_REGRESSION_SOURCE_ONLY=1 source "${suiteFile}"
+    fi
+
+    runParallelRegressionSelectors() {
+        printf 'subscription-state aggregate should not require selector registry in source-only mode\n' >&2
+        return 97
+    }
+
+    runParallelRegressionRunners() {
+        printf '%s\n' "$*" >>"${callsFile}"
+    }
+
+    : >"${callsFile}"
+    runRegressionSubscriptionStateCore
+    runRegressionSubscriptionState
+
+    mapfile -t calls <"${callsFile}"
+    [[ "${#calls[@]}" -eq 2 ]]
+    [[ "${calls[0]}" == "${TMP_DIR}/subscription-state-core structure runRegressionSubscriptionStateStructure quota runRegressionSubscriptionStateQuota remote-restore runRegressionSubscriptionStateRemoteRestore" ]]
+    [[ "${calls[1]}" == "${TMP_DIR}/subscription-state-default core runRegressionSubscriptionStateCore support runRegressionSubscriptionStateSupport sync-rollback runRegressionSubscriptionStateSyncRollback" ]]
+)
 
 runRemoteControlSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
@@ -2482,6 +2526,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-full-uses-framework-parallel-helper runSubscriptionStateFullUsesFrameworkParallelHelperContract &&
+        runRegressionStep subscription-state-aggregates-support-source-only runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-public-selector-retirement runRemoteControlPublicSelectorRetirementContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
