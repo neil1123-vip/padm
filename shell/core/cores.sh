@@ -1834,7 +1834,7 @@ initXrayClients() {
 
         # VLESS Reality gRPC
         if protocolSelectionIncludes "${type}" 26; then
-            currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-vless_reality_grpc\",\"flow\":\"\"}"
+            currentUser="{\"id\":\"${uuid}\",\"email\":\"${email}-vless_reality_grpc\"}"
 
             users=$(echo "${users}" | jq -r ". +=[${currentUser}]")
         fi

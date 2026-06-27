@@ -9505,6 +9505,7 @@ EOF
 runRuntimeAndRealityRegression() {
     local oldCurrentClients="${currentClients:-}"
     local xhttpClients
+    local realityGrpcClients
     local visionClients
 
     visionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a")
@@ -9520,6 +9521,8 @@ runRuntimeAndRealityRegression() {
     currentClients='[{"id":"uuid-a","email":"user-a"}]'
     xhttpClients=$(initXrayClients 2)
     jq -e '.[0].email == "user-a-VLESS_Reality_XHTTP" and (.[0].flow | not)' <<<"${xhttpClients}" >/dev/null
+    realityGrpcClients=$(initXrayClients 26)
+    jq -e '.[0].email == "user-a-vless_reality_grpc" and (.[0].flow | not)' <<<"${realityGrpcClients}" >/dev/null
     visionClients=$(initXrayClients 27)
     jq -e '.[0].email == "user-a-VLESS_TCP/TLS_Vision" and .[0].flow == "xtls-rprx-vision"' <<<"${visionClients}" >/dev/null
     currentClients="${oldCurrentClients}"
