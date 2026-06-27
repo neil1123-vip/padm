@@ -1044,13 +1044,25 @@ runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
 
 runRoutingSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local status=0
 
     grep -q 'source "\${REGRESSION_ROUTING_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || status=1
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || status=1
+    grep -q '^listRegressionRoutingCoreChildSelectors() {$' "${suiteFile}" || status=1
+    grep -q '^listRegressionRoutingHeavyChildSelectors() {$' "${suiteFile}" || status=1
+    grep -q '^listRegressionRoutingLightChildSelectors() {$' "${suiteFile}" || status=1
+    grep -q '^listRegressionRoutingChildSelectors() {$' "${suiteFile}" || status=1
     grep -q '^runRegressionRoutingSuiteRoot() {$' "${suiteFile}" || status=1
+    grep -q '^runRegressionRoutingParallelCompositionRegression() ' "${suiteFile}" || status=1
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}" || status=1
     grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/routing-parallel-' "${suiteFile}" || status=1
+    ! grep -q '^listRegressionRoutingCoreChildSelectors() {$' "${legacyScriptFile}" || status=1
+    ! grep -q '^listRegressionRoutingHeavyChildSelectors() {$' "${legacyScriptFile}" || status=1
+    ! grep -q '^listRegressionRoutingLightChildSelectors() {$' "${legacyScriptFile}" || status=1
+    ! grep -q '^listRegressionRoutingChildSelectors() {$' "${legacyScriptFile}" || status=1
+    ! grep -q '^runRegressionRouting() {$' "${legacyScriptFile}" || status=1
+    ! grep -q '^runRegressionRoutingParallelCompositionRegression() ' "${legacyScriptFile}" || status=1
     ! grep -q '^registerRegressionScriptLeaf routing ' "${suiteFile}" || status=1
     ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}" || status=1
     grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}" || status=1
