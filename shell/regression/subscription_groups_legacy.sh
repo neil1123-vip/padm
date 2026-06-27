@@ -12239,10 +12239,20 @@ runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    selectors=(
+        wireguard-menu-flow-peer-rollback-apply-service
+        wireguard-menu-flow-peer-rollback-apply-restore
+    )
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
         runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
-        wireguard-menu-flow-peer-rollback-apply-service \
-        wireguard-menu-flow-peer-rollback-apply-restore
+        "${selectorPairs[@]}"
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() {
@@ -12250,10 +12260,20 @@ runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression() {
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    selectors=(
+        wireguard-menu-flow-peer-rollback-credential-write
+        wireguard-menu-flow-peer-rollback-credential-groups-restore
+    )
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
         runParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
-        wireguard-menu-flow-peer-rollback-credential-write \
-        wireguard-menu-flow-peer-rollback-credential-groups-restore
+        "${selectorPairs[@]}"
 }
 
 runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
@@ -13472,10 +13492,20 @@ runMenuSmokeFullSubscriptionMainPublishUserRegression() {
 }
 
 runMenuSmokeFullSubscriptionMainPublishSyncRegression() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    selectors=(
+        menu-smoke-full-subscription-main-publish-sync-skip
+        menu-smoke-full-subscription-main-publish-sync-enable
+    )
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
         runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
-        menu-smoke-full-subscription-main-publish-sync-skip \
-        menu-smoke-full-subscription-main-publish-sync-enable
+        "${selectorPairs[@]}"
 }
 
 runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression() {
@@ -15877,30 +15907,8 @@ runRegressionFastReality() {
         runRegressionStep reality-candidates-fast runRealityCandidateFastRegression
 }
 
-runRegressionUi() {
-    if [[ "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" == "all" ]]; then
-        runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
-            menu-smoke-full-subscription-main-publish-sync \
-            wireguard-menu-flow-peer-rollback-apply \
-            wireguard-menu-flow-peer-rollback-credential \
-            wireguard-menu-flow-peer-rollback-source \
-            menu-smoke-full-subscription-main-publish-user \
-            menu-smoke-full-subscription-main-publish-service \
-            wireguard-menu-flow-peer-add-update \
-            wireguard-menu-flow-peer-source-control \
-            menu-smoke-full-subscription-main-maintenance \
-            wireguard-menu-flow-control-restore \
-            wireguard-menu-flow-bootstrap \
-            menu-smoke-full-subscription-main-entry \
-            menu-smoke-full-subscription-controlled \
-            menu-smoke-full-core \
-            menu-smoke-full-core-maintenance \
-            menu-smoke \
-            wireguard-restore-runner
-        return
-    fi
-
-    runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+listRegressionUiChildSelectors() {
+    printf '%s\n' \
         menu-smoke-full-subscription-main-publish-sync-enable \
         wireguard-menu-flow-peer-rollback-apply-service \
         wireguard-menu-flow-peer-rollback-credential-write \
@@ -15927,20 +15935,76 @@ runRegressionUi() {
         wireguard-restore-runner
 }
 
+listRegressionUiAllProfileChildSelectors() {
+    printf '%s\n' \
+        menu-smoke-full-subscription-main-publish-sync \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-rollback-source \
+        menu-smoke-full-subscription-main-publish-user \
+        menu-smoke-full-subscription-main-publish-service \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-source-control \
+        menu-smoke-full-subscription-main-maintenance \
+        wireguard-menu-flow-control-restore \
+        wireguard-menu-flow-bootstrap \
+        menu-smoke-full-subscription-main-entry \
+        menu-smoke-full-subscription-controlled \
+        menu-smoke-full-core \
+        menu-smoke-full-core-maintenance \
+        menu-smoke \
+        wireguard-restore-runner
+}
+
+runRegressionUi() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    if [[ "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" == "all" ]]; then
+        mapfile -t selectors < <(listRegressionUiAllProfileChildSelectors)
+        selectorPairs=()
+        for selector in "${selectors[@]}"; do
+            selectorPairs+=("${selector}" "${selector}")
+        done
+        runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+            "${selectorPairs[@]}"
+        return
+    fi
+
+    mapfile -t selectors < <(listRegressionUiChildSelectors)
+    selectorPairs=()
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
+    runParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+        "${selectorPairs[@]}"
+}
+
 runRegressionMenuSmoke() {
     runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }
 
 runRegressionMenuSmokeFull() {
-    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-parallel-${BASHPID:-$$}" \
-        menu-smoke-full-subscription-main-entry \
-        menu-smoke-full-subscription-main-publish-service \
-        menu-smoke-full-subscription-main-publish-user \
-        menu-smoke-full-subscription-main-publish-sync \
-        menu-smoke-full-subscription-main-maintenance \
-        menu-smoke-full-subscription-controlled \
-        menu-smoke-full-core \
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    selectors=(
+        menu-smoke-full-subscription-main-entry
+        menu-smoke-full-subscription-main-publish-service
+        menu-smoke-full-subscription-main-publish-user
+        menu-smoke-full-subscription-main-publish-sync
+        menu-smoke-full-subscription-main-maintenance
+        menu-smoke-full-subscription-controlled
+        menu-smoke-full-core
         menu-smoke-full-core-maintenance
+    )
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
+    runParallelRegressionSelectors "${TMP_DIR}/menu-smoke-full-parallel-${BASHPID:-$$}" \
+        "${selectorPairs[@]}"
 }
 
 listRegressionRoutingCoreChildSelectors() {

@@ -298,6 +298,142 @@ EOF
     return "${status}"
 }
 
+runUiPublicSelectorsUseFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local status=0
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+    done <<'EOF'
+menu-smoke runRegressionMenuSmoke
+menu-smoke-full runRegressionMenuSmokeFull
+menu-smoke-full-core runMenuSmokeFullCoreRegression
+menu-smoke-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
+menu-smoke-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
+menu-smoke-full-subscription-main-publish runMenuSmokeFullSubscriptionMainPublishRegression
+menu-smoke-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
+menu-smoke-full-subscription-main-publish-user runMenuSmokeFullSubscriptionMainPublishUserRegression
+menu-smoke-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
+menu-smoke-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
+menu-smoke-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
+menu-smoke-full-subscription-main-publish-sync runMenuSmokeFullSubscriptionMainPublishSyncRegression
+menu-smoke-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
+menu-smoke-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
+menu-smoke-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression
+menu-smoke-full-subscription-controlled runMenuSmokeFullSubscriptionControlledRegression
+menu-smoke-full-core-maintenance runMenuSmokeFullCoreMaintenanceRegression
+wireguard-menu-flow runRegressionWireGuardMenuFlow
+wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapRegression
+wireguard-menu-flow-peer-transaction runSubscriptionWireGuardMenuFlowPeerTransactionRegression
+wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression
+wireguard-menu-flow-peer-rollback runSubscriptionWireGuardMenuFlowPeerRollbackRegression
+wireguard-menu-flow-peer-rollback-apply runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
+wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression
+wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression
+wireguard-menu-flow-peer-rollback-source runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
+wireguard-menu-flow-peer-rollback-credential runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
+wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression
+wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression
+wireguard-menu-flow-peer-source-control runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
+wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression
+wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression
+wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression
+wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowControlRestoreRegression
+wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
+EOF
+
+    return "${status}"
+}
+
+runUiSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/ui-default-selectors.txt"
+    local defaultSortedFile="${TMP_DIR}/ui-default-selectors.sorted.txt"
+    local allProfileSelectorsFile="${TMP_DIR}/ui-all-profile-selectors.txt"
+    local allProfileSortedFile="${TMP_DIR}/ui-all-profile-selectors.sorted.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/ui-default-selectors.expected.txt"
+    local expectedAllProfileSelectorsFile="${TMP_DIR}/ui-all-profile-selectors.expected.txt"
+
+    declare -F listRegressionUiChildSelectors >/dev/null
+    declare -F listRegressionUiAllProfileChildSelectors >/dev/null
+
+    listRegressionUiChildSelectors >"${defaultSelectorsFile}"
+    listRegressionUiAllProfileChildSelectors >"${allProfileSelectorsFile}"
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+menu-smoke-full-subscription-main-publish-sync-enable
+wireguard-menu-flow-peer-rollback-apply-service
+wireguard-menu-flow-peer-rollback-credential-write
+wireguard-menu-flow-peer-rollback-source
+menu-smoke-full-subscription-main-publish-sync-skip
+wireguard-menu-flow-peer-rollback-apply-restore
+wireguard-menu-flow-peer-rollback-credential-groups-restore
+menu-smoke-full-subscription-main-publish-user-inspect
+wireguard-menu-flow-peer-source-control-toggle
+menu-smoke-full-subscription-main-publish-user-create
+menu-smoke-full-subscription-main-publish-service
+wireguard-menu-flow-peer-add-update
+wireguard-menu-flow-peer-source-control-clear-error
+wireguard-menu-flow-peer-source-control-status
+menu-smoke-full-subscription-main-publish-user-empty
+menu-smoke-full-subscription-main-maintenance
+wireguard-menu-flow-control-restore
+wireguard-menu-flow-bootstrap
+menu-smoke-full-subscription-main-entry
+menu-smoke-full-subscription-controlled
+menu-smoke-full-core
+menu-smoke-full-core-maintenance
+menu-smoke
+wireguard-restore-runner
+EOF
+
+    cat <<'EOF' >"${expectedAllProfileSelectorsFile}"
+menu-smoke-full-subscription-main-publish-sync
+wireguard-menu-flow-peer-rollback-apply
+wireguard-menu-flow-peer-rollback-credential
+wireguard-menu-flow-peer-rollback-source
+menu-smoke-full-subscription-main-publish-user
+menu-smoke-full-subscription-main-publish-service
+wireguard-menu-flow-peer-add-update
+wireguard-menu-flow-peer-source-control
+menu-smoke-full-subscription-main-maintenance
+wireguard-menu-flow-control-restore
+wireguard-menu-flow-bootstrap
+menu-smoke-full-subscription-main-entry
+menu-smoke-full-subscription-controlled
+menu-smoke-full-core
+menu-smoke-full-core-maintenance
+menu-smoke
+wireguard-restore-runner
+EOF
+
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+    cmp -s "${expectedAllProfileSelectorsFile}" "${allProfileSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/ui-default-selectors.unique.txt"
+    sort "${allProfileSelectorsFile}" >"${allProfileSortedFile}"
+    sort -u "${allProfileSelectorsFile}" >"${TMP_DIR}/ui-all-profile-selectors.unique.txt"
+
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/ui-default-selectors.unique.txt"
+    cmp -s "${allProfileSortedFile}" "${TMP_DIR}/ui-all-profile-selectors.unique.txt"
+)
+
+runUiAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["ui"]:-}
+
+    ! grep -q '^ui ui$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUi \\' "${suiteFile}"
+    expectedChildren=$(listRegressionUiChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["ui"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["ui"]:-}" == "runRegressionUi" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
 runRoutingSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/routing-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/routing-default-selectors.sorted.txt"
@@ -828,6 +964,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-tls-uses-function-registry runLegacyTlsUsesFunctionRegistryContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
+        runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
+        runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
         runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
