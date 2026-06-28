@@ -1444,6 +1444,44 @@ runFastOnlyCoreChildStepsContract() {
     done
 }
 
+runRealitySuiteChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
+    local candidatesBody
+    local streamBody
+    local -a actualCandidatesSteps=()
+    local -a expectedCandidatesSteps=(
+        reality-candidates-fast
+        reality-asn-scan-plan
+        reality-candidates-full
+    )
+    local -a actualStreamSteps=()
+    local -a expectedStreamSteps=(
+        reality-stream-enable
+        reality-stream-disable
+    )
+    local idx
+
+    candidatesBody=$(sed -n '/^runRegressionRealityCandidatesSuiteRoot() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${candidatesBody}" ]] || return 1
+    mapfile -t actualCandidatesSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${candidatesBody}"
+    )
+    [[ "${#actualCandidatesSteps[@]}" -eq "${#expectedCandidatesSteps[@]}" ]] || return 1
+    for idx in "${!expectedCandidatesSteps[@]}"; do
+        [[ "${actualCandidatesSteps[idx]}" == "${expectedCandidatesSteps[idx]}" ]] || return 1
+    done
+
+    streamBody=$(sed -n '/^runRegressionRealityStreamSuiteRoot() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${streamBody}" ]] || return 1
+    mapfile -t actualStreamSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${streamBody}"
+    )
+    [[ "${#actualStreamSteps[@]}" -eq "${#expectedStreamSteps[@]}" ]] || return 1
+    for idx in "${!expectedStreamSteps[@]}"; do
+        [[ "${actualStreamSteps[idx]}" == "${expectedStreamSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4399,6 +4437,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-aggregate-runners-use-framework-selector-helper runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract &&
         runRegressionStep reality-suite-uses-function-registry runRealitySuiteUsesFunctionRegistryContract &&
         runRegressionStep reality-legacy-public-selector-retirement runRealityLegacyPublicSelectorRetirementContract &&
+        runRegressionStep reality-suite-child-steps runRealitySuiteChildStepsContract &&
         runRegressionStep reality-candidates-aggregate-runner-registration runRealityCandidatesAggregateRunnerRegistrationContract &&
         runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
