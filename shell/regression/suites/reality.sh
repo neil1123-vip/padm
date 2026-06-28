@@ -35,17 +35,13 @@ listRegressionRealityCandidatesChildSelectors() {
         reality-candidates-full
 }
 
-while read -r selector runner; do
-    registerRegressionFunctionLeaf "${selector}" "${runner}"
-done <<'EOF'
-reality-candidates-fast runRealityCandidateFastRegression
-reality-asn-scan-plan runRealityAsnScanPlanRegression
-reality-candidates-full runRealityCandidateFullRegression
-reality-stream-enable runRealityStreamEnableRegression
-reality-stream-disable runRealityStreamDisableRegression
-reality-config runRealityConfigRegression
-reality-profile-failure runRealityProfileFailureRegression
-EOF
+registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression
+registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegression
+registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression
+registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression
+registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression
+registerRegressionFunctionLeaf reality-config runRealityConfigRegression
+registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression
 
 registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \
     $(listRegressionRealityCandidatesChildSelectors)

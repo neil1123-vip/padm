@@ -103,10 +103,10 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh' "${suiteFile}"
-    grep -q 'registerRegressionFunctionLeaf "\${selector}" "\${runner}"' "${suiteFile}"
-    grep -q '^subscription-state-structure runRegressionSubscriptionStateStructure$' "${suiteFile}"
-    grep -q '^subscription-state-support runRegressionSubscriptionStateSupport$' "${suiteFile}"
-    grep -q '^subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback$' "${suiteFile}"
+    ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-state-structure runRegressionSubscriptionStateStructure$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-state-support runRegressionSubscriptionStateSupport$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback$' "${suiteFile}"
 }
 
 runSubscriptionStateSelectorHelpersStayAlignedContract() (
@@ -285,20 +285,20 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
-    grep -q 'registerRegressionFunctionLeaf "\${selector}" "\${runner}"' "${suiteFile}"
-    grep -q '^remote-control-smoke-core runRegressionRemoteControlSmokeCore$' "${suiteFile}"
-    grep -q '^remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic$' "${suiteFile}"
-    grep -q '^remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare$' "${suiteFile}"
-    grep -q '^remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure$' "${suiteFile}"
-    grep -q '^remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore$' "${suiteFile}"
-    grep -q '^remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile$' "${suiteFile}"
-    grep -q '^remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess$' "${suiteFile}"
-    grep -q '^remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail$' "${suiteFile}"
-    grep -q '^remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail$' "${suiteFile}"
-    grep -q '^remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback$' "${suiteFile}"
-    grep -q '^remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction$' "${suiteFile}"
-    grep -q '^remote-control-contract-server-response runRegressionRemoteControlContractServerResponse$' "${suiteFile}"
-    grep -q '^remote-control-deep runRegressionRemoteControlDeep$' "${suiteFile}"
+    ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core runRegressionRemoteControlSmokeCore$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlContractServerResponse$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlDeep$' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
@@ -1328,7 +1328,7 @@ runSubscriptionStateCompositionLeafSelectorsUseFunctionRegistryContract() {
 
     while read -r selector runner; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
         grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${suiteFile}" || status=1
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
         ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
@@ -2655,14 +2655,14 @@ runRealitySuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
-    grep -q 'registerRegressionFunctionLeaf "${selector}" "${runner}"' "${suiteFile}"
-    grep -q '^reality-candidates-fast runRealityCandidateFastRegression$' "${suiteFile}"
-    grep -q '^reality-asn-scan-plan runRealityAsnScanPlanRegression$' "${suiteFile}"
-    grep -q '^reality-candidates-full runRealityCandidateFullRegression$' "${suiteFile}"
-    grep -q '^reality-stream-enable runRealityStreamEnableRegression$' "${suiteFile}"
-    grep -q '^reality-stream-disable runRealityStreamDisableRegression$' "${suiteFile}"
-    grep -q '^reality-config runRealityConfigRegression$' "${suiteFile}"
-    grep -q '^reality-profile-failure runRealityProfileFailureRegression$' "${suiteFile}"
+    ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-config runRealityConfigRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
 }
