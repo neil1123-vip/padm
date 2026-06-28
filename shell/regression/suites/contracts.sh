@@ -114,6 +114,24 @@ runAggregateRunnerRegistrationAssertionContract() (
     fi
 )
 
+runAggregateRunnerRegistrationHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runFastRealityAggregateRunnerRegistrationContract \
+        runFastAggregateRunnerRegistrationContract \
+        runFastOnlyAggregateRunnerRegistrationContract \
+        runFastOnlyOutputAggregateRunnerRegistrationContract \
+        runTlsAggregateRunnerRegistrationContract \
+        runAllAggregateRunnerRegistrationContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() {" { in_fn = 1 }
+            in_fn && /runAggregateRunnerRegistrationAssertions \\/ { found = 1 }
+            in_fn && /^}$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
 runLegacyPublicSelectorRetirementHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
@@ -893,17 +911,17 @@ EOF
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast-reality"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential fast-reality \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionFastRealityChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast-reality"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast-reality"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast-reality"]:-}" == "runRegressionFastRealitySuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        fast-reality \
+        sequential \
+        runRegressionFastRealitySuiteRoot \
+        "${expectedChildren}"
 }
 
 runFastSelectorHelpersStayAlignedContract() (
@@ -946,46 +964,46 @@ EOF
 runFastAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf fast ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel fast runRegressionFastSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionFastChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast"]:-}" == "runRegressionFastSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        fast \
+        parallel \
+        runRegressionFastSuiteRoot \
+        "${expectedChildren}"
 }
 
 runFastOnlyAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast-only"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf fast-only ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf fast-only ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel fast-only runRegressionFastOnlySuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionFastOnlyChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast-only"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast-only"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast-only"]:-}" == "runRegressionFastOnlySuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        fast-only \
+        parallel \
+        runRegressionFastOnlySuiteRoot \
+        "${expectedChildren}"
 }
 
 runFastOnlyOutputAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast-only-output"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf fast-only-output ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf fast-only-output ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel fast-only-output runRegressionFastOnlyOutputSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionFastOnlyOutputChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast-only-output"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast-only-output"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast-only-output"]:-}" == "runRegressionFastOnlyOutputSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        fast-only-output \
+        parallel \
+        runRegressionFastOnlyOutputSuiteRoot \
+        "${expectedChildren}"
 }
 
 runFastRealityLegacyRetirementContract() {
@@ -1258,17 +1276,17 @@ EOF
 runTlsAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["tls"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential tls \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionTlsChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["tls"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["tls"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["tls"]:-}" == "runRegressionTlsSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        tls \
+        sequential \
+        runRegressionTlsSuiteRoot \
+        "${expectedChildren}"
 }
 
 runTlsLegacyRetirementContract() {
@@ -2680,17 +2698,17 @@ EOF
 runAllAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["all"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf all ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential all \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionAllChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["all"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["all"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["all"]:-}" == "runRegressionAllSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        all \
+        sequential \
+        runRegressionAllSuiteRoot \
+        "${expectedChildren}"
 }
 
 runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
@@ -3661,6 +3679,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
+        runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
