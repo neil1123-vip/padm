@@ -1985,6 +1985,21 @@ runUiFullLegacyWrapperRetirementContract() {
     ! grep -Fq '|ui-full|' "${legacyScriptFile}" || return 1
 }
 
+runUiFullSubscriptionMainLegacyWrapperRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^runRegressionUiFullSubscriptionMain() {$' "${suiteFile}" || return 1
+    grep -q '^runRegressionUiFullSubscriptionMainPublish() {$' "${suiteFile}" || return 1
+    grep -q '^runRegressionUiFullSubscriptionMainPublishUser() {$' "${suiteFile}" || return 1
+    grep -q '^runRegressionUiFullSubscriptionMainPublishSync() {$' "${suiteFile}" || return 1
+
+    ! grep -Eq '^runMenuSmokeFullSubscriptionMainRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runMenuSmokeFullSubscriptionMainPublishRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runMenuSmokeFullSubscriptionMainPublishUserRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runMenuSmokeFullSubscriptionMainPublishSyncRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+}
+
 runUiWireGuardLegacyWrapperRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -3953,6 +3968,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
         runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
         runRegressionStep ui-full-legacy-wrapper-retirement runUiFullLegacyWrapperRetirementContract &&
+        runRegressionStep ui-full-subscription-main-legacy-wrapper-retirement runUiFullSubscriptionMainLegacyWrapperRetirementContract &&
         runRegressionStep ui-wireguard-legacy-wrapper-retirement runUiWireGuardLegacyWrapperRetirementContract &&
         runRegressionStep ui-legacy-public-selector-retirement runUiLegacyPublicSelectorRetirementContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&

@@ -13438,53 +13438,12 @@ runMenuSmokeFullCoreRegression() {
     runMenuSmokeRegression core
 }
 
-runMenuSmokeFullSubscriptionMainRegression() {
-    runParallelRegressionSelectors "${TMP_DIR}/ui-full-subscription-main-parallel-${BASHPID:-$$}" \
-        ui-full-subscription-main-entry \
-        ui-full-subscription-main-publish-service \
-        ui-full-subscription-main-publish-user \
-        ui-full-subscription-main-publish-sync \
-        ui-full-subscription-main-maintenance
-}
-
 runMenuSmokeFullSubscriptionMainEntryRegression() {
     runMenuSmokeRegression subscription-main-entry
 }
 
-runMenuSmokeFullSubscriptionMainPublishRegression() {
-    runParallelRegressionSelectors "${TMP_DIR}/ui-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
-        ui-full-subscription-main-publish-service \
-        ui-full-subscription-main-publish-user \
-        ui-full-subscription-main-publish-sync
-}
-
 runMenuSmokeFullSubscriptionMainPublishServiceRegression() {
     runMenuSmokeRegression subscription-main-publish-service
-}
-
-runMenuSmokeFullSubscriptionMainPublishUserRegression() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
-        runParallelRegressionSelectors "${TMP_DIR}/ui-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
-        ui-full-subscription-main-publish-user-empty \
-        ui-full-subscription-main-publish-user-create \
-        ui-full-subscription-main-publish-user-inspect
-}
-
-runMenuSmokeFullSubscriptionMainPublishSyncRegression() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    selectors=(
-        ui-full-subscription-main-publish-sync-skip
-        ui-full-subscription-main-publish-sync-enable
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-        runParallelRegressionSelectors "${TMP_DIR}/ui-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
 }
 
 runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression() {
