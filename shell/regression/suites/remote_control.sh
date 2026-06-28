@@ -9,6 +9,21 @@ runRegressionRemoteControlSuiteSelector() {
     case "$1" in
     remote-control-smoke) runRegressionRemoteControlSmoke ;;
     remote-control-contract) runRegressionRemoteControlContract ;;
+    remote-control-smoke-core) runRegressionRemoteControlSmokeCore ;;
+    remote-control-smoke-refresh) runRegressionRemoteControlSmokeRefresh ;;
+    remote-control-smoke-refresh-apply) runRegressionRemoteControlSmokeRefreshApply ;;
+    remote-control-smoke-refresh-apply-basic) runRegressionRemoteControlSmokeRefreshApplyBasic ;;
+    remote-control-smoke-refresh-apply-prepare) runRegressionRemoteControlSmokeRefreshApplyPrepare ;;
+    remote-control-smoke-refresh-apply-failure) runRegressionRemoteControlSmokeRefreshApplyFailure ;;
+    remote-control-smoke-refresh-restore) runRegressionRemoteControlSmokeRefreshRestore ;;
+    remote-control-smoke-refresh-reconcile) runRegressionRemoteControlSmokeRefreshReconcile ;;
+    remote-control-contract-service-install) runRegressionRemoteControlContractServiceInstall ;;
+    remote-control-contract-service-install-success) runRegressionRemoteControlContractServiceInstallSuccess ;;
+    remote-control-contract-service-install-systemctl-fail) runRegressionRemoteControlContractServiceInstallSystemctlFail ;;
+    remote-control-contract-service-install-health-fail) runRegressionRemoteControlContractServiceInstallHealthFail ;;
+    remote-control-contract-service-install-health-rollback) runRegressionRemoteControlContractServiceInstallHealthRollback ;;
+    remote-control-contract-service-install-token-transaction) runRegressionRemoteControlContractServiceInstallTokenTransaction ;;
+    remote-control-contract-server-response) runRegressionRemoteControlContractServerResponse ;;
     remote-control-deep) runRegressionRemoteControlDeep ;;
     *) return 2 ;;
     esac

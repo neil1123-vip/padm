@@ -306,12 +306,18 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -q '^runParallelRemoteControlModes()' "${scriptFile}"
     ! grep -q '^runParallelRemoteControlTotals()' "${scriptFile}"
     ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${REMOTE_CONTROL_SCRIPT_PATH}"' "${scriptFile}"
-    grep -q 'apply runRegressionRemoteControlSmokeRefreshApply' "${scriptFile}"
-    grep -q 'reconcile runRegressionRemoteControlSmokeRefreshReconcile' "${scriptFile}"
-    grep -q 'service-install runRegressionRemoteControlContractServiceInstall' "${scriptFile}"
-    grep -q 'server-response runRegressionRemoteControlContractServerResponse' "${scriptFile}"
-    grep -q 'remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess' "${scriptFile}"
-    grep -q 'remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction' "${scriptFile}"
+    grep -q '^listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {$' "${scriptFile}"
+    grep -q '^listRegressionRemoteControlSmokeRefreshChildSelectors() {$' "${scriptFile}"
+    grep -q '^listRegressionRemoteControlSmokeChildSelectors() {$' "${scriptFile}"
+    grep -q '^listRegressionRemoteControlContractServiceInstallChildSelectors() {$' "${scriptFile}"
+    grep -q '^listRegressionRemoteControlContractChildSelectors() {$' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh"' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh-apply"' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke"' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract"' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract-service-install"' "${scriptFile}"
+    grep -q 'remote-control-smoke-refresh-apply-basic' "${scriptFile}"
+    grep -q 'remote-control-contract-service-install-token-transaction' "${scriptFile}"
 }
 
 runRemoteControlPublicSelectorRetirementContract() {
@@ -387,7 +393,8 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
     }
 
     runParallelRegressionRunners() {
-        printf '%s\n' "$*" >>"${callsFile}"
+        printf 'legacy-runner:%s\n' "$*" >>"${callsFile}"
+        return 97
     }
 
     : >"${callsFile}"
@@ -402,34 +409,68 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
     [[ "${#calls[@]}" -eq 6 ]] || return 1
     [[ "${calls[0]}" == framework:"${TMP_DIR}/remote-control-default-"* ]] || return 1
     [[ "${calls[0]}" == *' remote-control-smoke remote-control-smoke remote-control-contract remote-control-contract remote-control-deep remote-control-deep' ]] || return 1
-    [[ "${calls[1]}" == "${TMP_DIR}/remote-control-smoke-refresh apply runRegressionRemoteControlSmokeRefreshApply restore runRegressionRemoteControlSmokeRefreshRestore reconcile runRegressionRemoteControlSmokeRefreshReconcile" ]]
-    [[ "${calls[2]}" == "${TMP_DIR}/remote-control-smoke-refresh-apply basic runRegressionRemoteControlSmokeRefreshApplyBasic prepare runRegressionRemoteControlSmokeRefreshApplyPrepare failure runRegressionRemoteControlSmokeRefreshApplyFailure" ]]
-    [[ "${calls[3]}" == "${TMP_DIR}/remote-control-smoke smoke-core runRegressionRemoteControlSmokeCore smoke-refresh runRegressionRemoteControlSmokeRefresh" ]]
-    [[ "${calls[4]}" == "${TMP_DIR}/remote-control-contract service-install runRegressionRemoteControlContractServiceInstall server-response runRegressionRemoteControlContractServerResponse" ]]
-    [[ "${calls[5]}" == "${TMP_DIR}/remote-control-contract-service-install remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction" ]]
+    [[ "${calls[1]}" == "framework:${TMP_DIR}/remote-control-smoke-refresh remote-control-smoke-refresh-apply remote-control-smoke-refresh-apply remote-control-smoke-refresh-restore remote-control-smoke-refresh-restore remote-control-smoke-refresh-reconcile remote-control-smoke-refresh-reconcile" ]] || return 1
+    [[ "${calls[2]}" == "framework:${TMP_DIR}/remote-control-smoke-refresh-apply remote-control-smoke-refresh-apply-basic remote-control-smoke-refresh-apply-basic remote-control-smoke-refresh-apply-prepare remote-control-smoke-refresh-apply-prepare remote-control-smoke-refresh-apply-failure remote-control-smoke-refresh-apply-failure" ]] || return 1
+    [[ "${calls[3]}" == "framework:${TMP_DIR}/remote-control-smoke remote-control-smoke-core remote-control-smoke-core remote-control-smoke-refresh remote-control-smoke-refresh" ]] || return 1
+    [[ "${calls[4]}" == "framework:${TMP_DIR}/remote-control-contract remote-control-contract-service-install remote-control-contract-service-install remote-control-contract-server-response remote-control-contract-server-response" ]] || return 1
+    [[ "${calls[5]}" == "framework:${TMP_DIR}/remote-control-contract-service-install remote-control-contract-service-install-success remote-control-contract-service-install-success remote-control-contract-service-install-systemctl-fail remote-control-contract-service-install-systemctl-fail remote-control-contract-service-install-health-fail remote-control-contract-service-install-health-fail remote-control-contract-service-install-health-rollback remote-control-contract-service-install-health-rollback remote-control-contract-service-install-token-transaction remote-control-contract-service-install-token-transaction" ]] || return 1
+    ! grep -q '^legacy-runner:' "${callsFile}" || return 1
 )
 
 runRemoteControlSelectorHelpersStayAlignedContract() (
-    local defaultSelectorsFile="${TMP_DIR}/remote-control-default-selectors.txt"
-    local defaultSortedFile="${TMP_DIR}/remote-control-default-selectors.sorted.txt"
-    local expectedDefaultSelectorsFile="${TMP_DIR}/remote-control-default-selectors.expected.txt"
+    local helperDir="${TMP_DIR}/remote-control-selector-helpers"
+
+    mkdir -p "${helperDir}"
 
     declare -F listRegressionRemoteControlChildSelectors >/dev/null
+    declare -F listRegressionRemoteControlSmokeRefreshApplyChildSelectors >/dev/null
+    declare -F listRegressionRemoteControlSmokeRefreshChildSelectors >/dev/null
+    declare -F listRegressionRemoteControlSmokeChildSelectors >/dev/null
+    declare -F listRegressionRemoteControlContractServiceInstallChildSelectors >/dev/null
+    declare -F listRegressionRemoteControlContractChildSelectors >/dev/null
 
-    listRegressionRemoteControlChildSelectors >"${defaultSelectorsFile}"
+    remoteControlAssertSelectorList() {
+        local helperFn=$1
+        local helperName=$2
+        shift 2
+        local actualFile="${helperDir}/${helperName}.actual.txt"
+        local expectedFile="${helperDir}/${helperName}.expected.txt"
+        local sortedFile="${helperDir}/${helperName}.sorted.txt"
+        local uniqueFile="${helperDir}/${helperName}.unique.txt"
 
-    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
-remote-control-smoke
-remote-control-contract
-remote-control-deep
-EOF
+        "${helperFn}" >"${actualFile}"
+        printf '%s\n' "$@" >"${expectedFile}"
 
-    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+        cmp -s "${expectedFile}" "${actualFile}"
+        sort "${actualFile}" >"${sortedFile}"
+        sort -u "${actualFile}" >"${uniqueFile}"
+        cmp -s "${sortedFile}" "${uniqueFile}"
+    }
 
-    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
-    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/remote-control-default-selectors.unique.txt"
-
-    cmp -s "${defaultSortedFile}" "${TMP_DIR}/remote-control-default-selectors.unique.txt"
+    remoteControlAssertSelectorList listRegressionRemoteControlChildSelectors default \
+        remote-control-smoke \
+        remote-control-contract \
+        remote-control-deep
+    remoteControlAssertSelectorList listRegressionRemoteControlSmokeRefreshApplyChildSelectors smoke-refresh-apply \
+        remote-control-smoke-refresh-apply-basic \
+        remote-control-smoke-refresh-apply-prepare \
+        remote-control-smoke-refresh-apply-failure
+    remoteControlAssertSelectorList listRegressionRemoteControlSmokeRefreshChildSelectors smoke-refresh \
+        remote-control-smoke-refresh-apply \
+        remote-control-smoke-refresh-restore \
+        remote-control-smoke-refresh-reconcile
+    remoteControlAssertSelectorList listRegressionRemoteControlSmokeChildSelectors smoke \
+        remote-control-smoke-core \
+        remote-control-smoke-refresh
+    remoteControlAssertSelectorList listRegressionRemoteControlContractServiceInstallChildSelectors contract-service-install \
+        remote-control-contract-service-install-success \
+        remote-control-contract-service-install-systemctl-fail \
+        remote-control-contract-service-install-health-fail \
+        remote-control-contract-service-install-health-rollback \
+        remote-control-contract-service-install-token-transaction
+    remoteControlAssertSelectorList listRegressionRemoteControlContractChildSelectors contract \
+        remote-control-contract-service-install \
+        remote-control-contract-server-response
 )
 
 runRemoteControlAggregateRunnerRegistrationContract() {
