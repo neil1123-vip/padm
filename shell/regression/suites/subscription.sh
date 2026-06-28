@@ -5,6 +5,23 @@ REGRESSION_SUBSCRIPTION_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
 source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"
 
+runRegressionSubscriptionLegacyLeafWithCompat() (
+    # Re-source legacy subscription fixtures in an isolated subshell so later
+    # suite loads cannot leave source-time TMP_DIR-derived paths stale.
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"
+    "$@"
+)
+
+runRegressionSubscriptionOutputCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput; }
+runRemoteSubscribeFetchUniqueCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchUniqueRegression; }
+runRemoteSubscribeFetchRollbackCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchRollbackRegression; }
+runRemoteSubscribeFetchMergeCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchMergeRegression; }
+runRemoteSubscribeFetchControlledCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchControlledRegression; }
+runRemoteSubscribeFetchAppendFailureCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchAppendFailureRegression; }
+runRemoteSubscribeFetchCommitFailureCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchCommitFailureRegression; }
+runRemoteSubscribeFetchIdempotentCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchIdempotentRegression; }
+runSingBoxSubscribeWriteCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runSingBoxSubscribeWriteRegression; }
+
 runRegressionSubscriptionRemoteSuiteRoot() {
     local -a selectors=()
     local -a selectorPairs=()
@@ -171,6 +188,17 @@ runRegressionSubscriptionTxParallelCompositionRegression() (
     ' "${callLog}"
 )
 
+runRegressionSubscriptionLegacyTmpDirIsolationRegression() (
+    set -euo pipefail
+    local originalTmpDir="${TMP_DIR}"
+
+    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
+    source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../bootstrap.sh"
+    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain sing-box-subscribe-write
+)
+
 runRegressionSubscriptionParallelCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-subscription-parallel-composition.log"
@@ -230,15 +258,15 @@ runRegressionSubscriptionParallelCompositionRegression() (
     ' "${callLog}"
 )
 
-registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput
-registerRegressionFunctionLeaf subscription-remote-unique runRemoteSubscribeFetchUniqueRegression
-registerRegressionFunctionLeaf subscription-remote-rollback runRemoteSubscribeFetchRollbackRegression
-registerRegressionFunctionLeaf subscription-remote-merge runRemoteSubscribeFetchMergeRegression
-registerRegressionFunctionLeaf subscription-remote-controlled runRemoteSubscribeFetchControlledRegression
-registerRegressionFunctionLeaf subscription-remote-append-failure runRemoteSubscribeFetchAppendFailureRegression
-registerRegressionFunctionLeaf subscription-remote-commit-failure runRemoteSubscribeFetchCommitFailureRegression
-registerRegressionFunctionLeaf subscription-remote-idempotent runRemoteSubscribeFetchIdempotentRegression
-registerRegressionFunctionLeaf sing-box-subscribe-write runSingBoxSubscribeWriteRegression
+registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutputCompatRegression
+registerRegressionFunctionLeaf subscription-remote-unique runRemoteSubscribeFetchUniqueCompatRegression
+registerRegressionFunctionLeaf subscription-remote-rollback runRemoteSubscribeFetchRollbackCompatRegression
+registerRegressionFunctionLeaf subscription-remote-merge runRemoteSubscribeFetchMergeCompatRegression
+registerRegressionFunctionLeaf subscription-remote-controlled runRemoteSubscribeFetchControlledCompatRegression
+registerRegressionFunctionLeaf subscription-remote-append-failure runRemoteSubscribeFetchAppendFailureCompatRegression
+registerRegressionFunctionLeaf subscription-remote-commit-failure runRemoteSubscribeFetchCommitFailureCompatRegression
+registerRegressionFunctionLeaf subscription-remote-idempotent runRemoteSubscribeFetchIdempotentCompatRegression
+registerRegressionFunctionLeaf sing-box-subscribe-write runSingBoxSubscribeWriteCompatRegression
 registerRegressionFunctionLeaf cdn-address-write-transaction runCdnAddressTransactionRegression
 registerRegressionFunctionLeaf subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 registerRegressionFunctionLeaf subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
@@ -257,6 +285,7 @@ registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runUserSu
 registerRegressionFunctionLeaf regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
+registerRegressionFunctionLeaf regression-subscription-legacy-tmpdir-isolation runRegressionSubscriptionLegacyTmpDirIsolationRegression
 
 registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \
     $(listRegressionSubscriptionRemoteChildSelectors)

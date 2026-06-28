@@ -1064,15 +1064,15 @@ runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract() {
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
-subscription-output runRegressionSubscriptionOutput
-subscription-remote-unique runRemoteSubscribeFetchUniqueRegression
-subscription-remote-rollback runRemoteSubscribeFetchRollbackRegression
-subscription-remote-merge runRemoteSubscribeFetchMergeRegression
-subscription-remote-controlled runRemoteSubscribeFetchControlledRegression
-subscription-remote-append-failure runRemoteSubscribeFetchAppendFailureRegression
-subscription-remote-commit-failure runRemoteSubscribeFetchCommitFailureRegression
-subscription-remote-idempotent runRemoteSubscribeFetchIdempotentRegression
-sing-box-subscribe-write runSingBoxSubscribeWriteRegression
+subscription-output runRegressionSubscriptionOutputCompatRegression
+subscription-remote-unique runRemoteSubscribeFetchUniqueCompatRegression
+subscription-remote-rollback runRemoteSubscribeFetchRollbackCompatRegression
+subscription-remote-merge runRemoteSubscribeFetchMergeCompatRegression
+subscription-remote-controlled runRemoteSubscribeFetchControlledCompatRegression
+subscription-remote-append-failure runRemoteSubscribeFetchAppendFailureCompatRegression
+subscription-remote-commit-failure runRemoteSubscribeFetchCommitFailureCompatRegression
+subscription-remote-idempotent runRemoteSubscribeFetchIdempotentCompatRegression
+sing-box-subscribe-write runSingBoxSubscribeWriteCompatRegression
 cdn-address-write-transaction runCdnAddressTransactionRegression
 subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
@@ -1169,7 +1169,7 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutputCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}"
@@ -2626,7 +2626,7 @@ runSubscriptionOutputLegacyRetirementContract() {
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutputCompatRegression$' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionOutput\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
     ! grep -Eq '^[[:space:]]*subscription-output\)$' "${legacyFile}" || return 1
     ! grep -Fq '|subscription-output|' "${legacyFile}" || return 1
