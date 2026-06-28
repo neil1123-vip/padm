@@ -26,6 +26,50 @@ runRegressionRegistryRetiresScriptSelectorKindContract() {
     ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${scriptPath}" "\${runner}"' "${registryFile}"
 }
 
+runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract() (
+    local dispatcherFile="${PROJECT_ROOT}/shell/subscription_groups_regression.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local helperDir="${TMP_DIR}/pre-legacy-suite-collision-check"
+    local legacyNamesFile="${helperDir}/legacy.names"
+    local suiteFilesFile="${helperDir}/pre-legacy-suites.txt"
+    local collisionsFile="${helperDir}/collisions.txt"
+    local relativeSuiteFile=
+    local suiteFile=
+    local functionName=
+
+    mkdir -p "${helperDir}"
+
+    grep -E '^(runRegression|listRegression)[A-Za-z0-9_]+\(\)' "${legacyFile}" |
+        sed -E 's/\(\).*$//' |
+        sort -u >"${legacyNamesFile}"
+
+    awk '
+        /regression\/suites\/legacy\.sh/ { exit }
+        match($0, /source "\$\{SCRIPT_DIR\}\/(regression\/suites\/[^"]+)"/, capture) {
+            print capture[1]
+        }
+    ' "${dispatcherFile}" >"${suiteFilesFile}"
+
+    : >"${collisionsFile}"
+    while IFS= read -r relativeSuiteFile; do
+        [[ -n "${relativeSuiteFile}" ]] || continue
+        suiteFile="${PROJECT_ROOT}/shell/${relativeSuiteFile}"
+        while IFS= read -r functionName; do
+            [[ -n "${functionName}" ]] || continue
+            if grep -qx "${functionName}" "${legacyNamesFile}"; then
+                printf '%s:%s\n' "${relativeSuiteFile}" "${functionName}" >>"${collisionsFile}"
+            fi
+        done < <(
+            grep -E '^(runRegression|listRegression)[A-Za-z0-9_]+\(\)' "${suiteFile}" |
+                sed -E 's/\(\).*$//' |
+                sort -u
+        )
+    done <"${suiteFilesFile}"
+
+    ! grep -q '^regression/suites/legacy\.sh$' "${suiteFilesFile}"
+    [[ ! -s "${collisionsFile}" ]]
+)
+
 runSubscriptionStateNoImplicitFullFallbackContract() {
     local stateShim="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state.sh"
 
@@ -3618,6 +3662,7 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
+        runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
         runRegressionStep subscription-state-shim-stays-thin runSubscriptionStateShimStaysThinContract &&
