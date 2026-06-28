@@ -1001,6 +1001,7 @@ runUiSuiteUsesFunctionRegistryContract() {
 
     grep -q 'source "\${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || return 1
+    grep -q '^runRegressionMenuSmokeFull() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionUiChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionUiAllProfileChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionUiSmokeSuiteRoot() {$' "${suiteFile}" || return 1
@@ -1037,6 +1038,17 @@ runUiSmokeLegacyWrapperRetirementContract() {
     ! grep -Eq '^runRegressionMenuSmoke\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
     ! grep -Eq '^[[:space:]]*ui-smoke\)$' "${legacyScriptFile}" || return 1
     ! grep -Fq '|ui-smoke|' "${legacyScriptFile}" || return 1
+}
+
+runUiFullLegacyWrapperRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^runRegressionMenuSmokeFull() {$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionMenuSmokeFull\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*ui-full\)$' "${legacyScriptFile}" || return 1
+    ! grep -Fq '|ui-full|' "${legacyScriptFile}" || return 1
 }
 
 runUiSelectorHelpersStayAlignedContract() (
@@ -2637,6 +2649,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep targeted-subscription-restore-retirement runTargetedSubscriptionRestoreRetirementContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
         runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
+        runRegressionStep ui-full-legacy-wrapper-retirement runUiFullLegacyWrapperRetirementContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&

@@ -88,6 +88,29 @@ runRegressionUiSmokeSuiteRoot() {
     coreInstallType="${oldCoreInstallType}"
 }
 
+runRegressionMenuSmokeFull() {
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    selectors=(
+        ui-full-subscription-main-entry
+        ui-full-subscription-main-publish-service
+        ui-full-subscription-main-publish-user
+        ui-full-subscription-main-publish-sync
+        ui-full-subscription-main-maintenance
+        ui-full-subscription-controlled
+        ui-full-core
+        ui-full-core-maintenance
+    )
+    for selector in "${selectors[@]}"; do
+        selectorPairs+=("${selector}" "${selector}")
+    done
+    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" \
+        "${selectorPairs[@]}"
+}
+
 listRegressionUiChildSelectors() {
     printf '%s\n' \
         ui-full-subscription-main-publish-sync-enable \
