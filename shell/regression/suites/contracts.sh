@@ -296,6 +296,7 @@ runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
+        runUiAggregateRunnerUsesFrameworkSelectorHelperContract \
         runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract \
         runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract \
         runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract; do
@@ -2207,8 +2208,6 @@ runUiAggregateRunnerUsesSuiteLocalHelperContract() (
 runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/ui-framework-helper-dispatch.log"
 
-    : >"${callLog}"
-
     listRegressionUiChildSelectors() {
         printf '%s\n' \
             ui-smoke \
@@ -2275,20 +2274,24 @@ runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
             ui-full-subscription-main-publish-sync-enable
     }
 
-    runRegressionUiSuiteRoot
-    PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionUiSuiteRoot
-    runRegressionUiFullSubscriptionMain
-    runRegressionUiFullSubscriptionMainPublish
-    runRegressionUiFullSubscriptionMainPublishUser
-    runRegressionUiFullSubscriptionMainPublishSync
+    runUiAggregateRunnerUsesFrameworkSelectorHelperRunner() {
+        runRegressionUiSuiteRoot
+        PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionUiSuiteRoot
+        runRegressionUiFullSubscriptionMain
+        runRegressionUiFullSubscriptionMainPublish
+        runRegressionUiFullSubscriptionMainPublishUser
+        runRegressionUiFullSubscriptionMainPublishSync
+    }
 
-    grep -qx 'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke ui-full-core ui-full-core' "${callLog}"
-    grep -qx 'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke wireguard-restore-runner wireguard-restore-runner' "${callLog}"
-    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-parallel-[0-9][0-9]* ui-full-subscription-main-entry ui-full-subscription-main-entry ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync ui-full-subscription-main-maintenance ui-full-subscription-main-maintenance' "${callLog}"
-    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-parallel-[0-9][0-9]* ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync' "${callLog}"
-    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-user-parallel-[0-9][0-9]* ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-inspect ui-full-subscription-main-publish-user-inspect' "${callLog}"
-    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-sync-parallel-[0-9][0-9]* ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-enable ui-full-subscription-main-publish-sync-enable' "${callLog}"
-    ! grep -q '^legacy-helper:' "${callLog}"
+    runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
+        "${callLog}" \
+        runUiAggregateRunnerUsesFrameworkSelectorHelperRunner \
+        'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke ui-full-core ui-full-core' \
+        'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke wireguard-restore-runner wireguard-restore-runner' \
+        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-parallel-[0-9][0-9]* ui-full-subscription-main-entry ui-full-subscription-main-entry ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync ui-full-subscription-main-maintenance ui-full-subscription-main-maintenance' \
+        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-parallel-[0-9][0-9]* ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync' \
+        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-user-parallel-[0-9][0-9]* ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-inspect ui-full-subscription-main-publish-user-inspect' \
+        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-sync-parallel-[0-9][0-9]* ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-enable ui-full-subscription-main-publish-sync-enable'
 )
 
 runRoutingLegacyPublicSelectorRetirementContract() {
