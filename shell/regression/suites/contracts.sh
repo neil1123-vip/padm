@@ -93,6 +93,12 @@ runLegacyPublicSelectorRetirementHelperAdoptionContract() {
         in_fn && /runLegacyPublicSelectorRetirementAssertions "\$\{legacyScriptFile\}" \\/ { found = 1 }
         in_fn && /^}$/ { exit(found ? 0 : 1) }
     ' "${contractsFile}" || return 1
+
+    awk '
+        /^runUiLegacyPublicSelectorRetirementContract\(\) \{$/ { in_fn = 1 }
+        in_fn && /runLegacyPublicSelectorRetirementAssertions "\$\{legacyScriptFile\}" \\/ { found = 1 }
+        in_fn && /^}$/ { exit(found ? 0 : 1) }
+    ' "${contractsFile}" || return 1
 }
 
 runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract() (
@@ -1792,20 +1798,46 @@ runUiLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local selector
-    local usageLine
-    local usageSelectors
     local uiLeafLine
     local uiLeafSelectors
 
     grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}" || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
     uiLeafLine=$(grep -F 'ui leaf selectors: ' "${legacyScriptFile}" || true)
     uiLeafSelectors="${uiLeafLine#*: }"
     uiLeafSelectors="${uiLeafSelectors%%\\n*}"
+
+    runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" \
+        ui \
+        ui-full-core \
+        ui-full-subscription-main \
+        ui-full-subscription-main-entry \
+        ui-full-subscription-main-publish \
+        ui-full-subscription-main-publish-service \
+        ui-full-subscription-main-publish-user \
+        ui-full-subscription-main-publish-user-empty \
+        ui-full-subscription-main-publish-user-create \
+        ui-full-subscription-main-publish-user-inspect \
+        ui-full-subscription-main-publish-sync \
+        ui-full-subscription-main-publish-sync-skip \
+        ui-full-subscription-main-publish-sync-enable \
+        ui-full-subscription-main-maintenance \
+        ui-full-subscription-controlled \
+        ui-full-core-maintenance \
+        wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status \
+        wireguard-menu-flow-control-restore \
+        wireguard-restore-runner \
+        regression-ui-parallel-composition \
+        regression-ui-long-tail-split-composition
 
     for selector in \
         ui \
@@ -1838,17 +1870,6 @@ runUiLegacyPublicSelectorRetirementContract() {
         wireguard-restore-runner \
         regression-ui-parallel-composition \
         regression-ui-long-tail-split-composition; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyScriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
         [[ -z "${uiLeafLine}" || "|${uiLeafSelectors}|" != *"|${selector}|"* ]] || return 1
     done
 }
