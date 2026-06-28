@@ -133,6 +133,10 @@ Key selectors:
 - `subscription-output-tls-vless-vmess-trojan`
 - `subscription-output-tls-any-hysteria-tuic-naive`
 
+The public `subscription-output` wrapper still appends one compatibility tail step after the parallel suite root:
+
+- `subscription-remote-sources-no-reverse-decode`
+
 Defaults:
 
 - `PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS` falls back to `PADM_REGRESSION_PARALLEL_JOBS`, then `2`
@@ -427,9 +431,16 @@ Contract coverage includes:
 - selector registration shape
 - legacy retirement guards
 - aggregate-runner registration expectations
+- wrapper and child-step ordering guards
 - parallel composition behavior
 - child budget forwarding
 - resource-layer ordering
+
+Repeated straight-line `runRegressionStep` chains now share one assertion helper:
+
+- `runRegressionStepSequenceAssertions`
+
+That helper is used only for fully repeated sequence shapes. Wrapper-order guards that mix suite-root calls with explicit serial tail steps remain suite-specific and explicit.
 
 Representative composition checks already exist for:
 
@@ -453,8 +464,9 @@ Recommended verification set for future harness changes:
 3. targeted composition selectors for touched suites
 4. `shell/subscription_groups_regression.sh regression-dispatcher-contract`
 5. `shell/subscription_groups_regression.sh regression-all-composition`
-6. `shell/subscription_groups_regression.sh regression-all-resource-layer-composition`
-7. `git diff --check`
+6. `shell/subscription_groups_regression.sh regression-all-child-parallel-budget-composition`
+7. `shell/subscription_groups_regression.sh regression-all-resource-layer-composition`
+8. `git diff --check`
 
 ## Implemented Milestones
 
@@ -479,6 +491,28 @@ Already landed in this branch:
 - `8c4ba82` `refactor: dedupe framework helper contracts`
 - `9eb8ced` `refactor: dedupe layered framework helper contracts`
 - `a0f1222` `refactor: dedupe ui framework helper contract`
+- `9565ff4` `refactor: localize subscription selector helpers`
+- `364d9f3` `refactor: guard routing compat contracts`
+- `d3a5c75` `refactor: guard subscription-state support steps`
+- `07ed432` `refactor: guard subscription-state serial steps`
+- `6f4f141` `refactor: guard remote control smoke core steps`
+- `c81bcd7` `refactor: guard platform refresh steps`
+- `6814252` `refactor: guard fast auto install steps`
+- `40fd32e` `refactor: guard fast output rest steps`
+- `86bf29e` `refactor: guard fast core steps`
+- `8edde82` `refactor: guard fast safety steps`
+- `8f36627` `refactor: guard platform rest steps`
+- `57196d9` `refactor: guard platform update steps`
+- `f8754d3` `refactor: guard reality suite steps`
+- `1baf3dc` `refactor: guard runtime suite steps`
+- `4ef5932` `refactor: guard platform io steps`
+- `b020cef` `refactor: guard tls suite steps`
+- `924ebd5` `refactor: guard transaction subscription steps`
+- `b8c6402` `refactor: guard targeted batch helper steps`
+- `7a46d83` `refactor: guard subscription output wrapper steps`
+- `a43c112` `refactor: guard transaction suite wrapper steps`
+- `f1e39b0` `refactor: guard all suite wrapper steps`
+- `1d36d7a` `refactor: dedupe child step contract assertions`
 
 Together these commits establish the current harness direction:
 
@@ -486,8 +520,9 @@ Together these commits establish the current harness direction:
 - selector-owned suite topology
 - targeted legacy compat wrappers
 - resource-aware layered parallelism
-- shared contract helpers for repeated framework invariants
+- shared contract helpers for repeated framework invariants and repeated child-step sequences
 - source-order guards where pre-legacy suite loads can silently collide with legacy names
+- explicit wrapper-order guards where public suite roots still mix aggregate calls with serial tail steps
 
 ## Remaining Cleanup Opportunities
 
@@ -497,7 +532,7 @@ Most likely next steps:
 
 1. keep reviewing legacy-backed suites for source-time global drift and add compat wrappers only where concrete collisions are proven
 2. decide whether nested aggregates still living inside legacy-backed scripts should also be lifted onto selector-list orchestration, or intentionally remain local runner groups
-3. keep trimming contract duplication only where a cross-suite assertion shape is still materially repeated; most shared aggregate-runner and helper-dispatch invariants now already sit behind common assertion helpers
+3. keep trimming contract duplication only where a cross-suite assertion shape is still materially repeated; aggregate-runner, helper-dispatch, and straight-line child-step invariants now already sit behind common helpers, so mixed wrapper-order contracts should stay explicit unless a truly repeated shape emerges
 4. refresh this design snapshot whenever a suite root, resource-profile boundary, or contract-helper boundary changes, so the spec remains an authoritative map instead of a historical note
 
 Deferred on purpose:
@@ -515,6 +550,6 @@ Key decisions captured by the current implementation:
 3. split long tails where timing gains are material, but keep leaf coverage unchanged
 4. forward child concurrency budgets from `all` instead of letting every nested suite fully fan out
 5. use isolated compat wrappers when legacy source-time globals make shared sourcing unsafe
-6. prefer shared contract assertion helpers for repeated framework invariants, but leave suite-specific composition expectations explicit until a clear cross-suite shape appears
+6. prefer shared contract assertion helpers for repeated framework invariants and fully repeated child-step sequences, but leave wrapper-order expectations explicit when they combine suite-root calls with serial tail steps
 
 That is the intended baseline for the next round of regression time work.
