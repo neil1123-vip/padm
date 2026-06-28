@@ -120,6 +120,7 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateStructureChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateSyncRollbackFailureChildSelectors >/dev/null
 
     subscriptionStateAssertSelectorList() {
         local helperFn=$1
@@ -164,6 +165,11 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-remote-restore-self-reference \
         subscription-state-remote-restore-state-write \
         subscription-state-remote-restore-legacy-menu
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateSyncRollbackFailureChildSelectors sync-rollback-failure \
+        subscription-sync-rollback-config-restore-failure \
+        subscription-sync-restore-dir-failure \
+        subscription-sync-reload-rollback \
+        subscription-group-sync-rollback
 )
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
@@ -214,10 +220,12 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     grep -q '^listRegressionSubscriptionStateStructureChildSelectors() {$' "${scriptFile}"
     grep -q '^listRegressionSubscriptionStateQuotaChildSelectors() {$' "${scriptFile}"
     grep -q '^listRegressionSubscriptionStateRemoteRestoreChildSelectors() {$' "${scriptFile}"
+    grep -q '^listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {$' "${scriptFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation"' "${scriptFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' "${scriptFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota"' "${scriptFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore"' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure"' "${scriptFile}"
 
     coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${suiteFile}")
     stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${suiteFile}")
@@ -299,9 +307,10 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
     runRegressionSubscriptionStateStructure
     runRegressionSubscriptionStateQuota
     runRegressionSubscriptionStateRemoteRestore
+    runRegressionSubscriptionStateSyncRollback
 
     mapfile -t calls <"${callsFile}"
-    [[ "${#calls[@]}" -eq 6 ]]
+    [[ "${#calls[@]}" -eq 7 ]]
     [[ "${calls[0]}" == framework:"${TMP_DIR}/subscription-state-core-"* ]]
     [[ "${calls[1]}" == framework:"${TMP_DIR}/subscription-state-default-"* ]]
     [[ "${calls[0]}" == *' subscription-state-structure subscription-state-structure subscription-state-quota subscription-state-quota subscription-state-remote-restore subscription-state-remote-restore' ]]
@@ -310,6 +319,7 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
     [[ "${calls[3]}" == "framework:${TMP_DIR}/subscription-state-structure subscription-state-structure-foundation subscription-state-structure-foundation subscription-state-structure-migration subscription-state-structure-migration subscription-state-structure-source subscription-state-structure-source" ]]
     [[ "${calls[4]}" == "framework:${TMP_DIR}/subscription-state-quota subscription-state-quota-traffic subscription-state-quota-traffic subscription-state-quota-menu-tx subscription-state-quota-menu-tx subscription-state-quota-partial-sync subscription-state-quota-partial-sync" ]]
     [[ "${calls[5]}" == "framework:${TMP_DIR}/subscription-state-remote-restore subscription-state-remote-restore-self-reference subscription-state-remote-restore-self-reference subscription-state-remote-restore-state-write subscription-state-remote-restore-state-write subscription-state-remote-restore-legacy-menu subscription-state-remote-restore-legacy-menu" ]]
+    [[ "${calls[6]}" == "framework:${TMP_DIR}/subscription-sync-rollback-failure subscription-sync-rollback-config-restore-failure subscription-sync-rollback-config-restore-failure subscription-sync-restore-dir-failure subscription-sync-restore-dir-failure subscription-sync-reload-rollback subscription-sync-reload-rollback subscription-group-sync-rollback subscription-group-sync-rollback" ]]
     ! grep -q '^legacy-runner:' "${callsFile}"
 )
 
@@ -1273,6 +1283,7 @@ regression-transaction-core-parallel-composition
 regression-transaction-system-parallel-composition
 regression-subscription-state-remote-restore-parallel-isolation-composition
 regression-subscription-state-structure-parallel-isolation-composition
+regression-subscription-state-sync-rollback-parallel-isolation-composition
 regression-ui-parallel-composition
 regression-ui-long-tail-split-composition
 regression-selector-dispatch-composition
@@ -1448,6 +1459,7 @@ runSubscriptionStateCompositionLeafSelectorsUseFunctionRegistryContract() {
     done <<'EOF'
 regression-subscription-state-remote-restore-parallel-isolation-composition runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegression
 regression-subscription-state-structure-parallel-isolation-composition runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression
+regression-subscription-state-sync-rollback-parallel-isolation-composition runRegressionSubscriptionStateSyncRollbackParallelIsolationCompositionRegression
 EOF
 
     return "${status}"

@@ -145,6 +145,75 @@ runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression() 
     ' "${callLog}"
 )
 
+runRegressionSubscriptionStateSyncRollbackParallelIsolationCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-state-sync-rollback-parallel-isolation-composition.log"
+    local startMarker="${TMP_DIR}/subscription-state-sync-rollback-reload-started"
+
+    : >"${callLog}"
+    rm -f "${startMarker}"
+
+    runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe() {
+        local selector=$1
+
+        printf '%s|start|tmp=%s|groups=%s\n' \
+            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
+        if [[ "${selector}" == "sync-rollback-config-restore-failure" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${startMarker}" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "sync-reload-rollback" ]]; then
+            : >"${startMarker}"
+        fi
+        printf '%s|finish|tmp=%s|groups=%s\n' \
+            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
+    }
+
+    runRegressionSubscriptionSyncRollbackConfigRestoreFailure() {
+        runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe sync-rollback-config-restore-failure
+    }
+
+    runRegressionSubscriptionSyncRollbackRestoreDirFailure() {
+        runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe sync-restore-dir-failure
+    }
+
+    runRegressionSubscriptionSyncRollbackReloadRollback() {
+        runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe sync-reload-rollback
+    }
+
+    runRegressionSubscriptionGroupSyncRollback() {
+        runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe group-sync-rollback
+    }
+
+    runSubscriptionSyncRollbackFailureRegression
+
+    for selector in \
+        sync-rollback-config-restore-failure \
+        sync-restore-dir-failure \
+        sync-reload-rollback \
+        group-sync-rollback; do
+        grep -q "^${selector}|start|" "${callLog}"
+        grep -q "^${selector}|finish|" "${callLog}"
+    done
+    awk -F'[|=]' '
+        $1 == "sync-rollback-config-restore-failure" && $2 == "start" { firstStart = NR }
+        $1 == "sync-reload-rollback" && $2 == "start" { reloadStart = NR }
+        $1 == "sync-rollback-config-restore-failure" && $2 == "finish" { firstFinish = NR }
+        END { exit !(firstStart && reloadStart && firstFinish && reloadStart < firstFinish) }
+    ' "${callLog}"
+    awk -F'[|=]' '
+        $2 == "start" {
+            tmp[$4] = 1
+            groups[$6] = 1
+            if (index($6, $4 "/groups") != 1) {
+                bad = 1
+            }
+        }
+        END { exit !(length(tmp) == 4 && length(groups) == 4 && !bad) }
+    ' "${callLog}"
+)
+
 registerRegressionFunctionLeaf subscription-state-serial runRegressionSubscriptionStateSerial
 registerRegressionFunctionLeaf subscription-state-structure runRegressionSubscriptionStateStructure
 registerRegressionFunctionLeaf subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation
@@ -202,6 +271,7 @@ registerRegressionFunctionLeaf subscription-sync-reconcile-early-exit runRegress
 registerRegressionFunctionLeaf subscription-groups-restore-failure runRegressionSubscriptionGroupsRestoreFailure
 registerRegressionFunctionLeaf regression-subscription-state-remote-restore-parallel-isolation-composition runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-state-structure-parallel-isolation-composition runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression
+registerRegressionFunctionLeaf regression-subscription-state-sync-rollback-parallel-isolation-composition runRegressionSubscriptionStateSyncRollbackParallelIsolationCompositionRegression
 
 listRegressionSubscriptionStateCoreChildSelectors() {
     printf '%s\n' \

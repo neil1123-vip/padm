@@ -1654,13 +1654,44 @@ runSubscriptionGroupSyncRollbackSerialRegression() {
         runRegressionStep subscription-group-sync-remote-before-publish-refresh runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression
 }
 
+runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-sync-rollback-config-restore-failure runRegressionSubscriptionSyncRollbackConfigRestoreFailure
+}
+
+runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-sync-restore-dir-failure runRegressionSubscriptionSyncRollbackRestoreDirFailure
+}
+
+runRegressionSubscriptionSyncRollbackReloadRollbackIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-sync-reload-rollback runRegressionSubscriptionSyncRollbackReloadRollback
+}
+
+runRegressionSubscriptionGroupSyncRollbackIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-group-sync-rollback runRegressionSubscriptionGroupSyncRollback
+}
+
+listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {
+    printf '%s\n' \
+        subscription-sync-rollback-config-restore-failure \
+        subscription-sync-restore-dir-failure \
+        subscription-sync-reload-rollback \
+        subscription-group-sync-rollback
+}
+
+runRegressionSubscriptionStateSyncRollbackFailureSelector() {
+    case "$1" in
+    subscription-sync-rollback-config-restore-failure) runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated ;;
+    subscription-sync-restore-dir-failure) runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated ;;
+    subscription-sync-reload-rollback) runRegressionSubscriptionSyncRollbackReloadRollbackIsolated ;;
+    subscription-group-sync-rollback) runRegressionSubscriptionGroupSyncRollbackIsolated ;;
+    *) return 2 ;;
+    esac
+}
+
 runSubscriptionSyncRollbackFailureRegression() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/subscription-sync-rollback-failure" \
-        config-restore-fail runRegressionSubscriptionSyncRollbackConfigRestoreFailure \
-        restore-dir-fail runRegressionSubscriptionSyncRollbackRestoreDirFailure \
-        reload-rollback runRegressionSubscriptionSyncRollbackReloadRollback \
-        group-sync runRegressionSubscriptionGroupSyncRollback
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateSyncRollbackFailureSelector \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure" \
+            listRegressionSubscriptionStateSyncRollbackFailureChildSelectors
 }
 
 runSubscriptionSyncRollbackFailureSerialRegression() {
