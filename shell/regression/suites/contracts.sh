@@ -40,14 +40,42 @@ runSubscriptionStateShimStaysThinContract() {
     ! grep -q '^runRegressionSubscriptionStateSyncRollback()' "${stateShim}" || return 1
     ! grep -Eq '^[[:space:]]*subscription-state\)$' "${stateShim}" || return 1
     ! grep -Eq '^[[:space:]]*subscription-state-core\)$' "${stateShim}" || return 1
-    ! grep -Fq 'usage: %s [subscription-state|' "${stateShim}" || return 1
-    ! grep -Fq '|subscription-state-core|' "${stateShim}" || return 1
-    grep -q 'subscription-state-structure)' "${stateShim}"
-    grep -q 'subscription-state-quota)' "${stateShim}"
-    grep -q 'subscription-state-remote-restore)' "${stateShim}"
-    grep -q 'subscription-state-support)' "${stateShim}"
-    grep -q 'subscription-state-sync-rollback)' "${stateShim}"
-    grep -q 'runRegressionStep "total:\${regressionName}" "\${regressionRunner}"' "${stateShim}"
+}
+
+runSubscriptionStateShimPublicCliRetirementContract() {
+    local stateShim="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state.sh"
+    local usageLine
+    local usageSelectors
+    local selector
+
+    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${stateShim}" || return 1
+    grep -q "printf 'use shell/subscription_groups_regression.sh <selector>\\\\n' >&2" "${stateShim}" || return 1
+    ! grep -q 'regressionName=' "${stateShim}" || return 1
+    ! grep -q 'runRegressionStep "total:\${regressionName}" "\${regressionRunner}"' "${stateShim}" || return 1
+    ! grep -q 'subscription-groups-regression-ok:' "${stateShim}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${stateShim}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+    [[ -z "${usageLine}" ]] || return 1
+    [[ -z "${usageSelectors}" ]] || return 1
+
+    for selector in subscription-state subscription-state-core; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${stateShim}" || return 1
+    done
+
+    ! grep -Eq '^[[:space:]]*subscription-state-.*\)$' "${stateShim}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-sync-.*\)$' "${stateShim}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-group-sync-.*\)$' "${stateShim}" || return 1
 }
 
 runSubscriptionStateSuiteUsesFunctionRegistryContract() {
@@ -150,8 +178,6 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^[[:space:]]*subscription-state\)$' "${scriptFile}"
     ! grep -Eq '^[[:space:]]*subscription-state-core\)$' "${scriptFile}"
-    ! grep -Fq 'usage: %s [subscription-state|' "${scriptFile}"
-    ! grep -Fq '|subscription-state-core|' "${scriptFile}"
 
     coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${suiteFile}")
     stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${suiteFile}")
@@ -169,6 +195,42 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     grep -q 'core runRegressionSubscriptionStateCore' <<<"${stateBody}"
     grep -q 'support runRegressionSubscriptionStateSupport' <<<"${stateBody}"
     grep -q 'sync-rollback runRegressionSubscriptionStateSyncRollback' <<<"${stateBody}"
+}
+
+runSubscriptionStateFullPublicCliRetirementContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
+    local usageLine
+    local usageSelectors
+    local selector
+
+    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}" || return 1
+    grep -q "printf 'use shell/subscription_groups_regression.sh <selector>\\\\n' >&2" "${scriptFile}" || return 1
+    ! grep -q 'regressionName=' "${scriptFile}" || return 1
+    ! grep -q 'runRegressionStep "total:\${regressionName}" "\${regressionRunner}"' "${scriptFile}" || return 1
+    ! grep -q 'subscription-groups-regression-ok:' "${scriptFile}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${scriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+    [[ -z "${usageLine}" ]] || return 1
+    [[ -z "${usageSelectors}" ]] || return 1
+
+    for selector in subscription-state subscription-state-core; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${scriptFile}" || return 1
+    done
+
+    ! grep -Eq '^[[:space:]]*subscription-state-.*\)$' "${scriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-sync-.*\)$' "${scriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-group-sync-.*\)$' "${scriptFile}" || return 1
 }
 
 runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
@@ -3099,12 +3161,14 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
         runRegressionStep subscription-state-shim-stays-thin runSubscriptionStateShimStaysThinContract &&
+        runRegressionStep subscription-state-shim-public-cli-retirement runSubscriptionStateShimPublicCliRetirementContract &&
         runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-full-uses-framework-parallel-helper runSubscriptionStateFullUsesFrameworkParallelHelperContract &&
+        runRegressionStep subscription-state-full-public-cli-retirement runSubscriptionStateFullPublicCliRetirementContract &&
         runRegressionStep subscription-state-aggregates-support-source-only runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
         runRegressionStep remote-control-public-selector-retirement runRemoteControlPublicSelectorRetirementContract &&
