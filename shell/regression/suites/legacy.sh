@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 REGRESSION_LEGACY_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-REGRESSION_LEGACY_SCRIPT="${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"
 
 restoreLegacyRealityRegressionStubs() {
@@ -46,8 +45,3 @@ runRegressionTargetedBatchHelpers() {
 }
 
 registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers
-
-while read -r selector runner; do
-    registerRegressionScriptLeaf "${selector}" "${REGRESSION_LEGACY_SCRIPT}" "${runner}"
-done <<'EOF'
-EOF
