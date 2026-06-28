@@ -79,6 +79,22 @@ EOF
     fi
 )
 
+runLegacyPublicSelectorRetirementHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    awk '
+        /^runSubscriptionLegacyPublicSelectorRetirementContract\(\) \{$/ { in_fn = 1 }
+        in_fn && /runLegacyPublicSelectorRetirementAssertions "\$\{legacyScriptFile\}" \\/ { found = 1 }
+        in_fn && /^}$/ { exit(found ? 0 : 1) }
+    ' "${contractsFile}" || return 1
+
+    awk '
+        /^runRoutingLegacyPublicSelectorRetirementContract\(\) \{$/ { in_fn = 1 }
+        in_fn && /runLegacyPublicSelectorRetirementAssertions "\$\{legacyScriptFile\}" \\/ { found = 1 }
+        in_fn && /^}$/ { exit(found ? 0 : 1) }
+    ' "${contractsFile}" || return 1
+}
+
 runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract() (
     local dispatcherFile="${PROJECT_ROOT}/shell/subscription_groups_regression.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -1569,23 +1585,16 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
 runSubscriptionLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local selector
-    local usageLine
-    local usageSelectors
     local subscriptionRemoteLeafLine
 
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}" || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
     subscriptionRemoteLeafLine=$(grep -F 'subscription remote leaf selectors: ' "${legacyScriptFile}" || true)
     [[ -z "${subscriptionRemoteLeafLine}" ]] || return 1
 
-    for selector in \
+    runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" \
         subscription \
         subscription-remote \
         subscription-tx \
@@ -1619,19 +1628,7 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
         regression-subscription-parallel-composition \
         regression-subscription-output-parallel-composition \
         regression-subscription-tx-parallel-composition \
-        regression-subscription-remote-parallel-composition; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyScriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
-    done
+        regression-subscription-remote-parallel-composition
 }
 
 runUiPublicSelectorsUseFunctionRegistryContract() {
@@ -2060,21 +2057,14 @@ runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
 runRoutingLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local selector
-    local usageLine
-    local usageSelectors
     local routingLeafLine
 
     grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}" || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
     routingLeafLine=$(grep -F 'routing leaf selectors: ' "${legacyScriptFile}" || true)
     [[ -z "${routingLeafLine}" ]] || return 1
 
-    for selector in \
+    runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" \
         routing \
         routing-core \
         routing-core-unsafe-config-dir \
@@ -2092,19 +2082,7 @@ runRoutingLegacyPublicSelectorRetirementContract() {
         routing-dns-unsafe-config-dir \
         routing-dns-restore-scope \
         routing-port-panel \
-        regression-routing-parallel-composition; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyScriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
-    done
+        regression-routing-parallel-composition
 }
 
 runRoutingSuiteUsesFunctionRegistryContract() {
@@ -3627,6 +3605,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
+        runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
