@@ -15999,69 +15999,6 @@ fi
 
 regressionName=${1:-fast}
 case "${regressionName}" in
-core-rollback-result-message)
-    regressionRunner=runCoreRollbackResultMessageRegression
-    ;;
-config-transaction)
-    regressionRunner=runConfigTransactionRegression
-    ;;
-core-port-file-transaction)
-    regressionRunner=runCorePortFileTransactionRegression
-    ;;
-core-port-unsafe-config-dir)
-    regressionRunner=runCorePortRejectsUnsafeConfigDirRegression
-    ;;
-entry-helper-config)
-    regressionRunner=runEntryHelperConfigRegression
-    ;;
-check-port-open-nginx-directory-target)
-    regressionRunner=runCheckPortOpenNginxRejectsDirectoryTargetRegression
-    ;;
-alone-nginx-directory-target)
-    regressionRunner=runAloneNginxRejectsDirectoryTargetRegression
-    ;;
-xray-reality-port-failure)
-    regressionRunner=runXrayRealityPortFailureRegression
-    ;;
-sing-box-reality-key-transaction)
-    regressionRunner=runSingBoxRealityKeyTransactionRegression
-    ;;
-core-template-return-failure)
-    regressionRunner=runCoreTemplateReturnFailureRegression
-    ;;
-core-template-managed-remove)
-    regressionRunner=runCoreTemplateManagedConfigRemovalRegression
-    ;;
-core-binary-install-copy-failure)
-    regressionRunner=runCoreBinaryInstallCopyFailureRegression
-    ;;
-sing-box-cronet-rollback)
-    regressionRunner=runSingBoxCronetRollbackRegression
-    ;;
-finalize-sing-box-rollback)
-    regressionRunner=runFinalizeSingBoxBinaryInstallRollbackRegression
-    ;;
-core-upgrade-directory-target)
-    regressionRunner=runCoreUpgradeRejectsDirectoryTargetRegression
-    ;;
-legacy-core-upgrade-keeps-existing)
-    regressionRunner=runLegacyCoreUpgradeKeepsExistingBinaryRegression
-    ;;
-core-first-install-failure-clean)
-    regressionRunner=runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
-    ;;
-core-first-install-commit-rollback)
-    regressionRunner=runCoreFirstInstallCommitFailureRollbackRegression
-    ;;
-core-install-unsafe-binary-path)
-    regressionRunner=runCoreInstallRejectsUnsafeBinaryPathRegression
-    ;;
-sing-box-download-artifacts-cleanup)
-    regressionRunner=runSingBoxDownloadArtifactsCleanupRegression
-    ;;
-network-check-return-failure)
-    regressionRunner=runNetworkCheckReturnFailureRegression
-    ;;
 tls-failure-return)
     regressionRunner=runTlsFailureReturnRegression
     ;;
@@ -16071,56 +16008,8 @@ tls-reinstall-rollback)
 tls-renew-failure-propagation)
     regressionRunner=runTlsRenewalFailurePropagationRegression
     ;;
-service-queue-apply-propagation)
-    regressionRunner=runServiceQueueApplyPropagationRegression
-    ;;
-core-install-service-action-failure)
-    regressionRunner=runCoreInstallServiceActionFailureRegression
-    ;;
-sing-box-merge-start-failure)
-    regressionRunner=runSingBoxMergeStartFailureRegression
-    ;;
-sing-box-merge-config-transaction)
-    regressionRunner=runSingBoxMergeConfigTransactionRegression
-    ;;
-sing-box-uninstall-failure-propagation)
-    regressionRunner=runSingBoxUninstallFailurePropagationRegression
-    ;;
-sing-box-uninstall-rejects-unsafe-config-path)
-    regressionRunner=runSingBoxUninstallRejectsUnsafeConfigPathRegression
-    ;;
-sing-box-managed-cleanup)
-    regressionRunner=runSingBoxManagedCleanupRegression
-    ;;
-sing-box-protocol-reload-failure)
-    regressionRunner=runSingBoxProtocolReloadFailureRegression
-    ;;
-geo-update-reload-failure)
-    regressionRunner=runGeoUpdateReloadFailureRegression
-    ;;
-core-cleanup-failure-propagation)
-    regressionRunner=runCoreCleanupFailurePropagationRegression
-    ;;
-reload-core-propagation)
-    regressionRunner=runReloadCorePropagationRegression
-    ;;
-sing-box-log-transaction)
-    regressionRunner=runSingBoxLogTransactionRegression
-    ;;
-user-config-write)
-    regressionRunner=runUserConfigWriteRegression
-    ;;
-remove-user)
-    regressionRunner=runRemoveUserRegression
-    ;;
 regression-all-composition)
     regressionRunner=runRegressionAllCompositionRegression
-    ;;
-regression-transaction-core-parallel-composition)
-    regressionRunner=runRegressionTransactionCoreParallelCompositionRegression
-    ;;
-regression-transaction-system-parallel-composition)
-    regressionRunner=runRegressionTransactionSystemParallelCompositionRegression
     ;;
 regression-selector-dispatch-composition)
     regressionRunner=runRegressionSelectorDispatchCompositionRegression
@@ -16137,71 +16026,11 @@ regression-parallel-selector-limit-composition)
 regression-parallel-selector-slot-refill-composition)
     regressionRunner=runRegressionParallelSelectorSlotRefillCompositionRegression
     ;;
-transaction)
-    regressionRunner=runRegressionTransaction
-    ;;
-transaction-core)
-    regressionRunner=runRegressionTransactionCore
-    ;;
-transaction-subscription)
-    regressionRunner=runRegressionTransactionSubscription
-    ;;
-transaction-system)
-    regressionRunner=runRegressionTransactionSystem
-    ;;
-nginx-service-failure)
-    regressionRunner=runNginxServiceFailureRegression
-    ;;
-uninstall-nginx-cleanup)
-    regressionRunner=runUninstallNginxCleanupRegression
-    ;;
-clean-agent-nginx-managed-remove)
-    regressionRunner=runCleanAgentNginxManagedRemovalRegression
-    ;;
-fail2ban-managed-cleanup)
-    regressionRunner=runFail2banManagedCleanupRegression
-    ;;
-fail2ban-apply-transaction)
-    regressionRunner=runFail2banApplyTransactionRegression
-    ;;
-uninstall-wireguard-cleanup)
-    regressionRunner=runUninstallWireGuardCleanupRegression
-    ;;
-wireguard-key-transaction)
-    regressionRunner=runWireGuardKeyTransactionRegression
-    ;;
-wireguard-control-safe-dir)
-    regressionRunner=runWireGuardControlSafeDirRegression
-    ;;
-warp-config-safe-dir)
-    regressionRunner=runWarpConfigSafeDirRegression
-    ;;
-warp-config-file-cleanup)
-    regressionRunner=runWarpConfigFileCleanupRegression
-    ;;
-uninstall-service-stop-failure)
-    regressionRunner=runUninstallServiceStopFailureRegression
-    ;;
-clean-last-installation-failure)
-    regressionRunner=runCleanLastInstallationConfigFailureRegression
-    ;;
-clean-last-installation-acme-home)
-    regressionRunner=runCleanLastInstallationConfigAcmeHomeFailureRegression
-    ;;
-clean-last-installation-acme-relative-home)
-    regressionRunner=runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
-    ;;
-alone-nginx-write-transaction)
-    regressionRunner=runAloneNginxConfigWriteTransactionRegression
-    ;;
-alone-nginx-update-transaction)
-    regressionRunner=runAloneNginxUpdateTransactionRegression
-    ;;
 all)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|all]\n' "$0" >&2
+    printf 'usage: %s [tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|regression-all-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|all]\n' "$0" >&2
     exit 2
     ;;
 esac

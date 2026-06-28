@@ -1811,6 +1811,40 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
 )
 
+runTransactionLegacyPublicSelectorRetirementContract() (
+    set -euo pipefail
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local usageLine
+    local usageSelectors
+    local selector
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    while read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyScriptFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done < <(
+        awk '
+            /^registerRegressionFunctionLeaf / { print $2 }
+            /^registerRegressionAggregateRunnerSequential / { print $2 }
+            /^registerRegressionAggregateRunnerParallel / { print $2 }
+        ' "${suiteFile}"
+    )
+)
+
 runTransactionSuiteUsesSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/transaction-suite-root-dispatch.log"
 
@@ -2987,6 +3021,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep routing-aggregate-runner-uses-suite-local-helper runRoutingAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep routing-aggregate-runner-uses-framework-selector-helper runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
+        runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
