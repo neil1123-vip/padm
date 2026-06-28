@@ -307,8 +307,8 @@ Nested public aggregates include:
 Important boundary:
 
 - the top-level suite root now uses `runFrameworkParallelRegressionSelectorList`
-- nested public aggregates inside `subscription_groups_remote_control.sh` still use `runParallelRegressionRunners`
-- this keeps source-only compatibility for the legacy-backed nested helper tree while moving the suite-owned root onto framework orchestration
+- nested public aggregates inside `subscription_groups_remote_control.sh` now also use suite-local selector-list helpers plus `runFrameworkParallelRegressionSelectorList`
+- the suite-local selector runner still preserves source-only compatibility for the legacy-backed helper tree while keeping orchestration on framework primitives
 
 ### Subscription State
 
@@ -469,6 +469,7 @@ Already landed in this branch:
 - `21ab955` `refactor: inline remaining regression leaf registrations`
 - `93d07bd` `refactor: route remote control suite through selector helper`
 - `32fe720` `refactor: route subscription state suites through selector helper`
+- `9110545` `refactor: route remote control nested aggregates through selector helper`
 
 Together these commits establish the current harness direction:
 
