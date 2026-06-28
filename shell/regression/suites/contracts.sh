@@ -1906,6 +1906,39 @@ runTargetedBatchHelpersLegacyRetirementContract() {
     ! grep -Fq '|targeted-batch-helpers|' "${legacyFile}" || return 1
 }
 
+runTargetedBatchHelpersChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local targetedBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        core-invalid-input-retry-menu
+        core-selection-retry-action
+        sync-configured-managed-users-helper
+        sync-append-local-user-batch
+        traffic-configured-accounts-helper
+        traffic-account-id-map-helper
+        subscription-remote-sources-no-reverse-decode
+        core-rollback-result-message
+        config-transaction
+        padm-bbr-managed-cleanup
+        alone-nginx-backup-manual-check
+    )
+    local idx
+
+    targetedBody=$(sed -n '/^runRegressionTargetedBatchHelpers() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${targetedBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${targetedBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runPlatformSuiteUsesSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/platform-suite-root-dispatch.log"
 
@@ -4503,6 +4536,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep targeted-batch-helpers-legacy-retirement runTargetedBatchHelpersLegacyRetirementContract &&
+        runRegressionStep targeted-batch-helpers-child-steps runTargetedBatchHelpersChildStepsContract &&
         runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
         runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
         runRegressionStep tls-legacy-retirement runTlsLegacyRetirementContract &&
