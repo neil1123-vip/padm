@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 
 REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=/dev/null
+source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"
 
 runRegressionSubscriptionStateCore() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/subscription-state-core" \
-        structure runRegressionSubscriptionStateStructure \
-        quota runRegressionSubscriptionStateQuota \
-        remote-restore runRegressionSubscriptionStateRemoteRestore
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-core-${BASHPID:-$$}" \
+        listRegressionSubscriptionStateCoreChildSelectors
 }
 
 runRegressionSubscriptionStateCoreSuiteRoot() {
@@ -16,11 +15,8 @@ runRegressionSubscriptionStateCoreSuiteRoot() {
 }
 
 runRegressionSubscriptionState() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/subscription-state-default" \
-        core runRegressionSubscriptionStateCore \
-        support runRegressionSubscriptionStateSupport \
-        sync-rollback runRegressionSubscriptionStateSyncRollback
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-default-${BASHPID:-$$}" \
+        listRegressionSubscriptionStateChildSelectors
 }
 
 runRegressionSubscriptionStateSuiteRoot() {

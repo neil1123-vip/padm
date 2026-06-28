@@ -195,19 +195,15 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${suiteFile}")
     stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${suiteFile}")
 
-    grep -q 'runParallelRegressionRunners \\' <<<"${coreBody}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-core-' <<<"${coreBody}"
     ! grep -q 'runParallelSubscriptionStateModes' <<<"${coreBody}"
     ! grep -q 'PADM_REGRESSION_INTERNAL_CLI=1 bash' <<<"${coreBody}"
-    grep -q 'structure runRegressionSubscriptionStateStructure' <<<"${coreBody}"
-    grep -q 'quota runRegressionSubscriptionStateQuota' <<<"${coreBody}"
-    grep -q 'remote-restore runRegressionSubscriptionStateRemoteRestore' <<<"${coreBody}"
+    grep -q 'listRegressionSubscriptionStateCoreChildSelectors' <<<"${coreBody}"
 
-    grep -q 'runParallelRegressionRunners \\' <<<"${stateBody}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-default-' <<<"${stateBody}"
     ! grep -q 'runParallelSubscriptionStateModes' <<<"${stateBody}"
     ! grep -q 'PADM_REGRESSION_INTERNAL_CLI=1 bash' <<<"${stateBody}"
-    grep -q 'core runRegressionSubscriptionStateCore' <<<"${stateBody}"
-    grep -q 'support runRegressionSubscriptionStateSupport' <<<"${stateBody}"
-    grep -q 'sync-rollback runRegressionSubscriptionStateSyncRollback' <<<"${stateBody}"
+    grep -q 'listRegressionSubscriptionStateChildSelectors' <<<"${stateBody}"
 }
 
 runSubscriptionStateFullPublicCliRetirementContract() {
@@ -260,8 +256,8 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
         return 97
     }
 
-    runParallelRegressionRunners() {
-        printf '%s\n' "$*" >>"${callsFile}"
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:%s\n' "$*" >>"${callsFile}"
     }
 
     : >"${callsFile}"
@@ -270,8 +266,10 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
 
     mapfile -t calls <"${callsFile}"
     [[ "${#calls[@]}" -eq 2 ]]
-    [[ "${calls[0]}" == "${TMP_DIR}/subscription-state-core structure runRegressionSubscriptionStateStructure quota runRegressionSubscriptionStateQuota remote-restore runRegressionSubscriptionStateRemoteRestore" ]]
-    [[ "${calls[1]}" == "${TMP_DIR}/subscription-state-default core runRegressionSubscriptionStateCore support runRegressionSubscriptionStateSupport sync-rollback runRegressionSubscriptionStateSyncRollback" ]]
+    [[ "${calls[0]}" == framework:"${TMP_DIR}/subscription-state-core-"* ]]
+    [[ "${calls[1]}" == framework:"${TMP_DIR}/subscription-state-default-"* ]]
+    [[ "${calls[0]}" == *' subscription-state-structure subscription-state-structure subscription-state-quota subscription-state-quota subscription-state-remote-restore subscription-state-remote-restore' ]]
+    [[ "${calls[1]}" == *' subscription-state-core subscription-state-core subscription-state-support subscription-state-support subscription-state-sync-rollback subscription-state-sync-rollback' ]]
 )
 
 runRemoteControlSuiteUsesFunctionRegistryContract() {
