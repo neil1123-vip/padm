@@ -127,7 +127,11 @@ runAggregateRunnerRegistrationHelperAdoptionContract() {
         runAllAggregateRunnerRegistrationContract \
         runSubscriptionAggregateRunnerRegistrationContract \
         runSubscriptionRemoteAggregateRunnerRegistrationContract \
-        runSubscriptionTxAggregateRunnerRegistrationContract; do
+        runSubscriptionTxAggregateRunnerRegistrationContract \
+        runUiAggregateRunnerRegistrationContract \
+        runRoutingAggregateRunnerRegistrationContract \
+        runRealityCandidatesAggregateRunnerRegistrationContract \
+        runRealityStreamAggregateRunnerRegistrationContract; do
         awk -v fn="${functionName}" '
             $0 == fn "() {" { in_fn = 1 }
             in_fn && /runAggregateRunnerRegistrationAssertions \\/ { found = 1 }
@@ -2007,7 +2011,6 @@ EOF
 runUiAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["ui"]:-}
 
     ! grep -q '^ui ui$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}"
@@ -2015,14 +2018,15 @@ runUiAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionUiChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["ui"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["ui"]:-}" == "runRegressionUiSuiteRoot" ]]
+    runAggregateRunnerRegistrationAssertions \
+        ui \
+        parallel \
+        runRegressionUiSuiteRoot \
+        "${expectedChildren}"
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
 runUiAggregateRunnerUsesSuiteLocalHelperContract() (
@@ -2243,16 +2247,16 @@ runRoutingSelectorHelpersStayAlignedContract() (
 runRoutingAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["routing"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf routing ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRoutingChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["routing"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["routing"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["routing"]:-}" == "runRegressionRoutingSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        routing \
+        parallel \
+        runRegressionRoutingSuiteRoot \
+        "${expectedChildren}"
 }
 
 runRoutingAggregateRunnerUsesSuiteLocalHelperContract() (
@@ -3239,16 +3243,16 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
 runRealityCandidatesAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["reality-candidates"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealitySuiteCandidatesChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-candidates"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-candidates"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-candidates"]:-}" == "runRegressionRealityCandidatesSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        reality-candidates \
+        sequential \
+        runRegressionRealityCandidatesSuiteRoot \
+        "${expectedChildren}"
 }
 
 runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
@@ -3285,16 +3289,16 @@ runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
 runRealityStreamAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["reality-stream"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealitySuiteStreamChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-stream"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-stream"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-stream"]:-}" == "runRegressionRealityStreamSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        reality-stream \
+        sequential \
+        runRegressionRealityStreamSuiteRoot \
+        "${expectedChildren}"
 }
 
 runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
