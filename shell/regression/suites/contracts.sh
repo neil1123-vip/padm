@@ -933,6 +933,37 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
         remote-control-contract-server-response
 )
 
+runRemoteControlSmokeCoreChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
+    local smokeCoreBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        remote-control-concurrency
+        remote-control-aggregation-failure
+        remote-control-inline-aggregation-helpers
+        remote-control-health
+        remote-control-inline-request-helpers
+        remote-control-inline-wireguard-peer-helpers
+        remote-control-inline-token-consumers
+        remote-control-inline-sync-runner
+        remote-control-handle-inline-helpers
+    )
+    local idx
+
+    smokeCoreBody=$(sed -n '/^runRegressionRemoteControlSmokeCoreSteps() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${smokeCoreBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${smokeCoreBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runRemoteControlAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local expectedChildren
@@ -4001,6 +4032,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-retires-suite-owned-wrappers runLegacyRetiresSuiteOwnedWrappersContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
+        runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
         runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
