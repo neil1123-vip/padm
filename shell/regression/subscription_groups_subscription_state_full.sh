@@ -663,12 +663,16 @@ runSubscriptionGroupStateQuotaSerialRegression() {
         runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
 }
 
+listRegressionSubscriptionStateQuotaChildSelectors() {
+    printf '%s\n' \
+        subscription-state-quota-traffic \
+        subscription-state-quota-menu-tx \
+        subscription-state-quota-partial-sync
+}
+
 runSubscriptionGroupStateQuotaRegression() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/subscription-state-quota" \
-        traffic runRegressionSubscriptionStateQuotaTraffic \
-        menu-tx runRegressionSubscriptionStateQuotaMenuTransaction \
-        partial-sync runRegressionSubscriptionStateQuotaPartialSync
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota" \
+        listRegressionSubscriptionStateQuotaChildSelectors
 }
 
 prepareSubscriptionRemoteRestoreSelfReferenceFixture() {
