@@ -1578,6 +1578,37 @@ runTlsSuiteChildStepsContract() {
     done
 }
 
+runTransactionSubscriptionChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local subscriptionBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        cdn-address-write-transaction
+        subscribe-server-name
+        subscribe-nginx-config-write
+        subscribe-nginx-service-failure
+        subscribe-salt-write-transaction
+        subscribe-user-output-transaction
+        remove-user-subscription-menu-failure
+        user-subscription-menu-mutation-failure
+        remote-subscribe-fetch
+    )
+    local idx
+
+    subscriptionBody=$(sed -n '/^runRegressionTransactionSubscription() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${subscriptionBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${subscriptionBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4512,6 +4543,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep routing-legacy-read-install-type-isolation-guard-registered runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract &&
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
         runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract &&
+        runRegressionStep transaction-subscription-child-steps runTransactionSubscriptionChildStepsContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
