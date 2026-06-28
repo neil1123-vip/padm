@@ -581,6 +581,8 @@ runLegacySuiteUsesFunctionRegistryContract() (
     local expectedChildren actualChildren
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_LEGACY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionTargetedBatchHelpers() {$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateRunnerSequential transaction ' "${suiteFile}"
@@ -589,6 +591,7 @@ runLegacySuiteUsesFunctionRegistryContract() (
     ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}"
     grep -Eq '^[[:space:]]*registerRegressionScriptLeaf "\${selector}" "\${REGRESSION_LEGACY_SCRIPT}" "\${runner}"$' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+    ! grep -q '^runRegressionTargetedBatchHelpers() {$' "${scriptFile}"
     declare -F listRegressionTransactionSystemChildSelectors >/dev/null
     declare -F listRegressionTransactionChildSelectors >/dev/null
     expectedChildren=$(listRegressionTransactionSystemChildSelectors)
@@ -596,6 +599,17 @@ runLegacySuiteUsesFunctionRegistryContract() (
     [[ -n "${expectedChildren}" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 )
+
+runTargetedBatchHelpersLegacyRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^runRegressionTargetedBatchHelpers() {$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionTargetedBatchHelpers\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
+    ! grep -Eq '^[[:space:]]*targeted-batch-helpers\)$' "${legacyFile}" || return 1
+    ! grep -Fq '|targeted-batch-helpers|' "${legacyFile}" || return 1
+}
 
 runPlatformSuiteUsesSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/platform-suite-root-dispatch.log"
@@ -714,7 +728,10 @@ runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
 runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
 
-    ! grep -q '^registerRegressionFunctionLeaf ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf targeted-batch-helpers ' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}" || return 1
 }
 
 runCompositionLeafSelectorsUseSuiteLocalRegistryContract() {
@@ -2690,6 +2707,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
+        runRegressionStep targeted-batch-helpers-legacy-retirement runTargetedBatchHelpersLegacyRetirementContract &&
         runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
         runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
         runRegressionStep tls-legacy-retirement runTlsLegacyRetirementContract &&

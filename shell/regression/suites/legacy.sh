@@ -31,6 +31,22 @@ restoreLegacyRealityRegressionStubs() {
 
 restoreLegacyRealityRegressionStubs
 
+runRegressionTargetedBatchHelpers() {
+    runRegressionStep core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression &&
+        runRegressionStep core-selection-retry-action runCoreSelectionRetryActionRegression &&
+        runRegressionStep sync-configured-managed-users-helper runSyncConfiguredManagedUsersHelperRegression &&
+        runRegressionStep sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression &&
+        runRegressionStep traffic-configured-accounts-helper runTrafficConfiguredAccountsHelperRegression &&
+        runRegressionStep traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression &&
+        runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression &&
+        runRegressionStep core-rollback-result-message runCoreRollbackResultMessageRegression &&
+        runRegressionStep config-transaction runConfigTransactionRegression &&
+        runRegressionStep padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression &&
+        runRegressionStep alone-nginx-backup-manual-check runNginxBackupManualCheckRegression
+}
+
+registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers
+
 while read -r selector runner; do
     registerRegressionScriptLeaf "${selector}" "${REGRESSION_LEGACY_SCRIPT}" "${runner}"
 done <<'EOF'
