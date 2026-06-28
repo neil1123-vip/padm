@@ -2014,10 +2014,5 @@ if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
-if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
-    printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
-    exit 2
-fi
-
-printf 'remote control public selectors retired; use shell/subscription_groups_regression.sh <selector>\n' >&2
+printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
 exit 2

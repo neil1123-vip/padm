@@ -3330,6 +3330,16 @@ ${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh
 EOF
 }
 
+runLegacyRegressionScriptsRetireInternalCliContract() {
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local remoteControlScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
+
+    ! grep -q '^if \[\[ "\${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" \]\]; then$' "${legacyScriptFile}"
+    ! grep -q '^if \[\[ "\${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" \]\]; then$' "${remoteControlScriptFile}"
+    ! grep -q '^printf '\''legacy public selectors retired; use shell/subscription_groups_regression.sh <selector>\\n'\'' >&2$' "${legacyScriptFile}"
+    ! grep -q '^printf '\''remote control public selectors retired; use shell/subscription_groups_regression.sh <selector>\\n'\'' >&2$' "${remoteControlScriptFile}"
+}
+
 runRegressionSelectorDispatchCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-selector-dispatch-composition.log"
@@ -3433,6 +3443,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-shim-stays-thin runSubscriptionStateShimStaysThinContract &&
         runRegressionStep subscription-state-shim-public-cli-retirement runSubscriptionStateShimPublicCliRetirementContract &&
         runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
+        runRegressionStep legacy-regression-scripts-retire-internal-cli runLegacyRegressionScriptsRetireInternalCliContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
