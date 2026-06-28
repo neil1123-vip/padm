@@ -131,7 +131,10 @@ runAggregateRunnerRegistrationHelperAdoptionContract() {
         runUiAggregateRunnerRegistrationContract \
         runRoutingAggregateRunnerRegistrationContract \
         runRealityCandidatesAggregateRunnerRegistrationContract \
-        runRealityStreamAggregateRunnerRegistrationContract; do
+        runRealityStreamAggregateRunnerRegistrationContract \
+        runTransactionCoreAggregateRunnerRegistrationContract \
+        runTransactionAggregateRunnerRegistrationContract \
+        runTransactionSystemAggregateRunnerRegistrationContract; do
         awk -v fn="${functionName}" '
             $0 == fn "() {" { in_fn = 1 }
             in_fn && /runAggregateRunnerRegistrationAssertions \\/ { found = 1 }
@@ -2414,16 +2417,16 @@ EOF
 runTransactionCoreAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-core"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-core ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionCoreChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction-core"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction-core"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-core"]:-}" == "runRegressionTransactionCoreSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        transaction-core \
+        parallel \
+        runRegressionTransactionCoreSuiteRoot \
+        "${expectedChildren}"
 }
 
 runTransactionSelectorHelpersStayAlignedContract() (
@@ -2460,34 +2463,34 @@ runTransactionAggregateRunnerRegistrationContract() (
     set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential transaction \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction"]:-}" == "sequential" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction"]:-}" == "runRegressionTransactionSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        transaction \
+        sequential \
+        runRegressionTransactionSuiteRoot \
+        "${expectedChildren}"
 )
 
 runTransactionSystemAggregateRunnerRegistrationContract() (
     set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["transaction-system"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel transaction-system \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionSystemChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["transaction-system"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["transaction-system"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-system"]:-}" == "runRegressionTransactionSystemSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        transaction-system \
+        parallel \
+        runRegressionTransactionSystemSuiteRoot \
+        "${expectedChildren}"
 )
 
 runTransactionSuiteUsesFunctionRegistryContract() (
