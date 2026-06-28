@@ -3901,6 +3901,31 @@ runSubscriptionSelectorHelpersAreSuiteOwnedContract() {
     ! grep -q '^listRegressionSubscriptionChildSelectors() {$' "${legacyFile}" || return 1
 }
 
+runSubscriptionOutputChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local outputBody
+    local -a actualSteps=()
+    local rootLine
+    local stepLine
+
+    outputBody=$(sed -n '/^runRegressionSubscriptionOutput() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${outputBody}" ]] || return 1
+
+    rootLine=$(awk '/runRegressionSubscriptionOutputSuiteRoot/ { print NR; exit }' <<<"${outputBody}")
+    [[ -n "${rootLine}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${outputBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq 1 ]] || return 1
+    [[ "${actualSteps[0]}" == "subscription-remote-sources-no-reverse-decode" ]] || return 1
+
+    stepLine=$(awk '/^[[:space:]]*runRegressionStep subscription-remote-sources-no-reverse-decode / { print NR; exit }' <<<"${outputBody}")
+    [[ -n "${stepLine}" ]] || return 1
+    (( rootLine < stepLine )) || return 1
+}
+
 runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
     local status=0
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
@@ -4592,6 +4617,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-legacy-public-selector-retirement runSubscriptionLegacyPublicSelectorRetirementContract &&
         runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
+        runRegressionStep subscription-output-child-steps runSubscriptionOutputChildStepsContract &&
         runRegressionStep subscription-remote-registered-child-selectors-aligned runSubscriptionRemoteRegisteredChildSelectorsAlignedContract &&
         runRegressionStep subscription-tx-registered-child-selectors-aligned runSubscriptionTxRegisteredChildSelectorsAlignedContract &&
         runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract &&
