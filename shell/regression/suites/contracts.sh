@@ -394,7 +394,7 @@ runPlatformPublicSelectorRetirementContract() {
     ! grep -Eq '^[[:space:]]*platform\)$' "${legacyFile}"
     grep -Eq '^[[:space:]]*platform-hot\)$' "${legacyFile}"
     ! grep -Fq '|platform|platform-io|' "${legacyFile}"
-    grep -Fq '|platform-hot|platform-io|' "${legacyFile}"
+    grep -Fq 'usage: %s [platform-hot|platform-io|' "${legacyFile}"
 }
 
 runFastRealitySelectorHelpersStayAlignedContract() (
@@ -443,6 +443,16 @@ runFastRealityLegacyRetirementContract() {
     ! grep -Eq '^runRegressionFastReality\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
     ! grep -Eq '^[[:space:]]*fast-reality\)$' "${legacyFile}" || return 1
     ! grep -Fq '|fast-reality|' "${legacyFile}" || return 1
+}
+
+runFastLegacyRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionFast\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
+    ! grep -Eq '^[[:space:]]*fast\)$' "${legacyFile}" || return 1
+    ! grep -Fq 'usage: %s [fast|' "${legacyFile}" || return 1
 }
 
 runFastPlatformSourceOnlyExecutionContract() (
@@ -2574,6 +2584,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
+        runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
