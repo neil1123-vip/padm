@@ -545,15 +545,29 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
+    grep -q 'source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-state-structure runRegressionSubscriptionStateStructure$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-state-quota runRegressionSubscriptionStateQuota$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-state-support runRegressionSubscriptionStateSupport$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback$' "${suiteFile}"
 }
@@ -621,6 +635,42 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-group-sync-rollback
 )
 
+runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
+    local functionName
+
+    for functionName in \
+        runSubscriptionStateParallelChildRegressionIsolated \
+        listRegressionSubscriptionStateStructureFoundationChildSelectors \
+        runRegressionSubscriptionStateStructureFoundation \
+        runRegressionSubscriptionStateStructureFoundationIsolated \
+        runRegressionSubscriptionStateStructureMigrationIsolated \
+        runRegressionSubscriptionStateStructureSourceIsolated \
+        listRegressionSubscriptionStateStructureChildSelectors \
+        runRegressionSubscriptionStateStructureSelector \
+        runRegressionSubscriptionStateStructure \
+        listRegressionSubscriptionStateQuotaChildSelectors \
+        runRegressionSubscriptionStateQuota \
+        runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
+        runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
+        runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated \
+        listRegressionSubscriptionStateRemoteRestoreChildSelectors \
+        runRegressionSubscriptionStateRemoteRestoreSelector \
+        runRegressionSubscriptionStateRemoteRestore \
+        runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated \
+        runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated \
+        runRegressionSubscriptionSyncRollbackReloadRollbackIsolated \
+        runRegressionSubscriptionGroupSyncRollbackIsolated \
+        listRegressionSubscriptionStateSyncRollbackFailureChildSelectors \
+        runRegressionSubscriptionStateSyncRollbackFailureSelector \
+        runRegressionSubscriptionStateSyncRollback
+    do
+        grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
+        ! grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${scriptFile}" || return 1
+    done
+}
+
 runSubscriptionStateSupportChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
     runRegressionStepSequenceAssertions "${scriptFile}" runRegressionSubscriptionStateSupport \
@@ -683,28 +733,39 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
     local coreBody
     local stateBody
+    local structureFoundationBody
+    local structureBody
+    local quotaBody
+    local remoteRestoreBody
+    local syncRollbackBody
 
     ! grep -q 'PADM_SECTION_BEGIN: subscription-state-hot-regressions' "${scriptFile}"
     ! grep -q 'PADM_SECTION_END: subscription-state-hot-regressions' "${scriptFile}"
     ! grep -q '^runParallelSubscriptionStateModes()' "${scriptFile}"
-    grep -q 'source "${REGRESSION_ENTRY_DIR}/regression/framework/runtime.sh"' "${scriptFile}"
+    grep -q 'source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
+    ! grep -q 'source "${REGRESSION_ENTRY_DIR}/regression/framework/runtime.sh"' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^[[:space:]]*subscription-state\)$' "${scriptFile}"
     ! grep -Eq '^[[:space:]]*subscription-state-core\)$' "${scriptFile}"
-    grep -q '^listRegressionSubscriptionStateStructureFoundationChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionSubscriptionStateStructureChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionSubscriptionStateQuotaChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionSubscriptionStateRemoteRestoreChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {$' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure"' "${scriptFile}"
+    ! grep -q '^listRegressionSubscriptionStateStructureFoundationChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionSubscriptionStateStructureChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionSubscriptionStateQuotaChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionSubscriptionStateRemoteRestoreChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {$' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure"' "${scriptFile}"
 
     coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${suiteFile}")
     stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${suiteFile}")
+    structureFoundationBody=$(sed -n '/^runRegressionSubscriptionStateStructureFoundation() {$/,/^}$/p' "${suiteFile}")
+    structureBody=$(sed -n '/^runRegressionSubscriptionStateStructure() {$/,/^}$/p' "${suiteFile}")
+    quotaBody=$(sed -n '/^runRegressionSubscriptionStateQuota() {$/,/^}$/p' "${suiteFile}")
+    remoteRestoreBody=$(sed -n '/^runRegressionSubscriptionStateRemoteRestore() {$/,/^}$/p' "${suiteFile}")
+    syncRollbackBody=$(sed -n '/^runRegressionSubscriptionStateSyncRollback() {$/,/^}$/p' "${suiteFile}")
 
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-core-' <<<"${coreBody}"
     ! grep -q 'runParallelSubscriptionStateModes' <<<"${coreBody}"
@@ -715,6 +776,24 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     ! grep -q 'runParallelSubscriptionStateModes' <<<"${stateBody}"
     ! grep -q 'PADM_REGRESSION_INTERNAL_CLI=1 bash' <<<"${stateBody}"
     grep -q 'listRegressionSubscriptionStateChildSelectors' <<<"${stateBody}"
+
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation"' <<<"${structureFoundationBody}"
+    grep -q 'listRegressionSubscriptionStateStructureFoundationChildSelectors' <<<"${structureFoundationBody}"
+
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateStructureSelector' <<<"${structureBody}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' <<<"${structureBody}"
+    grep -q 'listRegressionSubscriptionStateStructureChildSelectors' <<<"${structureBody}"
+
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota"' <<<"${quotaBody}"
+    grep -q 'listRegressionSubscriptionStateQuotaChildSelectors' <<<"${quotaBody}"
+
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateRemoteRestoreSelector' <<<"${remoteRestoreBody}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore"' <<<"${remoteRestoreBody}"
+    grep -q 'listRegressionSubscriptionStateRemoteRestoreChildSelectors' <<<"${remoteRestoreBody}"
+
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateSyncRollbackFailureSelector' <<<"${syncRollbackBody}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure"' <<<"${syncRollbackBody}"
+    grep -q 'listRegressionSubscriptionStateSyncRollbackFailureChildSelectors' <<<"${syncRollbackBody}"
 }
 
 runSubscriptionStateFullPublicCliRetirementContract() {
@@ -4394,6 +4473,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-regression-scripts-retire-internal-cli runLegacyRegressionScriptsRetireInternalCliContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
+        runRegressionStep subscription-state-nested-selector-helpers-are-suite-owned runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract &&
         runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&

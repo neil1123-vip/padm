@@ -5,8 +5,6 @@ REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 SUBSCRIPTION_STATE_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
-# shellcheck source=/dev/null
-source "${REGRESSION_ENTRY_DIR}/regression/framework/runtime.sh"
 writeSubscriptionStateDefaultFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
@@ -159,54 +157,6 @@ runSubscriptionGroupStateStructureFoundationSerialRegression() {
         runRegressionStep subscription-state-structure-foundation-credential runSubscriptionGroupStateStructureFoundationCredentialRegression &&
         runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression &&
         runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
-}
-
-listRegressionSubscriptionStateStructureFoundationChildSelectors() {
-    printf '%s\n' \
-        subscription-state-structure-foundation-add-remove \
-        subscription-state-structure-foundation-credential \
-        subscription-state-structure-foundation-normalize \
-        subscription-state-structure-foundation-init-transaction
-}
-
-runRegressionSubscriptionStateStructureFoundationSelector() {
-    case "$1" in
-    subscription-state-structure-foundation-add-remove) runRegressionSubscriptionStateStructureFoundationAddRemove ;;
-    subscription-state-structure-foundation-credential) runRegressionSubscriptionStateStructureFoundationCredential ;;
-    subscription-state-structure-foundation-normalize) runRegressionSubscriptionStateStructureFoundationNormalize ;;
-    subscription-state-structure-foundation-init-transaction) runRegressionSubscriptionStateStructureFoundationInitTransaction ;;
-    *) return 2 ;;
-    esac
-}
-
-runSubscriptionGroupStateStructureFoundationRegression() {
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateStructureFoundationSelector \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation" \
-            listRegressionSubscriptionStateStructureFoundationChildSelectors
-}
-
-runSubscriptionStateParallelChildRegressionIsolated() (
-    local isolatedLabel=$1
-    shift
-    local isolatedRoot="${TMP_DIR}/${isolatedLabel}"
-
-    TMP_DIR="${isolatedRoot}"
-    TMPDIR="${isolatedRoot}/tmp"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${isolatedRoot}/groups"
-    mkdir -p "${TMP_DIR}" "${TMPDIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
-    "$@"
-)
-
-runRegressionSubscriptionStateStructureFoundationIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation
-}
-
-runRegressionSubscriptionStateStructureMigrationIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-migration runRegressionSubscriptionStateStructureMigration
-}
-
-runRegressionSubscriptionStateStructureSourceIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-source runRegressionSubscriptionStateStructureSource
 }
 
 runSubscriptionGroupStateStructureMigrationRegression() {
@@ -371,28 +321,6 @@ runSubscriptionGroupStateStructureSerialRegression() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression &&
         runRegressionStep subscription-state-structure-migration runSubscriptionGroupStateStructureMigrationRegression &&
         runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
-}
-
-listRegressionSubscriptionStateStructureChildSelectors() {
-    printf '%s\n' \
-        subscription-state-structure-foundation \
-        subscription-state-structure-migration \
-        subscription-state-structure-source
-}
-
-runRegressionSubscriptionStateStructureSelector() {
-    case "$1" in
-    subscription-state-structure-foundation) runRegressionSubscriptionStateStructureFoundationIsolated ;;
-    subscription-state-structure-migration) runRegressionSubscriptionStateStructureMigrationIsolated ;;
-    subscription-state-structure-source) runRegressionSubscriptionStateStructureSourceIsolated ;;
-    *) return 2 ;;
-    esac
-}
-
-runSubscriptionGroupStateStructureRegression() {
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateStructureSelector \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure" \
-            listRegressionSubscriptionStateStructureChildSelectors
 }
 
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
@@ -663,18 +591,6 @@ runSubscriptionGroupStateQuotaSerialRegression() {
         runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
 }
 
-listRegressionSubscriptionStateQuotaChildSelectors() {
-    printf '%s\n' \
-        subscription-state-quota-traffic \
-        subscription-state-quota-menu-tx \
-        subscription-state-quota-partial-sync
-}
-
-runSubscriptionGroupStateQuotaRegression() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota" \
-        listRegressionSubscriptionStateQuotaChildSelectors
-}
-
 prepareSubscriptionRemoteRestoreSelfReferenceFixture() {
     currentHost="self.example.com"
     subscribeDomain="self.example.com"
@@ -714,10 +630,6 @@ runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression() {
 
 runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression() {
     runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression
-}
-
-runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference
 }
 
 runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
@@ -782,40 +694,10 @@ JSON
     jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
 }
 
-runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-state-write runRegressionSubscriptionStateRemoteRestoreStateWrite
-}
-
-runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
-}
-
 runSubscriptionGroupStateRemoteRestoreSerialRegression() {
     runRegressionStep subscription-state-remote-restore-self-reference runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression &&
         runRegressionStep subscription-state-remote-restore-state-write runSubscriptionGroupStateRemoteRestoreStateWriteRegression &&
         runRegressionStep subscription-state-remote-restore-legacy-menu runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression
-}
-
-listRegressionSubscriptionStateRemoteRestoreChildSelectors() {
-    printf '%s\n' \
-        subscription-state-remote-restore-self-reference \
-        subscription-state-remote-restore-state-write \
-        subscription-state-remote-restore-legacy-menu
-}
-
-runRegressionSubscriptionStateRemoteRestoreSelector() {
-    case "$1" in
-    subscription-state-remote-restore-self-reference) runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated ;;
-    subscription-state-remote-restore-state-write) runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated ;;
-    subscription-state-remote-restore-legacy-menu) runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated ;;
-    *) return 2 ;;
-    esac
-}
-
-runSubscriptionGroupStateRemoteRestoreRegression() {
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateRemoteRestoreSelector \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore" \
-            listRegressionSubscriptionStateRemoteRestoreChildSelectors
 }
 
 runSubscriptionGroupStateRegression() {
@@ -1654,46 +1536,6 @@ runSubscriptionGroupSyncRollbackSerialRegression() {
         runRegressionStep subscription-group-sync-remote-before-publish-refresh runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression
 }
 
-runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-sync-rollback-config-restore-failure runRegressionSubscriptionSyncRollbackConfigRestoreFailure
-}
-
-runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-sync-restore-dir-failure runRegressionSubscriptionSyncRollbackRestoreDirFailure
-}
-
-runRegressionSubscriptionSyncRollbackReloadRollbackIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-sync-reload-rollback runRegressionSubscriptionSyncRollbackReloadRollback
-}
-
-runRegressionSubscriptionGroupSyncRollbackIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-group-sync-rollback runRegressionSubscriptionGroupSyncRollback
-}
-
-listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {
-    printf '%s\n' \
-        subscription-sync-rollback-config-restore-failure \
-        subscription-sync-restore-dir-failure \
-        subscription-sync-reload-rollback \
-        subscription-group-sync-rollback
-}
-
-runRegressionSubscriptionStateSyncRollbackFailureSelector() {
-    case "$1" in
-    subscription-sync-rollback-config-restore-failure) runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated ;;
-    subscription-sync-restore-dir-failure) runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated ;;
-    subscription-sync-reload-rollback) runRegressionSubscriptionSyncRollbackReloadRollbackIsolated ;;
-    subscription-group-sync-rollback) runRegressionSubscriptionGroupSyncRollbackIsolated ;;
-    *) return 2 ;;
-    esac
-}
-
-runSubscriptionSyncRollbackFailureRegression() {
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateSyncRollbackFailureSelector \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure" \
-            listRegressionSubscriptionStateSyncRollbackFailureChildSelectors
-}
-
 runSubscriptionSyncRollbackFailureSerialRegression() {
     runRegressionStep subscription-sync-rollback-config-restore-failure runSubscriptionSyncRollbackConfigRestoreFailureRegression &&
         runRegressionStep subscription-sync-restore-dir-failure runSubscriptionSyncRollbackRestoreDirFailureRegression &&
@@ -1880,14 +1722,6 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
-runRegressionSubscriptionStateStructure() {
-    runRegressionStep subscription-state-structure runSubscriptionGroupStateStructureRegression
-}
-
-runRegressionSubscriptionStateStructureFoundation() {
-    runRegressionStep subscription-state-structure-foundation runSubscriptionGroupStateStructureFoundationRegression
-}
-
 runRegressionSubscriptionStateStructureFoundationAddRemove() {
     runRegressionStep subscription-state-structure-foundation-add-remove runSubscriptionGroupStateStructureFoundationAddRemoveRegression
 }
@@ -1908,14 +1742,6 @@ runRegressionSubscriptionStateStructureFoundationSerial() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
 }
 
-runRegressionSubscriptionStateStructureMigration() {
-    runRegressionStep subscription-state-structure-migration runSubscriptionGroupStateStructureMigrationRegression
-}
-
-runRegressionSubscriptionStateStructureSource() {
-    runRegressionStep subscription-state-structure-source runSubscriptionGroupStateStructureSourceRegression
-}
-
 runRegressionSubscriptionStateStructureSourceCredential() {
     runRegressionStep subscription-state-structure-source-credential runSubscriptionGroupStateStructureSourceCredentialRegression
 }
@@ -1934,14 +1760,6 @@ runRegressionSubscriptionStateStructureSourceSerial() {
 
 runRegressionSubscriptionStateStructureSerial() {
     runRegressionStep subscription-state-structure-serial runSubscriptionGroupStateStructureSerialRegression
-}
-
-runRegressionSubscriptionStateQuota() {
-    runRegressionStep subscription-state-quota runSubscriptionGroupStateQuotaRegression
-}
-
-runRegressionSubscriptionStateQuotaTraffic() {
-    runRegressionStep subscription-state-quota-traffic runSubscriptionGroupStateQuotaTrafficRegression
 }
 
 runRegressionSubscriptionStateQuotaTrafficSummary() {
@@ -1968,10 +1786,6 @@ runRegressionSubscriptionStateQuotaTransactionRollback() {
     runRegressionStep subscription-state-quota-menu-tx-rollback runSubscriptionGroupStateQuotaTransactionRollbackRegression
 }
 
-runRegressionSubscriptionStateQuotaMenuTransaction() {
-    runRegressionStep subscription-state-quota-menu-tx runSubscriptionGroupStateQuotaMenuTransactionRegression
-}
-
 runRegressionSubscriptionStateQuotaMenuTransactionSerial() {
     runRegressionStep subscription-state-quota-menu-tx-serial runSubscriptionGroupStateQuotaMenuTransactionSerialRegression
 }
@@ -1988,20 +1802,12 @@ runRegressionSubscriptionStateQuotaPartialSyncConfig() {
     runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
 }
 
-runRegressionSubscriptionStateQuotaPartialSync() {
-    runRegressionStep subscription-state-quota-partial-sync runSubscriptionGroupStateQuotaPartialSyncRegression
-}
-
 runRegressionSubscriptionStateQuotaPartialSyncSerial() {
     runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
 }
 
 runRegressionSubscriptionStateQuotaSerial() {
     runRegressionStep subscription-state-quota-serial runSubscriptionGroupStateQuotaSerialRegression
-}
-
-runRegressionSubscriptionStateRemoteRestore() {
-    runRegressionStep subscription-state-remote-restore runSubscriptionGroupStateRemoteRestoreRegression
 }
 
 runRegressionSubscriptionStateRemoteRestoreSelfReference() {
@@ -2061,10 +1867,6 @@ runRegressionSubscriptionSyncSingleRestoreResultMessage() {
 
 runRegressionSubscriptionSyncRollbackResultMessage() {
     runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
-}
-
-runRegressionSubscriptionStateSyncRollback() {
-    runRegressionStep subscription-sync-rollback-failure runSubscriptionSyncRollbackFailureRegression
 }
 
 runRegressionSubscriptionStateSyncRollbackSerial() {
