@@ -550,6 +550,37 @@ runSubscriptionStateSupportChildStepsContract() {
     done
 }
 
+runSubscriptionStateSerialChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
+    local serialBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        subscription-state
+        subscription-sync-tempdir
+        subscription-sync-restore-pair-failure-message
+        subscription-sync-append-restore-failure-detail
+        subscription-sync-single-restore-result-message
+        subscription-sync-rollback-result-message
+        subscription-sync-rollback-failure-serial
+        subscription-sync-reconcile-early-exit
+        subscription-groups-restore-failure
+    )
+    local idx
+
+    serialBody=$(sed -n '/^runRegressionSubscriptionStateSerial() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${serialBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${serialBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
     local expectedChildren
@@ -3959,6 +3990,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract &&
+        runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-full-uses-framework-parallel-helper runSubscriptionStateFullUsesFrameworkParallelHelperContract &&
