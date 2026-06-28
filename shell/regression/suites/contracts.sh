@@ -436,10 +436,33 @@ runFastSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
+    grep -q '^listRegressionFastChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionFastOnlyChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionFastOnlyOutputChildSelectors() {$' "${suiteFile}"
     grep -q '^runRegressionFastSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionFastOnlySuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionFastOnlyOutputSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionFastOnlyCoreSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionFastUiSmokeLightSuiteRoot() {$' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-parallel-' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-only-parallel-' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-only-output-parallel-' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel fast runRegressionFastSuiteRoot \\' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf fast-only ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-only ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel fast-only runRegressionFastOnlySuiteRoot \\' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf fast-only-output ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-only-output ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel fast-only-output runRegressionFastOnlyOutputSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf fast-only-core runRegressionFastOnlyCoreSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf regression-fast-parallel-composition runRegressionFastParallelCompositionRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
     grep -q '^runRegressionFastRealitySuiteRoot() {$' "${suiteFile}"
@@ -522,6 +545,88 @@ runFastRealityAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runFastSelectorHelpersStayAlignedContract() (
+    local fastSelectorsFile="${TMP_DIR}/fast-default-selectors.txt"
+    local fastExpectedFile="${TMP_DIR}/fast-default-selectors.expected.txt"
+    local fastOnlySelectorsFile="${TMP_DIR}/fast-only-default-selectors.txt"
+    local fastOnlyExpectedFile="${TMP_DIR}/fast-only-default-selectors.expected.txt"
+    local fastOnlyOutputSelectorsFile="${TMP_DIR}/fast-only-output-default-selectors.txt"
+    local fastOnlyOutputExpectedFile="${TMP_DIR}/fast-only-output-default-selectors.expected.txt"
+
+    declare -F listRegressionFastChildSelectors >/dev/null
+    declare -F listRegressionFastOnlyChildSelectors >/dev/null
+    declare -F listRegressionFastOnlyOutputChildSelectors >/dev/null
+
+    listRegressionFastChildSelectors >"${fastSelectorsFile}"
+    listRegressionFastOnlyChildSelectors >"${fastOnlySelectorsFile}"
+    listRegressionFastOnlyOutputChildSelectors >"${fastOnlyOutputSelectorsFile}"
+
+    cat <<'EOF' >"${fastExpectedFile}"
+platform-hot
+fast-only
+EOF
+
+    cat <<'EOF' >"${fastOnlyExpectedFile}"
+fast-only-safety
+fast-only-output
+fast-only-core
+EOF
+
+    cat <<'EOF' >"${fastOnlyOutputExpectedFile}"
+fast-only-output-auto-install
+fast-only-output-rest
+EOF
+
+    cmp -s "${fastExpectedFile}" "${fastSelectorsFile}"
+    cmp -s "${fastOnlyExpectedFile}" "${fastOnlySelectorsFile}"
+    cmp -s "${fastOnlyOutputExpectedFile}" "${fastOnlyOutputSelectorsFile}"
+)
+
+runFastAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel fast runRegressionFastSuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionFastChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast"]:-}" == "runRegressionFastSuiteRoot" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runFastOnlyAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast-only"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf fast-only ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-only ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel fast-only runRegressionFastOnlySuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionFastOnlyChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast-only"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast-only"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast-only"]:-}" == "runRegressionFastOnlySuiteRoot" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runFastOnlyOutputAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["fast-only-output"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf fast-only-output ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-only-output ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel fast-only-output runRegressionFastOnlyOutputSuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionFastOnlyOutputChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["fast-only-output"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["fast-only-output"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast-only-output"]:-}" == "runRegressionFastOnlyOutputSuiteRoot" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
 runFastRealityLegacyRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -536,7 +641,8 @@ runFastLegacyRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^registerRegressionFunctionLeaf fast runRegressionFastSuiteRoot$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf fast ' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel fast runRegressionFastSuiteRoot \\' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionFast\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
     ! grep -Eq '^[[:space:]]*fast\)$' "${legacyFile}" || return 1
     ! grep -Fq 'usage: %s [fast|' "${legacyFile}" || return 1
@@ -631,7 +737,7 @@ runFastSuiteUsesSuiteLocalHelperContract() (
         return 0
     }
 
-    runRegressionFastSuiteRoot
+    runRegressionFastOnlyCoreSuiteRoot
 
     grep -qx 'suite-ui-smoke-light' "${callLog}"
     ! grep -q '^legacy-ui-smoke-light$' "${callLog}"
@@ -914,6 +1020,9 @@ runCompositionLeafSelectorsUseSuiteLocalRegistryContract() {
 regression-all-composition runRegressionAllCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
 regression-all-child-parallel-budget-composition runRegressionAllChildParallelBudgetCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
 regression-all-resource-layer-composition runRegressionAllResourceLayerCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
+regression-fast-parallel-composition runRegressionFastParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/fast.sh
+regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/fast.sh
+regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/fast.sh
 regression-routing-parallel-composition runRegressionRoutingParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/routing.sh
 regression-runtime-parallel-composition runRegressionRuntimeParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/runtime.sh
 regression-transaction-core-parallel-composition runRegressionTransactionCoreParallelCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/transaction.sh
@@ -956,6 +1065,9 @@ runCompositionLeafSelectorsLegacyPublicRetirementContract() {
 regression-all-composition
 regression-all-child-parallel-budget-composition
 regression-all-resource-layer-composition
+regression-fast-parallel-composition
+regression-fast-only-parallel-composition
+regression-fast-only-output-parallel-composition
 regression-routing-parallel-composition
 regression-runtime-parallel-composition
 regression-transaction-core-parallel-composition
@@ -3249,6 +3361,10 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
         runRegressionStep fast-public-cli-retirement runFastPublicCliRetirementContract &&
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
+        runRegressionStep fast-selector-helpers-stay-aligned runFastSelectorHelpersStayAlignedContract &&
+        runRegressionStep fast-aggregate-runner-registration runFastAggregateRunnerRegistrationContract &&
+        runRegressionStep fast-only-aggregate-runner-registration runFastOnlyAggregateRunnerRegistrationContract &&
+        runRegressionStep fast-only-output-aggregate-runner-registration runFastOnlyOutputAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
