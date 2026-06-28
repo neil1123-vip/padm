@@ -418,18 +418,17 @@ bash shell/validate_install.sh --online example.com
 ```bash
 bash shell/subscription_groups_regression.sh fast
 bash shell/subscription_groups_regression.sh platform
-bash shell/subscription_groups_regression.sh remote-control-light
+bash shell/subscription_groups_regression.sh remote-control-smoke
 bash shell/subscription_groups_regression.sh subscription-state
 ```
 
 回归分发规则：
 
-| 名称 | 实际脚本 | 覆盖范围 |
+| 名称 | 实际命令 | 覆盖范围 |
 | --- | --- | --- |
-| `fast` / `platform` | `shell/regression/subscription_groups_fast.sh` | 运行时 helper、安装/订阅基础路径和快速平台回归。 |
-| `remote-control-*` | `shell/regression/subscription_groups_remote_control.sh` | 主控/被控控制面契约、同步请求和远端响应处理。 |
-| `subscription-state*` | `shell/regression/subscription_groups_subscription_state.sh` | `groups.json`、同步事务、回滚和状态恢复。 |
-| 其它名称 | `shell/regression/subscription_groups_legacy.sh` | 旧链路和更大范围兼容回归。 |
+| 所有公开 selector | `bash shell/subscription_groups_regression.sh <selector>` | 统一分发 `fast`、`all`、`platform`、`remote-control` 及其 `smoke` / `contract` / `deep` 分层 selector、`subscription-state*` 等 suite / aggregate selector。 |
+
+历史分组脚本现在只作为内部 runner / source-only 复用层，不再作为公开命令面。
 
 ## 许可证
 

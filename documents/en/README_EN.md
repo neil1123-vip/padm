@@ -418,18 +418,17 @@ Grouped local regressions:
 ```bash
 bash shell/subscription_groups_regression.sh fast
 bash shell/subscription_groups_regression.sh platform
-bash shell/subscription_groups_regression.sh remote-control-light
+bash shell/subscription_groups_regression.sh remote-control-smoke
 bash shell/subscription_groups_regression.sh subscription-state
 ```
 
 Regression dispatch rules:
 
-| Name | Actual script | Coverage |
+| Name | Actual command | Coverage |
 | --- | --- | --- |
-| `fast` / `platform` | `shell/regression/subscription_groups_fast.sh` | Runtime helpers, installation/subscription foundations, and fast platform regressions. |
-| `remote-control-*` | `shell/regression/subscription_groups_remote_control.sh` | Controller/controlled control-plane contracts, sync requests, and remote response handling. |
-| `subscription-state*` | `shell/regression/subscription_groups_subscription_state.sh` | `groups.json`, sync transactions, rollback paths, and state restoration. |
-| Other names | `shell/regression/subscription_groups_legacy.sh` | Legacy paths and broader compatibility regressions. |
+| All public selectors | `bash shell/subscription_groups_regression.sh <selector>` | Unified dispatch for `fast`, `all`, `platform`, `remote-control` plus its `smoke` / `contract` / `deep` layered selectors, `subscription-state*`, and other suite / aggregate selectors. |
+
+Historical grouped scripts are now internal runner / source-only layers and are no longer public command surfaces.
 
 ## License
 

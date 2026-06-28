@@ -562,16 +562,42 @@ runAllSuiteUsesFunctionRegistryContract() {
 runAllPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+    local usageLine
+    local usageSelectors
 
-    ! grep -q '^registerRegressionAlias full all$' "${suiteFile}"
-    ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}"
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["all"]:-}" == "aggregate-runner" ]]
-    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["full"]:-}" ]]
-    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["ci"]:-}" ]]
-    ! grep -Eq '^[[:space:]]*all\|full\|ci\)$' "${legacyFile}"
-    grep -Eq '^[[:space:]]*all\)$' "${legacyFile}"
-    ! grep -Fq '|all|full|ci]' "${legacyFile}"
-    grep -Fq '|all]' "${legacyFile}"
+    ! grep -q '^registerRegressionAlias full all$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}" || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["all"]:-}" == "aggregate-runner" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["regression-all-composition"]:-}" == "function" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["regression-all-child-parallel-budget-composition"]:-}" == "function" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["regression-all-resource-layer-composition"]:-}" == "function" ]] || return 1
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["full"]:-}" ]] || return 1
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["ci"]:-}" ]] || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    for selector in \
+        all \
+        regression-all-composition \
+        regression-all-child-parallel-budget-composition \
+        regression-all-resource-layer-composition \
+        full \
+        ci; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
 }
 
 runLegacySuiteUsesFunctionRegistryContract() (

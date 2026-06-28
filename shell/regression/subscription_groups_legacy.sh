@@ -16008,17 +16008,8 @@ tls-reinstall-rollback)
 tls-renew-failure-propagation)
     regressionRunner=runTlsRenewalFailurePropagationRegression
     ;;
-regression-all-composition)
-    regressionRunner=runRegressionAllCompositionRegression
-    ;;
 regression-selector-dispatch-composition)
     regressionRunner=runRegressionSelectorDispatchCompositionRegression
-    ;;
-regression-all-child-parallel-budget-composition)
-    regressionRunner=runRegressionAllChildParallelBudgetCompositionRegression
-    ;;
-regression-all-resource-layer-composition)
-    regressionRunner=runRegressionAllResourceLayerCompositionRegression
     ;;
 regression-parallel-selector-limit-composition)
     regressionRunner=runRegressionParallelSelectorLimitCompositionRegression
@@ -16026,11 +16017,8 @@ regression-parallel-selector-limit-composition)
 regression-parallel-selector-slot-refill-composition)
     regressionRunner=runRegressionParallelSelectorSlotRefillCompositionRegression
     ;;
-all)
-    regressionRunner=runRegressionAll
-    ;;
 *)
-    printf 'usage: %s [tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|regression-all-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|all]\n' "$0" >&2
+    printf 'usage: %s [tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|regression-selector-dispatch-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition]\n' "$0" >&2
     exit 2
     ;;
 esac
