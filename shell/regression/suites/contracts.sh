@@ -677,6 +677,16 @@ runTlsAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runTlsLegacyRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionTls\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
+    ! grep -Eq '^[[:space:]]*tls\)$' "${legacyFile}" || return 1
+    ! grep -Fq '|tls|' "${legacyFile}" || return 1
+}
+
 runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
     local callLog="${TMP_DIR}/tls-aggregate-suite-root-dispatch.log"
 
@@ -2610,6 +2620,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
         runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
+        runRegressionStep tls-legacy-retirement runTlsLegacyRetirementContract &&
         runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
         runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
         runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
