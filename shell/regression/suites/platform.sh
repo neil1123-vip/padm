@@ -76,6 +76,23 @@ runRegressionPlatformHotParallelCompositionRegression() (
     ' "${callLog}"
 )
 
+runRegressionPlatformFastHelperIsolationRegression() (
+    set -euo pipefail
+    local legacyBody fastBody
+
+    capturePlatformUpdateRunnerBody() {
+        declare -f runUpdatePadmVersionPromptRegression
+    }
+
+    legacyBody=$(capturePlatformUpdateRunnerBody)
+    fastBody=$(runRegressionPlatformFastLeafWithCompat capturePlatformUpdateRunnerBody)
+
+    grep -Fq 'successLog="${TMP_DIR}/update-padm-success.log"' <<<"${legacyBody}"
+    grep -Fq 'replaceFailureDir="${TMP_DIR}/update-padm-replace-restore-failure"' <<<"${legacyBody}"
+    grep -Fq 'outputLog="${TMP_DIR}/update-padm-output.log"' <<<"${fastBody}"
+    grep -Fq 'replaceFailureDir="${TMP_DIR}/update-padm-replace-failure"' <<<"${fastBody}"
+)
+
 runRegressionPlatformIoSuiteRoot() {
     runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression &&
         runRegressionStep install-tools-acme-result-failure runInstallToolsAcmeResultFailureRegression &&
@@ -101,6 +118,7 @@ registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuit
 registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot
 registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
+registerRegressionFunctionLeaf regression-platform-fast-helper-isolation runRegressionPlatformFastHelperIsolationRegression
 
 registerRegressionAggregateRunnerParallel platform-hot runRegressionPlatformHotSuiteRoot \
     $(listRegressionPlatformHotChildSelectors)

@@ -1224,6 +1224,18 @@ EOF
     cmp -s "${TMP_DIR}/platform-hot-fast-compat-helper.expected.log" "${callLog}"
 )
 
+runPlatformFastHelperIsolationGuardRegisteredContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local fastFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^runRegressionPlatformFastHelperIsolationRegression() ($' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf regression-platform-fast-helper-isolation runRegressionPlatformFastHelperIsolationRegression$' "${suiteFile}" || return 1
+    grep -q '^runUpdatePadmVersionPromptRegression() {$' "${fastFile}" || return 1
+    grep -q '^runUpdatePadmVersionPromptRegression() {$' "${legacyFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerParallel platform-hot .*regression-platform-fast-helper-isolation' "${suiteFile}" || return 1
+}
+
 runPlatformRefreshChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRefresh \
@@ -4418,6 +4430,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract &&
         runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract &&
         runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract &&
+        runRegressionStep platform-fast-helper-isolation-guard-registered runPlatformFastHelperIsolationGuardRegisteredContract &&
         runRegressionStep platform-update-child-steps runPlatformUpdateChildStepsContract &&
         runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract &&
         runRegressionStep platform-rest-child-steps runPlatformRestChildStepsContract &&
