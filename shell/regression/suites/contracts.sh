@@ -1553,6 +1553,31 @@ runRuntimeSuiteChildStepsContract() {
     done
 }
 
+runTlsSuiteChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
+    local tlsBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        tls-failure-return
+        tls-reinstall-rollback
+        tls-renew-failure-propagation
+    )
+    local idx
+
+    tlsBody=$(sed -n '/^runRegressionTlsSuiteRoot() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${tlsBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${tlsBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4451,6 +4476,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
         runRegressionStep tls-legacy-retirement runTlsLegacyRetirementContract &&
         runRegressionStep tls-legacy-public-selector-retirement runTlsLegacyPublicSelectorRetirementContract &&
+        runRegressionStep tls-suite-child-steps runTlsSuiteChildStepsContract &&
         runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
         runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
         runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
