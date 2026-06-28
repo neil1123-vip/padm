@@ -3494,6 +3494,36 @@ EOF
     cmp -s "${defaultSortedFile}" "${TMP_DIR}/all-default-selectors.unique.txt"
 )
 
+runAllSuiteChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
+    local allBody
+    local parallelLine
+    local transactionSystemLine
+    local remoteControlLine
+
+    allBody=$(sed -n '/^runRegressionAllSuiteRoot() ($/,/^)$/p' "${suiteFile}")
+    [[ -n "${allBody}" ]] || return 1
+
+    parallelLine=$(awk '/runFrameworkParallelRegressionSelectors "\$\{TMP_DIR\}\/all-parallel-/ { print NR; exit }' <<<"${allBody}")
+    transactionSystemLine=$(awk '/^[[:space:]]*runRegressionStep transaction-system / { print NR; exit }' <<<"${allBody}")
+    remoteControlLine=$(awk '/^[[:space:]]*runRegressionStep remote-control-contract-server-response / { print NR; exit }' <<<"${allBody}")
+
+    [[ -n "${parallelLine}" ]] || return 1
+    [[ -n "${transactionSystemLine}" ]] || return 1
+    [[ -n "${remoteControlLine}" ]] || return 1
+
+    grep -q 'subscription \\' <<<"${allBody}" || return 1
+    grep -q 'ui \\' <<<"${allBody}" || return 1
+    grep -q 'transaction-core \\' <<<"${allBody}" || return 1
+    grep -q 'routing \\' <<<"${allBody}" || return 1
+    grep -q 'runtime \\' <<<"${allBody}" || return 1
+    grep -q 'remote-control-smoke \\' <<<"${allBody}" || return 1
+    grep -q 'remote-control-contract-service-install$' <<<"${allBody}" || return 1
+
+    (( parallelLine < transactionSystemLine )) || return 1
+    (( transactionSystemLine < remoteControlLine )) || return 1
+}
+
 runAllAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
     local expectedChildren
@@ -4635,6 +4665,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-suite-uses-suite-local-helpers runTransactionSuiteUsesSuiteLocalHelpersContract &&
         runRegressionStep transaction-core-aggregate-runner-uses-framework-selector-helper runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract &&
+        runRegressionStep all-suite-child-steps runAllSuiteChildStepsContract &&
         runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
         runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&
         runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract &&
