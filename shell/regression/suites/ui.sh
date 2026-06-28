@@ -83,8 +83,8 @@ runRegressionUiSmokeSuiteRoot() {
     resetMenuActions
     systemScriptMenu <<<"4"
     assertMenuAction bbrInstall
-    [[ "$(protocolMenuDescription 10)" == "TLS 指纹抗性优先；sing-box / tcp / tls" ]]
-    [[ "$(protocolMenuDescription 13)" == "sing-box AnyTLS 按需；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
+    [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
 }
 
