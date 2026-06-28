@@ -23,69 +23,30 @@ runRemoteSubscribeFetchIdempotentCompatRegression() { runRegressionSubscriptionL
 runSingBoxSubscribeWriteCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runSingBoxSubscribeWriteRegression; }
 
 runRegressionSubscriptionRemoteSuiteRoot() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    mapfile -t selectors < <(listRegressionSubscriptionRemoteChildSelectors)
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
+        listRegressionSubscriptionRemoteChildSelectors
 }
 
 runRegressionSubscriptionTxSuiteRoot() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    mapfile -t selectors < <(listRegressionSubscriptionTxChildSelectors)
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-tx-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-tx-parallel-${BASHPID:-$$}" \
+        listRegressionSubscriptionTxChildSelectors
 }
 
 runRegressionSubscriptionSuiteRoot() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
     if [[ "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" == "all" ]]; then
-        mapfile -t selectors < <(listRegressionSubscriptionLightChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
+            listRegressionSubscriptionLightChildSelectors
         (
             export PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-2}"
-            mapfile -t selectors < <(listRegressionSubscriptionHeavyChildSelectors)
-            selectorPairs=()
-            for selector in "${selectors[@]}"; do
-                selectorPairs+=("${selector}" "${selector}")
-            done
-            PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-                runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
-                "${selectorPairs[@]}"
+            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
+                listRegressionSubscriptionHeavyChildSelectors
         )
         return
     fi
 
-    mapfile -t selectors < <(listRegressionSubscriptionChildSelectors)
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-${BASHPID:-$$}" \
+        listRegressionSubscriptionChildSelectors
 }
 
 runRegressionSubscriptionRemote() {

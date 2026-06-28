@@ -194,6 +194,25 @@ runFrameworkParallelRegressionSelectors() {
     return "${status}"
 }
 
+runFrameworkParallelRegressionSelectorList() {
+    local orchestrationRoot=$1
+    local selectorListFn=$2
+    shift 2
+    local -a selectors=()
+    local -a selectorPairs=()
+    local selector
+
+    mapfile -t selectors < <("${selectorListFn}" "$@")
+    for selector in "${selectors[@]}"; do
+        [[ -n "${selector}" ]] || continue
+        selectorPairs+=("${selector}" "${selector}")
+    done
+
+    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
+        runFrameworkParallelRegressionSelectors "${orchestrationRoot}" \
+        "${selectorPairs[@]}"
+}
+
 runParallelRegressionSelectors() {
     runFrameworkParallelRegressionSelectors "$@"
 }

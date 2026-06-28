@@ -90,51 +90,23 @@ runRoutingDNSRestoreScopeCompatRegression() { runRegressionRoutingLegacyLeafWith
 runRoutingPortPanelCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runPortAndPanelHelperRegression; }
 
 runRegressionRoutingSuiteRoot() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
     if [[ "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" == "all" ]]; then
-        mapfile -t selectors < <(listRegressionRoutingCoreChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/routing-parallel-core-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-core-${BASHPID:-$$}" \
+            listRegressionRoutingCoreChildSelectors
 
-        mapfile -t selectors < <(listRegressionRoutingHeavyChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-2}" \
-            PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/routing-parallel-heavy-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-heavy-${BASHPID:-$$}" \
+            listRegressionRoutingHeavyChildSelectors
 
-        mapfile -t selectors < <(listRegressionRoutingLightChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ROUTING_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-4}}" \
-            PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/routing-parallel-light-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-light-${BASHPID:-$$}" \
+            listRegressionRoutingLightChildSelectors
         return
     fi
 
-    mapfile -t selectors < <(listRegressionRoutingChildSelectors)
-    selectorPairs=()
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ROUTING_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/routing-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-${BASHPID:-$$}" \
+        listRegressionRoutingChildSelectors
 }
 
 runRegressionRoutingParallelCompositionRegression() (

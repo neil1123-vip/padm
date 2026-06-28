@@ -1151,8 +1151,7 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/subscription-' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-' "${suiteFile}"
     ! grep -q '^runRegressionSubscription() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionSubscriptionRemote() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionSubscriptionTx() {$' "${legacyScriptFile}"
@@ -1676,8 +1675,7 @@ runRoutingSuiteUsesFunctionRegistryContract() {
     grep -q '^listRegressionRoutingChildSelectors() {$' "${suiteFile}" || status=1
     grep -q '^runRegressionRoutingSuiteRoot() {$' "${suiteFile}" || status=1
     grep -q '^runRegressionRoutingParallelCompositionRegression() ' "${suiteFile}" || status=1
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}" || status=1
-    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/routing-parallel-' "${suiteFile}" || status=1
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-' "${suiteFile}" || status=1
     ! grep -q '^listRegressionRoutingCoreChildSelectors() {$' "${legacyScriptFile}" || status=1
     ! grep -q '^listRegressionRoutingHeavyChildSelectors() {$' "${legacyScriptFile}" || status=1
     ! grep -q '^listRegressionRoutingLightChildSelectors() {$' "${legacyScriptFile}" || status=1
@@ -2340,6 +2338,29 @@ runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract() (
     ' "${callLog}"
 )
 
+runFrameworkParallelSelectorListBuildsPairDispatchContract() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/framework-parallel-selector-list.log"
+
+    : >"${callLog}"
+
+    listFrameworkParallelSelectorListFixtures() {
+        [[ "${1:-}" == "wave-a" ]]
+        printf '%s\n' \
+            alpha \
+            beta \
+            gamma
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:mode=%s:%s\n' "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-}" "$*" >>"${callLog}"
+    }
+
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/framework-parallel-selector-list-root" listFrameworkParallelSelectorListFixtures wave-a
+
+    grep -qx 'framework:mode=pairs:'"${TMP_DIR}"'/framework-parallel-selector-list-root alpha alpha beta beta gamma gamma' "${callLog}"
+)
+
 runRuntimeSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -2351,8 +2372,7 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
     grep -q '^listRegressionRuntimeChildSelectors() {$' "${suiteFile}"
     grep -q '^runRegressionRuntimeSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionRuntimeParallelCompositionRegression() ' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/runtime-parallel-' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/runtime-parallel-' "${suiteFile}"
     ! grep -q '^listRegressionRuntimeLightChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionRuntimeHeavyChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionRuntimeChildSelectors() {$' "${legacyScriptFile}"
@@ -3214,6 +3234,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract &&
+        runRegressionStep framework-parallel-selector-list-builds-pair-dispatch runFrameworkParallelSelectorListBuildsPairDispatchContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep targeted-batch-helpers-legacy-retirement runTargetedBatchHelpersLegacyRetirementContract &&
