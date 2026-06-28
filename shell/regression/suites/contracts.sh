@@ -1230,6 +1230,43 @@ runFastOnlyOutputAutoInstallChildStepsContract() {
     done
 }
 
+runFastOnlyOutputRestChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local restBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        client-name-suffix-preserves-random-prefix
+        subscribe-local-cleanup
+        subscription-output-random-user
+        show-accounts-optional-step
+        show-accounts-xray-singbox-assist
+        show-accounts-singbox-reality-grpc
+        trojan-grpc-account-template-filename
+        trojan-fallback-subscribe-entry
+        trojan-fallback-template-frontend
+        parse-install-args-missing-value
+        locale-unset-printN
+        httpupgrade-incremental-starts-nginx
+        httpupgrade-rejects-unsafe-nginx-path
+        allow-port-optional-protocol
+        core-client-optional-args
+    )
+    local idx
+
+    restBody=$(sed -n '/^runRegressionFastOnlyOutputRest() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${restBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${restBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4100,6 +4137,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-only-aggregate-runner-registration runFastOnlyAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-output-aggregate-runner-registration runFastOnlyOutputAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-output-auto-install-child-steps runFastOnlyOutputAutoInstallChildStepsContract &&
+        runRegressionStep fast-only-output-rest-child-steps runFastOnlyOutputRestChildStepsContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
