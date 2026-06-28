@@ -1203,6 +1203,73 @@ runPlatformRefreshChildStepsContract() {
     done
 }
 
+runPlatformRestChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local restBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        release-workflow-version
+        version-helpers
+        regression-bootstrap-local-env-fallback
+        cleanup-trap
+        cleanup-trap-relative-path
+        clean-directory-safety
+        managed-file-backup-manifest
+        managed-file-backup-manifest-validator
+        remove-managed-files-ignore-failure
+        remove-managed-path-ignore-failure
+        check-log-backup-restore
+        remote-control-systemctl-stub-default-stop-disable
+        regression-fast-parallel-composition
+        regression-fast-only-parallel-composition
+        regression-fast-only-output-parallel-composition
+        regression-platform-hot-parallel-composition
+        remote-control-function-stub-default-stop-disable
+        tuic-protocol-single-default-branch
+        tls-dns-api-single-default-branch
+        tls-ca-single-default-branch
+        reality-target-single-default-branch
+        auto-install-type-single-custom-branch
+        subscription-menu-wrapper-count
+        subscription-menu-dead-entry-count
+        unused-helper-function-count
+        legacy-users-module-removed
+        install-entry-refresh
+        install-module-paths
+        install-early-capability-list
+        install-menu-recommended-ids
+        validate-install-loads-runtime
+        validate-install-temp-root-parent-shell
+        install-entry-symlink
+        alias-install-metadata
+        alias-install-same-target
+        alias-install-rejects-unsafe-target
+        alias-install-rejects-unsafe-home
+        xray-stats-jq
+        local-traffic-accounts
+        dpkg-installed-pattern
+        dpkg-query-installed-pattern
+        rhel-like-detection
+        fedora-detection
+        port-hopping-without-persistent
+        port-hopping-menu-command-lookup
+    )
+    local idx
+
+    restBody=$(sed -n '/^runRegressionPlatformRest() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${restBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${restBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastOnlyOutputAutoInstallChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     local autoInstallBody
@@ -4237,6 +4304,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract &&
         runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract &&
         runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract &&
+        runRegressionStep platform-rest-child-steps runPlatformRestChildStepsContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
