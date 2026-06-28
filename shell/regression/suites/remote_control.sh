@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 
 REGRESSION_REMOTE_CONTROL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=/dev/null
+source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
 
+runRegressionRemoteControlSuiteSelector() {
+    case "$1" in
+    remote-control-smoke) runRegressionRemoteControlSmoke ;;
+    remote-control-contract) runRegressionRemoteControlContract ;;
+    remote-control-deep) runRegressionRemoteControlDeep ;;
+    *) return 2 ;;
+    esac
+}
+
 runRegressionRemoteControl() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/remote-control-default" \
-        smoke runRegressionRemoteControlSmoke \
-        contract runRegressionRemoteControlContract \
-        deep runRegressionRemoteControlDeep
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionRemoteControlSuiteSelector \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-default-${BASHPID:-$$}" \
+        listRegressionRemoteControlChildSelectors
 }
 
 runRegressionRemoteControlSuiteRoot() {

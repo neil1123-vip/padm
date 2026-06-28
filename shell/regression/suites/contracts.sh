@@ -384,6 +384,10 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
         return 97
     }
 
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:%s\n' "$*" >>"${callsFile}"
+    }
+
     runParallelRegressionRunners() {
         printf '%s\n' "$*" >>"${callsFile}"
     }
@@ -397,8 +401,9 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
     runRegressionRemoteControlContractServiceInstall
 
     mapfile -t calls <"${callsFile}"
-    [[ "${#calls[@]}" -eq 6 ]]
-    [[ "${calls[0]}" == "${TMP_DIR}/remote-control-default smoke runRegressionRemoteControlSmoke contract runRegressionRemoteControlContract deep runRegressionRemoteControlDeep" ]]
+    [[ "${#calls[@]}" -eq 6 ]] || return 1
+    [[ "${calls[0]}" == framework:"${TMP_DIR}/remote-control-default-"* ]] || return 1
+    [[ "${calls[0]}" == *' remote-control-smoke remote-control-smoke remote-control-contract remote-control-contract remote-control-deep remote-control-deep' ]] || return 1
     [[ "${calls[1]}" == "${TMP_DIR}/remote-control-smoke-refresh apply runRegressionRemoteControlSmokeRefreshApply restore runRegressionRemoteControlSmokeRefreshRestore reconcile runRegressionRemoteControlSmokeRefreshReconcile" ]]
     [[ "${calls[2]}" == "${TMP_DIR}/remote-control-smoke-refresh-apply basic runRegressionRemoteControlSmokeRefreshApplyBasic prepare runRegressionRemoteControlSmokeRefreshApplyPrepare failure runRegressionRemoteControlSmokeRefreshApplyFailure" ]]
     [[ "${calls[3]}" == "${TMP_DIR}/remote-control-smoke smoke-core runRegressionRemoteControlSmokeCore smoke-refresh runRegressionRemoteControlSmokeRefresh" ]]
@@ -443,6 +448,32 @@ runRemoteControlAggregateRunnerRegistrationContract() {
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["remote-control"]:-}" == "runRegressionRemoteControlSuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
+
+runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/remote-control-framework-helper-dispatch.log"
+
+    : >"${callLog}"
+
+    listRegressionRemoteControlChildSelectors() {
+        printf '%s\n' \
+            remote-control-smoke \
+            remote-control-deep
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:%s\n' "$*" >>"${callLog}"
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runRegressionRemoteControl
+
+    grep -qx 'framework:'"${TMP_DIR}"'/remote-control-default-[0-9][0-9]* remote-control-smoke remote-control-smoke remote-control-deep remote-control-deep' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
+)
 
 runFastSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
@@ -3457,6 +3488,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
+        runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
         runRegressionStep fast-public-cli-retirement runFastPublicCliRetirementContract &&
