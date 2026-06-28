@@ -13,6 +13,10 @@ runRegressionSubscriptionLegacyLeafWithCompat() (
 )
 
 runRegressionSubscriptionOutputCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput; }
+runRegressionSubscriptionOutputProfileAndRealityCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputProfileAndRealityRegression; }
+runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression; }
+runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsVlessVmessTrojanRegression; }
+runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression; }
 runRemoteSubscribeFetchUniqueCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchUniqueRegression; }
 runRemoteSubscribeFetchRollbackCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchRollbackRegression; }
 runRemoteSubscribeFetchMergeCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchMergeRegression; }
@@ -21,6 +25,20 @@ runRemoteSubscribeFetchAppendFailureCompatRegression() { runRegressionSubscripti
 runRemoteSubscribeFetchCommitFailureCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchCommitFailureRegression; }
 runRemoteSubscribeFetchIdempotentCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchIdempotentRegression; }
 runSingBoxSubscribeWriteCompatRegression() { runRegressionSubscriptionLegacyLeafWithCompat runSingBoxSubscribeWriteRegression; }
+
+listRegressionSubscriptionOutputChildSelectors() {
+    printf '%s\n' \
+        subscription-output-profile-and-reality \
+        subscription-output-publish-accounts-and-remote-hint \
+        subscription-output-tls-vless-vmess-trojan \
+        subscription-output-tls-any-hysteria-tuic-naive
+}
+
+runRegressionSubscriptionOutputSuiteRoot() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-output-parallel-${BASHPID:-$$}" \
+        listRegressionSubscriptionOutputChildSelectors
+}
 
 runRegressionSubscriptionRemoteSuiteRoot() {
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
@@ -61,8 +79,54 @@ runRegressionSubscription() {
     runRegressionSubscriptionSuiteRoot
 }
 
+runRegressionSubscriptionOutputParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-subscription-output-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionAllSelector() {
+        local selector=$1
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "subscription-output-profile-and-reality" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${TMP_DIR}/subscription-output-publish-started" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "subscription-output-publish-accounts-and-remote-hint" ]]; then
+            : >"${TMP_DIR}/subscription-output-publish-started"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionOutputSuiteRoot
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        grep -qx "${selector}-start" "${callLog}"
+        grep -qx "${selector}-finish" "${callLog}"
+    done < <(listRegressionSubscriptionOutputChildSelectors)
+    awk '
+        $0 == "subscription-output-profile-and-reality-start" { firstStart = NR }
+        $0 == "subscription-output-publish-accounts-and-remote-hint-start" { secondStart = NR }
+        $0 == "subscription-output-profile-and-reality-finish" { firstFinish = NR }
+        END { exit !(firstStart && secondStart && firstFinish && secondStart < firstFinish) }
+    ' "${callLog}"
+
+    : >"${callLog}"
+    rm -f "${TMP_DIR}/subscription-output-publish-started"
+    PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionOutputSuiteRoot
+    awk '
+        $0 == "subscription-output-profile-and-reality-finish" { firstFinish = NR }
+        $0 == "subscription-output-publish-accounts-and-remote-hint-start" { secondStart = NR }
+        $0 == "subscription-output-publish-accounts-and-remote-hint-finish" { secondFinish = NR }
+        $0 == "subscription-output-tls-vless-vmess-trojan-start" { thirdStart = NR }
+        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
+    ' "${callLog}"
+)
+
 runRegressionSubscriptionOutput() {
-    runRegressionStep subscription-output runSubscriptionOutputRegression &&
+    runRegressionSubscriptionOutputSuiteRoot &&
         runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
 }
 
@@ -220,6 +284,10 @@ runRegressionSubscriptionParallelCompositionRegression() (
 )
 
 registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutputCompatRegression
+registerRegressionFunctionLeaf subscription-output-profile-and-reality runRegressionSubscriptionOutputProfileAndRealityCompatRegression
+registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression
+registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression
+registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression
 registerRegressionFunctionLeaf subscription-remote-unique runRemoteSubscribeFetchUniqueCompatRegression
 registerRegressionFunctionLeaf subscription-remote-rollback runRemoteSubscribeFetchRollbackCompatRegression
 registerRegressionFunctionLeaf subscription-remote-merge runRemoteSubscribeFetchMergeCompatRegression
@@ -244,6 +312,7 @@ registerRegressionFunctionLeaf subscribe-return-failure runSubscribeReturnFailur
 registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
 registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
 registerRegressionFunctionLeaf regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
+registerRegressionFunctionLeaf regression-subscription-output-parallel-composition runRegressionSubscriptionOutputParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-legacy-tmpdir-isolation runRegressionSubscriptionLegacyTmpDirIsolationRegression

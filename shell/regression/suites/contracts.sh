@@ -1065,6 +1065,10 @@ runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract() {
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
 subscription-output runRegressionSubscriptionOutputCompatRegression
+subscription-output-profile-and-reality runRegressionSubscriptionOutputProfileAndRealityCompatRegression
+subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression
+subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression
+subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression
 subscription-remote-unique runRemoteSubscribeFetchUniqueCompatRegression
 subscription-remote-rollback runRemoteSubscribeFetchRollbackCompatRegression
 subscription-remote-merge runRemoteSubscribeFetchMergeCompatRegression
@@ -1151,6 +1155,7 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-' "${suiteFile}"
     ! grep -q '^runRegressionSubscription() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionSubscriptionRemote() {$' "${legacyScriptFile}"
@@ -1202,6 +1207,10 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
         subscription \
         subscription-remote \
         subscription-tx \
+        subscription-output-profile-and-reality \
+        subscription-output-publish-accounts-and-remote-hint \
+        subscription-output-tls-vless-vmess-trojan \
+        subscription-output-tls-any-hysteria-tuic-naive \
         subscription-remote-unique \
         subscription-remote-rollback \
         subscription-remote-merge \
@@ -1226,6 +1235,7 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
         remove-user-subscription-menu-failure \
         user-subscription-menu-mutation-failure \
         regression-subscription-parallel-composition \
+        regression-subscription-output-parallel-composition \
         regression-subscription-tx-parallel-composition \
         regression-subscription-remote-parallel-composition; do
         ! awk -v sel="${selector}" '
@@ -2646,7 +2656,12 @@ runSubscriptionOutputLegacyRetirementContract() {
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}" || return 1
+    grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutputCompatRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-profile-and-reality runRegressionSubscriptionOutputProfileAndRealityCompatRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression$' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionOutput\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
     ! grep -Eq '^[[:space:]]*subscription-output\)$' "${legacyFile}" || return 1
     ! grep -Fq '|subscription-output|' "${legacyFile}" || return 1
@@ -2713,6 +2728,14 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
 
     : >"${callLog}"
 
+    listRegressionSubscriptionOutputChildSelectors() {
+        printf '%s\n' \
+            subscription-output-profile-and-reality \
+            subscription-output-publish-accounts-and-remote-hint \
+            subscription-output-tls-vless-vmess-trojan \
+            subscription-output-tls-any-hysteria-tuic-naive
+    }
+
     listRegressionSubscriptionRemoteChildSelectors() {
         printf '%s\n' \
             subscription-remote-unique \
@@ -2756,9 +2779,11 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
 
     runRegressionSubscriptionRemoteSuiteRoot
     runRegressionSubscriptionTxSuiteRoot
+    runRegressionSubscriptionOutputSuiteRoot
     runRegressionSubscriptionSuiteRoot
     PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionSubscriptionSuiteRoot
 
+    grep -qx 'framework:jobs='"${PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS:-2}"':'"${TMP_DIR}"'/subscription-output-parallel-[0-9][0-9]* subscription-output-profile-and-reality subscription-output-profile-and-reality subscription-output-publish-accounts-and-remote-hint subscription-output-publish-accounts-and-remote-hint subscription-output-tls-vless-vmess-trojan subscription-output-tls-vless-vmess-trojan subscription-output-tls-any-hysteria-tuic-naive subscription-output-tls-any-hysteria-tuic-naive' "${callLog}"
     grep -qx 'framework:jobs='"${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-4}"':'"${TMP_DIR}"'/subscription-remote-parallel-[0-9][0-9]* subscription-remote-unique subscription-remote-unique subscription-remote-merge subscription-remote-merge' "${callLog}"
     grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-tx-parallel-[0-9][0-9]* sing-box-subscribe-write sing-box-subscribe-write subscribe-user-output-transaction subscribe-user-output-transaction' "${callLog}"
     grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-[0-9][0-9]* subscription-output subscription-output subscription-state subscription-state subscription-remote subscription-remote subscription-tx subscription-tx' "${callLog}"

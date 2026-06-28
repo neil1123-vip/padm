@@ -10709,7 +10709,7 @@ runRealityConfigRegression() {
     runRegressionStep reality-config-import-skip runRealityConfigImportSkipRegression
 }
 
-runSubscriptionOutputRegression() {
+runSubscriptionOutputProfileAndRealityRegression() {
     rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
     export REGRESSION_ECHO_LOG="${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 local profileEmail profileId profilePassword profileName profileUuid
@@ -10756,7 +10756,9 @@ grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhtt
 ! grep -q 'flow: xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q '%26flow%3Dxtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 configPath="${oldConfigPath}"
+}
 
+runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
 (
     local publishRoot="${TMP_DIR}/subscription-output-publish-accounts"
     local localBase="${publishRoot}/local"
@@ -10927,7 +10929,9 @@ configPath="${oldConfigPath}"
         unset currentDefaultPort
     fi
 )
+}
 
+runSubscriptionOutputTlsVlessVmessTrojanRegression() {
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vlesstcp 443 tls-user uuid-tls "" ""
@@ -10976,7 +10980,9 @@ httpUpgradeLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-httpupgrade-
 [[ "${httpUpgradeLink}" != " "* ]]
 assertCapturedSubscribeOutputs "tls-httpupgrade-user" "${httpUpgradeLink}" "edge.example.com" "tls.example.com" "httpupgrade" "vmess"
 jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-httpupgrade-user" >/dev/null
+}
 
+runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 singBoxAnyTLSPort=8443
@@ -11025,6 +11031,13 @@ grep -qxF "naive+https://tls-naive-user:pass-naive@tls.example.com:443?padding=t
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-naive-user" ]]
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-naive-user" ]]
 unset REGRESSION_ECHO_LOG
+}
+
+runSubscriptionOutputRegression() {
+    runSubscriptionOutputProfileAndRealityRegression
+    runSubscriptionOutputPublishAccountsAndRemoteHintRegression
+    runSubscriptionOutputTlsVlessVmessTrojanRegression
+    runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
 }
 
 runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
