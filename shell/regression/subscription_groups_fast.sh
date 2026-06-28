@@ -4516,24 +4516,5 @@ if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
-if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
-    printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
-    exit 2
-fi
-
-regressionName=${1:-fast}
-case "${regressionName}" in
-fast)
-    regressionRunner=runRegressionFast
-    ;;
-platform)
-    regressionRunner=runRegressionPlatform
-    ;;
-*)
-    printf 'usage: %s [fast|platform]\n' "$0" >&2
-    exit 2
-    ;;
-esac
-
-runRegressionStep "total:${regressionName}" "${regressionRunner}"
-echo "subscription-groups-regression-ok:${regressionName}"
+printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
+exit 2

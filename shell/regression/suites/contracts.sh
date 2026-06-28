@@ -480,6 +480,23 @@ runFastLegacyRetirementContract() {
     ! grep -Fq 'usage: %s [fast|' "${legacyFile}" || return 1
 }
 
+runFastPublicCliRetirementContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local usageLine
+
+    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}" || return 1
+    grep -q "printf 'use shell/subscription_groups_regression.sh <selector>\\\\n' >&2" "${scriptFile}" || return 1
+    grep -q '^exit 2$' "${scriptFile}" || return 1
+    ! grep -q '^if \[\[ "\${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" \]\]; then$' "${scriptFile}" || return 1
+    ! grep -q '^regressionName=' "${scriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*fast\)$' "${scriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*platform\)$' "${scriptFile}" || return 1
+    ! grep -Fq 'subscription-groups-regression-ok:' "${scriptFile}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${scriptFile}" || true)
+    [[ -z "${usageLine}" ]] || return 1
+}
+
 runFastPlatformSourceOnlyExecutionContract() (
     local platformSuite="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
     local fastSuite="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
@@ -3097,6 +3114,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
+        runRegressionStep fast-public-cli-retirement runFastPublicCliRetirementContract &&
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
