@@ -1174,6 +1174,35 @@ EOF
     cmp -s "${TMP_DIR}/platform-hot-fast-compat-helper.expected.log" "${callLog}"
 )
 
+runPlatformRefreshChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local refreshBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        install-refresh-fallback-main
+        install-refresh-keep-ref-on-lookup-fail
+        install-refresh-rejects-unsafe-script-dir
+        install-refresh-rejects-unsafe-archive
+        install-refresh-rejects-unsupported-archive-entry
+        install-refresh-restore
+        install-refresh-single-archive-guard
+    )
+    local idx
+
+    refreshBody=$(sed -n '/^runRegressionPlatformRefresh() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${refreshBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${refreshBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4052,6 +4081,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract &&
         runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract &&
         runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract &&
+        runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
