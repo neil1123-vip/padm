@@ -26,6 +26,52 @@ runRegressionRegistryRetiresScriptSelectorKindContract() {
     ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${scriptPath}" "\${runner}"' "${registryFile}"
 }
 
+runLegacyPublicSelectorRetirementAssertions() (
+    local legacyFile=$1
+    shift
+    local usageLine
+    local usageSelectors
+    local selector
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    for selector in "$@"; do
+        [[ -n "${selector}" ]] || continue
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
+)
+
+runLegacyPublicSelectorRetirementAssertionContract() (
+    local helperFile="${TMP_DIR}/legacy-public-selector-retirement-helper.sh"
+
+    cat <<'EOF' >"${helperFile}"
+usage: %s [alpha|delta]
+case "$1" in
+    alpha)
+        ;;
+    beta)
+        ;;
+esac
+EOF
+
+    runLegacyPublicSelectorRetirementAssertions "${helperFile}" alpha delta
+    if runLegacyPublicSelectorRetirementAssertions "${helperFile}" beta; then
+        return 1
+    fi
+)
+
 runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract() (
     local dispatcherFile="${PROJECT_ROOT}/shell/subscription_groups_regression.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -1193,35 +1239,16 @@ runTlsLegacyRetirementContract() {
 runTlsLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local selector
-    local usageLine
-    local usageSelectors
 
     grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}" || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-failure-return"]:-}" == "function" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-reinstall-rollback"]:-}" == "function" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-renew-failure-propagation"]:-}" == "function" ]] || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
-    for selector in \
+    runLegacyPublicSelectorRetirementAssertions "${legacyFile}" \
         tls-failure-return \
         tls-reinstall-rollback \
-        tls-renew-failure-propagation; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
-    done
+        tls-renew-failure-propagation
 }
 
 runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
@@ -2829,35 +2856,16 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
 runRuntimeLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local selector
-    local usageLine
-    local usageSelectors
 
     grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}" || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
-    for selector in \
+    runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" \
         runtime \
         runtime-core \
         runtime-autoread-unset-auto-install \
         runtime-auto-install-reality-route \
         runtime-tempdir \
-        regression-runtime-parallel-composition; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyScriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
-    done
+        regression-runtime-parallel-composition
 }
 
 runRealitySuiteUsesFunctionRegistryContract() {
@@ -2894,37 +2902,18 @@ runRealitySuiteUsesFunctionRegistryContract() {
 runRealityLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local selector
-    local usageLine
-    local usageSelectors
 
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}" || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
-    for selector in \
+    runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" \
         reality-candidates \
         reality-candidates-fast \
         reality-asn-scan-plan \
         reality-candidates-full \
         reality-config \
         reality-stream \
-        reality-profile-failure; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyScriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
-    done
+        reality-profile-failure
 }
 
 runSubscriptionSelectorHelpersStayAlignedContract() (
@@ -3662,6 +3651,7 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
+        runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
