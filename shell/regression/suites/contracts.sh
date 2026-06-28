@@ -480,12 +480,24 @@ runPlatformSuiteUsesFunctionRegistryContract() {
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
+    grep -q '^runRegressionPlatformFastLeafWithCompat() ($' "${suiteFile}"
+    grep -q '^listRegressionPlatformHotChildSelectors() {$' "${suiteFile}"
     grep -q '^runRegressionPlatformSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionPlatformIoSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionPlatformHotSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionPlatformUpdateSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionPlatformRefreshSuiteRoot() {$' "${suiteFile}"
+    grep -q '^runRegressionPlatformRestSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel platform-hot runRegressionPlatformHotSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression$' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/platform-hot-parallel-' "${suiteFile}"
     ! grep -q 'declare -f runRegressionPlatform' "${suiteFile}"
     ! grep -q 'declare -f runRegressionPlatformIo' "${suiteFile}"
     ! grep -q '^eval ' "${suiteFile}"
@@ -495,7 +507,7 @@ runPlatformPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel platform-hot runRegressionPlatformHotSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform runRegressionPlatformSuiteRoot$' "${suiteFile}"
     ! grep -Eq '^runRegressionPlatform\(\)[[:space:]]*[({]' "${legacyFile}"
@@ -527,6 +539,67 @@ EOF
     sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/fast-reality-default-selectors.unique.txt"
 
     cmp -s "${defaultSortedFile}" "${TMP_DIR}/fast-reality-default-selectors.unique.txt"
+)
+
+runPlatformHotSelectorHelpersStayAlignedContract() (
+    local defaultSelectorsFile="${TMP_DIR}/platform-hot-default-selectors.txt"
+    local expectedDefaultSelectorsFile="${TMP_DIR}/platform-hot-default-selectors.expected.txt"
+    local defaultSortedFile="${TMP_DIR}/platform-hot-default-selectors.sorted.txt"
+
+    declare -F listRegressionPlatformHotChildSelectors >/dev/null
+
+    listRegressionPlatformHotChildSelectors >"${defaultSelectorsFile}"
+
+    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
+platform-update
+platform-refresh
+platform-rest
+EOF
+
+    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/platform-hot-default-selectors.unique.txt"
+    cmp -s "${defaultSortedFile}" "${TMP_DIR}/platform-hot-default-selectors.unique.txt"
+)
+
+runPlatformHotAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local expectedChildren
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["platform-hot"]:-}
+
+    ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel platform-hot runRegressionPlatformHotSuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionPlatformHotChildSelectors)
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["platform-hot"]:-}" == "aggregate-runner" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["platform-hot"]:-}" == "parallel" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["platform-hot"]:-}" == "runRegressionPlatformHotSuiteRoot" ]]
+    [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runPlatformHotLeavesUseFastCompatHelperContract() (
+    local callLog="${TMP_DIR}/platform-hot-fast-compat-helper.log"
+
+    : >"${callLog}"
+
+    runRegressionStep() { :; }
+    runRegressionPlatformFastLeafWithCompat() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    runRegressionPlatformUpdateSuiteRoot
+    runRegressionPlatformRefreshSuiteRoot
+    runRegressionPlatformRestSuiteRoot
+    runRegressionPlatformSuiteRoot
+
+    cat <<'EOF' >"${TMP_DIR}/platform-hot-fast-compat-helper.expected.log"
+runRegressionPlatformUpdate
+runRegressionPlatformRefresh
+runRegressionPlatformRest
+runRegressionPlatform
+EOF
+
+    cmp -s "${TMP_DIR}/platform-hot-fast-compat-helper.expected.log" "${callLog}"
 )
 
 runFastRealityAggregateRunnerRegistrationContract() {
@@ -3371,6 +3444,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-suite-uses-suite-local-helper runFastSuiteUsesSuiteLocalHelperContract &&
         runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
         runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract &&
+        runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract &&
+        runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract &&
+        runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&

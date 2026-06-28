@@ -1,53 +1,80 @@
 #!/usr/bin/env bash
 
 REGRESSION_PLATFORM_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=/dev/null
+source "${REGRESSION_PLATFORM_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"
 
-runRegressionPlatformSuiteRoot() {
-    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
-        runRegressionStep version-helpers runVersionHelpersRegression &&
-        runRegressionStep cleanup-trap runCleanupTrapRegression &&
-        runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression &&
-        runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
-        runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
-        runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
-        runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
-        runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
-        runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
-        runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
-        runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
-        runRegressionStep install-refresh-rejects-protected-worktree runInstallRefreshRejectsProtectedWorktreeRegression &&
-        runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
-        runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression &&
-        runRegressionStep install-ensure-modules-rejects-protected-worktree runInstallEnsureModulesRejectsProtectedWorktreeRegression &&
-        runRegressionStep regression-framework-exports-protected-worktree-env runRegressionFrameworkExportsProtectedWorktreeEnvRegression &&
-        runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
-        runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
-        runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
-        runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression &&
-        runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression &&
-        runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
-        runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression &&
-        runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression &&
-        runRegressionStep subscription-menu-dead-entry-count runSubscriptionMenuDeadEntryCountRegression &&
-        runRegressionStep unused-helper-function-count runUnusedHelperFunctionCountRegression &&
-        runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression &&
-        runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
-        runRegressionStep install-module-paths runInstallModulePathsRegression &&
-        runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
-        runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression &&
-        runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&
-        runRegressionStep alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression &&
-        runRegressionStep alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression &&
-        runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression &&
-        runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression &&
-        runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression &&
-        runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression &&
-        runRegressionStep rhel-like-detection runRhelLikeDetectionRegression &&
-        runRegressionStep fedora-detection runFedoraDetectionRegression &&
-        runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression
+runRegressionPlatformFastLeafWithCompat() (
+    # Re-source fast platform fixtures in an isolated subshell so later suite
+    # loads cannot overwrite fast-only platform leaf dependencies.
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"
+    "$@"
+)
+
+runRegressionPlatformUpdateSuiteRoot() {
+    runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate
 }
+
+runRegressionPlatformRefreshSuiteRoot() {
+    runRegressionPlatformFastLeafWithCompat runRegressionPlatformRefresh
+}
+
+runRegressionPlatformRestSuiteRoot() {
+    runRegressionPlatformFastLeafWithCompat runRegressionPlatformRest
+}
+
+listRegressionPlatformHotChildSelectors() {
+    printf '%s\n' \
+        platform-update \
+        platform-refresh \
+        platform-rest
+}
+
+runRegressionPlatformHotSuiteRoot() {
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" \
+        listRegressionPlatformHotChildSelectors
+}
+
+runRegressionPlatformSuiteRoot() {
+    runRegressionPlatformFastLeafWithCompat runRegressionPlatform
+}
+
+runRegressionPlatformHotParallelCompositionRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/regression-platform-hot-parallel-composition.log"
+
+    : >"${callLog}"
+
+    runRegressionPlatformUpdateSuiteRoot() {
+        printf 'update-start\n' >>"${callLog}"
+        while [[ ! -f "${TMP_DIR}/platform-refresh-started" ]]; do
+            sleep 0.05
+        done
+        printf 'update-finish\n' >>"${callLog}"
+    }
+
+    runRegressionPlatformRefreshSuiteRoot() {
+        printf 'refresh-start\n' >>"${callLog}"
+        : >"${TMP_DIR}/platform-refresh-started"
+        printf 'refresh-finish\n' >>"${callLog}"
+    }
+
+    runRegressionPlatformRestSuiteRoot() {
+        printf 'rest\n' >>"${callLog}"
+    }
+
+    runRegressionPlatformHotSuiteRoot
+    grep -qx 'update-start' "${callLog}"
+    grep -qx 'refresh-start' "${callLog}"
+    awk '
+        $0 == "update-start" { updateStart = NR }
+        $0 == "refresh-start" { refreshStart = NR }
+        $0 == "update-finish" { updateFinish = NR }
+        END { exit !(updateStart && refreshStart && updateFinish && refreshStart < updateFinish) }
+    ' "${callLog}"
+)
 
 runRegressionPlatformIoSuiteRoot() {
     runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression &&
@@ -69,5 +96,11 @@ runRegressionPlatformIoSuiteRoot() {
         runRegressionStep reality-scanner-download-failure runRealityScannerDownloadFailureKeepsExistingDirRegression
 }
 
-registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot
+registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot
+registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuiteRoot
+registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot
+registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
+
+registerRegressionAggregateRunnerParallel platform-hot runRegressionPlatformHotSuiteRoot \
+    $(listRegressionPlatformHotChildSelectors)
