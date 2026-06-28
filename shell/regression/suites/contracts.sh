@@ -1004,6 +1004,12 @@ runUiSuiteUsesFunctionRegistryContract() {
     grep -q 'source "\${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || return 1
     grep -q '^runRegressionMenuSmokeFull() {$' "${suiteFile}" || return 1
+    grep -q '^runRegressionWireGuardMenuFlow() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionUiChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionUiAllProfileChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionUiSmokeSuiteRoot() {$' "${suiteFile}" || return 1
@@ -1017,6 +1023,12 @@ runUiSuiteUsesFunctionRegistryContract() {
     ! grep -q '^runRegressionUi() {$' "${legacyScriptFile}" || return 1
     ! grep -q '^runRegressionUiParallelCompositionRegression() ' "${legacyScriptFile}" || return 1
     ! grep -q '^runRegressionUiLongTailSplitCompositionRegression() ' "${legacyScriptFile}" || return 1
+    ! grep -q '^runRegressionWireGuardMenuFlow() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {$' "${legacyScriptFile}" || return 1
+    ! grep -q '^runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {$' "${legacyScriptFile}" || return 1
     ! grep -q '^registerRegressionScriptLeaf ui ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionScriptLeaf menu-smoke ' "${suiteFile}" || return 1
@@ -1051,6 +1063,37 @@ runUiFullLegacyWrapperRetirementContract() {
     ! grep -Eq '^runRegressionMenuSmokeFull\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
     ! grep -Eq '^[[:space:]]*ui-full\)$' "${legacyScriptFile}" || return 1
     ! grep -Fq '|ui-full|' "${legacyScriptFile}" || return 1
+}
+
+runUiWireGuardLegacyWrapperRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+
+    grep -q '^runRegressionWireGuardMenuFlow() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {$' "${suiteFile}" || return 1
+
+    ! grep -Eq '^runRegressionWireGuardMenuFlow\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerTransactionRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerRollbackRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerSourceControlRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+
+    for selector in \
+        wireguard-menu-flow \
+        wireguard-menu-flow-peer-transaction \
+        wireguard-menu-flow-peer-rollback \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-source-control; do
+        ! grep -Eq "^[[:space:]]*${selector}\)$" "${legacyScriptFile}" || return 1
+        ! grep -Eq "[\\[|]${selector}[|\\]]" "${legacyScriptFile}" || return 1
+    done
 }
 
 runUiSelectorHelpersStayAlignedContract() (
@@ -2664,6 +2707,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
         runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
         runRegressionStep ui-full-legacy-wrapper-retirement runUiFullLegacyWrapperRetirementContract &&
+        runRegressionStep ui-wireguard-legacy-wrapper-retirement runUiWireGuardLegacyWrapperRetirementContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
