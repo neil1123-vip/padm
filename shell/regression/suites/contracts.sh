@@ -1293,6 +1293,45 @@ runPlatformRestChildStepsContract() {
     done
 }
 
+runPlatformIoChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local ioBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        install-tools-certificate-dependency
+        install-tools-acme-result-failure
+        install-tools-acme-commit-failure
+        install-tools-configured-log
+        install-tools-update-failure
+        install-tools-release-info-failure
+        install-tools-nginx-reinstall-failure
+        apt-key-install-failure
+        nginx-apt-refresh-rollback
+        nginx-alpine-default-conf-rollback
+        nginx-yum-mainline-enable-failure
+        base-package-batch
+        package-rollback-failure
+        package-command-stdin
+        reality-scanner-unsafe-dir
+        reality-scanner-binary
+        reality-scanner-download-failure
+    )
+    local idx
+
+    ioBody=$(sed -n '/^runRegressionPlatformIoSuiteRoot() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${ioBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${ioBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastOnlyOutputAutoInstallChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     local autoInstallBody
@@ -4399,6 +4438,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-update-child-steps runPlatformUpdateChildStepsContract &&
         runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract &&
         runRegressionStep platform-rest-child-steps runPlatformRestChildStepsContract &&
+        runRegressionStep platform-io-child-steps runPlatformIoChildStepsContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
         runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
