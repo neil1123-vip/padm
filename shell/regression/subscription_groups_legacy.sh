@@ -15997,33 +15997,5 @@ if [[ "${PADM_REGRESSION_INTERNAL_CLI:-}" != "1" ]]; then
     exit 2
 fi
 
-regressionName=${1:-fast}
-case "${regressionName}" in
-tls-failure-return)
-    regressionRunner=runTlsFailureReturnRegression
-    ;;
-tls-reinstall-rollback)
-    regressionRunner=runTlsReinstallRollbackRegression
-    ;;
-tls-renew-failure-propagation)
-    regressionRunner=runTlsRenewalFailurePropagationRegression
-    ;;
-regression-selector-dispatch-composition)
-    regressionRunner=runRegressionSelectorDispatchCompositionRegression
-    ;;
-regression-parallel-selector-limit-composition)
-    regressionRunner=runRegressionParallelSelectorLimitCompositionRegression
-    ;;
-regression-parallel-selector-slot-refill-composition)
-    regressionRunner=runRegressionParallelSelectorSlotRefillCompositionRegression
-    ;;
-*)
-    printf 'usage: %s [tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|regression-selector-dispatch-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition]\n' "$0" >&2
-    exit 2
-    ;;
-esac
-
-runRegressionStep "total:${regressionName}" "${regressionRunner}"
-if [[ "${PADM_REGRESSION_SUPPRESS_DONE:-}" != "1" ]]; then
-    echo "subscription-groups-regression-ok:${regressionName}"
-fi
+printf 'legacy public selectors retired; use shell/subscription_groups_regression.sh <selector>\n' >&2
+exit 2

@@ -731,6 +731,40 @@ runTlsLegacyRetirementContract() {
     ! grep -Fq '|tls|' "${legacyFile}" || return 1
 }
 
+runTlsLegacyPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+    local usageLine
+    local usageSelectors
+
+    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}" || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-failure-return"]:-}" == "function" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-reinstall-rollback"]:-}" == "function" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-renew-failure-propagation"]:-}" == "function" ]] || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    for selector in \
+        tls-failure-return \
+        tls-reinstall-rollback \
+        tls-renew-failure-propagation; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
+}
+
 runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
     local callLog="${TMP_DIR}/tls-aggregate-suite-root-dispatch.log"
 
@@ -792,6 +826,46 @@ regression-parallel-selector-slot-refill-composition runRegressionParallelSelect
 EOF
 
     return "${status}"
+}
+
+runCompositionLeafSelectorsLegacyPublicRetirementContract() {
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+    local usageLine
+    local usageSelectors
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    while read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || return 1
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyScriptFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done <<'EOF'
+regression-all-composition
+regression-all-child-parallel-budget-composition
+regression-all-resource-layer-composition
+regression-routing-parallel-composition
+regression-runtime-parallel-composition
+regression-transaction-core-parallel-composition
+regression-transaction-system-parallel-composition
+regression-ui-parallel-composition
+regression-ui-long-tail-split-composition
+regression-selector-dispatch-composition
+regression-parallel-selector-limit-composition
+regression-parallel-selector-slot-refill-composition
+EOF
 }
 
 runTransactionDirectLeafSelectorsUseFunctionRegistryContract() {
@@ -3019,11 +3093,13 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
         runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
         runRegressionStep tls-legacy-retirement runTlsLegacyRetirementContract &&
+        runRegressionStep tls-legacy-public-selector-retirement runTlsLegacyPublicSelectorRetirementContract &&
         runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
         runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
         runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract &&
+        runRegressionStep composition-leaf-selectors-legacy-public-retirement runCompositionLeafSelectorsLegacyPublicRetirementContract &&
         runRegressionStep transaction-direct-leaf-selectors-use-function-registry runTransactionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep transaction-core-direct-leaf-selectors-use-function-registry runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
