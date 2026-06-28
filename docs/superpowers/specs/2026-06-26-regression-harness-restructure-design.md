@@ -470,6 +470,15 @@ Already landed in this branch:
 - `93d07bd` `refactor: route remote control suite through selector helper`
 - `32fe720` `refactor: route subscription state suites through selector helper`
 - `9110545` `refactor: route remote control nested aggregates through selector helper`
+- `43da388` `refactor: route ui nested aggregates through selector lists`
+- `306d949` `refactor: isolate reality suite selector helpers`
+- `5d2dac0` `test: guard pre-legacy suite helper collisions`
+- `ae69d33` `refactor: finish selector retirement helper rollout`
+- `b76d6c1` `refactor: finish aggregate registration helper rollout`
+- `aa79eec` `refactor: dedupe suite-local helper contracts`
+- `8c4ba82` `refactor: dedupe framework helper contracts`
+- `9eb8ced` `refactor: dedupe layered framework helper contracts`
+- `a0f1222` `refactor: dedupe ui framework helper contract`
 
 Together these commits establish the current harness direction:
 
@@ -477,6 +486,8 @@ Together these commits establish the current harness direction:
 - selector-owned suite topology
 - targeted legacy compat wrappers
 - resource-aware layered parallelism
+- shared contract helpers for repeated framework invariants
+- source-order guards where pre-legacy suite loads can silently collide with legacy names
 
 ## Remaining Cleanup Opportunities
 
@@ -486,8 +497,8 @@ Most likely next steps:
 
 1. keep reviewing legacy-backed suites for source-time global drift and add compat wrappers only where concrete collisions are proven
 2. decide whether nested aggregates still living inside legacy-backed scripts should also be lifted onto selector-list orchestration, or intentionally remain local runner groups
-3. reduce contract duplication where multiple suites assert the same framework invariant
-4. refresh this design snapshot whenever a suite root or resource-profile boundary changes, so the spec remains an authoritative map instead of a historical note
+3. keep trimming contract duplication only where a cross-suite assertion shape is still materially repeated; most shared aggregate-runner and helper-dispatch invariants now already sit behind common assertion helpers
+4. refresh this design snapshot whenever a suite root, resource-profile boundary, or contract-helper boundary changes, so the spec remains an authoritative map instead of a historical note
 
 Deferred on purpose:
 
@@ -504,5 +515,6 @@ Key decisions captured by the current implementation:
 3. split long tails where timing gains are material, but keep leaf coverage unchanged
 4. forward child concurrency budgets from `all` instead of letting every nested suite fully fan out
 5. use isolated compat wrappers when legacy source-time globals make shared sourcing unsafe
+6. prefer shared contract assertion helpers for repeated framework invariants, but leave suite-specific composition expectations explicit until a clear cross-suite shape appears
 
 That is the intended baseline for the next round of regression time work.
