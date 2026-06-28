@@ -906,6 +906,7 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionSubscription() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemote() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionTx() {$' "${suiteFile}"
+    grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
@@ -914,6 +915,7 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^runRegressionSubscription() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionSubscriptionRemote() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionSubscriptionTx() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionSubscriptionOutput() {$' "${legacyScriptFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-remote ' "${suiteFile}"
@@ -2053,6 +2055,17 @@ runTargetedSubscriptionRestoreRetirementContract() {
     ! grep -Fq '|targeted-subscription-restore|' "${legacyFile}" || return 1
 }
 
+runSubscriptionOutputLegacyRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionOutput\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-output\)$' "${legacyFile}" || return 1
+    ! grep -Fq '|subscription-output|' "${legacyFile}" || return 1
+}
+
 runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
     local status=0
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
@@ -2647,6 +2660,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep targeted-subscription-restore-retirement runTargetedSubscriptionRestoreRetirementContract &&
+        runRegressionStep subscription-output-legacy-retirement runSubscriptionOutputLegacyRetirementContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
         runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
         runRegressionStep ui-full-legacy-wrapper-retirement runUiFullLegacyWrapperRetirementContract &&

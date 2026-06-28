@@ -83,6 +83,11 @@ runRegressionSubscription() {
     runRegressionSubscriptionSuiteRoot
 }
 
+runRegressionSubscriptionOutput() {
+    runRegressionStep subscription-output runSubscriptionOutputRegression &&
+        runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
+}
+
 runRegressionSubscriptionRemoteParallelCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-subscription-remote-parallel-composition.log"
