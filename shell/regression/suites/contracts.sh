@@ -2118,6 +2118,40 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionAggregateRunnerSequential reality-stream ' "${suiteFile}"
 }
 
+runRuntimeLegacyPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+    local usageLine
+    local usageSelectors
+
+    grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    for selector in \
+        runtime \
+        runtime-core \
+        runtime-autoread-unset-auto-install \
+        runtime-auto-install-reality-route \
+        runtime-tempdir \
+        regression-runtime-parallel-composition; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyScriptFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
+}
+
 runRealitySuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -2944,6 +2978,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
         runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep runtime-suite-uses-function-registry runRuntimeSuiteUsesFunctionRegistryContract &&
+        runRegressionStep runtime-legacy-public-selector-retirement runRuntimeLegacyPublicSelectorRetirementContract &&
         runRegressionStep runtime-selector-helpers-stay-aligned runRuntimeSelectorHelpersStayAlignedContract &&
         runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract &&
         runRegressionStep runtime-aggregate-runner-uses-suite-local-helper runRuntimeAggregateRunnerUsesSuiteLocalHelperContract &&
