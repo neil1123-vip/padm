@@ -1692,22 +1692,22 @@ runRoutingSuiteUsesFunctionRegistryContract() {
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
-routing-socks5-udp-associate runSocks5UdpAssociateRegression
-routing-core runRoutingRegression
-routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
-routing-access-control-config-transaction runAccessControlConfigTransactionRegression
-routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
-routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
-routing-access-control-failure-return runAccessControlFailureReturnRegression
-routing-bt-failure-return runBTRoutingFailureReturnRegression
-routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
-routing-warp-failure-return runWARPRoutingFailureReturnRegression
-routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
-routing-dns-failure-return runDNSRoutingFailureReturnRegression
-routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
-routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
-routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
-routing-port-panel runPortAndPanelHelperRegression
+routing-socks5-udp-associate runRoutingSocks5UdpAssociateCompatRegression
+routing-core runRoutingCoreCompatRegression
+routing-core-unsafe-config-dir runRoutingCoreUnsafeConfigDirCompatRegression
+routing-access-control-config-transaction runRoutingAccessControlConfigTransactionCompatRegression
+routing-access-control-unsafe-backup-dir runRoutingAccessControlUnsafeBackupDirCompatRegression
+routing-access-control-unsafe-config-dir runRoutingAccessControlUnsafeConfigDirCompatRegression
+routing-access-control-failure-return runRoutingAccessControlFailureReturnCompatRegression
+routing-bt-failure-return runRoutingBTFailureReturnCompatRegression
+routing-ipv6-failure-return runRoutingIPv6FailureReturnCompatRegression
+routing-warp-failure-return runRoutingWarpFailureReturnCompatRegression
+routing-socks5-failure-return runRoutingSocks5FailureReturnCompatRegression
+routing-dns-failure-return runRoutingDNSFailureReturnCompatRegression
+routing-dns-unsafe-backup-dir runRoutingDNSUnsafeBackupDirCompatRegression
+routing-dns-unsafe-config-dir runRoutingDNSUnsafeConfigDirCompatRegression
+routing-dns-restore-scope runRoutingDNSRestoreScopeCompatRegression
+routing-port-panel runRoutingPortPanelCompatRegression
 EOF
 
     return "${status}"
