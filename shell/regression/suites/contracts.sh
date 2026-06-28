@@ -106,6 +106,46 @@ runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions() (
     ! grep -q '^legacy-helper:' "${callLog}" || return 1
 )
 
+runRegressionStepSequenceAssertions() {
+    local sourceFile=$1
+    local functionName=$2
+    shift 2
+    local functionBody
+    local -a actualSteps=()
+    local -a expectedSteps=("$@")
+    local idx
+
+    functionBody=$(sed -n "/^${functionName}() {$/,/^}$/p" "${sourceFile}")
+    [[ -n "${functionBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${functionBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
+runRegressionStepSequenceAssertionContract() (
+    local fixtureFile="${TMP_DIR}/regression-step-sequence-assertion-fixture.sh"
+
+    cat <<'EOF' >"${fixtureFile}"
+runFixtureRegressionSequence() {
+    runRegressionStep first runFixtureFirst &&
+        runRegressionStep second runFixtureSecond
+}
+EOF
+
+    runRegressionStepSequenceAssertions "${fixtureFile}" runFixtureRegressionSequence first second
+
+    if runRegressionStepSequenceAssertions "${fixtureFile}" runFixtureRegressionSequence second first; then
+        return 1
+    fi
+)
+
 runLegacyPublicSelectorRetirementAssertionContract() (
     local helperFile="${TMP_DIR}/legacy-public-selector-retirement-helper.sh"
     local selectorsFile="${TMP_DIR}/legacy-public-selector-retirement-selectors.txt"
@@ -306,6 +346,67 @@ runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract() {
             in_fn && /^\)$/ { exit(found ? 0 : 1) }
         ' "${contractsFile}" || return 1
     done
+}
+
+runRegressionStepSequenceHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runSubscriptionStateSupportChildStepsContract \
+        runSubscriptionStateSerialChildStepsContract \
+        runRemoteControlSmokeCoreChildStepsContract \
+        runPlatformRefreshChildStepsContract \
+        runPlatformUpdateChildStepsContract \
+        runPlatformRestChildStepsContract \
+        runPlatformIoChildStepsContract \
+        runFastOnlyOutputAutoInstallChildStepsContract \
+        runFastOnlySafetyChildStepsContract \
+        runFastOnlyOutputRestChildStepsContract \
+        runFastOnlyCoreChildStepsContract \
+        runRealitySuiteChildStepsContract \
+        runRuntimeSuiteChildStepsContract \
+        runTlsSuiteChildStepsContract \
+        runTransactionSubscriptionChildStepsContract \
+        runTargetedBatchHelpersChildStepsContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() {" { in_fn = 1 }
+            in_fn && /runRegressionStepSequenceAssertions / { found = 1 }
+            in_fn && /^}$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
+runRegressionStepSequenceHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runSubscriptionStateSupportChildStepsContract \
+        runSubscriptionStateSerialChildStepsContract \
+        runRemoteControlSmokeCoreChildStepsContract \
+        runPlatformRefreshChildStepsContract \
+        runPlatformUpdateChildStepsContract \
+        runPlatformRestChildStepsContract \
+        runPlatformIoChildStepsContract \
+        runFastOnlyOutputAutoInstallChildStepsContract \
+        runFastOnlySafetyChildStepsContract \
+        runFastOnlyOutputRestChildStepsContract \
+        runFastOnlyCoreChildStepsContract \
+        runRuntimeSuiteChildStepsContract \
+        runTlsSuiteChildStepsContract \
+        runTransactionSubscriptionChildStepsContract \
+        runTargetedBatchHelpersChildStepsContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() {" { in_fn = 1 }
+            in_fn && /runRegressionStepSequenceAssertions / { found = 1 }
+            in_fn && /^}$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+
+    awk '
+        /^runRealitySuiteChildStepsContract\(\) \{$/ { in_fn = 1 }
+        in_fn && /runRegressionStepSequenceAssertions / { count++ }
+        in_fn && /^}$/ { exit(count == 2 ? 0 : 1) }
+    ' "${contractsFile}" || return 1
 }
 
 runLegacyPublicSelectorRetirementHelperAdoptionContract() {
@@ -522,63 +623,29 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
 
 runSubscriptionStateSupportChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
-    local supportBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        subscription-sync-tempdir
-        subscription-sync-restore-pair-failure-message
-        subscription-sync-append-restore-failure-detail
-        subscription-sync-single-restore-result-message
-        subscription-sync-rollback-result-message
-        subscription-sync-reconcile-early-exit
-        subscription-group-sync-publish-refresh-inline
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionSubscriptionStateSupport \
+        subscription-sync-tempdir \
+        subscription-sync-restore-pair-failure-message \
+        subscription-sync-append-restore-failure-detail \
+        subscription-sync-single-restore-result-message \
+        subscription-sync-rollback-result-message \
+        subscription-sync-reconcile-early-exit \
+        subscription-group-sync-publish-refresh-inline \
         subscription-groups-restore-failure
-    )
-    local idx
-
-    supportBody=$(sed -n '/^runRegressionSubscriptionStateSupport() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${supportBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${supportBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runSubscriptionStateSerialChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
-    local serialBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        subscription-state
-        subscription-sync-tempdir
-        subscription-sync-restore-pair-failure-message
-        subscription-sync-append-restore-failure-detail
-        subscription-sync-single-restore-result-message
-        subscription-sync-rollback-result-message
-        subscription-sync-rollback-failure-serial
-        subscription-sync-reconcile-early-exit
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionSubscriptionStateSerial \
+        subscription-state \
+        subscription-sync-tempdir \
+        subscription-sync-restore-pair-failure-message \
+        subscription-sync-append-restore-failure-detail \
+        subscription-sync-single-restore-result-message \
+        subscription-sync-rollback-result-message \
+        subscription-sync-rollback-failure-serial \
+        subscription-sync-reconcile-early-exit \
         subscription-groups-restore-failure
-    )
-    local idx
-
-    serialBody=$(sed -n '/^runRegressionSubscriptionStateSerial() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${serialBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${serialBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
@@ -935,33 +1002,16 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
 
 runRemoteControlSmokeCoreChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
-    local smokeCoreBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        remote-control-concurrency
-        remote-control-aggregation-failure
-        remote-control-inline-aggregation-helpers
-        remote-control-health
-        remote-control-inline-request-helpers
-        remote-control-inline-wireguard-peer-helpers
-        remote-control-inline-token-consumers
-        remote-control-inline-sync-runner
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionRemoteControlSmokeCoreSteps \
+        remote-control-concurrency \
+        remote-control-aggregation-failure \
+        remote-control-inline-aggregation-helpers \
+        remote-control-health \
+        remote-control-inline-request-helpers \
+        remote-control-inline-wireguard-peer-helpers \
+        remote-control-inline-token-consumers \
+        remote-control-inline-sync-runner \
         remote-control-handle-inline-helpers
-    )
-    local idx
-
-    smokeCoreBody=$(sed -n '/^runRegressionRemoteControlSmokeCoreSteps() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${smokeCoreBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${smokeCoreBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runRemoteControlAggregateRunnerRegistrationContract() {
@@ -1176,437 +1226,219 @@ EOF
 
 runPlatformRefreshChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
-    local refreshBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        install-refresh-fallback-main
-        install-refresh-keep-ref-on-lookup-fail
-        install-refresh-rejects-unsafe-script-dir
-        install-refresh-rejects-unsafe-archive
-        install-refresh-rejects-unsupported-archive-entry
-        install-refresh-restore
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRefresh \
+        install-refresh-fallback-main \
+        install-refresh-keep-ref-on-lookup-fail \
+        install-refresh-rejects-unsafe-script-dir \
+        install-refresh-rejects-unsafe-archive \
+        install-refresh-rejects-unsupported-archive-entry \
+        install-refresh-restore \
         install-refresh-single-archive-guard
-    )
-    local idx
-
-    refreshBody=$(sed -n '/^runRegressionPlatformRefresh() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${refreshBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${refreshBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runPlatformUpdateChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
-    local updateBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformUpdate \
         update-padm-version-prompt
-    )
-    local idx
-
-    updateBody=$(sed -n '/^runRegressionPlatformUpdate() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${updateBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${updateBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runPlatformRestChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
-    local restBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        release-workflow-version
-        version-helpers
-        regression-bootstrap-local-env-fallback
-        cleanup-trap
-        cleanup-trap-relative-path
-        clean-directory-safety
-        managed-file-backup-manifest
-        managed-file-backup-manifest-validator
-        remove-managed-files-ignore-failure
-        remove-managed-path-ignore-failure
-        check-log-backup-restore
-        remote-control-systemctl-stub-default-stop-disable
-        regression-fast-parallel-composition
-        regression-fast-only-parallel-composition
-        regression-fast-only-output-parallel-composition
-        regression-platform-hot-parallel-composition
-        remote-control-function-stub-default-stop-disable
-        tuic-protocol-single-default-branch
-        tls-dns-api-single-default-branch
-        tls-ca-single-default-branch
-        reality-target-single-default-branch
-        auto-install-type-single-custom-branch
-        subscription-menu-wrapper-count
-        subscription-menu-dead-entry-count
-        unused-helper-function-count
-        legacy-users-module-removed
-        install-entry-refresh
-        install-module-paths
-        install-early-capability-list
-        install-menu-recommended-ids
-        validate-install-loads-runtime
-        validate-install-temp-root-parent-shell
-        install-entry-symlink
-        alias-install-metadata
-        alias-install-same-target
-        alias-install-rejects-unsafe-target
-        alias-install-rejects-unsafe-home
-        xray-stats-jq
-        local-traffic-accounts
-        dpkg-installed-pattern
-        dpkg-query-installed-pattern
-        rhel-like-detection
-        fedora-detection
-        port-hopping-without-persistent
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRest \
+        release-workflow-version \
+        version-helpers \
+        regression-bootstrap-local-env-fallback \
+        cleanup-trap \
+        cleanup-trap-relative-path \
+        clean-directory-safety \
+        managed-file-backup-manifest \
+        managed-file-backup-manifest-validator \
+        remove-managed-files-ignore-failure \
+        remove-managed-path-ignore-failure \
+        check-log-backup-restore \
+        remote-control-systemctl-stub-default-stop-disable \
+        regression-fast-parallel-composition \
+        regression-fast-only-parallel-composition \
+        regression-fast-only-output-parallel-composition \
+        regression-platform-hot-parallel-composition \
+        remote-control-function-stub-default-stop-disable \
+        tuic-protocol-single-default-branch \
+        tls-dns-api-single-default-branch \
+        tls-ca-single-default-branch \
+        reality-target-single-default-branch \
+        auto-install-type-single-custom-branch \
+        subscription-menu-wrapper-count \
+        subscription-menu-dead-entry-count \
+        unused-helper-function-count \
+        legacy-users-module-removed \
+        install-entry-refresh \
+        install-module-paths \
+        install-early-capability-list \
+        install-menu-recommended-ids \
+        validate-install-loads-runtime \
+        validate-install-temp-root-parent-shell \
+        install-entry-symlink \
+        alias-install-metadata \
+        alias-install-same-target \
+        alias-install-rejects-unsafe-target \
+        alias-install-rejects-unsafe-home \
+        xray-stats-jq \
+        local-traffic-accounts \
+        dpkg-installed-pattern \
+        dpkg-query-installed-pattern \
+        rhel-like-detection \
+        fedora-detection \
+        port-hopping-without-persistent \
         port-hopping-menu-command-lookup
-    )
-    local idx
-
-    restBody=$(sed -n '/^runRegressionPlatformRest() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${restBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${restBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runPlatformIoChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
-    local ioBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        install-tools-certificate-dependency
-        install-tools-acme-result-failure
-        install-tools-acme-commit-failure
-        install-tools-configured-log
-        install-tools-update-failure
-        install-tools-release-info-failure
-        install-tools-nginx-reinstall-failure
-        apt-key-install-failure
-        nginx-apt-refresh-rollback
-        nginx-alpine-default-conf-rollback
-        nginx-yum-mainline-enable-failure
-        base-package-batch
-        package-rollback-failure
-        package-command-stdin
-        reality-scanner-unsafe-dir
-        reality-scanner-binary
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionPlatformIoSuiteRoot \
+        install-tools-certificate-dependency \
+        install-tools-acme-result-failure \
+        install-tools-acme-commit-failure \
+        install-tools-configured-log \
+        install-tools-update-failure \
+        install-tools-release-info-failure \
+        install-tools-nginx-reinstall-failure \
+        apt-key-install-failure \
+        nginx-apt-refresh-rollback \
+        nginx-alpine-default-conf-rollback \
+        nginx-yum-mainline-enable-failure \
+        base-package-batch \
+        package-rollback-failure \
+        package-command-stdin \
+        reality-scanner-unsafe-dir \
+        reality-scanner-binary \
         reality-scanner-download-failure
-    )
-    local idx
-
-    ioBody=$(sed -n '/^runRegressionPlatformIoSuiteRoot() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${ioBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${ioBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runFastOnlyOutputAutoInstallChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
-    local autoInstallBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        auto-install-generated-identity
-        auto-install-empty-defaults
-        auto-install-missing-required-no-stdin
-        auto-install-tls-domain-missing-returns
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionFastOnlyOutputAutoInstall \
+        auto-install-generated-identity \
+        auto-install-empty-defaults \
+        auto-install-missing-required-no-stdin \
+        auto-install-tls-domain-missing-returns \
         auto-install-two-digit-single-protocol
-    )
-    local idx
-
-    autoInstallBody=$(sed -n '/^runRegressionFastOnlyOutputAutoInstall() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${autoInstallBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${autoInstallBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runFastOnlySafetyChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
-    local safetyBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        commit-generated-file-directory-target
-        restore-managed-file-directory-target
-        github-release-direct-fallback
-        download-arg-missing-value
-        github-release-arg-missing-value
-        remove-install-path-retry
-        remove-install-path-file-mode
-        uninstall-padm-root-scope
-        remove-install-path-safety
-        remove-nginx-default-conf-safety
-        clean-agent-nginx-conf-safety
-        uninstall-subscribe-nginx-path-safety
-        check-port-open-nginx-path-safety
-        write-subscribe-nginx-path-safety
-        write-wireguard-control-nginx-path-safety
-        write-alone-nginx-path-safety
-        clean-last-installation-nginx-safety
-        install-nginx-alpine-default-path-safety
-        install-nginx-static-unsafe-path
-        install-nginx-static-unzip-failure
-        clean-last-installation-static-safety
-        subscription-sync-path-safety
-        subscription-sync-config-directory-target
-        subscription-sync-create-local-apply-backups-rollback
-        subscription-sync-config-unmanaged-target
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionFastOnlySafety \
+        commit-generated-file-directory-target \
+        restore-managed-file-directory-target \
+        github-release-direct-fallback \
+        download-arg-missing-value \
+        github-release-arg-missing-value \
+        remove-install-path-retry \
+        remove-install-path-file-mode \
+        uninstall-padm-root-scope \
+        remove-install-path-safety \
+        remove-nginx-default-conf-safety \
+        clean-agent-nginx-conf-safety \
+        uninstall-subscribe-nginx-path-safety \
+        check-port-open-nginx-path-safety \
+        write-subscribe-nginx-path-safety \
+        write-wireguard-control-nginx-path-safety \
+        write-alone-nginx-path-safety \
+        clean-last-installation-nginx-safety \
+        install-nginx-alpine-default-path-safety \
+        install-nginx-static-unsafe-path \
+        install-nginx-static-unzip-failure \
+        clean-last-installation-static-safety \
+        subscription-sync-path-safety \
+        subscription-sync-config-directory-target \
+        subscription-sync-create-local-apply-backups-rollback \
+        subscription-sync-config-unmanaged-target \
         subscription-sync-missing-restore-scope
-    )
-    local idx
-
-    safetyBody=$(sed -n '/^runRegressionFastOnlySafety() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${safetyBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${safetyBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runFastOnlyOutputRestChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
-    local restBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        client-name-suffix-preserves-random-prefix
-        subscribe-local-cleanup
-        subscription-output-random-user
-        show-accounts-optional-step
-        show-accounts-xray-singbox-assist
-        show-accounts-singbox-reality-grpc
-        trojan-grpc-account-template-filename
-        trojan-fallback-subscribe-entry
-        trojan-fallback-template-frontend
-        parse-install-args-missing-value
-        locale-unset-printN
-        httpupgrade-incremental-starts-nginx
-        httpupgrade-rejects-unsafe-nginx-path
-        allow-port-optional-protocol
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionFastOnlyOutputRest \
+        client-name-suffix-preserves-random-prefix \
+        subscribe-local-cleanup \
+        subscription-output-random-user \
+        show-accounts-optional-step \
+        show-accounts-xray-singbox-assist \
+        show-accounts-singbox-reality-grpc \
+        trojan-grpc-account-template-filename \
+        trojan-fallback-subscribe-entry \
+        trojan-fallback-template-frontend \
+        parse-install-args-missing-value \
+        locale-unset-printN \
+        httpupgrade-incremental-starts-nginx \
+        httpupgrade-rejects-unsafe-nginx-path \
+        allow-port-optional-protocol \
         core-client-optional-args
-    )
-    local idx
-
-    restBody=$(sed -n '/^runRegressionFastOnlyOutputRest() {$/,/^}$/p' "${scriptFile}")
-    [[ -n "${restBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${restBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runFastOnlyCoreChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
-    local coreBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        singbox-mainpid-template
-        check-gfw-status-service-wait
-        service-wait-state
-        core-running-service-state
-        warp-config-generation-failure
-        fail2ban-profile
-        fail2ban-sshd-systemd-backend
-        fail2ban-menu
-        xray-strict-validation
-        xray-compat-audit
-        xray-prerelease-dry-run
-        singbox-compat-audit
-        singbox-prerelease-dry-run
-        services-proc-race
-        singbox-ignore-client-proc
-        nginx-blog-auto-install
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionFastOnlyCoreSuiteRoot \
+        singbox-mainpid-template \
+        check-gfw-status-service-wait \
+        service-wait-state \
+        core-running-service-state \
+        warp-config-generation-failure \
+        fail2ban-profile \
+        fail2ban-sshd-systemd-backend \
+        fail2ban-menu \
+        xray-strict-validation \
+        xray-compat-audit \
+        xray-prerelease-dry-run \
+        singbox-compat-audit \
+        singbox-prerelease-dry-run \
+        services-proc-race \
+        singbox-ignore-client-proc \
+        nginx-blog-auto-install \
         ui-smoke-light
-    )
-    local idx
-
-    coreBody=$(sed -n '/^runRegressionFastOnlyCoreSuiteRoot() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${coreBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${coreBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runRealitySuiteChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
-    local candidatesBody
-    local streamBody
-    local -a actualCandidatesSteps=()
-    local -a expectedCandidatesSteps=(
-        reality-candidates-fast
-        reality-asn-scan-plan
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionRealityCandidatesSuiteRoot \
+        reality-candidates-fast \
+        reality-asn-scan-plan \
         reality-candidates-full
-    )
-    local -a actualStreamSteps=()
-    local -a expectedStreamSteps=(
-        reality-stream-enable
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionRealityStreamSuiteRoot \
+        reality-stream-enable \
         reality-stream-disable
-    )
-    local idx
-
-    candidatesBody=$(sed -n '/^runRegressionRealityCandidatesSuiteRoot() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${candidatesBody}" ]] || return 1
-    mapfile -t actualCandidatesSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${candidatesBody}"
-    )
-    [[ "${#actualCandidatesSteps[@]}" -eq "${#expectedCandidatesSteps[@]}" ]] || return 1
-    for idx in "${!expectedCandidatesSteps[@]}"; do
-        [[ "${actualCandidatesSteps[idx]}" == "${expectedCandidatesSteps[idx]}" ]] || return 1
-    done
-
-    streamBody=$(sed -n '/^runRegressionRealityStreamSuiteRoot() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${streamBody}" ]] || return 1
-    mapfile -t actualStreamSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${streamBody}"
-    )
-    [[ "${#actualStreamSteps[@]}" -eq "${#expectedStreamSteps[@]}" ]] || return 1
-    for idx in "${!expectedStreamSteps[@]}"; do
-        [[ "${actualStreamSteps[idx]}" == "${expectedStreamSteps[idx]}" ]] || return 1
-    done
 }
 
 runRuntimeSuiteChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
-    local runtimeBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        runtime-core
-        runtime-autoread-unset-auto-install
-        runtime-auto-install-reality-route
-        runtime-tempdir
-        reality-candidates
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionRuntimeSuiteRoot \
+        runtime-core \
+        runtime-autoread-unset-auto-install \
+        runtime-auto-install-reality-route \
+        runtime-tempdir \
+        reality-candidates \
         reality-config
-    )
-    local idx
-
-    runtimeBody=$(sed -n '/^runRegressionRuntimeSuiteRoot() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${runtimeBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '
-            /^[[:space:]]*runRegressionStep / {
-                print $2
-            }
-        ' <<<"${runtimeBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runTlsSuiteChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
-    local tlsBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        tls-failure-return
-        tls-reinstall-rollback
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTlsSuiteRoot \
+        tls-failure-return \
+        tls-reinstall-rollback \
         tls-renew-failure-propagation
-    )
-    local idx
-
-    tlsBody=$(sed -n '/^runRegressionTlsSuiteRoot() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${tlsBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${tlsBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runTransactionSubscriptionChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-    local subscriptionBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        cdn-address-write-transaction
-        subscribe-server-name
-        subscribe-nginx-config-write
-        subscribe-nginx-service-failure
-        subscribe-salt-write-transaction
-        subscribe-user-output-transaction
-        remove-user-subscription-menu-failure
-        user-subscription-menu-mutation-failure
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTransactionSubscription \
+        cdn-address-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        subscribe-salt-write-transaction \
+        subscribe-user-output-transaction \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure \
         remote-subscribe-fetch
-    )
-    local idx
-
-    subscriptionBody=$(sed -n '/^runRegressionTransactionSubscription() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${subscriptionBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${subscriptionBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runTransactionSuiteChildStepsContract() {
@@ -1930,35 +1762,18 @@ runTargetedBatchHelpersLegacyRetirementContract() {
 
 runTargetedBatchHelpersChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
-    local targetedBody
-    local -a actualSteps=()
-    local -a expectedSteps=(
-        core-invalid-input-retry-menu
-        core-selection-retry-action
-        sync-configured-managed-users-helper
-        sync-append-local-user-batch
-        traffic-configured-accounts-helper
-        traffic-account-id-map-helper
-        subscription-remote-sources-no-reverse-decode
-        core-rollback-result-message
-        config-transaction
-        padm-bbr-managed-cleanup
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTargetedBatchHelpers \
+        core-invalid-input-retry-menu \
+        core-selection-retry-action \
+        sync-configured-managed-users-helper \
+        sync-append-local-user-batch \
+        traffic-configured-accounts-helper \
+        traffic-account-id-map-helper \
+        subscription-remote-sources-no-reverse-decode \
+        core-rollback-result-message \
+        config-transaction \
+        padm-bbr-managed-cleanup \
         alone-nginx-backup-manual-check
-    )
-    local idx
-
-    targetedBody=$(sed -n '/^runRegressionTargetedBatchHelpers() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${targetedBody}" ]] || return 1
-
-    mapfile -t actualSteps < <(
-        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${targetedBody}"
-    )
-
-    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
-
-    for idx in "${!expectedSteps[@]}"; do
-        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
-    done
 }
 
 runPlatformSuiteUsesSuiteLocalHelpersContract() (
@@ -4545,6 +4360,7 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
+        runRegressionStep regression-step-sequence-assertion runRegressionStepSequenceAssertionContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
         runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
@@ -4556,6 +4372,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-adoption runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
+        runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
