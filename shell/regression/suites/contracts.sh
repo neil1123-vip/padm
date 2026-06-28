@@ -66,6 +66,19 @@ runAggregateRunnerRegistrationAssertions() {
     [[ "${actualChildren}" == "${expectedChildren}" ]] || return 1
 }
 
+runAggregateRunnerUsesSuiteLocalHelperAssertions() (
+    local selector=$1
+    local callLog=$2
+    local expectedSuiteLine=$3
+    local forbiddenLegacyLine=$4
+
+    : >"${callLog}"
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+
+    grep -qx "${expectedSuiteLine}" "${callLog}" || return 1
+    ! grep -q "^${forbiddenLegacyLine}$" "${callLog}" || return 1
+)
+
 runLegacyPublicSelectorRetirementAssertionContract() (
     local helperFile="${TMP_DIR}/legacy-public-selector-retirement-helper.sh"
     local selectorsFile="${TMP_DIR}/legacy-public-selector-retirement-selectors.txt"
@@ -114,6 +127,25 @@ runAggregateRunnerRegistrationAssertionContract() (
     fi
 )
 
+runAggregateRunnerUsesSuiteLocalHelperAssertionContract() (
+    local callLog="${TMP_DIR}/aggregate-suite-local-helper.log"
+
+    runRegressionTls() {
+        printf 'legacy-tls\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTlsSuiteRoot() {
+        printf 'suite-tls\n' >>"${callLog}"
+    }
+
+    runAggregateRunnerUsesSuiteLocalHelperAssertions tls "${callLog}" 'suite-tls' 'legacy-tls'
+
+    if runAggregateRunnerUsesSuiteLocalHelperAssertions tls "${callLog}" 'suite-runtime' 'legacy-tls'; then
+        return 1
+    fi
+)
+
 runAggregateRunnerRegistrationHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
@@ -139,6 +171,22 @@ runAggregateRunnerRegistrationHelperAdoptionContract() {
             $0 == fn "() {" { in_fn = 1 }
             in_fn && /runAggregateRunnerRegistrationAssertions \\/ { found = 1 }
             in_fn && /^}$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
+runAggregateRunnerUsesSuiteLocalHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runTlsAggregateRunnerUsesSuiteLocalHelperContract \
+        runUiAggregateRunnerUsesSuiteLocalHelperContract \
+        runRoutingAggregateRunnerUsesSuiteLocalHelperContract \
+        runRuntimeAggregateRunnerUsesSuiteLocalHelperContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() (" { in_fn = 1 }
+            in_fn && /runAggregateRunnerUsesSuiteLocalHelperAssertions / { found = 1 }
+            in_fn && /^\)$/ { exit(found ? 0 : 1) }
         ' "${contractsFile}" || return 1
     done
 }
@@ -1328,8 +1376,6 @@ runTlsLegacyPublicSelectorRetirementContract() {
 runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
     local callLog="${TMP_DIR}/tls-aggregate-suite-root-dispatch.log"
 
-    : >"${callLog}"
-
     runRegressionTls() {
         printf 'legacy-tls\n' >>"${callLog}"
         return 97
@@ -1339,10 +1385,7 @@ runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
         printf 'suite-tls\n' >>"${callLog}"
     }
 
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls
-
-    grep -qx 'suite-tls' "${callLog}"
-    ! grep -q '^legacy-tls$' "${callLog}"
+    runAggregateRunnerUsesSuiteLocalHelperAssertions tls "${callLog}" 'suite-tls' 'legacy-tls'
 )
 
 runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
@@ -2035,8 +2078,6 @@ runUiAggregateRunnerRegistrationContract() {
 runUiAggregateRunnerUsesSuiteLocalHelperContract() (
     local callLog="${TMP_DIR}/ui-aggregate-suite-root-dispatch.log"
 
-    : >"${callLog}"
-
     runRegressionUi() {
         printf 'legacy-ui\n' >>"${callLog}"
         return 97
@@ -2046,10 +2087,7 @@ runUiAggregateRunnerUsesSuiteLocalHelperContract() (
         printf 'suite-ui\n' >>"${callLog}"
     }
 
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain ui
-
-    grep -qx 'suite-ui' "${callLog}"
-    ! grep -q '^legacy-ui$' "${callLog}"
+    runAggregateRunnerUsesSuiteLocalHelperAssertions ui "${callLog}" 'suite-ui' 'legacy-ui'
 )
 
 runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -2265,8 +2303,6 @@ runRoutingAggregateRunnerRegistrationContract() {
 runRoutingAggregateRunnerUsesSuiteLocalHelperContract() (
     local callLog="${TMP_DIR}/routing-aggregate-suite-root-dispatch.log"
 
-    : >"${callLog}"
-
     runRegressionRouting() {
         printf 'legacy-routing\n' >>"${callLog}"
         return 97
@@ -2276,10 +2312,7 @@ runRoutingAggregateRunnerUsesSuiteLocalHelperContract() (
         printf 'suite-routing\n' >>"${callLog}"
     }
 
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain routing
-
-    grep -qx 'suite-routing' "${callLog}"
-    ! grep -q '^legacy-routing$' "${callLog}"
+    runAggregateRunnerUsesSuiteLocalHelperAssertions routing "${callLog}" 'suite-routing' 'legacy-routing'
 )
 
 runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -3373,8 +3406,6 @@ runRuntimeAggregateRunnerRegistrationContract() {
 runRuntimeAggregateRunnerUsesSuiteLocalHelperContract() (
     local callLog="${TMP_DIR}/runtime-aggregate-suite-root-dispatch.log"
 
-    : >"${callLog}"
-
     runRegressionRuntime() {
         printf 'legacy-runtime\n' >>"${callLog}"
         return 97
@@ -3384,10 +3415,7 @@ runRuntimeAggregateRunnerUsesSuiteLocalHelperContract() (
         printf 'suite-runtime\n' >>"${callLog}"
     }
 
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime
-
-    grep -qx 'suite-runtime' "${callLog}"
-    ! grep -q '^legacy-runtime$' "${callLog}"
+    runAggregateRunnerUsesSuiteLocalHelperAssertions runtime "${callLog}" 'suite-runtime' 'legacy-runtime'
 )
 
 runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -3691,6 +3719,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
         runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
+        runRegressionStep aggregate-runner-uses-suite-local-helper-assertion runAggregateRunnerUsesSuiteLocalHelperAssertionContract &&
+        runRegressionStep aggregate-runner-uses-suite-local-helper-adoption runAggregateRunnerUsesSuiteLocalHelperAdoptionContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
