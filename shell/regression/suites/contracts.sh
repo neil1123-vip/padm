@@ -245,19 +245,40 @@ runRemoteControlPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local usageLine
+    local usageSelectors
+    local selector
 
-    ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke"]:-}" == "aggregate" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract"]:-}" == "aggregate" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-deep"]:-}" == "function" ]]
-    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["remote-control-light"]:-}" ]]
-    ! grep -Eq '^[[:space:]]*remote-control\)$' "${scriptFile}"
-    ! grep -Eq '^[[:space:]]*remote-control-light\)$' "${scriptFile}"
-    ! grep -Fq 'remote-control-light|' "${scriptFile}"
-    ! grep -Fq 'usage: %s [remote-control|' "${scriptFile}"
-    grep -Fq 'usage: %s [remote-control-smoke|remote-control-contract|remote-control-deep]' "${scriptFile}"
-    ! grep -Eq '^[[:space:]]*remote-control\)$' "${legacyFile}"
+    ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}" || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke"]:-}" == "aggregate" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract"]:-}" == "aggregate" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-deep"]:-}" == "function" ]] || return 1
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["remote-control-light"]:-}" ]] || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${scriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    for selector in "${!PADM_REGRESSION_SELECTOR_KIND[@]}"; do
+        [[ "${selector}" == remote-control* ]] || continue
+        [[ -n "${selector}" ]] || continue
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${scriptFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
+
+    ! grep -Eq '^[[:space:]]*remote-control-light\)$' "${scriptFile}" || return 1
+    ! grep -Fq 'remote-control-light|' "${scriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*remote-control\)$' "${legacyFile}" || return 1
 }
 
 runLegacyRetiresSuiteOwnedWrappersContract() {
