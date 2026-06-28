@@ -2017,6 +2017,16 @@ runSubscriptionTxAggregateRunnerRegistrationContract() {
     [[ "${actualChildren}" == "${expectedChildren}" ]]
 }
 
+runTargetedSubscriptionRestoreRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^registerRegressionFunctionLeaf subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionTargetedSubscriptionRestore\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
+    ! grep -Eq '^[[:space:]]*targeted-subscription-restore\)$' "${legacyFile}" || return 1
+    ! grep -Fq '|targeted-subscription-restore|' "${legacyFile}" || return 1
+}
+
 runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
     local status=0
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
@@ -2609,6 +2619,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-core-direct-leaf-selectors-use-function-registry runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep targeted-subscription-restore-retirement runTargetedSubscriptionRestoreRetirementContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
         runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
