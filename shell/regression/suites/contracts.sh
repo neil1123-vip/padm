@@ -960,6 +960,8 @@ regression-routing-parallel-composition
 regression-runtime-parallel-composition
 regression-transaction-core-parallel-composition
 regression-transaction-system-parallel-composition
+regression-subscription-state-remote-restore-parallel-isolation-composition
+regression-subscription-state-structure-parallel-isolation-composition
 regression-ui-parallel-composition
 regression-ui-long-tail-split-composition
 regression-selector-dispatch-composition
@@ -1109,6 +1111,28 @@ runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract() {
 regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
 regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
 regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
+EOF
+
+    return "${status}"
+}
+
+runSubscriptionStateCompositionLeafSelectorsUseFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local status=0
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${suiteFile}" || status=1
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${legacyScriptFile}" || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
+    done <<'EOF'
+regression-subscription-state-remote-restore-parallel-isolation-composition runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegression
+regression-subscription-state-structure-parallel-isolation-composition runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression
 EOF
 
     return "${status}"
@@ -3207,6 +3231,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-core-direct-leaf-selectors-use-function-registry runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep subscription-state-composition-leaf-selectors-use-function-registry runSubscriptionStateCompositionLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep targeted-subscription-restore-retirement runTargetedSubscriptionRestoreRetirementContract &&
         runRegressionStep subscription-output-legacy-retirement runSubscriptionOutputLegacyRetirementContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&

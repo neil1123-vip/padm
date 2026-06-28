@@ -170,6 +170,30 @@ runSubscriptionGroupStateStructureFoundationRegression() {
         init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
 }
 
+runSubscriptionStateParallelChildRegressionIsolated() (
+    local isolatedLabel=$1
+    shift
+    local isolatedRoot="${TMP_DIR}/${isolatedLabel}"
+
+    TMP_DIR="${isolatedRoot}"
+    TMPDIR="${isolatedRoot}/tmp"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${isolatedRoot}/groups"
+    mkdir -p "${TMP_DIR}" "${TMPDIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR}"
+    "$@"
+)
+
+runRegressionSubscriptionStateStructureFoundationIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation
+}
+
+runRegressionSubscriptionStateStructureMigrationIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-migration runRegressionSubscriptionStateStructureMigration
+}
+
+runRegressionSubscriptionStateStructureSourceIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-source runRegressionSubscriptionStateStructureSource
+}
+
 runSubscriptionGroupStateStructureMigrationRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateLegacyEdgeGroupFixture
@@ -337,9 +361,9 @@ runSubscriptionGroupStateStructureSerialRegression() {
 runSubscriptionGroupStateStructureRegression() {
     runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-structure" \
-        foundation runRegressionSubscriptionStateStructureFoundation \
-        migration runRegressionSubscriptionStateStructureMigration \
-        source runRegressionSubscriptionStateStructureSource
+        foundation runRegressionSubscriptionStateStructureFoundationIsolated \
+        migration runRegressionSubscriptionStateStructureMigrationIsolated \
+        source runRegressionSubscriptionStateStructureSourceIsolated
 }
 
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
@@ -659,6 +683,10 @@ runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression() {
     runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression
 }
 
+runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference
+}
+
 runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateDefaultFixture
@@ -721,6 +749,14 @@ JSON
     jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
 }
 
+runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-state-write runRegressionSubscriptionStateRemoteRestoreStateWrite
+}
+
+runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated() {
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
+}
+
 runSubscriptionGroupStateRemoteRestoreSerialRegression() {
     runRegressionStep subscription-state-remote-restore-self-reference runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression &&
         runRegressionStep subscription-state-remote-restore-state-write runSubscriptionGroupStateRemoteRestoreStateWriteRegression &&
@@ -730,9 +766,9 @@ runSubscriptionGroupStateRemoteRestoreSerialRegression() {
 runSubscriptionGroupStateRemoteRestoreRegression() {
     runParallelRegressionRunners \
         "${TMP_DIR}/subscription-state-remote-restore" \
-        self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference \
-        state-write runRegressionSubscriptionStateRemoteRestoreStateWrite \
-        legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
+        self-reference runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
+        state-write runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
+        legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated
 }
 
 runSubscriptionGroupStateRegression() {
