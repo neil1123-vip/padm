@@ -34,6 +34,57 @@ listRegressionSubscriptionOutputChildSelectors() {
         subscription-output-tls-any-hysteria-tuic-naive
 }
 
+listRegressionSubscriptionRemoteChildSelectors() {
+    printf '%s\n' \
+        subscription-remote-unique \
+        subscription-remote-rollback \
+        subscription-remote-merge \
+        subscription-remote-controlled \
+        subscription-remote-append-failure \
+        subscription-remote-commit-failure \
+        subscription-remote-idempotent
+}
+
+listRegressionSubscriptionTxChildSelectors() {
+    printf '%s\n' \
+        sing-box-subscribe-write \
+        cdn-address-write-transaction \
+        subscribe-local-output-transaction \
+        subscribe-salt-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        sing-box-port-failure \
+        subscribe-user-output-transaction \
+        subscribe-local-rollback \
+        subscription-groups-migration-backup \
+        subscription-groups-backup-failure \
+        refresh-local-subscriptions-rollback \
+        subscribe-return-failure \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure
+}
+
+listRegressionSubscriptionLightChildSelectors() {
+    printf '%s\n' \
+        subscription-output \
+        subscription-state
+}
+
+listRegressionSubscriptionHeavyChildSelectors() {
+    printf '%s\n' \
+        subscription-tx \
+        subscription-remote
+}
+
+listRegressionSubscriptionChildSelectors() {
+    printf '%s\n' \
+        subscription-output \
+        subscription-state \
+        subscription-remote \
+        subscription-tx
+}
+
 runRegressionSubscriptionOutputSuiteRoot() {
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-output-parallel-${BASHPID:-$$}" \

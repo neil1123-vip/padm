@@ -3324,6 +3324,23 @@ runSubscriptionOutputLegacyRetirementContract() {
     ! grep -Fq '|subscription-output|' "${legacyFile}" || return 1
 }
 
+runSubscriptionSelectorHelpersAreSuiteOwnedContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^listRegressionSubscriptionRemoteChildSelectors() {$' "${suiteFile}" || return 1
+    grep -q '^listRegressionSubscriptionTxChildSelectors() {$' "${suiteFile}" || return 1
+    grep -q '^listRegressionSubscriptionLightChildSelectors() {$' "${suiteFile}" || return 1
+    grep -q '^listRegressionSubscriptionHeavyChildSelectors() {$' "${suiteFile}" || return 1
+    grep -q '^listRegressionSubscriptionChildSelectors() {$' "${suiteFile}" || return 1
+
+    ! grep -q '^listRegressionSubscriptionRemoteChildSelectors() {$' "${legacyFile}" || return 1
+    ! grep -q '^listRegressionSubscriptionTxChildSelectors() {$' "${legacyFile}" || return 1
+    ! grep -q '^listRegressionSubscriptionLightChildSelectors() {$' "${legacyFile}" || return 1
+    ! grep -q '^listRegressionSubscriptionHeavyChildSelectors() {$' "${legacyFile}" || return 1
+    ! grep -q '^listRegressionSubscriptionChildSelectors() {$' "${legacyFile}" || return 1
+}
+
 runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
     local status=0
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
@@ -3965,6 +3982,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-composition-leaf-selectors-use-function-registry runSubscriptionStateCompositionLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep targeted-subscription-restore-retirement runTargetedSubscriptionRestoreRetirementContract &&
         runRegressionStep subscription-output-legacy-retirement runSubscriptionOutputLegacyRetirementContract &&
+        runRegressionStep subscription-selector-helpers-are-suite-owned runSubscriptionSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
         runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
         runRegressionStep ui-full-legacy-wrapper-retirement runUiFullLegacyWrapperRetirementContract &&
