@@ -1203,6 +1203,29 @@ runPlatformRefreshChildStepsContract() {
     done
 }
 
+runPlatformUpdateChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local updateBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        update-padm-version-prompt
+    )
+    local idx
+
+    updateBody=$(sed -n '/^runRegressionPlatformUpdate() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${updateBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${updateBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runPlatformRestChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     local restBody
@@ -4303,6 +4326,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract &&
         runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract &&
         runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract &&
+        runRegressionStep platform-update-child-steps runPlatformUpdateChildStepsContract &&
         runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract &&
         runRegressionStep platform-rest-child-steps runPlatformRestChildStepsContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
