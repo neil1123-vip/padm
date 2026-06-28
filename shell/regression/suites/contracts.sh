@@ -393,8 +393,8 @@ runPlatformPublicSelectorRetirementContract() {
     ! grep -q '^registerRegressionFunctionLeaf platform runRegressionPlatformSuiteRoot$' "${suiteFile}"
     ! grep -Eq '^[[:space:]]*platform\)$' "${legacyFile}"
     grep -Eq '^[[:space:]]*platform-hot\)$' "${legacyFile}"
-    ! grep -Fq 'usage: %s [fast|fast-reality|platform|platform-io|' "${legacyFile}"
-    grep -Fq 'usage: %s [fast|fast-reality|platform-hot|platform-io|' "${legacyFile}"
+    ! grep -Fq '|platform|platform-io|' "${legacyFile}"
+    grep -Fq '|platform-hot|platform-io|' "${legacyFile}"
 }
 
 runFastRealitySelectorHelpersStayAlignedContract() (
@@ -433,6 +433,16 @@ runFastRealityAggregateRunnerRegistrationContract() {
     [[ "${PADM_REGRESSION_SELECTOR_MODE["fast-reality"]:-}" == "sequential" ]]
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["fast-reality"]:-}" == "runRegressionFastRealitySuiteRoot" ]]
     [[ "${actualChildren}" == "${expectedChildren}" ]]
+}
+
+runFastRealityLegacyRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionFastReality\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
+    ! grep -Eq '^[[:space:]]*fast-reality\)$' "${legacyFile}" || return 1
+    ! grep -Fq '|fast-reality|' "${legacyFile}" || return 1
 }
 
 runFastPlatformSourceOnlyExecutionContract() (
@@ -2566,6 +2576,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
+        runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep fast-suite-uses-suite-local-helper runFastSuiteUsesSuiteLocalHelperContract &&
         runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
