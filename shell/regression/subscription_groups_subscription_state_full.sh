@@ -796,12 +796,26 @@ runSubscriptionGroupStateRemoteRestoreSerialRegression() {
         runRegressionStep subscription-state-remote-restore-legacy-menu runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression
 }
 
+listRegressionSubscriptionStateRemoteRestoreChildSelectors() {
+    printf '%s\n' \
+        subscription-state-remote-restore-self-reference \
+        subscription-state-remote-restore-state-write \
+        subscription-state-remote-restore-legacy-menu
+}
+
+runRegressionSubscriptionStateRemoteRestoreSelector() {
+    case "$1" in
+    subscription-state-remote-restore-self-reference) runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated ;;
+    subscription-state-remote-restore-state-write) runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated ;;
+    subscription-state-remote-restore-legacy-menu) runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated ;;
+    *) return 2 ;;
+    esac
+}
+
 runSubscriptionGroupStateRemoteRestoreRegression() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/subscription-state-remote-restore" \
-        self-reference runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
-        state-write runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
-        legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateRemoteRestoreSelector \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore" \
+            listRegressionSubscriptionStateRemoteRestoreChildSelectors
 }
 
 runSubscriptionGroupStateRegression() {

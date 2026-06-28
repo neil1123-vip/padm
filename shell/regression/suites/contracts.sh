@@ -119,6 +119,7 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateStructureFoundationChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateRemoteRestoreChildSelectors >/dev/null
 
     subscriptionStateAssertSelectorList() {
         local helperFn=$1
@@ -159,6 +160,10 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-quota-traffic \
         subscription-state-quota-menu-tx \
         subscription-state-quota-partial-sync
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreChildSelectors remote-restore \
+        subscription-state-remote-restore-self-reference \
+        subscription-state-remote-restore-state-write \
+        subscription-state-remote-restore-legacy-menu
 )
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
@@ -208,9 +213,11 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     grep -q '^listRegressionSubscriptionStateStructureFoundationChildSelectors() {$' "${scriptFile}"
     grep -q '^listRegressionSubscriptionStateStructureChildSelectors() {$' "${scriptFile}"
     grep -q '^listRegressionSubscriptionStateQuotaChildSelectors() {$' "${scriptFile}"
+    grep -q '^listRegressionSubscriptionStateRemoteRestoreChildSelectors() {$' "${scriptFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation"' "${scriptFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' "${scriptFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota"' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore"' "${scriptFile}"
 
     coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${suiteFile}")
     stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${suiteFile}")
@@ -291,9 +298,10 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
     runRegressionSubscriptionStateStructureFoundation
     runRegressionSubscriptionStateStructure
     runRegressionSubscriptionStateQuota
+    runRegressionSubscriptionStateRemoteRestore
 
     mapfile -t calls <"${callsFile}"
-    [[ "${#calls[@]}" -eq 5 ]]
+    [[ "${#calls[@]}" -eq 6 ]]
     [[ "${calls[0]}" == framework:"${TMP_DIR}/subscription-state-core-"* ]]
     [[ "${calls[1]}" == framework:"${TMP_DIR}/subscription-state-default-"* ]]
     [[ "${calls[0]}" == *' subscription-state-structure subscription-state-structure subscription-state-quota subscription-state-quota subscription-state-remote-restore subscription-state-remote-restore' ]]
@@ -301,6 +309,7 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
     [[ "${calls[2]}" == "framework:${TMP_DIR}/subscription-state-structure-foundation subscription-state-structure-foundation-add-remove subscription-state-structure-foundation-add-remove subscription-state-structure-foundation-credential subscription-state-structure-foundation-credential subscription-state-structure-foundation-normalize subscription-state-structure-foundation-normalize subscription-state-structure-foundation-init-transaction subscription-state-structure-foundation-init-transaction" ]]
     [[ "${calls[3]}" == "framework:${TMP_DIR}/subscription-state-structure subscription-state-structure-foundation subscription-state-structure-foundation subscription-state-structure-migration subscription-state-structure-migration subscription-state-structure-source subscription-state-structure-source" ]]
     [[ "${calls[4]}" == "framework:${TMP_DIR}/subscription-state-quota subscription-state-quota-traffic subscription-state-quota-traffic subscription-state-quota-menu-tx subscription-state-quota-menu-tx subscription-state-quota-partial-sync subscription-state-quota-partial-sync" ]]
+    [[ "${calls[5]}" == "framework:${TMP_DIR}/subscription-state-remote-restore subscription-state-remote-restore-self-reference subscription-state-remote-restore-self-reference subscription-state-remote-restore-state-write subscription-state-remote-restore-state-write subscription-state-remote-restore-legacy-menu subscription-state-remote-restore-legacy-menu" ]]
     ! grep -q '^legacy-runner:' "${callsFile}"
 )
 
