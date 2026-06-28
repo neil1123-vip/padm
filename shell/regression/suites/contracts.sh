@@ -2825,8 +2825,12 @@ runRealitySuiteUsesFunctionRegistryContract() {
     grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}"
+    grep -q '^listRegressionRealitySuiteCandidatesChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionRealitySuiteStreamChildSelectors() {$' "${suiteFile}"
     ! grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${legacyScriptFile}"
     ! grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${legacyScriptFile}"
+    ! grep -q '^listRegressionRealitySuiteCandidatesChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionRealitySuiteStreamChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
@@ -3176,7 +3180,7 @@ runRealityCandidatesAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
-    expectedChildren=$(listRegressionRealityCandidatesChildSelectors)
+    expectedChildren=$(listRegressionRealitySuiteCandidatesChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-candidates"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-candidates"]:-}" == "sequential" ]]
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-candidates"]:-}" == "runRegressionRealityCandidatesSuiteRoot" ]]
@@ -3222,7 +3226,7 @@ runRealityStreamAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
-    expectedChildren=$(listRegressionRealityStreamChildSelectors)
+    expectedChildren=$(listRegressionRealitySuiteStreamChildSelectors)
     [[ "${PADM_REGRESSION_SELECTOR_KIND["reality-stream"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_MODE["reality-stream"]:-}" == "sequential" ]]
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["reality-stream"]:-}" == "runRegressionRealityStreamSuiteRoot" ]]

@@ -22,13 +22,13 @@ runRegressionRealityStream() {
     runRegressionRealityStreamSuiteRoot
 }
 
-listRegressionRealityStreamChildSelectors() {
+listRegressionRealitySuiteStreamChildSelectors() {
     printf '%s\n' \
         reality-stream-enable \
         reality-stream-disable
 }
 
-listRegressionRealityCandidatesChildSelectors() {
+listRegressionRealitySuiteCandidatesChildSelectors() {
     printf '%s\n' \
         reality-candidates-fast \
         reality-asn-scan-plan \
@@ -44,6 +44,6 @@ registerRegressionFunctionLeaf reality-config runRealityConfigRegression
 registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression
 
 registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \
-    $(listRegressionRealityCandidatesChildSelectors)
+    $(listRegressionRealitySuiteCandidatesChildSelectors)
 registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \
-    $(listRegressionRealityStreamChildSelectors)
+    $(listRegressionRealitySuiteStreamChildSelectors)
