@@ -1326,6 +1326,56 @@ runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
     ! grep -q '^legacy-helper:' "${callLog}"
 )
 
+runRoutingLegacyPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+    local usageLine
+    local usageSelectors
+    local routingLeafLine
+
+    grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    routingLeafLine=$(grep -F 'routing leaf selectors: ' "${legacyScriptFile}" || true)
+    [[ -z "${routingLeafLine}" ]] || return 1
+
+    for selector in \
+        routing \
+        routing-core \
+        routing-core-unsafe-config-dir \
+        routing-socks5-udp-associate \
+        routing-access-control-config-transaction \
+        routing-access-control-unsafe-backup-dir \
+        routing-access-control-unsafe-config-dir \
+        routing-access-control-failure-return \
+        routing-bt-failure-return \
+        routing-ipv6-failure-return \
+        routing-warp-failure-return \
+        routing-socks5-failure-return \
+        routing-dns-failure-return \
+        routing-dns-unsafe-backup-dir \
+        routing-dns-unsafe-config-dir \
+        routing-dns-restore-scope \
+        routing-port-panel \
+        regression-routing-parallel-composition; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyScriptFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
+}
+
 runRoutingSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -2798,6 +2848,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep ui-aggregate-runner-uses-suite-local-helper runUiAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep ui-aggregate-runner-uses-framework-selector-helper runUiAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep routing-suite-uses-function-registry runRoutingSuiteUsesFunctionRegistryContract &&
+        runRegressionStep routing-legacy-public-selector-retirement runRoutingLegacyPublicSelectorRetirementContract &&
         runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
         runRegressionStep routing-aggregate-runner-uses-suite-local-helper runRoutingAggregateRunnerUsesSuiteLocalHelperContract &&
