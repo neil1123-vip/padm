@@ -1609,6 +1609,28 @@ runTransactionSubscriptionChildStepsContract() {
     done
 }
 
+runTransactionSuiteChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local transactionBody
+    local coreLine
+    local subscriptionLine
+    local systemLine
+
+    transactionBody=$(sed -n '/^runRegressionTransactionSuiteRoot() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${transactionBody}" ]] || return 1
+
+    coreLine=$(awk '/runRegressionTransactionCoreSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
+    subscriptionLine=$(awk '/runRegressionTransactionSubscription/ { print NR; exit }' <<<"${transactionBody}")
+    systemLine=$(awk '/runRegressionTransactionSystemSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
+
+    [[ -n "${coreLine}" ]] || return 1
+    [[ -n "${subscriptionLine}" ]] || return 1
+    [[ -n "${systemLine}" ]] || return 1
+
+    (( coreLine < subscriptionLine )) || return 1
+    (( subscriptionLine < systemLine )) || return 1
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4603,6 +4625,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
         runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract &&
         runRegressionStep transaction-subscription-child-steps runTransactionSubscriptionChildStepsContract &&
+        runRegressionStep transaction-suite-child-steps runTransactionSuiteChildStepsContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
         runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
