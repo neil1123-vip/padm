@@ -1203,6 +1203,33 @@ runPlatformRefreshChildStepsContract() {
     done
 }
 
+runFastOnlyOutputAutoInstallChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local autoInstallBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        auto-install-generated-identity
+        auto-install-empty-defaults
+        auto-install-missing-required-no-stdin
+        auto-install-tls-domain-missing-returns
+        auto-install-two-digit-single-protocol
+    )
+    local idx
+
+    autoInstallBody=$(sed -n '/^runRegressionFastOnlyOutputAutoInstall() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${autoInstallBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${autoInstallBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4072,6 +4099,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-aggregate-runner-registration runFastAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-aggregate-runner-registration runFastOnlyAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-output-aggregate-runner-registration runFastOnlyOutputAggregateRunnerRegistrationContract &&
+        runRegressionStep fast-only-output-auto-install-child-steps runFastOnlyOutputAutoInstallChildStepsContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
