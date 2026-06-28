@@ -330,10 +330,21 @@ The core subtree fans out through selector-list orchestration over:
 - `subscription-state-quota`
 - `subscription-state-remote-restore`
 
+Those nested public aggregates now also live in the suite layer instead of the legacy-backed full script:
+
+- `subscription-state-structure-foundation`
+- `subscription-state-structure`
+- `subscription-state-quota`
+- `subscription-state-remote-restore`
+- `subscription-state-sync-rollback`
+
+The legacy-backed full script now keeps the leaf implementations plus the support and serial helper chains, while suite-local isolated wrappers own the nested selector topology and framework orchestration.
+
 The suite already has composition coverage proving parallel isolation for:
 
 - structure subtree
 - remote restore subtree
+- sync rollback subtree
 
 ## All-Suite Resource Scheduling
 
@@ -495,6 +506,7 @@ Already landed in this branch:
 - `364d9f3` `refactor: guard routing compat contracts`
 - `d3a5c75` `refactor: guard subscription-state support steps`
 - `07ed432` `refactor: guard subscription-state serial steps`
+- `91e022a` `refactor: move subscription-state nested topology into suite`
 - `6f4f141` `refactor: guard remote control smoke core steps`
 - `c81bcd7` `refactor: guard platform refresh steps`
 - `6814252` `refactor: guard fast auto install steps`
