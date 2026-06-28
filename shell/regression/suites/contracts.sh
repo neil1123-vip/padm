@@ -110,41 +110,50 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
 }
 
 runSubscriptionStateSelectorHelpersStayAlignedContract() (
-    local coreSelectorsFile="${TMP_DIR}/subscription-state-core-selectors.txt"
-    local coreSortedFile="${TMP_DIR}/subscription-state-core-selectors.sorted.txt"
-    local expectedCoreSelectorsFile="${TMP_DIR}/subscription-state-core-selectors.expected.txt"
-    local defaultSelectorsFile="${TMP_DIR}/subscription-state-default-selectors.txt"
-    local defaultSortedFile="${TMP_DIR}/subscription-state-default-selectors.sorted.txt"
-    local expectedDefaultSelectorsFile="${TMP_DIR}/subscription-state-default-selectors.expected.txt"
+    local helperDir="${TMP_DIR}/subscription-state-selector-helpers"
+
+    mkdir -p "${helperDir}"
 
     declare -F listRegressionSubscriptionStateCoreChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateStructureFoundationChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateStructureChildSelectors >/dev/null
 
-    listRegressionSubscriptionStateCoreChildSelectors >"${coreSelectorsFile}"
-    listRegressionSubscriptionStateChildSelectors >"${defaultSelectorsFile}"
+    subscriptionStateAssertSelectorList() {
+        local helperFn=$1
+        local helperName=$2
+        shift 2
+        local actualFile="${helperDir}/${helperName}.actual.txt"
+        local expectedFile="${helperDir}/${helperName}.expected.txt"
+        local sortedFile="${helperDir}/${helperName}.sorted.txt"
+        local uniqueFile="${helperDir}/${helperName}.unique.txt"
 
-    cat <<'EOF' >"${expectedCoreSelectorsFile}"
-subscription-state-structure
-subscription-state-quota
-subscription-state-remote-restore
-EOF
+        "${helperFn}" >"${actualFile}"
+        printf '%s\n' "$@" >"${expectedFile}"
 
-    cat <<'EOF' >"${expectedDefaultSelectorsFile}"
-subscription-state-core
-subscription-state-support
-subscription-state-sync-rollback
-EOF
+        cmp -s "${expectedFile}" "${actualFile}"
+        sort "${actualFile}" >"${sortedFile}"
+        sort -u "${actualFile}" >"${uniqueFile}"
+        cmp -s "${sortedFile}" "${uniqueFile}"
+    }
 
-    cmp -s "${expectedCoreSelectorsFile}" "${coreSelectorsFile}"
-    cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
-
-    sort "${coreSelectorsFile}" >"${coreSortedFile}"
-    sort -u "${coreSelectorsFile}" >"${TMP_DIR}/subscription-state-core-selectors.unique.txt"
-    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
-    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/subscription-state-default-selectors.unique.txt"
-
-    cmp -s "${coreSortedFile}" "${TMP_DIR}/subscription-state-core-selectors.unique.txt"
-    cmp -s "${defaultSortedFile}" "${TMP_DIR}/subscription-state-default-selectors.unique.txt"
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateCoreChildSelectors core \
+        subscription-state-structure \
+        subscription-state-quota \
+        subscription-state-remote-restore
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateChildSelectors default \
+        subscription-state-core \
+        subscription-state-support \
+        subscription-state-sync-rollback
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureFoundationChildSelectors structure-foundation \
+        subscription-state-structure-foundation-add-remove \
+        subscription-state-structure-foundation-credential \
+        subscription-state-structure-foundation-normalize \
+        subscription-state-structure-foundation-init-transaction
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureChildSelectors structure \
+        subscription-state-structure-foundation \
+        subscription-state-structure-migration \
+        subscription-state-structure-source
 )
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
@@ -191,6 +200,10 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^[[:space:]]*subscription-state\)$' "${scriptFile}"
     ! grep -Eq '^[[:space:]]*subscription-state-core\)$' "${scriptFile}"
+    grep -q '^listRegressionSubscriptionStateStructureFoundationChildSelectors() {$' "${scriptFile}"
+    grep -q '^listRegressionSubscriptionStateStructureChildSelectors() {$' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation"' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' "${scriptFile}"
 
     coreBody=$(sed -n '/^runRegressionSubscriptionStateCore() {$/,/^}$/p' "${suiteFile}")
     stateBody=$(sed -n '/^runRegressionSubscriptionState() {$/,/^}$/p' "${suiteFile}")
@@ -260,16 +273,26 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
         printf 'framework:%s\n' "$*" >>"${callsFile}"
     }
 
+    runParallelRegressionRunners() {
+        printf 'legacy-runner:%s\n' "$*" >>"${callsFile}"
+        return 97
+    }
+
     : >"${callsFile}"
     runRegressionSubscriptionStateCore
     runRegressionSubscriptionState
+    runRegressionSubscriptionStateStructureFoundation
+    runRegressionSubscriptionStateStructure
 
     mapfile -t calls <"${callsFile}"
-    [[ "${#calls[@]}" -eq 2 ]]
+    [[ "${#calls[@]}" -eq 4 ]]
     [[ "${calls[0]}" == framework:"${TMP_DIR}/subscription-state-core-"* ]]
     [[ "${calls[1]}" == framework:"${TMP_DIR}/subscription-state-default-"* ]]
     [[ "${calls[0]}" == *' subscription-state-structure subscription-state-structure subscription-state-quota subscription-state-quota subscription-state-remote-restore subscription-state-remote-restore' ]]
     [[ "${calls[1]}" == *' subscription-state-core subscription-state-core subscription-state-support subscription-state-support subscription-state-sync-rollback subscription-state-sync-rollback' ]]
+    [[ "${calls[2]}" == "framework:${TMP_DIR}/subscription-state-structure-foundation subscription-state-structure-foundation-add-remove subscription-state-structure-foundation-add-remove subscription-state-structure-foundation-credential subscription-state-structure-foundation-credential subscription-state-structure-foundation-normalize subscription-state-structure-foundation-normalize subscription-state-structure-foundation-init-transaction subscription-state-structure-foundation-init-transaction" ]]
+    [[ "${calls[3]}" == "framework:${TMP_DIR}/subscription-state-structure subscription-state-structure-foundation subscription-state-structure-foundation subscription-state-structure-migration subscription-state-structure-migration subscription-state-structure-source subscription-state-structure-source" ]]
+    ! grep -q '^legacy-runner:' "${callsFile}"
 )
 
 runRemoteControlSuiteUsesFunctionRegistryContract() {

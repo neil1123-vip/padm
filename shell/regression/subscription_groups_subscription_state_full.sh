@@ -161,13 +161,28 @@ runSubscriptionGroupStateStructureFoundationSerialRegression() {
         runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
 }
 
+listRegressionSubscriptionStateStructureFoundationChildSelectors() {
+    printf '%s\n' \
+        subscription-state-structure-foundation-add-remove \
+        subscription-state-structure-foundation-credential \
+        subscription-state-structure-foundation-normalize \
+        subscription-state-structure-foundation-init-transaction
+}
+
+runRegressionSubscriptionStateStructureFoundationSelector() {
+    case "$1" in
+    subscription-state-structure-foundation-add-remove) runRegressionSubscriptionStateStructureFoundationAddRemove ;;
+    subscription-state-structure-foundation-credential) runRegressionSubscriptionStateStructureFoundationCredential ;;
+    subscription-state-structure-foundation-normalize) runRegressionSubscriptionStateStructureFoundationNormalize ;;
+    subscription-state-structure-foundation-init-transaction) runRegressionSubscriptionStateStructureFoundationInitTransaction ;;
+    *) return 2 ;;
+    esac
+}
+
 runSubscriptionGroupStateStructureFoundationRegression() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/subscription-state-structure-foundation" \
-        add-remove runRegressionSubscriptionStateStructureFoundationAddRemove \
-        credential runRegressionSubscriptionStateStructureFoundationCredential \
-        normalize runRegressionSubscriptionStateStructureFoundationNormalize \
-        init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateStructureFoundationSelector \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation" \
+            listRegressionSubscriptionStateStructureFoundationChildSelectors
 }
 
 runSubscriptionStateParallelChildRegressionIsolated() (
@@ -358,12 +373,26 @@ runSubscriptionGroupStateStructureSerialRegression() {
         runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
 }
 
+listRegressionSubscriptionStateStructureChildSelectors() {
+    printf '%s\n' \
+        subscription-state-structure-foundation \
+        subscription-state-structure-migration \
+        subscription-state-structure-source
+}
+
+runRegressionSubscriptionStateStructureSelector() {
+    case "$1" in
+    subscription-state-structure-foundation) runRegressionSubscriptionStateStructureFoundationIsolated ;;
+    subscription-state-structure-migration) runRegressionSubscriptionStateStructureMigrationIsolated ;;
+    subscription-state-structure-source) runRegressionSubscriptionStateStructureSourceIsolated ;;
+    *) return 2 ;;
+    esac
+}
+
 runSubscriptionGroupStateStructureRegression() {
-    runParallelRegressionRunners \
-        "${TMP_DIR}/subscription-state-structure" \
-        foundation runRegressionSubscriptionStateStructureFoundationIsolated \
-        migration runRegressionSubscriptionStateStructureMigrationIsolated \
-        source runRegressionSubscriptionStateStructureSourceIsolated
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateStructureSelector \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure" \
+            listRegressionSubscriptionStateStructureChildSelectors
 }
 
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
