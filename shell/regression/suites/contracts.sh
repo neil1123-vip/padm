@@ -390,11 +390,15 @@ runPlatformPublicSelectorRetirementContract() {
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^registerRegressionFunctionLeaf platform-hot runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform runRegressionPlatformSuiteRoot$' "${suiteFile}"
+    ! grep -Eq '^runRegressionPlatform\(\)[[:space:]]*[({]' "${legacyFile}"
+    ! grep -Eq '^runRegressionPlatformIo\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -Eq '^[[:space:]]*platform\)$' "${legacyFile}"
-    grep -Eq '^[[:space:]]*platform-hot\)$' "${legacyFile}"
-    ! grep -Fq '|platform|platform-io|' "${legacyFile}"
-    grep -Fq 'usage: %s [platform-hot|platform-io|' "${legacyFile}"
+    ! grep -Eq '^[[:space:]]*platform-hot\)$' "${legacyFile}"
+    ! grep -Eq '^[[:space:]]*platform-io\)$' "${legacyFile}"
+    ! grep -Fq '[platform-hot|' "${legacyFile}"
+    ! grep -Fq '|platform-io|' "${legacyFile}"
 }
 
 runFastRealitySelectorHelpersStayAlignedContract() (
