@@ -1918,53 +1918,8 @@ runRegressionRemoteControlContractServerResponseSteps() {
     runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
 
-listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {
-    printf '%s\n' \
-        remote-control-smoke-refresh-apply-basic \
-        remote-control-smoke-refresh-apply-prepare \
-        remote-control-smoke-refresh-apply-failure
-}
-
-listRegressionRemoteControlSmokeRefreshChildSelectors() {
-    printf '%s\n' \
-        remote-control-smoke-refresh-apply \
-        remote-control-smoke-refresh-restore \
-        remote-control-smoke-refresh-reconcile
-}
-
-listRegressionRemoteControlSmokeChildSelectors() {
-    printf '%s\n' \
-        remote-control-smoke-core \
-        remote-control-smoke-refresh
-}
-
-listRegressionRemoteControlContractServiceInstallChildSelectors() {
-    printf '%s\n' \
-        remote-control-contract-service-install-success \
-        remote-control-contract-service-install-systemctl-fail \
-        remote-control-contract-service-install-health-fail \
-        remote-control-contract-service-install-health-rollback \
-        remote-control-contract-service-install-token-transaction
-}
-
-listRegressionRemoteControlContractChildSelectors() {
-    printf '%s\n' \
-        remote-control-contract-service-install \
-        remote-control-contract-server-response
-}
-
 runRegressionRemoteControlSmokeCore() {
     runRegressionRemoteControlSmokeCoreSteps
-}
-
-runRegressionRemoteControlSmokeRefresh() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh" \
-        listRegressionRemoteControlSmokeRefreshChildSelectors
-}
-
-runRegressionRemoteControlSmokeRefreshApply() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh-apply" \
-        listRegressionRemoteControlSmokeRefreshApplyChildSelectors
 }
 
 runRegressionRemoteControlSmokeRefreshApplyBasic() {
@@ -1985,21 +1940,6 @@ runRegressionRemoteControlSmokeRefreshRestore() {
 
 runRegressionRemoteControlSmokeRefreshReconcile() {
     runRegressionRemoteControlSmokeRefreshReconcileSteps
-}
-
-runRegressionRemoteControlSmoke() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke" \
-        listRegressionRemoteControlSmokeChildSelectors
-}
-
-runRegressionRemoteControlContract() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract" \
-        listRegressionRemoteControlContractChildSelectors
-}
-
-runRegressionRemoteControlContractServiceInstall() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract-service-install" \
-        listRegressionRemoteControlContractServiceInstallChildSelectors
 }
 
 runRegressionRemoteControlContractServiceInstallSuccess() {

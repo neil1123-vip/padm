@@ -883,10 +883,21 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
+    grep -q 'source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControlSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControlSmokeRefresh\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControlSmokeRefreshApply\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControlSmoke\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControlContract\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControlContractServiceInstall\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionRemoteControlSmokeRefresh\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionRemoteControlSmokeRefreshApply\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionRemoteControlSmoke\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionRemoteControlContract\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionRemoteControlContractServiceInstall\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
@@ -912,18 +923,28 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -q '^runParallelRemoteControlModes()' "${scriptFile}"
     ! grep -q '^runParallelRemoteControlTotals()' "${scriptFile}"
     ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${REMOTE_CONTROL_SCRIPT_PATH}"' "${scriptFile}"
-    grep -q '^listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionRemoteControlSmokeRefreshChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionRemoteControlSmokeChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionRemoteControlContractServiceInstallChildSelectors() {$' "${scriptFile}"
-    grep -q '^listRegressionRemoteControlContractChildSelectors() {$' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh-apply"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract"' "${scriptFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract-service-install"' "${scriptFile}"
-    grep -q 'remote-control-smoke-refresh-apply-basic' "${scriptFile}"
-    grep -q 'remote-control-contract-service-install-token-transaction' "${scriptFile}"
+    grep -q '^listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionRemoteControlSmokeRefreshChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionRemoteControlSmokeChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionRemoteControlContractServiceInstallChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionRemoteControlContractChildSelectors() {$' "${suiteFile}"
+    ! grep -q '^listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionRemoteControlSmokeRefreshChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionRemoteControlSmokeChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionRemoteControlContractServiceInstallChildSelectors() {$' "${scriptFile}"
+    ! grep -q '^listRegressionRemoteControlContractChildSelectors() {$' "${scriptFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh"' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh-apply"' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke"' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract"' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract-service-install"' "${suiteFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh-apply"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract"' "${scriptFile}"
+    ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract-service-install"' "${scriptFile}"
+    grep -q 'remote-control-smoke-refresh-apply-basic' "${suiteFile}"
+    grep -q 'remote-control-contract-service-install-token-transaction' "${suiteFile}"
 }
 
 runRemoteControlPublicSelectorRetirementContract() {
@@ -1078,6 +1099,28 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
         remote-control-contract-service-install \
         remote-control-contract-server-response
 )
+
+runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
+    local functionName
+
+    for functionName in \
+        listRegressionRemoteControlSmokeRefreshApplyChildSelectors \
+        listRegressionRemoteControlSmokeRefreshChildSelectors \
+        listRegressionRemoteControlSmokeChildSelectors \
+        listRegressionRemoteControlContractServiceInstallChildSelectors \
+        listRegressionRemoteControlContractChildSelectors \
+        runRegressionRemoteControlSmokeRefresh \
+        runRegressionRemoteControlSmokeRefreshApply \
+        runRegressionRemoteControlSmoke \
+        runRegressionRemoteControlContract \
+        runRegressionRemoteControlContractServiceInstall
+    do
+        grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
+        ! grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${scriptFile}" || return 1
+    done
+}
 
 runRemoteControlSmokeCoreChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
@@ -4486,6 +4529,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-retires-suite-owned-wrappers runLegacyRetiresSuiteOwnedWrappersContract &&
         runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
+        runRegressionStep remote-control-nested-selector-helpers-are-suite-owned runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
         runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract &&
