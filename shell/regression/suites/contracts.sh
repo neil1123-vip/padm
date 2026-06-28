@@ -79,6 +79,18 @@ runAggregateRunnerUsesSuiteLocalHelperAssertions() (
     ! grep -q "^${forbiddenLegacyLine}$" "${callLog}" || return 1
 )
 
+runAggregateRunnerUsesFrameworkSelectorHelperAssertions() (
+    local callLog=$1
+    local expectedFrameworkLine=$2
+    shift 2
+
+    : >"${callLog}"
+    "$@"
+
+    grep -qx "${expectedFrameworkLine}" "${callLog}" || return 1
+    ! grep -q '^legacy-helper:' "${callLog}" || return 1
+)
+
 runLegacyPublicSelectorRetirementAssertionContract() (
     local helperFile="${TMP_DIR}/legacy-public-selector-retirement-helper.sh"
     local selectorsFile="${TMP_DIR}/legacy-public-selector-retirement-selectors.txt"
@@ -146,6 +158,29 @@ runAggregateRunnerUsesSuiteLocalHelperAssertionContract() (
     fi
 )
 
+runAggregateRunnerUsesFrameworkSelectorHelperAssertionContract() (
+    local callLog="${TMP_DIR}/aggregate-framework-helper.log"
+
+    runFixtureFrameworkAggregate() {
+        printf 'framework:fixture\n' >>"${callLog}"
+    }
+
+    runFixtureFrameworkAggregateWithLegacyFallback() {
+        printf 'framework:fixture\n' >>"${callLog}"
+        printf 'legacy-helper:fixture\n' >>"${callLog}"
+    }
+
+    runAggregateRunnerUsesFrameworkSelectorHelperAssertions "${callLog}" 'framework:fixture' runFixtureFrameworkAggregate
+
+    if runAggregateRunnerUsesFrameworkSelectorHelperAssertions "${callLog}" 'framework:other' runFixtureFrameworkAggregate; then
+        return 1
+    fi
+
+    if runAggregateRunnerUsesFrameworkSelectorHelperAssertions "${callLog}" 'framework:fixture' runFixtureFrameworkAggregateWithLegacyFallback; then
+        return 1
+    fi
+)
+
 runAggregateRunnerRegistrationHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
@@ -186,6 +221,20 @@ runAggregateRunnerUsesSuiteLocalHelperAdoptionContract() {
         awk -v fn="${functionName}" '
             $0 == fn "() (" { in_fn = 1 }
             in_fn && /runAggregateRunnerUsesSuiteLocalHelperAssertions / { found = 1 }
+            in_fn && /^\)$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
+runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract \
+        runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() (" { in_fn = 1 }
+            in_fn && /runAggregateRunnerUsesFrameworkSelectorHelperAssertions / { found = 1 }
             in_fn && /^\)$/ { exit(found ? 0 : 1) }
         ' "${contractsFile}" || return 1
     done
@@ -773,8 +822,6 @@ runRemoteControlAggregateRunnerRegistrationContract() {
 runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/remote-control-framework-helper-dispatch.log"
 
-    : >"${callLog}"
-
     listRegressionRemoteControlChildSelectors() {
         printf '%s\n' \
             remote-control-smoke \
@@ -790,10 +837,10 @@ runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract() (
         return 97
     }
 
-    runRegressionRemoteControl
-
-    grep -qx 'framework:'"${TMP_DIR}"'/remote-control-default-[0-9][0-9]* remote-control-smoke remote-control-smoke remote-control-deep remote-control-deep' "${callLog}"
-    ! grep -q '^legacy-helper:' "${callLog}"
+    runAggregateRunnerUsesFrameworkSelectorHelperAssertions \
+        "${callLog}" \
+        'framework:'"${TMP_DIR}"'/remote-control-default-[0-9][0-9]* remote-control-smoke remote-control-smoke remote-control-deep remote-control-deep' \
+        runRegressionRemoteControl
 )
 
 runFastSuiteUsesFunctionRegistryContract() {
@@ -2690,8 +2737,6 @@ runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract() (
 runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/transaction-framework-helper-dispatch.log"
 
-    : >"${callLog}"
-
     listRegressionTransactionSystemChildSelectors() {
         printf '%s\n' \
             nginx-service-failure \
@@ -2707,10 +2752,10 @@ runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
         return 97
     }
 
-    runRegressionTransactionSystemSuiteRoot
-
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-system-parallel-[0-9][0-9]* nginx-service-failure nginx-service-failure fail2ban-apply-transaction fail2ban-apply-transaction' "${callLog}"
-    ! grep -q '^legacy-helper:' "${callLog}"
+    runAggregateRunnerUsesFrameworkSelectorHelperAssertions \
+        "${callLog}" \
+        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-system-parallel-[0-9][0-9]* nginx-service-failure nginx-service-failure fail2ban-apply-transaction fail2ban-apply-transaction' \
+        runRegressionTransactionSystemSuiteRoot
 )
 
 runAllSelectorHelpersStayAlignedContract() (
@@ -3721,6 +3766,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
         runRegressionStep aggregate-runner-uses-suite-local-helper-assertion runAggregateRunnerUsesSuiteLocalHelperAssertionContract &&
         runRegressionStep aggregate-runner-uses-suite-local-helper-adoption runAggregateRunnerUsesSuiteLocalHelperAdoptionContract &&
+        runRegressionStep aggregate-runner-uses-framework-selector-helper-assertion runAggregateRunnerUsesFrameworkSelectorHelperAssertionContract &&
+        runRegressionStep aggregate-runner-uses-framework-selector-helper-adoption runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
