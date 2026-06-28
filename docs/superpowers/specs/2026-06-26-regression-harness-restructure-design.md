@@ -290,7 +290,9 @@ Limits:
 
 ### Remote Control
 
-`remote-control` uses selector registration for public entrypoints and aggregate composition, but still relies on `runParallelRegressionRunners` for the suite root:
+`remote-control` now uses selector registration plus framework selector-list orchestration for the suite root.
+
+The top-level suite root fans out through a suite-local selector runner over:
 
 - `smoke`
 - `contract`
@@ -302,13 +304,27 @@ Nested public aggregates include:
 - `remote-control-contract`
 - `remote-control-contract-service-install`
 
+Important boundary:
+
+- the top-level suite root now uses `runFrameworkParallelRegressionSelectorList`
+- nested public aggregates inside `subscription_groups_remote_control.sh` still use `runParallelRegressionRunners`
+- this keeps source-only compatibility for the legacy-backed nested helper tree while moving the suite-owned root onto framework orchestration
+
 ### Subscription State
 
-`subscription-state` also stays on `runParallelRegressionRunners` for its suite root and core subtree:
+`subscription-state` now uses framework selector-list orchestration for both its suite root and core subtree.
+
+The current top-level shape is:
 
 - `subscription-state-core`
 - `subscription-state-support`
 - `subscription-state-sync-rollback`
+
+The core subtree fans out through selector-list orchestration over:
+
+- `subscription-state-structure`
+- `subscription-state-quota`
+- `subscription-state-remote-restore`
 
 The suite already has composition coverage proving parallel isolation for:
 
@@ -450,6 +466,9 @@ Already landed in this branch:
 - `4233536` `refactor: retire empty legacy script-leaf shim`
 - `31f7678` `refactor: retire script regression selectors`
 - `717ecf4` `refactor: retire legacy internal cli regression paths`
+- `21ab955` `refactor: inline remaining regression leaf registrations`
+- `93d07bd` `refactor: route remote control suite through selector helper`
+- `32fe720` `refactor: route subscription state suites through selector helper`
 
 Together these commits establish the current harness direction:
 
@@ -464,13 +483,10 @@ The current structure is usable, but there is still cleanup headroom.
 
 Most likely next steps:
 
-1. normalize remaining `while read ... registerRegressionFunctionLeaf` blocks in:
-   - `reality.sh`
-   - `remote_control.sh`
-   - `subscription_state.sh`
-2. audit whether `remote-control` and `subscription-state` should eventually move from `runParallelRegressionRunners` to selector-list orchestration
-3. keep reviewing legacy-backed suites for source-time global drift and add compat wrappers only where concrete collisions are proven
-4. reduce contract duplication where multiple suites assert the same framework invariant
+1. keep reviewing legacy-backed suites for source-time global drift and add compat wrappers only where concrete collisions are proven
+2. decide whether nested aggregates still living inside legacy-backed scripts should also be lifted onto selector-list orchestration, or intentionally remain local runner groups
+3. reduce contract duplication where multiple suites assert the same framework invariant
+4. refresh this design snapshot whenever a suite root or resource-profile boundary changes, so the spec remains an authoritative map instead of a historical note
 
 Deferred on purpose:
 
