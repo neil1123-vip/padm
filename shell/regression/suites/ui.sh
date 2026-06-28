@@ -111,6 +111,35 @@ runRegressionMenuSmokeFull() {
         "${selectorPairs[@]}"
 }
 
+listRegressionUiFullSubscriptionMainChildSelectors() {
+    printf '%s\n' \
+        ui-full-subscription-main-entry \
+        ui-full-subscription-main-publish-service \
+        ui-full-subscription-main-publish-user \
+        ui-full-subscription-main-publish-sync \
+        ui-full-subscription-main-maintenance
+}
+
+listRegressionUiFullSubscriptionMainPublishChildSelectors() {
+    printf '%s\n' \
+        ui-full-subscription-main-publish-service \
+        ui-full-subscription-main-publish-user \
+        ui-full-subscription-main-publish-sync
+}
+
+listRegressionUiFullSubscriptionMainPublishUserChildSelectors() {
+    printf '%s\n' \
+        ui-full-subscription-main-publish-user-empty \
+        ui-full-subscription-main-publish-user-create \
+        ui-full-subscription-main-publish-user-inspect
+}
+
+listRegressionUiFullSubscriptionMainPublishSyncChildSelectors() {
+    printf '%s\n' \
+        ui-full-subscription-main-publish-sync-skip \
+        ui-full-subscription-main-publish-sync-enable
+}
+
 runRegressionWireGuardMenuFlow() {
     local -a selectors=()
     local -a selectorPairs=()
@@ -222,6 +251,28 @@ runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
         PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
         runFrameworkParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
         "${selectorPairs[@]}"
+}
+
+runRegressionUiFullSubscriptionMain() {
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-parallel-${BASHPID:-$$}" \
+        listRegressionUiFullSubscriptionMainChildSelectors
+}
+
+runRegressionUiFullSubscriptionMainPublish() {
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
+        listRegressionUiFullSubscriptionMainPublishChildSelectors
+}
+
+runRegressionUiFullSubscriptionMainPublishUser() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
+            listRegressionUiFullSubscriptionMainPublishUserChildSelectors
+}
+
+runRegressionUiFullSubscriptionMainPublishSync() {
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
+            listRegressionUiFullSubscriptionMainPublishSyncChildSelectors
 }
 
 listRegressionUiChildSelectors() {
@@ -487,7 +538,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ! grep -qx 'wireguard-menu-flow-peer-source-control-toggle-start' "${callLog}"
 
     : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runMenuSmokeFullSubscriptionMainPublishUserRegression
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiFullSubscriptionMainPublishUser
     for selector in \
         ui-full-subscription-main-publish-user-empty \
         ui-full-subscription-main-publish-user-create \
@@ -498,7 +549,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ! grep -q '^ui-full:subscription-main-publish-user-start$' "${callLog}"
 
     : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runMenuSmokeFullSubscriptionMainPublishSyncRegression
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiFullSubscriptionMainPublishSync
     for selector in \
         ui-full-subscription-main-publish-sync-skip \
         ui-full-subscription-main-publish-sync-enable; do
@@ -535,7 +586,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
     done
 
     : >"${callLog}"
-    PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runMenuSmokeFullSubscriptionMainPublishUserRegression
+    PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiFullSubscriptionMainPublishUser
     awk '
         $0 == "ui-full-subscription-main-publish-user-empty-finish" { firstFinish = NR }
         $0 == "ui-full-subscription-main-publish-user-create-start" { secondStart = NR }
@@ -548,15 +599,15 @@ runRegressionUiLongTailSplitCompositionRegression() (
 registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
 registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull
 registerRegressionFunctionLeaf ui-full-core runMenuSmokeFullCoreRegression
-registerRegressionFunctionLeaf ui-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
+registerRegressionFunctionLeaf ui-full-subscription-main runRegressionUiFullSubscriptionMain
 registerRegressionFunctionLeaf ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish runMenuSmokeFullSubscriptionMainPublishRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish runRegressionUiFullSubscriptionMainPublish
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-user runMenuSmokeFullSubscriptionMainPublishUserRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-user runRegressionUiFullSubscriptionMainPublishUser
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync runMenuSmokeFullSubscriptionMainPublishSyncRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync runRegressionUiFullSubscriptionMainPublishSync
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
 registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
 registerRegressionFunctionLeaf ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression

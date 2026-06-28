@@ -1591,15 +1591,15 @@ runUiPublicSelectorsUseFunctionRegistryContract() {
 ui-smoke runRegressionUiSmokeSuiteRoot
 ui-full runRegressionMenuSmokeFull
 ui-full-core runMenuSmokeFullCoreRegression
-ui-full-subscription-main runMenuSmokeFullSubscriptionMainRegression
+ui-full-subscription-main runRegressionUiFullSubscriptionMain
 ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
-ui-full-subscription-main-publish runMenuSmokeFullSubscriptionMainPublishRegression
+ui-full-subscription-main-publish runRegressionUiFullSubscriptionMainPublish
 ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
-ui-full-subscription-main-publish-user runMenuSmokeFullSubscriptionMainPublishUserRegression
+ui-full-subscription-main-publish-user runRegressionUiFullSubscriptionMainPublishUser
 ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
 ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
 ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
-ui-full-subscription-main-publish-sync runMenuSmokeFullSubscriptionMainPublishSyncRegression
+ui-full-subscription-main-publish-sync runRegressionUiFullSubscriptionMainPublishSync
 ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
 ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
 ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression
@@ -1932,16 +1932,69 @@ runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
         printf 'framework:%s\n' "$*" >>"${callLog}"
     }
 
+    runFrameworkParallelRegressionSelectorList() {
+        local orchestrationRoot=$1
+        local selectorListFn=$2
+        shift 2
+        local -a selectors=()
+        local -a selectorPairs=()
+        local selector
+
+        mapfile -t selectors < <("${selectorListFn}" "$@")
+        for selector in "${selectors[@]}"; do
+            [[ -n "${selector}" ]] || continue
+            selectorPairs+=("${selector}" "${selector}")
+        done
+        runFrameworkParallelRegressionSelectors "${orchestrationRoot}" "${selectorPairs[@]}"
+    }
+
     runParallelRegressionSelectors() {
         printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
         return 97
     }
 
+    listRegressionUiFullSubscriptionMainChildSelectors() {
+        printf '%s\n' \
+            ui-full-subscription-main-entry \
+            ui-full-subscription-main-publish-service \
+            ui-full-subscription-main-publish-user \
+            ui-full-subscription-main-publish-sync \
+            ui-full-subscription-main-maintenance
+    }
+
+    listRegressionUiFullSubscriptionMainPublishChildSelectors() {
+        printf '%s\n' \
+            ui-full-subscription-main-publish-service \
+            ui-full-subscription-main-publish-user \
+            ui-full-subscription-main-publish-sync
+    }
+
+    listRegressionUiFullSubscriptionMainPublishUserChildSelectors() {
+        printf '%s\n' \
+            ui-full-subscription-main-publish-user-empty \
+            ui-full-subscription-main-publish-user-create \
+            ui-full-subscription-main-publish-user-inspect
+    }
+
+    listRegressionUiFullSubscriptionMainPublishSyncChildSelectors() {
+        printf '%s\n' \
+            ui-full-subscription-main-publish-sync-skip \
+            ui-full-subscription-main-publish-sync-enable
+    }
+
     runRegressionUiSuiteRoot
     PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionUiSuiteRoot
+    runRegressionUiFullSubscriptionMain
+    runRegressionUiFullSubscriptionMainPublish
+    runRegressionUiFullSubscriptionMainPublishUser
+    runRegressionUiFullSubscriptionMainPublishSync
 
     grep -qx 'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke ui-full-core ui-full-core' "${callLog}"
     grep -qx 'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke wireguard-restore-runner wireguard-restore-runner' "${callLog}"
+    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-parallel-[0-9][0-9]* ui-full-subscription-main-entry ui-full-subscription-main-entry ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync ui-full-subscription-main-maintenance ui-full-subscription-main-maintenance' "${callLog}"
+    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-parallel-[0-9][0-9]* ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync' "${callLog}"
+    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-user-parallel-[0-9][0-9]* ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-inspect ui-full-subscription-main-publish-user-inspect' "${callLog}"
+    grep -qx 'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-sync-parallel-[0-9][0-9]* ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-enable ui-full-subscription-main-publish-sync-enable' "${callLog}"
     ! grep -q '^legacy-helper:' "${callLog}"
 )
 
