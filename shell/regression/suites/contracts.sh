@@ -53,6 +53,19 @@ runLegacyPublicSelectorRetirementAssertions() (
     done
 )
 
+runAggregateRunnerRegistrationAssertions() {
+    local selector=$1
+    local mode=$2
+    local runner=$3
+    local expectedChildren=$4
+    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]:-}
+
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "aggregate-runner" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_MODE["${selector}"]:-}" == "${mode}" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]:-}" == "${runner}" ]] || return 1
+    [[ "${actualChildren}" == "${expectedChildren}" ]] || return 1
+}
+
 runLegacyPublicSelectorRetirementAssertionContract() (
     local helperFile="${TMP_DIR}/legacy-public-selector-retirement-helper.sh"
     local selectorsFile="${TMP_DIR}/legacy-public-selector-retirement-selectors.txt"
@@ -75,6 +88,28 @@ EOF
     runLegacyPublicSelectorRetirementAssertions "${helperFile}" alpha delta
     runLegacyPublicSelectorRetirementAssertions "${helperFile}" $(<"${selectorsFile}")
     if runLegacyPublicSelectorRetirementAssertions "${helperFile}" beta; then
+        return 1
+    fi
+)
+
+runAggregateRunnerRegistrationAssertionContract() (
+    local selector="aggregate-runner-registration-fixture"
+    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=aggregate-runner
+    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=parallel
+    PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=runFixtureAggregateRunner
+    PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$'alpha\nbeta'
+
+    runAggregateRunnerRegistrationAssertions \
+        "${selector}" \
+        parallel \
+        runFixtureAggregateRunner \
+        $'alpha\nbeta'
+
+    if runAggregateRunnerRegistrationAssertions \
+        "${selector}" \
+        sequential \
+        runFixtureAggregateRunner \
+        $'alpha\nbeta'; then
         return 1
     fi
 )
@@ -294,31 +329,31 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["subscription-state-core"]:-}
 
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-core ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel subscription-state-core \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCoreSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionStateCoreChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-state-core"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-state-core"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state-core"]:-}" == "runRegressionSubscriptionStateCoreSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-core \
+        parallel \
+        runRegressionSubscriptionStateCoreSuiteRoot \
+        "${expectedChildren}"
 }
 
 runSubscriptionStateAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["subscription-state"]:-}
 
     ! grep -q '^registerRegressionFunctionLeaf subscription-state ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel subscription-state \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionStateSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionStateChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-state"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["subscription-state"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["subscription-state"]:-}" == "runRegressionSubscriptionStateSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state \
+        parallel \
+        runRegressionSubscriptionStateSuiteRoot \
+        "${expectedChildren}"
 }
 
 runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
@@ -646,16 +681,16 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
 runRemoteControlAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["remote-control"]:-}
 
     ! grep -q '^registerRegressionFunctionLeaf remote-control ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRemoteControlChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["remote-control"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["remote-control"]:-}" == "runRegressionRemoteControlSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        remote-control \
+        parallel \
+        runRegressionRemoteControlSuiteRoot \
+        "${expectedChildren}"
 }
 
 runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -818,16 +853,16 @@ EOF
 runPlatformHotAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
     local expectedChildren
-    local actualChildren=${PADM_REGRESSION_SELECTOR_CHILDREN["platform-hot"]:-}
 
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel platform-hot runRegressionPlatformHotSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionPlatformHotChildSelectors)
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["platform-hot"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_MODE["platform-hot"]:-}" == "parallel" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["platform-hot"]:-}" == "runRegressionPlatformHotSuiteRoot" ]]
-    [[ "${actualChildren}" == "${expectedChildren}" ]]
+    runAggregateRunnerRegistrationAssertions \
+        platform-hot \
+        parallel \
+        runRegressionPlatformHotSuiteRoot \
+        "${expectedChildren}"
 }
 
 runPlatformHotLeavesUseFastCompatHelperContract() (
@@ -3625,6 +3660,7 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
+        runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
