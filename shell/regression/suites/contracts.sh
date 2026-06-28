@@ -2179,6 +2179,42 @@ runRealitySuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
 }
 
+runRealityLegacyPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+    local usageLine
+    local usageSelectors
+
+    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    for selector in \
+        reality-candidates \
+        reality-candidates-fast \
+        reality-asn-scan-plan \
+        reality-candidates-full \
+        reality-config \
+        reality-stream \
+        reality-profile-failure; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyScriptFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
+}
+
 runSubscriptionSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/subscription-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/subscription-default-selectors.sorted.txt"
@@ -2973,6 +3009,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-aggregate-runners-use-suite-local-helpers runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract &&
         runRegressionStep subscription-aggregate-runners-use-framework-selector-helper runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract &&
         runRegressionStep reality-suite-uses-function-registry runRealitySuiteUsesFunctionRegistryContract &&
+        runRegressionStep reality-legacy-public-selector-retirement runRealityLegacyPublicSelectorRetirementContract &&
         runRegressionStep reality-candidates-aggregate-runner-registration runRealityCandidatesAggregateRunnerRegistrationContract &&
         runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&

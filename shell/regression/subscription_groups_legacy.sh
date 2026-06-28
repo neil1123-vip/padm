@@ -15999,24 +15999,6 @@ fi
 
 regressionName=${1:-fast}
 case "${regressionName}" in
-reality-candidates)
-    regressionRunner=runRegressionRealityCandidates
-    ;;
-reality-candidates-fast)
-    regressionRunner=runRealityCandidateFastRegression
-    ;;
-reality-asn-scan-plan)
-    regressionRunner=runRealityAsnScanPlanRegression
-    ;;
-reality-candidates-full)
-    regressionRunner=runRealityCandidateFullRegression
-    ;;
-reality-config)
-    regressionRunner=runRealityConfigRegression
-    ;;
-reality-stream)
-    regressionRunner=runRegressionRealityStream
-    ;;
 core-rollback-result-message)
     regressionRunner=runCoreRollbackResultMessageRegression
     ;;
@@ -16040,9 +16022,6 @@ alone-nginx-directory-target)
     ;;
 xray-reality-port-failure)
     regressionRunner=runXrayRealityPortFailureRegression
-    ;;
-reality-profile-failure)
-    regressionRunner=runRealityProfileFailureRegression
     ;;
 sing-box-reality-key-transaction)
     regressionRunner=runSingBoxRealityKeyTransactionRegression
@@ -16222,7 +16201,7 @@ all)
     regressionRunner=runRegressionAll
     ;;
 *)
-    printf 'usage: %s [reality-candidates|reality-candidates-fast|reality-asn-scan-plan|reality-candidates-full|reality-config|reality-stream|core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|reality-profile-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|all]\n' "$0" >&2
+    printf 'usage: %s [core-rollback-result-message|config-transaction|core-port-file-transaction|core-port-unsafe-config-dir|entry-helper-config|check-port-open-nginx-directory-target|alone-nginx-directory-target|xray-reality-port-failure|sing-box-reality-key-transaction|core-template-return-failure|core-template-managed-remove|core-binary-install-copy-failure|sing-box-cronet-rollback|finalize-sing-box-rollback|core-upgrade-directory-target|legacy-core-upgrade-keeps-existing|core-first-install-failure-clean|core-first-install-commit-rollback|core-install-unsafe-binary-path|sing-box-download-artifacts-cleanup|network-check-return-failure|tls-failure-return|tls-reinstall-rollback|tls-renew-failure-propagation|service-queue-apply-propagation|core-install-service-action-failure|sing-box-merge-start-failure|sing-box-merge-config-transaction|sing-box-uninstall-failure-propagation|sing-box-uninstall-rejects-unsafe-config-path|sing-box-managed-cleanup|sing-box-protocol-reload-failure|geo-update-reload-failure|core-cleanup-failure-propagation|reload-core-propagation|sing-box-log-transaction|user-config-write|remove-user|regression-all-composition|regression-transaction-core-parallel-composition|regression-transaction-system-parallel-composition|regression-selector-dispatch-composition|regression-all-child-parallel-budget-composition|regression-all-resource-layer-composition|regression-parallel-selector-limit-composition|regression-parallel-selector-slot-refill-composition|transaction|transaction-core|transaction-subscription|transaction-system|nginx-service-failure|uninstall-nginx-cleanup|clean-agent-nginx-managed-remove|fail2ban-managed-cleanup|fail2ban-apply-transaction|uninstall-wireguard-cleanup|wireguard-key-transaction|wireguard-control-safe-dir|warp-config-safe-dir|warp-config-file-cleanup|uninstall-service-stop-failure|clean-last-installation-failure|clean-last-installation-acme-home|clean-last-installation-acme-relative-home|alone-nginx-write-transaction|alone-nginx-update-transaction|all]\n' "$0" >&2
     exit 2
     ;;
 esac
