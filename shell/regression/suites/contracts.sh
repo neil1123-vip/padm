@@ -2481,6 +2481,45 @@ runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract() (
         'framework:jobs='"${PADM_REGRESSION_ROUTING_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/routing-parallel-light-[0-9][0-9]* routing-port-panel routing-port-panel routing-core-unsafe-config-dir routing-core-unsafe-config-dir'
 )
 
+runRoutingLegacyLeavesUseCompatHelperContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
+    local status=0
+
+    while read -r selector runner regression; do
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -q "^${runner}() { runRegressionRoutingLegacyLeafWithCompat ${regression}; }$" "${suiteFile}" || status=1
+    done <<'EOF'
+routing-socks5-udp-associate runRoutingSocks5UdpAssociateCompatRegression runSocks5UdpAssociateRegression
+routing-core runRoutingCoreCompatRegression runRoutingRegression
+routing-core-unsafe-config-dir runRoutingCoreUnsafeConfigDirCompatRegression runRoutingCoreRejectsUnsafeConfigDirRegression
+routing-access-control-config-transaction runRoutingAccessControlConfigTransactionCompatRegression runAccessControlConfigTransactionRegression
+routing-access-control-unsafe-backup-dir runRoutingAccessControlUnsafeBackupDirCompatRegression runAccessControlRejectsUnsafeBackupDirRegression
+routing-access-control-unsafe-config-dir runRoutingAccessControlUnsafeConfigDirCompatRegression runAccessControlRejectsUnsafeConfigDirRegression
+routing-access-control-failure-return runRoutingAccessControlFailureReturnCompatRegression runAccessControlFailureReturnRegression
+routing-bt-failure-return runRoutingBTFailureReturnCompatRegression runBTRoutingFailureReturnRegression
+routing-ipv6-failure-return runRoutingIPv6FailureReturnCompatRegression runIPv6RoutingFailureReturnRegression
+routing-warp-failure-return runRoutingWarpFailureReturnCompatRegression runWARPRoutingFailureReturnRegression
+routing-socks5-failure-return runRoutingSocks5FailureReturnCompatRegression runSocks5RoutingFailureReturnRegression
+routing-dns-failure-return runRoutingDNSFailureReturnCompatRegression runDNSRoutingFailureReturnRegression
+routing-dns-unsafe-backup-dir runRoutingDNSUnsafeBackupDirCompatRegression runDNSRoutingRejectsUnsafeBackupDirRegression
+routing-dns-unsafe-config-dir runRoutingDNSUnsafeConfigDirCompatRegression runDNSRoutingRejectsUnsafeConfigDirRegression
+routing-dns-restore-scope runRoutingDNSRestoreScopeCompatRegression runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+routing-port-panel runRoutingPortPanelCompatRegression runPortAndPanelHelperRegression
+EOF
+
+    return "${status}"
+}
+
+runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
+
+    grep -q '^runRegressionRoutingLegacyReadInstallTypeIsolationRegression() ($' "${suiteFile}" || return 1
+    grep -q '^    runRegressionRoutingLegacyLeafWithCompat runRegressionRoutingLegacyReadInstallTypeIsolationProbe$' "${suiteFile}" || return 1
+    grep -q '^runRegressionRoutingLegacyReadInstallTypeIsolationProbe() {$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf regression-routing-legacy-read-install-type-isolation runRegressionRoutingLegacyReadInstallTypeIsolationRegression$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerParallel routing .*regression-routing-legacy-read-install-type-isolation' "${suiteFile}" || return 1
+}
+
 runTransactionCoreSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/transaction-core-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/transaction-core-default-selectors.sorted.txt"
@@ -3927,6 +3966,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
         runRegressionStep routing-aggregate-runner-uses-suite-local-helper runRoutingAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep routing-aggregate-runner-uses-framework-selector-helper runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract &&
+        runRegressionStep routing-legacy-leaves-use-compat-helper runRoutingLegacyLeavesUseCompatHelperContract &&
+        runRegressionStep routing-legacy-read-install-type-isolation-guard-registered runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract &&
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
         runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract &&
         runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
