@@ -1482,6 +1482,38 @@ runRealitySuiteChildStepsContract() {
     done
 }
 
+runRuntimeSuiteChildStepsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
+    local runtimeBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        runtime-core
+        runtime-autoread-unset-auto-install
+        runtime-auto-install-reality-route
+        runtime-tempdir
+        reality-candidates
+        reality-config
+    )
+    local idx
+
+    runtimeBody=$(sed -n '/^runRegressionRuntimeSuiteRoot() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${runtimeBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '
+            /^[[:space:]]*runRegressionStep / {
+                print $2
+            }
+        ' <<<"${runtimeBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local expectedChildren
@@ -4444,6 +4476,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep runtime-suite-uses-function-registry runRuntimeSuiteUsesFunctionRegistryContract &&
         runRegressionStep runtime-legacy-public-selector-retirement runRuntimeLegacyPublicSelectorRetirementContract &&
+        runRegressionStep runtime-suite-child-steps runRuntimeSuiteChildStepsContract &&
         runRegressionStep runtime-selector-helpers-stay-aligned runRuntimeSelectorHelpersStayAlignedContract &&
         runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract &&
         runRegressionStep runtime-aggregate-runner-uses-suite-local-helper runRuntimeAggregateRunnerUsesSuiteLocalHelperContract &&
