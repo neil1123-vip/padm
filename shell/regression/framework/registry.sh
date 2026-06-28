@@ -7,7 +7,6 @@ PADM_REGRESSION_FRAMEWORK_REGISTRY_LOADED=1
 
 declare -ag PADM_REGRESSION_REGISTERED_SELECTORS=()
 declare -Ag PADM_REGRESSION_SELECTOR_KIND=()
-declare -Ag PADM_REGRESSION_SELECTOR_SCRIPT=()
 declare -Ag PADM_REGRESSION_SELECTOR_RUNNER=()
 declare -Ag PADM_REGRESSION_SELECTOR_CHILDREN=()
 declare -Ag PADM_REGRESSION_SELECTOR_MODE=()
@@ -22,17 +21,6 @@ registerRegressionSelector() {
     fi
 
     PADM_REGRESSION_REGISTERED_SELECTORS+=("${selector}")
-}
-
-registerRegressionScriptLeaf() {
-    local selector=$1
-    local scriptPath=$2
-    local runner=$3
-
-    registerRegressionSelector "${selector}" || return 1
-    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=script
-    PADM_REGRESSION_SELECTOR_SCRIPT["${selector}"]=${scriptPath}
-    PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=${runner}
 }
 
 registerRegressionFunctionLeaf() {
@@ -107,10 +95,6 @@ validateRegressionRegistry() {
     for selector in "${PADM_REGRESSION_REGISTERED_SELECTORS[@]}"; do
         kind=${PADM_REGRESSION_SELECTOR_KIND["${selector}"]}
         case "${kind}" in
-        script)
-            [[ -n "${PADM_REGRESSION_SELECTOR_SCRIPT[${selector}]:-}" ]]
-            [[ -n "${PADM_REGRESSION_SELECTOR_RUNNER[${selector}]:-}" ]]
-            ;;
         function)
             [[ -n "${PADM_REGRESSION_SELECTOR_RUNNER[${selector}]:-}" ]]
             ;;
@@ -165,17 +149,11 @@ renderRegressionUsage() {
 runRegisteredRegressionSelector() {
     local selector=$1
     local kind=${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}
-    local scriptPath
     local runner
     local child
     local -a childPairs=()
 
     case "${kind}" in
-    script)
-        scriptPath=${PADM_REGRESSION_SELECTOR_SCRIPT["${selector}"]}
-        runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
-        PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${scriptPath}" "${runner}"
-        ;;
     function)
         runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
         "${runner}"

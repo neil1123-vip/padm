@@ -2,6 +2,7 @@
 
 runRegressionDispatcherRegistryOnlyContract() {
     local dispatcherFile="${PROJECT_ROOT}/shell/subscription_groups_regression.sh"
+    local registryFile="${PROJECT_ROOT}/shell/regression/framework/registry.sh"
 
     ! grep -q 'subscription_groups_legacy\.sh' "${dispatcherFile}"
     ! grep -q 'subscription_groups_fast\.sh' "${dispatcherFile}"
@@ -11,6 +12,18 @@ runRegressionDispatcherRegistryOnlyContract() {
     grep -q 'regression/framework/runtime\.sh' "${dispatcherFile}"
     grep -q 'regression/framework/registry\.sh' "${dispatcherFile}"
     grep -q 'runRegisteredRegressionMain' "${dispatcherFile}"
+
+    ! grep -q '^registerRegressionScriptLeaf() {' "${registryFile}"
+    ! grep -q '^declare -Ag PADM_REGRESSION_SELECTOR_SCRIPT=' "${registryFile}"
+    ! grep -q '^    script)$' "${registryFile}"
+}
+
+runRegressionRegistryRetiresScriptSelectorKindContract() {
+    local registryFile="${PROJECT_ROOT}/shell/regression/framework/registry.sh"
+
+    ! grep -q 'PADM_REGRESSION_SELECTOR_KIND\["\${selector}"\]=script' "${registryFile}"
+    ! grep -q 'PADM_REGRESSION_SELECTOR_SCRIPT\["\${selector}"\]=' "${registryFile}"
+    ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${scriptPath}" "\${runner}"' "${registryFile}"
 }
 
 runSubscriptionStateNoImplicitFullFallbackContract() {
@@ -3414,6 +3427,7 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
+        runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
         runRegressionStep subscription-state-shim-stays-thin runSubscriptionStateShimStaysThinContract &&
