@@ -55,6 +55,7 @@ runLegacyPublicSelectorRetirementAssertions() (
 
 runLegacyPublicSelectorRetirementAssertionContract() (
     local helperFile="${TMP_DIR}/legacy-public-selector-retirement-helper.sh"
+    local selectorsFile="${TMP_DIR}/legacy-public-selector-retirement-selectors.txt"
 
     cat <<'EOF' >"${helperFile}"
 usage: %s [alpha|delta]
@@ -66,7 +67,13 @@ case "$1" in
 esac
 EOF
 
+    cat <<'EOF' >"${selectorsFile}"
+alpha
+delta
+EOF
+
     runLegacyPublicSelectorRetirementAssertions "${helperFile}" alpha delta
+    runLegacyPublicSelectorRetirementAssertions "${helperFile}" $(<"${selectorsFile}")
     if runLegacyPublicSelectorRetirementAssertions "${helperFile}" beta; then
         return 1
     fi
@@ -1065,9 +1072,6 @@ runAllSuiteUsesFunctionRegistryContract() {
 runAllPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local selector
-    local usageLine
-    local usageSelectors
 
     ! grep -q '^registerRegressionAlias full all$' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}" || return 1
@@ -1078,29 +1082,13 @@ runAllPublicSelectorRetirementContract() {
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["full"]:-}" ]] || return 1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["ci"]:-}" ]] || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
-    for selector in \
+    runLegacyPublicSelectorRetirementAssertions "${legacyFile}" \
         all \
         regression-all-composition \
         regression-all-child-parallel-budget-composition \
         regression-all-resource-layer-composition \
         full \
-        ci; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
-    done
+        ci
 }
 
 runLegacySuiteUsesFunctionRegistryContract() (
@@ -2494,27 +2482,12 @@ runTransactionLegacyPublicSelectorRetirementContract() (
     set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local usageLine
-    local usageSelectors
     local selector
-
-    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
+    local -a selectors=()
 
     while read -r selector; do
         [[ -n "${selector}" ]] || continue
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyScriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+        selectors+=("${selector}")
     done < <(
         awk '
             /^registerRegressionFunctionLeaf / { print $2 }
@@ -2522,6 +2495,8 @@ runTransactionLegacyPublicSelectorRetirementContract() (
             /^registerRegressionAggregateRunnerParallel / { print $2 }
         ' "${suiteFile}"
     )
+
+    runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" "${selectors[@]}"
 )
 
 runTransactionSuiteUsesSuiteLocalHelpersContract() (
