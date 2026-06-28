@@ -1230,6 +1230,54 @@ runFastOnlyOutputAutoInstallChildStepsContract() {
     done
 }
 
+runFastOnlySafetyChildStepsContract() {
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
+    local safetyBody
+    local -a actualSteps=()
+    local -a expectedSteps=(
+        commit-generated-file-directory-target
+        restore-managed-file-directory-target
+        github-release-direct-fallback
+        download-arg-missing-value
+        github-release-arg-missing-value
+        remove-install-path-retry
+        remove-install-path-file-mode
+        uninstall-padm-root-scope
+        remove-install-path-safety
+        remove-nginx-default-conf-safety
+        clean-agent-nginx-conf-safety
+        uninstall-subscribe-nginx-path-safety
+        check-port-open-nginx-path-safety
+        write-subscribe-nginx-path-safety
+        write-wireguard-control-nginx-path-safety
+        write-alone-nginx-path-safety
+        clean-last-installation-nginx-safety
+        install-nginx-alpine-default-path-safety
+        install-nginx-static-unsafe-path
+        install-nginx-static-unzip-failure
+        clean-last-installation-static-safety
+        subscription-sync-path-safety
+        subscription-sync-config-directory-target
+        subscription-sync-create-local-apply-backups-rollback
+        subscription-sync-config-unmanaged-target
+        subscription-sync-missing-restore-scope
+    )
+    local idx
+
+    safetyBody=$(sed -n '/^runRegressionFastOnlySafety() {$/,/^}$/p' "${scriptFile}")
+    [[ -n "${safetyBody}" ]] || return 1
+
+    mapfile -t actualSteps < <(
+        awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${safetyBody}"
+    )
+
+    [[ "${#actualSteps[@]}" -eq "${#expectedSteps[@]}" ]] || return 1
+
+    for idx in "${!expectedSteps[@]}"; do
+        [[ "${actualSteps[idx]}" == "${expectedSteps[idx]}" ]] || return 1
+    done
+}
+
 runFastOnlyOutputRestChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     local restBody
@@ -4174,6 +4222,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-selector-helpers-stay-aligned runFastSelectorHelpersStayAlignedContract &&
         runRegressionStep fast-aggregate-runner-registration runFastAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-aggregate-runner-registration runFastOnlyAggregateRunnerRegistrationContract &&
+        runRegressionStep fast-only-safety-child-steps runFastOnlySafetyChildStepsContract &&
         runRegressionStep fast-only-output-aggregate-runner-registration runFastOnlyOutputAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-output-auto-install-child-steps runFastOnlyOutputAutoInstallChildStepsContract &&
         runRegressionStep fast-only-output-rest-child-steps runFastOnlyOutputRestChildStepsContract &&
