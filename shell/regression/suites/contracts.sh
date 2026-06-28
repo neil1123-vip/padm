@@ -956,6 +956,69 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-write-transaction"]:-}" ]]
 }
 
+runSubscriptionLegacyPublicSelectorRetirementContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local selector
+    local usageLine
+    local usageSelectors
+    local subscriptionRemoteLeafLine
+
+    grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+
+    subscriptionRemoteLeafLine=$(grep -F 'subscription remote leaf selectors: ' "${legacyScriptFile}" || true)
+    [[ -z "${subscriptionRemoteLeafLine}" ]] || return 1
+
+    for selector in \
+        subscription \
+        subscription-remote \
+        subscription-tx \
+        subscription-remote-unique \
+        subscription-remote-rollback \
+        subscription-remote-merge \
+        subscription-remote-controlled \
+        subscription-remote-append-failure \
+        subscription-remote-commit-failure \
+        subscription-remote-idempotent \
+        sing-box-subscribe-write \
+        cdn-address-write-transaction \
+        subscribe-local-output-transaction \
+        subscribe-salt-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        sing-box-port-failure \
+        subscribe-user-output-transaction \
+        subscribe-local-rollback \
+        subscription-groups-migration-backup \
+        subscription-groups-backup-failure \
+        refresh-local-subscriptions-rollback \
+        subscribe-return-failure \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure \
+        regression-subscription-parallel-composition \
+        regression-subscription-tx-parallel-composition \
+        regression-subscription-remote-parallel-composition; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${legacyScriptFile}" || return 1
+        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+    done
+}
+
 runUiPublicSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local status=0
@@ -2866,6 +2929,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
         runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&
         runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract &&
+        runRegressionStep subscription-legacy-public-selector-retirement runSubscriptionLegacyPublicSelectorRetirementContract &&
         runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-remote-registered-child-selectors-aligned runSubscriptionRemoteRegisteredChildSelectorsAlignedContract &&
         runRegressionStep subscription-tx-registered-child-selectors-aligned runSubscriptionTxRegisteredChildSelectorsAlignedContract &&
