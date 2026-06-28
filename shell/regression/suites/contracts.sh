@@ -91,6 +91,21 @@ runAggregateRunnerUsesFrameworkSelectorHelperAssertions() (
     ! grep -q '^legacy-helper:' "${callLog}" || return 1
 )
 
+runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions() (
+    local callLog=$1
+    local runnerFn=$2
+    shift 2
+    local expectedFrameworkLine
+
+    : >"${callLog}"
+    "${runnerFn}"
+
+    for expectedFrameworkLine in "$@"; do
+        grep -qx "${expectedFrameworkLine}" "${callLog}" || return 1
+    done
+    ! grep -q '^legacy-helper:' "${callLog}" || return 1
+)
+
 runLegacyPublicSelectorRetirementAssertionContract() (
     local helperFile="${TMP_DIR}/legacy-public-selector-retirement-helper.sh"
     local selectorsFile="${TMP_DIR}/legacy-public-selector-retirement-selectors.txt"
@@ -181,6 +196,43 @@ runAggregateRunnerUsesFrameworkSelectorHelperAssertionContract() (
     fi
 )
 
+runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertionContract() (
+    local callLog="${TMP_DIR}/aggregate-framework-helper-multiline.log"
+
+    runFixtureFrameworkAggregateMultiLine() {
+        printf 'framework:first\n' >>"${callLog}"
+        printf 'framework:second\n' >>"${callLog}"
+    }
+
+    runFixtureFrameworkAggregateMultiLineWithLegacyFallback() {
+        printf 'framework:first\n' >>"${callLog}"
+        printf 'framework:second\n' >>"${callLog}"
+        printf 'legacy-helper:fixture\n' >>"${callLog}"
+    }
+
+    runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
+        "${callLog}" \
+        runFixtureFrameworkAggregateMultiLine \
+        'framework:first' \
+        'framework:second'
+
+    if runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
+        "${callLog}" \
+        runFixtureFrameworkAggregateMultiLine \
+        'framework:first' \
+        'framework:other'; then
+        return 1
+    fi
+
+    if runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
+        "${callLog}" \
+        runFixtureFrameworkAggregateMultiLineWithLegacyFallback \
+        'framework:first' \
+        'framework:second'; then
+        return 1
+    fi
+)
+
 runAggregateRunnerRegistrationHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
@@ -235,6 +287,21 @@ runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract() {
         awk -v fn="${functionName}" '
             $0 == fn "() (" { in_fn = 1 }
             in_fn && /runAggregateRunnerUsesFrameworkSelectorHelperAssertions / { found = 1 }
+            in_fn && /^\)$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
+runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract \
+        runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract \
+        runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() (" { in_fn = 1 }
+            in_fn && /runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions / { found = 1 }
             in_fn && /^\)$/ { exit(found ? 0 : 1) }
         ' "${contractsFile}" || return 1
     done
@@ -2365,8 +2432,6 @@ runRoutingAggregateRunnerUsesSuiteLocalHelperContract() (
 runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/routing-framework-helper-dispatch.log"
 
-    : >"${callLog}"
-
     listRegressionRoutingChildSelectors() {
         printf '%s\n' \
             routing-core \
@@ -2399,14 +2464,18 @@ runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract() (
         return 97
     }
 
-    runRegressionRoutingSuiteRoot
-    PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionRoutingSuiteRoot
+    runRoutingAggregateRunnerUsesFrameworkSelectorHelperRunner() {
+        runRegressionRoutingSuiteRoot
+        PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionRoutingSuiteRoot
+    }
 
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_ROUTING_PARALLEL_JOBS:-4}"':'"${TMP_DIR}"'/routing-parallel-[0-9][0-9]* routing-core routing-core routing-port-panel routing-port-panel' "${callLog}"
-    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/routing-parallel-core-[0-9][0-9]* routing-core routing-core' "${callLog}"
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-2}"':'"${TMP_DIR}"'/routing-parallel-heavy-[0-9][0-9]* routing-access-control-config-transaction routing-access-control-config-transaction routing-dns-failure-return routing-dns-failure-return' "${callLog}"
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_ROUTING_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/routing-parallel-light-[0-9][0-9]* routing-port-panel routing-port-panel routing-core-unsafe-config-dir routing-core-unsafe-config-dir' "${callLog}"
-    ! grep -q '^legacy-helper:' "${callLog}"
+    runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
+        "${callLog}" \
+        runRoutingAggregateRunnerUsesFrameworkSelectorHelperRunner \
+        'framework:jobs='"${PADM_REGRESSION_ROUTING_PARALLEL_JOBS:-4}"':'"${TMP_DIR}"'/routing-parallel-[0-9][0-9]* routing-core routing-core routing-port-panel routing-port-panel' \
+        'framework:jobs=:'"${TMP_DIR}"'/routing-parallel-core-[0-9][0-9]* routing-core routing-core' \
+        'framework:jobs='"${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-2}"':'"${TMP_DIR}"'/routing-parallel-heavy-[0-9][0-9]* routing-access-control-config-transaction routing-access-control-config-transaction routing-dns-failure-return routing-dns-failure-return' \
+        'framework:jobs='"${PADM_REGRESSION_ROUTING_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_ROUTING_WAVE_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/routing-parallel-light-[0-9][0-9]* routing-port-panel routing-port-panel routing-core-unsafe-config-dir routing-core-unsafe-config-dir'
 )
 
 runTransactionCoreSelectorHelpersStayAlignedContract() (
@@ -2689,8 +2758,6 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
 runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/transaction-core-framework-helper-dispatch.log"
 
-    : >"${callLog}"
-
     listRegressionTransactionCoreChildSelectors() {
         printf '%s\n' \
             core-rollback-result-message \
@@ -2724,14 +2791,18 @@ runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract() (
         return 97
     }
 
-    runRegressionTransactionCoreSuiteRoot
-    PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCoreSuiteRoot
+    runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperRunner() {
+        runRegressionTransactionCoreSuiteRoot
+        PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionTransactionCoreSuiteRoot
+    }
 
-    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/transaction-core-parallel-[0-9][0-9]* core-rollback-result-message core-rollback-result-message config-transaction config-transaction' "${callLog}"
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/transaction-core-parallel-heavy-[0-9][0-9]* core-install-service-action-failure core-install-service-action-failure core-port-file-transaction core-port-file-transaction' "${callLog}"
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}"':'"${TMP_DIR}"'/transaction-core-parallel-medium-[0-9][0-9]* config-transaction config-transaction entry-helper-config entry-helper-config' "${callLog}"
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-core-parallel-light-[0-9][0-9]* core-rollback-result-message core-rollback-result-message service-queue-apply-propagation service-queue-apply-propagation' "${callLog}"
-    ! grep -q '^legacy-helper:' "${callLog}"
+    runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
+        "${callLog}" \
+        runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperRunner \
+        'framework:jobs=:'"${TMP_DIR}"'/transaction-core-parallel-[0-9][0-9]* core-rollback-result-message core-rollback-result-message config-transaction config-transaction' \
+        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/transaction-core-parallel-heavy-[0-9][0-9]* core-install-service-action-failure core-install-service-action-failure core-port-file-transaction core-port-file-transaction' \
+        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}"':'"${TMP_DIR}"'/transaction-core-parallel-medium-[0-9][0-9]* config-transaction config-transaction entry-helper-config entry-helper-config' \
+        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-core-parallel-light-[0-9][0-9]* core-rollback-result-message core-rollback-result-message service-queue-apply-propagation service-queue-apply-propagation'
 )
 
 runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -3466,8 +3537,6 @@ runRuntimeAggregateRunnerUsesSuiteLocalHelperContract() (
 runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/runtime-framework-helper-dispatch.log"
 
-    : >"${callLog}"
-
     listRegressionRuntimeLightChildSelectors() {
         printf '%s\n' \
             runtime-core \
@@ -3489,11 +3558,15 @@ runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
         return 97
     }
 
-    PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntimeSuiteRoot
+    runRuntimeAggregateRunnerUsesFrameworkSelectorHelperRunner() {
+        PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntimeSuiteRoot
+    }
 
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/runtime-parallel-light-[0-9][0-9]* runtime-core runtime-core runtime-tempdir runtime-tempdir' "${callLog}"
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/runtime-parallel-heavy-[0-9][0-9]* reality-candidates reality-candidates reality-config reality-config' "${callLog}"
-    ! grep -q '^legacy-helper:' "${callLog}"
+    runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
+        "${callLog}" \
+        runRuntimeAggregateRunnerUsesFrameworkSelectorHelperRunner \
+        'framework:jobs='"${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/runtime-parallel-light-[0-9][0-9]* runtime-core runtime-core runtime-tempdir runtime-tempdir' \
+        'framework:jobs='"${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/runtime-parallel-heavy-[0-9][0-9]* reality-candidates reality-candidates reality-config reality-config'
 )
 
 runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
@@ -3768,6 +3841,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep aggregate-runner-uses-suite-local-helper-adoption runAggregateRunnerUsesSuiteLocalHelperAdoptionContract &&
         runRegressionStep aggregate-runner-uses-framework-selector-helper-assertion runAggregateRunnerUsesFrameworkSelectorHelperAssertionContract &&
         runRegressionStep aggregate-runner-uses-framework-selector-helper-adoption runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract &&
+        runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-assertion runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertionContract &&
+        runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-adoption runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
