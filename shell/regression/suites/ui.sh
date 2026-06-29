@@ -89,26 +89,20 @@ runRegressionUiSmokeSuiteRoot() {
 }
 
 runRegressionMenuSmokeFull() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" \
+        listRegressionUiFullChildSelectors
+}
 
-    selectors=(
-        ui-full-subscription-main-entry
-        ui-full-subscription-main-publish-service
-        ui-full-subscription-main-publish-user
-        ui-full-subscription-main-publish-sync
-        ui-full-subscription-main-maintenance
-        ui-full-subscription-controlled
-        ui-full-core
+listRegressionUiFullChildSelectors() {
+    printf '%s\n' \
+        ui-full-subscription-main-entry \
+        ui-full-subscription-main-publish-service \
+        ui-full-subscription-main-publish-user \
+        ui-full-subscription-main-publish-sync \
+        ui-full-subscription-main-maintenance \
+        ui-full-subscription-controlled \
+        ui-full-core \
         ui-full-core-maintenance
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
 }
 
 listRegressionUiFullSubscriptionMainChildSelectors() {
@@ -141,116 +135,80 @@ listRegressionUiFullSubscriptionMainPublishSyncChildSelectors() {
 }
 
 runRegressionWireGuardMenuFlow() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    selectors=(
-        wireguard-menu-flow-bootstrap
-        wireguard-menu-flow-peer-add-update
-        wireguard-menu-flow-peer-rollback-apply
-        wireguard-menu-flow-peer-rollback-source
-        wireguard-menu-flow-peer-rollback-credential
-        wireguard-menu-flow-peer-source-control
-        wireguard-menu-flow-control-restore
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    selectors=(
-        wireguard-menu-flow-peer-add-update
-        wireguard-menu-flow-peer-rollback
-        wireguard-menu-flow-peer-source-control
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerTransactionChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    selectors=(
-        wireguard-menu-flow-peer-rollback-apply
-        wireguard-menu-flow-peer-rollback-source
-        wireguard-menu-flow-peer-rollback-credential
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerRollbackChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    selectors=(
-        wireguard-menu-flow-peer-rollback-apply-service
-        wireguard-menu-flow-peer-rollback-apply-restore
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    selectors=(
-        wireguard-menu-flow-peer-rollback-credential-write
-        wireguard-menu-flow-peer-rollback-credential-groups-restore
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    selectors=(
-        wireguard-menu-flow-peer-source-control-toggle
-        wireguard-menu-flow-peer-source-control-clear-error
-        wireguard-menu-flow-peer-source-control-status
-    )
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors
+}
+
+listRegressionWireGuardMenuFlowChildSelectors() {
+    printf '%s\n' \
+        wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-source-control \
+        wireguard-menu-flow-control-restore
+}
+
+listRegressionWireGuardMenuFlowPeerTransactionChildSelectors() {
+    printf '%s\n' \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback \
+        wireguard-menu-flow-peer-source-control
+}
+
+listRegressionWireGuardMenuFlowPeerRollbackChildSelectors() {
+    printf '%s\n' \
+        wireguard-menu-flow-peer-rollback-apply \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential
+}
+
+listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors() {
+    printf '%s\n' \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore
+}
+
+listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors() {
+    printf '%s\n' \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore
+}
+
+listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors() {
+    printf '%s\n' \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status
 }
 
 runRegressionUiFullSubscriptionMain() {
@@ -325,30 +283,14 @@ listRegressionUiAllProfileChildSelectors() {
 }
 
 runRegressionUiSuiteRoot() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
     if [[ "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" == "all" ]]; then
-        mapfile -t selectors < <(listRegressionUiAllProfileChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+            listRegressionUiAllProfileChildSelectors
         return
     fi
 
-    mapfile -t selectors < <(listRegressionUiChildSelectors)
-    selectorPairs=()
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-parallel-${BASHPID:-$$}" \
+        listRegressionUiChildSelectors
 }
 
 runRegressionUiParallelCompositionRegression() (

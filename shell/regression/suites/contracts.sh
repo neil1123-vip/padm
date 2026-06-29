@@ -2467,8 +2467,7 @@ runUiSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionUiParallelCompositionRegression() ' "${suiteFile}" || return 1
     grep -q '^runRegressionUiLongTailSplitCompositionRegression() ' "${suiteFile}" || return 1
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}" || return 1
-    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/ui-parallel-' "${suiteFile}" || return 1
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-parallel-' "${suiteFile}" || return 1
     ! grep -q '^listRegressionUiChildSelectors() {$' "${legacyScriptFile}" || return 1
     ! grep -q '^listRegressionUiAllProfileChildSelectors() {$' "${legacyScriptFile}" || return 1
     ! grep -q '^runRegressionUi() {$' "${legacyScriptFile}" || return 1
@@ -2766,24 +2765,22 @@ runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
             wireguard-restore-runner
     }
 
-    runFrameworkParallelRegressionSelectors() {
-        printf 'framework:%s\n' "$*" >>"${callLog}"
-    }
-
     runFrameworkParallelRegressionSelectorList() {
         local orchestrationRoot=$1
         local selectorListFn=$2
         shift 2
         local -a selectors=()
-        local -a selectorPairs=()
-        local selector
 
         mapfile -t selectors < <("${selectorListFn}" "$@")
-        for selector in "${selectors[@]}"; do
-            [[ -n "${selector}" ]] || continue
-            selectorPairs+=("${selector}" "${selector}")
-        done
-        runFrameworkParallelRegressionSelectors "${orchestrationRoot}" "${selectorPairs[@]}"
+        printf 'framework:list:%s:%s:%s\n' \
+            "${orchestrationRoot}" \
+            "${selectorListFn}" \
+            "${selectors[*]}" >>"${callLog}"
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:selectors:%s\n' "$*" >>"${callLog}"
+        return 97
     }
 
     runParallelRegressionSelectors() {
@@ -2832,12 +2829,12 @@ runUiAggregateRunnerUsesFrameworkSelectorHelperContract() (
     runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
         "${callLog}" \
         runUiAggregateRunnerUsesFrameworkSelectorHelperRunner \
-        'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke ui-full-core ui-full-core' \
-        'framework:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]* ui-smoke ui-smoke wireguard-restore-runner wireguard-restore-runner' \
-        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-parallel-[0-9][0-9]* ui-full-subscription-main-entry ui-full-subscription-main-entry ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync ui-full-subscription-main-maintenance ui-full-subscription-main-maintenance' \
-        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-parallel-[0-9][0-9]* ui-full-subscription-main-publish-service ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-publish-sync' \
-        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-user-parallel-[0-9][0-9]* ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-inspect ui-full-subscription-main-publish-user-inspect' \
-        'framework:'"${TMP_DIR}"'/ui-full-subscription-main-publish-sync-parallel-[0-9][0-9]* ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-enable ui-full-subscription-main-publish-sync-enable'
+        'framework:list:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]*:listRegressionUiChildSelectors:ui-smoke ui-full-core' \
+        'framework:list:'"${TMP_DIR}"'/ui-parallel-[0-9][0-9]*:listRegressionUiAllProfileChildSelectors:ui-smoke wireguard-restore-runner' \
+        'framework:list:'"${TMP_DIR}"'/ui-full-subscription-main-parallel-[0-9][0-9]*:listRegressionUiFullSubscriptionMainChildSelectors:ui-full-subscription-main-entry ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync ui-full-subscription-main-maintenance' \
+        'framework:list:'"${TMP_DIR}"'/ui-full-subscription-main-publish-parallel-[0-9][0-9]*:listRegressionUiFullSubscriptionMainPublishChildSelectors:ui-full-subscription-main-publish-service ui-full-subscription-main-publish-user ui-full-subscription-main-publish-sync' \
+        'framework:list:'"${TMP_DIR}"'/ui-full-subscription-main-publish-user-parallel-[0-9][0-9]*:listRegressionUiFullSubscriptionMainPublishUserChildSelectors:ui-full-subscription-main-publish-user-empty ui-full-subscription-main-publish-user-create ui-full-subscription-main-publish-user-inspect' \
+        'framework:list:'"${TMP_DIR}"'/ui-full-subscription-main-publish-sync-parallel-[0-9][0-9]*:listRegressionUiFullSubscriptionMainPublishSyncChildSelectors:ui-full-subscription-main-publish-sync-skip ui-full-subscription-main-publish-sync-enable'
 )
 
 runRoutingLegacyPublicSelectorRetirementContract() {
