@@ -4033,8 +4033,6 @@ runRealitySuiteUsesFunctionRegistryContract() {
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REALITY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}"
     grep -q '^listRegressionRealitySuiteCandidatesChildSelectors() {$' "${suiteFile}"
@@ -4604,23 +4602,11 @@ runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
 
     : >"${callLog}"
 
-    grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
-    grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
     ! grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
     ! grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
 
-    runRegressionRealityCandidates() {
-        printf 'legacy-reality-candidates\n' >>"${callLog}"
-        return 97
-    }
-
     runRegressionRealityCandidatesSuiteRoot() {
         printf 'suite-reality-candidates\n' >>"${callLog}"
-    }
-
-    runRegressionRealityStream() {
-        printf 'legacy-reality-stream\n' >>"${callLog}"
-        return 97
     }
 
     runRegressionRealityStreamSuiteRoot() {
@@ -4632,8 +4618,6 @@ runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
 
     grep -qx 'suite-reality-candidates' "${callLog}" || status=1
     grep -qx 'suite-reality-stream' "${callLog}" || status=1
-    ! grep -q '^legacy-reality-candidates$' "${callLog}" || status=1
-    ! grep -q '^legacy-reality-stream$' "${callLog}" || status=1
     return "${status}"
 )
 
