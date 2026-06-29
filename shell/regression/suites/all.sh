@@ -194,6 +194,9 @@ runRegressionAllCompositionRegression() (
         *) return 2 ;;
         esac
     }
+    runRegressionAllSelectorSuiteRoot() {
+        runRegressionAllSelector "$@"
+    }
 
     runRegressionAll
 
