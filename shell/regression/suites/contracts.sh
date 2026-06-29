@@ -143,6 +143,16 @@ runLegacyFunctionSelectorRetirementAssertions() (
     ! grep -Fq "${usageToken}" "${legacyFile}" || return 1
 )
 
+runLegacyFunctionRetirementBatchAssertions() (
+    local legacyFile=$1
+    shift
+    local functionName
+
+    for functionName in "$@"; do
+        ! grep -Eq "^${functionName}\\(\\)[[:space:]]*[({]" "${legacyFile}" || return 1
+    done
+)
+
 runRegressionStepSequenceAssertions() {
     local sourceFile=$1
     local functionName=$2
@@ -486,6 +496,20 @@ runLegacyFunctionSelectorRetirementHelperAdoptionContract() {
         awk -v fn="${functionName}" '
             $0 == fn "() {" { in_fn = 1 }
             in_fn && /runLegacyFunctionSelectorRetirementAssertions / { found = 1 }
+            in_fn && /^}$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
+runLegacyFunctionRetirementBatchHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runUiFullSubscriptionMainLegacyWrapperRetirementContract \
+        runUiWireGuardLegacyWrapperRetirementContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() {" { in_fn = 1 }
+            in_fn && /runLegacyFunctionRetirementBatchAssertions / { found = 1 }
             in_fn && /^}$/ { exit(found ? 0 : 1) }
         ' "${contractsFile}" || return 1
     done
@@ -2747,10 +2771,12 @@ runUiFullSubscriptionMainLegacyWrapperRetirementContract() {
     grep -q '^runRegressionUiFullSubscriptionMainPublishUser() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionUiFullSubscriptionMainPublishSync() {$' "${suiteFile}" || return 1
 
-    ! grep -Eq '^runMenuSmokeFullSubscriptionMainRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runMenuSmokeFullSubscriptionMainPublishRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runMenuSmokeFullSubscriptionMainPublishUserRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runMenuSmokeFullSubscriptionMainPublishSyncRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    runLegacyFunctionRetirementBatchAssertions \
+        "${legacyScriptFile}" \
+        runMenuSmokeFullSubscriptionMainRegression \
+        runMenuSmokeFullSubscriptionMainPublishRegression \
+        runMenuSmokeFullSubscriptionMainPublishUserRegression \
+        runMenuSmokeFullSubscriptionMainPublishSyncRegression
 }
 
 runUiWireGuardLegacyWrapperRetirementContract() {
@@ -2765,12 +2791,14 @@ runUiWireGuardLegacyWrapperRetirementContract() {
     grep -q '^runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {$' "${suiteFile}" || return 1
     grep -q '^runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {$' "${suiteFile}" || return 1
 
-    ! grep -Eq '^runRegressionWireGuardMenuFlow\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerTransactionRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerRollbackRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^runSubscriptionWireGuardMenuFlowPeerSourceControlRegression\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
+    runLegacyFunctionRetirementBatchAssertions \
+        "${legacyScriptFile}" \
+        runRegressionWireGuardMenuFlow \
+        runSubscriptionWireGuardMenuFlowPeerTransactionRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression \
+        runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
 
     for selector in \
         wireguard-menu-flow \
@@ -4927,6 +4955,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
         runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
         runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
+        runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
