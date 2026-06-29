@@ -224,6 +224,18 @@ runRegressionDispatcherStepCoverageAssertions() {
     grep -q "runRegressionStep ${selector} ${runner}" <<<"${dispatcherBody}"
 }
 
+runContractHelperAdoptionAssertions() {
+    local sourceFile=$1
+    local functionName=$2
+    local helperName=$3
+
+    awk -v fn="${functionName}" -v helper="${helperName}" '
+        $0 == fn "() {" || $0 == fn "() (" { in_fn = 1 }
+        in_fn && index($0, helper " ") { found = 1 }
+        in_fn && ($0 == "}" || $0 == ")") { exit(found ? 0 : 1) }
+    ' "${sourceFile}"
+}
+
 runRegressionStepSequenceAssertionContract() (
     local fixtureFile="${TMP_DIR}/regression-step-sequence-assertion-fixture.sh"
 
@@ -255,6 +267,30 @@ EOF
     runRegressionDispatcherStepCoverageAssertions "${fixtureFile}" beta runFixtureBeta
 
     if runRegressionDispatcherStepCoverageAssertions "${fixtureFile}" gamma runFixtureGamma; then
+        return 1
+    fi
+)
+
+runContractHelperAdoptionAssertionContract() (
+    local braceFixture="${TMP_DIR}/contract-helper-adoption-brace-fixture.sh"
+    local subshellFixture="${TMP_DIR}/contract-helper-adoption-subshell-fixture.sh"
+
+    cat <<'EOF' >"${braceFixture}"
+runBraceFixtureContract() {
+    runFixtureAssertions alpha
+}
+EOF
+
+    cat <<'EOF' >"${subshellFixture}"
+runSubshellFixtureContract() (
+    runFixtureAssertions beta
+)
+EOF
+
+    runContractHelperAdoptionAssertions "${braceFixture}" runBraceFixtureContract runFixtureAssertions
+    runContractHelperAdoptionAssertions "${subshellFixture}" runSubshellFixtureContract runFixtureAssertions
+
+    if runContractHelperAdoptionAssertions "${braceFixture}" runBraceFixtureContract runMissingAssertions; then
         return 1
     fi
 )
@@ -407,11 +443,10 @@ runAggregateRunnerRegistrationHelperAdoptionContract() {
         runTransactionCoreAggregateRunnerRegistrationContract \
         runTransactionAggregateRunnerRegistrationContract \
         runTransactionSystemAggregateRunnerRegistrationContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() {" { in_fn = 1 }
-            in_fn && /runAggregateRunnerRegistrationAssertions \\/ { found = 1 }
-            in_fn && /^}$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runAggregateRunnerRegistrationAssertions || return 1
     done
 }
 
@@ -423,11 +458,10 @@ runAggregateRunnerUsesSuiteLocalHelperAdoptionContract() {
         runUiAggregateRunnerUsesSuiteLocalHelperContract \
         runRoutingAggregateRunnerUsesSuiteLocalHelperContract \
         runRuntimeAggregateRunnerUsesSuiteLocalHelperContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() (" { in_fn = 1 }
-            in_fn && /runAggregateRunnerUsesSuiteLocalHelperAssertions / { found = 1 }
-            in_fn && /^\)$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runAggregateRunnerUsesSuiteLocalHelperAssertions || return 1
     done
 }
 
@@ -438,11 +472,10 @@ runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract() {
         runAllAggregateRunnerUsesFrameworkSelectorHelperContract \
         runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract \
         runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() (" { in_fn = 1 }
-            in_fn && /runAggregateRunnerUsesFrameworkSelectorHelperAssertions / { found = 1 }
-            in_fn && /^\)$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runAggregateRunnerUsesFrameworkSelectorHelperAssertions || return 1
     done
 }
 
@@ -454,11 +487,10 @@ runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract() {
         runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract \
         runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract \
         runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() (" { in_fn = 1 }
-            in_fn && /runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions / { found = 1 }
-            in_fn && /^\)$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions || return 1
     done
 }
 
@@ -524,11 +556,10 @@ runRegisteredChildSelectorsAlignedHelperAdoptionContract() {
         runTransactionSubscriptionRegisteredChildSelectorsAlignedContract \
         runSubscriptionRemoteRegisteredChildSelectorsAlignedContract \
         runSubscriptionTxRegisteredChildSelectorsAlignedContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() (" { in_fn = 1 }
-            in_fn && /runRegisteredChildSelectorsAlignedAssertions / { found = 1 }
-            in_fn && /^\)$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runRegisteredChildSelectorsAlignedAssertions || return 1
     done
 }
 
@@ -539,11 +570,10 @@ runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract() {
         runFastRealityAggregateRunnerDispatchesChildrenInOrderContract \
         runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract \
         runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() (" { in_fn = 1 }
-            in_fn && /runAggregateRunnerDispatchesChildrenInOrderAssertions / { found = 1 }
-            in_fn && /^\)$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runAggregateRunnerDispatchesChildrenInOrderAssertions || return 1
     done
 }
 
@@ -559,11 +589,10 @@ runLegacyFunctionSelectorRetirementHelperAdoptionContract() {
         runSubscriptionOutputLegacyRetirementContract \
         runUiSmokeLegacyWrapperRetirementContract \
         runUiFullLegacyWrapperRetirementContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() {" { in_fn = 1 }
-            in_fn && /runLegacyFunctionSelectorRetirementAssertions / { found = 1 }
-            in_fn && /^}$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runLegacyFunctionSelectorRetirementAssertions || return 1
     done
 }
 
@@ -573,11 +602,10 @@ runLegacyFunctionRetirementBatchHelperAdoptionContract() {
     for functionName in \
         runUiFullSubscriptionMainLegacyWrapperRetirementContract \
         runUiWireGuardLegacyWrapperRetirementContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() {" { in_fn = 1 }
-            in_fn && /runLegacyFunctionRetirementBatchAssertions / { found = 1 }
-            in_fn && /^}$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runLegacyFunctionRetirementBatchAssertions || return 1
     done
 }
 
@@ -587,11 +615,10 @@ runSubscriptionStateCliRetirementHelperAdoptionContract() {
     for functionName in \
         runSubscriptionStateShimPublicCliRetirementContract \
         runSubscriptionStateFullPublicCliRetirementContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() {" { in_fn = 1 }
-            in_fn && /runSubscriptionStateCliRetirementAssertions / { found = 1 }
-            in_fn && /^}$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runSubscriptionStateCliRetirementAssertions || return 1
     done
 }
 
@@ -609,11 +636,31 @@ runRegressionDispatcherStepCoverageHelperAdoptionContract() {
     for functionName in \
         runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract \
         runSubscriptionStateNestedAggregateRunnerRegistrationCoveredByDispatcherContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() {" { in_fn = 1 }
-            in_fn && /runRegressionDispatcherStepCoverageAssertions / { found = 1 }
-            in_fn && /^}$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runRegressionDispatcherStepCoverageAssertions || return 1
+    done
+}
+
+runContractHelperAdoptionHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runAggregateRunnerRegistrationHelperAdoptionContract \
+        runAggregateRunnerUsesSuiteLocalHelperAdoptionContract \
+        runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract \
+        runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract \
+        runRegisteredChildSelectorsAlignedHelperAdoptionContract \
+        runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract \
+        runLegacyFunctionSelectorRetirementHelperAdoptionContract \
+        runLegacyFunctionRetirementBatchHelperAdoptionContract \
+        runSubscriptionStateCliRetirementHelperAdoptionContract \
+        runRegressionDispatcherStepCoverageHelperAdoptionContract; do
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runContractHelperAdoptionAssertions || return 1
     done
 }
 
@@ -4979,6 +5026,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep regression-step-sequence-assertion runRegressionStepSequenceAssertionContract &&
         runRegressionStep regression-dispatcher-step-coverage-assertion runRegressionDispatcherStepCoverageAssertionContract &&
+        runRegressionStep contract-helper-adoption-assertion runContractHelperAdoptionAssertionContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
         runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
@@ -4993,6 +5041,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
         runRegressionStep regression-dispatcher-step-coverage-helper-adoption runRegressionDispatcherStepCoverageHelperAdoptionContract &&
+        runRegressionStep contract-helper-adoption-helper-adoption runContractHelperAdoptionHelperAdoptionContract &&
         runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
         runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
         runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract &&
