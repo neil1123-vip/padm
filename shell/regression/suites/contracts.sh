@@ -106,6 +106,32 @@ runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions() (
     ! grep -q '^legacy-helper:' "${callLog}" || return 1
 )
 
+runAggregateRunnerDispatchesChildrenInOrderAssertions() (
+    local callLog=$1
+    shift
+    local expectedLine
+    local expectedCount=$#
+    local previousLineNumber=0
+    local currentLineNumber
+
+    for expectedLine in "$@"; do
+        grep -qx "${expectedLine}" "${callLog}" || return 1
+
+        currentLineNumber=$(awk -v expected="${expectedLine}" '
+            $0 == expected {
+                print NR
+                exit
+            }
+        ' "${callLog}")
+
+        [[ -n "${currentLineNumber}" ]] || return 1
+        (( currentLineNumber > previousLineNumber )) || return 1
+        previousLineNumber=${currentLineNumber}
+    done
+
+    [[ "$(wc -l <"${callLog}")" -eq "${expectedCount}" ]]
+)
+
 runRegressionStepSequenceAssertions() {
     local sourceFile=$1
     local functionName=$2
@@ -414,6 +440,21 @@ runRegisteredChildSelectorsAlignedHelperAdoptionContract() {
         awk -v fn="${functionName}" '
             $0 == fn "() (" { in_fn = 1 }
             in_fn && /runRegisteredChildSelectorsAlignedAssertions / { found = 1 }
+            in_fn && /^\)$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
+runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runFastRealityAggregateRunnerDispatchesChildrenInOrderContract \
+        runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract \
+        runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() (" { in_fn = 1 }
+            in_fn && /runAggregateRunnerDispatchesChildrenInOrderAssertions / { found = 1 }
             in_fn && /^\)$/ { exit(found ? 0 : 1) }
         ' "${contractsFile}" || return 1
     done
@@ -1893,14 +1934,10 @@ runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain fast-reality
 
-    grep -qx 'fast' "${callLog}"
-    grep -qx 'reality-candidates-fast' "${callLog}"
-    [[ "$(wc -l <"${callLog}")" -eq 2 ]]
-    awk '
-        $0 == "fast" { fastLine = NR }
-        $0 == "reality-candidates-fast" { candidateLine = NR }
-        END { exit !(fastLine && candidateLine && fastLine < candidateLine) }
-    ' "${callLog}"
+    runAggregateRunnerDispatchesChildrenInOrderAssertions \
+        "${callLog}" \
+        fast \
+        reality-candidates-fast
 )
 
 runFastSuiteUsesSuiteLocalHelperContract() (
@@ -4430,16 +4467,11 @@ runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-candidates
 
-    grep -qx 'reality-candidates-fast' "${callLog}"
-    grep -qx 'reality-asn-scan-plan' "${callLog}"
-    grep -qx 'reality-candidates-full' "${callLog}"
-    [[ "$(wc -l <"${callLog}")" -eq 3 ]]
-    awk '
-        $0 == "reality-candidates-fast" { fastLine = NR }
-        $0 == "reality-asn-scan-plan" { asnLine = NR }
-        $0 == "reality-candidates-full" { fullLine = NR }
-        END { exit !(fastLine && asnLine && fullLine && fastLine < asnLine && asnLine < fullLine) }
-    ' "${callLog}"
+    runAggregateRunnerDispatchesChildrenInOrderAssertions \
+        "${callLog}" \
+        reality-candidates-fast \
+        reality-asn-scan-plan \
+        reality-candidates-full
 )
 
 runRealityStreamAggregateRunnerRegistrationContract() {
@@ -4472,14 +4504,10 @@ runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-stream
 
-    grep -qx 'reality-stream-enable' "${callLog}"
-    grep -qx 'reality-stream-disable' "${callLog}"
-    [[ "$(wc -l <"${callLog}")" -eq 2 ]]
-    awk '
-        $0 == "reality-stream-enable" { enableLine = NR }
-        $0 == "reality-stream-disable" { disableLine = NR }
-        END { exit !(enableLine && disableLine && enableLine < disableLine) }
-    ' "${callLog}"
+    runAggregateRunnerDispatchesChildrenInOrderAssertions \
+        "${callLog}" \
+        reality-stream-enable \
+        reality-stream-disable
 )
 
 runRuntimeSelectorHelpersStayAlignedContract() (
@@ -4850,6 +4878,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
+        runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
