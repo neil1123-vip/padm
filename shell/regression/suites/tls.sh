@@ -16,13 +16,9 @@ listRegressionTlsChildSelectors() {
         tls-renew-failure-propagation
 }
 
-while read -r selector runner; do
-    registerRegressionFunctionLeaf "${selector}" "${runner}"
-done <<'EOF'
-tls-failure-return runTlsFailureReturnRegression
-tls-reinstall-rollback runTlsReinstallRollbackRegression
-tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
-EOF
+registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnRegression
+registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackRegression
+registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression
 
 registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \
     $(listRegressionTlsChildSelectors)

@@ -2060,6 +2060,7 @@ runTlsSuiteUsesFunctionRegistryContract() {
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TLS_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^runRegressionTlsSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnRegression$' "${suiteFile}"
