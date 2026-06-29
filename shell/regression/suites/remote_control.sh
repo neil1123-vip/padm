@@ -99,6 +99,23 @@ runRegressionRemoteControlContractServiceInstall() {
         listRegressionRemoteControlContractServiceInstallChildSelectors
 }
 
+runRegressionRemoteControlDeepStateRollbackNormalizationRegression() (
+    set -euo pipefail
+    local beforeFile="${TMP_DIR}/remote-control-deep-rollback-normalized.before.json"
+    local afterFile="${TMP_DIR}/remote-control-deep-rollback-normalized.after.json"
+
+    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+
+    normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)" | jq -S -c . >"${beforeFile}"
+    subscriptionGroupsStateWrite '.groups |= .'
+    normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)" | jq -S -c . >"${afterFile}"
+
+    cmp -s "${beforeFile}" "${afterFile}"
+)
+
 registerRegressionFunctionLeaf remote-control-smoke-core runRegressionRemoteControlSmokeCore
 registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic
 registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare
@@ -112,6 +129,7 @@ registerRegressionFunctionLeaf remote-control-contract-service-install-health-ro
 registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction
 registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlContractServerResponse
 registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlDeep
+registerRegressionFunctionLeaf regression-remote-control-deep-state-rollback-normalization runRegressionRemoteControlDeepStateRollbackNormalizationRegression
 
 listRegressionRemoteControlChildSelectors() {
     printf '%s\n' \

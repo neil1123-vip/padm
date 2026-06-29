@@ -627,6 +627,7 @@ runRemoteControlServerRefreshRegression() (
     eval "$(declare -f subscriptionSyncRestoreSubscribeOutputBackups | sed '1s/^subscriptionSyncRestoreSubscribeOutputBackups/originalSubscriptionSyncRestoreSubscribeOutputBackups/')"
     eval "$(declare -f subscriptionGroupsStateRead | sed '1s/^subscriptionGroupsStateRead/originalSubscriptionGroupsStateRead/')"
     eval "$(declare -f subscriptionGroupsStateWrite | sed '1s/^subscriptionGroupsStateWrite/originalSubscriptionGroupsStateWrite/')"
+    eval "$(declare -f subscribe | sed '1s/^subscribe/originalSubscribe/')"
 
     useLightweightSyncBackups() {
         subscriptionSyncCreateConfigBackups() {
@@ -1104,7 +1105,7 @@ JSON
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_rollback"],"remove":[]}'
         }
-        rollbackStateBefore=$(<"$(subscriptionGroupsFile)")
+        rollbackStateBefore=$(normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)")
         rollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
         rollbackSecondBefore=$(<"${configPath}03_VLESS_WS_inbounds.json")
         subscriptionControlApplyAccountPlan() {
@@ -1179,13 +1180,13 @@ JSON
 {"inbounds":[{"settings":{"clients":[{"email":"sub_publish-vless","id":"77777777-7777-7777-7777-777777777777"}]}}]}
 JSON
         }
-        refreshRollbackStateBefore=$(<"$(subscriptionGroupsFile)")
+        refreshRollbackStateBefore=$(normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)")
         refreshRollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
         refreshRollbackLocalBefore=$(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
         refreshRollbackPublicBefore=$(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
         printf '%s\n' "${refreshRollbackLocalBefore}" >"${refreshRollbackLocalExpected}"
         printf '%s\n' "${refreshRollbackPublicBefore}" >"${refreshRollbackPublicExpected}"
-        subscriptionControlRefreshPublishedSubscriptions() {
+        subscribe() {
             printf 'new salt\n' >"${refreshRollbackLocalDir}/subscribeSalt"
             printf 'new local default\n' >"${refreshRollbackLocalDir}/default/existing"
             printf 'new local created\n' >"${refreshRollbackLocalDir}/default/generated"
@@ -1213,8 +1214,8 @@ JSON
         SCRIPT_DIR="${refreshRollbackOldScriptDir}"
         if [[ -n "${refreshRollbackOldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${refreshRollbackOldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
         if [[ -n "${refreshRollbackOldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${refreshRollbackOldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
-        subscriptionControlRefreshPublishedSubscriptions() {
-            subscribe false false >/dev/null 2>&1
+        subscribe() {
+            originalSubscribe "$@"
         }
 
         local restoreFailureRoot="${TMP_DIR}/remote-control-restore-failure"
@@ -1250,7 +1251,7 @@ JSON
 {"inbounds":[{"settings":{"clients":[{"email":"sub_restore_fail-vless","id":"88888888-8888-8888-8888-888888888888"}]}}]}
 JSON
         }
-        subscriptionControlRefreshPublishedSubscriptions() {
+        subscribe() {
             printf 'new local\n' >"${restoreFailureLocalDir}/default/existing"
             printf 'new local created\n' >"${restoreFailureLocalDir}/default/generated"
             printf 'new public\n' >"${restoreFailurePublicDir}/default/existing-md5"
@@ -1284,8 +1285,8 @@ JSON
         coreInstallType="${oldCoreInstallType}"
         SCRIPT_DIR="${restoreFailureOldScriptDir}"
         if [[ -n "${restoreFailureOldTmpDir}" ]]; then export TMPDIR="${restoreFailureOldTmpDir}"; else unset TMPDIR; fi
-        subscriptionControlRefreshPublishedSubscriptions() {
-            subscribe false false >/dev/null 2>&1
+        subscribe() {
+            originalSubscribe "$@"
         }
         subscriptionControlApplyAccountPlan() {
             originalSubscriptionControlApplyAccountPlan "$@"
