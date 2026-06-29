@@ -212,6 +212,18 @@ runRegressionStepSequenceAssertions() {
     done
 }
 
+runRegressionDispatcherStepCoverageAssertions() {
+    local sourceFile=$1
+    local selector=$2
+    local runner=$3
+    local dispatcherBody
+
+    dispatcherBody=$(sed -n '/^runRegressionDispatcherContracts() {$/,/^}$/p' "${sourceFile}")
+    [[ -n "${dispatcherBody}" ]] || return 1
+
+    grep -q "runRegressionStep ${selector} ${runner}" <<<"${dispatcherBody}"
+}
+
 runRegressionStepSequenceAssertionContract() (
     local fixtureFile="${TMP_DIR}/regression-step-sequence-assertion-fixture.sh"
 
@@ -225,6 +237,24 @@ EOF
     runRegressionStepSequenceAssertions "${fixtureFile}" runFixtureRegressionSequence first second
 
     if runRegressionStepSequenceAssertions "${fixtureFile}" runFixtureRegressionSequence second first; then
+        return 1
+    fi
+)
+
+runRegressionDispatcherStepCoverageAssertionContract() (
+    local fixtureFile="${TMP_DIR}/regression-dispatcher-step-coverage-fixture.sh"
+
+    cat <<'EOF' >"${fixtureFile}"
+runRegressionDispatcherContracts() {
+    runRegressionStep alpha runFixtureAlpha &&
+        runRegressionStep beta runFixtureBeta
+}
+EOF
+
+    runRegressionDispatcherStepCoverageAssertions "${fixtureFile}" alpha runFixtureAlpha
+    runRegressionDispatcherStepCoverageAssertions "${fixtureFile}" beta runFixtureBeta
+
+    if runRegressionDispatcherStepCoverageAssertions "${fixtureFile}" gamma runFixtureGamma; then
         return 1
     fi
 )
@@ -567,12 +597,24 @@ runSubscriptionStateCliRetirementHelperAdoptionContract() {
 
 runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
-    local dispatcherBody
+    runRegressionDispatcherStepCoverageAssertions \
+        "${contractsFile}" \
+        subscription-state-cli-retirement-helper-adoption \
+        runSubscriptionStateCliRetirementHelperAdoptionContract
+}
 
-    dispatcherBody=$(sed -n '/^runRegressionDispatcherContracts() {$/,/^}$/p' "${contractsFile}")
-    [[ -n "${dispatcherBody}" ]] || return 1
+runRegressionDispatcherStepCoverageHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
-    grep -q 'runRegressionStep subscription-state-cli-retirement-helper-adoption runSubscriptionStateCliRetirementHelperAdoptionContract' <<<"${dispatcherBody}"
+    for functionName in \
+        runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract \
+        runSubscriptionStateNestedAggregateRunnerRegistrationCoveredByDispatcherContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() {" { in_fn = 1 }
+            in_fn && /runRegressionDispatcherStepCoverageAssertions / { found = 1 }
+            in_fn && /^}$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
 }
 
 runLegacyPublicSelectorRetirementHelperAdoptionContract() {
@@ -907,12 +949,10 @@ runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
 
 runSubscriptionStateNestedAggregateRunnerRegistrationCoveredByDispatcherContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
-    local dispatcherBody
-
-    dispatcherBody=$(sed -n '/^runRegressionDispatcherContracts() {$/,/^}$/p' "${contractsFile}")
-    [[ -n "${dispatcherBody}" ]] || return 1
-
-    grep -q 'runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract' <<<"${dispatcherBody}"
+    runRegressionDispatcherStepCoverageAssertions \
+        "${contractsFile}" \
+        subscription-state-nested-aggregate-runner-registration \
+        runSubscriptionStateNestedAggregateRunnerRegistrationContract
 }
 
 runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
@@ -4938,6 +4978,7 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
         runRegressionStep regression-step-sequence-assertion runRegressionStepSequenceAssertionContract &&
+        runRegressionStep regression-dispatcher-step-coverage-assertion runRegressionDispatcherStepCoverageAssertionContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
         runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
@@ -4951,6 +4992,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
+        runRegressionStep regression-dispatcher-step-coverage-helper-adoption runRegressionDispatcherStepCoverageHelperAdoptionContract &&
         runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
         runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
         runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract &&
