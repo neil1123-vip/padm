@@ -12,6 +12,19 @@ listRegressionTransactionChildSelectors() {
         transaction-system
 }
 
+listRegressionTransactionSubscriptionChildSelectors() {
+    printf '%s\n' \
+        cdn-address-write-transaction \
+        subscribe-server-name \
+        subscribe-nginx-config-write \
+        subscribe-nginx-service-failure \
+        subscribe-salt-write-transaction \
+        subscribe-user-output-transaction \
+        remove-user-subscription-menu-failure \
+        user-subscription-menu-mutation-failure \
+        remote-subscribe-fetch
+}
+
 listRegressionTransactionCoreSelectorEntries() {
     printf '%s\n' \
         'default light core-rollback-result-message' \
@@ -181,11 +194,11 @@ runRegressionTransactionSystemSuiteRoot() {
 
 runRegressionTransactionSuiteRoot() {
     runRegressionTransactionCoreSuiteRoot &&
-        runRegressionTransactionSubscription &&
+        runRegressionTransactionSubscriptionSuiteRoot &&
         runRegressionTransactionSystemSuiteRoot
 }
 
-runRegressionTransactionSubscription() {
+runRegressionTransactionSubscriptionSuiteRoot() {
     runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression &&
         runRegressionStep subscribe-server-name runSubscribeServerNameRegression &&
         runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression &&
@@ -195,6 +208,10 @@ runRegressionTransactionSubscription() {
         runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression &&
         runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression &&
         runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
+}
+
+runRegressionTransactionSubscription() {
+    runRegressionTransactionSubscriptionSuiteRoot
 }
 
 runRegressionTransactionCoreParallelCompositionRegression() (
@@ -438,7 +455,7 @@ registerRegressionFunctionLeaf reload-core-propagation runReloadCorePropagationR
 
 registerRegressionFunctionLeaf regression-transaction-core-parallel-composition runRegressionTransactionCoreParallelCompositionRegression
 registerRegressionFunctionLeaf regression-transaction-system-parallel-composition runRegressionTransactionSystemParallelCompositionRegression
-registerRegressionFunctionLeaf transaction-subscription runRegressionTransactionSubscription
+registerRegressionFunctionLeaf remote-subscribe-fetch runRemoteSubscribeFetchRegression
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
 registerRegressionFunctionLeaf uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 registerRegressionFunctionLeaf clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
@@ -461,6 +478,9 @@ registerRegressionAggregateRunnerParallel transaction-system runRegressionTransa
 
 registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \
     $(listRegressionTransactionCoreChildSelectors)
+
+registerRegressionAggregateRunnerSequential transaction-subscription runRegressionTransactionSubscriptionSuiteRoot \
+    $(listRegressionTransactionSubscriptionChildSelectors)
 
 registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \
     $(listRegressionTransactionChildSelectors)

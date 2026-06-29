@@ -1671,7 +1671,7 @@ runTlsSuiteChildStepsContract() {
 
 runTransactionSubscriptionChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTransactionSubscription \
+    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTransactionSubscriptionSuiteRoot \
         cdn-address-write-transaction \
         subscribe-server-name \
         subscribe-nginx-config-write \
@@ -1694,7 +1694,7 @@ runTransactionSuiteChildStepsContract() {
     [[ -n "${transactionBody}" ]] || return 1
 
     coreLine=$(awk '/runRegressionTransactionCoreSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
-    subscriptionLine=$(awk '/runRegressionTransactionSubscription/ { print NR; exit }' <<<"${transactionBody}")
+    subscriptionLine=$(awk '/runRegressionTransactionSubscriptionSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
     systemLine=$(awk '/runRegressionTransactionSystemSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
 
     [[ -n "${coreLine}" ]] || return 1
@@ -2247,7 +2247,7 @@ runTransactionDirectLeafSelectorsUseFunctionRegistryContract() {
         ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
         [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
     done <<'EOF'
-transaction-subscription runRegressionTransactionSubscription
+remote-subscribe-fetch runRemoteSubscribeFetchRegression
 nginx-service-failure runNginxServiceFailureRegression
 uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
@@ -3385,6 +3385,33 @@ EOF
     cmp -s "${systemSortedFile}" "${TMP_DIR}/transaction-system-selectors.unique.txt"
 )
 
+runTransactionSubscriptionRegisteredChildSelectorsAlignedContract() (
+    local expectedSelectorsFile="${TMP_DIR}/transaction-subscription-registered-child-selectors.expected.txt"
+    local actualSelectorsFile="${TMP_DIR}/transaction-subscription-registered-child-selectors.actual.txt"
+    local selector
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
+            printf '%s\n' "${selector}"
+        fi
+    done < <(listRegressionTransactionSubscriptionChildSelectors) >"${actualSelectorsFile}"
+
+    cat <<'EOF' >"${expectedSelectorsFile}"
+cdn-address-write-transaction
+subscribe-server-name
+subscribe-nginx-config-write
+subscribe-nginx-service-failure
+subscribe-salt-write-transaction
+subscribe-user-output-transaction
+remove-user-subscription-menu-failure
+user-subscription-menu-mutation-failure
+remote-subscribe-fetch
+EOF
+
+    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
+)
+
 runTransactionAggregateRunnerRegistrationContract() (
     set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
@@ -3399,6 +3426,23 @@ runTransactionAggregateRunnerRegistrationContract() (
         transaction \
         sequential \
         runRegressionTransactionSuiteRoot \
+        "${expectedChildren}"
+)
+
+runTransactionSubscriptionAggregateRunnerRegistrationContract() (
+    set -euo pipefail
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local expectedChildren
+
+    ! grep -q '^registerRegressionScriptLeaf transaction-subscription ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction-subscription ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateSequential transaction-subscription \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential transaction-subscription runRegressionTransactionSubscriptionSuiteRoot \\' "${suiteFile}"
+    expectedChildren=$(listRegressionTransactionSubscriptionChildSelectors)
+    runAggregateRunnerRegistrationAssertions \
+        transaction-subscription \
+        sequential \
+        runRegressionTransactionSubscriptionSuiteRoot \
         "${expectedChildren}"
 )
 
@@ -3427,7 +3471,8 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q 'source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^listRegressionTransactionChildSelectors() {$' "${suiteFile}"
-    grep -q '^runRegressionTransactionSubscription() {$' "${suiteFile}"
+    grep -q '^listRegressionTransactionSubscriptionChildSelectors() {$' "${suiteFile}"
+    grep -q '^runRegressionTransactionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionCoreSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionCoreChildSelectors() {$' "${suiteFile}"
@@ -3444,12 +3489,14 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-system-parallel-' "${suiteFile}"
     ! grep -q '^runRegressionTransactionCore() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionTransactionSubscription() {$' "${legacyScriptFile}"
+    ! grep -q '^runRegressionTransactionSubscriptionSuiteRoot() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionCoreSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionCoreChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionCoreHeavyChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionCoreMediumChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionCoreLightChildSelectors() {$' "${legacyScriptFile}"
+    ! grep -q '^listRegressionTransactionSubscriptionChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionSystemChildSelectors() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionTransactionSystem() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionTransactionCoreParallelCompositionRegression() ' "${legacyScriptFile}"
@@ -3459,9 +3506,12 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-core ' "${suiteFile}"
+    ! grep -q '^registerRegressionScriptLeaf transaction-subscription ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf transaction-subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequential transaction-subscription runRegressionTransactionSubscriptionSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
 )
@@ -3515,19 +3565,31 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
         printf 'suite-transaction-core\n' >>"${callLog}"
     }
 
+    runRegressionTransactionSubscription() {
+        printf 'legacy-transaction-subscription\n' >>"${callLog}"
+        return 97
+    }
+
+    runRegressionTransactionSubscriptionSuiteRoot() {
+        printf 'suite-transaction-subscription\n' >>"${callLog}"
+    }
+
     runRegressionTransactionSystemSuiteRoot() {
         printf 'suite-transaction-system\n' >>"${callLog}"
     }
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-core
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-subscription
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-system
 
     grep -qx 'suite-transaction' "${callLog}"
     grep -qx 'suite-transaction-core' "${callLog}"
+    grep -qx 'suite-transaction-subscription' "${callLog}"
     grep -qx 'suite-transaction-system' "${callLog}"
     ! grep -q '^legacy-transaction$' "${callLog}"
     ! grep -q '^legacy-transaction-core$' "${callLog}"
+    ! grep -q '^legacy-transaction-subscription$' "${callLog}"
     ! grep -q '^legacy-transaction-system$' "${callLog}"
 )
 
