@@ -475,11 +475,14 @@ runLegacyFunctionSelectorRetirementHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
+        runFastLegacyRetirementContract \
         runFastRealityLegacyRetirementContract \
         runTargetedBatchHelpersLegacyRetirementContract \
         runTlsLegacyRetirementContract \
         runTargetedSubscriptionRestoreRetirementContract \
-        runSubscriptionOutputLegacyRetirementContract; do
+        runSubscriptionOutputLegacyRetirementContract \
+        runUiSmokeLegacyWrapperRetirementContract \
+        runUiFullLegacyWrapperRetirementContract; do
         awk -v fn="${functionName}" '
             $0 == fn "() {" { in_fn = 1 }
             in_fn && /runLegacyFunctionSelectorRetirementAssertions / { found = 1 }
@@ -1906,9 +1909,11 @@ runFastLegacyRetirementContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf fast ' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel fast runRegressionFastSuiteRoot \\' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionFast\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
-    ! grep -Eq '^[[:space:]]*fast\)$' "${legacyFile}" || return 1
-    ! grep -Fq 'usage: %s [fast|' "${legacyFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyFile}" \
+        runRegressionFast \
+        fast \
+        'usage: %s [fast|'
 }
 
 runFastPublicCliRetirementContract() {
@@ -2713,9 +2718,11 @@ runUiSmokeLegacyWrapperRetirementContract() {
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot$' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionMenuSmoke\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^[[:space:]]*ui-smoke\)$' "${legacyScriptFile}" || return 1
-    ! grep -Fq '|ui-smoke|' "${legacyScriptFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyScriptFile}" \
+        runRegressionMenuSmoke \
+        ui-smoke \
+        '|ui-smoke|'
 }
 
 runUiFullLegacyWrapperRetirementContract() {
@@ -2724,9 +2731,11 @@ runUiFullLegacyWrapperRetirementContract() {
 
     grep -q '^runRegressionMenuSmokeFull() {$' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel ui-full runRegressionMenuSmokeFull \\' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionMenuSmokeFull\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
-    ! grep -Eq '^[[:space:]]*ui-full\)$' "${legacyScriptFile}" || return 1
-    ! grep -Fq '|ui-full|' "${legacyScriptFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyScriptFile}" \
+        runRegressionMenuSmokeFull \
+        ui-full \
+        '|ui-full|'
 }
 
 runUiFullSubscriptionMainLegacyWrapperRetirementContract() {
