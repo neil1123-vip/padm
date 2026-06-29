@@ -153,6 +153,42 @@ runLegacyFunctionRetirementBatchAssertions() (
     done
 )
 
+runSubscriptionStateCliRetirementAssertions() {
+    local scriptFile=$1
+    local usageLine
+    local usageSelectors
+    local selector
+
+    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}" || return 1
+    grep -q "printf 'use shell/subscription_groups_regression.sh <selector>\\\\n' >&2" "${scriptFile}" || return 1
+    ! grep -q 'regressionName=' "${scriptFile}" || return 1
+    ! grep -q 'runRegressionStep "total:\${regressionName}" "\${regressionRunner}"' "${scriptFile}" || return 1
+    ! grep -q 'subscription-groups-regression-ok:' "${scriptFile}" || return 1
+
+    usageLine=$(grep -F 'usage: %s [' "${scriptFile}" || true)
+    usageSelectors="${usageLine#*[}"
+    usageSelectors="${usageSelectors%%]*}"
+    [[ -z "${usageLine}" ]] || return 1
+    [[ -z "${usageSelectors}" ]] || return 1
+
+    for selector in subscription-state subscription-state-core; do
+        ! awk -v sel="${selector}" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line == sel ")") {
+                    found = 1
+                }
+            }
+            END { exit(found ? 0 : 1) }
+        ' "${scriptFile}" || return 1
+    done
+
+    ! grep -Eq '^[[:space:]]*subscription-state-.*\)$' "${scriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-sync-.*\)$' "${scriptFile}" || return 1
+    ! grep -Eq '^[[:space:]]*subscription-group-sync-.*\)$' "${scriptFile}" || return 1
+}
+
 runRegressionStepSequenceAssertions() {
     local sourceFile=$1
     local functionName=$2
@@ -515,6 +551,20 @@ runLegacyFunctionRetirementBatchHelperAdoptionContract() {
     done
 }
 
+runSubscriptionStateCliRetirementHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runSubscriptionStateShimPublicCliRetirementContract \
+        runSubscriptionStateFullPublicCliRetirementContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() {" { in_fn = 1 }
+            in_fn && /runSubscriptionStateCliRetirementAssertions / { found = 1 }
+            in_fn && /^}$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
 runLegacyPublicSelectorRetirementHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
@@ -612,38 +662,7 @@ runSubscriptionStateShimStaysThinContract() {
 
 runSubscriptionStateShimPublicCliRetirementContract() {
     local stateShim="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state.sh"
-    local usageLine
-    local usageSelectors
-    local selector
-
-    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${stateShim}" || return 1
-    grep -q "printf 'use shell/subscription_groups_regression.sh <selector>\\\\n' >&2" "${stateShim}" || return 1
-    ! grep -q 'regressionName=' "${stateShim}" || return 1
-    ! grep -q 'runRegressionStep "total:\${regressionName}" "\${regressionRunner}"' "${stateShim}" || return 1
-    ! grep -q 'subscription-groups-regression-ok:' "${stateShim}" || return 1
-
-    usageLine=$(grep -F 'usage: %s [' "${stateShim}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-    [[ -z "${usageLine}" ]] || return 1
-    [[ -z "${usageSelectors}" ]] || return 1
-
-    for selector in subscription-state subscription-state-core; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${stateShim}" || return 1
-    done
-
-    ! grep -Eq '^[[:space:]]*subscription-state-.*\)$' "${stateShim}" || return 1
-    ! grep -Eq '^[[:space:]]*subscription-sync-.*\)$' "${stateShim}" || return 1
-    ! grep -Eq '^[[:space:]]*subscription-group-sync-.*\)$' "${stateShim}" || return 1
+    runSubscriptionStateCliRetirementAssertions "${stateShim}"
 }
 
 runSubscriptionStateSuiteUsesFunctionRegistryContract() {
@@ -956,38 +975,7 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
 
 runSubscriptionStateFullPublicCliRetirementContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
-    local usageLine
-    local usageSelectors
-    local selector
-
-    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}" || return 1
-    grep -q "printf 'use shell/subscription_groups_regression.sh <selector>\\\\n' >&2" "${scriptFile}" || return 1
-    ! grep -q 'regressionName=' "${scriptFile}" || return 1
-    ! grep -q 'runRegressionStep "total:\${regressionName}" "\${regressionRunner}"' "${scriptFile}" || return 1
-    ! grep -q 'subscription-groups-regression-ok:' "${scriptFile}" || return 1
-
-    usageLine=$(grep -F 'usage: %s [' "${scriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-    [[ -z "${usageLine}" ]] || return 1
-    [[ -z "${usageSelectors}" ]] || return 1
-
-    for selector in subscription-state subscription-state-core; do
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${scriptFile}" || return 1
-    done
-
-    ! grep -Eq '^[[:space:]]*subscription-state-.*\)$' "${scriptFile}" || return 1
-    ! grep -Eq '^[[:space:]]*subscription-sync-.*\)$' "${scriptFile}" || return 1
-    ! grep -Eq '^[[:space:]]*subscription-group-sync-.*\)$' "${scriptFile}" || return 1
+    runSubscriptionStateCliRetirementAssertions "${scriptFile}"
 }
 
 runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
@@ -4956,6 +4944,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
         runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
         runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract &&
+        runRegressionStep subscription-state-cli-retirement-helper-adoption runSubscriptionStateCliRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
