@@ -2465,35 +2465,24 @@ runUiPublicSelectorsUseFunctionRegistryContract() {
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
 ui-smoke runRegressionUiSmokeSuiteRoot
-ui-full runRegressionMenuSmokeFull
 ui-full-core runMenuSmokeFullCoreRegression
-ui-full-subscription-main runRegressionUiFullSubscriptionMain
 ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
-ui-full-subscription-main-publish runRegressionUiFullSubscriptionMainPublish
 ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
-ui-full-subscription-main-publish-user runRegressionUiFullSubscriptionMainPublishUser
 ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
 ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
 ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
-ui-full-subscription-main-publish-sync runRegressionUiFullSubscriptionMainPublishSync
 ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
 ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
 ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression
 ui-full-subscription-controlled runMenuSmokeFullSubscriptionControlledRegression
 ui-full-core-maintenance runMenuSmokeFullCoreMaintenanceRegression
-wireguard-menu-flow runRegressionWireGuardMenuFlow
 wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapRegression
-wireguard-menu-flow-peer-transaction runSubscriptionWireGuardMenuFlowPeerTransactionRegression
 wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression
-wireguard-menu-flow-peer-rollback runSubscriptionWireGuardMenuFlowPeerRollbackRegression
-wireguard-menu-flow-peer-rollback-apply runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
 wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression
 wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression
 wireguard-menu-flow-peer-rollback-source runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
-wireguard-menu-flow-peer-rollback-credential runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
 wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression
 wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression
-wireguard-menu-flow-peer-source-control runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
 wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression
 wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression
 wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression
@@ -2502,7 +2491,17 @@ wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
 EOF
 
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]] || status=1
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full-subscription-main"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full-subscription-main-publish"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full-subscription-main-publish-user"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full-subscription-main-publish-sync"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["wireguard-menu-flow"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["wireguard-menu-flow-peer-transaction"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["wireguard-menu-flow-peer-rollback"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["wireguard-menu-flow-peer-rollback-apply"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["wireguard-menu-flow-peer-rollback-credential"]:-}" == "aggregate-runner" ]] || status=1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["wireguard-menu-flow-peer-source-control"]:-}" == "aggregate-runner" ]] || status=1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]] || status=1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]] || status=1
 
@@ -2547,10 +2546,10 @@ runUiSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel ui-full runRegressionMenuSmokeFull \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}" || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]] || return 1
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "aggregate-runner" ]] || return 1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]] || return 1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]] || return 1
 }
@@ -2570,7 +2569,7 @@ runUiFullLegacyWrapperRetirementContract() {
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^runRegressionMenuSmokeFull() {$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf ui-full runRegressionMenuSmokeFull$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel ui-full runRegressionMenuSmokeFull \\' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionMenuSmokeFull\(\)[[:space:]]*[({]' "${legacyScriptFile}" || return 1
     ! grep -Eq '^[[:space:]]*ui-full\)$' "${legacyScriptFile}" || return 1
     ! grep -Fq '|ui-full|' "${legacyScriptFile}" || return 1
@@ -2791,9 +2790,93 @@ runUiAggregateRunnerRegistrationContract() {
         runRegressionUiSuiteRoot \
         "${expectedChildren}"
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "function" ]]
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "aggregate-runner" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke-full"]:-}" ]]
+}
+
+runUiNestedAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+
+    ! grep -q '^registerRegressionFunctionLeaf ui-full ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf ui-full-subscription-main ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf ui-full-subscription-main-publish ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf ui-full-subscription-main-publish-user ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf wireguard-menu-flow ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf wireguard-menu-flow-peer-transaction ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control ' "${suiteFile}" || return 1
+
+    grep -q '^registerRegressionAggregateRunnerParallel ui-full runRegressionMenuSmokeFull \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel ui-full-subscription-main runRegressionUiFullSubscriptionMain \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel ui-full-subscription-main-publish runRegressionUiFullSubscriptionMainPublish \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel ui-full-subscription-main-publish-user runRegressionUiFullSubscriptionMainPublishUser \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel ui-full-subscription-main-publish-sync runRegressionUiFullSubscriptionMainPublishSync \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel wireguard-menu-flow runRegressionWireGuardMenuFlow \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-transaction runSubscriptionWireGuardMenuFlowPeerTransactionRegression \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-rollback runSubscriptionWireGuardMenuFlowPeerRollbackRegression \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-rollback-apply runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-rollback-credential runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-source-control runSubscriptionWireGuardMenuFlowPeerSourceControlRegression \\' "${suiteFile}" || return 1
+
+    runAggregateRunnerRegistrationAssertions \
+        ui-full \
+        parallel \
+        runRegressionMenuSmokeFull \
+        "$(listRegressionUiFullChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        ui-full-subscription-main \
+        parallel \
+        runRegressionUiFullSubscriptionMain \
+        "$(listRegressionUiFullSubscriptionMainChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        ui-full-subscription-main-publish \
+        parallel \
+        runRegressionUiFullSubscriptionMainPublish \
+        "$(listRegressionUiFullSubscriptionMainPublishChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        ui-full-subscription-main-publish-user \
+        parallel \
+        runRegressionUiFullSubscriptionMainPublishUser \
+        "$(listRegressionUiFullSubscriptionMainPublishUserChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        ui-full-subscription-main-publish-sync \
+        parallel \
+        runRegressionUiFullSubscriptionMainPublishSync \
+        "$(listRegressionUiFullSubscriptionMainPublishSyncChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        wireguard-menu-flow \
+        parallel \
+        runRegressionWireGuardMenuFlow \
+        "$(listRegressionWireGuardMenuFlowChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        wireguard-menu-flow-peer-transaction \
+        parallel \
+        runSubscriptionWireGuardMenuFlowPeerTransactionRegression \
+        "$(listRegressionWireGuardMenuFlowPeerTransactionChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        wireguard-menu-flow-peer-rollback \
+        parallel \
+        runSubscriptionWireGuardMenuFlowPeerRollbackRegression \
+        "$(listRegressionWireGuardMenuFlowPeerRollbackChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        wireguard-menu-flow-peer-rollback-apply \
+        parallel \
+        runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression \
+        "$(listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        wireguard-menu-flow-peer-rollback-credential \
+        parallel \
+        runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression \
+        "$(listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        wireguard-menu-flow-peer-source-control \
+        parallel \
+        runSubscriptionWireGuardMenuFlowPeerSourceControlRegression \
+        "$(listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors)"
 }
 
 runUiAggregateRunnerUsesSuiteLocalHelperContract() (
