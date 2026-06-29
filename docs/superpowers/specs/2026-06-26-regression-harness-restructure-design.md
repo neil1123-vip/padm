@@ -1,6 +1,6 @@
 # Regression Harness Restructure Design
 
-Status: implemented snapshot for the current `codex/all-resource-aware-regression` branch
+Status: implemented snapshot for the current `codex/subscription-output-fix` branch
 
 ## Summary
 
@@ -354,7 +354,12 @@ Current default top-level slot budget:
 
 - `PADM_REGRESSION_ALL_PARALLEL_JOBS:-5`
 
-The first top-level wave runs through selector parallel orchestration:
+The first top-level wave now runs through a suite-local selector list helper plus framework selector-list orchestration:
+
+- `listRegressionAllParallelChildSelectors`
+- `runFrameworkParallelRegressionSelectorList`
+
+The current first-wave selector list is:
 
 - `subscription`
 - `ui`
@@ -378,6 +383,14 @@ After that wave drains enough capacity, lighter remote-control selectors can run
 - `remote-control-contract-server-response`
 
 This protects the machine from stacking every heavy child suite at once while still keeping the front wave broad.
+
+Important boundary:
+
+- `all` now uses `runFrameworkParallelRegressionSelectorList` for the first wave instead of manually listing selectors through `runFrameworkParallelRegressionSelectors`
+- the top-level resource semantics do not change with that refactor:
+  - first-wave slot budget stays `5`
+  - the selector order stays `subscription -> ui -> transaction-core -> routing -> runtime -> remote-control-smoke -> remote-control-contract-service-install`
+  - `transaction-system` and `remote-control-contract-server-response` remain explicit serial tail steps
 
 ### Child Budgets Forwarded by `all`
 
@@ -482,6 +495,10 @@ Recommended verification set for future harness changes:
 ## Implemented Milestones
 
 Already landed in this branch:
+
+- `6e43f06` `refactor: route all selector wave through selector list`
+- `6bf295c` `refactor: route ui selector waves through selector lists`
+- `452f838` `refactor: route transaction selector waves through selector lists`
 
 - `2926d71` `perf: split subscription output regression layers`
 - `f7ae91f` `refactor: layer fast regression selectors`
