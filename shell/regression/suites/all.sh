@@ -5,6 +5,17 @@ REGRESSION_ALL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"
 REGRESSION_ENTRY_SCRIPT_PATH="${REGRESSION_ALL_SUITE_DIR}/../../subscription_groups_regression.sh"
 
+listRegressionAllParallelChildSelectors() {
+    printf '%s\n' \
+        subscription \
+        ui \
+        transaction-core \
+        routing \
+        runtime \
+        remote-control-smoke \
+        remote-control-contract-service-install
+}
+
 runRegressionAllSelectorSuiteRoot() {
     local selector=$1
     local childParallelJobs=
@@ -126,16 +137,9 @@ runRegressionAllSuiteRoot() (
     PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE:-}"
     PADM_REGRESSION_LIGHT_CHILD_PARALLEL_JOBS="${PADM_REGRESSION_ALL_LIGHT_CHILD_PARALLEL_JOBS:-1}"
 
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelectorSuiteRoot \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
-        subscription \
-        ui \
-        transaction-core \
-        routing \
-        runtime \
-        remote-control-smoke \
-        remote-control-contract-service-install
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelectorSuiteRoot \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/all-parallel-${BASHPID:-$$}" \
+        listRegressionAllParallelChildSelectors
     runRegressionStep transaction-system runRegressionAllSelectorSuiteRoot transaction-system
     runRegressionStep remote-control-contract-server-response runRegressionAllSelectorSuiteRoot remote-control-contract-server-response
 )

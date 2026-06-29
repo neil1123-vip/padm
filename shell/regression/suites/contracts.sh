@@ -322,6 +322,7 @@ runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
+        runAllAggregateRunnerUsesFrameworkSelectorHelperContract \
         runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract \
         runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract; do
         awk -v fn="${functionName}" '
@@ -1818,12 +1819,12 @@ runAllSuiteUsesFunctionRegistryContract() {
     ! grep -q 'subscription_groups_legacy\.sh' "${suiteFile}" || return 1
     grep -q 'source "\${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
     grep -q '^REGRESSION_ENTRY_SCRIPT_PATH=' "${suiteFile}" || return 1
+    grep -q '^listRegressionAllParallelChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionAllSelector() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionAllSelectorSuiteRoot() {$' "${suiteFile}" || return 1
     grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
     grep -Eq '^runRegressionAllSuiteRoot\(\) \($|^runRegressionAllSuiteRoot\(\) {$' "${suiteFile}" || return 1
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors' "${suiteFile}" || return 1
-    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/all-parallel-' "${suiteFile}" || return 1
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/all-parallel-' "${suiteFile}" || return 1
     ! grep -q '^runRegressionAllSelector() {$' "${legacyScriptFile}" || return 1
     ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${legacyScriptFile}" || return 1
     ! grep -q '^registerRegressionScriptLeaf all ' "${suiteFile}" || return 1
@@ -3447,10 +3448,14 @@ runAllSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/all-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/all-default-selectors.sorted.txt"
     local expectedDefaultSelectorsFile="${TMP_DIR}/all-default-selectors.expected.txt"
+    local parallelSelectorsFile="${TMP_DIR}/all-parallel-selectors.txt"
+    local parallelExpectedFile="${TMP_DIR}/all-parallel-selectors.expected.txt"
 
     declare -F listRegressionAllChildSelectors >/dev/null
+    declare -F listRegressionAllParallelChildSelectors >/dev/null
 
     listRegressionAllChildSelectors >"${defaultSelectorsFile}"
+    listRegressionAllParallelChildSelectors >"${parallelSelectorsFile}"
 
     cat <<'EOF' >"${expectedDefaultSelectorsFile}"
 routing
@@ -3460,8 +3465,18 @@ transaction
 remote-control
 ui
 EOF
+    cat <<'EOF' >"${parallelExpectedFile}"
+subscription
+ui
+transaction-core
+routing
+runtime
+remote-control-smoke
+remote-control-contract-service-install
+EOF
 
     cmp -s "${expectedDefaultSelectorsFile}" "${defaultSelectorsFile}"
+    cmp -s "${parallelExpectedFile}" "${parallelSelectorsFile}"
 
     sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
     sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/all-default-selectors.unique.txt"
@@ -3479,7 +3494,7 @@ runAllSuiteChildStepsContract() {
     allBody=$(sed -n '/^runRegressionAllSuiteRoot() ($/,/^)$/p' "${suiteFile}")
     [[ -n "${allBody}" ]] || return 1
 
-    parallelLine=$(awk '/runFrameworkParallelRegressionSelectors "\$\{TMP_DIR\}\/all-parallel-/ { print NR; exit }' <<<"${allBody}")
+    parallelLine=$(awk '/runFrameworkParallelRegressionSelectorList "\$\{TMP_DIR\}\/all-parallel-/ { print NR; exit }' <<<"${allBody}")
     transactionSystemLine=$(awk '/^[[:space:]]*runRegressionStep transaction-system / { print NR; exit }' <<<"${allBody}")
     remoteControlLine=$(awk '/^[[:space:]]*runRegressionStep remote-control-contract-server-response / { print NR; exit }' <<<"${allBody}")
 
@@ -3487,13 +3502,7 @@ runAllSuiteChildStepsContract() {
     [[ -n "${transactionSystemLine}" ]] || return 1
     [[ -n "${remoteControlLine}" ]] || return 1
 
-    grep -q 'subscription \\' <<<"${allBody}" || return 1
-    grep -q 'ui \\' <<<"${allBody}" || return 1
-    grep -q 'transaction-core \\' <<<"${allBody}" || return 1
-    grep -q 'routing \\' <<<"${allBody}" || return 1
-    grep -q 'runtime \\' <<<"${allBody}" || return 1
-    grep -q 'remote-control-smoke \\' <<<"${allBody}" || return 1
-    grep -q 'remote-control-contract-service-install$' <<<"${allBody}" || return 1
+    grep -q 'listRegressionAllParallelChildSelectors$' <<<"${allBody}" || return 1
 
     (( parallelLine < transactionSystemLine )) || return 1
     (( transactionSystemLine < remoteControlLine )) || return 1
@@ -3520,8 +3529,30 @@ runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
 
     : >"${callLog}"
 
+    listRegressionAllParallelChildSelectors() {
+        printf '%s\n' \
+            subscription \
+            ui \
+            transaction-core \
+            routing \
+            runtime \
+            remote-control-smoke \
+            remote-control-contract-service-install
+    }
+
+    runFrameworkParallelRegressionSelectorList() {
+        local orchestrationRoot=$1
+        local selectorListFn=$2
+        shift 2
+        local -a selectors=()
+
+        mapfile -t selectors < <("${selectorListFn}" "$@")
+        printf 'parallel:list:%s:%s:%s\n' "${orchestrationRoot}" "${selectorListFn}" "${selectors[*]}" >>"${callLog}"
+    }
+
     runFrameworkParallelRegressionSelectors() {
-        printf 'parallel:%s\n' "$*" >>"${callLog}"
+        printf 'parallel:selectors:%s\n' "$*" >>"${callLog}"
+        return 97
     }
 
     runRegressionAllSelector() {
@@ -3535,10 +3566,55 @@ runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain all
 
-    grep -qx 'parallel:'"${TMP_DIR}"'/all-parallel-[0-9][0-9]* subscription ui transaction-core routing runtime remote-control-smoke remote-control-contract-service-install' "${callLog}"
+    grep -qx 'parallel:list:'"${TMP_DIR}"'/all-parallel-[0-9][0-9]*:listRegressionAllParallelChildSelectors:subscription ui transaction-core routing runtime remote-control-smoke remote-control-contract-service-install' "${callLog}"
     grep -qx 'suite-helper:transaction-system' "${callLog}"
     grep -qx 'suite-helper:remote-control-contract-server-response' "${callLog}"
     ! grep -q '^legacy-helper:' "${callLog}"
+    ! grep -q '^parallel:selectors:' "${callLog}"
+)
+
+runAllAggregateRunnerUsesFrameworkSelectorHelperContract() (
+    local callLog="${TMP_DIR}/all-framework-helper-dispatch.log"
+
+    listRegressionAllParallelChildSelectors() {
+        printf '%s\n' \
+            subscription \
+            ui \
+            transaction-core \
+            routing \
+            runtime \
+            remote-control-smoke \
+            remote-control-contract-service-install
+    }
+
+    runFrameworkParallelRegressionSelectorList() {
+        local orchestrationRoot=$1
+        local selectorListFn=$2
+        shift 2
+        local -a selectors=()
+
+        mapfile -t selectors < <("${selectorListFn}" "$@")
+        printf 'framework:list:jobs=%s:%s:%s:%s\n' \
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" \
+            "${orchestrationRoot}" \
+            "${selectorListFn}" \
+            "${selectors[*]}" >>"${callLog}"
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:selectors:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runParallelRegressionSelectors() {
+        printf 'legacy-helper:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runAggregateRunnerUsesFrameworkSelectorHelperAssertions \
+        "${callLog}" \
+        'framework:list:jobs='"${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}"':'"${TMP_DIR}"'/all-parallel-[0-9][0-9]*:listRegressionAllParallelChildSelectors:subscription ui transaction-core routing runtime remote-control-smoke remote-control-contract-service-install' \
+        runRegressionAllSuiteRoot
 )
 
 runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract() (
@@ -4648,6 +4724,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep all-suite-child-steps runAllSuiteChildStepsContract &&
         runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
         runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&
+        runRegressionStep all-aggregate-runner-uses-framework-selector-helper runAllAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-legacy-public-selector-retirement runSubscriptionLegacyPublicSelectorRetirementContract &&
         runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
