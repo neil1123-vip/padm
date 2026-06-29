@@ -565,12 +565,12 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-state-structure runRegressionSubscriptionStateStructure$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-state-quota runRegressionSubscriptionStateQuota$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \\' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-state-support runRegressionSubscriptionStateSupport$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}"
 }
 
 runSubscriptionStateSelectorHelpersStayAlignedContract() (
@@ -727,6 +727,58 @@ runSubscriptionStateAggregateRunnerRegistrationContract() {
         parallel \
         runRegressionSubscriptionStateSuiteRoot \
         "${expectedChildren}"
+}
+
+runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure-foundation ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback ' "${suiteFile}" || return 1
+
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}" || return 1
+
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-structure \
+        parallel \
+        runRegressionSubscriptionStateStructure \
+        "$(listRegressionSubscriptionStateStructureChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-structure-foundation \
+        parallel \
+        runRegressionSubscriptionStateStructureFoundation \
+        "$(listRegressionSubscriptionStateStructureFoundationChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-quota \
+        parallel \
+        runRegressionSubscriptionStateQuota \
+        "$(listRegressionSubscriptionStateQuotaChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-remote-restore \
+        parallel \
+        runRegressionSubscriptionStateRemoteRestore \
+        "$(listRegressionSubscriptionStateRemoteRestoreChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-sync-rollback \
+        parallel \
+        runRegressionSubscriptionStateSyncRollback \
+        "$(listRegressionSubscriptionStateSyncRollbackFailureChildSelectors)"
+}
+
+runSubscriptionStateNestedAggregateRunnerRegistrationCoveredByDispatcherContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+    local dispatcherBody
+
+    dispatcherBody=$(sed -n '/^runRegressionDispatcherContracts() {$/,/^}$/p' "${contractsFile}")
+    [[ -n "${dispatcherBody}" ]] || return 1
+
+    grep -q 'runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract' <<<"${dispatcherBody}"
 }
 
 runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
@@ -4766,6 +4818,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
+        runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-full-uses-framework-parallel-helper runSubscriptionStateFullUsesFrameworkParallelHelperContract &&
         runRegressionStep subscription-state-full-public-cli-retirement runSubscriptionStateFullPublicCliRetirementContract &&
         runRegressionStep subscription-state-aggregates-support-source-only runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract &&
