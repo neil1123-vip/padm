@@ -120,25 +120,15 @@ listRegressionRemoteControlChildSelectors() {
         remote-control-deep
 }
 
-registerRegressionAggregateParallel remote-control-smoke-refresh-apply \
-    remote-control-smoke-refresh-apply-basic \
-    remote-control-smoke-refresh-apply-prepare \
-    remote-control-smoke-refresh-apply-failure
-registerRegressionAggregateParallel remote-control-smoke-refresh \
-    remote-control-smoke-refresh-apply \
-    remote-control-smoke-refresh-restore \
-    remote-control-smoke-refresh-reconcile
-registerRegressionAggregateParallel remote-control-smoke \
-    remote-control-smoke-core \
-    remote-control-smoke-refresh
-registerRegressionAggregateParallel remote-control-contract-service-install \
-    remote-control-contract-service-install-success \
-    remote-control-contract-service-install-systemctl-fail \
-    remote-control-contract-service-install-health-fail \
-    remote-control-contract-service-install-health-rollback \
-    remote-control-contract-service-install-token-transaction
-registerRegressionAggregateParallel remote-control-contract \
-    remote-control-contract-service-install \
-    remote-control-contract-server-response
+registerRegressionAggregateRunnerParallel remote-control-smoke-refresh-apply runRegressionRemoteControlSmokeRefreshApply \
+    $(listRegressionRemoteControlSmokeRefreshApplyChildSelectors)
+registerRegressionAggregateRunnerParallel remote-control-smoke-refresh runRegressionRemoteControlSmokeRefresh \
+    $(listRegressionRemoteControlSmokeRefreshChildSelectors)
+registerRegressionAggregateRunnerParallel remote-control-smoke runRegressionRemoteControlSmoke \
+    $(listRegressionRemoteControlSmokeChildSelectors)
+registerRegressionAggregateRunnerParallel remote-control-contract-service-install runRegressionRemoteControlContractServiceInstall \
+    $(listRegressionRemoteControlContractServiceInstallChildSelectors)
+registerRegressionAggregateRunnerParallel remote-control-contract runRegressionRemoteControlContract \
+    $(listRegressionRemoteControlContractChildSelectors)
 registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \
     $(listRegressionRemoteControlChildSelectors)

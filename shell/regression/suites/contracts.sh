@@ -958,8 +958,11 @@ runRemoteControlPublicSelectorRetirementContract() {
 
     ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}" || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]] || return 1
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke"]:-}" == "aggregate" ]] || return 1
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract"]:-}" == "aggregate" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke"]:-}" == "aggregate-runner" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract"]:-}" == "aggregate-runner" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke-refresh"]:-}" == "aggregate-runner" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke-refresh-apply"]:-}" == "aggregate-runner" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract-service-install"]:-}" == "aggregate-runner" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-deep"]:-}" == "function" ]] || return 1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["remote-control-light"]:-}" ]] || return 1
 
@@ -1016,12 +1019,26 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
         return 97
     }
 
-    runFrameworkParallelRegressionSelectors() {
-        printf 'framework:%s\n' "$*" >>"${callsFile}"
-    }
-
     runParallelRegressionRunners() {
         printf 'legacy-runner:%s\n' "$*" >>"${callsFile}"
+        return 97
+    }
+
+    runFrameworkParallelRegressionSelectorList() {
+        local orchestrationRoot=$1
+        local selectorListFn=$2
+        shift 2
+        local -a selectors=()
+
+        mapfile -t selectors < <("${selectorListFn}" "$@")
+        printf 'framework:list:%s:%s:%s\n' \
+            "${orchestrationRoot}" \
+            "${selectorListFn}" \
+            "${selectors[*]}" >>"${callsFile}"
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:selectors:%s\n' "$*" >>"${callsFile}"
         return 97
     }
 
@@ -1035,14 +1052,15 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
 
     mapfile -t calls <"${callsFile}"
     [[ "${#calls[@]}" -eq 6 ]] || return 1
-    [[ "${calls[0]}" == framework:"${TMP_DIR}/remote-control-default-"* ]] || return 1
-    [[ "${calls[0]}" == *' remote-control-smoke remote-control-smoke remote-control-contract remote-control-contract remote-control-deep remote-control-deep' ]] || return 1
-    [[ "${calls[1]}" == "framework:${TMP_DIR}/remote-control-smoke-refresh remote-control-smoke-refresh-apply remote-control-smoke-refresh-apply remote-control-smoke-refresh-restore remote-control-smoke-refresh-restore remote-control-smoke-refresh-reconcile remote-control-smoke-refresh-reconcile" ]] || return 1
-    [[ "${calls[2]}" == "framework:${TMP_DIR}/remote-control-smoke-refresh-apply remote-control-smoke-refresh-apply-basic remote-control-smoke-refresh-apply-basic remote-control-smoke-refresh-apply-prepare remote-control-smoke-refresh-apply-prepare remote-control-smoke-refresh-apply-failure remote-control-smoke-refresh-apply-failure" ]] || return 1
-    [[ "${calls[3]}" == "framework:${TMP_DIR}/remote-control-smoke remote-control-smoke-core remote-control-smoke-core remote-control-smoke-refresh remote-control-smoke-refresh" ]] || return 1
-    [[ "${calls[4]}" == "framework:${TMP_DIR}/remote-control-contract remote-control-contract-service-install remote-control-contract-service-install remote-control-contract-server-response remote-control-contract-server-response" ]] || return 1
-    [[ "${calls[5]}" == "framework:${TMP_DIR}/remote-control-contract-service-install remote-control-contract-service-install-success remote-control-contract-service-install-success remote-control-contract-service-install-systemctl-fail remote-control-contract-service-install-systemctl-fail remote-control-contract-service-install-health-fail remote-control-contract-service-install-health-fail remote-control-contract-service-install-health-rollback remote-control-contract-service-install-health-rollback remote-control-contract-service-install-token-transaction remote-control-contract-service-install-token-transaction" ]] || return 1
+    [[ "${calls[0]}" == framework:list:"${TMP_DIR}/remote-control-default-"*:listRegressionRemoteControlChildSelectors:* ]] || return 1
+    [[ "${calls[0]}" == *':remote-control-smoke remote-control-contract remote-control-deep' ]] || return 1
+    [[ "${calls[1]}" == "framework:list:${TMP_DIR}/remote-control-smoke-refresh:listRegressionRemoteControlSmokeRefreshChildSelectors:remote-control-smoke-refresh-apply remote-control-smoke-refresh-restore remote-control-smoke-refresh-reconcile" ]] || return 1
+    [[ "${calls[2]}" == "framework:list:${TMP_DIR}/remote-control-smoke-refresh-apply:listRegressionRemoteControlSmokeRefreshApplyChildSelectors:remote-control-smoke-refresh-apply-basic remote-control-smoke-refresh-apply-prepare remote-control-smoke-refresh-apply-failure" ]] || return 1
+    [[ "${calls[3]}" == "framework:list:${TMP_DIR}/remote-control-smoke:listRegressionRemoteControlSmokeChildSelectors:remote-control-smoke-core remote-control-smoke-refresh" ]] || return 1
+    [[ "${calls[4]}" == "framework:list:${TMP_DIR}/remote-control-contract:listRegressionRemoteControlContractChildSelectors:remote-control-contract-service-install remote-control-contract-server-response" ]] || return 1
+    [[ "${calls[5]}" == "framework:list:${TMP_DIR}/remote-control-contract-service-install:listRegressionRemoteControlContractServiceInstallChildSelectors:remote-control-contract-service-install-success remote-control-contract-service-install-systemctl-fail remote-control-contract-service-install-health-fail remote-control-contract-service-install-health-rollback remote-control-contract-service-install-token-transaction" ]] || return 1
     ! grep -q '^legacy-runner:' "${callsFile}" || return 1
+    ! grep -q '^framework:selectors:' "${callsFile}" || return 1
 )
 
 runRemoteControlSelectorHelpersStayAlignedContract() (
@@ -1150,6 +1168,48 @@ runRemoteControlAggregateRunnerRegistrationContract() {
         parallel \
         runRegressionRemoteControlSuiteRoot \
         "${expectedChildren}"
+}
+
+runRemoteControlNestedAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
+
+    ! grep -q '^registerRegressionAggregateParallel remote-control-smoke-refresh-apply \\' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateParallel remote-control-smoke-refresh \\' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateParallel remote-control-contract-service-install \\' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}" || return 1
+
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control-smoke-refresh-apply runRegressionRemoteControlSmokeRefreshApply \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control-smoke-refresh runRegressionRemoteControlSmokeRefresh \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control-smoke runRegressionRemoteControlSmoke \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control-contract-service-install runRegressionRemoteControlContractServiceInstall \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control-contract runRegressionRemoteControlContract \\' "${suiteFile}" || return 1
+
+    runAggregateRunnerRegistrationAssertions \
+        remote-control-smoke-refresh-apply \
+        parallel \
+        runRegressionRemoteControlSmokeRefreshApply \
+        "$(listRegressionRemoteControlSmokeRefreshApplyChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        remote-control-smoke-refresh \
+        parallel \
+        runRegressionRemoteControlSmokeRefresh \
+        "$(listRegressionRemoteControlSmokeRefreshChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        remote-control-smoke \
+        parallel \
+        runRegressionRemoteControlSmoke \
+        "$(listRegressionRemoteControlSmokeChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        remote-control-contract-service-install \
+        parallel \
+        runRegressionRemoteControlContractServiceInstall \
+        "$(listRegressionRemoteControlContractServiceInstallChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        remote-control-contract \
+        parallel \
+        runRegressionRemoteControlContract \
+        "$(listRegressionRemoteControlContractChildSelectors)"
 }
 
 runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -4634,6 +4694,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-nested-selector-helpers-are-suite-owned runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
+        runRegressionStep remote-control-nested-aggregate-runner-registration runRemoteControlNestedAggregateRunnerRegistrationContract &&
         runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
