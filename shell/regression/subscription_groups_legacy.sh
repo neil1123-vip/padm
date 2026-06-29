@@ -10804,8 +10804,10 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
 
 (
     local sourceLines
+    local helperAccountFile="${TMP_DIR}/subscription-output-remote-hint-account.log"
     subscriptionSyncFindUserByAccountName() {
-        return 97
+        printf '%s\n' "$1" >"${helperAccountFile}"
+        printf '{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}\n'
     }
     subscriptionActiveGroupRead() {
         if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'.id as $sid | $allowed | index($sid)'* ]]; then
@@ -10814,11 +10816,9 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
         fi
         return 1
     }
-    subscriptionActiveEnabledUsersJson() {
-        printf '[{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}]\n'
-    }
     sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
     [[ "${sourceLines}" == "example.com:443:edge:https" ]]
+    grep -qx 'sub_team_a' "${helperAccountFile}"
 )
 
 (
