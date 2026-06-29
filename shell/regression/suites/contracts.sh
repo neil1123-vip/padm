@@ -403,6 +403,22 @@ runRegressionStepSequenceHelperAdoptionContract() {
     ' "${contractsFile}" || return 1
 }
 
+runRegisteredChildSelectorsAlignedHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runTransactionCoreRegisteredChildSelectorsAlignedContract \
+        runTransactionSubscriptionRegisteredChildSelectorsAlignedContract \
+        runSubscriptionRemoteRegisteredChildSelectorsAlignedContract \
+        runSubscriptionTxRegisteredChildSelectorsAlignedContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() (" { in_fn = 1 }
+            in_fn && /runRegisteredChildSelectorsAlignedAssertions / { found = 1 }
+            in_fn && /^\)$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
 runLegacyPublicSelectorRetirementHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
@@ -1919,6 +1935,25 @@ runFastSuiteUsesSuiteLocalHelperContract() (
     ! grep -q '^legacy-ui-smoke-light$' "${callLog}"
 )
 
+runRegisteredChildSelectorsAlignedAssertions() (
+    local selectorListFn=$1
+    local filePrefix=$2
+    local expectedSelectorsFile="${filePrefix}.expected.txt"
+    local actualSelectorsFile="${filePrefix}.actual.txt"
+    local selector
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
+            printf '%s\n' "${selector}"
+        fi
+    done < <("${selectorListFn}") >"${actualSelectorsFile}"
+
+    cat >"${expectedSelectorsFile}"
+
+    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
+)
+
 runAllSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
@@ -3284,18 +3319,9 @@ runTransactionCoreSelectorHelpersStayAlignedContract() (
 )
 
 runTransactionCoreRegisteredChildSelectorsAlignedContract() (
-    local expectedSelectorsFile="${TMP_DIR}/transaction-core-registered-child-selectors.expected.txt"
-    local actualSelectorsFile="${TMP_DIR}/transaction-core-registered-child-selectors.actual.txt"
-    local selector
-
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
-            printf '%s\n' "${selector}"
-        fi
-    done < <(listRegressionTransactionCoreChildSelectors) >"${actualSelectorsFile}"
-
-    cat <<'EOF' >"${expectedSelectorsFile}"
+    runRegisteredChildSelectorsAlignedAssertions \
+        listRegressionTransactionCoreChildSelectors \
+        "${TMP_DIR}/transaction-core-registered-child-selectors" <<'EOF'
 core-rollback-result-message
 config-transaction
 core-port-file-transaction
@@ -3336,8 +3362,6 @@ sing-box-log-transaction
 user-config-write
 remove-user
 EOF
-
-    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
 )
 
 runTransactionCoreAggregateRunnerRegistrationContract() {
@@ -3386,18 +3410,9 @@ EOF
 )
 
 runTransactionSubscriptionRegisteredChildSelectorsAlignedContract() (
-    local expectedSelectorsFile="${TMP_DIR}/transaction-subscription-registered-child-selectors.expected.txt"
-    local actualSelectorsFile="${TMP_DIR}/transaction-subscription-registered-child-selectors.actual.txt"
-    local selector
-
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
-            printf '%s\n' "${selector}"
-        fi
-    done < <(listRegressionTransactionSubscriptionChildSelectors) >"${actualSelectorsFile}"
-
-    cat <<'EOF' >"${expectedSelectorsFile}"
+    runRegisteredChildSelectorsAlignedAssertions \
+        listRegressionTransactionSubscriptionChildSelectors \
+        "${TMP_DIR}/transaction-subscription-registered-child-selectors" <<'EOF'
 cdn-address-write-transaction
 subscribe-server-name
 subscribe-nginx-config-write
@@ -3408,8 +3423,6 @@ remove-user-subscription-menu-failure
 user-subscription-menu-mutation-failure
 remote-subscribe-fetch
 EOF
-
-    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
 )
 
 runTransactionAggregateRunnerRegistrationContract() (
@@ -4101,18 +4114,9 @@ runSubscriptionSelectorHelpersStayAlignedContract() (
 )
 
 runSubscriptionRemoteRegisteredChildSelectorsAlignedContract() (
-    local expectedSelectorsFile="${TMP_DIR}/subscription-remote-registered-child-selectors.expected.txt"
-    local actualSelectorsFile="${TMP_DIR}/subscription-remote-registered-child-selectors.actual.txt"
-    local selector
-
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
-            printf '%s\n' "${selector}"
-        fi
-    done < <(listRegressionSubscriptionRemoteChildSelectors) >"${actualSelectorsFile}"
-
-    cat <<'EOF' >"${expectedSelectorsFile}"
+    runRegisteredChildSelectorsAlignedAssertions \
+        listRegressionSubscriptionRemoteChildSelectors \
+        "${TMP_DIR}/subscription-remote-registered-child-selectors" <<'EOF'
 subscription-remote-unique
 subscription-remote-rollback
 subscription-remote-merge
@@ -4121,23 +4125,12 @@ subscription-remote-append-failure
 subscription-remote-commit-failure
 subscription-remote-idempotent
 EOF
-
-    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
 )
 
 runSubscriptionTxRegisteredChildSelectorsAlignedContract() (
-    local expectedSelectorsFile="${TMP_DIR}/subscription-tx-registered-child-selectors.expected.txt"
-    local actualSelectorsFile="${TMP_DIR}/subscription-tx-registered-child-selectors.actual.txt"
-    local selector
-
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        if [[ -n "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" ]]; then
-            printf '%s\n' "${selector}"
-        fi
-    done < <(listRegressionSubscriptionTxChildSelectors) >"${actualSelectorsFile}"
-
-    cat <<'EOF' >"${expectedSelectorsFile}"
+    runRegisteredChildSelectorsAlignedAssertions \
+        listRegressionSubscriptionTxChildSelectors \
+        "${TMP_DIR}/subscription-tx-registered-child-selectors" <<'EOF'
 sing-box-subscribe-write
 cdn-address-write-transaction
 subscribe-local-output-transaction
@@ -4155,8 +4148,6 @@ subscribe-return-failure
 remove-user-subscription-menu-failure
 user-subscription-menu-mutation-failure
 EOF
-
-    cmp -s "${expectedSelectorsFile}" "${actualSelectorsFile}"
 )
 
 runSubscriptionAggregateRunnerRegistrationContract() {
