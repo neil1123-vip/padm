@@ -565,6 +565,16 @@ runSubscriptionStateCliRetirementHelperAdoptionContract() {
     done
 }
 
+runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+    local dispatcherBody
+
+    dispatcherBody=$(sed -n '/^runRegressionDispatcherContracts() {$/,/^}$/p' "${contractsFile}")
+    [[ -n "${dispatcherBody}" ]] || return 1
+
+    grep -q 'runRegressionStep subscription-state-cli-retirement-helper-adoption runSubscriptionStateCliRetirementHelperAdoptionContract' <<<"${dispatcherBody}"
+}
+
 runLegacyPublicSelectorRetirementHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
@@ -4945,6 +4955,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
         runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract &&
         runRegressionStep subscription-state-cli-retirement-helper-adoption runSubscriptionStateCliRetirementHelperAdoptionContract &&
+        runRegressionStep subscription-state-cli-retirement-helper-adoption-covered-by-dispatcher runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
