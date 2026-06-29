@@ -365,7 +365,6 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runFastOnlyOutputRestChildStepsContract \
         runFastOnlyCoreChildStepsContract \
         runRealitySuiteChildStepsContract \
-        runRuntimeSuiteChildStepsContract \
         runTlsSuiteChildStepsContract \
         runTransactionSubscriptionChildStepsContract \
         runTargetedBatchHelpersChildStepsContract; do
@@ -392,7 +391,6 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runFastOnlySafetyChildStepsContract \
         runFastOnlyOutputRestChildStepsContract \
         runFastOnlyCoreChildStepsContract \
-        runRuntimeSuiteChildStepsContract \
         runTlsSuiteChildStepsContract \
         runTransactionSubscriptionChildStepsContract \
         runTargetedBatchHelpersChildStepsContract; do
@@ -1657,13 +1655,15 @@ runRealitySuiteChildStepsContract() {
 
 runRuntimeSuiteChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionRuntimeSuiteRoot \
-        runtime-core \
-        runtime-autoread-unset-auto-install \
-        runtime-auto-install-reality-route \
-        runtime-tempdir \
-        reality-candidates \
-        reality-config
+    local runtimeBody
+
+    runtimeBody=$(sed -n '/^runRegressionRuntimeSuiteRoot() {$/,/^}$/p' "${suiteFile}")
+    [[ -n "${runtimeBody}" ]] || return 1
+
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/runtime-parallel-' <<<"${runtimeBody}" || return 1
+    grep -q 'listRegressionRuntimeChildSelectors' <<<"${runtimeBody}" || return 1
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/runtime-parallel-light-' <<<"${runtimeBody}" || return 1
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/runtime-parallel-heavy-' <<<"${runtimeBody}" || return 1
 }
 
 runTlsSuiteChildStepsContract() {
@@ -4495,6 +4495,16 @@ runRuntimeAggregateRunnerUsesSuiteLocalHelperContract() (
 runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/runtime-framework-helper-dispatch.log"
 
+    : >"${callLog}"
+
+    listRegressionRuntimeChildSelectors() {
+        printf '%s\n' \
+            runtime-core \
+            runtime-tempdir \
+            reality-candidates \
+            reality-config
+    }
+
     listRegressionRuntimeLightChildSelectors() {
         printf '%s\n' \
             runtime-core \
@@ -4517,12 +4527,14 @@ runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
     }
 
     runRuntimeAggregateRunnerUsesFrameworkSelectorHelperRunner() {
+        runRegressionRuntimeSuiteRoot
         PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntimeSuiteRoot
     }
 
     runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
         "${callLog}" \
         runRuntimeAggregateRunnerUsesFrameworkSelectorHelperRunner \
+        'framework:jobs=:'"${TMP_DIR}"'/runtime-parallel-[0-9][0-9]* runtime-core runtime-core runtime-tempdir runtime-tempdir reality-candidates reality-candidates reality-config reality-config' \
         'framework:jobs='"${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/runtime-parallel-light-[0-9][0-9]* runtime-core runtime-core runtime-tempdir runtime-tempdir' \
         'framework:jobs='"${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/runtime-parallel-heavy-[0-9][0-9]* reality-candidates reality-candidates reality-config reality-config'
 )

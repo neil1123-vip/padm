@@ -16,12 +16,8 @@ runRegressionRuntimeSuiteRoot() {
         return
     fi
 
-    runRegressionStep runtime-core runRuntimeAndRealityRegression &&
-        runRegressionStep runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression &&
-        runRegressionStep runtime-auto-install-reality-route runAutoInstallRealityRouteRegression &&
-        runRegressionStep runtime-tempdir runRuntimeTempDirRegression &&
-        runRegressionStep reality-candidates runRegressionRealityCandidatesSuiteRoot &&
-        runRegressionStep reality-config runRealityConfigRegression
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/runtime-parallel-${BASHPID:-$$}" \
+        listRegressionRuntimeChildSelectors
 }
 
 listRegressionRuntimeLightChildSelectors() {
