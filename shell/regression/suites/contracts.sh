@@ -132,6 +132,17 @@ runAggregateRunnerDispatchesChildrenInOrderAssertions() (
     [[ "$(wc -l <"${callLog}")" -eq "${expectedCount}" ]]
 )
 
+runLegacyFunctionSelectorRetirementAssertions() (
+    local legacyFile=$1
+    local functionName=$2
+    local selectorToken=$3
+    local usageToken=$4
+
+    ! grep -Eq "^${functionName}\\(\\)[[:space:]]*[({]" "${legacyFile}" || return 1
+    ! grep -Eq "^[[:space:]]*${selectorToken}\\)$" "${legacyFile}" || return 1
+    ! grep -Fq "${usageToken}" "${legacyFile}" || return 1
+)
+
 runRegressionStepSequenceAssertions() {
     local sourceFile=$1
     local functionName=$2
@@ -456,6 +467,23 @@ runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract() {
             $0 == fn "() (" { in_fn = 1 }
             in_fn && /runAggregateRunnerDispatchesChildrenInOrderAssertions / { found = 1 }
             in_fn && /^\)$/ { exit(found ? 0 : 1) }
+        ' "${contractsFile}" || return 1
+    done
+}
+
+runLegacyFunctionSelectorRetirementHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runFastRealityLegacyRetirementContract \
+        runTargetedBatchHelpersLegacyRetirementContract \
+        runTlsLegacyRetirementContract \
+        runTargetedSubscriptionRestoreRetirementContract \
+        runSubscriptionOutputLegacyRetirementContract; do
+        awk -v fn="${functionName}" '
+            $0 == fn "() {" { in_fn = 1 }
+            in_fn && /runLegacyFunctionSelectorRetirementAssertions / { found = 1 }
+            in_fn && /^}$/ { exit(found ? 0 : 1) }
         ' "${contractsFile}" || return 1
     done
 }
@@ -1865,9 +1893,11 @@ runFastRealityLegacyRetirementContract() {
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionFastReality\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
-    ! grep -Eq '^[[:space:]]*fast-reality\)$' "${legacyFile}" || return 1
-    ! grep -Fq '|fast-reality|' "${legacyFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyFile}" \
+        runRegressionFastReality \
+        fast-reality \
+        '|fast-reality|'
 }
 
 runFastLegacyRetirementContract() {
@@ -2069,9 +2099,11 @@ runTargetedBatchHelpersLegacyRetirementContract() {
 
     grep -q '^runRegressionTargetedBatchHelpers() {$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers$' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionTargetedBatchHelpers\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
-    ! grep -Eq '^[[:space:]]*targeted-batch-helpers\)$' "${legacyFile}" || return 1
-    ! grep -Fq '|targeted-batch-helpers|' "${legacyFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyFile}" \
+        runRegressionTargetedBatchHelpers \
+        targeted-batch-helpers \
+        '|targeted-batch-helpers|'
 }
 
 runTargetedBatchHelpersChildStepsContract() {
@@ -2180,9 +2212,11 @@ runTlsLegacyRetirementContract() {
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionTls\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
-    ! grep -Eq '^[[:space:]]*tls\)$' "${legacyFile}" || return 1
-    ! grep -Fq '|tls|' "${legacyFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyFile}" \
+        runRegressionTls \
+        tls \
+        '|tls|'
 }
 
 runTlsLegacyPublicSelectorRetirementContract() {
@@ -4245,9 +4279,11 @@ runTargetedSubscriptionRestoreRetirementContract() {
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^registerRegressionFunctionLeaf subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression$' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionTargetedSubscriptionRestore\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
-    ! grep -Eq '^[[:space:]]*targeted-subscription-restore\)$' "${legacyFile}" || return 1
-    ! grep -Fq '|targeted-subscription-restore|' "${legacyFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyFile}" \
+        runRegressionTargetedSubscriptionRestore \
+        targeted-subscription-restore \
+        '|targeted-subscription-restore|'
 }
 
 runSubscriptionOutputLegacyRetirementContract() {
@@ -4261,9 +4297,11 @@ runSubscriptionOutputLegacyRetirementContract() {
     grep -q '^registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression$' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionOutput\(\)[[:space:]]*[({]' "${legacyFile}" || return 1
-    ! grep -Eq '^[[:space:]]*subscription-output\)$' "${legacyFile}" || return 1
-    ! grep -Fq '|subscription-output|' "${legacyFile}" || return 1
+    runLegacyFunctionSelectorRetirementAssertions \
+        "${legacyFile}" \
+        runRegressionSubscriptionOutput \
+        subscription-output \
+        '|subscription-output|'
 }
 
 runSubscriptionSelectorHelpersAreSuiteOwnedContract() {
@@ -4879,6 +4917,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
         runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
+        runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
         runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
         runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
