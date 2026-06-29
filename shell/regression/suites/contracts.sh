@@ -3251,9 +3251,8 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q '^runRegressionTransactionSystemSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionCoreParallelCompositionRegression() ' "${suiteFile}"
     grep -q '^runRegressionTransactionSystemParallelCompositionRegression() ' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-' "${suiteFile}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-system-parallel-' "${suiteFile}"
     ! grep -q '^runRegressionTransactionCore() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionTransactionSubscription() {$' "${legacyScriptFile}"
     ! grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${legacyScriptFile}"
@@ -3370,8 +3369,23 @@ runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract() (
             service-queue-apply-propagation
     }
 
+    runFrameworkParallelRegressionSelectorList() {
+        local orchestrationRoot=$1
+        local selectorListFn=$2
+        shift 2
+        local -a selectors=()
+
+        mapfile -t selectors < <("${selectorListFn}" "$@")
+        printf 'framework:list:jobs=%s:%s:%s:%s\n' \
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" \
+            "${orchestrationRoot}" \
+            "${selectorListFn}" \
+            "${selectors[*]}" >>"${callLog}"
+    }
+
     runFrameworkParallelRegressionSelectors() {
-        printf 'framework:jobs=%s:%s\n' "${PADM_REGRESSION_PARALLEL_JOBS:-}" "$*" >>"${callLog}"
+        printf 'framework:selectors:%s\n' "$*" >>"${callLog}"
+        return 97
     }
 
     runParallelRegressionSelectors() {
@@ -3387,10 +3401,10 @@ runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract() (
     runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertions \
         "${callLog}" \
         runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperRunner \
-        'framework:jobs=:'"${TMP_DIR}"'/transaction-core-parallel-[0-9][0-9]* core-rollback-result-message core-rollback-result-message config-transaction config-transaction' \
-        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/transaction-core-parallel-heavy-[0-9][0-9]* core-install-service-action-failure core-install-service-action-failure core-port-file-transaction core-port-file-transaction' \
-        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}"':'"${TMP_DIR}"'/transaction-core-parallel-medium-[0-9][0-9]* config-transaction config-transaction entry-helper-config entry-helper-config' \
-        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-core-parallel-light-[0-9][0-9]* core-rollback-result-message core-rollback-result-message service-queue-apply-propagation service-queue-apply-propagation'
+        'framework:list:jobs=:'"${TMP_DIR}"'/transaction-core-parallel-[0-9][0-9]*:listRegressionTransactionCoreChildSelectors:core-rollback-result-message config-transaction' \
+        'framework:list:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/transaction-core-parallel-heavy-[0-9][0-9]*:listRegressionTransactionCoreHeavyChildSelectors:core-install-service-action-failure core-port-file-transaction' \
+        'framework:list:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}"':'"${TMP_DIR}"'/transaction-core-parallel-medium-[0-9][0-9]*:listRegressionTransactionCoreMediumChildSelectors:config-transaction entry-helper-config' \
+        'framework:list:jobs='"${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-core-parallel-light-[0-9][0-9]*:listRegressionTransactionCoreLightChildSelectors:core-rollback-result-message service-queue-apply-propagation'
 )
 
 runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
@@ -3402,8 +3416,23 @@ runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
             fail2ban-apply-transaction
     }
 
+    runFrameworkParallelRegressionSelectorList() {
+        local orchestrationRoot=$1
+        local selectorListFn=$2
+        shift 2
+        local -a selectors=()
+
+        mapfile -t selectors < <("${selectorListFn}" "$@")
+        printf 'framework:list:jobs=%s:%s:%s:%s\n' \
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" \
+            "${orchestrationRoot}" \
+            "${selectorListFn}" \
+            "${selectors[*]}" >>"${callLog}"
+    }
+
     runFrameworkParallelRegressionSelectors() {
-        printf 'framework:jobs=%s:%s\n' "${PADM_REGRESSION_PARALLEL_JOBS:-}" "$*" >>"${callLog}"
+        printf 'framework:selectors:%s\n' "$*" >>"${callLog}"
+        return 97
     }
 
     runParallelRegressionSelectors() {
@@ -3413,7 +3442,7 @@ runTransactionAggregateRunnerUsesFrameworkSelectorHelperContract() (
 
     runAggregateRunnerUsesFrameworkSelectorHelperAssertions \
         "${callLog}" \
-        'framework:jobs='"${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-system-parallel-[0-9][0-9]* nginx-service-failure nginx-service-failure fail2ban-apply-transaction fail2ban-apply-transaction' \
+        'framework:list:jobs='"${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}"':'"${TMP_DIR}"'/transaction-system-parallel-[0-9][0-9]*:listRegressionTransactionSystemChildSelectors:nginx-service-failure fail2ban-apply-transaction' \
         runRegressionTransactionSystemSuiteRoot
 )
 

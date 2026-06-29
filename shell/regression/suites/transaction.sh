@@ -154,65 +154,29 @@ listRegressionTransactionSystemChildSelectors() {
 }
 
 runRegressionTransactionCoreSuiteRoot() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
     if [[ "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" == "all" ]]; then
-        mapfile -t selectors < <(listRegressionTransactionCoreHeavyChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-            PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-heavy-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-heavy-${BASHPID:-$$}" \
+            listRegressionTransactionCoreHeavyChildSelectors
 
-        mapfile -t selectors < <(listRegressionTransactionCoreMediumChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_MEDIUM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
-            PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-medium-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-medium-${BASHPID:-$$}" \
+            listRegressionTransactionCoreMediumChildSelectors
 
-        mapfile -t selectors < <(listRegressionTransactionCoreLightChildSelectors)
-        selectorPairs=()
-        for selector in "${selectors[@]}"; do
-            selectorPairs+=("${selector}" "${selector}")
-        done
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_CORE_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-            PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-            runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-light-${BASHPID:-$$}" \
-            "${selectorPairs[@]}"
+            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-light-${BASHPID:-$$}" \
+            listRegressionTransactionCoreLightChildSelectors
         return
     fi
 
-    mapfile -t selectors < <(listRegressionTransactionCoreChildSelectors)
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
-    PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-core-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-${BASHPID:-$$}" \
+        listRegressionTransactionCoreChildSelectors
 }
 
 runRegressionTransactionSystemSuiteRoot() {
-    local -a selectors=()
-    local -a selectorPairs=()
-    local selector
-
-    mapfile -t selectors < <(listRegressionTransactionSystemChildSelectors)
-    for selector in "${selectors[@]}"; do
-        selectorPairs+=("${selector}" "${selector}")
-    done
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=pairs \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
-        "${selectorPairs[@]}"
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
+        listRegressionTransactionSystemChildSelectors
 }
 
 runRegressionTransactionSuiteRoot() {
