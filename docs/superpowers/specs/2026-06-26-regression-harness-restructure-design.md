@@ -1,6 +1,6 @@
 # Regression Harness Restructure Design
 
-Status: implemented snapshot for the current `codex/subscription-output-fix` branch
+Status: implemented snapshot for the current `codex/all-resource-aware-regression` branch
 
 ## Summary
 
@@ -452,19 +452,26 @@ The regression harness now defends its structure with contract tests in:
 Contract coverage includes:
 
 - dispatcher contract
+- dispatcher step coverage guards
 - selector registration shape
 - legacy retirement guards
+- shared helper-adoption guards for repeated contract shapes
 - aggregate-runner registration expectations
 - wrapper and child-step ordering guards
 - parallel composition behavior
 - child budget forwarding
 - resource-layer ordering
 
-Repeated straight-line `runRegressionStep` chains now share one assertion helper:
+Common helpers now cover most repeated contract shapes:
 
 - `runRegressionStepSequenceAssertions`
+- `runRegressionDispatcherStepCoverageAssertions`
+- `runContractHelperAdoptionAssertions`
+- `runAggregateRunnerRegistrationAssertions`
+- `runRegisteredChildSelectorsAlignedAssertions`
+- `runAggregateRunnerDispatchesChildrenInOrderAssertions`
 
-That helper is used only for fully repeated sequence shapes. Wrapper-order guards that mix suite-root calls with explicit serial tail steps remain suite-specific and explicit.
+These helpers intentionally stop at fully repeated or single-hit shapes. Wrapper-order guards, multi-hit assertions such as `runRealitySuiteChildStepsContract`, and suite-specific legacy-public checks remain explicit where that keeps intent clearer.
 
 Representative composition checks already exist for:
 
@@ -496,6 +503,16 @@ Recommended verification set for future harness changes:
 
 Already landed in this branch:
 
+- `6b1be39` `refactor: dedupe helper adoption contracts`
+- `ebd8a09` `refactor: dedupe dispatcher step coverage contracts`
+- `81b8b45` `test: restore subscription-state cli retirement dispatcher guard`
+- `fc0fff2` `refactor: dedupe subscription-state cli retirement checks`
+- `820ba2f` `refactor: batch ui legacy wrapper retirement checks`
+- `ae071dc` `refactor: extend legacy retirement helper rollout`
+- `e9ed787` `refactor: dedupe legacy retirement assertions`
+- `eb11a60` `refactor: dedupe aggregate runner order assertions`
+- `b641ba6` `refactor: dedupe registered selector alignment contracts`
+- `632f723` `refactor: dedupe dispatcher contract helper definitions`
 - `6e43f06` `refactor: route all selector wave through selector list`
 - `6bf295c` `refactor: route ui selector waves through selector lists`
 - `452f838` `refactor: route transaction selector waves through selector lists`
@@ -549,7 +566,7 @@ Together these commits establish the current harness direction:
 - selector-owned suite topology
 - targeted legacy compat wrappers
 - resource-aware layered parallelism
-- shared contract helpers for repeated framework invariants and repeated child-step sequences
+- shared contract helpers for repeated framework invariants, dispatcher-step inclusion checks, helper-adoption checks, and repeated child-step sequences
 - source-order guards where pre-legacy suite loads can silently collide with legacy names
 - explicit wrapper-order guards where public suite roots still mix aggregate calls with serial tail steps
 
@@ -561,7 +578,7 @@ Most likely next steps:
 
 1. keep reviewing legacy-backed suites for source-time global drift and add compat wrappers only where concrete collisions are proven
 2. decide whether nested aggregates still living inside legacy-backed scripts should also be lifted onto selector-list orchestration, or intentionally remain local runner groups
-3. keep trimming contract duplication only where a cross-suite assertion shape is still materially repeated; aggregate-runner, helper-dispatch, and straight-line child-step invariants now already sit behind common helpers, so mixed wrapper-order contracts should stay explicit unless a truly repeated shape emerges
+3. keep trimming contract duplication only where a cross-suite assertion shape is still materially repeated; aggregate-runner, helper-dispatch, registered-child alignment, child-order, dispatcher-step coverage, helper-adoption, and straight-line child-step invariants now already sit behind common helpers, so mixed wrapper-order, multi-hit, and suite-specific selector-retirement contracts should stay explicit unless a truly repeated shape emerges
 4. refresh this design snapshot whenever a suite root, resource-profile boundary, or contract-helper boundary changes, so the spec remains an authoritative map instead of a historical note
 
 Deferred on purpose:
@@ -579,6 +596,6 @@ Key decisions captured by the current implementation:
 3. split long tails where timing gains are material, but keep leaf coverage unchanged
 4. forward child concurrency budgets from `all` instead of letting every nested suite fully fan out
 5. use isolated compat wrappers when legacy source-time globals make shared sourcing unsafe
-6. prefer shared contract assertion helpers for repeated framework invariants and fully repeated child-step sequences, but leave wrapper-order expectations explicit when they combine suite-root calls with serial tail steps
+6. prefer shared contract assertion helpers for repeated framework invariants, dispatcher-step coverage checks, single-helper adoption checks, and fully repeated child-step sequences, but leave wrapper-order expectations and multi-hit suite-specific contracts explicit when abstraction would hide intent
 
 That is the intended baseline for the next round of regression time work.
