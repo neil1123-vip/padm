@@ -349,31 +349,26 @@ runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract() {
     done
 }
 
-runRegressionStepSequenceHelperAdoptionContract() {
+runContractFunctionDefinitionsUniqueContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+    local duplicates
 
-    for functionName in \
-        runSubscriptionStateSupportChildStepsContract \
-        runSubscriptionStateSerialChildStepsContract \
-        runRemoteControlSmokeCoreChildStepsContract \
-        runPlatformRefreshChildStepsContract \
-        runPlatformUpdateChildStepsContract \
-        runPlatformRestChildStepsContract \
-        runPlatformIoChildStepsContract \
-        runFastOnlyOutputAutoInstallChildStepsContract \
-        runFastOnlySafetyChildStepsContract \
-        runFastOnlyOutputRestChildStepsContract \
-        runFastOnlyCoreChildStepsContract \
-        runRealitySuiteChildStepsContract \
-        runTlsSuiteChildStepsContract \
-        runTransactionSubscriptionChildStepsContract \
-        runTargetedBatchHelpersChildStepsContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() {" { in_fn = 1 }
-            in_fn && /runRegressionStepSequenceAssertions / { found = 1 }
-            in_fn && /^}$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
-    done
+    duplicates=$(awk '
+        /^run[A-Za-z0-9]+Contract\(\)[[:space:]]*\{$/ || /^run[A-Za-z0-9]+Contract\(\)[[:space:]]*\($/ {
+            name = $0
+            sub(/\(.*/, "", name)
+            count[name]++
+        }
+        END {
+            for (name in count) {
+                if (count[name] > 1) {
+                    print name
+                }
+            }
+        }
+    ' "${contractsFile}")
+
+    [[ -z "${duplicates}" ]]
 }
 
 runRegressionStepSequenceHelperAdoptionContract() {
@@ -4814,6 +4809,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep aggregate-runner-uses-framework-selector-helper-adoption runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract &&
         runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-assertion runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertionContract &&
         runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-adoption runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract &&
+        runRegressionStep contract-function-definitions-unique runContractFunctionDefinitionsUniqueContract &&
         runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
         runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
         runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
