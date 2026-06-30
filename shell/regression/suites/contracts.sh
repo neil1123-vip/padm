@@ -3500,9 +3500,9 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-' "${suiteFile}"
     ! grep -q '^runRegressionSubscription() {$' "${suiteFile}"
     ! grep -q '^runRegressionSubscriptionRemote() {$' "${suiteFile}"
@@ -3524,8 +3524,6 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}"
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription"]:-}" == "aggregate-runner" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote"]:-}" == "aggregate-runner" ]]
@@ -3557,8 +3555,7 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
     local subscriptionRemoteLeafLine
 
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}" || return 1
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}" || return 1
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}" || return 1
+    [[ "$(grep -c '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}")" -ge 2 ]] || return 1
 
     subscriptionRemoteLeafLine=$(grep -F 'subscription remote leaf selectors: ' "${legacyScriptFile}" || true)
     [[ -z "${subscriptionRemoteLeafLine}" ]] || return 1
@@ -5458,13 +5455,19 @@ runSubscriptionRemoteAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf subscription-remote-fetch ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch-' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionRemoteChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         subscription-remote \
         parallel \
-        runRegressionSubscriptionRemoteSuiteRoot \
+        runSubscriptionSelectorListRegression \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsPatternAssertions \
+        subscription-remote \
+        '^subscription-remote-parallel$' \
+        '^listRegressionSubscriptionRemoteChildSelectors$' \
+        '^4$' \
+        '^PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS$'
 }
 
 runSubscriptionTxAggregateRunnerRegistrationContract() {
@@ -5477,13 +5480,17 @@ runSubscriptionTxAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionTxChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         subscription-tx \
         parallel \
-        runRegressionSubscriptionTxSuiteRoot \
+        runSubscriptionSelectorListRegression \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsPatternAssertions \
+        subscription-tx \
+        '^subscription-tx-parallel$' \
+        '^listRegressionSubscriptionTxChildSelectors$'
 }
 
 runTargetedSubscriptionRestoreRetirementContract() {
@@ -5503,7 +5510,7 @@ runSubscriptionOutputLegacyRetirementContract() {
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}" || return 1
-    grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf subscription-output-profile-and-reality runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputProfileAndRealityRegression$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression$' "${suiteFile}" || return 1
@@ -5537,14 +5544,14 @@ runSubscriptionOutputChildStepsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
     local outputBody
     local -a actualSteps=()
-    local rootLine
+    local helperLine
     local stepLine
 
     outputBody=$(sed -n '/^runRegressionSubscriptionOutput() {$/,/^}$/p' "${suiteFile}")
     [[ -n "${outputBody}" ]] || return 1
 
-    rootLine=$(awk '/runRegressionSubscriptionOutputSuiteRoot/ { print NR; exit }' <<<"${outputBody}")
-    [[ -n "${rootLine}" ]] || return 1
+    helperLine=$(awk '/runSubscriptionSelectorListRegression/ { print NR; exit }' <<<"${outputBody}")
+    [[ -n "${helperLine}" ]] || return 1
 
     mapfile -t actualSteps < <(
         awk '/^[[:space:]]*runRegressionStep / { print $2 }' <<<"${outputBody}"
@@ -5555,7 +5562,7 @@ runSubscriptionOutputChildStepsContract() {
 
     stepLine=$(awk '/^[[:space:]]*runRegressionStep subscription-remote-sources-no-reverse-decode / { print NR; exit }' <<<"${outputBody}")
     [[ -n "${stepLine}" ]] || return 1
-    (( rootLine < stepLine )) || return 1
+    (( helperLine < stepLine )) || return 1
 }
 
 runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
@@ -5569,6 +5576,8 @@ runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
     ! grep -Eq '^runRegressionSubscription\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
     ! grep -Eq '^runRegressionSubscriptionRemote\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
     ! grep -Eq '^runRegressionSubscriptionTx\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    ! grep -Eq '^runRegressionSubscriptionRemoteSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    ! grep -Eq '^runRegressionSubscriptionTxSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
     ! grep -Eq '^runRegressionSubscription\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
     ! grep -Eq '^runRegressionSubscriptionRemote\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
     ! grep -Eq '^runRegressionSubscriptionTx\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
@@ -5578,38 +5587,14 @@ runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
         return 97
     }
 
-    runRegressionSubscriptionRemote() {
-        printf 'legacy-subscription-remote\n' >>"${callLog}"
-        return 97
-    }
-
-    runRegressionSubscriptionTx() {
-        printf 'legacy-subscription-tx\n' >>"${callLog}"
-        return 97
-    }
-
     runRegressionSubscriptionSuiteRoot() {
         printf 'suite-subscription\n' >>"${callLog}"
     }
 
-    runRegressionSubscriptionRemoteSuiteRoot() {
-        printf 'suite-subscription-remote\n' >>"${callLog}"
-    }
-
-    runRegressionSubscriptionTxSuiteRoot() {
-        printf 'suite-subscription-tx\n' >>"${callLog}"
-    }
-
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-tx
 
     grep -qx 'suite-subscription' "${callLog}" || status=1
-    grep -qx 'suite-subscription-remote' "${callLog}" || status=1
-    grep -qx 'suite-subscription-tx' "${callLog}" || status=1
     ! grep -q '^legacy-subscription$' "${callLog}" || status=1
-    ! grep -q '^legacy-subscription-remote$' "${callLog}" || status=1
-    ! grep -q '^legacy-subscription-tx$' "${callLog}" || status=1
 
     return "${status}"
 )
@@ -5618,6 +5603,10 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/subscription-framework-helper-dispatch.log"
 
     : >"${callLog}"
+
+    runRegressionSubscriptionLegacyLeafWithCompat() {
+        "$@"
+    }
 
     listRegressionSubscriptionOutputChildSelectors() {
         printf '%s\n' \
@@ -5668,11 +5657,13 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
         return 97
     }
 
-    runRegressionSubscriptionRemoteSuiteRoot
-    runRegressionSubscriptionTxSuiteRoot
-    runRegressionSubscriptionOutputSuiteRoot
-    runRegressionSubscriptionSuiteRoot
-    PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionSubscriptionSuiteRoot
+    runRemoteSubscribeSourcesAvoidReverseDecodeRegression() { :; }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-tx
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-output
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegisteredRegressionMain subscription
 
     grep -qx 'framework:jobs='"${PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS:-2}"':'"${TMP_DIR}"'/subscription-output-parallel-[0-9][0-9]* subscription-output-profile-and-reality subscription-output-profile-and-reality subscription-output-publish-accounts-and-remote-hint subscription-output-publish-accounts-and-remote-hint subscription-output-tls-vless-vmess-trojan subscription-output-tls-vless-vmess-trojan subscription-output-tls-any-hysteria-tuic-naive subscription-output-tls-any-hysteria-tuic-naive' "${callLog}"
     grep -qx 'framework:jobs='"${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-4}"':'"${TMP_DIR}"'/subscription-remote-parallel-[0-9][0-9]* subscription-remote-unique subscription-remote-unique subscription-remote-merge subscription-remote-merge' "${callLog}"
@@ -5923,20 +5914,10 @@ runRealityNoEmptyAggregateWrapperFunctionsContract() {
 
 runParallelSelectorCollectsExitedChildWithoutRcContract() (
     local root="${TMP_DIR}/parallel-selector-exit-without-rc"
-    local statusFile="${root}/status"
     local callLog="${root}/call.log"
-    local workerPid=
 
     mkdir -p "${root}"
     : >"${callLog}"
-
-    cleanupParallelSelectorExitWithoutRcContract() {
-        if [[ -n "${workerPid}" ]]; then
-            kill "${workerPid}" 2>/dev/null || true
-            wait "${workerPid}" 2>/dev/null || true
-        fi
-    }
-    trap cleanupParallelSelectorExitWithoutRcContract EXIT
 
     runRegressionAllSelector() {
         local selector=$1
@@ -5952,22 +5933,12 @@ runParallelSelectorCollectsExitedChildWithoutRcContract() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    (
-        set +e
-        PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionSelectors "${root}/orchestration" exit-fast finish
-        printf '%s\n' "$?" >"${statusFile}"
-    ) &
-    workerPid=$!
-
-    for _ in $(seq 1 40); do
-        [[ -f "${statusFile}" ]] && break
-        sleep 0.05
-    done
-
-    [[ -f "${statusFile}" ]]
-    wait "${workerPid}"
-    workerPid=
-    [[ "$(<"${statusFile}")" == "1" ]]
+    set +e
+    PADM_REGRESSION_PARALLEL_JOBS=2 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runParallelRegressionSelectors "${root}/orchestration" exit-fast finish
+    [[ "$?" == "1" ]]
     grep -qx 'finish-start' "${callLog}"
     grep -qx 'finish-finish' "${callLog}"
 )

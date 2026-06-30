@@ -71,21 +71,29 @@ listRegressionSubscriptionChildSelectors() {
         subscription-tx
 }
 
-runRegressionSubscriptionOutputSuiteRoot() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-output-parallel-${BASHPID:-$$}" \
-        listRegressionSubscriptionOutputChildSelectors
-}
+runSubscriptionSelectorListRegression() {
+    local orchestrationLabel=$1
+    local selectorListFn=$2
+    local defaultJobs=${3:-}
+    local overrideJobsVar=${4:-}
+    local jobs=
 
-runRegressionSubscriptionRemoteSuiteRoot() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-remote-parallel-${BASHPID:-$$}" \
-        listRegressionSubscriptionRemoteChildSelectors
-}
+    if [[ -n "${overrideJobsVar}" ]]; then
+        jobs="${!overrideJobsVar:-}"
+    fi
+    if [[ -z "${jobs}" && -n "${defaultJobs}" ]]; then
+        jobs="${PADM_REGRESSION_PARALLEL_JOBS:-${defaultJobs}}"
+    fi
 
-runRegressionSubscriptionTxSuiteRoot() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-tx-parallel-${BASHPID:-$$}" \
-        listRegressionSubscriptionTxChildSelectors
+    if [[ -n "${jobs}" ]]; then
+        PADM_REGRESSION_PARALLEL_JOBS="${jobs}" \
+            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/${orchestrationLabel}-${BASHPID:-$$}" \
+            "${selectorListFn}"
+        return
+    fi
+
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/${orchestrationLabel}-${BASHPID:-$$}" \
+        "${selectorListFn}"
 }
 
 runRegressionSubscriptionSuiteRoot() {
@@ -124,7 +132,15 @@ runRegressionSubscriptionOutputParallelCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionOutputSuiteRoot
+    runRegressionSubscriptionLegacyLeafWithCompat() {
+        "$@"
+    }
+    runRemoteSubscribeSourcesAvoidReverseDecodeRegression() {
+        printf 'subscription-remote-sources-no-reverse-decode-finish\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-output
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -140,7 +156,9 @@ runRegressionSubscriptionOutputParallelCompositionRegression() (
 
     : >"${callLog}"
     rm -f "${TMP_DIR}/subscription-output-publish-started"
-    PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionOutputSuiteRoot
+    PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-output
     awk '
         $0 == "subscription-output-profile-and-reality-finish" { firstFinish = NR }
         $0 == "subscription-output-publish-accounts-and-remote-hint-start" { secondStart = NR }
@@ -151,7 +169,11 @@ runRegressionSubscriptionOutputParallelCompositionRegression() (
 )
 
 runRegressionSubscriptionOutput() {
-    runRegressionSubscriptionOutputSuiteRoot &&
+    runSubscriptionSelectorListRegression \
+        subscription-output-parallel \
+        listRegressionSubscriptionOutputChildSelectors \
+        2 \
+        PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS &&
         runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
 }
 
@@ -175,7 +197,8 @@ runRegressionSubscriptionRemoteParallelCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionRemoteSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -193,7 +216,9 @@ runRegressionSubscriptionRemoteParallelCompositionRegression() (
 
     : >"${callLog}"
     rm -f "${TMP_DIR}/subscription-remote-merge-started"
-    PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionRemoteSuiteRoot
+    PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
     awk '
         $0 == "subscription-remote-unique-finish" { firstFinish = NR }
         $0 == "subscription-remote-rollback-start" { secondStart = NR }
@@ -223,7 +248,8 @@ runRegressionSubscriptionTxParallelCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionTxSuiteRoot
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-tx
 
     while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
@@ -334,10 +360,22 @@ registerRegressionFunctionLeaf regression-subscription-tx-parallel-composition r
 registerRegressionFunctionLeaf regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-legacy-tmpdir-isolation runRegressionSubscriptionLegacyTmpDirIsolationRegression
 
-registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \
+registerRegressionAggregateRunnerParallelWithArgs \
+    subscription-remote \
+    runSubscriptionSelectorListRegression \
+    subscription-remote-parallel \
+    listRegressionSubscriptionRemoteChildSelectors \
+    4 \
+    PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS \
+    -- \
     $(listRegressionSubscriptionRemoteChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \
+registerRegressionAggregateRunnerParallelWithArgs \
+    subscription-tx \
+    runSubscriptionSelectorListRegression \
+    subscription-tx-parallel \
+    listRegressionSubscriptionTxChildSelectors \
+    -- \
     $(listRegressionSubscriptionTxChildSelectors)
 
 registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \

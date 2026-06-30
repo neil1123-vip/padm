@@ -14,6 +14,7 @@ runParallelRegressionRunners() {
     local -a pids=()
     local -a statuses=()
     local status=0
+    local hadErrexit=0
     local i
 
     if [[ $# -eq 0 || $(( $# % 2 )) -ne 0 ]]; then
@@ -29,6 +30,10 @@ runParallelRegressionRunners() {
         shift 2
     done
 
+    case $- in
+    *e*) hadErrexit=1 ;;
+    esac
+
     set +e
     for i in "${!runners[@]}"; do
         (
@@ -43,7 +48,11 @@ runParallelRegressionRunners() {
         wait "${pids[$i]}"
         statuses[$i]=$?
     done
-    set -e
+    if (( hadErrexit )); then
+        set -e
+    else
+        set +e
+    fi
 
     for i in "${!logs[@]}"; do
         [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
@@ -72,6 +81,7 @@ runFrameworkParallelRegressionSelectors() {
     local maxJobs="${PADM_REGRESSION_PARALLEL_JOBS:-0}"
     local nextIndex=0
     local running=0
+    local hadErrexit=0
     local i
     local madeProgress
 
@@ -142,6 +152,10 @@ runFrameworkParallelRegressionSelectors() {
         maxJobs=${#selectors[@]}
     fi
 
+    case $- in
+    *e*) hadErrexit=1 ;;
+    esac
+
     set +e
     while [[ "${nextIndex}" -lt "${#selectors[@]}" || "${running}" -gt 0 ]]; do
         while [[ "${nextIndex}" -lt "${#selectors[@]}" && "${running}" -lt "${maxJobs}" ]]; do
@@ -189,7 +203,11 @@ runFrameworkParallelRegressionSelectors() {
             sleep 0.05
         fi
     done
-    set -e
+    if (( hadErrexit )); then
+        set -e
+    else
+        set +e
+    fi
 
     return "${status}"
 }
