@@ -207,10 +207,6 @@ runRegressionTransactionSubscriptionSuiteRoot() {
     runFrameworkSequentialRegressionSelectorList listRegressionTransactionSubscriptionChildSelectors
 }
 
-runRegressionTransactionSubscription() {
-    runRegressionTransactionSubscriptionSuiteRoot
-}
-
 runRegressionTransactionLegacyTmpDirIsolationRegression() (
     set -euo pipefail
     local originalTmpDir="${TMP_DIR}"

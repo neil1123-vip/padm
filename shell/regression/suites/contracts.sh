@@ -2708,8 +2708,8 @@ runAllSuiteUsesFunctionRegistryContract() {
     grep -q '^listRegressionAllParallelChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionAllSelector() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionAllSelectorSuiteRoot() ($' "${suiteFile}" || return 1
-    grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
     grep -Eq '^runRegressionAllSuiteRoot\(\) \($|^runRegressionAllSuiteRoot\(\) {$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/all-parallel-' "${suiteFile}" || return 1
     ! grep -q '^runRegressionAllSelector() {$' "${legacyScriptFile}" || return 1
     ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${legacyScriptFile}" || return 1
@@ -2718,6 +2718,14 @@ runAllSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \\' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionAlias full all$' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionAlias ci all$' "${suiteFile}" || return 1
+}
+
+runAllNoEmptyAggregateWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/all.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${legacyScriptFile}" || return 1
 }
 
 runAllPublicSelectorRetirementContract() {
@@ -4550,6 +4558,7 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionCoreSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionSystemSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionTransactionSubscription() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionCoreParallelCompositionRegression() ' "${suiteFile}"
     grep -q '^runRegressionTransactionSystemParallelCompositionRegression() ' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-' "${suiteFile}"
@@ -4583,6 +4592,14 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
 )
 
+runTransactionNoEmptyAggregateWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+
+    ! grep -q '^runRegressionTransactionSubscription() {$' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionTransactionSubscription() {$' "${legacyScriptFile}" || return 1
+}
+
 runTransactionLegacyPublicSelectorRetirementContract() (
     set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
@@ -4606,8 +4623,11 @@ runTransactionLegacyPublicSelectorRetirementContract() (
 
 runTransactionSuiteUsesSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/transaction-suite-root-dispatch.log"
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
 
     : >"${callLog}"
+
+    ! grep -Eq '^runRegressionTransactionSubscription\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
 
     runRegressionTransaction() {
         printf 'legacy-transaction\n' >>"${callLog}"
@@ -6133,6 +6153,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-rest-child-steps runPlatformRestChildStepsContract &&
         runRegressionStep platform-io-child-steps runPlatformIoChildStepsContract &&
         runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
+        runRegressionStep all-no-empty-aggregate-wrapper-functions runAllNoEmptyAggregateWrapperFunctionsContract &&
         runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract &&
@@ -6187,6 +6208,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep routing-legacy-leaves-use-compat-helper runRoutingLegacyLeavesUseCompatHelperContract &&
         runRegressionStep routing-legacy-read-install-type-isolation-guard-registered runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract &&
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
+        runRegressionStep transaction-no-empty-aggregate-wrapper-functions runTransactionNoEmptyAggregateWrapperFunctionsContract &&
         runRegressionStep transaction-legacy-tmpdir-isolation-guard-registered runTransactionLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract &&
         runRegressionStep transaction-subscription-child-steps runTransactionSubscriptionChildStepsContract &&

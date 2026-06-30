@@ -76,10 +76,6 @@ runRegressionAllSelector() {
     runRegressionAllSelectorSuiteRoot "$@"
 }
 
-runRegressionAll() {
-    runRegressionAllSuiteRoot
-}
-
 runRegressionAllCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-all-composition.log"
@@ -130,7 +126,7 @@ runRegressionAllCompositionRegression() (
         runRegressionAllSelector "$@"
     }
 
-    runRegressionAll
+    runRegressionAllSuiteRoot
 
     for selector in routing subscription runtime transaction-core transaction-system remote-control-smoke remote-control-contract-service-install remote-control-contract-server-response ui; do
         grep -qx "${selector}-start" "${callLog}"
@@ -236,7 +232,7 @@ runRegressionAllResourceLayerCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    runRegressionAll
+    runRegressionAllSuiteRoot
 
     awk '
         /-start / {
@@ -295,15 +291,15 @@ runRegressionAllResourceLayerCompositionRegression() (
     ' "${callLog}"
 
     : >"${callLog}"
-    PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE=all runRegressionAll
+    PADM_REGRESSION_ALL_ROUTING_RESOURCE_PROFILE=all runRegressionAllSuiteRoot
     grep -qx 'routing-start jobs=1 ui_profile=all subscription_profile=all routing_profile=all runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
 
     : >"${callLog}"
-    PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE=all runRegressionAll
+    PADM_REGRESSION_ALL_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSuiteRoot
     grep -qx 'runtime-start jobs=1 ui_profile=all subscription_profile=all routing_profile= runtime_profile=all transaction_core_profile= suppress=1' "${callLog}"
 
     : >"${callLog}"
-    PADM_REGRESSION_ALL_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAll
+    PADM_REGRESSION_ALL_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSuiteRoot
     grep -qx 'transaction-core-start jobs=3 ui_profile=all subscription_profile=all routing_profile= runtime_profile= transaction_core_profile=all suppress=1' "${callLog}"
 )
 
