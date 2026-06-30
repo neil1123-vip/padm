@@ -127,9 +127,11 @@ These leaves run through isolated compat wrappers that re-source `subscription_g
 `platform-io` remains a sequential suite root, but its legacy-backed install-tools,
 package, and reality-scanner leaves now also run through a suite-local compat helper
 that re-sources `subscription_groups_legacy.sh` in a subshell before each step.
-That keeps the public `platform-io` selector on suite-owned dispatch while aligning
-its leaf isolation boundary with the other suites that already defend source-time
-`TMP_DIR`-derived state.
+Those leaves are now registered as suite-local function selectors, and the suite
+root dispatches them through `runFrameworkSequentialRegressionSelectorList` instead
+of a hand-written `runRegressionStep` chain. That keeps the public `platform-io`
+selector on suite-owned dispatch while aligning its leaf isolation boundary with the
+other suites that already defend source-time `TMP_DIR`-derived state.
 
 ### Subscription
 

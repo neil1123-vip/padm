@@ -20,6 +20,24 @@ runRegressionPlatformLegacyLeafWithCompat() (
     "$@"
 )
 
+runInstallToolsCertificateDependencyCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression; }
+runInstallToolsAcmeResultFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression; }
+runInstallToolsAcmeCommitFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression; }
+runInstallToolsConfiguredLogCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression; }
+runInstallToolsUpdateFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression; }
+runInstallToolsReleaseInfoFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression; }
+runInstallToolsNginxReinstallFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runInstallToolsNginxReinstallFailureRegression; }
+runAptKeyInstallFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runAptKeyInstallFailureRegression; }
+runNginxAptRefreshRollbackCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runNginxAptRepoRefreshRollbackRegression; }
+runNginxAlpineDefaultConfRollbackCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runNginxAlpineDefaultConfRollbackRegression; }
+runNginxYumMainlineEnableFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runNginxYumMainlineEnableFailureRegression; }
+runBasePackageBatchCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runBasePackageBatchRegression; }
+runPackageRollbackFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runPackageRollbackFailureRegression; }
+runPackageCommandStdinCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runPackageCommandStdinRegression; }
+runRealityScannerUnsafeDirCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runRealityScannerRejectsUnsafeDirRegression; }
+runRealityScannerBinaryCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runRealityScannerBinaryRegression; }
+runRealityScannerDownloadFailureCompatRegression() { runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression; }
+
 runRegressionPlatformUpdateSuiteRoot() {
     runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate
 }
@@ -37,6 +55,27 @@ listRegressionPlatformHotChildSelectors() {
         platform-update \
         platform-refresh \
         platform-rest
+}
+
+listRegressionPlatformIoChildSelectors() {
+    printf '%s\n' \
+        install-tools-certificate-dependency \
+        install-tools-acme-result-failure \
+        install-tools-acme-commit-failure \
+        install-tools-configured-log \
+        install-tools-update-failure \
+        install-tools-release-info-failure \
+        install-tools-nginx-reinstall-failure \
+        apt-key-install-failure \
+        nginx-apt-refresh-rollback \
+        nginx-alpine-default-conf-rollback \
+        nginx-yum-mainline-enable-failure \
+        base-package-batch \
+        package-rollback-failure \
+        package-command-stdin \
+        reality-scanner-unsafe-dir \
+        reality-scanner-binary \
+        reality-scanner-download-failure
 }
 
 runRegressionPlatformHotSuiteRoot() {
@@ -101,29 +140,30 @@ runRegressionPlatformFastHelperIsolationRegression() (
 )
 
 runRegressionPlatformIoSuiteRoot() {
-    runRegressionStep install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression &&
-        runRegressionStep install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression &&
-        runRegressionStep install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression &&
-        runRegressionStep install-tools-configured-log runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression &&
-        runRegressionStep install-tools-update-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression &&
-        runRegressionStep install-tools-release-info-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression &&
-        runRegressionStep install-tools-nginx-reinstall-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsNginxReinstallFailureRegression &&
-        runRegressionStep apt-key-install-failure runRegressionPlatformLegacyLeafWithCompat runAptKeyInstallFailureRegression &&
-        runRegressionStep nginx-apt-refresh-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAptRepoRefreshRollbackRegression &&
-        runRegressionStep nginx-alpine-default-conf-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAlpineDefaultConfRollbackRegression &&
-        runRegressionStep nginx-yum-mainline-enable-failure runRegressionPlatformLegacyLeafWithCompat runNginxYumMainlineEnableFailureRegression &&
-        runRegressionStep base-package-batch runRegressionPlatformLegacyLeafWithCompat runBasePackageBatchRegression &&
-        runRegressionStep package-rollback-failure runRegressionPlatformLegacyLeafWithCompat runPackageRollbackFailureRegression &&
-        runRegressionStep package-command-stdin runRegressionPlatformLegacyLeafWithCompat runPackageCommandStdinRegression &&
-        runRegressionStep reality-scanner-unsafe-dir runRegressionPlatformLegacyLeafWithCompat runRealityScannerRejectsUnsafeDirRegression &&
-        runRegressionStep reality-scanner-binary runRegressionPlatformLegacyLeafWithCompat runRealityScannerBinaryRegression &&
-        runRegressionStep reality-scanner-download-failure runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionPlatformIoChildSelectors
 }
 
 registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot
 registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuiteRoot
 registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot
 registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot
+registerRegressionFunctionLeaf install-tools-certificate-dependency runInstallToolsCertificateDependencyCompatRegression
+registerRegressionFunctionLeaf install-tools-acme-result-failure runInstallToolsAcmeResultFailureCompatRegression
+registerRegressionFunctionLeaf install-tools-acme-commit-failure runInstallToolsAcmeCommitFailureCompatRegression
+registerRegressionFunctionLeaf install-tools-configured-log runInstallToolsConfiguredLogCompatRegression
+registerRegressionFunctionLeaf install-tools-update-failure runInstallToolsUpdateFailureCompatRegression
+registerRegressionFunctionLeaf install-tools-release-info-failure runInstallToolsReleaseInfoFailureCompatRegression
+registerRegressionFunctionLeaf install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureCompatRegression
+registerRegressionFunctionLeaf apt-key-install-failure runAptKeyInstallFailureCompatRegression
+registerRegressionFunctionLeaf nginx-apt-refresh-rollback runNginxAptRefreshRollbackCompatRegression
+registerRegressionFunctionLeaf nginx-alpine-default-conf-rollback runNginxAlpineDefaultConfRollbackCompatRegression
+registerRegressionFunctionLeaf nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureCompatRegression
+registerRegressionFunctionLeaf base-package-batch runBasePackageBatchCompatRegression
+registerRegressionFunctionLeaf package-rollback-failure runPackageRollbackFailureCompatRegression
+registerRegressionFunctionLeaf package-command-stdin runPackageCommandStdinCompatRegression
+registerRegressionFunctionLeaf reality-scanner-unsafe-dir runRealityScannerUnsafeDirCompatRegression
+registerRegressionFunctionLeaf reality-scanner-binary runRealityScannerBinaryCompatRegression
+registerRegressionFunctionLeaf reality-scanner-download-failure runRealityScannerDownloadFailureCompatRegression
 registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
 registerRegressionFunctionLeaf regression-platform-fast-helper-isolation runRegressionPlatformFastHelperIsolationRegression
 

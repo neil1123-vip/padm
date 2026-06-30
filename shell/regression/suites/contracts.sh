@@ -538,7 +538,6 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runPlatformRefreshChildStepsContract \
         runPlatformUpdateChildStepsContract \
         runPlatformRestChildStepsContract \
-        runPlatformIoChildStepsContract \
         runFastOnlyOutputAutoInstallChildStepsContract \
         runFastOnlySafetyChildStepsContract \
         runFastOnlyOutputRestChildStepsContract \
@@ -557,6 +556,7 @@ runRegressionStepSequenceHelperAdoptionContract() {
     ' "${contractsFile}" || return 1
 
     for functionName in \
+        runPlatformIoChildStepsContract \
         runTlsSuiteChildStepsContract \
         runTransactionSubscriptionChildStepsContract; do
         runContractHelperAdoptionAssertions \
@@ -1839,25 +1839,33 @@ runPlatformRestChildStepsContract() {
 }
 
 runPlatformIoChildStepsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionPlatformIoSuiteRoot \
-        install-tools-certificate-dependency \
-        install-tools-acme-result-failure \
-        install-tools-acme-commit-failure \
-        install-tools-configured-log \
-        install-tools-update-failure \
-        install-tools-release-info-failure \
-        install-tools-nginx-reinstall-failure \
-        apt-key-install-failure \
-        nginx-apt-refresh-rollback \
-        nginx-alpine-default-conf-rollback \
-        nginx-yum-mainline-enable-failure \
-        base-package-batch \
-        package-rollback-failure \
-        package-command-stdin \
-        reality-scanner-unsafe-dir \
-        reality-scanner-binary \
-        reality-scanner-download-failure
+    local callLog="${TMP_DIR}/platform-io-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:install-tools-certificate-dependency' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionPlatformIoChildSelectors
+    grep -qx 'dispatch:install-tools-acme-result-failure' "${callLog}"
+    grep -qx 'dispatch:install-tools-acme-commit-failure' "${callLog}"
+    grep -qx 'dispatch:install-tools-configured-log' "${callLog}"
+    grep -qx 'dispatch:install-tools-update-failure' "${callLog}"
+    grep -qx 'dispatch:install-tools-release-info-failure' "${callLog}"
+    grep -qx 'dispatch:install-tools-nginx-reinstall-failure' "${callLog}"
+    grep -qx 'dispatch:apt-key-install-failure' "${callLog}"
+    grep -qx 'dispatch:nginx-apt-refresh-rollback' "${callLog}"
+    grep -qx 'dispatch:nginx-alpine-default-conf-rollback' "${callLog}"
+    grep -qx 'dispatch:nginx-yum-mainline-enable-failure' "${callLog}"
+    grep -qx 'dispatch:base-package-batch' "${callLog}"
+    grep -qx 'dispatch:package-rollback-failure' "${callLog}"
+    grep -qx 'dispatch:package-command-stdin' "${callLog}"
+    grep -qx 'dispatch:reality-scanner-unsafe-dir' "${callLog}"
+    grep -qx 'dispatch:reality-scanner-binary' "${callLog}"
+    grep -qx 'dispatch:reality-scanner-download-failure' "${callLog}"
 }
 
 runFastOnlyOutputAutoInstallChildStepsContract() {
@@ -2750,6 +2758,40 @@ sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
 network-check-return-failure runNetworkCheckReturnFailureRegression
 sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression
 reload-core-propagation runReloadCorePropagationRegression
+EOF
+
+    return "${status}"
+}
+
+runPlatformIoDirectLeafSelectorsUseFunctionRegistryContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
+    local status=0
+
+    while read -r selector runner; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
+        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
+    done <<'EOF'
+install-tools-certificate-dependency runInstallToolsCertificateDependencyCompatRegression
+install-tools-acme-result-failure runInstallToolsAcmeResultFailureCompatRegression
+install-tools-acme-commit-failure runInstallToolsAcmeCommitFailureCompatRegression
+install-tools-configured-log runInstallToolsConfiguredLogCompatRegression
+install-tools-update-failure runInstallToolsUpdateFailureCompatRegression
+install-tools-release-info-failure runInstallToolsReleaseInfoFailureCompatRegression
+install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureCompatRegression
+apt-key-install-failure runAptKeyInstallFailureCompatRegression
+nginx-apt-refresh-rollback runNginxAptRefreshRollbackCompatRegression
+nginx-alpine-default-conf-rollback runNginxAlpineDefaultConfRollbackCompatRegression
+nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureCompatRegression
+base-package-batch runBasePackageBatchCompatRegression
+package-rollback-failure runPackageRollbackFailureCompatRegression
+package-command-stdin runPackageCommandStdinCompatRegression
+reality-scanner-unsafe-dir runRealityScannerUnsafeDirCompatRegression
+reality-scanner-binary runRealityScannerBinaryCompatRegression
+reality-scanner-download-failure runRealityScannerDownloadFailureCompatRegression
 EOF
 
     return "${status}"
