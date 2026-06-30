@@ -313,6 +313,20 @@ Limits:
 - `PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS`
 - `PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS`
 
+Compatibility boundary:
+
+- the direct runtime leaves registered in the suite now all run through
+  `runRegressionRuntimeLegacyLeafWithCompat`
+- that includes:
+  - `runtime-core`
+  - `runtime-autoread-unset-auto-install`
+  - `runtime-auto-install-reality-route`
+  - `runtime-tempdir`
+- the wrapper re-sources `subscription_groups_legacy.sh` in a subshell before each
+  leaf so later suite loads cannot leave source-time `TMP_DIR`-derived paths stale
+- the heavier `reality-candidates` and `reality-config` children still route through
+  the dedicated reality suite boundary rather than duplicating reality leaf ownership
+
 ### Reality
 
 `reality-candidates` and `reality-stream` remain sequential aggregate runners. They are already registered in the selector framework, but they are not yet layered further.

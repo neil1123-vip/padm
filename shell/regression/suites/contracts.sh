@@ -4486,10 +4486,10 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf runtime ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf runtime ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirCompatRegression$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates-fast ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates-full ' "${suiteFile}"
@@ -4501,8 +4501,8 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionAggregateRunnerSequential reality-stream ' "${suiteFile}"
 }
 
-runRuntimeRealityRouteUsesCompatHelperContract() (
-    local callLog="${TMP_DIR}/runtime-reality-route-compat-helper.log"
+runRuntimeLeavesUseCompatHelperContract() (
+    local callLog="${TMP_DIR}/runtime-compat-helper.log"
 
     : >"${callLog}"
 
@@ -4510,13 +4510,19 @@ runRuntimeRealityRouteUsesCompatHelperContract() (
         printf '%s\n' "$1" >>"${callLog}"
     }
 
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime-core
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime-autoread-unset-auto-install
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime-auto-install-reality-route
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime-tempdir
 
-    cat <<'EOF' >"${TMP_DIR}/runtime-reality-route-compat-helper.expected.log"
+    cat <<'EOF' >"${TMP_DIR}/runtime-compat-helper.expected.log"
+runRuntimeAndRealityRegression
+runAutoReadUnsetAutoInstallRegression
 runAutoInstallRealityRouteRegression
+runRuntimeTempDirRegression
 EOF
 
-    cmp -s "${TMP_DIR}/runtime-reality-route-compat-helper.expected.log" "${callLog}"
+    cmp -s "${TMP_DIR}/runtime-compat-helper.expected.log" "${callLog}"
 )
 
 runRuntimeLegacyTmpDirIsolationGuardRegisteredContract() {
@@ -5552,7 +5558,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract &&
         runRegressionStep runtime-aggregate-runner-uses-suite-local-helper runRuntimeAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep runtime-aggregate-runner-uses-framework-selector-helper runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract &&
-        runRegressionStep runtime-reality-route-uses-compat-helper runRuntimeRealityRouteUsesCompatHelperContract &&
+        runRegressionStep runtime-leaves-use-compat-helper runRuntimeLeavesUseCompatHelperContract &&
         runRegressionStep runtime-legacy-tmpdir-isolation-guard-registered runRuntimeLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep reality-aggregate-runners-use-suite-local-helpers runRealityAggregateRunnersUseSuiteLocalHelpersContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&

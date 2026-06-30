@@ -12,7 +12,10 @@ runRegressionRuntimeLegacyLeafWithCompat() (
     "$@"
 )
 
+runRuntimeAndRealityCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runRuntimeAndRealityRegression; }
+runAutoReadUnsetAutoInstallCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runAutoReadUnsetAutoInstallRegression; }
 runAutoInstallRealityRouteCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runAutoInstallRealityRouteRegression; }
+runRuntimeTempDirCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runRuntimeTempDirRegression; }
 
 runRegressionRuntimeSuiteRoot() {
     if [[ "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" == "all" ]]; then
@@ -136,10 +139,10 @@ runRegressionRuntimeLegacyTmpDirIsolationRegression() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime-auto-install-reality-route
 )
 
-registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression
-registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression
+registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityCompatRegression
+registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallCompatRegression
 registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteCompatRegression
-registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression
+registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirCompatRegression
 registerRegressionFunctionLeaf regression-runtime-parallel-composition runRegressionRuntimeParallelCompositionRegression
 registerRegressionFunctionLeaf regression-runtime-legacy-tmpdir-isolation runRegressionRuntimeLegacyTmpDirIsolationRegression
 
