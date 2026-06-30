@@ -534,11 +534,10 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runTlsSuiteChildStepsContract \
         runTransactionSubscriptionChildStepsContract \
         runTargetedBatchHelpersChildStepsContract; do
-        awk -v fn="${functionName}" '
-            $0 == fn "() {" { in_fn = 1 }
-            in_fn && /runRegressionStepSequenceAssertions / { found = 1 }
-            in_fn && /^}$/ { exit(found ? 0 : 1) }
-        ' "${contractsFile}" || return 1
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runRegressionStepSequenceAssertions || return 1
     done
 
     awk '
@@ -647,6 +646,7 @@ runContractHelperAdoptionHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
+        runRegressionStepSequenceHelperAdoptionContract \
         runAggregateRunnerRegistrationHelperAdoptionContract \
         runAggregateRunnerUsesSuiteLocalHelperAdoptionContract \
         runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract \
