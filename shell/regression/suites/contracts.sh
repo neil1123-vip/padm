@@ -266,6 +266,34 @@ runAggregateRunnerDispatchesChildrenInOrderAssertions() (
     [[ "$(wc -l <"${callLog}")" -eq "${expectedCount}" ]]
 )
 
+runSelectorWaveHelpersStayAlignedAssertions() (
+    local defaultListFn=$1
+    local defaultSelectorsFile=$2
+    local defaultSortedFile=$3
+    local waveSelectorsFile=$4
+    local waveSortedFile=$5
+    shift 5
+    local waveListFn
+
+    declare -F "${defaultListFn}" >/dev/null || return 1
+    "${defaultListFn}" >"${defaultSelectorsFile}"
+    {
+        for waveListFn in "$@"; do
+            declare -F "${waveListFn}" >/dev/null || return 1
+            "${waveListFn}"
+        done
+    } >"${waveSelectorsFile}"
+
+    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
+    sort -u "${defaultSelectorsFile}" >"${defaultSelectorsFile}.unique"
+    sort "${waveSelectorsFile}" >"${waveSortedFile}"
+    sort -u "${waveSelectorsFile}" >"${waveSelectorsFile}.unique"
+
+    cmp -s "${defaultSortedFile}" "${defaultSelectorsFile}.unique"
+    cmp -s "${waveSortedFile}" "${waveSelectorsFile}.unique"
+    cmp -s "${defaultSelectorsFile}.unique" "${waveSelectorsFile}.unique"
+)
+
 runLegacyFunctionSelectorRetirementAssertions() (
     local legacyFile=$1
     local functionName=$2
@@ -4328,26 +4356,15 @@ runRoutingSelectorHelpersStayAlignedContract() (
     local waveSelectorsFile="${TMP_DIR}/routing-wave-selectors.txt"
     local waveSortedFile="${TMP_DIR}/routing-wave-selectors.sorted.txt"
 
-    declare -F listRegressionRoutingChildSelectors >/dev/null
-    declare -F listRegressionRoutingCoreChildSelectors >/dev/null
-    declare -F listRegressionRoutingHeavyChildSelectors >/dev/null
-    declare -F listRegressionRoutingLightChildSelectors >/dev/null
-
-    listRegressionRoutingChildSelectors >"${defaultSelectorsFile}"
-    {
-        listRegressionRoutingCoreChildSelectors
-        listRegressionRoutingHeavyChildSelectors
+    runSelectorWaveHelpersStayAlignedAssertions \
+        listRegressionRoutingChildSelectors \
+        "${defaultSelectorsFile}" \
+        "${defaultSortedFile}" \
+        "${waveSelectorsFile}" \
+        "${waveSortedFile}" \
+        listRegressionRoutingCoreChildSelectors \
+        listRegressionRoutingHeavyChildSelectors \
         listRegressionRoutingLightChildSelectors
-    } >"${waveSelectorsFile}"
-
-    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
-    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/routing-default-selectors.unique.txt"
-    sort "${waveSelectorsFile}" >"${waveSortedFile}"
-    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/routing-wave-selectors.unique.txt"
-
-    cmp -s "${defaultSortedFile}" "${TMP_DIR}/routing-default-selectors.unique.txt"
-    cmp -s "${waveSortedFile}" "${TMP_DIR}/routing-wave-selectors.unique.txt"
-    cmp -s "${TMP_DIR}/routing-default-selectors.unique.txt" "${TMP_DIR}/routing-wave-selectors.unique.txt"
 )
 
 runRoutingAggregateRunnerRegistrationContract() {
@@ -4511,26 +4528,15 @@ runTransactionCoreSelectorHelpersStayAlignedContract() (
     local waveSelectorsFile="${TMP_DIR}/transaction-core-wave-selectors.txt"
     local waveSortedFile="${TMP_DIR}/transaction-core-wave-selectors.sorted.txt"
 
-    declare -F listRegressionTransactionCoreChildSelectors >/dev/null
-    declare -F listRegressionTransactionCoreHeavyChildSelectors >/dev/null
-    declare -F listRegressionTransactionCoreMediumChildSelectors >/dev/null
-    declare -F listRegressionTransactionCoreLightChildSelectors >/dev/null
-
-    listRegressionTransactionCoreChildSelectors >"${defaultSelectorsFile}"
-    {
-        listRegressionTransactionCoreHeavyChildSelectors
-        listRegressionTransactionCoreMediumChildSelectors
+    runSelectorWaveHelpersStayAlignedAssertions \
+        listRegressionTransactionCoreChildSelectors \
+        "${defaultSelectorsFile}" \
+        "${defaultSortedFile}" \
+        "${waveSelectorsFile}" \
+        "${waveSortedFile}" \
+        listRegressionTransactionCoreHeavyChildSelectors \
+        listRegressionTransactionCoreMediumChildSelectors \
         listRegressionTransactionCoreLightChildSelectors
-    } >"${waveSelectorsFile}"
-
-    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
-    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/transaction-core-default-selectors.unique.txt"
-    sort "${waveSelectorsFile}" >"${waveSortedFile}"
-    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/transaction-core-wave-selectors.unique.txt"
-
-    cmp -s "${defaultSortedFile}" "${TMP_DIR}/transaction-core-default-selectors.unique.txt"
-    cmp -s "${waveSortedFile}" "${TMP_DIR}/transaction-core-wave-selectors.unique.txt"
-    cmp -s "${TMP_DIR}/transaction-core-default-selectors.unique.txt" "${TMP_DIR}/transaction-core-wave-selectors.unique.txt"
 )
 
 runTransactionCoreRegisteredChildSelectorsAlignedContract() (
@@ -5413,24 +5419,14 @@ runSubscriptionSelectorHelpersStayAlignedContract() (
     local waveSelectorsFile="${TMP_DIR}/subscription-wave-selectors.txt"
     local waveSortedFile="${TMP_DIR}/subscription-wave-selectors.sorted.txt"
 
-    declare -F listRegressionSubscriptionChildSelectors >/dev/null
-    declare -F listRegressionSubscriptionLightChildSelectors >/dev/null
-    declare -F listRegressionSubscriptionHeavyChildSelectors >/dev/null
-
-    listRegressionSubscriptionChildSelectors >"${defaultSelectorsFile}"
-    {
-        listRegressionSubscriptionLightChildSelectors
+    runSelectorWaveHelpersStayAlignedAssertions \
+        listRegressionSubscriptionChildSelectors \
+        "${defaultSelectorsFile}" \
+        "${defaultSortedFile}" \
+        "${waveSelectorsFile}" \
+        "${waveSortedFile}" \
+        listRegressionSubscriptionLightChildSelectors \
         listRegressionSubscriptionHeavyChildSelectors
-    } >"${waveSelectorsFile}"
-
-    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
-    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/subscription-default-selectors.unique.txt"
-    sort "${waveSelectorsFile}" >"${waveSortedFile}"
-    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/subscription-wave-selectors.unique.txt"
-
-    cmp -s "${defaultSortedFile}" "${TMP_DIR}/subscription-default-selectors.unique.txt"
-    cmp -s "${waveSortedFile}" "${TMP_DIR}/subscription-wave-selectors.unique.txt"
-    cmp -s "${TMP_DIR}/subscription-default-selectors.unique.txt" "${TMP_DIR}/subscription-wave-selectors.unique.txt"
 )
 
 runSubscriptionRemoteRegisteredChildSelectorsAlignedContract() (
@@ -5849,24 +5845,14 @@ runRuntimeSelectorHelpersStayAlignedContract() (
     local waveSelectorsFile="${TMP_DIR}/runtime-wave-selectors.txt"
     local waveSortedFile="${TMP_DIR}/runtime-wave-selectors.sorted.txt"
 
-    declare -F listRegressionRuntimeChildSelectors >/dev/null
-    declare -F listRegressionRuntimeLightChildSelectors >/dev/null
-    declare -F listRegressionRuntimeHeavyChildSelectors >/dev/null
-
-    listRegressionRuntimeChildSelectors >"${defaultSelectorsFile}"
-    {
-        listRegressionRuntimeLightChildSelectors
+    runSelectorWaveHelpersStayAlignedAssertions \
+        listRegressionRuntimeChildSelectors \
+        "${defaultSelectorsFile}" \
+        "${defaultSortedFile}" \
+        "${waveSelectorsFile}" \
+        "${waveSortedFile}" \
+        listRegressionRuntimeLightChildSelectors \
         listRegressionRuntimeHeavyChildSelectors
-    } >"${waveSelectorsFile}"
-
-    sort "${defaultSelectorsFile}" >"${defaultSortedFile}"
-    sort -u "${defaultSelectorsFile}" >"${TMP_DIR}/runtime-default-selectors.unique.txt"
-    sort "${waveSelectorsFile}" >"${waveSortedFile}"
-    sort -u "${waveSelectorsFile}" >"${TMP_DIR}/runtime-wave-selectors.unique.txt"
-
-    cmp -s "${defaultSortedFile}" "${TMP_DIR}/runtime-default-selectors.unique.txt"
-    cmp -s "${waveSortedFile}" "${TMP_DIR}/runtime-wave-selectors.unique.txt"
-    cmp -s "${TMP_DIR}/runtime-default-selectors.unique.txt" "${TMP_DIR}/runtime-wave-selectors.unique.txt"
 )
 
 runRuntimeAggregateRunnerRegistrationContract() {
