@@ -13,6 +13,13 @@ runRegressionPlatformFastLeafWithCompat() (
     "$@"
 )
 
+runRegressionPlatformLegacyLeafWithCompat() (
+    # Re-source legacy platform fixtures in an isolated subshell so later suite
+    # loads cannot leave source-time TMP_DIR-derived paths stale.
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"
+    "$@"
+)
+
 runRegressionPlatformUpdateSuiteRoot() {
     runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate
 }
@@ -94,23 +101,23 @@ runRegressionPlatformFastHelperIsolationRegression() (
 )
 
 runRegressionPlatformIoSuiteRoot() {
-    runRegressionStep install-tools-certificate-dependency runInstallToolsCertificateDependencyRegression &&
-        runRegressionStep install-tools-acme-result-failure runInstallToolsAcmeResultFailureRegression &&
-        runRegressionStep install-tools-acme-commit-failure runInstallToolsAcmeCommitFailureRegression &&
-        runRegressionStep install-tools-configured-log runInstallToolsUsesConfiguredInstallLogRegression &&
-        runRegressionStep install-tools-update-failure runInstallToolsUpdateFailureRegression &&
-        runRegressionStep install-tools-release-info-failure runInstallToolsReleaseInfoFailureRegression &&
-        runRegressionStep install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureRegression &&
-        runRegressionStep apt-key-install-failure runAptKeyInstallFailureRegression &&
-        runRegressionStep nginx-apt-refresh-rollback runNginxAptRepoRefreshRollbackRegression &&
-        runRegressionStep nginx-alpine-default-conf-rollback runNginxAlpineDefaultConfRollbackRegression &&
-        runRegressionStep nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureRegression &&
-        runRegressionStep base-package-batch runBasePackageBatchRegression &&
-        runRegressionStep package-rollback-failure runPackageRollbackFailureRegression &&
-        runRegressionStep package-command-stdin runPackageCommandStdinRegression &&
-        runRegressionStep reality-scanner-unsafe-dir runRealityScannerRejectsUnsafeDirRegression &&
-        runRegressionStep reality-scanner-binary runRealityScannerBinaryRegression &&
-        runRegressionStep reality-scanner-download-failure runRealityScannerDownloadFailureKeepsExistingDirRegression
+    runRegressionStep install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression &&
+        runRegressionStep install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression &&
+        runRegressionStep install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression &&
+        runRegressionStep install-tools-configured-log runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression &&
+        runRegressionStep install-tools-update-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression &&
+        runRegressionStep install-tools-release-info-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression &&
+        runRegressionStep install-tools-nginx-reinstall-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsNginxReinstallFailureRegression &&
+        runRegressionStep apt-key-install-failure runRegressionPlatformLegacyLeafWithCompat runAptKeyInstallFailureRegression &&
+        runRegressionStep nginx-apt-refresh-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAptRepoRefreshRollbackRegression &&
+        runRegressionStep nginx-alpine-default-conf-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAlpineDefaultConfRollbackRegression &&
+        runRegressionStep nginx-yum-mainline-enable-failure runRegressionPlatformLegacyLeafWithCompat runNginxYumMainlineEnableFailureRegression &&
+        runRegressionStep base-package-batch runRegressionPlatformLegacyLeafWithCompat runBasePackageBatchRegression &&
+        runRegressionStep package-rollback-failure runRegressionPlatformLegacyLeafWithCompat runPackageRollbackFailureRegression &&
+        runRegressionStep package-command-stdin runRegressionPlatformLegacyLeafWithCompat runPackageCommandStdinRegression &&
+        runRegressionStep reality-scanner-unsafe-dir runRegressionPlatformLegacyLeafWithCompat runRealityScannerRejectsUnsafeDirRegression &&
+        runRegressionStep reality-scanner-binary runRegressionPlatformLegacyLeafWithCompat runRealityScannerBinaryRegression &&
+        runRegressionStep reality-scanner-download-failure runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression
 }
 
 registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot

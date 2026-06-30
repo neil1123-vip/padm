@@ -1699,6 +1699,46 @@ EOF
     cmp -s "${TMP_DIR}/platform-hot-fast-compat-helper.expected.log" "${callLog}"
 )
 
+runPlatformIoLeavesUseLegacyCompatHelperContract() (
+    local callLog="${TMP_DIR}/platform-io-legacy-compat-helper.log"
+
+    : >"${callLog}"
+
+    runRegressionStep() {
+        local _name=$1
+        shift
+        "$@"
+    }
+
+    runRegressionPlatformLegacyLeafWithCompat() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    runRegressionPlatformIoSuiteRoot
+
+    cat <<'EOF' >"${TMP_DIR}/platform-io-legacy-compat-helper.expected.log"
+runInstallToolsCertificateDependencyRegression
+runInstallToolsAcmeResultFailureRegression
+runInstallToolsAcmeCommitFailureRegression
+runInstallToolsUsesConfiguredInstallLogRegression
+runInstallToolsUpdateFailureRegression
+runInstallToolsReleaseInfoFailureRegression
+runInstallToolsNginxReinstallFailureRegression
+runAptKeyInstallFailureRegression
+runNginxAptRepoRefreshRollbackRegression
+runNginxAlpineDefaultConfRollbackRegression
+runNginxYumMainlineEnableFailureRegression
+runBasePackageBatchRegression
+runPackageRollbackFailureRegression
+runPackageCommandStdinRegression
+runRealityScannerRejectsUnsafeDirRegression
+runRealityScannerBinaryRegression
+runRealityScannerDownloadFailureKeepsExistingDirRegression
+EOF
+
+    cmp -s "${TMP_DIR}/platform-io-legacy-compat-helper.expected.log" "${callLog}"
+)
+
 runPlatformFastHelperIsolationGuardRegisteredContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
     local fastFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
@@ -5408,6 +5448,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract &&
         runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract &&
         runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract &&
+        runRegressionStep platform-io-leaves-use-legacy-compat-helper runPlatformIoLeavesUseLegacyCompatHelperContract &&
         runRegressionStep platform-fast-helper-isolation-guard-registered runPlatformFastHelperIsolationGuardRegisteredContract &&
         runRegressionStep platform-update-child-steps runPlatformUpdateChildStepsContract &&
         runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract &&

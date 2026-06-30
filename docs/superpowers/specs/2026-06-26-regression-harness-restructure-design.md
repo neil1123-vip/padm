@@ -119,6 +119,13 @@ legacy isolation boundary used by the dedicated reality suite.
 
 These leaves run through isolated compat wrappers that re-source `subscription_groups_fast.sh` in a subshell. The goal is to prevent later suite loads from mutating source-time fast fixture state.
 
+`platform-io` remains a sequential suite root, but its legacy-backed install-tools,
+package, and reality-scanner leaves now also run through a suite-local compat helper
+that re-sources `subscription_groups_legacy.sh` in a subshell before each step.
+That keeps the public `platform-io` selector on suite-owned dispatch while aligning
+its leaf isolation boundary with the other suites that already defend source-time
+`TMP_DIR`-derived state.
+
 ### Subscription
 
 `subscription` has been decomposed into selector groups instead of monolithic legacy case branches.
@@ -469,6 +476,11 @@ These wrappers intentionally re-source legacy or fast bootstrap files inside an 
 - `readInstallType`-dependent state
 - fixture helper function bindings
 - `PADM_SUBSCRIPTION_GROUPS_DIR`
+
+The platform suite now uses both sides of that pattern:
+
+- fast-backed wrappers for `platform-hot` and the public `platform` root
+- legacy-backed wrappers for `platform-io`
 
 ## Contracts and Verification Strategy
 
