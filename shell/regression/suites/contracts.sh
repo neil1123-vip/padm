@@ -1926,6 +1926,7 @@ runFastSuiteUsesFunctionRegistryContract() {
 
 runPlatformSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local status=0
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
@@ -1950,6 +1951,31 @@ runPlatformSuiteUsesFunctionRegistryContract() {
     ! grep -q 'declare -f runRegressionPlatform' "${suiteFile}"
     ! grep -q 'declare -f runRegressionPlatformIo' "${suiteFile}"
     ! grep -q '^eval ' "${suiteFile}"
+
+    while read -r selector helper regression; do
+        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${helper} ${regression}\$" "${suiteFile}" || status=1
+    done <<'EOF'
+install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
+install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
+install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
+install-tools-configured-log runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression
+install-tools-update-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression
+install-tools-release-info-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression
+install-tools-nginx-reinstall-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsNginxReinstallFailureRegression
+apt-key-install-failure runRegressionPlatformLegacyLeafWithCompat runAptKeyInstallFailureRegression
+nginx-apt-refresh-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAptRepoRefreshRollbackRegression
+nginx-alpine-default-conf-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAlpineDefaultConfRollbackRegression
+nginx-yum-mainline-enable-failure runRegressionPlatformLegacyLeafWithCompat runNginxYumMainlineEnableFailureRegression
+base-package-batch runRegressionPlatformLegacyLeafWithCompat runBasePackageBatchRegression
+package-rollback-failure runRegressionPlatformLegacyLeafWithCompat runPackageRollbackFailureRegression
+package-command-stdin runRegressionPlatformLegacyLeafWithCompat runPackageCommandStdinRegression
+reality-scanner-unsafe-dir runRegressionPlatformLegacyLeafWithCompat runRealityScannerRejectsUnsafeDirRegression
+reality-scanner-binary runRegressionPlatformLegacyLeafWithCompat runRealityScannerBinaryRegression
+reality-scanner-download-failure runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression
+EOF
+
+    return "${status}"
 }
 
 runPlatformPublicSelectorRetirementContract() {
@@ -2090,6 +2116,35 @@ EOF
 
     cmp -s "${TMP_DIR}/platform-io-legacy-compat-helper.expected.log" "${callLog}"
 )
+
+runPlatformIoNoCompatWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        ! grep -q "^${wrapperName}() { runRegressionPlatformLegacyLeafWithCompat " "${suiteFile}" || status=1
+    done <<'EOF'
+runInstallToolsCertificateDependencyCompatRegression
+runInstallToolsAcmeResultFailureCompatRegression
+runInstallToolsAcmeCommitFailureCompatRegression
+runInstallToolsConfiguredLogCompatRegression
+runInstallToolsUpdateFailureCompatRegression
+runInstallToolsReleaseInfoFailureCompatRegression
+runInstallToolsNginxReinstallFailureCompatRegression
+runAptKeyInstallFailureCompatRegression
+runNginxAptRefreshRollbackCompatRegression
+runNginxAlpineDefaultConfRollbackCompatRegression
+runNginxYumMainlineEnableFailureCompatRegression
+runBasePackageBatchCompatRegression
+runPackageRollbackFailureCompatRegression
+runPackageCommandStdinCompatRegression
+runRealityScannerUnsafeDirCompatRegression
+runRealityScannerBinaryCompatRegression
+runRealityScannerDownloadFailureCompatRegression
+EOF
+
+    return "${status}"
+}
 
 runPlatformFastHelperIsolationGuardRegisteredContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
@@ -3105,30 +3160,30 @@ runPlatformIoDirectLeafSelectorsUseFunctionRegistryContract() {
     local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
     local status=0
 
-    while read -r selector runner; do
+    while read -r selector helper regression; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${helper} ${regression}\$" "${suiteFile}" || status=1
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
         ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
         [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
     done <<'EOF'
-install-tools-certificate-dependency runInstallToolsCertificateDependencyCompatRegression
-install-tools-acme-result-failure runInstallToolsAcmeResultFailureCompatRegression
-install-tools-acme-commit-failure runInstallToolsAcmeCommitFailureCompatRegression
-install-tools-configured-log runInstallToolsConfiguredLogCompatRegression
-install-tools-update-failure runInstallToolsUpdateFailureCompatRegression
-install-tools-release-info-failure runInstallToolsReleaseInfoFailureCompatRegression
-install-tools-nginx-reinstall-failure runInstallToolsNginxReinstallFailureCompatRegression
-apt-key-install-failure runAptKeyInstallFailureCompatRegression
-nginx-apt-refresh-rollback runNginxAptRefreshRollbackCompatRegression
-nginx-alpine-default-conf-rollback runNginxAlpineDefaultConfRollbackCompatRegression
-nginx-yum-mainline-enable-failure runNginxYumMainlineEnableFailureCompatRegression
-base-package-batch runBasePackageBatchCompatRegression
-package-rollback-failure runPackageRollbackFailureCompatRegression
-package-command-stdin runPackageCommandStdinCompatRegression
-reality-scanner-unsafe-dir runRealityScannerUnsafeDirCompatRegression
-reality-scanner-binary runRealityScannerBinaryCompatRegression
-reality-scanner-download-failure runRealityScannerDownloadFailureCompatRegression
+install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
+install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
+install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
+install-tools-configured-log runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression
+install-tools-update-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression
+install-tools-release-info-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression
+install-tools-nginx-reinstall-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsNginxReinstallFailureRegression
+apt-key-install-failure runRegressionPlatformLegacyLeafWithCompat runAptKeyInstallFailureRegression
+nginx-apt-refresh-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAptRepoRefreshRollbackRegression
+nginx-alpine-default-conf-rollback runRegressionPlatformLegacyLeafWithCompat runNginxAlpineDefaultConfRollbackRegression
+nginx-yum-mainline-enable-failure runRegressionPlatformLegacyLeafWithCompat runNginxYumMainlineEnableFailureRegression
+base-package-batch runRegressionPlatformLegacyLeafWithCompat runBasePackageBatchRegression
+package-rollback-failure runRegressionPlatformLegacyLeafWithCompat runPackageRollbackFailureRegression
+package-command-stdin runRegressionPlatformLegacyLeafWithCompat runPackageCommandStdinRegression
+reality-scanner-unsafe-dir runRegressionPlatformLegacyLeafWithCompat runRealityScannerRejectsUnsafeDirRegression
+reality-scanner-binary runRegressionPlatformLegacyLeafWithCompat runRealityScannerBinaryRegression
+reality-scanner-download-failure runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression
 EOF
 
     return "${status}"
