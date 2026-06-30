@@ -152,6 +152,16 @@ runRegressionSubscriptionStateQuota() {
         listRegressionSubscriptionStateQuotaChildSelectors
 }
 
+listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors() {
+    printf '%s\n' \
+        subscription-state-remote-restore-self-reference-plan \
+        subscription-state-remote-restore-self-reference-sync
+}
+
+runRegressionSubscriptionStateRemoteRestoreSelfReference() {
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors
+}
+
 runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated() {
     runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference
 }

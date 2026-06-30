@@ -417,6 +417,10 @@ their serial child selectors through `runFrameworkSequentialRegressionSelectorLi
 - `subscription-state-quota-menu-tx`
 - `subscription-state-quota-partial-sync`
 
+Within `subscription-state-remote-restore`, the
+`subscription-state-remote-restore-self-reference` wrapper now also dispatches its
+serial child selectors through `runFrameworkSequentialRegressionSelectorList`.
+
 Those nested public aggregates now also live in the suite layer instead of the legacy-backed full script:
 
 - `subscription-state-structure-foundation`

@@ -823,6 +823,7 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateQuotaTrafficChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaPartialSyncChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateSyncRollbackFailureChildSelectors >/dev/null
 
@@ -886,6 +887,9 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-quota-partial-sync-plan \
         subscription-state-quota-partial-sync-config \
         subscription-state-quota-partial-sync-serial
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors remote-restore-self-reference \
+        subscription-state-remote-restore-self-reference-plan \
+        subscription-state-remote-restore-self-reference-sync
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreChildSelectors remote-restore \
         subscription-state-remote-restore-self-reference \
         subscription-state-remote-restore-state-write \
@@ -919,6 +923,7 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors \
         listRegressionSubscriptionStateQuotaPartialSyncChildSelectors \
         runRegressionSubscriptionStateQuota \
+        listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors \
         runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
         runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
         runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated \
@@ -1044,6 +1049,21 @@ runSubscriptionStateQuotaPartialSyncChildStepsContract() {
     grep -qx 'dispatch:subscription-state-quota-partial-sync-plan' "${callLog}"
     grep -qx 'dispatch:subscription-state-quota-partial-sync-config' "${callLog}"
     grep -qx 'dispatch:subscription-state-quota-partial-sync-serial' "${callLog}"
+}
+
+runSubscriptionStateRemoteRestoreSelfReferenceChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-remote-restore-self-reference-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state-remote-restore-self-reference-plan' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors
+    grep -qx 'dispatch:subscription-state-remote-restore-self-reference-sync' "${callLog}"
 }
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
@@ -5685,6 +5705,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-quota-traffic-child-steps runSubscriptionStateQuotaTrafficChildStepsContract &&
         runRegressionStep subscription-state-quota-menu-tx-child-steps runSubscriptionStateQuotaMenuTransactionChildStepsContract &&
         runRegressionStep subscription-state-quota-partial-sync-child-steps runSubscriptionStateQuotaPartialSyncChildStepsContract &&
+        runRegressionStep subscription-state-remote-restore-self-reference-child-steps runSubscriptionStateRemoteRestoreSelfReferenceChildStepsContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract &&
