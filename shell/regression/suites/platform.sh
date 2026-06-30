@@ -60,11 +60,6 @@ listRegressionPlatformIoChildSelectors() {
         reality-scanner-download-failure
 }
 
-runRegressionPlatformHotSuiteRoot() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" \
-        listRegressionPlatformHotChildSelectors
-}
-
 runRegressionPlatformSuiteRoot() {
     runRegressionPlatformFastLeafWithCompat runRegressionPlatform
 }
@@ -74,26 +69,29 @@ runRegressionPlatformHotParallelCompositionRegression() (
     local callLog="${TMP_DIR}/regression-platform-hot-parallel-composition.log"
 
     : >"${callLog}"
+    rm -f "${TMP_DIR}/platform-refresh-started"
 
-    runRegressionPlatformUpdateSuiteRoot() {
-        printf 'update-start\n' >>"${callLog}"
+    runRegressionAllSelector() {
+        local selector=$1
+
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "platform-update" ]]; then
+            printf 'update-start\n' >>"${callLog}"
+        elif [[ "${selector}" == "platform-refresh" ]]; then
+            printf 'refresh-start\n' >>"${callLog}"
+            : >"${TMP_DIR}/platform-refresh-started"
+        fi
         while [[ ! -f "${TMP_DIR}/platform-refresh-started" ]]; do
             sleep 0.05
+            [[ "${selector}" == "platform-update" ]] || break
         done
-        printf 'update-finish\n' >>"${callLog}"
+        if [[ "${selector}" == "platform-update" ]]; then
+            printf 'update-finish\n' >>"${callLog}"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    runRegressionPlatformRefreshSuiteRoot() {
-        printf 'refresh-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/platform-refresh-started"
-        printf 'refresh-finish\n' >>"${callLog}"
-    }
-
-    runRegressionPlatformRestSuiteRoot() {
-        printf 'rest\n' >>"${callLog}"
-    }
-
-    runRegressionPlatformHotSuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegisteredRegressionMain platform-hot
     grep -qx 'update-start' "${callLog}"
     grep -qx 'refresh-start' "${callLog}"
     awk '
@@ -149,5 +147,10 @@ registerRegressionFunctionLeaf reality-scanner-download-failure runRegressionPla
 registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
 registerRegressionFunctionLeaf regression-platform-fast-helper-isolation runRegressionPlatformFastHelperIsolationRegression
 
-registerRegressionAggregateRunnerParallel platform-hot runRegressionPlatformHotSuiteRoot \
+registerRegressionAggregateRunnerParallelWithArgs \
+    platform-hot \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" \
+    listRegressionPlatformHotChildSelectors \
+    -- \
     $(listRegressionPlatformHotChildSelectors)

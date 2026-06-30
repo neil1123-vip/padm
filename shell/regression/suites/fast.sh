@@ -9,11 +9,6 @@ listRegressionFastOnlyOutputChildSelectors() {
         fast-only-output-rest
 }
 
-runRegressionFastOnlyOutputSuiteRoot() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" \
-        listRegressionFastOnlyOutputChildSelectors
-}
-
 runRegressionFastOnlyCoreSuiteRoot() {
     runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
         runRegressionStep check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression &&
@@ -41,20 +36,10 @@ listRegressionFastOnlyChildSelectors() {
         fast-only-core
 }
 
-runRegressionFastOnlySuiteRoot() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" \
-        listRegressionFastOnlyChildSelectors
-}
-
 listRegressionFastChildSelectors() {
     printf '%s\n' \
         platform-hot \
         fast-only
-}
-
-runRegressionFastSuiteRoot() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" \
-        listRegressionFastChildSelectors
 }
 
 runRegressionFastParallelCompositionRegression() (
@@ -62,22 +47,29 @@ runRegressionFastParallelCompositionRegression() (
     local callLog="${TMP_DIR}/regression-fast-parallel-composition.log"
 
     : >"${callLog}"
+    rm -f "${TMP_DIR}/fast-only-started"
 
-    runRegressionPlatformSuiteRoot() {
-        printf 'platform-start\n' >>"${callLog}"
+    runRegressionAllSelector() {
+        local selector=$1
+
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "platform-hot" ]]; then
+            printf 'platform-start\n' >>"${callLog}"
+        elif [[ "${selector}" == "fast-only" ]]; then
+            printf 'fast-only-start\n' >>"${callLog}"
+            : >"${TMP_DIR}/fast-only-started"
+        fi
         while [[ ! -f "${TMP_DIR}/fast-only-started" ]]; do
             sleep 0.05
+            [[ "${selector}" == "platform-hot" ]] || break
         done
-        printf 'platform-finish\n' >>"${callLog}"
+        if [[ "${selector}" == "platform-hot" ]]; then
+            printf 'platform-finish\n' >>"${callLog}"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    runRegressionFastOnlySuiteRoot() {
-        printf 'fast-only-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/fast-only-started"
-        printf 'fast-only-finish\n' >>"${callLog}"
-    }
-
-    runRegressionFastSuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegisteredRegressionMain fast
     grep -qx 'platform-start' "${callLog}"
     grep -qx 'fast-only-start' "${callLog}"
     awk '
@@ -93,26 +85,29 @@ runRegressionFastOnlyParallelCompositionRegression() (
     local callLog="${TMP_DIR}/regression-fast-only-parallel-composition.log"
 
     : >"${callLog}"
+    rm -f "${TMP_DIR}/fast-only-output-started"
 
-    runRegressionFastOnlySafety() {
-        printf 'safety-start\n' >>"${callLog}"
+    runRegressionAllSelector() {
+        local selector=$1
+
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "fast-only-safety" ]]; then
+            printf 'safety-start\n' >>"${callLog}"
+        elif [[ "${selector}" == "fast-only-output" ]]; then
+            printf 'output-start\n' >>"${callLog}"
+            : >"${TMP_DIR}/fast-only-output-started"
+        fi
         while [[ ! -f "${TMP_DIR}/fast-only-output-started" ]]; do
             sleep 0.05
+            [[ "${selector}" == "fast-only-safety" ]] || break
         done
-        printf 'safety-finish\n' >>"${callLog}"
+        if [[ "${selector}" == "fast-only-safety" ]]; then
+            printf 'safety-finish\n' >>"${callLog}"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    runRegressionFastOnlyOutputSuiteRoot() {
-        printf 'output-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/fast-only-output-started"
-        printf 'output-finish\n' >>"${callLog}"
-    }
-
-    runRegressionFastOnlyCoreSuiteRoot() {
-        printf 'core\n' >>"${callLog}"
-    }
-
-    runRegressionFastOnlySuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegisteredRegressionMain fast-only
     grep -qx 'safety-start' "${callLog}"
     grep -qx 'output-start' "${callLog}"
     awk '
@@ -128,22 +123,29 @@ runRegressionFastOnlyOutputParallelCompositionRegression() (
     local callLog="${TMP_DIR}/regression-fast-only-output-parallel-composition.log"
 
     : >"${callLog}"
+    rm -f "${TMP_DIR}/fast-only-subscription-started"
 
-    runRegressionFastOnlyOutputAutoInstall() {
-        printf 'auto-install-start\n' >>"${callLog}"
+    runRegressionAllSelector() {
+        local selector=$1
+
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "fast-only-output-auto-install" ]]; then
+            printf 'auto-install-start\n' >>"${callLog}"
+        elif [[ "${selector}" == "fast-only-output-rest" ]]; then
+            printf 'rest-start\n' >>"${callLog}"
+            : >"${TMP_DIR}/fast-only-subscription-started"
+        fi
         while [[ ! -f "${TMP_DIR}/fast-only-subscription-started" ]]; do
             sleep 0.05
+            [[ "${selector}" == "fast-only-output-auto-install" ]] || break
         done
-        printf 'auto-install-finish\n' >>"${callLog}"
+        if [[ "${selector}" == "fast-only-output-auto-install" ]]; then
+            printf 'auto-install-finish\n' >>"${callLog}"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    runRegressionFastOnlyOutputRest() {
-        printf 'rest-start\n' >>"${callLog}"
-        : >"${TMP_DIR}/fast-only-subscription-started"
-        printf 'rest-finish\n' >>"${callLog}"
-    }
-
-    runRegressionFastOnlyOutputSuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegisteredRegressionMain fast-only-output
     grep -qx 'auto-install-start' "${callLog}"
     grep -qx 'rest-start' "${callLog}"
     awk '
@@ -162,13 +164,28 @@ registerRegressionFunctionLeaf regression-fast-parallel-composition runRegressio
 registerRegressionFunctionLeaf regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression
 registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression
 
-registerRegressionAggregateRunnerParallel fast-only-output runRegressionFastOnlyOutputSuiteRoot \
+registerRegressionAggregateRunnerParallelWithArgs \
+    fast-only-output \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" \
+    listRegressionFastOnlyOutputChildSelectors \
+    -- \
     $(listRegressionFastOnlyOutputChildSelectors)
 
-registerRegressionAggregateRunnerParallel fast-only runRegressionFastOnlySuiteRoot \
+registerRegressionAggregateRunnerParallelWithArgs \
+    fast-only \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" \
+    listRegressionFastOnlyChildSelectors \
+    -- \
     $(listRegressionFastOnlyChildSelectors)
 
-registerRegressionAggregateRunnerParallel fast runRegressionFastSuiteRoot \
+registerRegressionAggregateRunnerParallelWithArgs \
+    fast \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" \
+    listRegressionFastChildSelectors \
+    -- \
     $(listRegressionFastChildSelectors)
 
 listRegressionFastRealityChildSelectors() {
