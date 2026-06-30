@@ -4281,13 +4281,13 @@ runRealitySuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-config runRealityConfigRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-config runRealityConfigCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
 }
@@ -4642,15 +4642,15 @@ runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
 
     : >"${callLog}"
 
-    runRealityCandidateFastRegression() {
+    runRealityCandidateFastCompatRegression() {
         printf 'reality-candidates-fast\n' >>"${callLog}"
     }
 
-    runRealityAsnScanPlanRegression() {
+    runRealityAsnScanPlanCompatRegression() {
         printf 'reality-asn-scan-plan\n' >>"${callLog}"
     }
 
-    runRealityCandidateFullRegression() {
+    runRealityCandidateFullCompatRegression() {
         printf 'reality-candidates-full\n' >>"${callLog}"
     }
 
@@ -4683,11 +4683,11 @@ runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
 
     : >"${callLog}"
 
-    runRealityStreamEnableRegression() {
+    runRealityStreamEnableCompatRegression() {
         printf 'reality-stream-enable\n' >>"${callLog}"
     }
 
-    runRealityStreamDisableRegression() {
+    runRealityStreamDisableCompatRegression() {
         printf 'reality-stream-disable\n' >>"${callLog}"
     }
 
@@ -4698,6 +4698,46 @@ runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
         reality-stream-enable \
         reality-stream-disable
 )
+
+runRealityLeavesUseCompatHelperContract() (
+    local callLog="${TMP_DIR}/reality-compat-helper.log"
+
+    : >"${callLog}"
+
+    runRegressionRealityLegacyLeafWithCompat() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-candidates-fast
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-asn-scan-plan
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-candidates-full
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-stream-enable
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-stream-disable
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-config
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-profile-failure
+
+    cat <<'EOF' >"${TMP_DIR}/reality-compat-helper.expected.log"
+runRealityCandidateFastRegression
+runRealityAsnScanPlanRegression
+runRealityCandidateFullRegression
+runRealityStreamEnableRegression
+runRealityStreamDisableRegression
+runRealityConfigRegression
+runRealityProfileFailureRegression
+EOF
+
+    cmp -s "${TMP_DIR}/reality-compat-helper.expected.log" "${callLog}"
+)
+
+runRealityLegacyTmpDirIsolationGuardRegisteredContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
+
+    grep -q '^runRegressionRealityLegacyTmpDirIsolationRegression() ($' "${suiteFile}" || return 1
+    grep -q '^    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-config$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf regression-reality-legacy-tmpdir-isolation runRegressionRealityLegacyTmpDirIsolationRegression$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerSequential reality-candidates .*regression-reality-legacy-tmpdir-isolation' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerSequential reality-stream .*regression-reality-legacy-tmpdir-isolation' "${suiteFile}" || return 1
+}
 
 runRuntimeSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/runtime-default-selectors.txt"
@@ -5214,6 +5254,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
         runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
         runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract &&
+        runRegressionStep reality-leaves-use-compat-helper runRealityLeavesUseCompatHelperContract &&
+        runRegressionStep reality-legacy-tmpdir-isolation-guard-registered runRealityLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep runtime-suite-uses-function-registry runRuntimeSuiteUsesFunctionRegistryContract &&
         runRegressionStep runtime-legacy-public-selector-retirement runRuntimeLegacyPublicSelectorRetirementContract &&
         runRegressionStep runtime-suite-child-steps runRuntimeSuiteChildStepsContract &&
