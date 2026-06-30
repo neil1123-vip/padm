@@ -404,10 +404,10 @@ The core subtree fans out through selector-list orchestration over:
 - `subscription-state-quota`
 - `subscription-state-remote-restore`
 
-Within `subscription-state-structure`, the `subscription-state-structure-source`
-wrapper now also dispatches its serial child selectors through
-`runFrameworkSequentialRegressionSelectorList`, instead of jumping straight to the
-legacy full-script `...-serial` runner.
+Within `subscription-state-structure`, the `subscription-state-structure-migration`
+and `subscription-state-structure-source` wrappers now also dispatch their child
+selectors through `runFrameworkSequentialRegressionSelectorList`, instead of jumping
+straight to the legacy full-script `...-serial` runners.
 
 Inside that core subtree, the `subscription-state-quota` branch now keeps its
 top-level aggregate-runner shape, but its three suite-local wrappers dispatch

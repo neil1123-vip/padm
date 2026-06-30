@@ -54,8 +54,13 @@ runRegressionSubscriptionStateStructureFoundationIsolated() {
     runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation
 }
 
+listRegressionSubscriptionStateStructureMigrationChildSelectors() {
+    printf '%s\n' \
+        subscription-state-structure-migration-serial
+}
+
 runRegressionSubscriptionStateStructureMigration() {
-    runRegressionStep subscription-state-structure-migration runSubscriptionGroupStateStructureMigrationRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateStructureMigrationChildSelectors
 }
 
 runRegressionSubscriptionStateStructureMigrationIsolated() {
@@ -419,6 +424,7 @@ registerRegressionFunctionLeaf subscription-state-structure-foundation-normalize
 registerRegressionFunctionLeaf subscription-state-structure-foundation-init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
 registerRegressionFunctionLeaf subscription-state-structure-foundation-serial runRegressionSubscriptionStateStructureFoundationSerial
 registerRegressionFunctionLeaf subscription-state-structure-migration runRegressionSubscriptionStateStructureMigration
+registerRegressionFunctionLeaf subscription-state-structure-migration-serial runRegressionSubscriptionStateStructureMigrationSerial
 registerRegressionFunctionLeaf subscription-state-structure-source runRegressionSubscriptionStateStructureSource
 registerRegressionFunctionLeaf subscription-state-structure-source-credential runRegressionSubscriptionStateStructureSourceCredential
 registerRegressionFunctionLeaf subscription-state-structure-source-status runRegressionSubscriptionStateStructureSourceStatus

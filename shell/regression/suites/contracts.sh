@@ -817,6 +817,7 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureFoundationChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateStructureMigrationChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureSourceChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaTrafficChildSelectors >/dev/null
@@ -860,6 +861,8 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-structure-foundation \
         subscription-state-structure-migration \
         subscription-state-structure-source
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureMigrationChildSelectors structure-migration \
+        subscription-state-structure-migration-serial
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureSourceChildSelectors structure-source \
         subscription-state-structure-source-credential \
         subscription-state-structure-source-status \
@@ -904,6 +907,7 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionSubscriptionStateStructureFoundationChildSelectors \
         runRegressionSubscriptionStateStructureFoundation \
         runRegressionSubscriptionStateStructureFoundationIsolated \
+        listRegressionSubscriptionStateStructureMigrationChildSelectors \
         runRegressionSubscriptionStateStructureMigrationIsolated \
         listRegressionSubscriptionStateStructureSourceChildSelectors \
         runRegressionSubscriptionStateStructureSourceIsolated \
@@ -976,6 +980,20 @@ runSubscriptionStateStructureSourceChildStepsContract() {
     grep -qx 'dispatch:subscription-state-structure-source-status' "${callLog}"
     grep -qx 'dispatch:subscription-state-structure-source-remove' "${callLog}"
     grep -qx 'dispatch:subscription-state-structure-source-serial' "${callLog}"
+}
+
+runSubscriptionStateStructureMigrationChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-structure-migration-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state-structure-migration-serial' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateStructureMigrationChildSelectors
 }
 
 runSubscriptionStateQuotaTrafficChildStepsContract() {
@@ -5662,6 +5680,11 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-nested-selector-helpers-are-suite-owned runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract &&
         runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract &&
+        runRegressionStep subscription-state-structure-source-child-steps runSubscriptionStateStructureSourceChildStepsContract &&
+        runRegressionStep subscription-state-structure-migration-child-steps runSubscriptionStateStructureMigrationChildStepsContract &&
+        runRegressionStep subscription-state-quota-traffic-child-steps runSubscriptionStateQuotaTrafficChildStepsContract &&
+        runRegressionStep subscription-state-quota-menu-tx-child-steps runSubscriptionStateQuotaMenuTransactionChildStepsContract &&
+        runRegressionStep subscription-state-quota-partial-sync-child-steps runSubscriptionStateQuotaPartialSyncChildStepsContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract &&

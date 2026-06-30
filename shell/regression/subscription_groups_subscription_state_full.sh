@@ -1742,6 +1742,10 @@ runRegressionSubscriptionStateStructureFoundationSerial() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
 }
 
+runRegressionSubscriptionStateStructureMigrationSerial() {
+    runRegressionStep subscription-state-structure-migration-serial runSubscriptionGroupStateStructureMigrationRegression
+}
+
 runRegressionSubscriptionStateStructureSourceCredential() {
     runRegressionStep subscription-state-structure-source-credential runSubscriptionGroupStateStructureSourceCredentialRegression
 }
