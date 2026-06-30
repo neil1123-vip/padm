@@ -812,6 +812,8 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateCoreSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}"
@@ -837,6 +839,16 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \\' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-state-support runRegressionSubscriptionStateSupport$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}"
+}
+
+runSubscriptionStateNoEmptyAggregateWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
+
+    ! grep -Eq '^runRegressionSubscriptionStateCoreSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateCoreSuiteRoot\(\)[[:space:]]*[({]' "${scriptFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateSuiteRoot\(\)[[:space:]]*[({]' "${scriptFile}" || return 1
 }
 
 runSubscriptionStateSelectorHelpersStayAlignedContract() (
@@ -1190,12 +1202,12 @@ runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-core ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel subscription-state-core \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCoreSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCore \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionStateCoreChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         subscription-state-core \
         parallel \
-        runRegressionSubscriptionStateCoreSuiteRoot \
+        runRegressionSubscriptionStateCore \
         "${expectedChildren}"
 }
 
@@ -1205,12 +1217,12 @@ runSubscriptionStateAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf subscription-state ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel subscription-state \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionStateSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionState \\' "${suiteFile}"
     expectedChildren=$(listRegressionSubscriptionStateChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         subscription-state \
         parallel \
-        runRegressionSubscriptionStateSuiteRoot \
+        runRegressionSubscriptionState \
         "${expectedChildren}"
 }
 
@@ -6089,6 +6101,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
         runRegressionStep legacy-regression-scripts-retire-internal-cli runLegacyRegressionScriptsRetireInternalCliContract &&
         runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
+        runRegressionStep subscription-state-no-empty-aggregate-wrapper-functions runSubscriptionStateNoEmptyAggregateWrapperFunctionsContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-state-nested-selector-helpers-are-suite-owned runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract &&

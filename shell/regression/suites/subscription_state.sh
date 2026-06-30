@@ -10,17 +10,9 @@ runRegressionSubscriptionStateCore() {
         listRegressionSubscriptionStateCoreChildSelectors
 }
 
-runRegressionSubscriptionStateCoreSuiteRoot() {
-    runRegressionSubscriptionStateCore
-}
-
 runRegressionSubscriptionState() {
     runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-default-${BASHPID:-$$}" \
         listRegressionSubscriptionStateChildSelectors
-}
-
-runRegressionSubscriptionStateSuiteRoot() {
-    runRegressionSubscriptionState
 }
 
 runSubscriptionStateParallelChildRegressionIsolated() (
@@ -592,7 +584,7 @@ registerRegressionAggregateRunnerParallel subscription-state-remote-restore runR
 registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \
     $(listRegressionSubscriptionStateSyncRollbackFailureChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCoreSuiteRoot \
+registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCore \
     $(listRegressionSubscriptionStateCoreChildSelectors)
-registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionStateSuiteRoot \
+registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionState \
     $(listRegressionSubscriptionStateChildSelectors)
