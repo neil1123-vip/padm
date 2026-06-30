@@ -5,6 +5,13 @@ REGRESSION_UI_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"
 
+runRegressionUiLegacyLeafWithCompat() (
+    # Re-source legacy UI fixtures in an isolated subshell so parallel menu-smoke
+    # leaves do not share source-time TMP_DIR-derived state directories.
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"
+    "$@"
+)
+
 runRegressionUiSmokeSuiteRoot() {
     local actions=
     local output=
@@ -89,8 +96,25 @@ runRegressionUiSmokeSuiteRoot() {
 }
 
 runRegressionMenuSmokeFull() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" \
+    runUiSelectorListRegression \
+        "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" \
         listRegressionUiFullChildSelectors
+}
+
+runUiSelectorListRegression() {
+    local orchestrationRoot=$1
+    local selectorListFn=$2
+
+    runFrameworkParallelRegressionSelectorList "${orchestrationRoot}" "${selectorListFn}"
+}
+
+runUiLeafSelectorListRegression() {
+    local orchestrationRoot=$1
+    local selectorListFn=$2
+    local defaultJobs=$3
+
+    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-${defaultJobs}}}" \
+        runUiSelectorListRegression "${orchestrationRoot}" "${selectorListFn}"
 }
 
 listRegressionUiFullChildSelectors() {
@@ -135,36 +159,42 @@ listRegressionUiFullSubscriptionMainPublishSyncChildSelectors() {
 }
 
 runRegressionWireGuardMenuFlow() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
+    runUiSelectorListRegression \
+        "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
         listRegressionWireGuardMenuFlowChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
+    runUiSelectorListRegression \
+        "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
         listRegressionWireGuardMenuFlowPeerTransactionChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
+    runUiSelectorListRegression \
+        "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
         listRegressionWireGuardMenuFlowPeerRollbackChildSelectors
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors
+    runUiLeafSelectorListRegression \
+        "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors \
+        2
 }
 
 runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors
+    runUiLeafSelectorListRegression \
+        "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors \
+        2
 }
 
 runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors
+    runUiLeafSelectorListRegression \
+        "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
+        listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors \
+        3
 }
 
 listRegressionWireGuardMenuFlowChildSelectors() {
@@ -212,25 +242,29 @@ listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors() {
 }
 
 runRegressionUiFullSubscriptionMain() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-parallel-${BASHPID:-$$}" \
+    runUiSelectorListRegression \
+        "${TMP_DIR}/ui-full-subscription-main-parallel-${BASHPID:-$$}" \
         listRegressionUiFullSubscriptionMainChildSelectors
 }
 
 runRegressionUiFullSubscriptionMainPublish() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
+    runUiSelectorListRegression \
+        "${TMP_DIR}/ui-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
         listRegressionUiFullSubscriptionMainPublishChildSelectors
 }
 
 runRegressionUiFullSubscriptionMainPublishUser() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-3}}" \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
-            listRegressionUiFullSubscriptionMainPublishUserChildSelectors
+    runUiLeafSelectorListRegression \
+        "${TMP_DIR}/ui-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
+        listRegressionUiFullSubscriptionMainPublishUserChildSelectors \
+        3
 }
 
 runRegressionUiFullSubscriptionMainPublishSync() {
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}" \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
-            listRegressionUiFullSubscriptionMainPublishSyncChildSelectors
+    runUiLeafSelectorListRegression \
+        "${TMP_DIR}/ui-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
+        listRegressionUiFullSubscriptionMainPublishSyncChildSelectors \
+        2
 }
 
 listRegressionUiChildSelectors() {
@@ -538,30 +572,66 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ' "${callLog}"
 )
 
+runRegressionUiLegacyTmpDirIsolationRegression() (
+    set -euo pipefail
+    local originalTmpDir="${TMP_DIR}"
+
+    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
+    source "${REGRESSION_UI_SUITE_DIR}/../bootstrap.sh"
+    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain ui-full-subscription-main-entry
+)
+
+runMenuSmokeFullCoreCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullCoreRegression; }
+runMenuSmokeFullSubscriptionMainEntryCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainEntryRegression; }
+runMenuSmokeFullSubscriptionMainPublishServiceCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainPublishServiceRegression; }
+runMenuSmokeFullSubscriptionMainPublishUserEmptyCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression; }
+runMenuSmokeFullSubscriptionMainPublishUserCreateCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainPublishUserCreateRegression; }
+runMenuSmokeFullSubscriptionMainPublishUserInspectCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainPublishUserInspectRegression; }
+runMenuSmokeFullSubscriptionMainPublishSyncSkipCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression; }
+runMenuSmokeFullSubscriptionMainPublishSyncEnableCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression; }
+runMenuSmokeFullSubscriptionMainMaintenanceCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainMaintenanceRegression; }
+runMenuSmokeFullSubscriptionControlledCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionControlledRegression; }
+runMenuSmokeFullCoreMaintenanceCompatRegression() { runRegressionUiLegacyLeafWithCompat runMenuSmokeFullCoreMaintenanceRegression; }
+runSubscriptionWireGuardMenuFlowBootstrapCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowBootstrapRegression; }
+runSubscriptionWireGuardMenuFlowPeerAddUpdateCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression; }
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression; }
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression; }
+runSubscriptionWireGuardMenuFlowPeerRollbackSourceCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression; }
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression; }
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression; }
+runSubscriptionWireGuardMenuFlowPeerSourceControlToggleCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression; }
+runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression; }
+runSubscriptionWireGuardMenuFlowPeerSourceControlStatusCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression; }
+runSubscriptionWireGuardMenuFlowControlRestoreCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowControlRestoreRegression; }
+runSubscriptionWireGuardRestoreRunnerCompatRegression() { runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardRestoreRunnerRegression; }
+
 registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
-registerRegressionFunctionLeaf ui-full-core runMenuSmokeFullCoreRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
-registerRegressionFunctionLeaf ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression
-registerRegressionFunctionLeaf ui-full-subscription-controlled runMenuSmokeFullSubscriptionControlledRegression
-registerRegressionFunctionLeaf ui-full-core-maintenance runMenuSmokeFullCoreMaintenanceRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-source runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowControlRestoreRegression
-registerRegressionFunctionLeaf wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
+registerRegressionFunctionLeaf ui-full-core runMenuSmokeFullCoreCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceCompatRegression
+registerRegressionFunctionLeaf ui-full-subscription-controlled runMenuSmokeFullSubscriptionControlledCompatRegression
+registerRegressionFunctionLeaf ui-full-core-maintenance runMenuSmokeFullCoreMaintenanceCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowPeerAddUpdateCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-source runSubscriptionWireGuardMenuFlowPeerRollbackSourceCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowPeerSourceControlToggleCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowPeerSourceControlStatusCompatRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowControlRestoreCompatRegression
+registerRegressionFunctionLeaf wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerCompatRegression
+registerRegressionFunctionLeaf regression-ui-legacy-tmpdir-isolation runRegressionUiLegacyTmpDirIsolationRegression
 registerRegressionFunctionLeaf regression-ui-parallel-composition runRegressionUiParallelCompositionRegression
 registerRegressionFunctionLeaf regression-ui-long-tail-split-composition runRegressionUiLongTailSplitCompositionRegression
 

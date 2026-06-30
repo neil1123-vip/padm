@@ -2783,29 +2783,29 @@ runUiPublicSelectorsUseFunctionRegistryContract() {
         grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
     done <<'EOF'
 ui-smoke runRegressionUiSmokeSuiteRoot
-ui-full-core runMenuSmokeFullCoreRegression
-ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryRegression
-ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceRegression
-ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
-ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
-ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
-ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
-ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
-ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceRegression
-ui-full-subscription-controlled runMenuSmokeFullSubscriptionControlledRegression
-ui-full-core-maintenance runMenuSmokeFullCoreMaintenanceRegression
-wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapRegression
-wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression
-wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression
-wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression
-wireguard-menu-flow-peer-rollback-source runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
-wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression
-wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression
-wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression
-wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression
-wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression
-wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowControlRestoreRegression
-wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
+ui-full-core runMenuSmokeFullCoreCompatRegression
+ui-full-subscription-main-entry runMenuSmokeFullSubscriptionMainEntryCompatRegression
+ui-full-subscription-main-publish-service runMenuSmokeFullSubscriptionMainPublishServiceCompatRegression
+ui-full-subscription-main-publish-user-empty runMenuSmokeFullSubscriptionMainPublishUserEmptyCompatRegression
+ui-full-subscription-main-publish-user-create runMenuSmokeFullSubscriptionMainPublishUserCreateCompatRegression
+ui-full-subscription-main-publish-user-inspect runMenuSmokeFullSubscriptionMainPublishUserInspectCompatRegression
+ui-full-subscription-main-publish-sync-skip runMenuSmokeFullSubscriptionMainPublishSyncSkipCompatRegression
+ui-full-subscription-main-publish-sync-enable runMenuSmokeFullSubscriptionMainPublishSyncEnableCompatRegression
+ui-full-subscription-main-maintenance runMenuSmokeFullSubscriptionMainMaintenanceCompatRegression
+ui-full-subscription-controlled runMenuSmokeFullSubscriptionControlledCompatRegression
+ui-full-core-maintenance runMenuSmokeFullCoreMaintenanceCompatRegression
+wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapCompatRegression
+wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowPeerAddUpdateCompatRegression
+wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceCompatRegression
+wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreCompatRegression
+wireguard-menu-flow-peer-rollback-source runSubscriptionWireGuardMenuFlowPeerRollbackSourceCompatRegression
+wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteCompatRegression
+wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreCompatRegression
+wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowPeerSourceControlToggleCompatRegression
+wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorCompatRegression
+wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowPeerSourceControlStatusCompatRegression
+wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowControlRestoreCompatRegression
+wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerCompatRegression
 EOF
 
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]] || status=1
@@ -3099,6 +3099,113 @@ EOF
     cmp -s "${defaultSortedFile}" "${TMP_DIR}/ui-default-selectors.unique.txt"
     cmp -s "${allProfileSortedFile}" "${TMP_DIR}/ui-all-profile-selectors.unique.txt"
 )
+
+runUiNestedAggregateRunnersUseSharedSuiteHelpersContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+    local functionName
+
+    grep -q '^runUiSelectorListRegression() {$' "${suiteFile}" || return 1
+    grep -q '^runUiLeafSelectorListRegression() {$' "${suiteFile}" || return 1
+
+    for functionName in \
+        runRegressionMenuSmokeFull \
+        runRegressionUiFullSubscriptionMain \
+        runRegressionUiFullSubscriptionMainPublish \
+        runRegressionWireGuardMenuFlow \
+        runSubscriptionWireGuardMenuFlowPeerTransactionRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackRegression; do
+        runContractHelperAdoptionAssertions \
+            "${suiteFile}" \
+            "${functionName}" \
+            runUiSelectorListRegression || return 1
+    done
+
+    for functionName in \
+        runRegressionUiFullSubscriptionMainPublishUser \
+        runRegressionUiFullSubscriptionMainPublishSync \
+        runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression \
+        runSubscriptionWireGuardMenuFlowPeerSourceControlRegression; do
+        runContractHelperAdoptionAssertions \
+            "${suiteFile}" \
+            "${functionName}" \
+            runUiLeafSelectorListRegression || return 1
+    done
+}
+
+runUiLeavesUseCompatHelperContract() (
+    local callLog="${TMP_DIR}/ui-compat-helper.log"
+
+    : >"${callLog}"
+
+    runRegressionUiLegacyLeafWithCompat() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    for selector in \
+        ui-full-core \
+        ui-full-subscription-main-entry \
+        ui-full-subscription-main-publish-service \
+        ui-full-subscription-main-publish-user-empty \
+        ui-full-subscription-main-publish-user-create \
+        ui-full-subscription-main-publish-user-inspect \
+        ui-full-subscription-main-publish-sync-skip \
+        ui-full-subscription-main-publish-sync-enable \
+        ui-full-subscription-main-maintenance \
+        ui-full-subscription-controlled \
+        ui-full-core-maintenance \
+        wireguard-menu-flow-bootstrap \
+        wireguard-menu-flow-peer-add-update \
+        wireguard-menu-flow-peer-rollback-apply-service \
+        wireguard-menu-flow-peer-rollback-apply-restore \
+        wireguard-menu-flow-peer-rollback-source \
+        wireguard-menu-flow-peer-rollback-credential-write \
+        wireguard-menu-flow-peer-rollback-credential-groups-restore \
+        wireguard-menu-flow-peer-source-control-toggle \
+        wireguard-menu-flow-peer-source-control-clear-error \
+        wireguard-menu-flow-peer-source-control-status \
+        wireguard-menu-flow-control-restore \
+        wireguard-restore-runner; do
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+    done
+
+    cat <<'EOF' >"${TMP_DIR}/ui-compat-helper.expected.log"
+runMenuSmokeFullCoreRegression
+runMenuSmokeFullSubscriptionMainEntryRegression
+runMenuSmokeFullSubscriptionMainPublishServiceRegression
+runMenuSmokeFullSubscriptionMainPublishUserEmptyRegression
+runMenuSmokeFullSubscriptionMainPublishUserCreateRegression
+runMenuSmokeFullSubscriptionMainPublishUserInspectRegression
+runMenuSmokeFullSubscriptionMainPublishSyncSkipRegression
+runMenuSmokeFullSubscriptionMainPublishSyncEnableRegression
+runMenuSmokeFullSubscriptionMainMaintenanceRegression
+runMenuSmokeFullSubscriptionControlledRegression
+runMenuSmokeFullCoreMaintenanceRegression
+runSubscriptionWireGuardMenuFlowBootstrapRegression
+runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceRegression
+runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreRegression
+runSubscriptionWireGuardMenuFlowPeerRollbackSourceRegression
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteRegression
+runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreRegression
+runSubscriptionWireGuardMenuFlowPeerSourceControlToggleRegression
+runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorRegression
+runSubscriptionWireGuardMenuFlowPeerSourceControlStatusRegression
+runSubscriptionWireGuardMenuFlowControlRestoreRegression
+runSubscriptionWireGuardRestoreRunnerRegression
+EOF
+
+    cmp -s "${TMP_DIR}/ui-compat-helper.expected.log" "${callLog}"
+)
+
+runUiLegacyTmpDirIsolationGuardRegisteredContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
+
+    grep -q '^runRegressionUiLegacyTmpDirIsolationRegression() ($' "${suiteFile}" || return 1
+    grep -q '^    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain ui-full-subscription-main-entry$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf regression-ui-legacy-tmpdir-isolation runRegressionUiLegacyTmpDirIsolationRegression$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerParallel ui .*regression-ui-legacy-tmpdir-isolation' "${suiteFile}" || return 1
+}
 
 runUiAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
@@ -5267,6 +5374,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep ui-legacy-public-selector-retirement runUiLegacyPublicSelectorRetirementContract &&
         runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
         runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
+        runRegressionStep ui-nested-aggregate-runners-use-shared-suite-helpers runUiNestedAggregateRunnersUseSharedSuiteHelpersContract &&
+        runRegressionStep ui-leaves-use-compat-helper runUiLeavesUseCompatHelperContract &&
+        runRegressionStep ui-legacy-tmpdir-isolation-guard-registered runUiLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
         runRegressionStep ui-aggregate-runner-uses-suite-local-helper runUiAggregateRunnerUsesSuiteLocalHelperContract &&
         runRegressionStep ui-aggregate-runner-uses-framework-selector-helper runUiAggregateRunnerUsesFrameworkSelectorHelperContract &&
