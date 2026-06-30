@@ -420,6 +420,9 @@ their serial child selectors through `runFrameworkSequentialRegressionSelectorLi
 Within `subscription-state-remote-restore`, the
 `subscription-state-remote-restore-self-reference` wrapper now also dispatches its
 serial child selectors through `runFrameworkSequentialRegressionSelectorList`.
+The compatibility `subscription-state-remote-restore-serial` wrapper now also
+dispatches its ordered child selectors through the same helper instead of hand-wiring
+that serial chain locally.
 
 Those nested public aggregates now also live in the suite layer instead of the legacy-backed full script:
 

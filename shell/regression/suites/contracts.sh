@@ -824,6 +824,7 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaPartialSyncChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateSyncRollbackFailureChildSelectors >/dev/null
 
@@ -890,6 +891,10 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors remote-restore-self-reference \
         subscription-state-remote-restore-self-reference-plan \
         subscription-state-remote-restore-self-reference-sync
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors remote-restore-serial \
+        subscription-state-remote-restore-self-reference \
+        subscription-state-remote-restore-state-write \
+        subscription-state-remote-restore-legacy-menu
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreChildSelectors remote-restore \
         subscription-state-remote-restore-self-reference \
         subscription-state-remote-restore-state-write \
@@ -924,6 +929,7 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionSubscriptionStateQuotaPartialSyncChildSelectors \
         runRegressionSubscriptionStateQuota \
         listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors \
+        listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors \
         runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
         runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
         runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated \
@@ -1064,6 +1070,22 @@ runSubscriptionStateRemoteRestoreSelfReferenceChildStepsContract() {
         runFrameworkSequentialRegressionSelectorList \
         listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors
     grep -qx 'dispatch:subscription-state-remote-restore-self-reference-sync' "${callLog}"
+}
+
+runSubscriptionStateRemoteRestoreSerialChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-remote-restore-serial-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state-remote-restore-self-reference' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors
+    grep -qx 'dispatch:subscription-state-remote-restore-state-write' "${callLog}"
+    grep -qx 'dispatch:subscription-state-remote-restore-legacy-menu' "${callLog}"
 }
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
@@ -5706,6 +5728,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-quota-menu-tx-child-steps runSubscriptionStateQuotaMenuTransactionChildStepsContract &&
         runRegressionStep subscription-state-quota-partial-sync-child-steps runSubscriptionStateQuotaPartialSyncChildStepsContract &&
         runRegressionStep subscription-state-remote-restore-self-reference-child-steps runSubscriptionStateRemoteRestoreSelfReferenceChildStepsContract &&
+        runRegressionStep subscription-state-remote-restore-serial-child-steps runSubscriptionStateRemoteRestoreSerialChildStepsContract &&
         runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
         runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract &&

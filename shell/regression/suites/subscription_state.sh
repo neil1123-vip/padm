@@ -174,6 +174,17 @@ runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated() {
     runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
 }
 
+listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors() {
+    printf '%s\n' \
+        subscription-state-remote-restore-self-reference \
+        subscription-state-remote-restore-state-write \
+        subscription-state-remote-restore-legacy-menu
+}
+
+runRegressionSubscriptionStateRemoteRestoreSerial() {
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors
+}
+
 listRegressionSubscriptionStateRemoteRestoreChildSelectors() {
     printf '%s\n' \
         subscription-state-remote-restore-self-reference \
