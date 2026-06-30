@@ -72,23 +72,6 @@ JSON
     ' "${configPath}02_sniffing_inbounds.json" >/dev/null
 }
 
-runRoutingCoreCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runRoutingRegression; }
-runRoutingCoreUnsafeConfigDirCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runRoutingCoreRejectsUnsafeConfigDirRegression; }
-runRoutingSocks5UdpAssociateCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runSocks5UdpAssociateRegression; }
-runRoutingAccessControlFailureReturnCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runAccessControlFailureReturnRegression; }
-runRoutingAccessControlConfigTransactionCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runAccessControlConfigTransactionRegression; }
-runRoutingAccessControlUnsafeBackupDirCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeBackupDirRegression; }
-runRoutingAccessControlUnsafeConfigDirCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeConfigDirRegression; }
-runRoutingBTFailureReturnCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runBTRoutingFailureReturnRegression; }
-runRoutingIPv6FailureReturnCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runIPv6RoutingFailureReturnRegression; }
-runRoutingWarpFailureReturnCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runWARPRoutingFailureReturnRegression; }
-runRoutingSocks5FailureReturnCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runSocks5RoutingFailureReturnRegression; }
-runRoutingDNSFailureReturnCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runDNSRoutingFailureReturnRegression; }
-runRoutingDNSUnsafeBackupDirCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeBackupDirRegression; }
-runRoutingDNSUnsafeConfigDirCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeConfigDirRegression; }
-runRoutingDNSRestoreScopeCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression; }
-runRoutingPortPanelCompatRegression() { runRegressionRoutingLegacyLeafWithCompat runPortAndPanelHelperRegression; }
-
 runRegressionRoutingSuiteRoot() {
     if [[ "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" == "all" ]]; then
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-core-${BASHPID:-$$}" \
@@ -140,22 +123,22 @@ runRegressionRoutingParallelCompositionRegression() (
         fi
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
-    runRoutingCoreCompatRegression() { runRegressionAllSelector routing-core; }
-    runRoutingCoreUnsafeConfigDirCompatRegression() { runRegressionAllSelector routing-core-unsafe-config-dir; }
-    runRoutingSocks5UdpAssociateCompatRegression() { runRegressionAllSelector routing-socks5-udp-associate; }
-    runRoutingAccessControlFailureReturnCompatRegression() { runRegressionAllSelector routing-access-control-failure-return; }
-    runRoutingAccessControlConfigTransactionCompatRegression() { runRegressionAllSelector routing-access-control-config-transaction; }
-    runRoutingAccessControlUnsafeBackupDirCompatRegression() { runRegressionAllSelector routing-access-control-unsafe-backup-dir; }
-    runRoutingAccessControlUnsafeConfigDirCompatRegression() { runRegressionAllSelector routing-access-control-unsafe-config-dir; }
-    runRoutingBTFailureReturnCompatRegression() { runRegressionAllSelector routing-bt-failure-return; }
-    runRoutingIPv6FailureReturnCompatRegression() { runRegressionAllSelector routing-ipv6-failure-return; }
-    runRoutingWarpFailureReturnCompatRegression() { runRegressionAllSelector routing-warp-failure-return; }
-    runRoutingSocks5FailureReturnCompatRegression() { runRegressionAllSelector routing-socks5-failure-return; }
-    runRoutingDNSFailureReturnCompatRegression() { runRegressionAllSelector routing-dns-failure-return; }
-    runRoutingDNSUnsafeBackupDirCompatRegression() { runRegressionAllSelector routing-dns-unsafe-backup-dir; }
-    runRoutingDNSUnsafeConfigDirCompatRegression() { runRegressionAllSelector routing-dns-unsafe-config-dir; }
-    runRoutingDNSRestoreScopeCompatRegression() { runRegressionAllSelector routing-dns-restore-scope; }
-    runRoutingPortPanelCompatRegression() { runRegressionAllSelector routing-port-panel; }
+    runSocks5UdpAssociateRegression() { runRegressionAllSelector routing-socks5-udp-associate; }
+    runRoutingRegression() { runRegressionAllSelector routing-core; }
+    runRoutingCoreRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-core-unsafe-config-dir; }
+    runAccessControlConfigTransactionRegression() { runRegressionAllSelector routing-access-control-config-transaction; }
+    runAccessControlRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-access-control-unsafe-backup-dir; }
+    runAccessControlRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-access-control-unsafe-config-dir; }
+    runAccessControlFailureReturnRegression() { runRegressionAllSelector routing-access-control-failure-return; }
+    runBTRoutingFailureReturnRegression() { runRegressionAllSelector routing-bt-failure-return; }
+    runIPv6RoutingFailureReturnRegression() { runRegressionAllSelector routing-ipv6-failure-return; }
+    runWARPRoutingFailureReturnRegression() { runRegressionAllSelector routing-warp-failure-return; }
+    runSocks5RoutingFailureReturnRegression() { runRegressionAllSelector routing-socks5-failure-return; }
+    runDNSRoutingFailureReturnRegression() { runRegressionAllSelector routing-dns-failure-return; }
+    runDNSRoutingRejectsUnsafeBackupDirRegression() { runRegressionAllSelector routing-dns-unsafe-backup-dir; }
+    runDNSRoutingRejectsUnsafeConfigDirRegression() { runRegressionAllSelector routing-dns-unsafe-config-dir; }
+    runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() { runRegressionAllSelector routing-dns-restore-scope; }
+    runPortAndPanelHelperRegression() { runRegressionAllSelector routing-port-panel; }
 
     runRegressionRoutingSuiteRoot
 
@@ -250,22 +233,22 @@ runRegressionRoutingParallelCompositionRegression() (
     ' "${callLog}"
 )
 
-registerRegressionFunctionLeaf routing-socks5-udp-associate runRoutingSocks5UdpAssociateCompatRegression
-registerRegressionFunctionLeaf routing-core runRoutingCoreCompatRegression
-registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRoutingCoreUnsafeConfigDirCompatRegression
-registerRegressionFunctionLeaf routing-access-control-config-transaction runRoutingAccessControlConfigTransactionCompatRegression
-registerRegressionFunctionLeaf routing-access-control-unsafe-backup-dir runRoutingAccessControlUnsafeBackupDirCompatRegression
-registerRegressionFunctionLeaf routing-access-control-unsafe-config-dir runRoutingAccessControlUnsafeConfigDirCompatRegression
-registerRegressionFunctionLeaf routing-access-control-failure-return runRoutingAccessControlFailureReturnCompatRegression
-registerRegressionFunctionLeaf routing-bt-failure-return runRoutingBTFailureReturnCompatRegression
-registerRegressionFunctionLeaf routing-ipv6-failure-return runRoutingIPv6FailureReturnCompatRegression
-registerRegressionFunctionLeaf routing-warp-failure-return runRoutingWarpFailureReturnCompatRegression
-registerRegressionFunctionLeaf routing-socks5-failure-return runRoutingSocks5FailureReturnCompatRegression
-registerRegressionFunctionLeaf routing-dns-failure-return runRoutingDNSFailureReturnCompatRegression
-registerRegressionFunctionLeaf routing-dns-unsafe-backup-dir runRoutingDNSUnsafeBackupDirCompatRegression
-registerRegressionFunctionLeaf routing-dns-unsafe-config-dir runRoutingDNSUnsafeConfigDirCompatRegression
-registerRegressionFunctionLeaf routing-dns-restore-scope runRoutingDNSRestoreScopeCompatRegression
-registerRegressionFunctionLeaf routing-port-panel runRoutingPortPanelCompatRegression
+registerRegressionFunctionLeaf routing-socks5-udp-associate runRegressionRoutingLegacyLeafWithCompat runSocks5UdpAssociateRegression
+registerRegressionFunctionLeaf routing-core runRegressionRoutingLegacyLeafWithCompat runRoutingRegression
+registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runRoutingCoreRejectsUnsafeConfigDirRegression
+registerRegressionFunctionLeaf routing-access-control-config-transaction runRegressionRoutingLegacyLeafWithCompat runAccessControlConfigTransactionRegression
+registerRegressionFunctionLeaf routing-access-control-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeBackupDirRegression
+registerRegressionFunctionLeaf routing-access-control-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeConfigDirRegression
+registerRegressionFunctionLeaf routing-access-control-failure-return runRegressionRoutingLegacyLeafWithCompat runAccessControlFailureReturnRegression
+registerRegressionFunctionLeaf routing-bt-failure-return runRegressionRoutingLegacyLeafWithCompat runBTRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-ipv6-failure-return runRegressionRoutingLegacyLeafWithCompat runIPv6RoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-warp-failure-return runRegressionRoutingLegacyLeafWithCompat runWARPRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-socks5-failure-return runRegressionRoutingLegacyLeafWithCompat runSocks5RoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-dns-failure-return runRegressionRoutingLegacyLeafWithCompat runDNSRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-dns-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeBackupDirRegression
+registerRegressionFunctionLeaf routing-dns-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeConfigDirRegression
+registerRegressionFunctionLeaf routing-dns-restore-scope runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+registerRegressionFunctionLeaf routing-port-panel runRegressionRoutingLegacyLeafWithCompat runPortAndPanelHelperRegression
 registerRegressionFunctionLeaf regression-routing-parallel-composition runRegressionRoutingParallelCompositionRegression
 registerRegressionFunctionLeaf regression-routing-legacy-read-install-type-isolation runRegressionRoutingLegacyReadInstallTypeIsolationRegression
 

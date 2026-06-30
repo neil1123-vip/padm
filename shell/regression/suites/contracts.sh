@@ -4059,26 +4059,26 @@ runRoutingSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}" || status=1
     grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}" || status=1
 
-    while read -r selector runner; do
+    while read -r selector helper regression; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${helper} ${regression}\$" "${suiteFile}" || status=1
     done <<'EOF'
-routing-socks5-udp-associate runRoutingSocks5UdpAssociateCompatRegression
-routing-core runRoutingCoreCompatRegression
-routing-core-unsafe-config-dir runRoutingCoreUnsafeConfigDirCompatRegression
-routing-access-control-config-transaction runRoutingAccessControlConfigTransactionCompatRegression
-routing-access-control-unsafe-backup-dir runRoutingAccessControlUnsafeBackupDirCompatRegression
-routing-access-control-unsafe-config-dir runRoutingAccessControlUnsafeConfigDirCompatRegression
-routing-access-control-failure-return runRoutingAccessControlFailureReturnCompatRegression
-routing-bt-failure-return runRoutingBTFailureReturnCompatRegression
-routing-ipv6-failure-return runRoutingIPv6FailureReturnCompatRegression
-routing-warp-failure-return runRoutingWarpFailureReturnCompatRegression
-routing-socks5-failure-return runRoutingSocks5FailureReturnCompatRegression
-routing-dns-failure-return runRoutingDNSFailureReturnCompatRegression
-routing-dns-unsafe-backup-dir runRoutingDNSUnsafeBackupDirCompatRegression
-routing-dns-unsafe-config-dir runRoutingDNSUnsafeConfigDirCompatRegression
-routing-dns-restore-scope runRoutingDNSRestoreScopeCompatRegression
-routing-port-panel runRoutingPortPanelCompatRegression
+routing-socks5-udp-associate runRegressionRoutingLegacyLeafWithCompat runSocks5UdpAssociateRegression
+routing-core runRegressionRoutingLegacyLeafWithCompat runRoutingRegression
+routing-core-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runRoutingCoreRejectsUnsafeConfigDirRegression
+routing-access-control-config-transaction runRegressionRoutingLegacyLeafWithCompat runAccessControlConfigTransactionRegression
+routing-access-control-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeBackupDirRegression
+routing-access-control-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeConfigDirRegression
+routing-access-control-failure-return runRegressionRoutingLegacyLeafWithCompat runAccessControlFailureReturnRegression
+routing-bt-failure-return runRegressionRoutingLegacyLeafWithCompat runBTRoutingFailureReturnRegression
+routing-ipv6-failure-return runRegressionRoutingLegacyLeafWithCompat runIPv6RoutingFailureReturnRegression
+routing-warp-failure-return runRegressionRoutingLegacyLeafWithCompat runWARPRoutingFailureReturnRegression
+routing-socks5-failure-return runRegressionRoutingLegacyLeafWithCompat runSocks5RoutingFailureReturnRegression
+routing-dns-failure-return runRegressionRoutingLegacyLeafWithCompat runDNSRoutingFailureReturnRegression
+routing-dns-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeBackupDirRegression
+routing-dns-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeConfigDirRegression
+routing-dns-restore-scope runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+routing-port-panel runRegressionRoutingLegacyLeafWithCompat runPortAndPanelHelperRegression
 EOF
 
     return "${status}"
@@ -4195,26 +4195,53 @@ runRoutingLegacyLeavesUseCompatHelperContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
     local status=0
 
-    while read -r selector runner regression; do
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
-        grep -q "^${runner}() { runRegressionRoutingLegacyLeafWithCompat ${regression}; }$" "${suiteFile}" || status=1
+    while read -r selector helper regression; do
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${helper} ${regression}\$" "${suiteFile}" || status=1
     done <<'EOF'
-routing-socks5-udp-associate runRoutingSocks5UdpAssociateCompatRegression runSocks5UdpAssociateRegression
-routing-core runRoutingCoreCompatRegression runRoutingRegression
-routing-core-unsafe-config-dir runRoutingCoreUnsafeConfigDirCompatRegression runRoutingCoreRejectsUnsafeConfigDirRegression
-routing-access-control-config-transaction runRoutingAccessControlConfigTransactionCompatRegression runAccessControlConfigTransactionRegression
-routing-access-control-unsafe-backup-dir runRoutingAccessControlUnsafeBackupDirCompatRegression runAccessControlRejectsUnsafeBackupDirRegression
-routing-access-control-unsafe-config-dir runRoutingAccessControlUnsafeConfigDirCompatRegression runAccessControlRejectsUnsafeConfigDirRegression
-routing-access-control-failure-return runRoutingAccessControlFailureReturnCompatRegression runAccessControlFailureReturnRegression
-routing-bt-failure-return runRoutingBTFailureReturnCompatRegression runBTRoutingFailureReturnRegression
-routing-ipv6-failure-return runRoutingIPv6FailureReturnCompatRegression runIPv6RoutingFailureReturnRegression
-routing-warp-failure-return runRoutingWarpFailureReturnCompatRegression runWARPRoutingFailureReturnRegression
-routing-socks5-failure-return runRoutingSocks5FailureReturnCompatRegression runSocks5RoutingFailureReturnRegression
-routing-dns-failure-return runRoutingDNSFailureReturnCompatRegression runDNSRoutingFailureReturnRegression
-routing-dns-unsafe-backup-dir runRoutingDNSUnsafeBackupDirCompatRegression runDNSRoutingRejectsUnsafeBackupDirRegression
-routing-dns-unsafe-config-dir runRoutingDNSUnsafeConfigDirCompatRegression runDNSRoutingRejectsUnsafeConfigDirRegression
-routing-dns-restore-scope runRoutingDNSRestoreScopeCompatRegression runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
-routing-port-panel runRoutingPortPanelCompatRegression runPortAndPanelHelperRegression
+routing-socks5-udp-associate runRegressionRoutingLegacyLeafWithCompat runSocks5UdpAssociateRegression
+routing-core runRegressionRoutingLegacyLeafWithCompat runRoutingRegression
+routing-core-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runRoutingCoreRejectsUnsafeConfigDirRegression
+routing-access-control-config-transaction runRegressionRoutingLegacyLeafWithCompat runAccessControlConfigTransactionRegression
+routing-access-control-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeBackupDirRegression
+routing-access-control-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeConfigDirRegression
+routing-access-control-failure-return runRegressionRoutingLegacyLeafWithCompat runAccessControlFailureReturnRegression
+routing-bt-failure-return runRegressionRoutingLegacyLeafWithCompat runBTRoutingFailureReturnRegression
+routing-ipv6-failure-return runRegressionRoutingLegacyLeafWithCompat runIPv6RoutingFailureReturnRegression
+routing-warp-failure-return runRegressionRoutingLegacyLeafWithCompat runWARPRoutingFailureReturnRegression
+routing-socks5-failure-return runRegressionRoutingLegacyLeafWithCompat runSocks5RoutingFailureReturnRegression
+routing-dns-failure-return runRegressionRoutingLegacyLeafWithCompat runDNSRoutingFailureReturnRegression
+routing-dns-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeBackupDirRegression
+routing-dns-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeConfigDirRegression
+routing-dns-restore-scope runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+routing-port-panel runRegressionRoutingLegacyLeafWithCompat runPortAndPanelHelperRegression
+EOF
+
+    return "${status}"
+}
+
+runRoutingNoCompatWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        ! grep -q "^${wrapperName}() { runRegressionRoutingLegacyLeafWithCompat " "${suiteFile}" || status=1
+    done <<'EOF'
+runRoutingCoreCompatRegression
+runRoutingCoreUnsafeConfigDirCompatRegression
+runRoutingSocks5UdpAssociateCompatRegression
+runRoutingAccessControlFailureReturnCompatRegression
+runRoutingAccessControlConfigTransactionCompatRegression
+runRoutingAccessControlUnsafeBackupDirCompatRegression
+runRoutingAccessControlUnsafeConfigDirCompatRegression
+runRoutingBTFailureReturnCompatRegression
+runRoutingIPv6FailureReturnCompatRegression
+runRoutingWarpFailureReturnCompatRegression
+runRoutingSocks5FailureReturnCompatRegression
+runRoutingDNSFailureReturnCompatRegression
+runRoutingDNSUnsafeBackupDirCompatRegression
+runRoutingDNSUnsafeConfigDirCompatRegression
+runRoutingDNSRestoreScopeCompatRegression
+runRoutingPortPanelCompatRegression
 EOF
 
     return "${status}"
