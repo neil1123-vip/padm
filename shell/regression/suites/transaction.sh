@@ -231,6 +231,17 @@ runRegressionTransactionSubscription() {
     runRegressionTransactionSubscriptionSuiteRoot
 }
 
+runRegressionTransactionLegacyTmpDirIsolationRegression() (
+    set -euo pipefail
+    local originalTmpDir="${TMP_DIR}"
+
+    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
+    source "${REGRESSION_TRANSACTION_SUITE_DIR}/../bootstrap.sh"
+    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscribe-user-output-transaction
+)
+
 runRegressionTransactionCoreParallelCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-transaction-core-parallel-composition.log"
@@ -472,6 +483,7 @@ registerRegressionFunctionLeaf reload-core-propagation runReloadCorePropagationR
 
 registerRegressionFunctionLeaf regression-transaction-core-parallel-composition runRegressionTransactionCoreParallelCompositionRegression
 registerRegressionFunctionLeaf regression-transaction-system-parallel-composition runRegressionTransactionSystemParallelCompositionRegression
+registerRegressionFunctionLeaf regression-transaction-legacy-tmpdir-isolation runRegressionTransactionLegacyTmpDirIsolationRegression
 registerRegressionFunctionLeaf cdn-address-write-transaction runCdnAddressTransactionCompatRegression
 registerRegressionFunctionLeaf subscribe-server-name runSubscribeServerNameCompatRegression
 registerRegressionFunctionLeaf subscribe-nginx-config-write runSubscribeNginxConfigWriteCompatRegression

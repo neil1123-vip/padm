@@ -3502,6 +3502,16 @@ runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract() {
     ! grep -q '^registerRegressionAggregateRunnerParallel routing .*regression-routing-legacy-read-install-type-isolation' "${suiteFile}" || return 1
 }
 
+runTransactionLegacyTmpDirIsolationGuardRegisteredContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+
+    grep -q '^runRegressionTransactionLegacyTmpDirIsolationRegression() ($' "${suiteFile}" || return 1
+    grep -q '^    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscribe-user-output-transaction$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf regression-transaction-legacy-tmpdir-isolation runRegressionTransactionLegacyTmpDirIsolationRegression$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerSequential transaction .*regression-transaction-legacy-tmpdir-isolation' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerSequential transaction-subscription .*regression-transaction-legacy-tmpdir-isolation' "${suiteFile}" || return 1
+}
+
 runTransactionCoreSelectorHelpersStayAlignedContract() (
     local defaultSelectorsFile="${TMP_DIR}/transaction-core-default-selectors.txt"
     local defaultSortedFile="${TMP_DIR}/transaction-core-default-selectors.sorted.txt"
@@ -5169,6 +5179,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep routing-legacy-leaves-use-compat-helper runRoutingLegacyLeavesUseCompatHelperContract &&
         runRegressionStep routing-legacy-read-install-type-isolation-guard-registered runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract &&
         runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
+        runRegressionStep transaction-legacy-tmpdir-isolation-guard-registered runTransactionLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract &&
         runRegressionStep transaction-subscription-child-steps runTransactionSubscriptionChildStepsContract &&
         runRegressionStep transaction-suite-child-steps runTransactionSuiteChildStepsContract &&
