@@ -1429,8 +1429,8 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-server-response runRemoteControlContractServerResponseCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-deep runRemoteControlDeepCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServerResponse$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlDeep$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf regression-remote-control-legacy-tmpdir-isolation runRegressionRemoteControlLegacyTmpDirIsolationRegression$' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
@@ -1693,6 +1693,20 @@ EOF
 
     cmp -s "${TMP_DIR}/remote-control-compat-helper.expected.log" "${callLog}"
 )
+
+runRemoteControlNoCompatWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        ! grep -q "^${wrapperName}() { runRegressionRemoteControlLegacyLeafWithCompat " "${suiteFile}" || status=1
+    done <<'EOF'
+runRemoteControlContractServerResponseCompatRegression
+runRemoteControlDeepCompatRegression
+EOF
+
+    return "${status}"
+}
 
 runRemoteControlSmokeCoreNoCompatHelperContract() (
     local callLog="${TMP_DIR}/remote-control-smoke-core-no-compat.log"
@@ -6063,6 +6077,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
         runRegressionStep remote-control-nested-selector-helpers-are-suite-owned runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep remote-control-leaves-use-compat-helper runRemoteControlLeavesUseCompatHelperContract &&
+        runRegressionStep remote-control-no-compat-wrapper-functions runRemoteControlNoCompatWrapperFunctionsContract &&
         runRegressionStep remote-control-smoke-core-no-compat-helper runRemoteControlSmokeCoreNoCompatHelperContract &&
         runRegressionStep remote-control-smoke-refresh-no-compat-helper runRemoteControlSmokeRefreshNoCompatHelperContract &&
         runRegressionStep remote-control-contract-service-install-no-compat-helper runRemoteControlContractServiceInstallNoCompatHelperContract &&
