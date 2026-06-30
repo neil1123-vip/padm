@@ -1918,7 +1918,7 @@ runFastSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionFastOnlySuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionFastOnlyOutputSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionFastOnlyCoreSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionFastUiSmokeLightSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionFastUiSmokeLightSuiteRoot() {$' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-parallel-' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-only-parallel-' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-only-output-parallel-' "${suiteFile}"
@@ -1946,8 +1946,13 @@ runFastSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
     ! grep -q 'declare -f runRegressionFast' "${suiteFile}"
     ! grep -q '^eval ' "${suiteFile}"
-    grep -q 'runRegressionStep ui-smoke-light runRegressionFastUiSmokeLightSuiteRoot' "${suiteFile}"
+    grep -q 'runRegressionStep ui-smoke-light runRegressionUiSmokeSuiteRoot' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+}
+
+runFastNoEmptyLocalWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    ! grep -q '^runRegressionFastUiSmokeLightSuiteRoot() {$' "${suiteFile}" || return 1
 }
 
 runPlatformSuiteUsesFunctionRegistryContract() {
@@ -2669,7 +2674,7 @@ runFastSuiteUsesSuiteLocalHelperContract() (
         return 97
     }
 
-    runRegressionFastUiSmokeLightSuiteRoot() {
+    runRegressionUiSmokeSuiteRoot() {
         printf 'suite-ui-smoke-light\n' >>"${callLog}"
     }
 
@@ -6138,6 +6143,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep remote-control-top-level-no-suite-selector-runner runRemoteControlTopLevelNoSuiteSelectorRunnerContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
+        runRegressionStep fast-no-empty-local-wrapper-functions runFastNoEmptyLocalWrapperFunctionsContract &&
         runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
         runRegressionStep fast-public-cli-retirement runFastPublicCliRetirementContract &&
         runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&

@@ -3,10 +3,6 @@
 REGRESSION_FAST_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"
 
-runRegressionFastUiSmokeLightSuiteRoot() {
-    runRegressionUiSmokeSuiteRoot
-}
-
 listRegressionFastOnlyOutputChildSelectors() {
     printf '%s\n' \
         fast-only-output-auto-install \
@@ -35,7 +31,7 @@ runRegressionFastOnlyCoreSuiteRoot() {
         runRegressionStep services-proc-race runServicesProcRaceRegression &&
         runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression &&
         runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
-        runRegressionStep ui-smoke-light runRegressionFastUiSmokeLightSuiteRoot
+        runRegressionStep ui-smoke-light runRegressionUiSmokeSuiteRoot
 }
 
 listRegressionFastOnlyChildSelectors() {
