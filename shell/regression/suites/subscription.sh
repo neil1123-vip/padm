@@ -104,18 +104,6 @@ runRegressionSubscriptionSuiteRoot() {
         listRegressionSubscriptionChildSelectors
 }
 
-runRegressionSubscriptionRemote() {
-    runRegressionSubscriptionRemoteSuiteRoot
-}
-
-runRegressionSubscriptionTx() {
-    runRegressionSubscriptionTxSuiteRoot
-}
-
-runRegressionSubscription() {
-    runRegressionSubscriptionSuiteRoot
-}
-
 runRegressionSubscriptionOutputParallelCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-subscription-output-parallel-composition.log"

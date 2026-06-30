@@ -3334,15 +3334,15 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
 
     grep -q 'source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^runRegressionSubscription() {$' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionRemote() {$' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionTx() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-' "${suiteFile}"
+    ! grep -q '^runRegressionSubscription() {$' "${suiteFile}"
+    ! grep -q '^runRegressionSubscriptionRemote() {$' "${suiteFile}"
+    ! grep -q '^runRegressionSubscriptionTx() {$' "${suiteFile}"
     ! grep -q '^runRegressionSubscription() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionSubscriptionRemote() {$' "${legacyScriptFile}"
     ! grep -q '^runRegressionSubscriptionTx() {$' "${legacyScriptFile}"
@@ -3368,6 +3368,23 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-tx"]:-}" == "aggregate-runner" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote-fetch"]:-}" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-write-transaction"]:-}" ]]
+}
+
+runSubscriptionNoEmptyAggregateWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        ! grep -q "^${wrapperName}() {$" "${suiteFile}" || status=1
+        ! grep -q "^${wrapperName}() {$" "${legacyScriptFile}" || status=1
+    done <<'EOF'
+runRegressionSubscription
+runRegressionSubscriptionRemote
+runRegressionSubscriptionTx
+EOF
+
+    return "${status}"
 }
 
 runSubscriptionLegacyPublicSelectorRetirementContract() {
@@ -5414,9 +5431,9 @@ runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract() (
 
     : >"${callLog}"
 
-    grep -Eq '^runRegressionSubscription\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
-    grep -Eq '^runRegressionSubscriptionRemote\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
-    grep -Eq '^runRegressionSubscriptionTx\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    ! grep -Eq '^runRegressionSubscription\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    ! grep -Eq '^runRegressionSubscriptionRemote\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
+    ! grep -Eq '^runRegressionSubscriptionTx\(\)[[:space:]]*[({]' "${suiteFile}" || status=1
     ! grep -Eq '^runRegressionSubscription\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
     ! grep -Eq '^runRegressionSubscriptionRemote\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
     ! grep -Eq '^runRegressionSubscriptionTx\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
@@ -6190,6 +6207,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep all-aggregate-runner-uses-framework-selector-helper runAllAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-legacy-public-selector-retirement runSubscriptionLegacyPublicSelectorRetirementContract &&
+        runRegressionStep subscription-no-empty-aggregate-wrapper-functions runSubscriptionNoEmptyAggregateWrapperFunctionsContract &&
         runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-output-child-steps runSubscriptionOutputChildStepsContract &&
         runRegressionStep subscription-remote-registered-child-selectors-aligned runSubscriptionRemoteRegisteredChildSelectorsAlignedContract &&
