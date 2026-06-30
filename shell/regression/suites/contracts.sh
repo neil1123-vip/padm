@@ -3040,22 +3040,22 @@ runTransactionDirectLeafSelectorsUseFunctionRegistryContract() {
     local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
     local status=0
 
-    while read -r selector runner; do
+    while read -r selector runner args; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}${args:+ ${args}}\$" "${suiteFile}" || status=1
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
         ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
         [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
     done <<'EOF'
-cdn-address-write-transaction runCdnAddressTransactionCompatRegression
-subscribe-server-name runSubscribeServerNameCompatRegression
-subscribe-nginx-config-write runSubscribeNginxConfigWriteCompatRegression
-subscribe-nginx-service-failure runSubscribeNginxServiceFailureCompatRegression
-subscribe-salt-write-transaction runSubscribeSaltWriteTransactionCompatRegression
-subscribe-user-output-transaction runSubscribeUserOutputTransactionCompatRegression
-remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureCompatRegression
-user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureCompatRegression
-remote-subscribe-fetch runRemoteSubscribeFetchCompatRegression
+cdn-address-write-transaction runRegressionTransactionLegacyLeafWithCompat runCdnAddressTransactionRegression
+subscribe-server-name runRegressionTransactionLegacyLeafWithCompat runSubscribeServerNameRegression
+subscribe-nginx-config-write runRegressionTransactionLegacyLeafWithCompat runSubscribeNginxConfigWriteRegression
+subscribe-nginx-service-failure runRegressionTransactionLegacyLeafWithCompat runSubscribeNginxServiceFailureRegression
+subscribe-salt-write-transaction runRegressionTransactionLegacyLeafWithCompat runSubscribeSaltWriteTransactionRegression
+subscribe-user-output-transaction runRegressionTransactionLegacyLeafWithCompat runSubscribeUserOutputTransactionRegression
+remove-user-subscription-menu-failure runRegressionTransactionLegacyLeafWithCompat runRemoveUserSubscriptionMenuFailureRegression
+user-subscription-menu-mutation-failure runRegressionTransactionLegacyLeafWithCompat runUserSubscriptionMenuMutationFailureRegression
+remote-subscribe-fetch runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeFetchRegression
 nginx-service-failure runNginxServiceFailureRegression
 uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
@@ -3072,6 +3072,27 @@ clean-last-installation-acme-home runCleanLastInstallationConfigAcmeHomeFailureR
 clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression
 alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
+EOF
+
+    return "${status}"
+}
+
+runTransactionNoCompatWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        ! grep -q "^${wrapperName}() { runRegressionTransactionLegacyLeafWithCompat " "${suiteFile}" || status=1
+    done <<'EOF'
+runCdnAddressTransactionCompatRegression
+runSubscribeServerNameCompatRegression
+runSubscribeNginxConfigWriteCompatRegression
+runSubscribeNginxServiceFailureCompatRegression
+runSubscribeSaltWriteTransactionCompatRegression
+runSubscribeUserOutputTransactionCompatRegression
+runRemoveUserSubscriptionMenuFailureCompatRegression
+runUserSubscriptionMenuMutationFailureCompatRegression
+runRemoteSubscribeFetchCompatRegression
 EOF
 
     return "${status}"
@@ -5278,7 +5299,7 @@ runTargetedSubscriptionRestoreRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^registerRegressionFunctionLeaf subscribe-user-output-transaction runSubscribeUserOutputTransactionCompatRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscribe-user-output-transaction runRegressionTransactionLegacyLeafWithCompat runSubscribeUserOutputTransactionRegression$' "${suiteFile}" || return 1
     runLegacyFunctionSelectorRetirementAssertions \
         "${legacyFile}" \
         runRegressionTargetedSubscriptionRestore \
@@ -6077,6 +6098,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract &&
         runRegressionStep composition-leaf-selectors-legacy-public-retirement runCompositionLeafSelectorsLegacyPublicRetirementContract &&
         runRegressionStep transaction-direct-leaf-selectors-use-function-registry runTransactionDirectLeafSelectorsUseFunctionRegistryContract &&
+        runRegressionStep transaction-no-compat-wrapper-functions runTransactionNoCompatWrapperFunctionsContract &&
         runRegressionStep transaction-subscription-leaves-use-compat-helper runTransactionSubscriptionLeavesUseCompatHelperContract &&
         runRegressionStep transaction-core-direct-leaf-selectors-use-function-registry runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
