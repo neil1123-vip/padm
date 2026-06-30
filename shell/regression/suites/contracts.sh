@@ -3214,23 +3214,23 @@ runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
     local status=0
 
-    while read -r selector runner; do
+    while read -r selector runner args; do
         ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
+        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}${args:+ ${args}}\$" "${suiteFile}" || status=1
     done <<'EOF'
-subscription-output runRegressionSubscriptionOutputCompatRegression
-subscription-output-profile-and-reality runRegressionSubscriptionOutputProfileAndRealityCompatRegression
-subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression
-subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression
-subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression
-subscription-remote-unique runRemoteSubscribeFetchUniqueCompatRegression
-subscription-remote-rollback runRemoteSubscribeFetchRollbackCompatRegression
-subscription-remote-merge runRemoteSubscribeFetchMergeCompatRegression
-subscription-remote-controlled runRemoteSubscribeFetchControlledCompatRegression
-subscription-remote-append-failure runRemoteSubscribeFetchAppendFailureCompatRegression
-subscription-remote-commit-failure runRemoteSubscribeFetchCommitFailureCompatRegression
-subscription-remote-idempotent runRemoteSubscribeFetchIdempotentCompatRegression
-sing-box-subscribe-write runSingBoxSubscribeWriteCompatRegression
+subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput
+subscription-output-profile-and-reality runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputProfileAndRealityRegression
+subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression
+subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsVlessVmessTrojanRegression
+subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
+subscription-remote-unique runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchUniqueRegression
+subscription-remote-rollback runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchRollbackRegression
+subscription-remote-merge runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchMergeRegression
+subscription-remote-controlled runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchControlledRegression
+subscription-remote-append-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchAppendFailureRegression
+subscription-remote-commit-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchCommitFailureRegression
+subscription-remote-idempotent runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchIdempotentRegression
+sing-box-subscribe-write runRegressionSubscriptionLegacyLeafWithCompat runSingBoxSubscribeWriteRegression
 subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 sing-box-port-failure runSingBoxPortFailureRegression
 subscribe-local-rollback runSubscribeLocalRollbackRegression
@@ -3238,6 +3238,31 @@ subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegress
 subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
 refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
 subscribe-return-failure runSubscribeReturnFailureRegression
+EOF
+
+    return "${status}"
+}
+
+runSubscriptionNoCompatWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        ! grep -q "^${wrapperName}() { runRegressionSubscriptionLegacyLeafWithCompat " "${suiteFile}" || status=1
+    done <<'EOF'
+runRegressionSubscriptionOutputCompatRegression
+runRegressionSubscriptionOutputProfileAndRealityCompatRegression
+runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression
+runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression
+runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression
+runRemoteSubscribeFetchUniqueCompatRegression
+runRemoteSubscribeFetchRollbackCompatRegression
+runRemoteSubscribeFetchMergeCompatRegression
+runRemoteSubscribeFetchControlledCompatRegression
+runRemoteSubscribeFetchAppendFailureCompatRegression
+runRemoteSubscribeFetchCommitFailureCompatRegression
+runRemoteSubscribeFetchIdempotentCompatRegression
+runSingBoxSubscribeWriteCompatRegression
 EOF
 
     return "${status}"
@@ -3320,7 +3345,7 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutputCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-remote runRegressionSubscriptionRemoteSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-tx runRegressionSubscriptionTxSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}"
@@ -5313,11 +5338,11 @@ runSubscriptionOutputLegacyRetirementContract() {
 
     grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutputCompatRegression$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf subscription-output-profile-and-reality runRegressionSubscriptionOutputProfileAndRealityCompatRegression$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-profile-and-reality runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputProfileAndRealityRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsVlessVmessTrojanRegression$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression$' "${suiteFile}" || return 1
     runLegacyFunctionSelectorRetirementAssertions \
         "${legacyFile}" \
         runRegressionSubscriptionOutput \
