@@ -655,6 +655,7 @@ runContractHelperAdoptionHelperAdoptionContract() {
         runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract \
         runLegacyFunctionSelectorRetirementHelperAdoptionContract \
         runLegacyFunctionRetirementBatchHelperAdoptionContract \
+        runLegacyPublicSelectorRetirementHelperAdoptionContract \
         runSubscriptionStateCliRetirementHelperAdoptionContract \
         runRegressionDispatcherStepCoverageHelperAdoptionContract; do
         runContractHelperAdoptionAssertions \
@@ -667,23 +668,15 @@ runContractHelperAdoptionHelperAdoptionContract() {
 runLegacyPublicSelectorRetirementHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
-    awk '
-        /^runSubscriptionLegacyPublicSelectorRetirementContract\(\) \{$/ { in_fn = 1 }
-        in_fn && /runLegacyPublicSelectorRetirementAssertions "\$\{legacyScriptFile\}" \\/ { found = 1 }
-        in_fn && /^}$/ { exit(found ? 0 : 1) }
-    ' "${contractsFile}" || return 1
-
-    awk '
-        /^runRoutingLegacyPublicSelectorRetirementContract\(\) \{$/ { in_fn = 1 }
-        in_fn && /runLegacyPublicSelectorRetirementAssertions "\$\{legacyScriptFile\}" \\/ { found = 1 }
-        in_fn && /^}$/ { exit(found ? 0 : 1) }
-    ' "${contractsFile}" || return 1
-
-    awk '
-        /^runUiLegacyPublicSelectorRetirementContract\(\) \{$/ { in_fn = 1 }
-        in_fn && /runLegacyPublicSelectorRetirementAssertions "\$\{legacyScriptFile\}" \\/ { found = 1 }
-        in_fn && /^}$/ { exit(found ? 0 : 1) }
-    ' "${contractsFile}" || return 1
+    for functionName in \
+        runSubscriptionLegacyPublicSelectorRetirementContract \
+        runRoutingLegacyPublicSelectorRetirementContract \
+        runUiLegacyPublicSelectorRetirementContract; do
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runLegacyPublicSelectorRetirementAssertions || return 1
+    done
 }
 
 runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract() (
