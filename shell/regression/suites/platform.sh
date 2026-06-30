@@ -119,14 +119,9 @@ runRegressionPlatformFastHelperIsolationRegression() (
     grep -Fq 'replaceFailureDir="${TMP_DIR}/update-padm-replace-failure"' <<<"${fastBody}"
 )
 
-runRegressionPlatformIoSuiteRoot() {
-    runFrameworkSequentialRegressionSelectorList listRegressionPlatformIoChildSelectors
-}
-
 registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot
 registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuiteRoot
 registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot
-registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot
 registerRegressionFunctionLeaf install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
 registerRegressionFunctionLeaf install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
 registerRegressionFunctionLeaf install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
@@ -146,6 +141,13 @@ registerRegressionFunctionLeaf reality-scanner-binary runRegressionPlatformLegac
 registerRegressionFunctionLeaf reality-scanner-download-failure runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression
 registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
 registerRegressionFunctionLeaf regression-platform-fast-helper-isolation runRegressionPlatformFastHelperIsolationRegression
+
+registerRegressionAggregateRunnerSequentialWithArgs \
+    platform-io \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionPlatformIoChildSelectors \
+    -- \
+    $(listRegressionPlatformIoChildSelectors)
 
 registerRegressionAggregateRunnerParallelWithArgs \
     platform-hot \

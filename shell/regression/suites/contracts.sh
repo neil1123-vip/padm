@@ -1547,7 +1547,7 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
 
     grep -q 'source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"' "${suiteFile}"
-    grep -Eq '^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -q '^runRegressionRemoteControlLegacyLeafWithCompat() ($' "${suiteFile}"
     grep -q '^runRegressionRemoteControlLegacyTmpDirIsolationRegression() ($' "${suiteFile}"
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${scriptFile}"
@@ -1560,7 +1560,7 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core runRegressionRemoteControlSmokeCore$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-concurrency runRegressionRemoteControlConcurrency$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-aggregation-failure runRegressionRemoteControlAggregationFailure$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRegressionRemoteControlInlineAggregationHelpers$' "${suiteFile}"
@@ -1586,6 +1586,7 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
     ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
 
@@ -1705,6 +1706,17 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
             "${selectors[*]}" >>"${callsFile}"
     }
 
+    runFrameworkSequentialRegressionSelectorList() {
+        local selectorListFn=$1
+        shift
+        local -a selectors=()
+
+        mapfile -t selectors < <("${selectorListFn}" "$@")
+        printf 'framework:sequential:%s:%s\n' \
+            "${selectorListFn}" \
+            "${selectors[*]}" >>"${callsFile}"
+    }
+
     runFrameworkParallelRegressionSelectors() {
         printf 'framework:selectors:%s\n' "$*" >>"${callsFile}"
         return 97
@@ -1715,17 +1727,19 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-smoke-refresh
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-smoke-refresh-apply
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-smoke
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-smoke-core
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-contract
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-contract-service-install
 
     mapfile -t calls <"${callsFile}"
-    [[ "${#calls[@]}" -eq 6 ]] || return 1
+    [[ "${#calls[@]}" -eq 7 ]] || return 1
     [[ "${calls[0]}" =~ ^framework:list:.*/remote-control-default-[0-9]+:listRegressionRemoteControlChildSelectors:remote-control-smoke\ remote-control-contract\ remote-control-deep$ ]] || return 1
     [[ "${calls[1]}" =~ ^framework:list:.*/remote-control-smoke-refresh:listRegressionRemoteControlSmokeRefreshChildSelectors:remote-control-smoke-refresh-apply\ remote-control-smoke-refresh-restore\ remote-control-smoke-refresh-reconcile$ ]] || return 1
     [[ "${calls[2]}" =~ ^framework:list:.*/remote-control-smoke-refresh-apply:listRegressionRemoteControlSmokeRefreshApplyChildSelectors:remote-control-smoke-refresh-apply-basic\ remote-control-smoke-refresh-apply-prepare\ remote-control-smoke-refresh-apply-failure$ ]] || return 1
     [[ "${calls[3]}" =~ ^framework:list:.*/remote-control-smoke:listRegressionRemoteControlSmokeChildSelectors:remote-control-smoke-core\ remote-control-smoke-refresh$ ]] || return 1
-    [[ "${calls[4]}" =~ ^framework:list:.*/remote-control-contract:listRegressionRemoteControlContractChildSelectors:remote-control-contract-service-install\ remote-control-contract-server-response$ ]] || return 1
-    [[ "${calls[5]}" =~ ^framework:list:.*/remote-control-contract-service-install:listRegressionRemoteControlContractServiceInstallChildSelectors:remote-control-contract-service-install-success\ remote-control-contract-service-install-systemctl-fail\ remote-control-contract-service-install-health-fail\ remote-control-contract-service-install-health-rollback\ remote-control-contract-service-install-token-transaction$ ]] || return 1
+    [[ "${calls[4]}" == "framework:sequential:listRegressionRemoteControlSmokeCoreChildSelectors:remote-control-concurrency remote-control-aggregation-failure remote-control-inline-aggregation-helpers remote-control-health remote-control-inline-request-helpers remote-control-inline-wireguard-peer-helpers remote-control-inline-token-consumers remote-control-inline-sync-runner remote-control-handle-inline-helpers" ]] || return 1
+    [[ "${calls[5]}" =~ ^framework:list:.*/remote-control-contract:listRegressionRemoteControlContractChildSelectors:remote-control-contract-service-install\ remote-control-contract-server-response$ ]] || return 1
+    [[ "${calls[6]}" =~ ^framework:list:.*/remote-control-contract-service-install:listRegressionRemoteControlContractServiceInstallChildSelectors:remote-control-contract-service-install-success\ remote-control-contract-service-install-systemctl-fail\ remote-control-contract-service-install-health-fail\ remote-control-contract-service-install-health-rollback\ remote-control-contract-service-install-token-transaction$ ]] || return 1
     ! grep -q '^legacy-runner:' "${callsFile}" || return 1
     ! grep -q '^framework:selectors:' "${callsFile}" || return 1
 )
@@ -1808,8 +1822,7 @@ runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionRemoteControlSmokeRefreshChildSelectors \
         listRegressionRemoteControlSmokeChildSelectors \
         listRegressionRemoteControlContractServiceInstallChildSelectors \
-        listRegressionRemoteControlContractChildSelectors \
-        runRegressionRemoteControlSmokeCore
+        listRegressionRemoteControlContractChildSelectors
     do
         grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
         ! grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${scriptFile}" || return 1
@@ -1969,6 +1982,7 @@ runRemoteControlNestedAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionAggregateParallel remote-control-smoke-refresh-apply \\' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionAggregateParallel remote-control-smoke-refresh \\' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionAggregateParallel remote-control-contract-service-install \\' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}" || return 1
 
@@ -1999,6 +2013,14 @@ runRemoteControlNestedAggregateRunnerRegistrationContract() {
         remote-control-smoke \
         '/remote-control-smoke$' \
         '^listRegressionRemoteControlSmokeChildSelectors$'
+    runAggregateRunnerRegistrationAssertions \
+        remote-control-smoke-core \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionRemoteControlSmokeCoreChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        remote-control-smoke-core \
+        'listRegressionRemoteControlSmokeCoreChildSelectors'
     runAggregateRunnerRegistrationAssertions \
         remote-control-contract-service-install \
         parallel \
@@ -2119,16 +2141,18 @@ runPlatformSuiteUsesFunctionRegistryContract() {
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^runRegressionPlatformFastLeafWithCompat() ($' "${suiteFile}"
     grep -q '^listRegressionPlatformHotChildSelectors() {$' "${suiteFile}"
+    grep -q '^listRegressionPlatformIoChildSelectors() {$' "${suiteFile}"
     grep -q '^runRegressionPlatformSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionPlatformIoSuiteRoot() {$' "${suiteFile}"
+    ! grep -Eq '^runRegressionPlatformIoSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -q '^runRegressionPlatformUpdateSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionPlatformRefreshSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionPlatformRestSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuiteRoot$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot$' "${suiteFile}"
@@ -2168,8 +2192,9 @@ runPlatformPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-io runRegressionPlatformIoSuiteRoot$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform runRegressionPlatformSuiteRoot$' "${suiteFile}"
     ! grep -Eq '^runRegressionPlatform\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -Eq '^runRegressionPlatformIo\(\)[[:space:]]*[({]' "${legacyFile}"
@@ -2242,6 +2267,22 @@ runPlatformHotAggregateRunnerRegistrationContract() {
         '^listRegressionPlatformHotChildSelectors$'
 }
 
+runPlatformIoAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
+    local expectedChildren
+
+    ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateSequential platform-io \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
+    expectedChildren=$(listRegressionPlatformIoChildSelectors)
+    runAggregateRunnerRegistrationAssertions \
+        platform-io \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions platform-io 'listRegressionPlatformIoChildSelectors'
+}
+
 runPlatformHotLeavesUseFastCompatHelperContract() (
     local callLog="${TMP_DIR}/platform-hot-fast-compat-helper.log"
 
@@ -2282,7 +2323,7 @@ runPlatformIoLeavesUseLegacyCompatHelperContract() (
         printf '%s\n' "$1" >>"${callLog}"
     }
 
-    runRegressionPlatformIoSuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-io
 
     cat <<'EOF' >"${TMP_DIR}/platform-io-legacy-compat-helper.expected.log"
 runInstallToolsCertificateDependencyRegression
@@ -2787,8 +2828,9 @@ runFastPlatformSourceOnlyExecutionContract() (
 
     PADM_REGRESSION_SOURCE_ONLY=1 source "${platformSuite}"
     PADM_REGRESSION_SOURCE_ONLY=1 source "${fastSuite}"
+    declare -F listRegressionPlatformIoChildSelectors >/dev/null
     declare -F runRegressionPlatformSuiteRoot >/dev/null
-    declare -F runRegressionPlatformIoSuiteRoot >/dev/null
+    ! declare -F runRegressionPlatformIoSuiteRoot >/dev/null
     ! declare -F _platform_hot_suite_def >/dev/null
     ! declare -F _platform_io_suite_def >/dev/null
     ! declare -F _fast_root_suite_def >/dev/null
@@ -3010,8 +3052,8 @@ runPlatformSuiteUsesSuiteLocalHelpersContract() (
         return 97
     }
 
-    runRegressionPlatformSuiteRoot() {
-        printf 'suite-platform-hot\n' >>"${callLog}"
+    runFrameworkParallelRegressionSelectorList() {
+        printf 'suite-platform-hot:%s\n' "$*" >>"${callLog}"
     }
 
     runRegressionPlatformIo() {
@@ -3019,15 +3061,15 @@ runPlatformSuiteUsesSuiteLocalHelpersContract() (
         return 97
     }
 
-    runRegressionPlatformIoSuiteRoot() {
-        printf 'suite-platform-io\n' >>"${callLog}"
+    runFrameworkSequentialRegressionSelectorList() {
+        printf 'suite-platform-io:%s\n' "$*" >>"${callLog}"
     }
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-hot
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-io
 
-    grep -qx 'suite-platform-hot' "${callLog}"
-    grep -qx 'suite-platform-io' "${callLog}"
+    grep -Eq '^suite-platform-hot:.*/platform-hot-parallel-[0-9][0-9]* listRegressionPlatformHotChildSelectors$' "${callLog}"
+    grep -qx 'suite-platform-io:listRegressionPlatformIoChildSelectors' "${callLog}"
     ! grep -q '^legacy-platform-hot$' "${callLog}"
     ! grep -q '^legacy-platform-io$' "${callLog}"
 )

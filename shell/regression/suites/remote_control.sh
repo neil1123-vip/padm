@@ -60,10 +60,6 @@ listRegressionRemoteControlContractChildSelectors() {
         remote-control-contract-server-response
 }
 
-runRegressionRemoteControlSmokeCore() {
-    runFrameworkSequentialRegressionSelectorList listRegressionRemoteControlSmokeCoreChildSelectors
-}
-
 runRegressionRemoteControlDeepStateRollbackNormalizationRegression() (
     set -euo pipefail
     local beforeFile="${TMP_DIR}/remote-control-deep-rollback-normalized.before.json"
@@ -148,7 +144,6 @@ runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-contract-server-response
 )
 
-registerRegressionFunctionLeaf remote-control-smoke-core runRegressionRemoteControlSmokeCore
 registerRegressionFunctionLeaf remote-control-concurrency runRegressionRemoteControlConcurrency
 registerRegressionFunctionLeaf remote-control-aggregation-failure runRegressionRemoteControlAggregationFailure
 registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRegressionRemoteControlInlineAggregationHelpers
@@ -201,6 +196,12 @@ registerRegressionAggregateRunnerParallelWithArgs \
     listRegressionRemoteControlSmokeChildSelectors \
     -- \
     $(listRegressionRemoteControlSmokeChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    remote-control-smoke-core \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionRemoteControlSmokeCoreChildSelectors \
+    -- \
+    $(listRegressionRemoteControlSmokeCoreChildSelectors)
 registerRegressionAggregateRunnerParallelWithArgs \
     remote-control-contract-service-install \
     runFrameworkParallelRegressionSelectorList \
