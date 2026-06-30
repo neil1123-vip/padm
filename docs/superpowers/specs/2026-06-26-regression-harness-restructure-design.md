@@ -104,6 +104,11 @@ Shape:
 
 This gives the short-path suite a clean layered shape and keeps output-focused work independently tunable.
 
+`fast-reality` remains a sequential aggregate runner, but its `reality-candidates-fast`
+tail step now reuses the reality suite compat leaf instead of calling the legacy-backed
+reality runner directly. That keeps fast-path reality coverage aligned with the same
+legacy isolation boundary used by the dedicated reality suite.
+
 ### Platform
 
 `platform-hot` is a parallel aggregate runner over:

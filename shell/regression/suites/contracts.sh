@@ -2122,7 +2122,7 @@ runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
         printf 'fast\n' >>"${callLog}"
     }
 
-    runRealityCandidateFastRegression() {
+    runRealityCandidateFastCompatRegression() {
         printf 'reality-candidates-fast\n' >>"${callLog}"
     }
 
@@ -2132,6 +2132,24 @@ runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
         "${callLog}" \
         fast \
         reality-candidates-fast
+)
+
+runFastRealityUsesRealityCompatHelperContract() (
+    local callLog="${TMP_DIR}/fast-reality-compat-helper.log"
+
+    : >"${callLog}"
+
+    runRealityCandidateFastCompatRegression() {
+        printf 'runRealityCandidateFastCompatRegression\n' >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain fast-reality
+
+    cat <<'EOF' >"${TMP_DIR}/fast-reality-compat-helper.expected.log"
+runRealityCandidateFastCompatRegression
+EOF
+
+    cmp -s "${TMP_DIR}/fast-reality-compat-helper.expected.log" "${callLog}"
 )
 
 runFastSuiteUsesSuiteLocalHelperContract() (
@@ -5383,6 +5401,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
         runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
+        runRegressionStep fast-reality-uses-reality-compat-helper runFastRealityUsesRealityCompatHelperContract &&
         runRegressionStep fast-suite-uses-suite-local-helper runFastSuiteUsesSuiteLocalHelperContract &&
         runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
         runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract &&
