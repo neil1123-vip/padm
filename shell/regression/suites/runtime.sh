@@ -12,11 +12,6 @@ runRegressionRuntimeLegacyLeafWithCompat() (
     "$@"
 )
 
-runRuntimeAndRealityCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runRuntimeAndRealityRegression; }
-runAutoReadUnsetAutoInstallCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runAutoReadUnsetAutoInstallRegression; }
-runAutoInstallRealityRouteCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runAutoInstallRealityRouteRegression; }
-runRuntimeTempDirCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runRuntimeTempDirRegression; }
-
 runRegressionRuntimeSuiteRoot() {
     if [[ "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" == "all" ]]; then
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
@@ -139,10 +134,10 @@ runRegressionRuntimeLegacyTmpDirIsolationRegression() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime-auto-install-reality-route
 )
 
-registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityCompatRegression
-registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallCompatRegression
-registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteCompatRegression
-registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirCompatRegression
+registerRegressionFunctionLeaf runtime-core runRegressionRuntimeLegacyLeafWithCompat runRuntimeAndRealityRegression
+registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runRegressionRuntimeLegacyLeafWithCompat runAutoReadUnsetAutoInstallRegression
+registerRegressionFunctionLeaf runtime-auto-install-reality-route runRegressionRuntimeLegacyLeafWithCompat runAutoInstallRealityRouteRegression
+registerRegressionFunctionLeaf runtime-tempdir runRegressionRuntimeLegacyLeafWithCompat runRuntimeTempDirRegression
 registerRegressionFunctionLeaf regression-runtime-parallel-composition runRegressionRuntimeParallelCompositionRegression
 registerRegressionFunctionLeaf regression-runtime-legacy-tmpdir-isolation runRegressionRuntimeLegacyTmpDirIsolationRegression
 

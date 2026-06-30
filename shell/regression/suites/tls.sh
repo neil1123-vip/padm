@@ -10,10 +10,6 @@ runRegressionTlsLegacyLeafWithCompat() (
     "$@"
 )
 
-runTlsFailureReturnCompatRegression() { runRegressionTlsLegacyLeafWithCompat runTlsFailureReturnRegression; }
-runTlsReinstallRollbackCompatRegression() { runRegressionTlsLegacyLeafWithCompat runTlsReinstallRollbackRegression; }
-runTlsRenewalFailurePropagationCompatRegression() { runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression; }
-
 runRegressionTlsSuiteRoot() {
     runFrameworkSequentialRegressionSelectorList listRegressionTlsChildSelectors
 }
@@ -36,9 +32,9 @@ listRegressionTlsChildSelectors() {
         tls-renew-failure-propagation
 }
 
-registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnCompatRegression
-registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackCompatRegression
-registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationCompatRegression
+registerRegressionFunctionLeaf tls-failure-return runRegressionTlsLegacyLeafWithCompat runTlsFailureReturnRegression
+registerRegressionFunctionLeaf tls-reinstall-rollback runRegressionTlsLegacyLeafWithCompat runTlsReinstallRollbackRegression
+registerRegressionFunctionLeaf tls-renew-failure-propagation runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression
 registerRegressionFunctionLeaf regression-tls-legacy-tmpdir-isolation runRegressionTlsLegacyTmpDirIsolationRegression
 
 registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \

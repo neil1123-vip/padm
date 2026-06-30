@@ -26,6 +26,33 @@ runRegressionRegistryRetiresScriptSelectorKindContract() {
     ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${scriptPath}" "\${runner}"' "${registryFile}"
 }
 
+runRegressionFunctionLeafSupportsRunnerArgsContract() (
+    local selector="function-leaf-runner-args-fixture"
+    local callLog="${TMP_DIR}/function-leaf-runner-args.log"
+
+    : >"${callLog}"
+
+    runFixtureCompatHelper() {
+        local runner=$1
+        printf 'compat:%s\n' "${runner}" >>"${callLog}"
+        "${runner}"
+    }
+
+    runFixtureLeaf() {
+        printf 'leaf\n' >>"${callLog}"
+    }
+
+    registerRegressionFunctionLeaf "${selector}" runFixtureCompatHelper runFixtureLeaf
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+
+    cat <<'EOF' >"${TMP_DIR}/function-leaf-runner-args.expected.log"
+compat:runFixtureLeaf
+leaf
+EOF
+
+    cmp -s "${TMP_DIR}/function-leaf-runner-args.expected.log" "${callLog}"
+)
+
 runLegacyPublicSelectorRetirementAssertions() (
     local legacyFile=$1
     shift
@@ -2517,7 +2544,11 @@ runFastRealityAggregateRunnerDispatchesChildrenInOrderContract() (
         printf 'fast\n' >>"${callLog}"
     }
 
-    runRealityCandidateFastCompatRegression() {
+    runRegressionRealityLegacyLeafWithCompat() {
+        "$1"
+    }
+
+    runRealityCandidateFastRegression() {
         printf 'reality-candidates-fast\n' >>"${callLog}"
     }
 
@@ -2534,14 +2565,14 @@ runFastRealityUsesRealityCompatHelperContract() (
 
     : >"${callLog}"
 
-    runRealityCandidateFastCompatRegression() {
-        printf 'runRealityCandidateFastCompatRegression\n' >>"${callLog}"
+    runRegressionRealityLegacyLeafWithCompat() {
+        printf 'compat:%s\n' "$1" >>"${callLog}"
     }
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain fast-reality
 
     cat <<'EOF' >"${TMP_DIR}/fast-reality-compat-helper.expected.log"
-runRealityCandidateFastCompatRegression
+compat:runRealityCandidateFastRegression
 EOF
 
     cmp -s "${TMP_DIR}/fast-reality-compat-helper.expected.log" "${callLog}"
@@ -2739,9 +2770,9 @@ runTlsSuiteUsesFunctionRegistryContract() {
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-failure-return runRegressionTlsLegacyLeafWithCompat runTlsFailureReturnRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-reinstall-rollback runRegressionTlsLegacyLeafWithCompat runTlsReinstallRollbackRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-renew-failure-propagation runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}"
 }
 
@@ -4936,10 +4967,10 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf runtime ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf runtime ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-core runRegressionRuntimeLegacyLeafWithCompat runRuntimeAndRealityRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runRegressionRuntimeLegacyLeafWithCompat runAutoReadUnsetAutoInstallRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-auto-install-reality-route runRegressionRuntimeLegacyLeafWithCompat runAutoInstallRealityRouteRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf runtime-tempdir runRegressionRuntimeLegacyLeafWithCompat runRuntimeTempDirRegression$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates-fast ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates-full ' "${suiteFile}"
@@ -5017,13 +5048,13 @@ runRealitySuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRealityCandidateFastCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRealityAsnScanPlanCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRealityCandidateFullCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRealityStreamEnableCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRealityStreamDisableCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-config runRealityConfigCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRealityProfileFailureCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRegressionRealityLegacyLeafWithCompat runRealityCandidateFastRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRegressionRealityLegacyLeafWithCompat runRealityAsnScanPlanRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRegressionRealityLegacyLeafWithCompat runRealityCandidateFullRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRegressionRealityLegacyLeafWithCompat runRealityStreamEnableRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRegressionRealityLegacyLeafWithCompat runRealityStreamDisableRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-config runRegressionRealityLegacyLeafWithCompat runRealityConfigRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRegressionRealityLegacyLeafWithCompat runRealityProfileFailureRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
 }
@@ -5379,15 +5410,19 @@ runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
 
     : >"${callLog}"
 
-    runRealityCandidateFastCompatRegression() {
+    runRegressionRealityLegacyLeafWithCompat() {
+        "$1"
+    }
+
+    runRealityCandidateFastRegression() {
         printf 'reality-candidates-fast\n' >>"${callLog}"
     }
 
-    runRealityAsnScanPlanCompatRegression() {
+    runRealityAsnScanPlanRegression() {
         printf 'reality-asn-scan-plan\n' >>"${callLog}"
     }
 
-    runRealityCandidateFullCompatRegression() {
+    runRealityCandidateFullRegression() {
         printf 'reality-candidates-full\n' >>"${callLog}"
     }
 
@@ -5421,11 +5456,15 @@ runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
 
     : >"${callLog}"
 
-    runRealityStreamEnableCompatRegression() {
+    runRegressionRealityLegacyLeafWithCompat() {
+        "$1"
+    }
+
+    runRealityStreamEnableRegression() {
         printf 'reality-stream-enable\n' >>"${callLog}"
     }
 
-    runRealityStreamDisableCompatRegression() {
+    runRealityStreamDisableRegression() {
         printf 'reality-stream-disable\n' >>"${callLog}"
     }
 
@@ -5843,6 +5882,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep regression-dispatcher-step-coverage-assertion runRegressionDispatcherStepCoverageAssertionContract &&
         runRegressionStep contract-helper-adoption-assertion runContractHelperAdoptionAssertionContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
+        runRegressionStep regression-function-leaf-supports-runner-args runRegressionFunctionLeafSupportsRunnerArgsContract &&
         runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
         runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
         runRegressionStep aggregate-runner-uses-suite-local-helper-assertion runAggregateRunnerUsesSuiteLocalHelperAssertionContract &&
