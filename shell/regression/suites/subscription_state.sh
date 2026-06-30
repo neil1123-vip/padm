@@ -51,12 +51,9 @@ listRegressionSubscriptionStateStructureMigrationChildSelectors() {
         subscription-state-structure-migration-serial
 }
 
-runRegressionSubscriptionStateStructureMigration() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateStructureMigrationChildSelectors
-}
-
 runRegressionSubscriptionStateStructureMigrationIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-migration runRegressionSubscriptionStateStructureMigration
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-migration \
+        runRegisteredRegressionMain subscription-state-structure-migration
 }
 
 listRegressionSubscriptionStateStructureSourceChildSelectors() {
@@ -67,12 +64,9 @@ listRegressionSubscriptionStateStructureSourceChildSelectors() {
         subscription-state-structure-source-serial
 }
 
-runRegressionSubscriptionStateStructureSource() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateStructureSourceChildSelectors
-}
-
 runRegressionSubscriptionStateStructureSourceIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-source runRegressionSubscriptionStateStructureSource
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-source \
+        runRegisteredRegressionMain subscription-state-structure-source
 }
 
 listRegressionSubscriptionStateStructureChildSelectors() {
@@ -163,12 +157,9 @@ listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors() {
         subscription-state-remote-restore-self-reference-sync
 }
 
-runRegressionSubscriptionStateRemoteRestoreSelfReference() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors
-}
-
 runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-remote-restore-self-reference \
+        runRegisteredRegressionMain subscription-state-remote-restore-self-reference
 }
 
 runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated() {
@@ -301,16 +292,23 @@ runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegressio
             "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
     }
 
-    runRegressionSubscriptionStateRemoteRestoreSelfReference() {
-        runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe remote-restore-self-reference
-    }
-
     runRegressionSubscriptionStateRemoteRestoreStateWrite() {
         runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe remote-restore-state-write
     }
 
     runRegressionSubscriptionStateRemoteRestoreLegacyMenu() {
         runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe remote-restore-legacy-menu
+    }
+
+    runRegisteredRegressionMain() {
+        case "$1" in
+        subscription-state-remote-restore-self-reference)
+            runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe remote-restore-self-reference
+            ;;
+        *)
+            return 1
+            ;;
+        esac
     }
 
     runRegressionSubscriptionStateRemoteRestore
@@ -366,12 +364,18 @@ runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression() 
         runRegressionSubscriptionStateStructureParallelIsolationProbe structure-foundation
     }
 
-    runRegressionSubscriptionStateStructureMigration() {
-        runRegressionSubscriptionStateStructureParallelIsolationProbe structure-migration
-    }
-
-    runRegressionSubscriptionStateStructureSource() {
-        runRegressionSubscriptionStateStructureParallelIsolationProbe structure-source
+    runRegisteredRegressionMain() {
+        case "$1" in
+        subscription-state-structure-migration)
+            runRegressionSubscriptionStateStructureParallelIsolationProbe structure-migration
+            ;;
+        subscription-state-structure-source)
+            runRegressionSubscriptionStateStructureParallelIsolationProbe structure-source
+            ;;
+        *)
+            return 1
+            ;;
+        esac
     }
 
     runRegressionSubscriptionStateStructure
@@ -472,9 +476,19 @@ registerRegressionFunctionLeaf subscription-state-structure-foundation-credentia
 registerRegressionFunctionLeaf subscription-state-structure-foundation-normalize runRegressionSubscriptionStateStructureFoundationNormalize
 registerRegressionFunctionLeaf subscription-state-structure-foundation-init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
 registerRegressionFunctionLeaf subscription-state-structure-foundation-serial runRegressionSubscriptionStateStructureFoundationSerial
-registerRegressionFunctionLeaf subscription-state-structure-migration runRegressionSubscriptionStateStructureMigration
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-structure-migration \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateStructureMigrationChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateStructureMigrationChildSelectors)
 registerRegressionFunctionLeaf subscription-state-structure-migration-serial runRegressionSubscriptionStateStructureMigrationSerial
-registerRegressionFunctionLeaf subscription-state-structure-source runRegressionSubscriptionStateStructureSource
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-structure-source \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateStructureSourceChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateStructureSourceChildSelectors)
 registerRegressionFunctionLeaf subscription-state-structure-source-credential runRegressionSubscriptionStateStructureSourceCredential
 registerRegressionFunctionLeaf subscription-state-structure-source-status runRegressionSubscriptionStateStructureSourceStatus
 registerRegressionFunctionLeaf subscription-state-structure-source-remove runRegressionSubscriptionStateStructureSourceRemove
@@ -492,7 +506,12 @@ registerRegressionFunctionLeaf subscription-state-quota-partial-sync-plan runReg
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-config runRegressionSubscriptionStateQuotaPartialSyncConfig
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-serial runRegressionSubscriptionStateQuotaPartialSyncSerial
 registerRegressionFunctionLeaf subscription-state-quota-serial runRegressionSubscriptionStateQuotaSerial
-registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference runRegressionSubscriptionStateRemoteRestoreSelfReference
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-remote-restore-self-reference \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors)
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-plan runRegressionSubscriptionStateRemoteRestoreSelfReferencePlan
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-sync runRegressionSubscriptionStateRemoteRestoreSelfReferenceSync
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-serial runRegressionSubscriptionStateRemoteRestoreSelfReferenceSerial
