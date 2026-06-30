@@ -19,11 +19,11 @@ runRegressionRemoteControlSuiteSelector() {
     remote-control-smoke-core) runRemoteControlSmokeCoreCompatRegression ;;
     remote-control-smoke-refresh) runRegressionRemoteControlSmokeRefresh ;;
     remote-control-smoke-refresh-apply) runRegressionRemoteControlSmokeRefreshApply ;;
-    remote-control-smoke-refresh-apply-basic) runRemoteControlSmokeRefreshApplyBasicCompatRegression ;;
-    remote-control-smoke-refresh-apply-prepare) runRemoteControlSmokeRefreshApplyPrepareCompatRegression ;;
-    remote-control-smoke-refresh-apply-failure) runRemoteControlSmokeRefreshApplyFailureCompatRegression ;;
-    remote-control-smoke-refresh-restore) runRemoteControlSmokeRefreshRestoreCompatRegression ;;
-    remote-control-smoke-refresh-reconcile) runRemoteControlSmokeRefreshReconcileCompatRegression ;;
+    remote-control-smoke-refresh-apply-basic) runRegressionRemoteControlSmokeRefreshApplyBasic ;;
+    remote-control-smoke-refresh-apply-prepare) runRegressionRemoteControlSmokeRefreshApplyPrepare ;;
+    remote-control-smoke-refresh-apply-failure) runRegressionRemoteControlSmokeRefreshApplyFailure ;;
+    remote-control-smoke-refresh-restore) runRegressionRemoteControlSmokeRefreshRestore ;;
+    remote-control-smoke-refresh-reconcile) runRegressionRemoteControlSmokeRefreshReconcile ;;
     remote-control-contract-service-install) runRegressionRemoteControlContractServiceInstall ;;
     remote-control-contract-service-install-success) runRemoteControlContractServiceInstallSuccessCompatRegression ;;
     remote-control-contract-service-install-systemctl-fail) runRemoteControlContractServiceInstallSystemctlFailCompatRegression ;;
@@ -176,11 +176,26 @@ runRegressionRemoteControlHandleInlineHelpers() {
     runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
 }
 
-runRemoteControlSmokeRefreshApplyBasicCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyBasic; }
-runRemoteControlSmokeRefreshApplyPrepareCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyPrepare; }
-runRemoteControlSmokeRefreshApplyFailureCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyFailure; }
-runRemoteControlSmokeRefreshRestoreCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshRestore; }
-runRemoteControlSmokeRefreshReconcileCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshReconcile; }
+runRegressionRemoteControlSmokeRefreshApplyBasic() {
+    runRegressionStep remote-control-server-refresh-light-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
+}
+
+runRegressionRemoteControlSmokeRefreshApplyPrepare() {
+    runRegressionStep remote-control-server-refresh-light-apply-prepare runRemoteControlServerRefreshLightApplyPrepareRegression
+}
+
+runRegressionRemoteControlSmokeRefreshApplyFailure() {
+    runRegressionStep remote-control-server-refresh-light-apply-failure runRemoteControlServerRefreshLightApplyFailureRegression
+}
+
+runRegressionRemoteControlSmokeRefreshRestore() {
+    runRegressionStep remote-control-server-refresh-light-restore runRemoteControlServerRefreshLightRestoreRegression
+}
+
+runRegressionRemoteControlSmokeRefreshReconcile() {
+    runRegressionStep remote-control-server-refresh-light-reconcile runRemoteControlServerRefreshLightReconcileRegression
+}
+
 runRemoteControlContractServiceInstallSuccessCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallSuccess; }
 runRemoteControlContractServiceInstallSystemctlFailCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallSystemctlFail; }
 runRemoteControlContractServiceInstallHealthFailCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallHealthFail; }
@@ -210,11 +225,11 @@ registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runR
 registerRegressionFunctionLeaf remote-control-inline-token-consumers runRegressionRemoteControlInlineTokenConsumers
 registerRegressionFunctionLeaf remote-control-inline-sync-runner runRegressionRemoteControlInlineSyncRunner
 registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRegressionRemoteControlHandleInlineHelpers
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlSmokeRefreshApplyBasicCompatRegression
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlSmokeRefreshApplyPrepareCompatRegression
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlSmokeRefreshApplyFailureCompatRegression
-registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRemoteControlSmokeRefreshRestoreCompatRegression
-registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRemoteControlSmokeRefreshReconcileCompatRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure
+registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore
+registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile
 registerRegressionFunctionLeaf remote-control-contract-service-install-success runRemoteControlContractServiceInstallSuccessCompatRegression
 registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRemoteControlContractServiceInstallSystemctlFailCompatRegression
 registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRemoteControlContractServiceInstallHealthFailCompatRegression

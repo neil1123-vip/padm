@@ -431,6 +431,9 @@ and those wrapper implementations no longer live in the legacy-backed full scrip
 Within `remote-control-smoke`, the `remote-control-smoke-core` leaf now also
 dispatches its ordered child selectors through a suite-local sequential helper list
 instead of routing through the legacy compat leaf wrapper.
+The `remote-control-smoke-refresh` children now also run through suite-owned leaf
+selectors instead of compat wrappers, and the matching full-script smoke-refresh
+wrapper shims have been removed.
 
 Those nested public aggregates now also live in the suite layer instead of the legacy-backed full script:
 

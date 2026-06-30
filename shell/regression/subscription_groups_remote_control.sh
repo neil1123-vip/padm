@@ -1919,26 +1919,6 @@ runRegressionRemoteControlContractServerResponseSteps() {
     runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
 
-runRegressionRemoteControlSmokeRefreshApplyBasic() {
-    runRegressionRemoteControlSmokeRefreshApplyBasicSteps
-}
-
-runRegressionRemoteControlSmokeRefreshApplyPrepare() {
-    runRegressionRemoteControlSmokeRefreshApplyPrepareSteps
-}
-
-runRegressionRemoteControlSmokeRefreshApplyFailure() {
-    runRegressionRemoteControlSmokeRefreshApplyFailureSteps
-}
-
-runRegressionRemoteControlSmokeRefreshRestore() {
-    runRegressionRemoteControlSmokeRefreshRestoreSteps
-}
-
-runRegressionRemoteControlSmokeRefreshReconcile() {
-    runRegressionRemoteControlSmokeRefreshReconcileSteps
-}
-
 runRegressionRemoteControlContractServiceInstallSuccess() {
     runRegressionRemoteControlContractServiceInstallSuccessSteps
 }
