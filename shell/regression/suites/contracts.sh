@@ -817,6 +817,7 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureFoundationChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateStructureSourceChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaTrafficChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors >/dev/null
@@ -859,6 +860,11 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-structure-foundation \
         subscription-state-structure-migration \
         subscription-state-structure-source
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureSourceChildSelectors structure-source \
+        subscription-state-structure-source-credential \
+        subscription-state-structure-source-status \
+        subscription-state-structure-source-remove \
+        subscription-state-structure-source-serial
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateQuotaChildSelectors quota \
         subscription-state-quota-traffic \
         subscription-state-quota-menu-tx \
@@ -899,6 +905,7 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         runRegressionSubscriptionStateStructureFoundation \
         runRegressionSubscriptionStateStructureFoundationIsolated \
         runRegressionSubscriptionStateStructureMigrationIsolated \
+        listRegressionSubscriptionStateStructureSourceChildSelectors \
         runRegressionSubscriptionStateStructureSourceIsolated \
         listRegressionSubscriptionStateStructureChildSelectors \
         runRegressionSubscriptionStateStructureSelector \
@@ -952,6 +959,23 @@ runSubscriptionStateSerialChildStepsContract() {
         subscription-sync-rollback-failure-serial \
         subscription-sync-reconcile-early-exit \
         subscription-groups-restore-failure
+}
+
+runSubscriptionStateStructureSourceChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-structure-source-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state-structure-source-credential' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateStructureSourceChildSelectors
+    grep -qx 'dispatch:subscription-state-structure-source-status' "${callLog}"
+    grep -qx 'dispatch:subscription-state-structure-source-remove' "${callLog}"
+    grep -qx 'dispatch:subscription-state-structure-source-serial' "${callLog}"
 }
 
 runSubscriptionStateQuotaTrafficChildStepsContract() {

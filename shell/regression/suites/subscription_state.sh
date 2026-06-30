@@ -62,8 +62,16 @@ runRegressionSubscriptionStateStructureMigrationIsolated() {
     runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-migration runRegressionSubscriptionStateStructureMigration
 }
 
+listRegressionSubscriptionStateStructureSourceChildSelectors() {
+    printf '%s\n' \
+        subscription-state-structure-source-credential \
+        subscription-state-structure-source-status \
+        subscription-state-structure-source-remove \
+        subscription-state-structure-source-serial
+}
+
 runRegressionSubscriptionStateStructureSource() {
-    runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateStructureSourceChildSelectors
 }
 
 runRegressionSubscriptionStateStructureSourceIsolated() {
