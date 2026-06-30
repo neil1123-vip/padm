@@ -1364,7 +1364,6 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q 'source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -Eq '^runRegressionRemoteControlSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControlSmokeRefresh\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControlSmokeRefreshApply\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControlSmoke\(\)[[:space:]]*[({]' "${suiteFile}"
@@ -1409,7 +1408,7 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q 'registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
     grep -q 'registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \\' "${suiteFile}"
     ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
 
     ! grep -q '^runParallelRemoteControlModes()' "${scriptFile}"
@@ -1752,12 +1751,12 @@ runRemoteControlAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf remote-control ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \\' "${suiteFile}"
     expectedChildren=$(listRegressionRemoteControlChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         remote-control \
         parallel \
-        runRegressionRemoteControlSuiteRoot \
+        runRegressionRemoteControl \
         "${expectedChildren}"
 }
 
@@ -1825,6 +1824,20 @@ runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract() (
         "${callLog}" \
         'framework:'"${TMP_DIR}"'/remote-control-default-[0-9][0-9]* remote-control-smoke remote-control-smoke remote-control-deep remote-control-deep' \
         runRegressionRemoteControl
+)
+
+runRemoteControlTopLevelNoSuiteSelectorRunnerContract() (
+    local callLog="${TMP_DIR}/remote-control-top-level-no-suite-selector-runner.log"
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'runner=%s args=%s\n' \
+            "${PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER:-}" \
+            "$*" >>"${callLog}"
+    }
+
+    runRegressionRemoteControl
+
+    grep -qx 'runner= args='"${TMP_DIR}"'/remote-control-default-[0-9][0-9]* remote-control-smoke remote-control-smoke remote-control-contract remote-control-contract remote-control-deep remote-control-deep' "${callLog}"
 )
 
 runFastSuiteUsesFunctionRegistryContract() {
@@ -5876,6 +5889,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
         runRegressionStep remote-control-nested-aggregate-runner-registration runRemoteControlNestedAggregateRunnerRegistrationContract &&
         runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract &&
+        runRegressionStep remote-control-top-level-no-suite-selector-runner runRemoteControlTopLevelNoSuiteSelectorRunnerContract &&
         runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
         runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
         runRegressionStep fast-public-cli-retirement runFastPublicCliRetirementContract &&

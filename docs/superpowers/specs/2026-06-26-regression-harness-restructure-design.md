@@ -368,7 +368,7 @@ suite root onto the shared framework helper.
 
 `remote-control` now uses selector registration plus framework selector-list orchestration for the suite root.
 
-The top-level suite root fans out through a suite-local selector runner over:
+The top-level suite root now fans out directly through the framework selector helper over:
 
 - `smoke`
 - `contract`
@@ -384,7 +384,7 @@ Important boundary:
 
 - the top-level suite root now uses `runFrameworkParallelRegressionSelectorList`
 - nested public aggregates inside `subscription_groups_remote_control.sh` now also use suite-local selector-list helpers plus `runFrameworkParallelRegressionSelectorList`
-- the suite-local selector runner still preserves source-only compatibility for the legacy-backed helper tree while keeping orchestration on framework primitives
+- the top-level suite no longer needs a suite-local selector runner shim for those direct children
 - legacy-backed direct leaves now also run through isolated compat wrappers that re-source `subscription_groups_remote_control.sh` in a subshell before each leaf
 - this isolates source-time `TMP_DIR`-derived globals such as `SUBSCRIBE_CAPTURE_DIR`, `configPath`, and `singBoxConfigPath`
 

@@ -12,38 +12,9 @@ runRegressionRemoteControlLegacyLeafWithCompat() (
     "$@"
 )
 
-runRegressionRemoteControlSuiteSelector() {
-    case "$1" in
-    remote-control-smoke) runRegressionRemoteControlSmoke ;;
-    remote-control-contract) runRegressionRemoteControlContract ;;
-    remote-control-smoke-core) runRemoteControlSmokeCoreCompatRegression ;;
-    remote-control-smoke-refresh) runRegressionRemoteControlSmokeRefresh ;;
-    remote-control-smoke-refresh-apply) runRegressionRemoteControlSmokeRefreshApply ;;
-    remote-control-smoke-refresh-apply-basic) runRegressionRemoteControlSmokeRefreshApplyBasic ;;
-    remote-control-smoke-refresh-apply-prepare) runRegressionRemoteControlSmokeRefreshApplyPrepare ;;
-    remote-control-smoke-refresh-apply-failure) runRegressionRemoteControlSmokeRefreshApplyFailure ;;
-    remote-control-smoke-refresh-restore) runRegressionRemoteControlSmokeRefreshRestore ;;
-    remote-control-smoke-refresh-reconcile) runRegressionRemoteControlSmokeRefreshReconcile ;;
-    remote-control-contract-service-install) runRegressionRemoteControlContractServiceInstall ;;
-    remote-control-contract-service-install-success) runRemoteControlContractServiceInstallSuccessCompatRegression ;;
-    remote-control-contract-service-install-systemctl-fail) runRemoteControlContractServiceInstallSystemctlFailCompatRegression ;;
-    remote-control-contract-service-install-health-fail) runRemoteControlContractServiceInstallHealthFailCompatRegression ;;
-    remote-control-contract-service-install-health-rollback) runRemoteControlContractServiceInstallHealthRollbackCompatRegression ;;
-    remote-control-contract-service-install-token-transaction) runRemoteControlContractServiceInstallTokenTransactionCompatRegression ;;
-    remote-control-contract-server-response) runRemoteControlContractServerResponseCompatRegression ;;
-    remote-control-deep) runRemoteControlDeepCompatRegression ;;
-    *) return 2 ;;
-    esac
-}
-
 runRegressionRemoteControl() {
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionRemoteControlSuiteSelector \
-        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-default-${BASHPID:-$$}" \
+    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-default-${BASHPID:-$$}" \
         listRegressionRemoteControlChildSelectors
-}
-
-runRegressionRemoteControlSuiteRoot() {
-    runRegressionRemoteControl
 }
 
 listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {
@@ -257,5 +228,5 @@ registerRegressionAggregateRunnerParallel remote-control-contract-service-instal
     $(listRegressionRemoteControlContractServiceInstallChildSelectors)
 registerRegressionAggregateRunnerParallel remote-control-contract runRegressionRemoteControlContract \
     $(listRegressionRemoteControlContractChildSelectors)
-registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControlSuiteRoot \
+registerRegressionAggregateRunnerParallel remote-control runRegressionRemoteControl \
     $(listRegressionRemoteControlChildSelectors)
