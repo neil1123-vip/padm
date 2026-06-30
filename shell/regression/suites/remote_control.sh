@@ -5,26 +5,33 @@ REGRESSION_REMOTE_CONTROL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 
 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
 
+runRegressionRemoteControlLegacyLeafWithCompat() (
+    # Re-source legacy remote-control fixtures in an isolated subshell so later
+    # suite loads cannot leave source-time TMP_DIR-derived paths stale.
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
+    "$@"
+)
+
 runRegressionRemoteControlSuiteSelector() {
     case "$1" in
     remote-control-smoke) runRegressionRemoteControlSmoke ;;
     remote-control-contract) runRegressionRemoteControlContract ;;
-    remote-control-smoke-core) runRegressionRemoteControlSmokeCore ;;
+    remote-control-smoke-core) runRemoteControlSmokeCoreCompatRegression ;;
     remote-control-smoke-refresh) runRegressionRemoteControlSmokeRefresh ;;
     remote-control-smoke-refresh-apply) runRegressionRemoteControlSmokeRefreshApply ;;
-    remote-control-smoke-refresh-apply-basic) runRegressionRemoteControlSmokeRefreshApplyBasic ;;
-    remote-control-smoke-refresh-apply-prepare) runRegressionRemoteControlSmokeRefreshApplyPrepare ;;
-    remote-control-smoke-refresh-apply-failure) runRegressionRemoteControlSmokeRefreshApplyFailure ;;
-    remote-control-smoke-refresh-restore) runRegressionRemoteControlSmokeRefreshRestore ;;
-    remote-control-smoke-refresh-reconcile) runRegressionRemoteControlSmokeRefreshReconcile ;;
+    remote-control-smoke-refresh-apply-basic) runRemoteControlSmokeRefreshApplyBasicCompatRegression ;;
+    remote-control-smoke-refresh-apply-prepare) runRemoteControlSmokeRefreshApplyPrepareCompatRegression ;;
+    remote-control-smoke-refresh-apply-failure) runRemoteControlSmokeRefreshApplyFailureCompatRegression ;;
+    remote-control-smoke-refresh-restore) runRemoteControlSmokeRefreshRestoreCompatRegression ;;
+    remote-control-smoke-refresh-reconcile) runRemoteControlSmokeRefreshReconcileCompatRegression ;;
     remote-control-contract-service-install) runRegressionRemoteControlContractServiceInstall ;;
-    remote-control-contract-service-install-success) runRegressionRemoteControlContractServiceInstallSuccess ;;
-    remote-control-contract-service-install-systemctl-fail) runRegressionRemoteControlContractServiceInstallSystemctlFail ;;
-    remote-control-contract-service-install-health-fail) runRegressionRemoteControlContractServiceInstallHealthFail ;;
-    remote-control-contract-service-install-health-rollback) runRegressionRemoteControlContractServiceInstallHealthRollback ;;
-    remote-control-contract-service-install-token-transaction) runRegressionRemoteControlContractServiceInstallTokenTransaction ;;
-    remote-control-contract-server-response) runRegressionRemoteControlContractServerResponse ;;
-    remote-control-deep) runRegressionRemoteControlDeep ;;
+    remote-control-contract-service-install-success) runRemoteControlContractServiceInstallSuccessCompatRegression ;;
+    remote-control-contract-service-install-systemctl-fail) runRemoteControlContractServiceInstallSystemctlFailCompatRegression ;;
+    remote-control-contract-service-install-health-fail) runRemoteControlContractServiceInstallHealthFailCompatRegression ;;
+    remote-control-contract-service-install-health-rollback) runRemoteControlContractServiceInstallHealthRollbackCompatRegression ;;
+    remote-control-contract-service-install-token-transaction) runRemoteControlContractServiceInstallTokenTransactionCompatRegression ;;
+    remote-control-contract-server-response) runRemoteControlContractServerResponseCompatRegression ;;
+    remote-control-deep) runRemoteControlDeepCompatRegression ;;
     *) return 2 ;;
     esac
 }
@@ -116,20 +123,46 @@ JSON
     cmp -s "${beforeFile}" "${afterFile}"
 )
 
-registerRegressionFunctionLeaf remote-control-smoke-core runRegressionRemoteControlSmokeCore
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure
-registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore
-registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile
-registerRegressionFunctionLeaf remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess
-registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail
-registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail
-registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback
-registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction
-registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlContractServerResponse
-registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlDeep
+runRemoteControlSmokeCoreCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeCore; }
+runRemoteControlSmokeRefreshApplyBasicCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyBasic; }
+runRemoteControlSmokeRefreshApplyPrepareCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyPrepare; }
+runRemoteControlSmokeRefreshApplyFailureCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyFailure; }
+runRemoteControlSmokeRefreshRestoreCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshRestore; }
+runRemoteControlSmokeRefreshReconcileCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshReconcile; }
+runRemoteControlContractServiceInstallSuccessCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallSuccess; }
+runRemoteControlContractServiceInstallSystemctlFailCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallSystemctlFail; }
+runRemoteControlContractServiceInstallHealthFailCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallHealthFail; }
+runRemoteControlContractServiceInstallHealthRollbackCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallHealthRollback; }
+runRemoteControlContractServiceInstallTokenTransactionCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServiceInstallTokenTransaction; }
+runRemoteControlContractServerResponseCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServerResponse; }
+runRemoteControlDeepCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlDeep; }
+
+runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
+    set -euo pipefail
+    local originalTmpDir="${TMP_DIR}"
+
+    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
+    source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../bootstrap.sh"
+    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-contract-server-response
+)
+
+registerRegressionFunctionLeaf remote-control-smoke-core runRemoteControlSmokeCoreCompatRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlSmokeRefreshApplyBasicCompatRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlSmokeRefreshApplyPrepareCompatRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlSmokeRefreshApplyFailureCompatRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRemoteControlSmokeRefreshRestoreCompatRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRemoteControlSmokeRefreshReconcileCompatRegression
+registerRegressionFunctionLeaf remote-control-contract-service-install-success runRemoteControlContractServiceInstallSuccessCompatRegression
+registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRemoteControlContractServiceInstallSystemctlFailCompatRegression
+registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRemoteControlContractServiceInstallHealthFailCompatRegression
+registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRemoteControlContractServiceInstallHealthRollbackCompatRegression
+registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRemoteControlContractServiceInstallTokenTransactionCompatRegression
+registerRegressionFunctionLeaf remote-control-contract-server-response runRemoteControlContractServerResponseCompatRegression
+registerRegressionFunctionLeaf remote-control-deep runRemoteControlDeepCompatRegression
 registerRegressionFunctionLeaf regression-remote-control-deep-state-rollback-normalization runRegressionRemoteControlDeepStateRollbackNormalizationRegression
+registerRegressionFunctionLeaf regression-remote-control-legacy-tmpdir-isolation runRegressionRemoteControlLegacyTmpDirIsolationRegression
 
 listRegressionRemoteControlChildSelectors() {
     printf '%s\n' \

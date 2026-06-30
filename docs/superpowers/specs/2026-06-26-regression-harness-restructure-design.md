@@ -326,6 +326,8 @@ Important boundary:
 - the top-level suite root now uses `runFrameworkParallelRegressionSelectorList`
 - nested public aggregates inside `subscription_groups_remote_control.sh` now also use suite-local selector-list helpers plus `runFrameworkParallelRegressionSelectorList`
 - the suite-local selector runner still preserves source-only compatibility for the legacy-backed helper tree while keeping orchestration on framework primitives
+- legacy-backed direct leaves now also run through isolated compat wrappers that re-source `subscription_groups_remote_control.sh` in a subshell before each leaf
+- this isolates source-time `TMP_DIR`-derived globals such as `SUBSCRIBE_CAPTURE_DIR`, `configPath`, and `singBoxConfigPath`
 
 ### Subscription State
 
@@ -450,6 +452,7 @@ Active compat wrapper patterns:
 - `routing.sh`
 - `platform.sh`
 - `reality.sh`
+- `remote_control.sh`
 - `tls.sh`
 - `runtime.sh`
 - `transaction.sh`
@@ -599,7 +602,7 @@ Most likely next steps:
 1. keep reviewing legacy-backed suites for source-time global drift and add compat wrappers only where concrete collisions are proven
 2. decide whether nested aggregates still living inside legacy-backed scripts should also be lifted onto selector-list orchestration, or intentionally remain local runner groups
 3. keep trimming contract duplication only where a cross-suite assertion shape is still materially repeated; aggregate-runner, helper-dispatch, registered-child alignment, child-order, dispatcher-step coverage, helper-adoption, and straight-line child-step invariants now already sit behind common helpers, so mixed wrapper-order, multi-hit, and suite-specific selector-retirement contracts should stay explicit unless a truly repeated shape emerges
-4. keep checking legacy-backed suites for source-time state that is initialized from bootstrap exports and later mutated or deleted inside leaf setup; the UI `PADM_SUBSCRIPTION_GROUPS_DIR` collision is the current example of that failure mode
+4. keep checking legacy-backed suites for source-time state that is initialized from bootstrap exports and later mutated or deleted inside leaf setup; the UI `PADM_SUBSCRIPTION_GROUPS_DIR` collision and remote-control `SUBSCRIBE_CAPTURE_DIR` / `configPath` / `singBoxConfigPath` drift are the current examples of that failure mode
 5. refresh this design snapshot whenever a suite root, resource-profile boundary, compat boundary, or contract-helper boundary changes, so the spec remains an authoritative map instead of a historical note
 
 Deferred on purpose:
