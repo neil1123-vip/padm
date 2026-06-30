@@ -404,6 +404,14 @@ The core subtree fans out through selector-list orchestration over:
 - `subscription-state-quota`
 - `subscription-state-remote-restore`
 
+Inside that core subtree, the `subscription-state-quota` branch now keeps its
+top-level aggregate-runner shape, but its three suite-local wrappers dispatch
+their serial child selectors through `runFrameworkSequentialRegressionSelectorList`:
+
+- `subscription-state-quota-traffic`
+- `subscription-state-quota-menu-tx`
+- `subscription-state-quota-partial-sync`
+
 Those nested public aggregates now also live in the suite layer instead of the legacy-backed full script:
 
 - `subscription-state-structure-foundation`

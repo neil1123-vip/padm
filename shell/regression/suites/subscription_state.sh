@@ -99,16 +99,39 @@ listRegressionSubscriptionStateQuotaChildSelectors() {
         subscription-state-quota-partial-sync
 }
 
+listRegressionSubscriptionStateQuotaTrafficChildSelectors() {
+    printf '%s\n' \
+        subscription-state-quota-traffic-summary \
+        subscription-state-quota-traffic-invalid-input \
+        subscription-state-quota-traffic-apply \
+        subscription-state-quota-traffic-serial
+}
+
+listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors() {
+    printf '%s\n' \
+        subscription-state-quota-menu-preview-fail \
+        subscription-state-quota-menu-tx-rollback \
+        subscription-state-quota-menu-tx-serial
+}
+
+listRegressionSubscriptionStateQuotaPartialSyncChildSelectors() {
+    printf '%s\n' \
+        subscription-state-quota-partial-sync-apply-failure \
+        subscription-state-quota-partial-sync-plan \
+        subscription-state-quota-partial-sync-config \
+        subscription-state-quota-partial-sync-serial
+}
+
 runRegressionSubscriptionStateQuotaTraffic() {
-    runRegressionStep subscription-state-quota-traffic-serial runSubscriptionGroupStateQuotaTrafficSerialRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaTrafficChildSelectors
 }
 
 runRegressionSubscriptionStateQuotaMenuTransaction() {
-    runRegressionStep subscription-state-quota-menu-tx-serial runSubscriptionGroupStateQuotaMenuTransactionSerialRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors
 }
 
 runRegressionSubscriptionStateQuotaPartialSync() {
-    runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaPartialSyncChildSelectors
 }
 
 runRegressionSubscriptionStateQuota() {

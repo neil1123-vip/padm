@@ -818,6 +818,9 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateStructureFoundationChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateQuotaTrafficChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateQuotaPartialSyncChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateSyncRollbackFailureChildSelectors >/dev/null
 
@@ -860,6 +863,20 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-quota-traffic \
         subscription-state-quota-menu-tx \
         subscription-state-quota-partial-sync
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateQuotaTrafficChildSelectors quota-traffic \
+        subscription-state-quota-traffic-summary \
+        subscription-state-quota-traffic-invalid-input \
+        subscription-state-quota-traffic-apply \
+        subscription-state-quota-traffic-serial
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors quota-menu-tx \
+        subscription-state-quota-menu-preview-fail \
+        subscription-state-quota-menu-tx-rollback \
+        subscription-state-quota-menu-tx-serial
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateQuotaPartialSyncChildSelectors quota-partial-sync \
+        subscription-state-quota-partial-sync-apply-failure \
+        subscription-state-quota-partial-sync-plan \
+        subscription-state-quota-partial-sync-config \
+        subscription-state-quota-partial-sync-serial
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreChildSelectors remote-restore \
         subscription-state-remote-restore-self-reference \
         subscription-state-remote-restore-state-write \
@@ -887,6 +904,9 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         runRegressionSubscriptionStateStructureSelector \
         runRegressionSubscriptionStateStructure \
         listRegressionSubscriptionStateQuotaChildSelectors \
+        listRegressionSubscriptionStateQuotaTrafficChildSelectors \
+        listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors \
+        listRegressionSubscriptionStateQuotaPartialSyncChildSelectors \
         runRegressionSubscriptionStateQuota \
         runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
         runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
@@ -932,6 +952,56 @@ runSubscriptionStateSerialChildStepsContract() {
         subscription-sync-rollback-failure-serial \
         subscription-sync-reconcile-early-exit \
         subscription-groups-restore-failure
+}
+
+runSubscriptionStateQuotaTrafficChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-quota-traffic-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state-quota-traffic-summary' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateQuotaTrafficChildSelectors
+    grep -qx 'dispatch:subscription-state-quota-traffic-invalid-input' "${callLog}"
+    grep -qx 'dispatch:subscription-state-quota-traffic-apply' "${callLog}"
+    grep -qx 'dispatch:subscription-state-quota-traffic-serial' "${callLog}"
+}
+
+runSubscriptionStateQuotaMenuTransactionChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-quota-menu-tx-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state-quota-menu-preview-fail' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors
+    grep -qx 'dispatch:subscription-state-quota-menu-tx-rollback' "${callLog}"
+    grep -qx 'dispatch:subscription-state-quota-menu-tx-serial' "${callLog}"
+}
+
+runSubscriptionStateQuotaPartialSyncChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-quota-partial-sync-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state-quota-partial-sync-apply-failure' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateQuotaPartialSyncChildSelectors
+    grep -qx 'dispatch:subscription-state-quota-partial-sync-plan' "${callLog}"
+    grep -qx 'dispatch:subscription-state-quota-partial-sync-config' "${callLog}"
+    grep -qx 'dispatch:subscription-state-quota-partial-sync-serial' "${callLog}"
 }
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
