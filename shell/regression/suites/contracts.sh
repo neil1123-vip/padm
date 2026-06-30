@@ -2269,9 +2269,9 @@ runTlsSuiteUsesFunctionRegistryContract() {
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-failure-return runTlsFailureReturnCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-reinstall-rollback runTlsReinstallRollbackCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-renew-failure-propagation runTlsRenewalFailurePropagationCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}"
 }
 
@@ -2355,6 +2355,37 @@ runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
 
     runAggregateRunnerUsesSuiteLocalHelperAssertions tls "${callLog}" 'suite-tls' 'legacy-tls'
 )
+
+runTlsLeavesUseCompatHelperContract() (
+    local callLog="${TMP_DIR}/tls-compat-helper.log"
+
+    : >"${callLog}"
+
+    runRegressionTlsLegacyLeafWithCompat() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-failure-return
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-reinstall-rollback
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-renew-failure-propagation
+
+    cat <<'EOF' >"${TMP_DIR}/tls-compat-helper.expected.log"
+runTlsFailureReturnRegression
+runTlsReinstallRollbackRegression
+runTlsRenewalFailurePropagationRegression
+EOF
+
+    cmp -s "${TMP_DIR}/tls-compat-helper.expected.log" "${callLog}"
+)
+
+runTlsLegacyTmpDirIsolationGuardRegisteredContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
+
+    grep -q '^runRegressionTlsLegacyTmpDirIsolationRegression() ($' "${suiteFile}" || return 1
+    grep -q '^    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-renew-failure-propagation$' "${suiteFile}" || return 1
+    grep -q '^registerRegressionFunctionLeaf regression-tls-legacy-tmpdir-isolation runRegressionTlsLegacyTmpDirIsolationRegression$' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerSequential tls .*regression-tls-legacy-tmpdir-isolation' "${suiteFile}" || return 1
+}
 
 runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
@@ -5187,6 +5218,8 @@ runRegressionDispatcherContracts() {
         runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
         runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
         runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
+        runRegressionStep tls-leaves-use-compat-helper runTlsLeavesUseCompatHelperContract &&
+        runRegressionStep tls-legacy-tmpdir-isolation-guard-registered runTlsLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
         runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract &&
         runRegressionStep composition-leaf-selectors-legacy-public-retirement runCompositionLeafSelectorsLegacyPublicRetirementContract &&
