@@ -223,6 +223,18 @@ runRegressionSubscriptionGroupSyncRollbackIsolated() {
     runSubscriptionStateParallelChildRegressionIsolated subscription-group-sync-rollback runRegressionSubscriptionGroupSyncRollback
 }
 
+listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors() {
+    printf '%s\n' \
+        subscription-sync-rollback-config-restore-failure \
+        subscription-sync-restore-dir-failure \
+        subscription-sync-reload-rollback \
+        subscription-group-sync-rollback-serial
+}
+
+runRegressionSubscriptionStateSyncRollbackSerial() {
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors
+}
+
 listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {
     printf '%s\n' \
         subscription-sync-rollback-config-restore-failure \
