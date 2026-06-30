@@ -53,6 +53,43 @@ EOF
     cmp -s "${TMP_DIR}/function-leaf-runner-args.expected.log" "${callLog}"
 )
 
+runRegressionAggregateRunnerSupportsRunnerArgsContract() (
+    local selector="aggregate-runner-args-fixture"
+    local callLog="${TMP_DIR}/aggregate-runner-args.log"
+
+    : >"${callLog}"
+
+    listFixtureAggregateRunnerChildren() {
+        printf '%s\n' \
+            alpha \
+            beta
+    }
+
+    runFixtureAggregateRunnerWithArgs() {
+        local selectorListFn=$1
+        printf 'runner:%s\n' "${selectorListFn}" >>"${callLog}"
+        "${selectorListFn}" >>"${callLog}"
+    }
+
+    registerRegressionFunctionLeaf alpha runFixtureCompatHelper runFixtureLeaf
+    registerRegressionFunctionLeaf beta runFixtureCompatHelper runFixtureLeaf
+    registerRegressionAggregateRunnerSequentialWithArgs \
+        "${selector}" \
+        runFixtureAggregateRunnerWithArgs \
+        listFixtureAggregateRunnerChildren \
+        -- \
+        $(listFixtureAggregateRunnerChildren)
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+
+    cat <<'EOF' >"${TMP_DIR}/aggregate-runner-args.expected.log"
+runner:listFixtureAggregateRunnerChildren
+alpha
+beta
+EOF
+
+    cmp -s "${TMP_DIR}/aggregate-runner-args.expected.log" "${callLog}"
+)
+
 runLegacyPublicSelectorRetirementAssertions() (
     local legacyFile=$1
     shift
@@ -91,6 +128,14 @@ runAggregateRunnerRegistrationAssertions() {
     [[ "${PADM_REGRESSION_SELECTOR_MODE["${selector}"]:-}" == "${mode}" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]:-}" == "${runner}" ]] || return 1
     [[ "${actualChildren}" == "${expectedChildren}" ]] || return 1
+}
+
+runAggregateRunnerRunnerArgsAssertions() {
+    local selector=$1
+    local expectedArgs=$2
+    local actualArgs=${PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]:-}
+
+    [[ "${actualArgs}" == "${expectedArgs}" ]] || return 1
 }
 
 runAggregateRunnerUsesSuiteLocalHelperAssertions() (
@@ -401,6 +446,18 @@ runAggregateRunnerUsesSuiteLocalHelperAssertionContract() (
     fi
 )
 
+runAggregateRunnerRunnerArgsAssertionContract() (
+    local selector="aggregate-runner-runner-args-fixture"
+
+    PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]='alpha
+beta'
+    runAggregateRunnerRunnerArgsAssertions "${selector}" $'alpha\nbeta'
+
+    if runAggregateRunnerRunnerArgsAssertions "${selector}" 'alpha'; then
+        return 1
+    fi
+)
+
 runAggregateRunnerUsesFrameworkSelectorHelperAssertionContract() (
     local callLog="${TMP_DIR}/aggregate-framework-helper.log"
 
@@ -493,7 +550,6 @@ runAggregateRunnerUsesSuiteLocalHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
-        runTlsAggregateRunnerUsesSuiteLocalHelperContract \
         runUiAggregateRunnerUsesSuiteLocalHelperContract \
         runRoutingAggregateRunnerUsesSuiteLocalHelperContract \
         runRuntimeAggregateRunnerUsesSuiteLocalHelperContract; do
@@ -1940,8 +1996,8 @@ runFastSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
-    grep -q '^runRegressionFastRealitySuiteRoot() {$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}"
+    ! grep -q '^runRegressionFastRealitySuiteRoot() {$' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
     ! grep -q 'declare -f runRegressionFast' "${suiteFile}"
@@ -2467,13 +2523,14 @@ runFastRealityAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential fast-reality \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionFastRealityChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         fast-reality \
         sequential \
-        runRegressionFastRealitySuiteRoot \
+        runFrameworkSequentialRegressionSelectorList \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions fast-reality 'listRegressionFastRealityChildSelectors'
 }
 
 runFastSelectorHelpersStayAlignedContract() (
@@ -2562,7 +2619,7 @@ runFastRealityLegacyRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
     runLegacyFunctionSelectorRetirementAssertions \
         "${legacyFile}" \
         runRegressionFastReality \
@@ -2860,14 +2917,14 @@ runTlsSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TLS_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^runRegressionTlsSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionTlsSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf tls-failure-return runRegressionTlsLegacyLeafWithCompat runTlsFailureReturnRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf tls-reinstall-rollback runRegressionTlsLegacyLeafWithCompat runTlsReinstallRollbackRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf tls-renew-failure-propagation runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
 }
 
 runTlsSelectorHelpersStayAlignedContract() (
@@ -2900,20 +2957,21 @@ runTlsAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential tls \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionTlsChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         tls \
         sequential \
-        runRegressionTlsSuiteRoot \
+        runFrameworkSequentialRegressionSelectorList \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions tls 'listRegressionTlsChildSelectors'
 }
 
 runTlsLegacyRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
     runLegacyFunctionSelectorRetirementAssertions \
         "${legacyFile}" \
         runRegressionTls \
@@ -2925,7 +2983,7 @@ runTlsLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-failure-return"]:-}" == "function" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-reinstall-rollback"]:-}" == "function" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-renew-failure-propagation"]:-}" == "function" ]] || return 1
@@ -2936,20 +2994,10 @@ runTlsLegacyPublicSelectorRetirementContract() {
         tls-renew-failure-propagation
 }
 
-runTlsAggregateRunnerUsesSuiteLocalHelperContract() (
-    local callLog="${TMP_DIR}/tls-aggregate-suite-root-dispatch.log"
-
-    runRegressionTls() {
-        printf 'legacy-tls\n' >>"${callLog}"
-        return 97
-    }
-
-    runRegressionTlsSuiteRoot() {
-        printf 'suite-tls\n' >>"${callLog}"
-    }
-
-    runAggregateRunnerUsesSuiteLocalHelperAssertions tls "${callLog}" 'suite-tls' 'legacy-tls'
-)
+runTlsNoEmptyAggregateWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
+    ! grep -q '^runRegressionTlsSuiteRoot() {$' "${suiteFile}" || return 1
+}
 
 runTlsLeavesUseCompatHelperContract() (
     local callLog="${TMP_DIR}/tls-compat-helper.log"
@@ -2979,7 +3027,7 @@ runTlsLegacyTmpDirIsolationGuardRegisteredContract() {
     grep -q '^runRegressionTlsLegacyTmpDirIsolationRegression() ($' "${suiteFile}" || return 1
     grep -q '^    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-renew-failure-propagation$' "${suiteFile}" || return 1
     grep -q '^registerRegressionFunctionLeaf regression-tls-legacy-tmpdir-isolation runRegressionTlsLegacyTmpDirIsolationRegression$' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionAggregateRunnerSequential tls .*regression-tls-legacy-tmpdir-isolation' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionAggregateRunnerSequentialWithArgs .*regression-tls-legacy-tmpdir-isolation' "${suiteFile}" || return 1
 }
 
 runLegacyDirectLeafSelectorsUseFunctionRegistryContract() {
@@ -3146,7 +3194,7 @@ runTransactionSubscriptionLeavesUseCompatHelperContract() (
         printf '%s\n' "$1" >>"${callLog}"
     }
 
-    runRegressionTransactionSubscriptionSuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-subscription
 
     cat <<'EOF' >"${TMP_DIR}/transaction-subscription-compat-helper.expected.log"
 runCdnAddressTransactionRegression
@@ -4512,13 +4560,14 @@ runTransactionAggregateRunnerRegistrationContract() (
     ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential transaction \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         transaction \
         sequential \
-        runRegressionTransactionSuiteRoot \
+        runFrameworkSequentialRegressionSelectorList \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions transaction 'listRegressionTransactionChildSelectors'
 )
 
 runTransactionSubscriptionAggregateRunnerRegistrationContract() (
@@ -4529,13 +4578,14 @@ runTransactionSubscriptionAggregateRunnerRegistrationContract() (
     ! grep -q '^registerRegressionScriptLeaf transaction-subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-subscription ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential transaction-subscription \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential transaction-subscription runRegressionTransactionSubscriptionSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionTransactionSubscriptionChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         transaction-subscription \
         sequential \
-        runRegressionTransactionSubscriptionSuiteRoot \
+        runFrameworkSequentialRegressionSelectorList \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions transaction-subscription 'listRegressionTransactionSubscriptionChildSelectors'
 )
 
 runTransactionSystemAggregateRunnerRegistrationContract() (
@@ -4564,7 +4614,7 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
     grep -q '^listRegressionTransactionChildSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionSubscriptionChildSelectors() {$' "${suiteFile}"
-    grep -q '^runRegressionTransactionSubscriptionSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionTransactionSubscriptionSuiteRoot() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionCoreSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionCoreChildSelectors() {$' "${suiteFile}"
@@ -4572,7 +4622,7 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     grep -q '^listRegressionTransactionCoreMediumChildSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionCoreLightChildSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionTransactionSystemChildSelectors() {$' "${suiteFile}"
-    grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionCoreSuiteRoot() {$' "${suiteFile}"
     grep -q '^runRegressionTransactionSystemSuiteRoot() {$' "${suiteFile}"
     ! grep -q '^runRegressionTransactionSubscription() {$' "${suiteFile}"
@@ -4604,9 +4654,9 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential transaction-subscription runRegressionTransactionSubscriptionSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
 )
 
 runTransactionNoEmptyAggregateWrapperFunctionsContract() {
@@ -4614,6 +4664,8 @@ runTransactionNoEmptyAggregateWrapperFunctionsContract() {
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     ! grep -q '^runRegressionTransactionSubscription() {$' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionTransactionSubscriptionSuiteRoot() {$' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}" || return 1
     ! grep -q '^runRegressionTransactionSubscription() {$' "${legacyScriptFile}" || return 1
 }
 
@@ -4638,55 +4690,12 @@ runTransactionLegacyPublicSelectorRetirementContract() (
     runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" "${selectors[@]}"
 )
 
-runTransactionSuiteUsesSuiteLocalHelpersContract() (
-    local callLog="${TMP_DIR}/transaction-suite-root-dispatch.log"
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-
-    : >"${callLog}"
-
-    ! grep -Eq '^runRegressionTransactionSubscription\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-
-    runRegressionTransaction() {
-        printf 'legacy-transaction\n' >>"${callLog}"
-        return 97
-    }
-
-    runRegressionTransactionSystem() {
-        printf 'legacy-transaction-system\n' >>"${callLog}"
-        return 97
-    }
-
-    runRegressionTransactionCore() {
-        printf 'legacy-transaction-core\n' >>"${callLog}"
-        return 97
-    }
-
-    runRegressionTransactionCoreSuiteRoot() {
-        printf 'suite-transaction-core\n' >>"${callLog}"
-    }
-
-    runRegressionTransactionSubscription() {
-        printf 'legacy-transaction-subscription\n' >>"${callLog}"
-        return 97
-    }
-
-    runRegressionTransactionSystemSuiteRoot() {
-        printf 'suite-transaction-system\n' >>"${callLog}"
-    }
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-core
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-subscription
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-system
-
-    grep -qx 'suite-transaction-core' "${callLog}"
-    grep -qx 'suite-transaction-system' "${callLog}"
-    grep -qx 'legacy-transaction-subscription' "${callLog}" && return 1
-    ! grep -q '^legacy-transaction$' "${callLog}"
-    ! grep -q '^legacy-transaction-core$' "${callLog}"
-    ! grep -q '^legacy-transaction-subscription$' "${callLog}"
-    ! grep -q '^legacy-transaction-system$' "${callLog}"
-)
+runTransactionSequentialAggregatesUseFrameworkSelectorHelperArgsContract() {
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction"]:-}" == "runFrameworkSequentialRegressionSelectorList" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_RUNNER["transaction-subscription"]:-}" == "runFrameworkSequentialRegressionSelectorList" ]] || return 1
+    runAggregateRunnerRunnerArgsAssertions transaction 'listRegressionTransactionChildSelectors'
+    runAggregateRunnerRunnerArgsAssertions transaction-subscription 'listRegressionTransactionSubscriptionChildSelectors'
+}
 
 runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/transaction-core-framework-helper-dispatch.log"
@@ -5231,8 +5240,8 @@ runRealitySuiteUsesFunctionRegistryContract() {
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REALITY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}"
+    ! grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}"
     grep -q '^listRegressionRealitySuiteCandidatesChildSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionRealitySuiteStreamChildSelectors() {$' "${suiteFile}"
     ! grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${legacyScriptFile}"
@@ -5251,16 +5260,14 @@ runRealitySuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRegressionRealityLegacyLeafWithCompat runRealityStreamDisableRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-config runRegressionRealityLegacyLeafWithCompat runRealityConfigRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRegressionRealityLegacyLeafWithCompat runRealityProfileFailureRegression$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
 }
 
 runRealityLegacyPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}" || return 1
-    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
 
     runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" \
         reality-candidates \
@@ -5592,13 +5599,14 @@ runRealityCandidatesAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential reality-candidates \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealitySuiteCandidatesChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         reality-candidates \
         sequential \
-        runRegressionRealityCandidatesSuiteRoot \
+        runFrameworkSequentialRegressionSelectorList \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions reality-candidates 'listRegressionRealitySuiteCandidatesChildSelectors'
 }
 
 runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
@@ -5638,13 +5646,14 @@ runRealityStreamAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionAggregateSequential reality-stream \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealitySuiteStreamChildSelectors)
     runAggregateRunnerRegistrationAssertions \
         reality-stream \
         sequential \
-        runRegressionRealityStreamSuiteRoot \
+        runFrameworkSequentialRegressionSelectorList \
         "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions reality-stream 'listRegressionRealitySuiteStreamChildSelectors'
 }
 
 runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
@@ -5815,32 +5824,11 @@ runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract() (
         'framework:jobs='"${PADM_REGRESSION_RUNTIME_HEAVY_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-2}}"':'"${TMP_DIR}"'/runtime-parallel-heavy-[0-9][0-9]* reality-candidates reality-candidates reality-config reality-config'
 )
 
-runRealityAggregateRunnersUseSuiteLocalHelpersContract() (
-    local status=0
+runRealityNoEmptyAggregateWrapperFunctionsContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
-    local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local callLog="${TMP_DIR}/reality-aggregate-suite-root-dispatch.log"
-
-    : >"${callLog}"
-
-    ! grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
-    ! grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${legacyScriptFile}" || status=1
-
-    runRegressionRealityCandidatesSuiteRoot() {
-        printf 'suite-reality-candidates\n' >>"${callLog}"
-    }
-
-    runRegressionRealityStreamSuiteRoot() {
-        printf 'suite-reality-stream\n' >>"${callLog}"
-    }
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-candidates
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain reality-stream
-
-    grep -qx 'suite-reality-candidates' "${callLog}" || status=1
-    grep -qx 'suite-reality-stream' "${callLog}" || status=1
-    return "${status}"
-)
+    ! grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}" || return 1
+}
 
 runParallelSelectorCollectsExitedChildWithoutRcContract() (
     local root="${TMP_DIR}/parallel-selector-exit-without-rc"
@@ -6079,7 +6067,9 @@ runRegressionDispatcherContracts() {
         runRegressionStep contract-helper-adoption-assertion runContractHelperAdoptionAssertionContract &&
         runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
         runRegressionStep regression-function-leaf-supports-runner-args runRegressionFunctionLeafSupportsRunnerArgsContract &&
+        runRegressionStep regression-aggregate-runner-supports-runner-args runRegressionAggregateRunnerSupportsRunnerArgsContract &&
         runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
+        runRegressionStep aggregate-runner-runner-args-assertion runAggregateRunnerRunnerArgsAssertionContract &&
         runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
         runRegressionStep aggregate-runner-uses-suite-local-helper-assertion runAggregateRunnerUsesSuiteLocalHelperAssertionContract &&
         runRegressionStep aggregate-runner-uses-suite-local-helper-adoption runAggregateRunnerUsesSuiteLocalHelperAdoptionContract &&
@@ -6188,7 +6178,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep tls-suite-child-steps runTlsSuiteChildStepsContract &&
         runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
         runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
-        runRegressionStep tls-aggregate-runner-uses-suite-local-helper runTlsAggregateRunnerUsesSuiteLocalHelperContract &&
+        runRegressionStep tls-no-empty-aggregate-wrapper-functions runTlsNoEmptyAggregateWrapperFunctionsContract &&
         runRegressionStep tls-leaves-use-compat-helper runTlsLeavesUseCompatHelperContract &&
         runRegressionStep tls-legacy-tmpdir-isolation-guard-registered runTlsLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
@@ -6238,7 +6228,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep transaction-selector-helpers-stay-aligned runTransactionSelectorHelpersStayAlignedContract &&
         runRegressionStep transaction-aggregate-runner-registration runTransactionAggregateRunnerRegistrationContract &&
         runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract &&
-        runRegressionStep transaction-suite-uses-suite-local-helpers runTransactionSuiteUsesSuiteLocalHelpersContract &&
+        runRegressionStep transaction-sequential-aggregates-use-framework-selector-helper-args runTransactionSequentialAggregatesUseFrameworkSelectorHelperArgsContract &&
         runRegressionStep transaction-core-aggregate-runner-uses-framework-selector-helper runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract &&
         runRegressionStep all-suite-child-steps runAllSuiteChildStepsContract &&
@@ -6276,7 +6266,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep runtime-aggregate-runner-uses-framework-selector-helper runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep runtime-leaves-use-compat-helper runRuntimeLeavesUseCompatHelperContract &&
         runRegressionStep runtime-legacy-tmpdir-isolation-guard-registered runRuntimeLegacyTmpDirIsolationGuardRegisteredContract &&
-        runRegressionStep reality-aggregate-runners-use-suite-local-helpers runRealityAggregateRunnersUseSuiteLocalHelpersContract &&
+        runRegressionStep reality-no-empty-aggregate-wrapper-functions runRealityNoEmptyAggregateWrapperFunctionsContract &&
         runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
         runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
         runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&

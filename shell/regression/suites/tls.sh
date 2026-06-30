@@ -10,10 +10,6 @@ runRegressionTlsLegacyLeafWithCompat() (
     "$@"
 )
 
-runRegressionTlsSuiteRoot() {
-    runFrameworkSequentialRegressionSelectorList listRegressionTlsChildSelectors
-}
-
 runRegressionTlsLegacyTmpDirIsolationRegression() (
     set -euo pipefail
     local originalTmpDir="${TMP_DIR}"
@@ -37,5 +33,9 @@ registerRegressionFunctionLeaf tls-reinstall-rollback runRegressionTlsLegacyLeaf
 registerRegressionFunctionLeaf tls-renew-failure-propagation runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression
 registerRegressionFunctionLeaf regression-tls-legacy-tmpdir-isolation runRegressionTlsLegacyTmpDirIsolationRegression
 
-registerRegressionAggregateRunnerSequential tls runRegressionTlsSuiteRoot \
+registerRegressionAggregateRunnerSequentialWithArgs \
+    tls \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionTlsChildSelectors \
+    -- \
     $(listRegressionTlsChildSelectors)

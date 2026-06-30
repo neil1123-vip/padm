@@ -10,14 +10,6 @@ runRegressionRealityLegacyLeafWithCompat() (
     "$@"
 )
 
-runRegressionRealityCandidatesSuiteRoot() {
-    runFrameworkSequentialRegressionSelectorList listRegressionRealitySuiteCandidatesChildSelectors
-}
-
-runRegressionRealityStreamSuiteRoot() {
-    runFrameworkSequentialRegressionSelectorList listRegressionRealitySuiteStreamChildSelectors
-}
-
 runRegressionRealityLegacyTmpDirIsolationRegression() (
     set -euo pipefail
     local originalTmpDir="${TMP_DIR}"
@@ -51,7 +43,15 @@ registerRegressionFunctionLeaf reality-config runRegressionRealityLegacyLeafWith
 registerRegressionFunctionLeaf reality-profile-failure runRegressionRealityLegacyLeafWithCompat runRealityProfileFailureRegression
 registerRegressionFunctionLeaf regression-reality-legacy-tmpdir-isolation runRegressionRealityLegacyTmpDirIsolationRegression
 
-registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \
+registerRegressionAggregateRunnerSequentialWithArgs \
+    reality-candidates \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionRealitySuiteCandidatesChildSelectors \
+    -- \
     $(listRegressionRealitySuiteCandidatesChildSelectors)
-registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \
+registerRegressionAggregateRunnerSequentialWithArgs \
+    reality-stream \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionRealitySuiteStreamChildSelectors \
+    -- \
     $(listRegressionRealitySuiteStreamChildSelectors)

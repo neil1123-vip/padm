@@ -55,6 +55,9 @@ Important simplification:
 
 - `registerRegressionScriptLeaf` and script-selector dispatch paths have been removed
 - legacy internal CLI selector forwarding has been removed
+- aggregate-runner registrations can now also carry runner args, so pure selector-list
+  suite roots no longer need one-hop wrapper functions just to pass a list helper into
+  `runFrameworkSequentialRegressionSelectorList`
 
 Each registered selector is validated before first execution. Validation checks:
 
@@ -107,12 +110,14 @@ Shape:
 
 This gives the short-path suite a clean layered shape and keeps output-focused work independently tunable.
 
-`fast-reality` remains a sequential aggregate runner, but its suite root now dispatches
-`fast` then `reality-candidates-fast` through `runFrameworkSequentialRegressionSelectorList`
-instead of a hand-written serial chain. Its `reality-candidates-fast` tail step still
-reuses the reality suite compat leaf instead of calling the legacy-backed reality runner
-directly. That keeps fast-path reality coverage aligned with the same legacy isolation
-boundary used by the dedicated reality suite.
+`fast-reality` remains a sequential aggregate runner, but it now registers
+`runFrameworkSequentialRegressionSelectorList` directly with
+`listRegressionFastRealityChildSelectors` as aggregate-runner args, instead of
+keeping a one-hop suite-root wrapper just to call that helper. Its
+`reality-candidates-fast` tail step still reuses the reality suite compat leaf
+instead of calling the legacy-backed reality runner directly. That keeps
+fast-path reality coverage aligned with the same legacy isolation boundary used
+by the dedicated reality suite.
 
 ### Platform
 
@@ -244,10 +249,11 @@ Default limit:
 
 This change targets the previous long serial tail inside `all`.
 
-The intermediate `transaction-subscription` suite root follows the same pattern:
-its ordered child selector chain is now emitted by
-`runFrameworkSequentialRegressionSelectorList`, while the public
-`transaction-subscription` selector and leaf coverage semantics stay unchanged.
+The intermediate `transaction-subscription` selector follows the same pattern:
+it now registers `runFrameworkSequentialRegressionSelectorList` directly with
+its selector-list helper as runner args, so the public
+`transaction-subscription` selector and leaf coverage semantics stay unchanged
+without keeping a one-hop suite-root wrapper.
 
 ### UI
 
@@ -346,23 +352,25 @@ Compatibility boundary:
 ### Reality
 
 `reality-candidates` and `reality-stream` remain sequential aggregate runners.
-Their suite roots now dispatch ordered children through
-`runFrameworkSequentialRegressionSelectorList`, keeping the aggregate-runner shell
-stable while removing local `runRegressionStep` chains. They are already registered in
-the selector framework, but they are not yet layered further.
+They now register `runFrameworkSequentialRegressionSelectorList` directly with
+their selector-list helpers as aggregate-runner args, so the suite no longer
+needs one-hop sequential suite-root wrapper functions just to dispatch ordered
+children. They are already registered in the selector framework, but they are
+not yet layered further.
 
 ### TLS
 
 `tls` remains a sequential aggregate runner.
 
-Its suite root now also uses `runFrameworkSequentialRegressionSelectorList` to dispatch:
+It now registers `runFrameworkSequentialRegressionSelectorList` directly with
+its selector-list helper as aggregate-runner args to dispatch:
 
 - `tls-failure-return`
 - `tls-reinstall-rollback`
 - `tls-renew-failure-propagation`
 
-That keeps the public selector topology unchanged while moving another straight-line
-suite root onto the shared framework helper.
+That keeps the public selector topology unchanged while removing another
+straight-line suite-root wrapper in favor of the shared framework helper.
 
 ### Remote Control
 

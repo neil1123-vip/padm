@@ -47,6 +47,31 @@ registerRegressionAggregateRunnerParallel() {
     PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
 }
 
+registerRegressionAggregateRunnerParallelWithArgs() {
+    local selector=$1
+    local runner=$2
+    shift 2
+    local arg
+    local -a runnerArgs=()
+    local -a children=()
+    local parseChildren=0
+
+    for arg in "$@"; do
+        if (( parseChildren )); then
+            children+=("${arg}")
+            continue
+        fi
+        if [[ "${arg}" == "--" ]]; then
+            parseChildren=1
+            continue
+        fi
+        runnerArgs+=("${arg}")
+    done
+
+    registerRegressionAggregateRunnerParallel "${selector}" "${runner}" "${children[@]}"
+    PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]=$(printf '%s\n' "${runnerArgs[@]}")
+}
+
 registerRegressionAggregateRunnerSequential() {
     local selector=$1
     local runner=$2
@@ -57,6 +82,31 @@ registerRegressionAggregateRunnerSequential() {
     PADM_REGRESSION_SELECTOR_MODE["${selector}"]=sequential
     PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=${runner}
     PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
+}
+
+registerRegressionAggregateRunnerSequentialWithArgs() {
+    local selector=$1
+    local runner=$2
+    shift 2
+    local arg
+    local -a runnerArgs=()
+    local -a children=()
+    local parseChildren=0
+
+    for arg in "$@"; do
+        if (( parseChildren )); then
+            children+=("${arg}")
+            continue
+        fi
+        if [[ "${arg}" == "--" ]]; then
+            parseChildren=1
+            continue
+        fi
+        runnerArgs+=("${arg}")
+    done
+
+    registerRegressionAggregateRunnerSequential "${selector}" "${runner}" "${children[@]}"
+    PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]=$(printf '%s\n' "${runnerArgs[@]}")
 }
 
 registerRegressionAggregateParallel() {
@@ -170,7 +220,12 @@ runRegisteredRegressionSelector() {
         ;;
     aggregate-runner)
         runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
-        "${runner}"
+        runnerArgs=${PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]:-}
+        while IFS= read -r child; do
+            [[ -n "${child}" ]] || continue
+            runnerArgv+=("${child}")
+        done <<<"${runnerArgs}"
+        "${runner}" "${runnerArgv[@]}"
         ;;
     aggregate)
         if [[ "${PADM_REGRESSION_SELECTOR_MODE[${selector}]}" == "parallel" ]]; then

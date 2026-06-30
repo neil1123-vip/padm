@@ -199,14 +199,6 @@ runRegressionTransactionSystemSuiteRoot() {
         listRegressionTransactionSystemChildSelectors
 }
 
-runRegressionTransactionSuiteRoot() {
-    runFrameworkSequentialRegressionSelectorList listRegressionTransactionChildSelectors
-}
-
-runRegressionTransactionSubscriptionSuiteRoot() {
-    runFrameworkSequentialRegressionSelectorList listRegressionTransactionSubscriptionChildSelectors
-}
-
 runRegressionTransactionLegacyTmpDirIsolationRegression() (
     set -euo pipefail
     local originalTmpDir="${TMP_DIR}"
@@ -492,8 +484,16 @@ registerRegressionAggregateRunnerParallel transaction-system runRegressionTransa
 registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \
     $(listRegressionTransactionCoreChildSelectors)
 
-registerRegressionAggregateRunnerSequential transaction-subscription runRegressionTransactionSubscriptionSuiteRoot \
+registerRegressionAggregateRunnerSequentialWithArgs \
+    transaction-subscription \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionTransactionSubscriptionChildSelectors \
+    -- \
     $(listRegressionTransactionSubscriptionChildSelectors)
 
-registerRegressionAggregateRunnerSequential transaction runRegressionTransactionSuiteRoot \
+registerRegressionAggregateRunnerSequentialWithArgs \
+    transaction \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionTransactionChildSelectors \
+    -- \
     $(listRegressionTransactionChildSelectors)

@@ -154,10 +154,6 @@ runRegressionFastOnlyOutputParallelCompositionRegression() (
     ' "${callLog}"
 )
 
-runRegressionFastRealitySuiteRoot() {
-    runFrameworkSequentialRegressionSelectorList listRegressionFastRealityChildSelectors
-}
-
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
 registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest
@@ -181,5 +177,9 @@ listRegressionFastRealityChildSelectors() {
         reality-candidates-fast
 }
 
-registerRegressionAggregateRunnerSequential fast-reality runRegressionFastRealitySuiteRoot \
+registerRegressionAggregateRunnerSequentialWithArgs \
+    fast-reality \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionFastRealityChildSelectors \
+    -- \
     $(listRegressionFastRealityChildSelectors)
