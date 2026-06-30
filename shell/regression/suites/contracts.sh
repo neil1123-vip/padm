@@ -5213,6 +5213,46 @@ runFrameworkParallelSelectorListBuildsPairDispatchContract() (
     grep -qx 'framework:mode=pairs:'"${TMP_DIR}"'/framework-parallel-selector-list-root alpha alpha beta beta gamma gamma' "${callLog}"
 )
 
+runFrameworkParallelSelectorListWithJobsContract() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/framework-parallel-selector-list-with-jobs.log"
+
+    : >"${callLog}"
+
+    listFrameworkParallelSelectorListWithJobsFixtures() {
+        printf '%s\n' \
+            alpha \
+            beta
+    }
+
+    runFrameworkParallelRegressionSelectors() {
+        printf 'framework:mode=%s:jobs=%s:%s\n' \
+            "${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-}" \
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" \
+            "$*" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_PARALLEL_JOBS=9 \
+        runFrameworkParallelRegressionSelectorListWithJobs \
+        "${TMP_DIR}/framework-parallel-selector-list-with-jobs-root" \
+        listFrameworkParallelSelectorListWithJobsFixtures \
+        4
+    grep -qx 'framework:mode=pairs:jobs=9:'"${TMP_DIR}"'/framework-parallel-selector-list-with-jobs-root alpha alpha beta beta' "${callLog}"
+
+    : >"${callLog}"
+    runFrameworkParallelRegressionSelectorListWithJobs \
+        "${TMP_DIR}/framework-parallel-selector-list-with-jobs-root" \
+        listFrameworkParallelSelectorListWithJobsFixtures \
+        4
+    grep -qx 'framework:mode=pairs:jobs=4:'"${TMP_DIR}"'/framework-parallel-selector-list-with-jobs-root alpha alpha beta beta' "${callLog}"
+
+    : >"${callLog}"
+    runFrameworkParallelRegressionSelectorListWithJobs \
+        "${TMP_DIR}/framework-parallel-selector-list-with-jobs-root" \
+        listFrameworkParallelSelectorListWithJobsFixtures
+    grep -qx 'framework:mode=pairs:jobs=:'"${TMP_DIR}"'/framework-parallel-selector-list-with-jobs-root alpha alpha beta beta' "${callLog}"
+)
+
 runFrameworkSequentialSelectorListBuildsSequentialDispatchContract() (
     set -euo pipefail
     local callLog="${TMP_DIR}/framework-sequential-selector-list.log"
@@ -5915,9 +5955,11 @@ runRealityNoEmptyAggregateWrapperFunctionsContract() {
 runParallelSelectorCollectsExitedChildWithoutRcContract() (
     local root="${TMP_DIR}/parallel-selector-exit-without-rc"
     local callLog="${root}/call.log"
+    local runnerLog="${root}/runner.log"
 
     mkdir -p "${root}"
     : >"${callLog}"
+    : >"${runnerLog}"
 
     runRegressionAllSelector() {
         local selector=$1
@@ -5937,8 +5979,9 @@ runParallelSelectorCollectsExitedChildWithoutRcContract() (
     PADM_REGRESSION_PARALLEL_JOBS=2 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        runParallelRegressionSelectors "${root}/orchestration" exit-fast finish
+        runParallelRegressionSelectors "${root}/orchestration" exit-fast finish >"${runnerLog}" 2>&1
     [[ "$?" == "1" ]]
+    grep -q '^regression-fail:exit-fast:' "${runnerLog}"
     grep -qx 'finish-start' "${callLog}"
     grep -qx 'finish-finish' "${callLog}"
 )
@@ -6230,6 +6273,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
         runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract &&
         runRegressionStep framework-parallel-selector-list-builds-pair-dispatch runFrameworkParallelSelectorListBuildsPairDispatchContract &&
+        runRegressionStep framework-parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract &&
         runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
         runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
         runRegressionStep targeted-batch-helpers-legacy-retirement runTargetedBatchHelpersLegacyRetirementContract &&
@@ -6340,3 +6384,4 @@ registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispa
 registerRegressionFunctionLeaf regression-selector-dispatch-composition runRegressionSelectorDispatchCompositionRegression
 registerRegressionFunctionLeaf regression-parallel-selector-limit-composition runRegressionParallelSelectorLimitCompositionRegression
 registerRegressionFunctionLeaf regression-parallel-selector-slot-refill-composition runRegressionParallelSelectorSlotRefillCompositionRegression
+registerRegressionFunctionLeaf framework-parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract

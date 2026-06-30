@@ -113,8 +113,10 @@ runUiLeafSelectorListRegression() {
     local selectorListFn=$2
     local defaultJobs=$3
 
-    PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-${defaultJobs}}}" \
-        runUiSelectorListRegression "${orchestrationRoot}" "${selectorListFn}"
+    runFrameworkParallelRegressionSelectorListWithJobs \
+        "${orchestrationRoot}" \
+        "${selectorListFn}" \
+        "${PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-${defaultJobs}}}"
 }
 
 listRegressionUiFullChildSelectors() {

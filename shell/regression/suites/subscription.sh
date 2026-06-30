@@ -85,15 +85,9 @@ runSubscriptionSelectorListRegression() {
         jobs="${PADM_REGRESSION_PARALLEL_JOBS:-${defaultJobs}}"
     fi
 
-    if [[ -n "${jobs}" ]]; then
-        PADM_REGRESSION_PARALLEL_JOBS="${jobs}" \
-            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/${orchestrationLabel}-${BASHPID:-$$}" \
-            "${selectorListFn}"
-        return
-    fi
-
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/${orchestrationLabel}-${BASHPID:-$$}" \
-        "${selectorListFn}"
+    runFrameworkParallelRegressionSelectorListWithJobs "${TMP_DIR}/${orchestrationLabel}-${BASHPID:-$$}" \
+        "${selectorListFn}" \
+        "${jobs}"
 }
 
 runRegressionSubscriptionSuiteRoot() {
