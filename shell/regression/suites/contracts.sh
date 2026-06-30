@@ -1397,11 +1397,11 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-success runRemoteControlContractServiceInstallSuccessCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRemoteControlContractServiceInstallSystemctlFailCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRemoteControlContractServiceInstallHealthFailCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRemoteControlContractServiceInstallHealthRollbackCompatRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRemoteControlContractServiceInstallTokenTransactionCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-contract-server-response runRemoteControlContractServerResponseCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-deep runRemoteControlDeepCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf regression-remote-control-legacy-tmpdir-isolation runRegressionRemoteControlLegacyTmpDirIsolationRegression$' "${suiteFile}"
@@ -1654,22 +1654,12 @@ runRemoteControlLeavesUseCompatHelperContract() (
     }
 
     for selector in \
-        remote-control-contract-service-install-success \
-        remote-control-contract-service-install-systemctl-fail \
-        remote-control-contract-service-install-health-fail \
-        remote-control-contract-service-install-health-rollback \
-        remote-control-contract-service-install-token-transaction \
         remote-control-contract-server-response \
         remote-control-deep; do
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
     done
 
     cat <<'EOF' >"${TMP_DIR}/remote-control-compat-helper.expected.log"
-runRegressionRemoteControlContractServiceInstallSuccess
-runRegressionRemoteControlContractServiceInstallSystemctlFail
-runRegressionRemoteControlContractServiceInstallHealthFail
-runRegressionRemoteControlContractServiceInstallHealthRollback
-runRegressionRemoteControlContractServiceInstallTokenTransaction
 runRegressionRemoteControlContractServerResponse
 runRegressionRemoteControlDeep
 EOF
@@ -1707,6 +1697,29 @@ runRemoteControlSmokeRefreshNoCompatHelperContract() (
         remote-control-smoke-refresh-apply-failure \
         remote-control-smoke-refresh-restore \
         remote-control-smoke-refresh-reconcile
+    do
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+    done
+
+    [[ ! -s "${callLog}" ]]
+)
+
+runRemoteControlContractServiceInstallNoCompatHelperContract() (
+    local callLog="${TMP_DIR}/remote-control-contract-service-install-no-compat.log"
+
+    : >"${callLog}"
+
+    runRegressionRemoteControlLegacyLeafWithCompat() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    local selector
+    for selector in \
+        remote-control-contract-service-install-success \
+        remote-control-contract-service-install-systemctl-fail \
+        remote-control-contract-service-install-health-fail \
+        remote-control-contract-service-install-health-rollback \
+        remote-control-contract-service-install-token-transaction
     do
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
     done
@@ -5884,6 +5897,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-leaves-use-compat-helper runRemoteControlLeavesUseCompatHelperContract &&
         runRegressionStep remote-control-smoke-core-no-compat-helper runRemoteControlSmokeCoreNoCompatHelperContract &&
         runRegressionStep remote-control-smoke-refresh-no-compat-helper runRemoteControlSmokeRefreshNoCompatHelperContract &&
+        runRegressionStep remote-control-contract-service-install-no-compat-helper runRemoteControlContractServiceInstallNoCompatHelperContract &&
         runRegressionStep remote-control-legacy-tmpdir-isolation-guard-registered runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
