@@ -5,6 +5,15 @@ REGRESSION_RUNTIME_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "${REGRESSION_RUNTIME_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh"
 
+runRegressionRuntimeLegacyLeafWithCompat() (
+    # Re-source legacy runtime fixtures in an isolated subshell so later suite
+    # loads cannot leave source-time TMP_DIR-derived paths stale.
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh"
+    "$@"
+)
+
+runAutoInstallRealityRouteCompatRegression() { runRegressionRuntimeLegacyLeafWithCompat runAutoInstallRealityRouteRegression; }
+
 runRegressionRuntimeSuiteRoot() {
     if [[ "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" == "all" ]]; then
         PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_RUNTIME_LIGHT_PARALLEL_JOBS:-${PADM_REGRESSION_PARALLEL_JOBS:-4}}" \
@@ -116,11 +125,23 @@ runRegressionRuntimeParallelCompositionRegression() (
     ' "${callLog}"
 )
 
+runRegressionRuntimeLegacyTmpDirIsolationRegression() (
+    set -euo pipefail
+    local originalTmpDir="${TMP_DIR}"
+
+    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
+    source "${REGRESSION_RUNTIME_SUITE_DIR}/../bootstrap.sh"
+    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain runtime-auto-install-reality-route
+)
+
 registerRegressionFunctionLeaf runtime-core runRuntimeAndRealityRegression
 registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runAutoReadUnsetAutoInstallRegression
-registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteRegression
+registerRegressionFunctionLeaf runtime-auto-install-reality-route runAutoInstallRealityRouteCompatRegression
 registerRegressionFunctionLeaf runtime-tempdir runRuntimeTempDirRegression
 registerRegressionFunctionLeaf regression-runtime-parallel-composition runRegressionRuntimeParallelCompositionRegression
+registerRegressionFunctionLeaf regression-runtime-legacy-tmpdir-isolation runRegressionRuntimeLegacyTmpDirIsolationRegression
 
 registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \
     $(listRegressionRuntimeChildSelectors)
