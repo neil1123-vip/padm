@@ -1842,17 +1842,6 @@ runRegressionSubscriptionStateRemoteRestoreSerial() {
     runRegressionStep subscription-state-remote-restore-serial runSubscriptionGroupStateRemoteRestoreSerialRegression
 }
 
-runRegressionSubscriptionStateSupport() {
-    runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression &&
-        runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression &&
-        runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression &&
-        runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression &&
-        runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression &&
-        runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression &&
-        runRegressionStep subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression &&
-        runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
-}
-
 runRegressionSubscriptionSyncTempDir() {
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
 }
@@ -1915,18 +1904,6 @@ runRegressionSubscriptionSyncReconcileEarlyExit() {
 
 runRegressionSubscriptionGroupsRestoreFailure() {
     runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
-}
-
-runRegressionSubscriptionStateSerial() {
-    runRegressionStep subscription-state runSubscriptionGroupStateRegression &&
-        runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression &&
-        runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression &&
-        runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression &&
-        runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression &&
-        runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression &&
-        runRegressionStep subscription-sync-rollback-failure-serial runSubscriptionSyncRollbackFailureSerialRegression &&
-        runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression &&
-        runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
 }
 
 if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then

@@ -425,6 +425,9 @@ dispatches its ordered child selectors through the same helper instead of hand-w
 that serial chain locally.
 The compatibility `subscription-sync-rollback-failure-serial` wrapper now also
 dispatches its ordered child selectors through `runFrameworkSequentialRegressionSelectorList`.
+The `subscription-state-support` and `subscription-state-serial` wrappers now also
+dispatch their ordered child selectors through suite-local sequential helper lists,
+and those wrapper implementations no longer live in the legacy-backed full script.
 
 Those nested public aggregates now also live in the suite layer instead of the legacy-backed full script:
 
@@ -434,7 +437,9 @@ Those nested public aggregates now also live in the suite layer instead of the l
 - `subscription-state-remote-restore`
 - `subscription-state-sync-rollback`
 
-The legacy-backed full script now keeps the leaf implementations plus the support and serial helper chains, while suite-local isolated wrappers own the nested selector topology and framework orchestration.
+The legacy-backed full script now keeps the leaf implementations, while suite-local
+wrappers own the support and serial helper chains, nested selector topology, and
+framework orchestration.
 
 The suite already has composition coverage proving parallel isolation for:
 

@@ -532,8 +532,6 @@ runRegressionStepSequenceHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
-        runSubscriptionStateSupportChildStepsContract \
-        runSubscriptionStateSerialChildStepsContract \
         runRemoteControlSmokeCoreChildStepsContract \
         runPlatformRefreshChildStepsContract \
         runPlatformUpdateChildStepsContract \
@@ -556,6 +554,8 @@ runRegressionStepSequenceHelperAdoptionContract() {
     ' "${contractsFile}" || return 1
 
     for functionName in \
+        runSubscriptionStateSupportChildStepsContract \
+        runSubscriptionStateSerialChildStepsContract \
         runPlatformIoChildStepsContract \
         runTlsSuiteChildStepsContract \
         runTransactionSubscriptionChildStepsContract; do
@@ -790,6 +790,8 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${scriptFile}"
@@ -797,6 +799,8 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     ! grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
@@ -823,6 +827,8 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateQuotaTrafficChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaPartialSyncChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateSupportChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateSerialChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateRemoteRestoreChildSelectors >/dev/null
@@ -889,6 +895,25 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-quota-partial-sync-plan \
         subscription-state-quota-partial-sync-config \
         subscription-state-quota-partial-sync-serial
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateSupportChildSelectors support \
+        subscription-sync-tempdir \
+        subscription-sync-restore-pair-failure-message \
+        subscription-sync-append-restore-failure-detail \
+        subscription-sync-single-restore-result-message \
+        subscription-sync-rollback-result-message \
+        subscription-sync-reconcile-early-exit \
+        subscription-group-sync-publish-refresh-inline \
+        subscription-groups-restore-failure
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateSerialChildSelectors serial \
+        subscription-state \
+        subscription-sync-tempdir \
+        subscription-sync-restore-pair-failure-message \
+        subscription-sync-append-restore-failure-detail \
+        subscription-sync-single-restore-result-message \
+        subscription-sync-rollback-result-message \
+        subscription-sync-rollback-failure-serial \
+        subscription-sync-reconcile-early-exit \
+        subscription-groups-restore-failure
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors remote-restore-self-reference \
         subscription-state-remote-restore-self-reference-plan \
         subscription-state-remote-restore-self-reference-sync
@@ -934,6 +959,8 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors \
         listRegressionSubscriptionStateQuotaPartialSyncChildSelectors \
         runRegressionSubscriptionStateQuota \
+        listRegressionSubscriptionStateSupportChildSelectors \
+        listRegressionSubscriptionStateSerialChildSelectors \
         listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors \
         listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors \
         runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
@@ -949,7 +976,9 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         runRegressionSubscriptionGroupSyncRollbackIsolated \
         listRegressionSubscriptionStateSyncRollbackFailureChildSelectors \
         runRegressionSubscriptionStateSyncRollbackFailureSelector \
-        runRegressionSubscriptionStateSyncRollback
+        runRegressionSubscriptionStateSyncRollback \
+        runRegressionSubscriptionStateSupport \
+        runRegressionSubscriptionStateSerial
     do
         grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
         ! grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${scriptFile}" || return 1
@@ -957,30 +986,46 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
 }
 
 runSubscriptionStateSupportChildStepsContract() {
-    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
-    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionSubscriptionStateSupport \
-        subscription-sync-tempdir \
-        subscription-sync-restore-pair-failure-message \
-        subscription-sync-append-restore-failure-detail \
-        subscription-sync-single-restore-result-message \
-        subscription-sync-rollback-result-message \
-        subscription-sync-reconcile-early-exit \
-        subscription-group-sync-publish-refresh-inline \
-        subscription-groups-restore-failure
+    local callLog="${TMP_DIR}/subscription-state-support-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-sync-tempdir' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateSupportChildSelectors
+    grep -qx 'dispatch:subscription-sync-restore-pair-failure-message' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-append-restore-failure-detail' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-single-restore-result-message' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-rollback-result-message' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-reconcile-early-exit' "${callLog}"
+    grep -qx 'dispatch:subscription-group-sync-publish-refresh-inline' "${callLog}"
+    grep -qx 'dispatch:subscription-groups-restore-failure' "${callLog}"
 }
 
 runSubscriptionStateSerialChildStepsContract() {
-    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
-    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionSubscriptionStateSerial \
-        subscription-state \
-        subscription-sync-tempdir \
-        subscription-sync-restore-pair-failure-message \
-        subscription-sync-append-restore-failure-detail \
-        subscription-sync-single-restore-result-message \
-        subscription-sync-rollback-result-message \
-        subscription-sync-rollback-failure-serial \
-        subscription-sync-reconcile-early-exit \
-        subscription-groups-restore-failure
+    local callLog="${TMP_DIR}/subscription-state-serial-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:subscription-state' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionSubscriptionStateSerialChildSelectors
+    grep -qx 'dispatch:subscription-sync-tempdir' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-restore-pair-failure-message' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-append-restore-failure-detail' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-single-restore-result-message' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-rollback-result-message' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-rollback-failure-serial' "${callLog}"
+    grep -qx 'dispatch:subscription-sync-reconcile-early-exit' "${callLog}"
+    grep -qx 'dispatch:subscription-groups-restore-failure' "${callLog}"
 }
 
 runSubscriptionStateStructureSourceChildStepsContract() {

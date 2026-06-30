@@ -135,6 +135,31 @@ listRegressionSubscriptionStateQuotaPartialSyncChildSelectors() {
         subscription-state-quota-partial-sync-serial
 }
 
+listRegressionSubscriptionStateSupportChildSelectors() {
+    printf '%s\n' \
+        subscription-sync-tempdir \
+        subscription-sync-restore-pair-failure-message \
+        subscription-sync-append-restore-failure-detail \
+        subscription-sync-single-restore-result-message \
+        subscription-sync-rollback-result-message \
+        subscription-sync-reconcile-early-exit \
+        subscription-group-sync-publish-refresh-inline \
+        subscription-groups-restore-failure
+}
+
+listRegressionSubscriptionStateSerialChildSelectors() {
+    printf '%s\n' \
+        subscription-state \
+        subscription-sync-tempdir \
+        subscription-sync-restore-pair-failure-message \
+        subscription-sync-append-restore-failure-detail \
+        subscription-sync-single-restore-result-message \
+        subscription-sync-rollback-result-message \
+        subscription-sync-rollback-failure-serial \
+        subscription-sync-reconcile-early-exit \
+        subscription-groups-restore-failure
+}
+
 runRegressionSubscriptionStateQuotaTraffic() {
     runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaTrafficChildSelectors
 }
@@ -145,6 +170,14 @@ runRegressionSubscriptionStateQuotaMenuTransaction() {
 
 runRegressionSubscriptionStateQuotaPartialSync() {
     runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaPartialSyncChildSelectors
+}
+
+runRegressionSubscriptionStateSupport() {
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateSupportChildSelectors
+}
+
+runRegressionSubscriptionStateSerial() {
+    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateSerialChildSelectors
 }
 
 runRegressionSubscriptionStateQuota() {
@@ -205,6 +238,26 @@ runRegressionSubscriptionStateRemoteRestore() {
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateRemoteRestoreSelector \
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore" \
             listRegressionSubscriptionStateRemoteRestoreChildSelectors
+}
+
+runRegressionSubscriptionSyncRestorePairFailureMessage() {
+    runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression
+}
+
+runRegressionSubscriptionSyncAppendRestoreFailureDetail() {
+    runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression
+}
+
+runRegressionSubscriptionSyncSingleRestoreResultMessage() {
+    runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
+}
+
+runRegressionSubscriptionSyncRollbackResultMessage() {
+    runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
+}
+
+runRegressionSubscriptionGroupSyncPublishRefreshInline() {
+    runRegressionStep subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression
 }
 
 runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated() {
@@ -489,6 +542,10 @@ registerRegressionFunctionLeaf subscription-state-remote-restore-serial runRegre
 registerRegressionFunctionLeaf subscription-state-support runRegressionSubscriptionStateSupport
 registerRegressionFunctionLeaf subscription-state-sync-rollback-serial runRegressionSubscriptionStateSyncRollbackSerial
 registerRegressionFunctionLeaf subscription-sync-tempdir runRegressionSubscriptionSyncTempDir
+registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message runRegressionSubscriptionSyncRestorePairFailureMessage
+registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runRegressionSubscriptionSyncAppendRestoreFailureDetail
+registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runRegressionSubscriptionSyncSingleRestoreResultMessage
+registerRegressionFunctionLeaf subscription-sync-rollback-result-message runRegressionSubscriptionSyncRollbackResultMessage
 registerRegressionFunctionLeaf subscription-sync-rollback-failure runRegressionSubscriptionStateSyncRollback
 registerRegressionFunctionLeaf subscription-sync-rollback-failure-serial runRegressionSubscriptionStateSyncRollbackSerial
 registerRegressionFunctionLeaf subscription-sync-rollback-config-restore-failure runRegressionSubscriptionSyncRollbackConfigRestoreFailure
@@ -496,6 +553,7 @@ registerRegressionFunctionLeaf subscription-sync-restore-dir-failure runRegressi
 registerRegressionFunctionLeaf subscription-sync-reload-rollback runRegressionSubscriptionSyncRollbackReloadRollback
 registerRegressionFunctionLeaf subscription-group-sync-rollback runRegressionSubscriptionGroupSyncRollback
 registerRegressionFunctionLeaf subscription-group-sync-rollback-serial runRegressionSubscriptionGroupSyncRollbackSerial
+registerRegressionFunctionLeaf subscription-group-sync-publish-refresh-inline runRegressionSubscriptionGroupSyncPublishRefreshInline
 registerRegressionFunctionLeaf subscription-group-sync-apply-failure runRegressionSubscriptionGroupSyncApplyFailure
 registerRegressionFunctionLeaf subscription-group-sync-reconcile-rollback runRegressionSubscriptionGroupSyncReconcileRollback
 registerRegressionFunctionLeaf subscription-group-sync-remote-failure runRegressionSubscriptionGroupSyncRemoteFailure
