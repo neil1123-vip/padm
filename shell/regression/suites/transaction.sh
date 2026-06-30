@@ -210,21 +210,11 @@ runRegressionTransactionSystemSuiteRoot() {
 }
 
 runRegressionTransactionSuiteRoot() {
-    runRegressionTransactionCoreSuiteRoot &&
-        runRegressionTransactionSubscriptionSuiteRoot &&
-        runRegressionTransactionSystemSuiteRoot
+    runFrameworkSequentialRegressionSelectorList listRegressionTransactionChildSelectors
 }
 
 runRegressionTransactionSubscriptionSuiteRoot() {
-    runRegressionStep cdn-address-write-transaction runCdnAddressTransactionCompatRegression &&
-        runRegressionStep subscribe-server-name runSubscribeServerNameCompatRegression &&
-        runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteCompatRegression &&
-        runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureCompatRegression &&
-        runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionCompatRegression &&
-        runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionCompatRegression &&
-        runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureCompatRegression &&
-        runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureCompatRegression &&
-        runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchCompatRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionTransactionSubscriptionChildSelectors
 }
 
 runRegressionTransactionSubscription() {

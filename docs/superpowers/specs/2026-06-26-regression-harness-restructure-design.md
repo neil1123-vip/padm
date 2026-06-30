@@ -70,6 +70,7 @@ The active runtime primitives are:
 - `runParallelRegressionRunners`
 - `runFrameworkParallelRegressionSelectors`
 - `runFrameworkParallelRegressionSelectorList`
+- `runFrameworkSequentialRegressionSelectorList`
 - `runParallelRegressionSelectors` as a compatibility alias
 
 `runFrameworkParallelRegressionSelectors` is now the common slot-limited orchestration primitive. It supports:
@@ -80,6 +81,8 @@ The active runtime primitives are:
 - ordered log replay after background execution
 
 `runFrameworkParallelRegressionSelectorList` is the preferred suite helper when a suite can expose its children as selectors.
+
+`runFrameworkSequentialRegressionSelectorList` is the corresponding ordered-dispatch helper for suite roots that still need one child selector after another, but no longer need to hand-wire `runRegressionStep` chains locally.
 
 `runParallelRegressionRunners` still exists for local same-file runner groups that are not yet expressed as selector trees.
 
@@ -104,10 +107,12 @@ Shape:
 
 This gives the short-path suite a clean layered shape and keeps output-focused work independently tunable.
 
-`fast-reality` remains a sequential aggregate runner, but its `reality-candidates-fast`
-tail step now reuses the reality suite compat leaf instead of calling the legacy-backed
-reality runner directly. That keeps fast-path reality coverage aligned with the same
-legacy isolation boundary used by the dedicated reality suite.
+`fast-reality` remains a sequential aggregate runner, but its suite root now dispatches
+`fast` then `reality-candidates-fast` through `runFrameworkSequentialRegressionSelectorList`
+instead of a hand-written serial chain. Its `reality-candidates-fast` tail step still
+reuses the reality suite compat leaf instead of calling the legacy-backed reality runner
+directly. That keeps fast-path reality coverage aligned with the same legacy isolation
+boundary used by the dedicated reality suite.
 
 ### Platform
 
@@ -182,6 +187,10 @@ Compatibility boundary:
 
 This preserves existing suite semantics while allowing both heavy subtrees to optimize internally.
 
+Its public suite root now also routes those ordered children through
+`runFrameworkSequentialRegressionSelectorList`, so the suite keeps aggregate-runner
+registration while dropping one more hand-written serial chain.
+
 #### Transaction Core
 
 `transaction-core` is a parallel aggregate runner with optional profile layering.
@@ -232,6 +241,11 @@ Default limit:
 - `PADM_REGRESSION_TRANSACTION_SYSTEM_PARALLEL_JOBS` -> fallback `PADM_REGRESSION_PARALLEL_JOBS` -> `4`
 
 This change targets the previous long serial tail inside `all`.
+
+The intermediate `transaction-subscription` suite root follows the same pattern:
+its ordered child selector chain is now emitted by
+`runFrameworkSequentialRegressionSelectorList`, while the public
+`transaction-subscription` selector and leaf coverage semantics stay unchanged.
 
 ### UI
 
@@ -329,7 +343,24 @@ Compatibility boundary:
 
 ### Reality
 
-`reality-candidates` and `reality-stream` remain sequential aggregate runners. They are already registered in the selector framework, but they are not yet layered further.
+`reality-candidates` and `reality-stream` remain sequential aggregate runners.
+Their suite roots now dispatch ordered children through
+`runFrameworkSequentialRegressionSelectorList`, keeping the aggregate-runner shell
+stable while removing local `runRegressionStep` chains. They are already registered in
+the selector framework, but they are not yet layered further.
+
+### TLS
+
+`tls` remains a sequential aggregate runner.
+
+Its suite root now also uses `runFrameworkSequentialRegressionSelectorList` to dispatch:
+
+- `tls-failure-return`
+- `tls-reinstall-rollback`
+- `tls-renew-failure-propagation`
+
+That keeps the public selector topology unchanged while moving another straight-line
+suite root onto the shared framework helper.
 
 ### Remote Control
 

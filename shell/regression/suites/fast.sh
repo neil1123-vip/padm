@@ -159,8 +159,7 @@ runRegressionFastOnlyOutputParallelCompositionRegression() (
 )
 
 runRegressionFastRealitySuiteRoot() {
-    runRegressionFastSuiteRoot &&
-        runRegressionStep reality-candidates-fast runRealityCandidateFastCompatRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionFastRealityChildSelectors
 }
 
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety

@@ -15,9 +15,7 @@ runTlsReinstallRollbackCompatRegression() { runRegressionTlsLegacyLeafWithCompat
 runTlsRenewalFailurePropagationCompatRegression() { runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression; }
 
 runRegressionTlsSuiteRoot() {
-    runRegressionStep tls-failure-return runTlsFailureReturnCompatRegression &&
-        runRegressionStep tls-reinstall-rollback runTlsReinstallRollbackCompatRegression &&
-        runRegressionStep tls-renew-failure-propagation runTlsRenewalFailurePropagationCompatRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionTlsChildSelectors
 }
 
 runRegressionTlsLegacyTmpDirIsolationRegression() (

@@ -213,6 +213,19 @@ runFrameworkParallelRegressionSelectorList() {
         "${selectorPairs[@]}"
 }
 
+runFrameworkSequentialRegressionSelectorList() {
+    local selectorListFn=$1
+    shift
+    local -a selectors=()
+    local selector
+
+    mapfile -t selectors < <("${selectorListFn}" "$@")
+    for selector in "${selectors[@]}"; do
+        [[ -n "${selector}" ]] || continue
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}" || return $?
+    done
+}
+
 runParallelRegressionSelectors() {
     runFrameworkParallelRegressionSelectors "$@"
 }

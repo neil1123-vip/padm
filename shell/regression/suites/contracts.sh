@@ -212,6 +212,18 @@ runRegressionStepSequenceAssertions() {
     done
 }
 
+runSequentialSelectorListUsesFrameworkHelperAssertions() {
+    local callLog=$1
+    local expectedCall=$2
+    shift 2
+
+    : >"${callLog}"
+    "$@"
+
+    grep -qx "${expectedCall}" "${callLog}" || return 1
+    ! grep -q '^legacy-helper:' "${callLog}" || return 1
+}
+
 runRegressionDispatcherStepCoverageAssertions() {
     local sourceFile=$1
     local selector=$2
@@ -531,8 +543,6 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runFastOnlySafetyChildStepsContract \
         runFastOnlyOutputRestChildStepsContract \
         runFastOnlyCoreChildStepsContract \
-        runTlsSuiteChildStepsContract \
-        runTransactionSubscriptionChildStepsContract \
         runTargetedBatchHelpersChildStepsContract; do
         runContractHelperAdoptionAssertions \
             "${contractsFile}" \
@@ -542,9 +552,18 @@ runRegressionStepSequenceHelperAdoptionContract() {
 
     awk '
         /^runRealitySuiteChildStepsContract\(\) \{$/ { in_fn = 1 }
-        in_fn && /runRegressionStepSequenceAssertions / { count++ }
+        in_fn && /runSequentialSelectorListUsesFrameworkHelperAssertions / { count++ }
         in_fn && /^}$/ { exit(count == 2 ? 0 : 1) }
     ' "${contractsFile}" || return 1
+
+    for functionName in \
+        runTlsSuiteChildStepsContract \
+        runTransactionSubscriptionChildStepsContract; do
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runSequentialSelectorListUsesFrameworkHelperAssertions || return 1
+    done
 }
 
 runRegisteredChildSelectorsAlignedHelperAdoptionContract() {
@@ -1925,14 +1944,26 @@ runFastOnlyCoreChildStepsContract() {
 }
 
 runRealitySuiteChildStepsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionRealityCandidatesSuiteRoot \
-        reality-candidates-fast \
-        reality-asn-scan-plan \
-        reality-candidates-full
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionRealityStreamSuiteRoot \
-        reality-stream-enable \
-        reality-stream-disable
+    local callLog="${TMP_DIR}/reality-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:reality-candidates-fast' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionRealitySuiteCandidatesChildSelectors
+    grep -qx 'dispatch:reality-asn-scan-plan' "${callLog}"
+    grep -qx 'dispatch:reality-candidates-full' "${callLog}"
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:reality-stream-enable' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionRealitySuiteStreamChildSelectors
+    grep -qx 'dispatch:reality-stream-disable' "${callLog}"
 }
 
 runRuntimeSuiteChildStepsContract() {
@@ -1949,47 +1980,57 @@ runRuntimeSuiteChildStepsContract() {
 }
 
 runTlsSuiteChildStepsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTlsSuiteRoot \
-        tls-failure-return \
-        tls-reinstall-rollback \
-        tls-renew-failure-propagation
+    local callLog="${TMP_DIR}/tls-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:tls-failure-return' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionTlsChildSelectors
+    grep -qx 'dispatch:tls-reinstall-rollback' "${callLog}"
+    grep -qx 'dispatch:tls-renew-failure-propagation' "${callLog}"
 }
 
 runTransactionSubscriptionChildStepsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTransactionSubscriptionSuiteRoot \
-        cdn-address-write-transaction \
-        subscribe-server-name \
-        subscribe-nginx-config-write \
-        subscribe-nginx-service-failure \
-        subscribe-salt-write-transaction \
-        subscribe-user-output-transaction \
-        remove-user-subscription-menu-failure \
-        user-subscription-menu-mutation-failure \
-        remote-subscribe-fetch
+    local callLog="${TMP_DIR}/transaction-subscription-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:cdn-address-write-transaction' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionTransactionSubscriptionChildSelectors
+    grep -qx 'dispatch:subscribe-server-name' "${callLog}"
+    grep -qx 'dispatch:subscribe-nginx-config-write' "${callLog}"
+    grep -qx 'dispatch:subscribe-nginx-service-failure' "${callLog}"
+    grep -qx 'dispatch:subscribe-salt-write-transaction' "${callLog}"
+    grep -qx 'dispatch:subscribe-user-output-transaction' "${callLog}"
+    grep -qx 'dispatch:remove-user-subscription-menu-failure' "${callLog}"
+    grep -qx 'dispatch:user-subscription-menu-mutation-failure' "${callLog}"
+    grep -qx 'dispatch:remote-subscribe-fetch' "${callLog}"
 }
 
 runTransactionSuiteChildStepsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-    local transactionBody
-    local coreLine
-    local subscriptionLine
-    local systemLine
+    local callLog="${TMP_DIR}/transaction-sequential-helper.log"
 
-    transactionBody=$(sed -n '/^runRegressionTransactionSuiteRoot() {$/,/^}$/p' "${suiteFile}")
-    [[ -n "${transactionBody}" ]] || return 1
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
 
-    coreLine=$(awk '/runRegressionTransactionCoreSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
-    subscriptionLine=$(awk '/runRegressionTransactionSubscriptionSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
-    systemLine=$(awk '/runRegressionTransactionSystemSuiteRoot/ { print NR; exit }' <<<"${transactionBody}")
-
-    [[ -n "${coreLine}" ]] || return 1
-    [[ -n "${subscriptionLine}" ]] || return 1
-    [[ -n "${systemLine}" ]] || return 1
-
-    (( coreLine < subscriptionLine )) || return 1
-    (( subscriptionLine < systemLine )) || return 1
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:transaction-core' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionTransactionChildSelectors
+    grep -qx 'dispatch:transaction-subscription' "${callLog}"
+    grep -qx 'dispatch:transaction-system' "${callLog}"
 }
 
 runFastRealityAggregateRunnerRegistrationContract() {
@@ -4040,10 +4081,6 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
         return 97
     }
 
-    runRegressionTransactionSuiteRoot() {
-        printf 'suite-transaction\n' >>"${callLog}"
-    }
-
     runRegressionTransactionCore() {
         printf 'legacy-transaction-core\n' >>"${callLog}"
         return 97
@@ -4058,10 +4095,6 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
         return 97
     }
 
-    runRegressionTransactionSubscriptionSuiteRoot() {
-        printf 'suite-transaction-subscription\n' >>"${callLog}"
-    }
-
     runRegressionTransactionSystemSuiteRoot() {
         printf 'suite-transaction-system\n' >>"${callLog}"
     }
@@ -4071,10 +4104,9 @@ runTransactionSuiteUsesSuiteLocalHelpersContract() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-subscription
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain transaction-system
 
-    grep -qx 'suite-transaction' "${callLog}"
     grep -qx 'suite-transaction-core' "${callLog}"
-    grep -qx 'suite-transaction-subscription' "${callLog}"
     grep -qx 'suite-transaction-system' "${callLog}"
+    grep -qx 'legacy-transaction-subscription' "${callLog}" && return 1
     ! grep -q '^legacy-transaction$' "${callLog}"
     ! grep -q '^legacy-transaction-core$' "${callLog}"
     ! grep -q '^legacy-transaction-subscription$' "${callLog}"
@@ -4507,6 +4539,33 @@ runFrameworkParallelSelectorListBuildsPairDispatchContract() (
     runFrameworkParallelRegressionSelectorList "${TMP_DIR}/framework-parallel-selector-list-root" listFrameworkParallelSelectorListFixtures wave-a
 
     grep -qx 'framework:mode=pairs:'"${TMP_DIR}"'/framework-parallel-selector-list-root alpha alpha beta beta gamma gamma' "${callLog}"
+)
+
+runFrameworkSequentialSelectorListBuildsSequentialDispatchContract() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/framework-sequential-selector-list.log"
+
+    : >"${callLog}"
+
+    listFrameworkSequentialSelectorListFixtures() {
+        [[ "${1:-}" == "wave-a" ]]
+        printf '%s\n' \
+            alpha \
+            beta \
+            gamma
+    }
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s suppress=%s\n' "$1" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    }
+
+    runFrameworkSequentialRegressionSelectorList listFrameworkSequentialSelectorListFixtures wave-a
+
+    runAggregateRunnerDispatchesChildrenInOrderAssertions \
+        "${callLog}" \
+        'dispatch:alpha suppress=1' \
+        'dispatch:beta suppress=1' \
+        'dispatch:gamma suppress=1'
 )
 
 runRuntimeSuiteUsesFunctionRegistryContract() {
@@ -4957,6 +5016,7 @@ runRealityCandidatesAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateSequential reality-candidates \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-candidates runRegressionRealityCandidatesSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealitySuiteCandidatesChildSelectors)
     runAggregateRunnerRegistrationAssertions \
@@ -4998,6 +5058,7 @@ runRealityStreamAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
+    ! grep -q '^registerRegressionAggregateSequential reality-stream \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequential reality-stream runRegressionRealityStreamSuiteRoot \\' "${suiteFile}"
     expectedChildren=$(listRegressionRealitySuiteStreamChildSelectors)
     runAggregateRunnerRegistrationAssertions \

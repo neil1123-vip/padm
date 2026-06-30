@@ -19,14 +19,11 @@ runRealityConfigCompatRegression() { runRegressionRealityLegacyLeafWithCompat ru
 runRealityProfileFailureCompatRegression() { runRegressionRealityLegacyLeafWithCompat runRealityProfileFailureRegression; }
 
 runRegressionRealityCandidatesSuiteRoot() {
-    runRegressionStep reality-candidates-fast runRealityCandidateFastCompatRegression &&
-        runRegressionStep reality-asn-scan-plan runRealityAsnScanPlanCompatRegression &&
-        runRegressionStep reality-candidates-full runRealityCandidateFullCompatRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionRealitySuiteCandidatesChildSelectors
 }
 
 runRegressionRealityStreamSuiteRoot() {
-    runRegressionStep reality-stream-enable runRealityStreamEnableCompatRegression &&
-        runRegressionStep reality-stream-disable runRealityStreamDisableCompatRegression
+    runFrameworkSequentialRegressionSelectorList listRegressionRealitySuiteStreamChildSelectors
 }
 
 runRegressionRealityLegacyTmpDirIsolationRegression() (
