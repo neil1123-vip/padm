@@ -2249,10 +2249,10 @@ runAllSuiteUsesFunctionRegistryContract() {
 
     ! grep -q 'subscription_groups_legacy\.sh' "${suiteFile}" || return 1
     grep -q 'source "\${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
-    grep -q '^REGRESSION_ENTRY_SCRIPT_PATH=' "${suiteFile}" || return 1
+    ! grep -q '^REGRESSION_ENTRY_SCRIPT_PATH=' "${suiteFile}" || return 1
     grep -q '^listRegressionAllParallelChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionAllSelector() {$' "${suiteFile}" || return 1
-    grep -q '^runRegressionAllSelectorSuiteRoot() {$' "${suiteFile}" || return 1
+    grep -q '^runRegressionAllSelectorSuiteRoot() ($' "${suiteFile}" || return 1
     grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
     grep -Eq '^runRegressionAllSuiteRoot\(\) \($|^runRegressionAllSuiteRoot\(\) {$' "${suiteFile}" || return 1
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/all-parallel-' "${suiteFile}" || return 1
@@ -4314,6 +4314,49 @@ runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
     ! grep -q '^parallel:selectors:' "${callLog}"
 )
 
+runAllSelectorDispatchAvoidsEntryScriptSpawnContract() (
+    local callLog="${TMP_DIR}/all-selector-dispatch-no-entry-spawn.log"
+
+    : >"${callLog}"
+
+    bash() {
+        printf 'bash:%s\n' "$*" >>"${callLog}"
+        return 97
+    }
+
+    runRegisteredRegressionMain() {
+        local selector=$1
+        printf 'dispatch:%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' \
+            "${selector}" \
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" \
+            "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelector subscription
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelector ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSelector transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionAllSelector routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelector runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-contract-server-response
+
+    grep -qx 'dispatch:subscription jobs=4 ui_profile= subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'dispatch:ui jobs=4 ui_profile=all subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'dispatch:transaction-core jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=all suppress=1' "${callLog}"
+    grep -qx 'dispatch:routing jobs=4 ui_profile= subscription_profile= routing_profile=all runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'dispatch:runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile=all transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'dispatch:transaction-system jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'dispatch:remote-control-smoke jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'dispatch:remote-control-contract-server-response jobs=1 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    ! grep -q '^bash:' "${callLog}"
+)
+
 runAllAggregateRunnerUsesFrameworkSelectorHelperContract() (
     local callLog="${TMP_DIR}/all-framework-helper-dispatch.log"
 
@@ -5288,18 +5331,26 @@ runRegressionSelectorDispatchCompositionRegression() (
 
     : >"${callLog}"
 
-    bash() {
-        printf 'script=%s selector=%s suppress=%s\n' "$1" "$2" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    runRegisteredRegressionMain() {
+        printf 'selector=%s suppress=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s\n' \
+            "$1" \
+            "${PADM_REGRESSION_SUPPRESS_DONE:-}" \
+            "${PADM_REGRESSION_PARALLEL_JOBS:-}" \
+            "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" \
+            "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" >>"${callLog}"
     }
 
     runRegressionAllSelector subscription-state
     runRegressionAllSelector remote-control
     runRegressionAllSelector routing
 
-    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=subscription-state suppress=1" "${callLog}"
-    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=remote-control suppress=1" "${callLog}"
-    grep -qx "script=${REGRESSION_ENTRY_SCRIPT_PATH} selector=routing suppress=1" "${callLog}"
-    ! grep -q "script=${REGRESSION_LEGACY_SCRIPT_PATH}" "${callLog}"
+    grep -qx 'selector=subscription-state suppress=1 jobs= ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=' "${callLog}"
+    grep -qx 'selector=remote-control suppress=1 jobs= ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=' "${callLog}"
+    grep -qx 'selector=routing suppress=1 jobs= ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=' "${callLog}"
+    ! grep -q '^legacy-helper:' "${callLog}"
 )
 
 runRegressionParallelSelectorLimitCompositionRegression() (
@@ -5530,6 +5581,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep all-suite-child-steps runAllSuiteChildStepsContract &&
         runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
         runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&
+        runRegressionStep all-selector-dispatch-avoids-entry-script-spawn runAllSelectorDispatchAvoidsEntryScriptSpawnContract &&
         runRegressionStep all-aggregate-runner-uses-framework-selector-helper runAllAggregateRunnerUsesFrameworkSelectorHelperContract &&
         runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract &&
         runRegressionStep subscription-legacy-public-selector-retirement runSubscriptionLegacyPublicSelectorRetirementContract &&

@@ -3,7 +3,6 @@
 REGRESSION_ALL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=/dev/null
 source "${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"
-REGRESSION_ENTRY_SCRIPT_PATH="${REGRESSION_ALL_SUITE_DIR}/../../subscription_groups_regression.sh"
 
 listRegressionAllParallelChildSelectors() {
     printf '%s\n' \
@@ -16,7 +15,7 @@ listRegressionAllParallelChildSelectors() {
         remote-control-contract-service-install
 }
 
-runRegressionAllSelectorSuiteRoot() {
+runRegressionAllSelectorSuiteRoot() (
     local selector=$1
     local childParallelJobs=
 
@@ -36,90 +35,19 @@ runRegressionAllSelectorSuiteRoot() {
     }
 
     childParallelJobs=$(regressionChildParallelJobsForSelector "${selector}")
+    export PADM_REGRESSION_SUPPRESS_DONE=1
+
+    # Child suite roots should use their own selector runners instead of
+    # inheriting the top-level `all` helper as a nested parallel selector runner.
+    unset PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER
+    unset PADM_REGRESSION_PARALLEL_SELECTOR_MODE
+
     if [[ -n "${childParallelJobs}" ]]; then
-        case "${selector}" in
-        ui)
-            if [[ -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        subscription)
-            if [[ -n "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        transaction-core)
-            if [[ -n "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        routing)
-            if [[ -n "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        runtime)
-            if [[ -n "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        *)
-            PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            ;;
-        esac
-    else
-        case "${selector}" in
-        ui)
-            if [[ -n "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_UI_RESOURCE_PROFILE="${PADM_REGRESSION_UI_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        subscription)
-            if [[ -n "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE="${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        transaction-core)
-            if [[ -n "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE="${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        routing)
-            if [[ -n "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE="${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        runtime)
-            if [[ -n "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" ]]; then
-                PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE="${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE}" bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            else
-                PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            fi
-            ;;
-        *)
-            PADM_REGRESSION_SUPPRESS_DONE=1 bash "${REGRESSION_ENTRY_SCRIPT_PATH}" "${selector}"
-            ;;
-        esac
+        export PADM_REGRESSION_PARALLEL_JOBS="${childParallelJobs}"
     fi
-}
+
+    runRegisteredRegressionMain "${selector}"
+)
 
 runRegressionAllSuiteRoot() (
     PADM_REGRESSION_PARALLEL_JOBS="${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}"
@@ -245,8 +173,8 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
 
     : >"${callLog}"
 
-    bash() {
-        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "$2" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
+    runRegisteredRegressionMain() {
+        printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "$1" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
     }
 
     PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
@@ -290,8 +218,8 @@ runRegressionAllResourceLayerCompositionRegression() (
 
     : >"${callLog}"
 
-    bash() {
-        local selector=$2
+    runRegisteredRegressionMain() {
+        local selector=$1
         printf '%s-start jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "${selector}" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
         case "${selector}" in
         subscription | ui | transaction-core | routing | runtime)
