@@ -5,6 +5,23 @@ REGRESSION_TRANSACTION_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && 
 source "${REGRESSION_TRANSACTION_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"
 
+runRegressionTransactionLegacyLeafWithCompat() (
+    # Re-source legacy transaction-backed subscription fixtures in an isolated
+    # subshell so later suite loads cannot leave source-time TMP_DIR globals stale.
+    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"
+    "$@"
+)
+
+runCdnAddressTransactionCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runCdnAddressTransactionRegression; }
+runSubscribeServerNameCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runSubscribeServerNameRegression; }
+runSubscribeNginxConfigWriteCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runSubscribeNginxConfigWriteRegression; }
+runSubscribeNginxServiceFailureCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runSubscribeNginxServiceFailureRegression; }
+runSubscribeSaltWriteTransactionCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runSubscribeSaltWriteTransactionRegression; }
+runSubscribeUserOutputTransactionCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runSubscribeUserOutputTransactionRegression; }
+runRemoveUserSubscriptionMenuFailureCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runRemoveUserSubscriptionMenuFailureRegression; }
+runUserSubscriptionMenuMutationFailureCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runUserSubscriptionMenuMutationFailureRegression; }
+runRemoteSubscribeFetchCompatRegression() { runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeFetchRegression; }
+
 listRegressionTransactionChildSelectors() {
     printf '%s\n' \
         transaction-core \
@@ -199,15 +216,15 @@ runRegressionTransactionSuiteRoot() {
 }
 
 runRegressionTransactionSubscriptionSuiteRoot() {
-    runRegressionStep cdn-address-write-transaction runCdnAddressTransactionRegression &&
-        runRegressionStep subscribe-server-name runSubscribeServerNameRegression &&
-        runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression &&
-        runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression &&
-        runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression &&
-        runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression &&
-        runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression &&
-        runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression &&
-        runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchRegression
+    runRegressionStep cdn-address-write-transaction runCdnAddressTransactionCompatRegression &&
+        runRegressionStep subscribe-server-name runSubscribeServerNameCompatRegression &&
+        runRegressionStep subscribe-nginx-config-write runSubscribeNginxConfigWriteCompatRegression &&
+        runRegressionStep subscribe-nginx-service-failure runSubscribeNginxServiceFailureCompatRegression &&
+        runRegressionStep subscribe-salt-write-transaction runSubscribeSaltWriteTransactionCompatRegression &&
+        runRegressionStep subscribe-user-output-transaction runSubscribeUserOutputTransactionCompatRegression &&
+        runRegressionStep remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureCompatRegression &&
+        runRegressionStep user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureCompatRegression &&
+        runRegressionStep remote-subscribe-fetch runRemoteSubscribeFetchCompatRegression
 }
 
 runRegressionTransactionSubscription() {
@@ -455,7 +472,15 @@ registerRegressionFunctionLeaf reload-core-propagation runReloadCorePropagationR
 
 registerRegressionFunctionLeaf regression-transaction-core-parallel-composition runRegressionTransactionCoreParallelCompositionRegression
 registerRegressionFunctionLeaf regression-transaction-system-parallel-composition runRegressionTransactionSystemParallelCompositionRegression
-registerRegressionFunctionLeaf remote-subscribe-fetch runRemoteSubscribeFetchRegression
+registerRegressionFunctionLeaf cdn-address-write-transaction runCdnAddressTransactionCompatRegression
+registerRegressionFunctionLeaf subscribe-server-name runSubscribeServerNameCompatRegression
+registerRegressionFunctionLeaf subscribe-nginx-config-write runSubscribeNginxConfigWriteCompatRegression
+registerRegressionFunctionLeaf subscribe-nginx-service-failure runSubscribeNginxServiceFailureCompatRegression
+registerRegressionFunctionLeaf subscribe-salt-write-transaction runSubscribeSaltWriteTransactionCompatRegression
+registerRegressionFunctionLeaf subscribe-user-output-transaction runSubscribeUserOutputTransactionCompatRegression
+registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureCompatRegression
+registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureCompatRegression
+registerRegressionFunctionLeaf remote-subscribe-fetch runRemoteSubscribeFetchCompatRegression
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
 registerRegressionFunctionLeaf uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 registerRegressionFunctionLeaf clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
