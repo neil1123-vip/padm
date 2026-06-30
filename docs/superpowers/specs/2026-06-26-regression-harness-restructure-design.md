@@ -238,9 +238,22 @@ The suite keeps the public `ui` selector while splitting nested flows such as:
 - wireguard peer rollback credential
 - wireguard peer source control
 
+Nested aggregate wrappers inside the suite now share two suite-local orchestration helpers:
+
+- `runUiSelectorListRegression`
+- `runUiLeafSelectorListRegression`
+
+The second helper preserves the existing nested leaf fan-out overrides instead of repeating inline environment wiring per wrapper.
+
 Nested leaf fan-out can be limited with:
 
 - `PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS`
+
+Compatibility boundary:
+
+- UI leaf coverage still calls the existing legacy menu-smoke and wireguard regression functions
+- those legacy-backed UI leaves now run through isolated compat wrappers that re-source `subscription_groups_legacy.sh` in a subshell before each leaf
+- this was required because parallel UI menu-smoke leaves shared source-time `TMP_DIR`-derived state such as `PADM_SUBSCRIPTION_GROUPS_DIR`, and some leaves explicitly removed that shared directory during setup
 
 At the `all` layer, UI child concurrency defaults are controlled separately from the top-level slot count.
 
@@ -436,12 +449,18 @@ Active compat wrapper patterns:
 - `subscription.sh`
 - `routing.sh`
 - `platform.sh`
+- `reality.sh`
+- `tls.sh`
+- `runtime.sh`
+- `transaction.sh`
+- `ui.sh`
 
 These wrappers intentionally re-source legacy or fast bootstrap files inside an isolated subshell before calling old leaf runners. The pattern exists because some source files mutate globals and source-time paths such as:
 
 - `TMP_DIR`
 - `readInstallType`-dependent state
 - fixture helper function bindings
+- `PADM_SUBSCRIPTION_GROUPS_DIR`
 
 ## Contracts and Verification Strategy
 
@@ -528,6 +547,7 @@ Already landed in this branch:
 - `32fe720` `refactor: route subscription state suites through selector helper`
 - `9110545` `refactor: route remote control nested aggregates through selector helper`
 - `43da388` `refactor: route ui nested aggregates through selector lists`
+- `4258e33` `refactor: isolate ui legacy leaf state`
 - `306d949` `refactor: isolate reality suite selector helpers`
 - `5d2dac0` `test: guard pre-legacy suite helper collisions`
 - `ae69d33` `refactor: finish selector retirement helper rollout`
@@ -579,7 +599,8 @@ Most likely next steps:
 1. keep reviewing legacy-backed suites for source-time global drift and add compat wrappers only where concrete collisions are proven
 2. decide whether nested aggregates still living inside legacy-backed scripts should also be lifted onto selector-list orchestration, or intentionally remain local runner groups
 3. keep trimming contract duplication only where a cross-suite assertion shape is still materially repeated; aggregate-runner, helper-dispatch, registered-child alignment, child-order, dispatcher-step coverage, helper-adoption, and straight-line child-step invariants now already sit behind common helpers, so mixed wrapper-order, multi-hit, and suite-specific selector-retirement contracts should stay explicit unless a truly repeated shape emerges
-4. refresh this design snapshot whenever a suite root, resource-profile boundary, or contract-helper boundary changes, so the spec remains an authoritative map instead of a historical note
+4. keep checking legacy-backed suites for source-time state that is initialized from bootstrap exports and later mutated or deleted inside leaf setup; the UI `PADM_SUBSCRIPTION_GROUPS_DIR` collision is the current example of that failure mode
+5. refresh this design snapshot whenever a suite root, resource-profile boundary, compat boundary, or contract-helper boundary changes, so the spec remains an authoritative map instead of a historical note
 
 Deferred on purpose:
 
