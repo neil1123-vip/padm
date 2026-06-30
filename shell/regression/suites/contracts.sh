@@ -964,8 +964,8 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${scriptFile}"
@@ -982,7 +982,15 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-state-support runRegressionSubscriptionStateSupport$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-support ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-serial ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-traffic ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-menu-tx ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-partial-sync ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore-serial ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback-serial ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf subscription-sync-rollback-failure-serial ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}"
 }
 
@@ -1160,9 +1168,7 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         runRegressionSubscriptionGroupSyncRollbackIsolated \
         listRegressionSubscriptionStateSyncRollbackFailureChildSelectors \
         runRegressionSubscriptionStateSyncRollbackFailureSelector \
-        runRegressionSubscriptionStateSyncRollback \
-        runRegressionSubscriptionStateSupport \
-        runRegressionSubscriptionStateSerial
+        runRegressionSubscriptionStateSyncRollback
     do
         grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
         ! grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${scriptFile}" || return 1
@@ -1377,14 +1383,23 @@ runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure-foundation ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-traffic ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-menu-tx ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-partial-sync ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore-serial ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-support ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-serial ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback-serial ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-sync-rollback-failure-serial ' "${suiteFile}" || return 1
 
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
 
     runAggregateRunnerRegistrationAssertions \
         subscription-state-structure \
@@ -1402,15 +1417,79 @@ runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
         runRegressionSubscriptionStateQuota \
         "$(listRegressionSubscriptionStateQuotaChildSelectors)"
     runAggregateRunnerRegistrationAssertions \
+        subscription-state-quota-traffic \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateQuotaTrafficChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-state-quota-traffic \
+        'listRegressionSubscriptionStateQuotaTrafficChildSelectors'
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-quota-menu-tx \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-state-quota-menu-tx \
+        'listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors'
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-quota-partial-sync \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateQuotaPartialSyncChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-state-quota-partial-sync \
+        'listRegressionSubscriptionStateQuotaPartialSyncChildSelectors'
+    runAggregateRunnerRegistrationAssertions \
         subscription-state-remote-restore \
         parallel \
         runRegressionSubscriptionStateRemoteRestore \
         "$(listRegressionSubscriptionStateRemoteRestoreChildSelectors)"
     runAggregateRunnerRegistrationAssertions \
+        subscription-state-remote-restore-serial \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-state-remote-restore-serial \
+        'listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors'
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-support \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateSupportChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-state-support \
+        'listRegressionSubscriptionStateSupportChildSelectors'
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-serial \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateSerialChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-state-serial \
+        'listRegressionSubscriptionStateSerialChildSelectors'
+    runAggregateRunnerRegistrationAssertions \
         subscription-state-sync-rollback \
         parallel \
         runRegressionSubscriptionStateSyncRollback \
         "$(listRegressionSubscriptionStateSyncRollbackFailureChildSelectors)"
+    runAggregateRunnerRegistrationAssertions \
+        subscription-state-sync-rollback-serial \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-state-sync-rollback-serial \
+        'listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors'
+    runAggregateRunnerRegistrationAssertions \
+        subscription-sync-rollback-failure-serial \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "$(listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors)"
+    runAggregateRunnerRunnerArgsAssertions \
+        subscription-sync-rollback-failure-serial \
+        'listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors'
 }
 
 runSubscriptionStateNestedAggregateRunnerRegistrationCoveredByDispatcherContract() {

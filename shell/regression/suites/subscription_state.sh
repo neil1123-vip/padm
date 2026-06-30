@@ -152,26 +152,6 @@ listRegressionSubscriptionStateSerialChildSelectors() {
         subscription-groups-restore-failure
 }
 
-runRegressionSubscriptionStateQuotaTraffic() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaTrafficChildSelectors
-}
-
-runRegressionSubscriptionStateQuotaMenuTransaction() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors
-}
-
-runRegressionSubscriptionStateQuotaPartialSync() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateQuotaPartialSyncChildSelectors
-}
-
-runRegressionSubscriptionStateSupport() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateSupportChildSelectors
-}
-
-runRegressionSubscriptionStateSerial() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateSerialChildSelectors
-}
-
 runRegressionSubscriptionStateQuota() {
     runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota" \
         listRegressionSubscriptionStateQuotaChildSelectors
@@ -204,10 +184,6 @@ listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors() {
         subscription-state-remote-restore-self-reference \
         subscription-state-remote-restore-state-write \
         subscription-state-remote-restore-legacy-menu
-}
-
-runRegressionSubscriptionStateRemoteRestoreSerial() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors
 }
 
 listRegressionSubscriptionStateRemoteRestoreChildSelectors() {
@@ -274,10 +250,6 @@ listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors() {
         subscription-sync-restore-dir-failure \
         subscription-sync-reload-rollback \
         subscription-group-sync-rollback-serial
-}
-
-runRegressionSubscriptionStateSyncRollbackSerial() {
-    runFrameworkSequentialRegressionSelectorList listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors
 }
 
 listRegressionSubscriptionStateSyncRollbackFailureChildSelectors() {
@@ -495,7 +467,6 @@ runRegressionSubscriptionStateSyncRollbackParallelIsolationCompositionRegression
     ' "${callLog}"
 )
 
-registerRegressionFunctionLeaf subscription-state-serial runRegressionSubscriptionStateSerial
 registerRegressionFunctionLeaf subscription-state-structure-foundation-add-remove runRegressionSubscriptionStateStructureFoundationAddRemove
 registerRegressionFunctionLeaf subscription-state-structure-foundation-credential runRegressionSubscriptionStateStructureFoundationCredential
 registerRegressionFunctionLeaf subscription-state-structure-foundation-normalize runRegressionSubscriptionStateStructureFoundationNormalize
@@ -509,16 +480,13 @@ registerRegressionFunctionLeaf subscription-state-structure-source-status runReg
 registerRegressionFunctionLeaf subscription-state-structure-source-remove runRegressionSubscriptionStateStructureSourceRemove
 registerRegressionFunctionLeaf subscription-state-structure-source-serial runRegressionSubscriptionStateStructureSourceSerial
 registerRegressionFunctionLeaf subscription-state-structure-serial runRegressionSubscriptionStateStructureSerial
-registerRegressionFunctionLeaf subscription-state-quota-traffic runRegressionSubscriptionStateQuotaTraffic
 registerRegressionFunctionLeaf subscription-state-quota-traffic-summary runRegressionSubscriptionStateQuotaTrafficSummary
 registerRegressionFunctionLeaf subscription-state-quota-traffic-invalid-input runRegressionSubscriptionStateQuotaTrafficInvalidInput
 registerRegressionFunctionLeaf subscription-state-quota-traffic-apply runRegressionSubscriptionStateQuotaTrafficApply
 registerRegressionFunctionLeaf subscription-state-quota-traffic-serial runRegressionSubscriptionStateQuotaTrafficSerial
 registerRegressionFunctionLeaf subscription-state-quota-menu-preview-fail runRegressionSubscriptionStateQuotaMenuPreviewFailure
-registerRegressionFunctionLeaf subscription-state-quota-menu-tx runRegressionSubscriptionStateQuotaMenuTransaction
 registerRegressionFunctionLeaf subscription-state-quota-menu-tx-rollback runRegressionSubscriptionStateQuotaTransactionRollback
 registerRegressionFunctionLeaf subscription-state-quota-menu-tx-serial runRegressionSubscriptionStateQuotaMenuTransactionSerial
-registerRegressionFunctionLeaf subscription-state-quota-partial-sync runRegressionSubscriptionStateQuotaPartialSync
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-apply-failure runRegressionSubscriptionStateQuotaPartialSyncApplyFailure
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-plan runRegressionSubscriptionStateQuotaPartialSyncPlan
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-config runRegressionSubscriptionStateQuotaPartialSyncConfig
@@ -530,16 +498,60 @@ registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-serial runRegressionSubscriptionStateRemoteRestoreSelfReferenceSerial
 registerRegressionFunctionLeaf subscription-state-remote-restore-state-write runRegressionSubscriptionStateRemoteRestoreStateWrite
 registerRegressionFunctionLeaf subscription-state-remote-restore-legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
-registerRegressionFunctionLeaf subscription-state-remote-restore-serial runRegressionSubscriptionStateRemoteRestoreSerial
-registerRegressionFunctionLeaf subscription-state-support runRegressionSubscriptionStateSupport
-registerRegressionFunctionLeaf subscription-state-sync-rollback-serial runRegressionSubscriptionStateSyncRollbackSerial
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-serial \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateSerialChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateSerialChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-quota-traffic \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateQuotaTrafficChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateQuotaTrafficChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-quota-menu-tx \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-quota-partial-sync \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateQuotaPartialSyncChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateQuotaPartialSyncChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-remote-restore-serial \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-support \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateSupportChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateSupportChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-state-sync-rollback-serial \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors)
+registerRegressionAggregateRunnerSequentialWithArgs \
+    subscription-sync-rollback-failure-serial \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors \
+    -- \
+    $(listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors)
 registerRegressionFunctionLeaf subscription-sync-tempdir runRegressionSubscriptionSyncTempDir
 registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message runRegressionSubscriptionSyncRestorePairFailureMessage
 registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runRegressionSubscriptionSyncAppendRestoreFailureDetail
 registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runRegressionSubscriptionSyncSingleRestoreResultMessage
 registerRegressionFunctionLeaf subscription-sync-rollback-result-message runRegressionSubscriptionSyncRollbackResultMessage
 registerRegressionFunctionLeaf subscription-sync-rollback-failure runRegressionSubscriptionStateSyncRollback
-registerRegressionFunctionLeaf subscription-sync-rollback-failure-serial runRegressionSubscriptionStateSyncRollbackSerial
 registerRegressionFunctionLeaf subscription-sync-rollback-config-restore-failure runRegressionSubscriptionSyncRollbackConfigRestoreFailure
 registerRegressionFunctionLeaf subscription-sync-restore-dir-failure runRegressionSubscriptionSyncRollbackRestoreDirFailure
 registerRegressionFunctionLeaf subscription-sync-reload-rollback runRegressionSubscriptionSyncRollbackReloadRollback
