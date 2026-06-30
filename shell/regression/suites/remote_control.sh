@@ -66,6 +66,19 @@ listRegressionRemoteControlSmokeChildSelectors() {
         remote-control-smoke-refresh
 }
 
+listRegressionRemoteControlSmokeCoreChildSelectors() {
+    printf '%s\n' \
+        remote-control-concurrency \
+        remote-control-aggregation-failure \
+        remote-control-inline-aggregation-helpers \
+        remote-control-health \
+        remote-control-inline-request-helpers \
+        remote-control-inline-wireguard-peer-helpers \
+        remote-control-inline-token-consumers \
+        remote-control-inline-sync-runner \
+        remote-control-handle-inline-helpers
+}
+
 listRegressionRemoteControlContractServiceInstallChildSelectors() {
     printf '%s\n' \
         remote-control-contract-service-install-success \
@@ -89,6 +102,10 @@ runRegressionRemoteControlSmokeRefresh() {
 runRegressionRemoteControlSmokeRefreshApply() {
     runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-smoke-refresh-apply" \
         listRegressionRemoteControlSmokeRefreshApplyChildSelectors
+}
+
+runRegressionRemoteControlSmokeCore() {
+    runFrameworkSequentialRegressionSelectorList listRegressionRemoteControlSmokeCoreChildSelectors
 }
 
 runRegressionRemoteControlSmoke() {
@@ -123,7 +140,42 @@ JSON
     cmp -s "${beforeFile}" "${afterFile}"
 )
 
-runRemoteControlSmokeCoreCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeCore; }
+runRegressionRemoteControlConcurrency() {
+    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
+}
+
+runRegressionRemoteControlAggregationFailure() {
+    runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
+}
+
+runRegressionRemoteControlInlineAggregationHelpers() {
+    runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
+}
+
+runRegressionRemoteControlHealth() {
+    runRegressionStep remote-control-health runRemoteControlHealthRegression
+}
+
+runRegressionRemoteControlInlineRequestHelpers() {
+    runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
+}
+
+runRegressionRemoteControlInlineWireGuardPeerHelpers() {
+    runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression
+}
+
+runRegressionRemoteControlInlineTokenConsumers() {
+    runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression
+}
+
+runRegressionRemoteControlInlineSyncRunner() {
+    runRegressionStep remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression
+}
+
+runRegressionRemoteControlHandleInlineHelpers() {
+    runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
+}
+
 runRemoteControlSmokeRefreshApplyBasicCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyBasic; }
 runRemoteControlSmokeRefreshApplyPrepareCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyPrepare; }
 runRemoteControlSmokeRefreshApplyFailureCompatRegression() { runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlSmokeRefreshApplyFailure; }
@@ -148,7 +200,16 @@ runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-contract-server-response
 )
 
-registerRegressionFunctionLeaf remote-control-smoke-core runRemoteControlSmokeCoreCompatRegression
+registerRegressionFunctionLeaf remote-control-smoke-core runRegressionRemoteControlSmokeCore
+registerRegressionFunctionLeaf remote-control-concurrency runRegressionRemoteControlConcurrency
+registerRegressionFunctionLeaf remote-control-aggregation-failure runRegressionRemoteControlAggregationFailure
+registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRegressionRemoteControlInlineAggregationHelpers
+registerRegressionFunctionLeaf remote-control-health runRegressionRemoteControlHealth
+registerRegressionFunctionLeaf remote-control-inline-request-helpers runRegressionRemoteControlInlineRequestHelpers
+registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRegressionRemoteControlInlineWireGuardPeerHelpers
+registerRegressionFunctionLeaf remote-control-inline-token-consumers runRegressionRemoteControlInlineTokenConsumers
+registerRegressionFunctionLeaf remote-control-inline-sync-runner runRegressionRemoteControlInlineSyncRunner
+registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRegressionRemoteControlHandleInlineHelpers
 registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlSmokeRefreshApplyBasicCompatRegression
 registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlSmokeRefreshApplyPrepareCompatRegression
 registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlSmokeRefreshApplyFailureCompatRegression

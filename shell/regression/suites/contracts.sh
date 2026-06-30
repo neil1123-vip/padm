@@ -532,7 +532,6 @@ runRegressionStepSequenceHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
-        runRemoteControlSmokeCoreChildStepsContract \
         runPlatformRefreshChildStepsContract \
         runPlatformUpdateChildStepsContract \
         runPlatformRestChildStepsContract \
@@ -554,6 +553,7 @@ runRegressionStepSequenceHelperAdoptionContract() {
     ' "${contractsFile}" || return 1
 
     for functionName in \
+        runRemoteControlSmokeCoreChildStepsContract \
         runSubscriptionStateSupportChildStepsContract \
         runSubscriptionStateSerialChildStepsContract \
         runPlatformIoChildStepsContract \
@@ -1370,6 +1370,7 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     grep -Eq '^runRegressionRemoteControlSmoke\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControlContract\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionRemoteControlContractServiceInstall\(\)[[:space:]]*[({]' "${suiteFile}"
+    grep -Eq '^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -q '^runRegressionRemoteControlLegacyLeafWithCompat() ($' "${suiteFile}"
     grep -q '^runRegressionRemoteControlLegacyTmpDirIsolationRegression() ($' "${suiteFile}"
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${scriptFile}"
@@ -1378,10 +1379,20 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -Eq '^runRegressionRemoteControlSmoke\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionRemoteControlContract\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionRemoteControlContractServiceInstall\(\)[[:space:]]*[({]' "${scriptFile}"
+    ! grep -Eq '^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]' "${scriptFile}"
     ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${legacyFile}"
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core runRemoteControlSmokeCoreCompatRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core runRegressionRemoteControlSmokeCore$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-concurrency runRegressionRemoteControlConcurrency$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-aggregation-failure runRegressionRemoteControlAggregationFailure$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRegressionRemoteControlInlineAggregationHelpers$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-health runRegressionRemoteControlHealth$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-request-helpers runRegressionRemoteControlInlineRequestHelpers$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRegressionRemoteControlInlineWireGuardPeerHelpers$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-token-consumers runRegressionRemoteControlInlineTokenConsumers$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-sync-runner runRegressionRemoteControlInlineSyncRunner$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRegressionRemoteControlHandleInlineHelpers$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlSmokeRefreshApplyBasicCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlSmokeRefreshApplyPrepareCompatRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlSmokeRefreshApplyFailureCompatRegression$' "${suiteFile}"
@@ -1552,6 +1563,7 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
     declare -F listRegressionRemoteControlSmokeRefreshApplyChildSelectors >/dev/null
     declare -F listRegressionRemoteControlSmokeRefreshChildSelectors >/dev/null
     declare -F listRegressionRemoteControlSmokeChildSelectors >/dev/null
+    declare -F listRegressionRemoteControlSmokeCoreChildSelectors >/dev/null
     declare -F listRegressionRemoteControlContractServiceInstallChildSelectors >/dev/null
     declare -F listRegressionRemoteControlContractChildSelectors >/dev/null
 
@@ -1588,6 +1600,16 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
     remoteControlAssertSelectorList listRegressionRemoteControlSmokeChildSelectors smoke \
         remote-control-smoke-core \
         remote-control-smoke-refresh
+    remoteControlAssertSelectorList listRegressionRemoteControlSmokeCoreChildSelectors smoke-core \
+        remote-control-concurrency \
+        remote-control-aggregation-failure \
+        remote-control-inline-aggregation-helpers \
+        remote-control-health \
+        remote-control-inline-request-helpers \
+        remote-control-inline-wireguard-peer-helpers \
+        remote-control-inline-token-consumers \
+        remote-control-inline-sync-runner \
+        remote-control-handle-inline-helpers
     remoteControlAssertSelectorList listRegressionRemoteControlContractServiceInstallChildSelectors contract-service-install \
         remote-control-contract-service-install-success \
         remote-control-contract-service-install-systemctl-fail \
@@ -1605,11 +1627,13 @@ runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract() {
     local functionName
 
     for functionName in \
+        listRegressionRemoteControlSmokeCoreChildSelectors \
         listRegressionRemoteControlSmokeRefreshApplyChildSelectors \
         listRegressionRemoteControlSmokeRefreshChildSelectors \
         listRegressionRemoteControlSmokeChildSelectors \
         listRegressionRemoteControlContractServiceInstallChildSelectors \
         listRegressionRemoteControlContractChildSelectors \
+        runRegressionRemoteControlSmokeCore \
         runRegressionRemoteControlSmokeRefresh \
         runRegressionRemoteControlSmokeRefreshApply \
         runRegressionRemoteControlSmoke \
@@ -1631,7 +1655,6 @@ runRemoteControlLeavesUseCompatHelperContract() (
     }
 
     for selector in \
-        remote-control-smoke-core \
         remote-control-smoke-refresh-apply-basic \
         remote-control-smoke-refresh-apply-prepare \
         remote-control-smoke-refresh-apply-failure \
@@ -1648,7 +1671,6 @@ runRemoteControlLeavesUseCompatHelperContract() (
     done
 
     cat <<'EOF' >"${TMP_DIR}/remote-control-compat-helper.expected.log"
-runRegressionRemoteControlSmokeCore
 runRegressionRemoteControlSmokeRefreshApplyBasic
 runRegressionRemoteControlSmokeRefreshApplyPrepare
 runRegressionRemoteControlSmokeRefreshApplyFailure
@@ -1666,6 +1688,20 @@ EOF
     cmp -s "${TMP_DIR}/remote-control-compat-helper.expected.log" "${callLog}"
 )
 
+runRemoteControlSmokeCoreNoCompatHelperContract() (
+    local callLog="${TMP_DIR}/remote-control-smoke-core-no-compat.log"
+
+    : >"${callLog}"
+
+    runRegressionRemoteControlLegacyLeafWithCompat() {
+        printf '%s\n' "$1" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-smoke-core
+
+    [[ ! -s "${callLog}" ]]
+)
+
 runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
 
@@ -1676,17 +1712,25 @@ runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract() {
 }
 
 runRemoteControlSmokeCoreChildStepsContract() {
-    local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
-    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionRemoteControlSmokeCoreSteps \
-        remote-control-concurrency \
-        remote-control-aggregation-failure \
-        remote-control-inline-aggregation-helpers \
-        remote-control-health \
-        remote-control-inline-request-helpers \
-        remote-control-inline-wireguard-peer-helpers \
-        remote-control-inline-token-consumers \
-        remote-control-inline-sync-runner \
-        remote-control-handle-inline-helpers
+    local callLog="${TMP_DIR}/remote-control-smoke-core-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:remote-control-concurrency' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionRemoteControlSmokeCoreChildSelectors
+    grep -qx 'dispatch:remote-control-aggregation-failure' "${callLog}"
+    grep -qx 'dispatch:remote-control-inline-aggregation-helpers' "${callLog}"
+    grep -qx 'dispatch:remote-control-health' "${callLog}"
+    grep -qx 'dispatch:remote-control-inline-request-helpers' "${callLog}"
+    grep -qx 'dispatch:remote-control-inline-wireguard-peer-helpers' "${callLog}"
+    grep -qx 'dispatch:remote-control-inline-token-consumers' "${callLog}"
+    grep -qx 'dispatch:remote-control-inline-sync-runner' "${callLog}"
+    grep -qx 'dispatch:remote-control-handle-inline-helpers' "${callLog}"
 }
 
 runRemoteControlAggregateRunnerRegistrationContract() {
@@ -5812,6 +5856,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
         runRegressionStep remote-control-nested-selector-helpers-are-suite-owned runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep remote-control-leaves-use-compat-helper runRemoteControlLeavesUseCompatHelperContract &&
+        runRegressionStep remote-control-smoke-core-no-compat-helper runRemoteControlSmokeCoreNoCompatHelperContract &&
         runRegressionStep remote-control-legacy-tmpdir-isolation-guard-registered runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract &&
         runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract &&
         runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&

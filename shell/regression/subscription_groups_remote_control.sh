@@ -1919,10 +1919,6 @@ runRegressionRemoteControlContractServerResponseSteps() {
     runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 }
 
-runRegressionRemoteControlSmokeCore() {
-    runRegressionRemoteControlSmokeCoreSteps
-}
-
 runRegressionRemoteControlSmokeRefreshApplyBasic() {
     runRegressionRemoteControlSmokeRefreshApplyBasicSteps
 }

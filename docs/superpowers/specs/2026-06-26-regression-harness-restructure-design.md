@@ -428,6 +428,9 @@ dispatches its ordered child selectors through `runFrameworkSequentialRegression
 The `subscription-state-support` and `subscription-state-serial` wrappers now also
 dispatch their ordered child selectors through suite-local sequential helper lists,
 and those wrapper implementations no longer live in the legacy-backed full script.
+Within `remote-control-smoke`, the `remote-control-smoke-core` leaf now also
+dispatches its ordered child selectors through a suite-local sequential helper list
+instead of routing through the legacy compat leaf wrapper.
 
 Those nested public aggregates now also live in the suite layer instead of the legacy-backed full script:
 
