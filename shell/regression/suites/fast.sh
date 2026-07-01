@@ -9,24 +9,25 @@ listRegressionFastOnlyOutputChildSelectors() {
         fast-only-output-rest
 }
 
-runRegressionFastOnlyCoreSuiteRoot() {
-    runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
-        runRegressionStep check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression &&
-        runRegressionStep service-wait-state runServiceWaitForStateRegression &&
-        runRegressionStep core-running-service-state runCoreRunningFallsBackToServiceStateRegression &&
-        runRegressionStep warp-config-generation-failure runWarpConfigGenerationFailureRegression &&
-        runRegressionStep fail2ban-profile runFail2banProfileRegression &&
-        runRegressionStep fail2ban-sshd-systemd-backend runFail2banSshdSystemdBackendRegression &&
-        runRegressionStep fail2ban-menu runFail2banMenuRegression &&
-        runRegressionStep xray-strict-validation runXrayStrictValidationRegression &&
-        runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression &&
-        runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression &&
-        runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression &&
-        runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression &&
-        runRegressionStep services-proc-race runServicesProcRaceRegression &&
-        runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression &&
-        runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
-        runRegressionStep ui-smoke-light runRegressionUiSmokeSuiteRoot
+listRegressionFastOnlyCoreChildSelectors() {
+    printf '%s\n' \
+        singbox-mainpid-template \
+        check-gfw-status-service-wait \
+        service-wait-state \
+        core-running-service-state \
+        warp-config-generation-failure \
+        fail2ban-profile \
+        fail2ban-sshd-systemd-backend \
+        fail2ban-menu \
+        xray-strict-validation \
+        xray-compat-audit \
+        xray-prerelease-dry-run \
+        singbox-compat-audit \
+        singbox-prerelease-dry-run \
+        services-proc-race \
+        singbox-ignore-client-proc \
+        nginx-blog-auto-install \
+        ui-smoke-light
 }
 
 listRegressionFastOnlyChildSelectors() {
@@ -159,7 +160,23 @@ runRegressionFastOnlyOutputParallelCompositionRegression() (
 registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
 registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
 registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest
-registerRegressionFunctionLeaf fast-only-core runRegressionFastOnlyCoreSuiteRoot
+registerRegressionFunctionLeaf singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression
+registerRegressionFunctionLeaf check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression
+registerRegressionFunctionLeaf service-wait-state runServiceWaitForStateRegression
+registerRegressionFunctionLeaf core-running-service-state runCoreRunningFallsBackToServiceStateRegression
+registerRegressionFunctionLeaf warp-config-generation-failure runWarpConfigGenerationFailureRegression
+registerRegressionFunctionLeaf fail2ban-profile runFail2banProfileRegression
+registerRegressionFunctionLeaf fail2ban-sshd-systemd-backend runFail2banSshdSystemdBackendRegression
+registerRegressionFunctionLeaf fail2ban-menu runFail2banMenuRegression
+registerRegressionFunctionLeaf xray-strict-validation runXrayStrictValidationRegression
+registerRegressionFunctionLeaf xray-compat-audit runXrayCompatibilityAuditRegression
+registerRegressionFunctionLeaf xray-prerelease-dry-run runXrayPrereleaseDryRunRegression
+registerRegressionFunctionLeaf singbox-compat-audit runSingBoxCompatibilityAuditRegression
+registerRegressionFunctionLeaf singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
+registerRegressionFunctionLeaf services-proc-race runServicesProcRaceRegression
+registerRegressionFunctionLeaf singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression
+registerRegressionFunctionLeaf nginx-blog-auto-install runNginxBlogAutoInstallRegression
+registerRegressionFunctionLeaf ui-smoke-light runRegressionUiSmokeSuiteRoot
 registerRegressionFunctionLeaf regression-fast-parallel-composition runRegressionFastParallelCompositionRegression
 registerRegressionFunctionLeaf regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression
 registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression
@@ -179,6 +196,13 @@ registerRegressionAggregateRunnerParallelWithArgs \
     listRegressionFastOnlyChildSelectors \
     -- \
     $(listRegressionFastOnlyChildSelectors)
+
+registerRegressionAggregateRunnerSequentialWithArgs \
+    fast-only-core \
+    runFrameworkSequentialRegressionSelectorList \
+    listRegressionFastOnlyCoreChildSelectors \
+    -- \
+    $(listRegressionFastOnlyCoreChildSelectors)
 
 registerRegressionAggregateRunnerParallelWithArgs \
     fast \

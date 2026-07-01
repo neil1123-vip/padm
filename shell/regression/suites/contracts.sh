@@ -710,7 +710,6 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runFastOnlyOutputAutoInstallChildStepsContract \
         runFastOnlySafetyChildStepsContract \
         runFastOnlyOutputRestChildStepsContract \
-        runFastOnlyCoreChildStepsContract \
         runTargetedBatchHelpersChildStepsContract; do
         runContractHelperAdoptionAssertions \
             "${contractsFile}" \
@@ -729,6 +728,7 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runSubscriptionStateSupportChildStepsContract \
         runSubscriptionStateSerialChildStepsContract \
         runPlatformIoChildStepsContract \
+        runFastOnlyCoreChildStepsContract \
         runTlsSuiteChildStepsContract \
         runTransactionSubscriptionChildStepsContract; do
         runContractHelperAdoptionAssertions \
@@ -2212,7 +2212,7 @@ runFastSuiteUsesFunctionRegistryContract() {
     grep -q '^listRegressionFastChildSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionFastOnlyChildSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionFastOnlyOutputChildSelectors() {$' "${suiteFile}"
-    grep -q '^runRegressionFastOnlyCoreSuiteRoot() {$' "${suiteFile}"
+    grep -q '^listRegressionFastOnlyCoreChildSelectors() {$' "${suiteFile}"
     ! grep -q '^runRegressionFastUiSmokeLightSuiteRoot() {$' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-parallel-' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/fast-only-parallel-' "${suiteFile}"
@@ -2229,7 +2229,9 @@ runFastSuiteUsesFunctionRegistryContract() {
     grep -q '^registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf fast-only-core runRegressionFastOnlyCoreSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf ui-smoke-light runRegressionUiSmokeSuiteRoot$' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-only-core ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf regression-fast-parallel-composition runRegressionFastParallelCompositionRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression$' "${suiteFile}"
@@ -2241,7 +2243,6 @@ runFastSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
     ! grep -q 'declare -f runRegressionFast' "${suiteFile}"
     ! grep -q '^eval ' "${suiteFile}"
-    grep -q 'runRegressionStep ui-smoke-light runRegressionUiSmokeSuiteRoot' "${suiteFile}"
     grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
 }
 
@@ -2668,25 +2669,33 @@ runFastOnlyOutputRestChildStepsContract() {
 }
 
 runFastOnlyCoreChildStepsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionFastOnlyCoreSuiteRoot \
-        singbox-mainpid-template \
-        check-gfw-status-service-wait \
-        service-wait-state \
-        core-running-service-state \
-        warp-config-generation-failure \
-        fail2ban-profile \
-        fail2ban-sshd-systemd-backend \
-        fail2ban-menu \
-        xray-strict-validation \
-        xray-compat-audit \
-        xray-prerelease-dry-run \
-        singbox-compat-audit \
-        singbox-prerelease-dry-run \
-        services-proc-race \
-        singbox-ignore-client-proc \
-        nginx-blog-auto-install \
-        ui-smoke-light
+    local callLog="${TMP_DIR}/fast-only-core-sequential-helper.log"
+
+    runRegisteredRegressionMain() {
+        printf 'dispatch:%s\n' "$1" >>"${callLog}"
+    }
+
+    runSequentialSelectorListUsesFrameworkHelperAssertions \
+        "${callLog}" \
+        'dispatch:singbox-mainpid-template' \
+        runFrameworkSequentialRegressionSelectorList \
+        listRegressionFastOnlyCoreChildSelectors
+    grep -qx 'dispatch:check-gfw-status-service-wait' "${callLog}"
+    grep -qx 'dispatch:service-wait-state' "${callLog}"
+    grep -qx 'dispatch:core-running-service-state' "${callLog}"
+    grep -qx 'dispatch:warp-config-generation-failure' "${callLog}"
+    grep -qx 'dispatch:fail2ban-profile' "${callLog}"
+    grep -qx 'dispatch:fail2ban-sshd-systemd-backend' "${callLog}"
+    grep -qx 'dispatch:fail2ban-menu' "${callLog}"
+    grep -qx 'dispatch:xray-strict-validation' "${callLog}"
+    grep -qx 'dispatch:xray-compat-audit' "${callLog}"
+    grep -qx 'dispatch:xray-prerelease-dry-run' "${callLog}"
+    grep -qx 'dispatch:singbox-compat-audit' "${callLog}"
+    grep -qx 'dispatch:singbox-prerelease-dry-run' "${callLog}"
+    grep -qx 'dispatch:services-proc-race' "${callLog}"
+    grep -qx 'dispatch:singbox-ignore-client-proc' "${callLog}"
+    grep -qx 'dispatch:nginx-blog-auto-install' "${callLog}"
+    grep -qx 'dispatch:ui-smoke-light' "${callLog}"
 }
 
 runRealitySuiteChildStepsContract() {
@@ -2803,14 +2812,18 @@ runFastSelectorHelpersStayAlignedContract() (
     local fastOnlyExpectedFile="${TMP_DIR}/fast-only-default-selectors.expected.txt"
     local fastOnlyOutputSelectorsFile="${TMP_DIR}/fast-only-output-default-selectors.txt"
     local fastOnlyOutputExpectedFile="${TMP_DIR}/fast-only-output-default-selectors.expected.txt"
+    local fastOnlyCoreSelectorsFile="${TMP_DIR}/fast-only-core-default-selectors.txt"
+    local fastOnlyCoreExpectedFile="${TMP_DIR}/fast-only-core-default-selectors.expected.txt"
 
     declare -F listRegressionFastChildSelectors >/dev/null
     declare -F listRegressionFastOnlyChildSelectors >/dev/null
     declare -F listRegressionFastOnlyOutputChildSelectors >/dev/null
+    declare -F listRegressionFastOnlyCoreChildSelectors >/dev/null
 
     listRegressionFastChildSelectors >"${fastSelectorsFile}"
     listRegressionFastOnlyChildSelectors >"${fastOnlySelectorsFile}"
     listRegressionFastOnlyOutputChildSelectors >"${fastOnlyOutputSelectorsFile}"
+    listRegressionFastOnlyCoreChildSelectors >"${fastOnlyCoreSelectorsFile}"
 
     cat <<'EOF' >"${fastExpectedFile}"
 platform-hot
@@ -2828,9 +2841,30 @@ fast-only-output-auto-install
 fast-only-output-rest
 EOF
 
+    cat <<'EOF' >"${fastOnlyCoreExpectedFile}"
+singbox-mainpid-template
+check-gfw-status-service-wait
+service-wait-state
+core-running-service-state
+warp-config-generation-failure
+fail2ban-profile
+fail2ban-sshd-systemd-backend
+fail2ban-menu
+xray-strict-validation
+xray-compat-audit
+xray-prerelease-dry-run
+singbox-compat-audit
+singbox-prerelease-dry-run
+services-proc-race
+singbox-ignore-client-proc
+nginx-blog-auto-install
+ui-smoke-light
+EOF
+
     cmp -s "${fastExpectedFile}" "${fastSelectorsFile}"
     cmp -s "${fastOnlyExpectedFile}" "${fastOnlySelectorsFile}"
     cmp -s "${fastOnlyOutputExpectedFile}" "${fastOnlyOutputSelectorsFile}"
+    cmp -s "${fastOnlyCoreExpectedFile}" "${fastOnlyCoreSelectorsFile}"
 )
 
 runFastAggregateRunnerRegistrationContract() {
@@ -2888,6 +2922,23 @@ runFastOnlyOutputAggregateRunnerRegistrationContract() {
         fast-only-output \
         '/fast-only-output-parallel-[0-9]+$' \
         '^listRegressionFastOnlyOutputChildSelectors$'
+}
+
+runFastOnlyCoreAggregateRunnerRegistrationContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
+    local expectedChildren
+
+    ! grep -q '^registerRegressionScriptLeaf fast-only-core ' "${suiteFile}"
+    ! grep -q '^registerRegressionFunctionLeaf fast-only-core ' "${suiteFile}"
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
+    expectedChildren=$(listRegressionFastOnlyCoreChildSelectors)
+    runAggregateRunnerRegistrationAssertions \
+        fast-only-core \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions fast-only-core 'listRegressionFastOnlyCoreChildSelectors'
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke-light"]:-}" == "function" ]] || return 1
 }
 
 runFastRealityLegacyRetirementContract() {
@@ -3015,19 +3066,18 @@ runFastSuiteUsesSuiteLocalHelperContract() (
         printf 'suite-ui-smoke-light\n' >>"${callLog}"
     }
 
-    runRegressionStep() {
-        local label=$1
-        local runner=$2
+    runRegisteredRegressionMain() {
+        local selector=$1
 
-        if [[ "${label}" == "ui-smoke-light" ]]; then
-            "${runner}"
+        if [[ "${selector}" == "ui-smoke-light" ]]; then
+            runRegressionUiSmokeSuiteRoot
             return $?
         fi
 
         return 0
     }
 
-    runRegressionFastOnlyCoreSuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain fast-only-core
 
     grep -qx 'suite-ui-smoke-light' "${callLog}"
     ! grep -q '^legacy-ui-smoke-light$' "${callLog}"
@@ -6436,6 +6486,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep fast-only-output-aggregate-runner-registration runFastOnlyOutputAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-output-auto-install-child-steps runFastOnlyOutputAutoInstallChildStepsContract &&
         runRegressionStep fast-only-output-rest-child-steps runFastOnlyOutputRestChildStepsContract &&
+        runRegressionStep fast-only-core-aggregate-runner-registration runFastOnlyCoreAggregateRunnerRegistrationContract &&
         runRegressionStep fast-only-core-child-steps runFastOnlyCoreChildStepsContract &&
         runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
         runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
