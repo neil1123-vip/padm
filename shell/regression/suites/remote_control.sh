@@ -77,62 +77,6 @@ JSON
     cmp -s "${beforeFile}" "${afterFile}"
 )
 
-runRegressionRemoteControlConcurrency() {
-    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
-}
-
-runRegressionRemoteControlAggregationFailure() {
-    runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
-}
-
-runRegressionRemoteControlInlineAggregationHelpers() {
-    runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
-}
-
-runRegressionRemoteControlHealth() {
-    runRegressionStep remote-control-health runRemoteControlHealthRegression
-}
-
-runRegressionRemoteControlInlineRequestHelpers() {
-    runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
-}
-
-runRegressionRemoteControlInlineWireGuardPeerHelpers() {
-    runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression
-}
-
-runRegressionRemoteControlInlineTokenConsumers() {
-    runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression
-}
-
-runRegressionRemoteControlInlineSyncRunner() {
-    runRegressionStep remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression
-}
-
-runRegressionRemoteControlHandleInlineHelpers() {
-    runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
-}
-
-runRegressionRemoteControlSmokeRefreshApplyBasic() {
-    runRegressionStep remote-control-server-refresh-light-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
-}
-
-runRegressionRemoteControlSmokeRefreshApplyPrepare() {
-    runRegressionStep remote-control-server-refresh-light-apply-prepare runRemoteControlServerRefreshLightApplyPrepareRegression
-}
-
-runRegressionRemoteControlSmokeRefreshApplyFailure() {
-    runRegressionStep remote-control-server-refresh-light-apply-failure runRemoteControlServerRefreshLightApplyFailureRegression
-}
-
-runRegressionRemoteControlSmokeRefreshRestore() {
-    runRegressionStep remote-control-server-refresh-light-restore runRemoteControlServerRefreshLightRestoreRegression
-}
-
-runRegressionRemoteControlSmokeRefreshReconcile() {
-    runRegressionStep remote-control-server-refresh-light-reconcile runRemoteControlServerRefreshLightReconcileRegression
-}
-
 runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
     set -euo pipefail
     local originalTmpDir="${TMP_DIR}"
@@ -144,20 +88,20 @@ runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-contract-server-response
 )
 
-registerRegressionFunctionLeaf remote-control-concurrency runRegressionRemoteControlConcurrency
-registerRegressionFunctionLeaf remote-control-aggregation-failure runRegressionRemoteControlAggregationFailure
-registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRegressionRemoteControlInlineAggregationHelpers
-registerRegressionFunctionLeaf remote-control-health runRegressionRemoteControlHealth
-registerRegressionFunctionLeaf remote-control-inline-request-helpers runRegressionRemoteControlInlineRequestHelpers
-registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRegressionRemoteControlInlineWireGuardPeerHelpers
-registerRegressionFunctionLeaf remote-control-inline-token-consumers runRegressionRemoteControlInlineTokenConsumers
-registerRegressionFunctionLeaf remote-control-inline-sync-runner runRegressionRemoteControlInlineSyncRunner
-registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRegressionRemoteControlHandleInlineHelpers
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare
-registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure
-registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore
-registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile
+registerRegressionFunctionLeaf remote-control-concurrency runRemoteControlConcurrencyRegression
+registerRegressionFunctionLeaf remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
+registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
+registerRegressionFunctionLeaf remote-control-health runRemoteControlHealthRegression
+registerRegressionFunctionLeaf remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
+registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression
+registerRegressionFunctionLeaf remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression
+registerRegressionFunctionLeaf remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression
+registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlServerRefreshLightApplyPrepareRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlServerRefreshLightApplyFailureRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRemoteControlServerRefreshLightRestoreRegression
+registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRemoteControlServerRefreshLightReconcileRegression
 registerRegressionFunctionLeaf remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess
 registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail
 registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail

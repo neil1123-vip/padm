@@ -1678,20 +1678,20 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
     ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-concurrency runRegressionRemoteControlConcurrency$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-aggregation-failure runRegressionRemoteControlAggregationFailure$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRegressionRemoteControlInlineAggregationHelpers$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-health runRegressionRemoteControlHealth$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-request-helpers runRegressionRemoteControlInlineRequestHelpers$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRegressionRemoteControlInlineWireGuardPeerHelpers$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-token-consumers runRegressionRemoteControlInlineTokenConsumers$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-sync-runner runRegressionRemoteControlInlineSyncRunner$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRegressionRemoteControlHandleInlineHelpers$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRegressionRemoteControlSmokeRefreshApplyBasic$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRegressionRemoteControlSmokeRefreshApplyPrepare$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRegressionRemoteControlSmokeRefreshApplyFailure$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRegressionRemoteControlSmokeRefreshRestore$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRegressionRemoteControlSmokeRefreshReconcile$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-concurrency runRemoteControlConcurrencyRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-aggregation-failure runRemoteControlAggregationFailureRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-health runRemoteControlHealthRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlServerRefreshLightApplyPrepareRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlServerRefreshLightApplyFailureRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRemoteControlServerRefreshLightRestoreRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRemoteControlServerRefreshLightReconcileRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail$' "${suiteFile}"
@@ -1732,6 +1732,33 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/remote-control-contract-service-install"' "${scriptFile}"
     grep -q 'remote-control-smoke-refresh-apply-basic' "${suiteFile}"
     grep -q 'remote-control-contract-service-install-token-transaction' "${suiteFile}"
+}
+
+runRemoteControlNoStepWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        [[ -n "${wrapperName}" ]] || continue
+        ! grep -Eq "^${wrapperName}\\(\\)[[:space:]]*[({]" "${suiteFile}" || status=1
+    done <<'EOF'
+runRegressionRemoteControlConcurrency
+runRegressionRemoteControlAggregationFailure
+runRegressionRemoteControlInlineAggregationHelpers
+runRegressionRemoteControlHealth
+runRegressionRemoteControlInlineRequestHelpers
+runRegressionRemoteControlInlineWireGuardPeerHelpers
+runRegressionRemoteControlInlineTokenConsumers
+runRegressionRemoteControlInlineSyncRunner
+runRegressionRemoteControlHandleInlineHelpers
+runRegressionRemoteControlSmokeRefreshApplyBasic
+runRegressionRemoteControlSmokeRefreshApplyPrepare
+runRegressionRemoteControlSmokeRefreshApplyFailure
+runRegressionRemoteControlSmokeRefreshRestore
+runRegressionRemoteControlSmokeRefreshReconcile
+EOF
+
+    return "${status}"
 }
 
 runRemoteControlPublicSelectorRetirementContract() {
@@ -6465,6 +6492,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep remote-control-nested-selector-helpers-are-suite-owned runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract &&
         runRegressionStep remote-control-leaves-use-compat-helper runRemoteControlLeavesUseCompatHelperContract &&
         runRegressionStep remote-control-no-compat-wrapper-functions runRemoteControlNoCompatWrapperFunctionsContract &&
+        runRegressionStep remote-control-no-step-wrapper-functions runRemoteControlNoStepWrapperFunctionsContract &&
         runRegressionStep remote-control-smoke-core-no-compat-helper runRemoteControlSmokeCoreNoCompatHelperContract &&
         runRegressionStep remote-control-smoke-refresh-no-compat-helper runRemoteControlSmokeRefreshNoCompatHelperContract &&
         runRegressionStep remote-control-contract-service-install-no-compat-helper runRemoteControlContractServiceInstallNoCompatHelperContract &&
