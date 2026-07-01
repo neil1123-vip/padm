@@ -177,6 +177,26 @@ runAggregateRunnerRunnerArgsAssertions() {
     [[ "${actualArgs}" == "${expectedArgs}" ]] || return 1
 }
 
+runSequentialAggregateRunnerWithArgsRegistrationAssertions() {
+    local suiteFile=$1
+    local selector=$2
+    local selectorListFn=$3
+    local expectedChildren
+
+    ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || return 1
+    ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${suiteFile}" || return 1
+    ! grep -q "^registerRegressionAggregateSequential ${selector} \\\\" "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
+
+    expectedChildren=$("${selectorListFn}")
+    runAggregateRunnerRegistrationAssertions \
+        "${selector}" \
+        sequential \
+        runFrameworkSequentialRegressionSelectorList \
+        "${expectedChildren}"
+    runAggregateRunnerRunnerArgsAssertions "${selector}" "${selectorListFn}"
+}
+
 runAggregateRunnerRunnerArgsPatternAssertions() {
     local selector=$1
     shift
@@ -612,27 +632,36 @@ runAggregateRunnerRegistrationHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
-        runFastRealityAggregateRunnerRegistrationContract \
         runFastAggregateRunnerRegistrationContract \
         runFastOnlyAggregateRunnerRegistrationContract \
         runFastOnlyOutputAggregateRunnerRegistrationContract \
         runRuntimeAggregateRunnerRegistrationContract \
-        runTlsAggregateRunnerRegistrationContract \
         runAllAggregateRunnerRegistrationContract \
         runSubscriptionAggregateRunnerRegistrationContract \
         runSubscriptionRemoteAggregateRunnerRegistrationContract \
         runSubscriptionTxAggregateRunnerRegistrationContract \
         runUiAggregateRunnerRegistrationContract \
         runRoutingAggregateRunnerRegistrationContract \
-        runRealityCandidatesAggregateRunnerRegistrationContract \
-        runRealityStreamAggregateRunnerRegistrationContract \
         runTransactionCoreAggregateRunnerRegistrationContract \
-        runTransactionAggregateRunnerRegistrationContract \
         runTransactionSystemAggregateRunnerRegistrationContract; do
         runContractHelperAdoptionAssertions \
             "${contractsFile}" \
             "${functionName}" \
             runAggregateRunnerRegistrationAssertions || return 1
+    done
+
+    for functionName in \
+        runPlatformIoAggregateRunnerRegistrationContract \
+        runFastRealityAggregateRunnerRegistrationContract \
+        runTlsAggregateRunnerRegistrationContract \
+        runTransactionAggregateRunnerRegistrationContract \
+        runTransactionSubscriptionAggregateRunnerRegistrationContract \
+        runRealityCandidatesAggregateRunnerRegistrationContract \
+        runRealityStreamAggregateRunnerRegistrationContract; do
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runSequentialAggregateRunnerWithArgsRegistrationAssertions || return 1
     done
 }
 
@@ -2430,18 +2459,11 @@ runPlatformHotAggregateRunnerRegistrationContract() {
 
 runPlatformIoAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionAggregateSequential platform-io \\' "${suiteFile}" || return 1
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
-    expectedChildren=$(listRegressionPlatformIoChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         platform-io \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions platform-io 'listRegressionPlatformIoChildSelectors'
+        listRegressionPlatformIoChildSelectors
 }
 
 runPlatformHotLeavesUseFastCompatHelperContract() (
@@ -2833,19 +2855,11 @@ runTransactionSuiteChildStepsContract() {
 
 runFastRealityAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateSequential fast-reality \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionFastRealityChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         fast-reality \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions fast-reality 'listRegressionFastRealityChildSelectors'
+        listRegressionFastRealityChildSelectors
 }
 
 runFastSelectorHelpersStayAlignedContract() (
@@ -3326,19 +3340,11 @@ EOF
 
 runTlsAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/tls.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateSequential tls \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionTlsChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         tls \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions tls 'listRegressionTlsChildSelectors'
+        listRegressionTlsChildSelectors
 }
 
 runTlsLegacyRetirementContract() {
@@ -5086,39 +5092,21 @@ EOF
 )
 
 runTransactionAggregateRunnerRegistrationContract() (
-    set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateSequential transaction \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionTransactionChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         transaction \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions transaction 'listRegressionTransactionChildSelectors'
+        listRegressionTransactionChildSelectors
 )
 
 runTransactionSubscriptionAggregateRunnerRegistrationContract() (
-    set -euo pipefail
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf transaction-subscription ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf transaction-subscription ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateSequential transaction-subscription \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionTransactionSubscriptionChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         transaction-subscription \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions transaction-subscription 'listRegressionTransactionSubscriptionChildSelectors'
+        listRegressionTransactionSubscriptionChildSelectors
 )
 
 runTransactionSystemAggregateRunnerRegistrationContract() (
@@ -6145,19 +6133,11 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
 
 runRealityCandidatesAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateSequential reality-candidates \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionRealitySuiteCandidatesChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         reality-candidates \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions reality-candidates 'listRegressionRealitySuiteCandidatesChildSelectors'
+        listRegressionRealitySuiteCandidatesChildSelectors
 }
 
 runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
@@ -6192,19 +6172,11 @@ runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract() (
 
 runRealityStreamAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateSequential reality-stream \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionRealitySuiteStreamChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         reality-stream \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions reality-stream 'listRegressionRealitySuiteStreamChildSelectors'
+        listRegressionRealitySuiteStreamChildSelectors
 }
 
 runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract() (
