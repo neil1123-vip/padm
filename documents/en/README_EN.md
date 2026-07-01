@@ -145,8 +145,8 @@ padm is not one giant Bash file. It is a self-refreshing entry script plus a mod
 | `install.sh` | 🚪 Repository entry script; handles self-refresh, argument parsing, formal subcommands, and first-run module bootstrap. |
 | `shell/core/` | ⚙️ Platform detection, runtime helpers, protocol templates, Reality/TLS/routing/service/menu logic. |
 | `shell/subscription/` | 🔗 Subscription publishing, subscription-group state, user accounts, WireGuard control plane, remote sync, and traffic accounting. |
-| `shell/regression/` | 🧪 Grouped regression tests. |
-| `shell/subscription_groups_regression.sh` | 🧪 Regression dispatch entrypoint. |
+| `shell/regression/` | 🧪 Selector-based suites, framework helpers, and contract / composition regressions. |
+| `shell/subscription_groups_regression.sh` | 🧪 The single public regression dispatcher for suite, aggregate, contract, and composition selectors. |
 | `shell/validate_install.sh` | ✅ Read-only post-install validation script. |
 | `documents/` | 📚 Example configuration and the English README. |
 | `assets/` | 🖼️ Traditional TLS fallback static-site templates. |
@@ -413,20 +413,36 @@ Check public HTTP/HTTPS/TLS reachability:
 bash shell/validate_install.sh --online example.com
 ```
 
-Grouped local regressions:
+Selector-based regressions through the unified dispatcher:
 
 ```bash
 bash shell/subscription_groups_regression.sh fast
-bash shell/subscription_groups_regression.sh platform
+bash shell/subscription_groups_regression.sh platform-hot
+bash shell/subscription_groups_regression.sh subscription-output
+bash shell/subscription_groups_regression.sh transaction-core
+bash shell/subscription_groups_regression.sh remote-control-contract
 bash shell/subscription_groups_regression.sh remote-control-smoke
 bash shell/subscription_groups_regression.sh subscription-state
 ```
+
+Recommended harness structure checks:
+
+```bash
+bash shell/subscription_groups_regression.sh regression-dispatcher-contract
+bash shell/subscription_groups_regression.sh regression-all-composition
+bash shell/subscription_groups_regression.sh regression-all-child-parallel-budget-composition
+bash shell/subscription_groups_regression.sh regression-all-resource-layer-composition
+```
+
+To cap concurrency or run heavy suites more conservatively, prefer `PADM_REGRESSION_PARALLEL_JOBS`, `PADM_REGRESSION_CHILD_PARALLEL_JOBS`, and suite-specific `PADM_REGRESSION_*_RESOURCE_PROFILE=all`.
 
 Regression dispatch rules:
 
 | Name | Actual command | Coverage |
 | --- | --- | --- |
-| All public selectors | `bash shell/subscription_groups_regression.sh <selector>` | Unified dispatch for `fast`, `all`, `platform`, `remote-control` plus its `smoke` / `contract` / `deep` layered selectors, `subscription-state*`, and other suite / aggregate selectors. |
+| Suite / aggregate selector | `bash shell/subscription_groups_regression.sh fast` | Unified dispatch for `fast`, `all`, `platform-hot`, `platform-io`, `subscription-output`, `transaction-core`, `remote-control` plus its `smoke` / `contract` / `deep` layered selectors, `subscription-state*`, and other suite / aggregate selectors. |
+| Contract / composition selector | `bash shell/subscription_groups_regression.sh regression-dispatcher-contract` | Unified dispatch for the dispatcher contract plus the `all` composition, child-budget, and resource-layer structure regressions. |
+| All public selectors | `bash shell/subscription_groups_regression.sh <selector>` | Every public regression entrypoint goes through the same dispatcher. |
 
 Historical grouped scripts are now internal runner / source-only layers and are no longer public command surfaces.
 
