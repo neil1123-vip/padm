@@ -2259,20 +2259,20 @@ runPlatformSuiteUsesFunctionRegistryContract() {
     grep -q '^runRegressionPlatformFastLeafWithCompat() ($' "${suiteFile}"
     grep -q '^listRegressionPlatformHotChildSelectors() {$' "${suiteFile}"
     grep -q '^listRegressionPlatformIoChildSelectors() {$' "${suiteFile}"
-    grep -q '^runRegressionPlatformSuiteRoot() {$' "${suiteFile}"
+    ! grep -Eq '^runRegressionPlatformSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionPlatformIoSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -q '^runRegressionPlatformUpdateSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionPlatformRefreshSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionPlatformRestSuiteRoot() {$' "${suiteFile}"
+    ! grep -Eq '^runRegressionPlatformUpdateSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionPlatformRefreshSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
+    ! grep -Eq '^runRegressionPlatformRestSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuiteRoot$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-update runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-refresh runRegressionPlatformFastLeafWithCompat runRegressionPlatformRefresh$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf platform-rest runRegressionPlatformFastLeafWithCompat runRegressionPlatformRest$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression$' "${suiteFile}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/platform-hot-parallel-' "${suiteFile}"
     ! grep -q 'declare -f runRegressionPlatform' "${suiteFile}"
@@ -2405,21 +2405,23 @@ runPlatformHotLeavesUseFastCompatHelperContract() (
 
     : >"${callLog}"
 
-    runRegressionStep() { :; }
+    runRegressionStep() {
+        local _name=$1
+        shift
+        "$@"
+    }
     runRegressionPlatformFastLeafWithCompat() {
-        printf '%s\n' "$1" >>"${callLog}"
+        printf '%s\n' "$*" >>"${callLog}"
     }
 
-    runRegressionPlatformUpdateSuiteRoot
-    runRegressionPlatformRefreshSuiteRoot
-    runRegressionPlatformRestSuiteRoot
-    runRegressionPlatformSuiteRoot
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-update
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-refresh
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain platform-rest
 
     cat <<'EOF' >"${TMP_DIR}/platform-hot-fast-compat-helper.expected.log"
 runRegressionPlatformUpdate
 runRegressionPlatformRefresh
 runRegressionPlatformRest
-runRegressionPlatform
 EOF
 
     cmp -s "${TMP_DIR}/platform-hot-fast-compat-helper.expected.log" "${callLog}"
@@ -2946,7 +2948,7 @@ runFastPlatformSourceOnlyExecutionContract() (
     PADM_REGRESSION_SOURCE_ONLY=1 source "${platformSuite}"
     PADM_REGRESSION_SOURCE_ONLY=1 source "${fastSuite}"
     declare -F listRegressionPlatformIoChildSelectors >/dev/null
-    declare -F runRegressionPlatformSuiteRoot >/dev/null
+    ! declare -F runRegressionPlatformSuiteRoot >/dev/null
     ! declare -F runRegressionPlatformIoSuiteRoot >/dev/null
     ! declare -F _platform_hot_suite_def >/dev/null
     ! declare -F _platform_io_suite_def >/dev/null

@@ -20,18 +20,6 @@ runRegressionPlatformLegacyLeafWithCompat() (
     "$@"
 )
 
-runRegressionPlatformUpdateSuiteRoot() {
-    runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate
-}
-
-runRegressionPlatformRefreshSuiteRoot() {
-    runRegressionPlatformFastLeafWithCompat runRegressionPlatformRefresh
-}
-
-runRegressionPlatformRestSuiteRoot() {
-    runRegressionPlatformFastLeafWithCompat runRegressionPlatformRest
-}
-
 listRegressionPlatformHotChildSelectors() {
     printf '%s\n' \
         platform-update \
@@ -58,10 +46,6 @@ listRegressionPlatformIoChildSelectors() {
         reality-scanner-unsafe-dir \
         reality-scanner-binary \
         reality-scanner-download-failure
-}
-
-runRegressionPlatformSuiteRoot() {
-    runRegressionPlatformFastLeafWithCompat runRegressionPlatform
 }
 
 runRegressionPlatformHotParallelCompositionRegression() (
@@ -119,9 +103,9 @@ runRegressionPlatformFastHelperIsolationRegression() (
     grep -Fq 'replaceFailureDir="${TMP_DIR}/update-padm-replace-failure"' <<<"${fastBody}"
 )
 
-registerRegressionFunctionLeaf platform-update runRegressionPlatformUpdateSuiteRoot
-registerRegressionFunctionLeaf platform-refresh runRegressionPlatformRefreshSuiteRoot
-registerRegressionFunctionLeaf platform-rest runRegressionPlatformRestSuiteRoot
+registerRegressionFunctionLeaf platform-update runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate
+registerRegressionFunctionLeaf platform-refresh runRegressionPlatformFastLeafWithCompat runRegressionPlatformRefresh
+registerRegressionFunctionLeaf platform-rest runRegressionPlatformFastLeafWithCompat runRegressionPlatformRest
 registerRegressionFunctionLeaf install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
 registerRegressionFunctionLeaf install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
 registerRegressionFunctionLeaf install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
