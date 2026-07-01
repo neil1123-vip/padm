@@ -5,16 +5,6 @@ REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}
 source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../framework/runtime.sh"
 PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"
 
-runRegressionSubscriptionStateCore() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-core-${BASHPID:-$$}" \
-        listRegressionSubscriptionStateCoreChildSelectors
-}
-
-runRegressionSubscriptionState() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-default-${BASHPID:-$$}" \
-        listRegressionSubscriptionStateChildSelectors
-}
-
 runSubscriptionStateParallelChildRegressionIsolated() (
     local isolatedLabel=$1
     shift
@@ -37,13 +27,9 @@ listRegressionSubscriptionStateStructureFoundationChildSelectors() {
         subscription-state-structure-foundation-init-transaction
 }
 
-runRegressionSubscriptionStateStructureFoundation() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure-foundation" \
-        listRegressionSubscriptionStateStructureFoundationChildSelectors
-}
-
 runRegressionSubscriptionStateStructureFoundationIsolated() {
-    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation
+    runSubscriptionStateParallelChildRegressionIsolated subscription-state-structure-foundation \
+        runRegisteredRegressionMain subscription-state-structure-foundation
 }
 
 listRegressionSubscriptionStateStructureMigrationChildSelectors() {
@@ -144,11 +130,6 @@ listRegressionSubscriptionStateSerialChildSelectors() {
         subscription-sync-rollback-failure-serial \
         subscription-sync-reconcile-early-exit \
         subscription-groups-restore-failure
-}
-
-runRegressionSubscriptionStateQuota() {
-    runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota" \
-        listRegressionSubscriptionStateQuotaChildSelectors
 }
 
 listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors() {
@@ -580,13 +561,23 @@ listRegressionSubscriptionStateChildSelectors() {
         subscription-state-sync-rollback
 }
 
-registerRegressionAggregateRunnerParallel subscription-state-structure-foundation runRegressionSubscriptionStateStructureFoundation \
+registerRegressionAggregateRunnerParallelWithArgs \
+    subscription-state-structure-foundation \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/subscription-state-structure-foundation" \
+    listRegressionSubscriptionStateStructureFoundationChildSelectors \
+    -- \
     $(listRegressionSubscriptionStateStructureFoundationChildSelectors)
 
 registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \
     $(listRegressionSubscriptionStateStructureChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \
+registerRegressionAggregateRunnerParallelWithArgs \
+    subscription-state-quota \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/subscription-state-quota" \
+    listRegressionSubscriptionStateQuotaChildSelectors \
+    -- \
     $(listRegressionSubscriptionStateQuotaChildSelectors)
 
 registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \
@@ -595,7 +586,17 @@ registerRegressionAggregateRunnerParallel subscription-state-remote-restore runR
 registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \
     $(listRegressionSubscriptionStateSyncRollbackFailureChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-state-core runRegressionSubscriptionStateCore \
+registerRegressionAggregateRunnerParallelWithArgs \
+    subscription-state-core \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/subscription-state-core-${BASHPID:-$$}" \
+    listRegressionSubscriptionStateCoreChildSelectors \
+    -- \
     $(listRegressionSubscriptionStateCoreChildSelectors)
-registerRegressionAggregateRunnerParallel subscription-state runRegressionSubscriptionState \
+registerRegressionAggregateRunnerParallelWithArgs \
+    subscription-state \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/subscription-state-default-${BASHPID:-$$}" \
+    listRegressionSubscriptionStateChildSelectors \
+    -- \
     $(listRegressionSubscriptionStateChildSelectors)
