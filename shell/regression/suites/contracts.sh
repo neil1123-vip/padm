@@ -452,6 +452,21 @@ runContractHelperAdoptionAssertions() {
     ' "${sourceFile}"
 }
 
+runNoCompatWrapperFunctionsAssertions() {
+    local suiteFile=$1
+    local compatHelper=$2
+    local status=0
+    local wrapperName
+
+    shift 2
+
+    for wrapperName in "$@"; do
+        ! grep -q "^${wrapperName}() { ${compatHelper} " "${suiteFile}" || status=1
+    done
+
+    return "${status}"
+}
+
 runRegressionStepSequenceAssertionContract() (
     local fixtureFile="${TMP_DIR}/regression-step-sequence-assertion-fixture.sh"
 
@@ -909,6 +924,7 @@ runContractHelperAdoptionHelperAdoptionContract() {
         runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract \
         runLegacyFunctionSelectorRetirementHelperAdoptionContract \
         runLegacyFunctionRetirementBatchHelperAdoptionContract \
+        runNoCompatWrapperFunctionsHelperAdoptionContract \
         runLegacyPublicSelectorRetirementHelperAdoptionContract \
         runSubscriptionStateCliRetirementHelperAdoptionContract \
         runRegressionDispatcherStepCoverageHelperAdoptionContract; do
@@ -930,6 +946,23 @@ runLegacyPublicSelectorRetirementHelperAdoptionContract() {
             "${contractsFile}" \
             "${functionName}" \
             runLegacyPublicSelectorRetirementAssertions || return 1
+    done
+}
+
+runNoCompatWrapperFunctionsHelperAdoptionContract() {
+    local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
+
+    for functionName in \
+        runRemoteControlNoCompatWrapperFunctionsContract \
+        runPlatformIoNoCompatWrapperFunctionsContract \
+        runTransactionNoCompatWrapperFunctionsContract \
+        runSubscriptionNoCompatWrapperFunctionsContract \
+        runUiNoCompatWrapperFunctionsContract \
+        runRoutingNoCompatWrapperFunctionsContract; do
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runNoCompatWrapperFunctionsAssertions || return 1
     done
 }
 
@@ -2062,17 +2095,11 @@ EOF
 )
 
 runRemoteControlNoCompatWrapperFunctionsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
-    local status=0
-
-    while read -r wrapperName; do
-        ! grep -q "^${wrapperName}() { runRegressionRemoteControlLegacyLeafWithCompat " "${suiteFile}" || status=1
-    done <<'EOF'
-runRemoteControlContractServerResponseCompatRegression
-runRemoteControlDeepCompatRegression
-EOF
-
-    return "${status}"
+    runNoCompatWrapperFunctionsAssertions \
+        "${PROJECT_ROOT}/shell/regression/suites/remote_control.sh" \
+        runRegressionRemoteControlLegacyLeafWithCompat \
+        runRemoteControlContractServerResponseCompatRegression \
+        runRemoteControlDeepCompatRegression
 }
 
 runRemoteControlSmokeCoreNoCompatHelperContract() (
@@ -2540,32 +2567,26 @@ EOF
 )
 
 runPlatformIoNoCompatWrapperFunctionsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
-    local status=0
-
-    while read -r wrapperName; do
-        ! grep -q "^${wrapperName}() { runRegressionPlatformLegacyLeafWithCompat " "${suiteFile}" || status=1
-    done <<'EOF'
-runInstallToolsCertificateDependencyCompatRegression
-runInstallToolsAcmeResultFailureCompatRegression
-runInstallToolsAcmeCommitFailureCompatRegression
-runInstallToolsConfiguredLogCompatRegression
-runInstallToolsUpdateFailureCompatRegression
-runInstallToolsReleaseInfoFailureCompatRegression
-runInstallToolsNginxReinstallFailureCompatRegression
-runAptKeyInstallFailureCompatRegression
-runNginxAptRefreshRollbackCompatRegression
-runNginxAlpineDefaultConfRollbackCompatRegression
-runNginxYumMainlineEnableFailureCompatRegression
-runBasePackageBatchCompatRegression
-runPackageRollbackFailureCompatRegression
-runPackageCommandStdinCompatRegression
-runRealityScannerUnsafeDirCompatRegression
-runRealityScannerBinaryCompatRegression
-runRealityScannerDownloadFailureCompatRegression
-EOF
-
-    return "${status}"
+    runNoCompatWrapperFunctionsAssertions \
+        "${PROJECT_ROOT}/shell/regression/suites/platform.sh" \
+        runRegressionPlatformLegacyLeafWithCompat \
+        runInstallToolsCertificateDependencyCompatRegression \
+        runInstallToolsAcmeResultFailureCompatRegression \
+        runInstallToolsAcmeCommitFailureCompatRegression \
+        runInstallToolsConfiguredLogCompatRegression \
+        runInstallToolsUpdateFailureCompatRegression \
+        runInstallToolsReleaseInfoFailureCompatRegression \
+        runInstallToolsNginxReinstallFailureCompatRegression \
+        runAptKeyInstallFailureCompatRegression \
+        runNginxAptRefreshRollbackCompatRegression \
+        runNginxAlpineDefaultConfRollbackCompatRegression \
+        runNginxYumMainlineEnableFailureCompatRegression \
+        runBasePackageBatchCompatRegression \
+        runPackageRollbackFailureCompatRegression \
+        runPackageCommandStdinCompatRegression \
+        runRealityScannerUnsafeDirCompatRegression \
+        runRealityScannerBinaryCompatRegression \
+        runRealityScannerDownloadFailureCompatRegression
 }
 
 runPlatformFastHelperIsolationGuardRegisteredContract() {
@@ -3523,24 +3544,18 @@ EOF
 }
 
 runTransactionNoCompatWrapperFunctionsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
-    local status=0
-
-    while read -r wrapperName; do
-        ! grep -q "^${wrapperName}() { runRegressionTransactionLegacyLeafWithCompat " "${suiteFile}" || status=1
-    done <<'EOF'
-runCdnAddressTransactionCompatRegression
-runSubscribeServerNameCompatRegression
-runSubscribeNginxConfigWriteCompatRegression
-runSubscribeNginxServiceFailureCompatRegression
-runSubscribeSaltWriteTransactionCompatRegression
-runSubscribeUserOutputTransactionCompatRegression
-runRemoveUserSubscriptionMenuFailureCompatRegression
-runUserSubscriptionMenuMutationFailureCompatRegression
-runRemoteSubscribeFetchCompatRegression
-EOF
-
-    return "${status}"
+    runNoCompatWrapperFunctionsAssertions \
+        "${PROJECT_ROOT}/shell/regression/suites/transaction.sh" \
+        runRegressionTransactionLegacyLeafWithCompat \
+        runCdnAddressTransactionCompatRegression \
+        runSubscribeServerNameCompatRegression \
+        runSubscribeNginxConfigWriteCompatRegression \
+        runSubscribeNginxServiceFailureCompatRegression \
+        runSubscribeSaltWriteTransactionCompatRegression \
+        runSubscribeUserOutputTransactionCompatRegression \
+        runRemoveUserSubscriptionMenuFailureCompatRegression \
+        runUserSubscriptionMenuMutationFailureCompatRegression \
+        runRemoteSubscribeFetchCompatRegression
 }
 
 runTransactionSubscriptionLeavesUseCompatHelperContract() (
@@ -3689,28 +3704,22 @@ EOF
 }
 
 runSubscriptionNoCompatWrapperFunctionsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
-    local status=0
-
-    while read -r wrapperName; do
-        ! grep -q "^${wrapperName}() { runRegressionSubscriptionLegacyLeafWithCompat " "${suiteFile}" || status=1
-    done <<'EOF'
-runRegressionSubscriptionOutputCompatRegression
-runRegressionSubscriptionOutputProfileAndRealityCompatRegression
-runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression
-runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression
-runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression
-runRemoteSubscribeFetchUniqueCompatRegression
-runRemoteSubscribeFetchRollbackCompatRegression
-runRemoteSubscribeFetchMergeCompatRegression
-runRemoteSubscribeFetchControlledCompatRegression
-runRemoteSubscribeFetchAppendFailureCompatRegression
-runRemoteSubscribeFetchCommitFailureCompatRegression
-runRemoteSubscribeFetchIdempotentCompatRegression
-runSingBoxSubscribeWriteCompatRegression
-EOF
-
-    return "${status}"
+    runNoCompatWrapperFunctionsAssertions \
+        "${PROJECT_ROOT}/shell/regression/suites/subscription.sh" \
+        runRegressionSubscriptionLegacyLeafWithCompat \
+        runRegressionSubscriptionOutputCompatRegression \
+        runRegressionSubscriptionOutputProfileAndRealityCompatRegression \
+        runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression \
+        runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression \
+        runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression \
+        runRemoteSubscribeFetchUniqueCompatRegression \
+        runRemoteSubscribeFetchRollbackCompatRegression \
+        runRemoteSubscribeFetchMergeCompatRegression \
+        runRemoteSubscribeFetchControlledCompatRegression \
+        runRemoteSubscribeFetchAppendFailureCompatRegression \
+        runRemoteSubscribeFetchCommitFailureCompatRegression \
+        runRemoteSubscribeFetchIdempotentCompatRegression \
+        runSingBoxSubscribeWriteCompatRegression
 }
 
 runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract() {
@@ -4333,38 +4342,32 @@ EOF
 )
 
 runUiNoCompatWrapperFunctionsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
-    local status=0
-
-    while read -r wrapperName; do
-        ! grep -q "^${wrapperName}() { runRegressionUiLegacyLeafWithCompat " "${suiteFile}" || status=1
-    done <<'EOF'
-runMenuSmokeFullCoreCompatRegression
-runMenuSmokeFullSubscriptionMainEntryCompatRegression
-runMenuSmokeFullSubscriptionMainPublishServiceCompatRegression
-runMenuSmokeFullSubscriptionMainPublishUserEmptyCompatRegression
-runMenuSmokeFullSubscriptionMainPublishUserCreateCompatRegression
-runMenuSmokeFullSubscriptionMainPublishUserInspectCompatRegression
-runMenuSmokeFullSubscriptionMainPublishSyncSkipCompatRegression
-runMenuSmokeFullSubscriptionMainPublishSyncEnableCompatRegression
-runMenuSmokeFullSubscriptionMainMaintenanceCompatRegression
-runMenuSmokeFullSubscriptionControlledCompatRegression
-runMenuSmokeFullCoreMaintenanceCompatRegression
-runSubscriptionWireGuardMenuFlowBootstrapCompatRegression
-runSubscriptionWireGuardMenuFlowPeerAddUpdateCompatRegression
-runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceCompatRegression
-runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreCompatRegression
-runSubscriptionWireGuardMenuFlowPeerRollbackSourceCompatRegression
-runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteCompatRegression
-runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreCompatRegression
-runSubscriptionWireGuardMenuFlowPeerSourceControlToggleCompatRegression
-runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorCompatRegression
-runSubscriptionWireGuardMenuFlowPeerSourceControlStatusCompatRegression
-runSubscriptionWireGuardMenuFlowControlRestoreCompatRegression
-runSubscriptionWireGuardRestoreRunnerCompatRegression
-EOF
-
-    return "${status}"
+    runNoCompatWrapperFunctionsAssertions \
+        "${PROJECT_ROOT}/shell/regression/suites/ui.sh" \
+        runRegressionUiLegacyLeafWithCompat \
+        runMenuSmokeFullCoreCompatRegression \
+        runMenuSmokeFullSubscriptionMainEntryCompatRegression \
+        runMenuSmokeFullSubscriptionMainPublishServiceCompatRegression \
+        runMenuSmokeFullSubscriptionMainPublishUserEmptyCompatRegression \
+        runMenuSmokeFullSubscriptionMainPublishUserCreateCompatRegression \
+        runMenuSmokeFullSubscriptionMainPublishUserInspectCompatRegression \
+        runMenuSmokeFullSubscriptionMainPublishSyncSkipCompatRegression \
+        runMenuSmokeFullSubscriptionMainPublishSyncEnableCompatRegression \
+        runMenuSmokeFullSubscriptionMainMaintenanceCompatRegression \
+        runMenuSmokeFullSubscriptionControlledCompatRegression \
+        runMenuSmokeFullCoreMaintenanceCompatRegression \
+        runSubscriptionWireGuardMenuFlowBootstrapCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerAddUpdateCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackApplyServiceCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackApplyRestoreCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackSourceCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackCredentialWriteCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerRollbackCredentialGroupsRestoreCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerSourceControlToggleCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerSourceControlClearErrorCompatRegression \
+        runSubscriptionWireGuardMenuFlowPeerSourceControlStatusCompatRegression \
+        runSubscriptionWireGuardMenuFlowControlRestoreCompatRegression \
+        runSubscriptionWireGuardRestoreRunnerCompatRegression
 }
 
 runUiLegacyTmpDirIsolationGuardRegisteredContract() {
@@ -4898,31 +4901,25 @@ EOF
 }
 
 runRoutingNoCompatWrapperFunctionsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
-    local status=0
-
-    while read -r wrapperName; do
-        ! grep -q "^${wrapperName}() { runRegressionRoutingLegacyLeafWithCompat " "${suiteFile}" || status=1
-    done <<'EOF'
-runRoutingCoreCompatRegression
-runRoutingCoreUnsafeConfigDirCompatRegression
-runRoutingSocks5UdpAssociateCompatRegression
-runRoutingAccessControlFailureReturnCompatRegression
-runRoutingAccessControlConfigTransactionCompatRegression
-runRoutingAccessControlUnsafeBackupDirCompatRegression
-runRoutingAccessControlUnsafeConfigDirCompatRegression
-runRoutingBTFailureReturnCompatRegression
-runRoutingIPv6FailureReturnCompatRegression
-runRoutingWarpFailureReturnCompatRegression
-runRoutingSocks5FailureReturnCompatRegression
-runRoutingDNSFailureReturnCompatRegression
-runRoutingDNSUnsafeBackupDirCompatRegression
-runRoutingDNSUnsafeConfigDirCompatRegression
-runRoutingDNSRestoreScopeCompatRegression
-runRoutingPortPanelCompatRegression
-EOF
-
-    return "${status}"
+    runNoCompatWrapperFunctionsAssertions \
+        "${PROJECT_ROOT}/shell/regression/suites/routing.sh" \
+        runRegressionRoutingLegacyLeafWithCompat \
+        runRoutingCoreCompatRegression \
+        runRoutingCoreUnsafeConfigDirCompatRegression \
+        runRoutingSocks5UdpAssociateCompatRegression \
+        runRoutingAccessControlFailureReturnCompatRegression \
+        runRoutingAccessControlConfigTransactionCompatRegression \
+        runRoutingAccessControlUnsafeBackupDirCompatRegression \
+        runRoutingAccessControlUnsafeConfigDirCompatRegression \
+        runRoutingBTFailureReturnCompatRegression \
+        runRoutingIPv6FailureReturnCompatRegression \
+        runRoutingWarpFailureReturnCompatRegression \
+        runRoutingSocks5FailureReturnCompatRegression \
+        runRoutingDNSFailureReturnCompatRegression \
+        runRoutingDNSUnsafeBackupDirCompatRegression \
+        runRoutingDNSUnsafeConfigDirCompatRegression \
+        runRoutingDNSRestoreScopeCompatRegression \
+        runRoutingPortPanelCompatRegression
 }
 
 runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract() {
@@ -6549,6 +6546,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
         runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
         runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract &&
+        runRegressionStep no-compat-wrapper-functions-helper-adoption runNoCompatWrapperFunctionsHelperAdoptionContract &&
         runRegressionStep subscription-state-cli-retirement-helper-adoption runSubscriptionStateCliRetirementHelperAdoptionContract &&
         runRegressionStep subscription-state-cli-retirement-helper-adoption-covered-by-dispatcher runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract &&
         runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
