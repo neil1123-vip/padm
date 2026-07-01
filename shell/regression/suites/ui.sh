@@ -95,19 +95,6 @@ runRegressionUiSmokeSuiteRoot() {
     coreInstallType="${oldCoreInstallType}"
 }
 
-runRegressionMenuSmokeFull() {
-    runUiSelectorListRegression \
-        "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" \
-        listRegressionUiFullChildSelectors
-}
-
-runUiSelectorListRegression() {
-    local orchestrationRoot=$1
-    local selectorListFn=$2
-
-    runFrameworkParallelRegressionSelectorList "${orchestrationRoot}" "${selectorListFn}"
-}
-
 runUiLeafSelectorListRegression() {
     local orchestrationRoot=$1
     local selectorListFn=$2
@@ -160,45 +147,6 @@ listRegressionUiFullSubscriptionMainPublishSyncChildSelectors() {
         ui-full-subscription-main-publish-sync-enable
 }
 
-runRegressionWireGuardMenuFlow() {
-    runUiSelectorListRegression \
-        "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowChildSelectors
-}
-
-runSubscriptionWireGuardMenuFlowPeerTransactionRegression() {
-    runUiSelectorListRegression \
-        "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerTransactionChildSelectors
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackRegression() {
-    runUiSelectorListRegression \
-        "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerRollbackChildSelectors
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression() {
-    runUiLeafSelectorListRegression \
-        "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors \
-        2
-}
-
-runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression() {
-    runUiLeafSelectorListRegression \
-        "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors \
-        2
-}
-
-runSubscriptionWireGuardMenuFlowPeerSourceControlRegression() {
-    runUiLeafSelectorListRegression \
-        "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
-        listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors \
-        3
-}
-
 listRegressionWireGuardMenuFlowChildSelectors() {
     printf '%s\n' \
         wireguard-menu-flow-bootstrap \
@@ -241,32 +189,6 @@ listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors() {
         wireguard-menu-flow-peer-source-control-toggle \
         wireguard-menu-flow-peer-source-control-clear-error \
         wireguard-menu-flow-peer-source-control-status
-}
-
-runRegressionUiFullSubscriptionMain() {
-    runUiSelectorListRegression \
-        "${TMP_DIR}/ui-full-subscription-main-parallel-${BASHPID:-$$}" \
-        listRegressionUiFullSubscriptionMainChildSelectors
-}
-
-runRegressionUiFullSubscriptionMainPublish() {
-    runUiSelectorListRegression \
-        "${TMP_DIR}/ui-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
-        listRegressionUiFullSubscriptionMainPublishChildSelectors
-}
-
-runRegressionUiFullSubscriptionMainPublishUser() {
-    runUiLeafSelectorListRegression \
-        "${TMP_DIR}/ui-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
-        listRegressionUiFullSubscriptionMainPublishUserChildSelectors \
-        3
-}
-
-runRegressionUiFullSubscriptionMainPublishSync() {
-    runUiLeafSelectorListRegression \
-        "${TMP_DIR}/ui-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
-        listRegressionUiFullSubscriptionMainPublishSyncChildSelectors \
-        2
 }
 
 listRegressionUiChildSelectors() {
@@ -516,7 +438,9 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ! grep -qx 'wireguard-menu-flow-peer-source-control-toggle-start' "${callLog}"
 
     : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiFullSubscriptionMainPublishUser
+    PADM_REGRESSION_SUPPRESS_DONE=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        runRegisteredRegressionMain ui-full-subscription-main-publish-user
     for selector in \
         ui-full-subscription-main-publish-user-empty \
         ui-full-subscription-main-publish-user-create \
@@ -527,7 +451,9 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ! grep -q '^ui-full:subscription-main-publish-user-start$' "${callLog}"
 
     : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiFullSubscriptionMainPublishSync
+    PADM_REGRESSION_SUPPRESS_DONE=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        runRegisteredRegressionMain ui-full-subscription-main-publish-sync
     for selector in \
         ui-full-subscription-main-publish-sync-skip \
         ui-full-subscription-main-publish-sync-enable; do
@@ -536,7 +462,9 @@ runRegressionUiLongTailSplitCompositionRegression() (
     done
 
     : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
+    PADM_REGRESSION_SUPPRESS_DONE=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        runRegisteredRegressionMain wireguard-menu-flow-peer-rollback-apply
     for selector in \
         wireguard-menu-flow-peer-rollback-apply-service \
         wireguard-menu-flow-peer-rollback-apply-restore; do
@@ -545,7 +473,9 @@ runRegressionUiLongTailSplitCompositionRegression() (
     done
 
     : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
+    PADM_REGRESSION_SUPPRESS_DONE=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        runRegisteredRegressionMain wireguard-menu-flow-peer-rollback-credential
     for selector in \
         wireguard-menu-flow-peer-rollback-credential-write \
         wireguard-menu-flow-peer-rollback-credential-groups-restore; do
@@ -554,7 +484,9 @@ runRegressionUiLongTailSplitCompositionRegression() (
     done
 
     : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
+    PADM_REGRESSION_SUPPRESS_DONE=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        runRegisteredRegressionMain wireguard-menu-flow-peer-source-control
     for selector in \
         wireguard-menu-flow-peer-source-control-toggle \
         wireguard-menu-flow-peer-source-control-clear-error \
@@ -564,7 +496,10 @@ runRegressionUiLongTailSplitCompositionRegression() (
     done
 
     : >"${callLog}"
-    PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiFullSubscriptionMainPublishUser
+    PADM_REGRESSION_SUPPRESS_DONE=1 \
+        PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        runRegisteredRegressionMain ui-full-subscription-main-publish-user
     awk '
         $0 == "ui-full-subscription-main-publish-user-empty-finish" { firstFinish = NR }
         $0 == "ui-full-subscription-main-publish-user-create-start" { secondStart = NR }
@@ -613,37 +548,97 @@ registerRegressionFunctionLeaf regression-ui-legacy-tmpdir-isolation runRegressi
 registerRegressionFunctionLeaf regression-ui-parallel-composition runRegressionUiParallelCompositionRegression
 registerRegressionFunctionLeaf regression-ui-long-tail-split-composition runRegressionUiLongTailSplitCompositionRegression
 
-registerRegressionAggregateRunnerParallel ui-full runRegressionMenuSmokeFull \
+registerRegressionAggregateRunnerParallelWithArgs \
+    ui-full \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" \
+    listRegressionUiFullChildSelectors \
+    -- \
     $(listRegressionUiFullChildSelectors)
 
-registerRegressionAggregateRunnerParallel ui-full-subscription-main runRegressionUiFullSubscriptionMain \
+registerRegressionAggregateRunnerParallelWithArgs \
+    ui-full-subscription-main \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/ui-full-subscription-main-parallel-${BASHPID:-$$}" \
+    listRegressionUiFullSubscriptionMainChildSelectors \
+    -- \
     $(listRegressionUiFullSubscriptionMainChildSelectors)
 
-registerRegressionAggregateRunnerParallel ui-full-subscription-main-publish runRegressionUiFullSubscriptionMainPublish \
+registerRegressionAggregateRunnerParallelWithArgs \
+    ui-full-subscription-main-publish \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/ui-full-subscription-main-publish-parallel-${BASHPID:-$$}" \
+    listRegressionUiFullSubscriptionMainPublishChildSelectors \
+    -- \
     $(listRegressionUiFullSubscriptionMainPublishChildSelectors)
 
-registerRegressionAggregateRunnerParallel ui-full-subscription-main-publish-user runRegressionUiFullSubscriptionMainPublishUser \
+registerRegressionAggregateRunnerParallelWithArgs \
+    ui-full-subscription-main-publish-user \
+    runUiLeafSelectorListRegression \
+    "${TMP_DIR}/ui-full-subscription-main-publish-user-parallel-${BASHPID:-$$}" \
+    listRegressionUiFullSubscriptionMainPublishUserChildSelectors \
+    3 \
+    -- \
     $(listRegressionUiFullSubscriptionMainPublishUserChildSelectors)
 
-registerRegressionAggregateRunnerParallel ui-full-subscription-main-publish-sync runRegressionUiFullSubscriptionMainPublishSync \
+registerRegressionAggregateRunnerParallelWithArgs \
+    ui-full-subscription-main-publish-sync \
+    runUiLeafSelectorListRegression \
+    "${TMP_DIR}/ui-full-subscription-main-publish-sync-parallel-${BASHPID:-$$}" \
+    listRegressionUiFullSubscriptionMainPublishSyncChildSelectors \
+    2 \
+    -- \
     $(listRegressionUiFullSubscriptionMainPublishSyncChildSelectors)
 
-registerRegressionAggregateRunnerParallel wireguard-menu-flow runRegressionWireGuardMenuFlow \
+registerRegressionAggregateRunnerParallelWithArgs \
+    wireguard-menu-flow \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/wireguard-menu-flow-parallel-${BASHPID:-$$}" \
+    listRegressionWireGuardMenuFlowChildSelectors \
+    -- \
     $(listRegressionWireGuardMenuFlowChildSelectors)
 
-registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-transaction runSubscriptionWireGuardMenuFlowPeerTransactionRegression \
+registerRegressionAggregateRunnerParallelWithArgs \
+    wireguard-menu-flow-peer-transaction \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/wireguard-menu-flow-peer-transaction-parallel-${BASHPID:-$$}" \
+    listRegressionWireGuardMenuFlowPeerTransactionChildSelectors \
+    -- \
     $(listRegressionWireGuardMenuFlowPeerTransactionChildSelectors)
 
-registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-rollback runSubscriptionWireGuardMenuFlowPeerRollbackRegression \
+registerRegressionAggregateRunnerParallelWithArgs \
+    wireguard-menu-flow-peer-rollback \
+    runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/wireguard-menu-flow-peer-rollback-parallel-${BASHPID:-$$}" \
+    listRegressionWireGuardMenuFlowPeerRollbackChildSelectors \
+    -- \
     $(listRegressionWireGuardMenuFlowPeerRollbackChildSelectors)
 
-registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-rollback-apply runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression \
+registerRegressionAggregateRunnerParallelWithArgs \
+    wireguard-menu-flow-peer-rollback-apply \
+    runUiLeafSelectorListRegression \
+    "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-parallel-${BASHPID:-$$}" \
+    listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors \
+    2 \
+    -- \
     $(listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors)
 
-registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-rollback-credential runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression \
+registerRegressionAggregateRunnerParallelWithArgs \
+    wireguard-menu-flow-peer-rollback-credential \
+    runUiLeafSelectorListRegression \
+    "${TMP_DIR}/wireguard-menu-flow-peer-rollback-credential-parallel-${BASHPID:-$$}" \
+    listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors \
+    2 \
+    -- \
     $(listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors)
 
-registerRegressionAggregateRunnerParallel wireguard-menu-flow-peer-source-control runSubscriptionWireGuardMenuFlowPeerSourceControlRegression \
+registerRegressionAggregateRunnerParallelWithArgs \
+    wireguard-menu-flow-peer-source-control \
+    runUiLeafSelectorListRegression \
+    "${TMP_DIR}/wireguard-menu-flow-peer-source-control-parallel-${BASHPID:-$$}" \
+    listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors \
+    3 \
+    -- \
     $(listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors)
 
 registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \
