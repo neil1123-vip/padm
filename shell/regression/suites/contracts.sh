@@ -990,6 +990,11 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore-serial ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback-serial ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-sync-rollback-failure-serial ' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}"
 }
@@ -1184,6 +1189,24 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
         ! grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${scriptFile}" || return 1
     done
+}
+
+runSubscriptionStateNoStepWrapperFunctionsContract() {
+    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
+    local status=0
+
+    while read -r wrapperName; do
+        [[ -n "${wrapperName}" ]] || continue
+        ! grep -Eq "^${wrapperName}\\(\\)[[:space:]]*[({]" "${suiteFile}" || status=1
+    done <<'EOF'
+runRegressionSubscriptionSyncRestorePairFailureMessage
+runRegressionSubscriptionSyncAppendRestoreFailureDetail
+runRegressionSubscriptionSyncSingleRestoreResultMessage
+runRegressionSubscriptionSyncRollbackResultMessage
+runRegressionSubscriptionGroupSyncPublishRefreshInline
+EOF
+
+    return "${status}"
 }
 
 runSubscriptionStateSupportChildStepsContract() {
@@ -6468,6 +6491,7 @@ runRegressionDispatcherContracts() {
         runRegressionStep subscription-state-no-empty-aggregate-wrapper-functions runSubscriptionStateNoEmptyAggregateWrapperFunctionsContract &&
         runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
         runRegressionStep subscription-state-nested-selector-helpers-are-suite-owned runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract &&
+        runRegressionStep subscription-state-no-step-wrapper-functions runSubscriptionStateNoStepWrapperFunctionsContract &&
         runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract &&
         runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract &&
         runRegressionStep subscription-state-structure-source-child-steps runSubscriptionStateStructureSourceChildStepsContract &&
