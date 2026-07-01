@@ -72,10 +72,6 @@ runRegressionAllSuiteRoot() (
     runRegressionStep remote-control-contract-server-response runRegressionAllSelectorSuiteRoot remote-control-contract-server-response
 )
 
-runRegressionAllSelector() {
-    runRegressionAllSelectorSuiteRoot "$@"
-}
-
 runRegressionAllCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-all-composition.log"
@@ -125,7 +121,6 @@ runRegressionAllCompositionRegression() (
     runRegressionAllSelectorSuiteRoot() {
         runRegressionAllSelector "$@"
     }
-
     runRegressionAllSuiteRoot
 
     for selector in routing subscription runtime transaction-core transaction-system remote-control-smoke remote-control-contract-service-install remote-control-contract-server-response ui; do
@@ -173,21 +168,21 @@ runRegressionAllChildParallelBudgetCompositionRegression() (
         printf 'selector=%s jobs=%s ui_profile=%s subscription_profile=%s routing_profile=%s runtime_profile=%s transaction_core_profile=%s suppress=%s\n' "$1" "${PADM_REGRESSION_PARALLEL_JOBS:-}" "${PADM_REGRESSION_UI_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_ROUTING_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
     }
 
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector ui
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector ui
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelector ui
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelector subscription
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-core
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSelector transaction-core
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector transaction-system
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector routing
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector routing
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionAllSelector routing
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector runtime
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS=2 runRegressionAllSelector runtime
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelector runtime
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_CHILD_PARALLEL_JOBS=2 runRegressionAllSelectorSuiteRoot ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot subscription
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot transaction-system
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_SYSTEM_CHILD_PARALLEL_JOBS=2 runRegressionAllSelectorSuiteRoot transaction-system
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_CHILD_PARALLEL_JOBS=2 runRegressionAllSelectorSuiteRoot routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_CHILD_PARALLEL_JOBS=2 runRegressionAllSelectorSuiteRoot runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot remote-control-smoke
 
     grep -qx 'selector=ui jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'selector=ui jobs=2 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"

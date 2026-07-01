@@ -3060,10 +3060,10 @@ runAllSuiteUsesFunctionRegistryContract() {
     grep -q 'source "\${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
     ! grep -q '^REGRESSION_ENTRY_SCRIPT_PATH=' "${suiteFile}" || return 1
     grep -q '^listRegressionAllParallelChildSelectors() {$' "${suiteFile}" || return 1
-    grep -q '^runRegressionAllSelector() {$' "${suiteFile}" || return 1
     grep -q '^runRegressionAllSelectorSuiteRoot() ($' "${suiteFile}" || return 1
     grep -Eq '^runRegressionAllSuiteRoot\(\) \($|^runRegressionAllSuiteRoot\(\) {$' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionAllSelector() {$' "${suiteFile}" || return 1
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/all-parallel-' "${suiteFile}" || return 1
     ! grep -q '^runRegressionAllSelector() {$' "${legacyScriptFile}" || return 1
     ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${legacyScriptFile}" || return 1
@@ -3079,6 +3079,7 @@ runAllNoEmptyAggregateWrapperFunctionsContract() {
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
     ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${suiteFile}" || return 1
+    ! grep -q '^runRegressionAllSelector() {$' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionAll\(\) \($|^runRegressionAll\(\) {$' "${legacyScriptFile}" || return 1
 }
 
@@ -5211,11 +5212,6 @@ runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
         return 97
     }
 
-    runRegressionAllSelector() {
-        printf 'legacy-helper:%s\n' "$1" >>"${callLog}"
-        return 97
-    }
-
     runRegressionAllSelectorSuiteRoot() {
         printf 'suite-helper:%s\n' "$1" >>"${callLog}"
     }
@@ -5225,7 +5221,6 @@ runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract() (
     grep -qx 'parallel:list:'"${TMP_DIR}"'/all-parallel-[0-9][0-9]*:listRegressionAllParallelChildSelectors:subscription ui transaction-core routing runtime remote-control-smoke remote-control-contract-service-install' "${callLog}"
     grep -qx 'suite-helper:transaction-system' "${callLog}"
     grep -qx 'suite-helper:remote-control-contract-server-response' "${callLog}"
-    ! grep -q '^legacy-helper:' "${callLog}"
     ! grep -q '^parallel:selectors:' "${callLog}"
 )
 
@@ -5252,14 +5247,14 @@ runAllSelectorDispatchAvoidsEntryScriptSpawnContract() (
             "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
     }
 
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelector subscription
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelector ui
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSelector transaction-core
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionAllSelector routing
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelector runtime
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector transaction-system
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-smoke
-    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelector remote-control-contract-server-response
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot subscription
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_UI_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot ui
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot transaction-core
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot routing
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionAllSelectorSuiteRoot runtime
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot transaction-system
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot remote-control-smoke
+    PADM_REGRESSION_CHILD_PARALLEL_JOBS=4 runRegressionAllSelectorSuiteRoot remote-control-contract-server-response
 
     grep -qx 'dispatch:subscription jobs=4 ui_profile= subscription_profile=all routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'dispatch:ui jobs=4 ui_profile=all subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
