@@ -1150,17 +1150,24 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
     ! grep -Eq '^runRegressionSubscriptionStateSyncRollbackSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateStructureFoundationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateStructureMigrationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateStructureSourceIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionSyncRollbackReloadRollbackIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionGroupSyncRollbackIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
 
     for functionName in \
         runSubscriptionStateParallelChildRegressionIsolated \
+        runSubscriptionStateParallelChildRegressionIsolatedSelector \
         listRegressionSubscriptionStateStructureFoundationChildSelectors \
-        runRegressionSubscriptionStateStructureFoundationIsolated \
         listRegressionSubscriptionStateStructureMigrationChildSelectors \
-        runRegressionSubscriptionStateStructureMigrationIsolated \
         listRegressionSubscriptionStateStructureSourceChildSelectors \
-        runRegressionSubscriptionStateStructureSourceIsolated \
         listRegressionSubscriptionStateStructureChildSelectors \
-        runRegressionSubscriptionStateStructureSelector \
         runRegressionSubscriptionStateStructure \
         listRegressionSubscriptionStateQuotaChildSelectors \
         listRegressionSubscriptionStateQuotaTrafficChildSelectors \
@@ -1170,19 +1177,10 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionSubscriptionStateSerialChildSelectors \
         listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors \
         listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors \
-        runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
-        runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
-        runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated \
         listRegressionSubscriptionStateRemoteRestoreChildSelectors \
         listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors \
-        runRegressionSubscriptionStateRemoteRestoreSelector \
         runRegressionSubscriptionStateRemoteRestore \
-        runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated \
-        runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated \
-        runRegressionSubscriptionSyncRollbackReloadRollbackIsolated \
-        runRegressionSubscriptionGroupSyncRollbackIsolated \
         listRegressionSubscriptionStateSyncRollbackFailureChildSelectors \
-        runRegressionSubscriptionStateSyncRollbackFailureSelector \
         runRegressionSubscriptionStateSyncRollback
     do
         grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
@@ -1604,15 +1602,15 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     remoteRestoreBody=$(sed -n '/^runRegressionSubscriptionStateRemoteRestore() {$/,/^}$/p' "${suiteFile}")
     syncRollbackBody=$(sed -n '/^runRegressionSubscriptionStateSyncRollback() {$/,/^}$/p' "${suiteFile}")
 
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateStructureSelector' <<<"${structureBody}"
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector' <<<"${structureBody}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' <<<"${structureBody}"
     grep -q 'listRegressionSubscriptionStateStructureChildSelectors' <<<"${structureBody}"
 
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateRemoteRestoreSelector' <<<"${remoteRestoreBody}"
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector' <<<"${remoteRestoreBody}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore"' <<<"${remoteRestoreBody}"
     grep -q 'listRegressionSubscriptionStateRemoteRestoreChildSelectors' <<<"${remoteRestoreBody}"
 
-    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionSubscriptionStateSyncRollbackFailureSelector' <<<"${syncRollbackBody}"
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector' <<<"${syncRollbackBody}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure"' <<<"${syncRollbackBody}"
     grep -q 'listRegressionSubscriptionStateSyncRollbackFailureChildSelectors' <<<"${syncRollbackBody}"
 }
