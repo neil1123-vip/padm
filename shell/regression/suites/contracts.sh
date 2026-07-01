@@ -197,6 +197,28 @@ runSequentialAggregateRunnerWithArgsRegistrationAssertions() {
     runAggregateRunnerRunnerArgsAssertions "${selector}" "${selectorListFn}"
 }
 
+runParallelAggregateRunnerWithArgsRegistrationAssertions() {
+    local suiteFile=$1
+    local selector=$2
+    local runner=$3
+    local selectorListFn=$4
+    shift 4
+    local expectedChildren
+
+    ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || return 1
+    ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${suiteFile}" || return 1
+    ! grep -q "^registerRegressionAggregateParallel ${selector} \\\\" "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}" || return 1
+
+    expectedChildren=$("${selectorListFn}")
+    runAggregateRunnerRegistrationAssertions \
+        "${selector}" \
+        parallel \
+        "${runner}" \
+        "${expectedChildren}"
+    runAggregateRunnerRunnerArgsPatternAssertions "${selector}" "$@"
+}
+
 runAggregateRunnerRunnerArgsPatternAssertions() {
     local selector=$1
     shift
@@ -632,14 +654,9 @@ runAggregateRunnerRegistrationHelperAdoptionContract() {
     local contractsFile="${PROJECT_ROOT}/shell/regression/suites/contracts.sh"
 
     for functionName in \
-        runFastAggregateRunnerRegistrationContract \
-        runFastOnlyAggregateRunnerRegistrationContract \
-        runFastOnlyOutputAggregateRunnerRegistrationContract \
         runRuntimeAggregateRunnerRegistrationContract \
         runAllAggregateRunnerRegistrationContract \
         runSubscriptionAggregateRunnerRegistrationContract \
-        runSubscriptionRemoteAggregateRunnerRegistrationContract \
-        runSubscriptionTxAggregateRunnerRegistrationContract \
         runUiAggregateRunnerRegistrationContract \
         runRoutingAggregateRunnerRegistrationContract \
         runTransactionCoreAggregateRunnerRegistrationContract \
@@ -651,8 +668,25 @@ runAggregateRunnerRegistrationHelperAdoptionContract() {
     done
 
     for functionName in \
+        runSubscriptionStateCoreAggregateRunnerRegistrationContract \
+        runSubscriptionStateAggregateRunnerRegistrationContract \
+        runRemoteControlAggregateRunnerRegistrationContract \
+        runPlatformHotAggregateRunnerRegistrationContract \
+        runFastAggregateRunnerRegistrationContract \
+        runFastOnlyAggregateRunnerRegistrationContract \
+        runFastOnlyOutputAggregateRunnerRegistrationContract \
+        runSubscriptionRemoteAggregateRunnerRegistrationContract \
+        runSubscriptionTxAggregateRunnerRegistrationContract; do
+        runContractHelperAdoptionAssertions \
+            "${contractsFile}" \
+            "${functionName}" \
+            runParallelAggregateRunnerWithArgsRegistrationAssertions || return 1
+    done
+
+    for functionName in \
         runPlatformIoAggregateRunnerRegistrationContract \
         runFastRealityAggregateRunnerRegistrationContract \
+        runFastOnlyCoreAggregateRunnerRegistrationContract \
         runTlsAggregateRunnerRegistrationContract \
         runTransactionAggregateRunnerRegistrationContract \
         runTransactionSubscriptionAggregateRunnerRegistrationContract \
@@ -1409,38 +1443,24 @@ runSubscriptionStateSyncRollbackFailureSerialChildStepsContract() {
 
 runSubscriptionStateCoreAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-core ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateParallel subscription-state-core \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionSubscriptionStateCoreChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         subscription-state-core \
-        parallel \
         runFrameworkParallelRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        subscription-state-core \
+        listRegressionSubscriptionStateCoreChildSelectors \
         '^.*/subscription-state-core-[0-9]+$' \
         '^listRegressionSubscriptionStateCoreChildSelectors$'
 }
 
 runSubscriptionStateAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateParallel subscription-state \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionSubscriptionStateChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         subscription-state \
-        parallel \
         runFrameworkParallelRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        subscription-state \
+        listRegressionSubscriptionStateChildSelectors \
         '^.*/subscription-state-default-[0-9]+$' \
         '^listRegressionSubscriptionStateChildSelectors$'
 }
@@ -2148,19 +2168,12 @@ runRemoteControlSmokeCoreChildStepsContract() {
 
 runRemoteControlAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionFunctionLeaf remote-control ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionRemoteControlChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         remote-control \
-        parallel \
         runFrameworkParallelRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        remote-control \
+        listRegressionRemoteControlChildSelectors \
         '/remote-control-default-[0-9]+$' \
         '^listRegressionRemoteControlChildSelectors$'
 }
@@ -2440,19 +2453,12 @@ EOF
 
 runPlatformHotAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionPlatformHotChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         platform-hot \
-        parallel \
         runFrameworkParallelRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        platform-hot \
+        listRegressionPlatformHotChildSelectors \
         '/platform-hot-parallel-[0-9]+$' \
         '^listRegressionPlatformHotChildSelectors$'
 }
@@ -2926,75 +2932,47 @@ EOF
 
 runFastAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionFastChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         fast \
-        parallel \
         runFrameworkParallelRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        fast \
+        listRegressionFastChildSelectors \
         '/fast-parallel-[0-9]+$' \
         '^listRegressionFastChildSelectors$'
 }
 
 runFastOnlyAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf fast-only ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-only ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionFastOnlyChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         fast-only \
-        parallel \
         runFrameworkParallelRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        fast-only \
+        listRegressionFastOnlyChildSelectors \
         '/fast-only-parallel-[0-9]+$' \
         '^listRegressionFastOnlyChildSelectors$'
 }
 
 runFastOnlyOutputAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf fast-only-output ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-only-output ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionFastOnlyOutputChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         fast-only-output \
-        parallel \
         runFrameworkParallelRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        fast-only-output \
+        listRegressionFastOnlyOutputChildSelectors \
         '/fast-only-output-parallel-[0-9]+$' \
         '^listRegressionFastOnlyOutputChildSelectors$'
 }
 
 runFastOnlyCoreAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
-    local expectedChildren
 
-    ! grep -q '^registerRegressionScriptLeaf fast-only-core ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-only-core ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionFastOnlyCoreChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+    runSequentialAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         fast-only-core \
-        sequential \
-        runFrameworkSequentialRegressionSelectorList \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsAssertions fast-only-core 'listRegressionFastOnlyCoreChildSelectors'
+        listRegressionFastOnlyCoreChildSelectors
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke-light"]:-}" == "function" ]] || return 1
 }
 
@@ -5904,23 +5882,17 @@ runSubscriptionAggregateRunnerRegistrationContract() {
 
 runSubscriptionRemoteAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
-    local expectedChildren
 
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote-fetch"]:-}" ]]
-    ! grep -q '^registerRegressionScriptLeaf subscription-remote ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-remote ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-remote-fetch ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch-' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionSubscriptionRemoteChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         subscription-remote \
-        parallel \
         runSubscriptionSelectorListRegression \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        subscription-remote \
+        listRegressionSubscriptionRemoteChildSelectors \
         '^subscription-remote-parallel$' \
         '^listRegressionSubscriptionRemoteChildSelectors$' \
         '^4$' \
@@ -5929,23 +5901,17 @@ runSubscriptionRemoteAggregateRunnerRegistrationContract() {
 
 runSubscriptionTxAggregateRunnerRegistrationContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
-    local expectedChildren
 
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-write-transaction"]:-}" ]]
-    ! grep -q '^registerRegressionScriptLeaf subscription-tx ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-tx ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    expectedChildren=$(listRegressionSubscriptionTxChildSelectors)
-    runAggregateRunnerRegistrationAssertions \
+
+    runParallelAggregateRunnerWithArgsRegistrationAssertions \
+        "${suiteFile}" \
         subscription-tx \
-        parallel \
         runSubscriptionSelectorListRegression \
-        "${expectedChildren}"
-    runAggregateRunnerRunnerArgsPatternAssertions \
-        subscription-tx \
+        listRegressionSubscriptionTxChildSelectors \
         '^subscription-tx-parallel$' \
         '^listRegressionSubscriptionTxChildSelectors$'
 }
