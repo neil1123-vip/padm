@@ -1135,7 +1135,7 @@ JSON
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
-    subscriptionSyncApplyAccountPlanTransaction() {
+    subscriptionSyncApplyAccountPlan() {
         SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败"
         return 1
     }
@@ -1213,7 +1213,7 @@ JSON
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
-    subscriptionSyncApplyAccountPlanTransaction() {
+    subscriptionSyncApplyAccountPlan() {
         cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_new-main"}]}}]}
 JSON
@@ -1300,7 +1300,7 @@ JSON
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
-    subscriptionSyncApplyAccountPlanTransaction() {
+    subscriptionSyncApplyAccountPlan() {
         cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_new-main"}]}}]}
 JSON
@@ -1403,7 +1403,7 @@ JSON
     subscriptionSyncPlan() {
         printf '{"create":["sub_real_sync_6"],"remove":[]}'
     }
-    subscriptionSyncApplyAccountPlanTransaction() {
+    subscriptionSyncApplyAccountPlan() {
         printf 'apply-account-plan\n' >>"${callLog}"
         return 0
     }
@@ -1477,7 +1477,7 @@ JSON
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
-    subscriptionSyncApplyAccountPlanTransaction() {
+    subscriptionSyncApplyAccountPlan() {
         printf 'apply\n' >>"${callLog}"
         return 0
     }
@@ -1523,6 +1523,69 @@ JSON
     grep -qx 'remote' "${callLog}"
     grep -qx 'read-subscribe' "${callLog}"
     grep -qx 'subscribe:false false' "${callLog}"
+)
+
+runSubscriptionGroupSyncSingleConfigBackupRegression() (
+    local syncRoot="${TMP_DIR}/subscription-group-sync-single-config-backup"
+    local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
+    local backupCountLog="${syncRoot}/backup-count.log"
+    local resultStatus="${syncRoot}/mark-status.log"
+    local resultFailures="${syncRoot}/mark-failures.log"
+    local statusLog="${syncRoot}/status.log"
+    local syncStatus
+
+    mkdir -p "${syncRoot}/xray" "${syncRoot}/subscribe_local" "${syncRoot}/subscribe" "${syncRoot}/groups" "${syncRoot}/tmp"
+    configPath="${syncRoot}/xray/"
+    singBoxConfigPath="${syncRoot}/xray/"
+    export PADM_SUBSCRIPTION_GROUPS_DIR="${syncRoot}/groups"
+    export PADM_SUBSCRIBE_LOCAL_DIR="${syncRoot}/subscribe_local"
+    export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
+    TMPDIR="${syncRoot}/tmp"
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":false,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    cat >"${syncConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[]}}]}
+JSON
+
+    eval "$(declare -f subscriptionSyncCreateConfigBackups | sed '1s/^subscriptionSyncCreateConfigBackups/originalSubscriptionSyncCreateConfigBackups/')"
+    subscriptionSyncCreateConfigBackups() {
+        printf 'backup\n' >>"${backupCountLog}"
+        originalSubscriptionSyncCreateConfigBackups "$@"
+    }
+    subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+    subscriptionGroupRemoteSyncEnabled() { return 1; }
+    collectSubscriptionTraffic() { return 0; }
+    readInstallType() { coreInstallType=1; }
+    readInstallProtocolType() { return 0; }
+    readConfigHostPathUUID() { return 0; }
+    protocolCapabilityRegistry() {
+        printf '1|unused|node|unused|unused|xray|unused|unused|unused|unused|unused|unused|unused|unused|unused|unused|unused|unused|02_VLESS_TCP_inbounds.json\n'
+    }
+    initXrayClients() {
+        jq -n --arg email "$3-main" '[{email:$email}]'
+    }
+    subscriptionSyncReconcileLocalServices() { return 0; }
+    readNginxSubscribe() { subscribePort=; }
+    subscriptionSyncMarkResult() {
+        printf '%s\n' "$1" >"${resultStatus}"
+        printf '%s\n' "$2" >"${resultFailures}"
+        return 0
+    }
+    successCard() { printf '%s\n' "$*" >"${statusLog}"; }
+    statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
+
+    set +e
+    runSubscriptionGroupSync skip-subscribe-refresh
+    syncStatus=$?
+    set -e
+    unset -f subscriptionSyncCreateConfigBackups originalSubscriptionSyncCreateConfigBackups protocolCapabilityRegistry initXrayClients
+
+    [[ "${syncStatus}" == "0" ]]
+    [[ "$(grep -c '^backup$' "${backupCountLog}")" == "1" ]]
+    jq -e '.inbounds[0].settings.clients[0].email == "sub_team_a-main"' "${syncConfigFile}" >/dev/null
+    [[ "$(<"${resultFailures}")" == "[]" ]]
+    grep -qx 'success' "${resultStatus}"
 )
 
 runSubscriptionGroupSyncRollbackRegression() {

@@ -1028,9 +1028,15 @@ runSubscriptionGroupSync() {
         rc=1
     }
     if [[ -n "${configBackupDir}" && -n "${outputBackupDir}" ]]; then
-        if ! subscriptionSyncApplyAccountPlanTransaction "${syncPlan}"; then
-            failures=$(jq --arg message "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-本机同步计划应用失败}" '. + [$message]' <<<"${failures}")
-            subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+        if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
+            localSyncFailure="本机同步计划应用失败"
+            if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}"; then
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+            else
+                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
+            fi
+            failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
             configBackupDir=
             outputBackupDir=
             rc=1
