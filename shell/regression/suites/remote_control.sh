@@ -37,6 +37,7 @@ listRegressionRemoteControlSmokeCoreChildSelectors() {
         remote-control-concurrency \
         remote-control-aggregation-failure \
         remote-control-inline-aggregation-helpers \
+        remote-control-sources-parsed-once \
         remote-control-health \
         remote-control-inline-request-helpers \
         remote-control-inline-wireguard-peer-helpers \
@@ -92,6 +93,7 @@ runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
 registerRegressionFunctionLeaf remote-control-concurrency runRemoteControlConcurrencyRegression
 registerRegressionFunctionLeaf remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
 registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
+registerRegressionFunctionLeaf remote-control-sources-parsed-once runRemoteControlSourcesParsedOnceRegression
 registerRegressionFunctionLeaf remote-control-health runRemoteControlHealthRegression
 registerRegressionFunctionLeaf remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
 registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression

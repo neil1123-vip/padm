@@ -305,7 +305,8 @@ subscriptionRemoteCollectParallelResults() {
     local pids=()
 
     padmCreateTmpRootPath tmpDir "${tmpPattern}" -d || return 1
-    while IFS= read -r source; do
+    mapfile -t sourceList < <(jq -c '.[]' <<<"${sources}")
+    for source in "${sourceList[@]}"; do
         printf -v outputFile '%s/%06d.json' "${tmpDir}" "${index}"
         (
             local writeResult
@@ -318,11 +319,10 @@ subscriptionRemoteCollectParallelResults() {
         ) &
         pids+=("$!")
         index=$((index + 1))
-    done < <(jq -c '.[]' <<<"${sources}")
+    done
     for pid in "${pids[@]}"; do
         wait "${pid}" 2>/dev/null || true
     done
-    mapfile -t sourceList < <(jq -c '.[]' <<<"${sources}")
     if [[ "${#sourceList[@]}" == "0" ]]; then
         aggregatedResults=$(jq -n '[]') || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
     else

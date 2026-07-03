@@ -170,6 +170,38 @@ JSON
     [[ "${planResult}" == *'"status":"internal_error"'*'"type":"internal_error"'* ]] || return 1
 )
 
+runRemoteControlSourcesParsedOnceRegression() (
+    local parseCountFile="${TMP_DIR}/remote-control-sources-parse-count"
+    local parseCount
+    local result
+    local sources='[{"id":"edge-a","name":"Edge A"},{"id":"edge-b","name":"Edge B"}]'
+
+    : >"${parseCountFile}"
+    jq() {
+        if [[ "$#" -ge 2 && "$1" == "-c" && "$2" == ".[]" ]]; then
+            printf 'x' >>"${parseCountFile}"
+        fi
+        command jq "$@"
+    }
+    remoteControlParseOnceWorker() {
+        local source=$1
+        local sourceId
+        sourceId=$(remoteControlRegressionSourceId "${source}")
+        printf '{"source_id":"%s","status":"success"}\n' "${sourceId}"
+    }
+    remoteControlParseOnceFallback() {
+        local source=$1
+        local sourceId
+        sourceId=$(remoteControlRegressionSourceId "${source}")
+        printf '{"source_id":"%s","status":"internal_error"}\n' "${sourceId}"
+    }
+
+    result=$(subscriptionRemoteCollectParallelResults "${sources}" padm-remote-parse-once.XXXXXX remoteControlParseOnceWorker remoteControlParseOnceFallback)
+    jq -e 'length == 2 and .[0].source_id == "edge-a" and .[1].source_id == "edge-b"' <<<"${result}" >/dev/null
+    parseCount=$(wc -c <"${parseCountFile}")
+    ((parseCount == 1))
+)
+
 runRemoteControlHealthRegression() (
     local sourceMissing='{"id":"edge-missing","name":"Edge Missing","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
     local sourceRemote='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"remote.example","port":443}'
@@ -1924,6 +1956,7 @@ runRegressionRemoteControlSmokeCoreSteps() {
     runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
         runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
         runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression &&
+        runRegressionStep remote-control-sources-parsed-once runRemoteControlSourcesParsedOnceRegression &&
         runRegressionStep remote-control-health runRemoteControlHealthRegression &&
         runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression &&
         runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression &&
