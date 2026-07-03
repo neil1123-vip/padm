@@ -97,6 +97,7 @@ listRegressionSubscriptionStateSupportChildSelectors() {
         subscription-sync-append-restore-failure-detail \
         subscription-sync-single-restore-result-message \
         subscription-sync-rollback-result-message \
+        subscription-sync-find-user-enabled-projection \
         subscription-sync-reconcile-early-exit \
         subscription-group-sync-publish-refresh-inline \
         subscription-group-sync-single-config-backup \
@@ -468,6 +469,7 @@ registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message ru
 registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression
 registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
 registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
+registerRegressionFunctionLeaf subscription-sync-find-user-enabled-projection runSubscriptionSyncFindUserEnabledProjectionRegression
 registerRegressionFunctionLeaf subscription-sync-rollback-failure runRegressionSubscriptionStateSyncRollback
 registerRegressionFunctionLeaf subscription-sync-rollback-config-restore-failure runRegressionSubscriptionSyncRollbackConfigRestoreFailure
 registerRegressionFunctionLeaf subscription-sync-restore-dir-failure runRegressionSubscriptionSyncRollbackRestoreDirFailure

@@ -970,6 +970,20 @@ runSubscriptionSyncRollbackResultMessageRegression() (
     grep -q '^true$' "${retryLog}"
 )
 
+runSubscriptionSyncFindUserEnabledProjectionRegression() (
+    local result
+
+    subscriptionActiveEnabledUsersJson() {
+        jq -n '[{id:"team-a", name:"Team A", account:"sub_team_a", allowed_sources:["main"], allows_main:true, has_remote:false}]'
+    }
+    subscriptionActiveGroupRead() {
+        return 99
+    }
+
+    result=$(subscriptionSyncFindUserByAccountName sub_team_a)
+    jq -e '.id == "team-a" and .account == "sub_team_a" and .allows_main == true and .has_remote == false' <<<"${result}" >/dev/null
+)
+
 runSubscriptionSyncRollbackConfigRestoreFailureRegression() (
     local rootRel="${TMP_DIR}/subscription-sync-rollback-failure"
     local root
