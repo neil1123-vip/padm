@@ -485,6 +485,63 @@ runRemoteControlInlineSyncRunnerRegression() (
     ! grep -q '^failure	' "${statusLog}" || return 1
 )
 
+runRemoteControlInlineSyncParallelRunnerRegression() (
+    local remoteSourcesJson='[{"id":"edge-slow","name":"Edge Slow","control_token":"token"},{"id":"edge-broken","name":"Edge Broken","control_token":"token"}]'
+    local desiredUsersBySourceJson='{"edge-slow":[],"edge-broken":[]}'
+    local statusLog="${TMP_DIR}/remote-control-inline-sync-parallel-runner.status"
+    local callLog="${TMP_DIR}/remote-control-inline-sync-parallel-runner.calls"
+    local brokenStarted="${TMP_DIR}/remote-control-inline-sync-parallel-runner.broken-started"
+    local syncFailures
+
+    : >"${callLog}"
+
+    subscriptionRemoteControlSources() {
+        printf '%s\n' "${remoteSourcesJson}"
+    }
+    subscriptionRemoteDesiredUsersBySource() {
+        printf '%s\n' "${desiredUsersBySourceJson}"
+    }
+    subscriptionRemoteSyncPlanForSource() {
+        local sourceJson=$1
+        local sourceId
+        sourceId=$(jq -r '.id' <<<"${sourceJson}") || return 1
+        printf '%s-start\n' "${sourceId}" >>"${callLog}"
+        case "${sourceId}" in
+        edge-slow)
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${brokenStarted}" ]] && break
+                sleep 0.01
+            done
+            [[ -f "${brokenStarted}" ]] || printf 'edge-broken-not-parallel\n' >>"${callLog}"
+            jq -n \
+                --argjson request '{"source_id":"edge-slow","dry_run":false,"desired_users":[]}' \
+                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}' \
+                '{source_id:"edge-slow", status:"success", dry_run:false, request:$request, response:$response}'
+            ;;
+        edge-broken)
+            : >"${brokenStarted}"
+            printf 'broken-sync-json\n'
+            ;;
+        esac
+    }
+    setSubscriptionSourceSyncStatus() {
+        printf 'status\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${statusLog}"
+    }
+    setSubscriptionSourceSyncFailure() {
+        printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
+    }
+
+    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null || true)
+    [[ -n "${syncFailures}" ]] || return 1
+    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
+    jq -e 'length == 1 and (.[0] | contains("edge-broken"))' <<<"${syncFailures}" >/dev/null || return 1
+    grep -qx 'edge-slow-start' "${callLog}" || return 1
+    grep -qx 'edge-broken-start' "${callLog}" || return 1
+    ! grep -qx 'edge-broken-not-parallel' "${callLog}" || return 1
+    grep -Fqx $'status\tedge-slow\tsuccess\tfalse\t{"create":[],"remove":[]}' "${statusLog}" || return 1
+    grep -q $'^failure\tedge-broken\tinternal_error\t' "${statusLog}" || return 1
+)
+
 runRemoteControlHandleInlineHelpersRegression() (
     local controlRoot="${TMP_DIR}/remote-control-handle-inline-helpers"
     local healthResponse
@@ -1872,6 +1929,7 @@ runRegressionRemoteControlSmokeCoreSteps() {
         runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression &&
         runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression &&
         runRegressionStep remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression &&
+        runRegressionStep remote-control-inline-sync-parallel-runner runRemoteControlInlineSyncParallelRunnerRegression &&
         runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
 }
 

@@ -408,6 +408,7 @@ runSubscriptionRemoteSync() {
     local desiredUsersBySource='{}'
     local sourceId
     local sourceResult
+    local syncResults
     local status
     local errorMessage
     local changed
@@ -417,8 +418,14 @@ runSubscriptionRemoteSync() {
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
     fi
-    while IFS= read -r source; do
-        sourceResult=$(subscriptionRemoteSyncPlanForSource "${source}" "${desiredUsersBySource}" false 2>/dev/null) || return 1
+    syncResults=$(subscriptionRemoteCollectParallelResults \
+        "${sources}" \
+        padm-remote-sync.XXXXXX \
+        subscriptionRemoteSyncPlanForSource \
+        subscriptionRemoteSyncPlanInternalErrorResult \
+        "${desiredUsersBySource}" \
+        false) || return 1
+    while IFS= read -r sourceResult; do
         sourceId=$(jq -r '.source_id // empty' <<<"${sourceResult}") || return 1
         [[ -n "${sourceId}" ]] || return 1
         status=$(jq -r '.status // empty' <<<"${sourceResult}") || return 1
@@ -448,11 +455,16 @@ runSubscriptionRemoteSync() {
             setSubscriptionSourceSyncFailure "${sourceId}" unreachable "${errorMessage}"
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 不可达或同步请求失败"]' <<<"${failures}")
             ;;
+        internal_error)
+            errorMessage=$(jq -r '.error_detail.message // "远程同步结果生成失败"' <<<"${sourceResult}") || return 1
+            setSubscriptionSourceSyncFailure "${sourceId}" internal_error "${errorMessage}"
+            failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 同步结果生成失败: " + $errorMessage]' <<<"${failures}")
+            ;;
         *)
             return 1
             ;;
         esac
-    done < <(jq -c '.[]' <<<"${sources}")
+    done < <(jq -c '.[]' <<<"${syncResults}")
     echo "${failures}"
 }
 
