@@ -541,6 +541,7 @@ updatePadm() {
     local installDir="${PADM_INSTALL_DIR:-/etc/padm}"
     local installPath backupPath
     local tmpDir newInstall installStage
+    local remoteRef= installUrl
     if ! padmIsSafeAbsolutePath "${installDir}"; then
         errorCard "更新入口目录异常"
         return 1
@@ -561,14 +562,19 @@ updatePadm() {
 
     padmCreateTmpRootPath tmpDir padm-update.XXXXXX -d || { errorCard "更新入口临时目录创建失败"; return 1; }
     newInstall="${tmpDir}/install.sh"
+    if declare -F fetchRemoteRef >/dev/null 2>&1; then
+        remoteRef=$(fetchRemoteRef || true)
+    fi
+    installUrl="https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"
+    [[ -n "${remoteRef}" ]] && installUrl="https://raw.githubusercontent.com/neil1123-vip/padm/${remoteRef}/install.sh"
 
     if [[ "${release}" == "alpine" ]]; then
-        if ! wget -c -q -P "${tmpDir}/" -N "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"; then
+        if ! wget -c -q -P "${tmpDir}/" -N "${installUrl}"; then
             padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
             errorCard "更新入口下载失败"
             return 1
         fi
-    elif ! downloadFile -P "${tmpDir}/" "https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"; then
+    elif ! downloadFile -P "${tmpDir}/" "${installUrl}"; then
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
         errorCard "更新入口下载失败"
         return 1
@@ -614,7 +620,7 @@ updatePadm() {
     padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
 
     successCard "更新入口已下载，正在重新打开新版脚本"
-    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 "${installPath}" RefreshScriptModules; then
+    if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${remoteRef}" "${installPath}" RefreshScriptModules; then
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
         exit 0
     fi

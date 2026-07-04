@@ -1682,6 +1682,61 @@ EOF
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
+runUpdatePadmSingleRefRegression() {
+    local root installDir updateTmpRoot downloadLog execLog errorLog oldTmpDir
+    root="${TMP_DIR}/update-padm-single-ref"
+    installDir="${root}/install"
+    updateTmpRoot="${root}/tmp"
+    downloadLog="${root}/download.log"
+    execLog="${root}/exec.log"
+    errorLog="${root}/error.log"
+    oldTmpDir="${TMPDIR:-}"
+    mkdir -p "${installDir}" "${updateTmpRoot}"
+    : >"${downloadLog}"
+    : >"${execLog}"
+    : >"${errorLog}"
+    installDir=$(cd -- "${installDir}" && pwd -P)
+    updateTmpRoot=$(cd -- "${updateTmpRoot}" && pwd -P)
+    printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
+    chmod 700 "${installDir}/install.sh"
+
+    (
+        REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        release=debian
+        PADM_INSTALL_DIR="${installDir}"
+        TMPDIR="${updateTmpRoot}"
+        export PADM_UPDATE_SINGLE_REF_EXEC_LOG="${execLog}"
+        fetchRemoteRef() { printf 'fixed-ref\n'; }
+        downloadFile() {
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -P)
+                    mkdir -p "$2"
+                    printf '%s\n' "$*" >>"${downloadLog}"
+                    cat >"$2/install.sh" <<'EOF'
+#!/usr/bin/env bash
+ensureScriptModules() { :; }
+printf 'force:%s\n' "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" >"${PADM_UPDATE_SINGLE_REF_EXEC_LOG}"
+printf 'ref:%s\n' "${PADM_SCRIPT_MODULE_REF:-}" >>"${PADM_UPDATE_SINGLE_REF_EXEC_LOG}"
+exit 0
+EOF
+                    return 0
+                    ;;
+                esac
+                shift
+            done
+            return 1
+        }
+
+        updatePadm 1
+    ) >"${root}/run.log" 2>&1
+
+    grep -q 'https://raw.githubusercontent.com/neil1123-vip/padm/fixed-ref/install.sh' "${downloadLog}"
+    grep -qx 'force:1' "${execLog}"
+    grep -qx 'ref:fixed-ref' "${execLog}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
 runInstallRefreshFallbackMainRegression() {
     (
         set -euo pipefail
@@ -2847,6 +2902,38 @@ EOF
         writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
         scriptModulesReady >/dev/null
         printf '# changed\n' >>"${fixtureDir}/install.sh"
+        ! scriptModulesReady >/dev/null
+    )
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
+runInstallModuleManifestCompleteRegression() {
+    local fixtureDir moduleTmpRoot oldTmpDir
+    fixtureDir="${TMP_DIR}/install-module-manifest-complete"
+    moduleTmpRoot="${TMP_DIR}/install-module-manifest-complete-tmp"
+    oldTmpDir="${TMPDIR:-}"
+    mkdir -p "${moduleTmpRoot}" "${fixtureDir}/shell/core"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
+    cat >"${fixtureDir}/shell/core/bootstrap.sh" <<'EOF'
+#!/usr/bin/env bash
+source "${CORE_DIR}/version.sh"
+EOF
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/validate_install.sh"
+    (
+        TMPDIR="${moduleTmpRoot}"
+        eval "$(awk '
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="${fixtureDir}"
+        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
+        awk '$2 != "shell/core/version.sh"' "${SCRIPT_MANIFEST_FILE}" >"${SCRIPT_MANIFEST_FILE}.tmp"
+        mv "${SCRIPT_MANIFEST_FILE}.tmp" "${SCRIPT_MANIFEST_FILE}"
         ! scriptModulesReady >/dev/null
     )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -4412,7 +4499,8 @@ runXrayPrereleaseDryRunRegression() {
 }
 
 runRegressionPlatformUpdate() {
-    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
+    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
+        runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
 }
 
 runRegressionPlatformRefresh() {
@@ -4454,6 +4542,7 @@ runRegressionPlatformRest() {
         runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression &&
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
+        runRegressionStep install-module-manifest-complete runInstallModuleManifestCompleteRegression &&
         runRegressionStep install-early-capability-list runInstallEarlyCapabilityListRegression &&
         runRegressionStep install-menu-recommended-ids runInstallMenuRecommendedIdsRegression &&
         runRegressionStep validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression &&

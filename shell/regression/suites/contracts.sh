@@ -2616,7 +2616,8 @@ runPlatformRefreshChildStepsContract() {
 runPlatformUpdateChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformUpdate \
-        update-padm-version-prompt
+        update-padm-version-prompt \
+        update-padm-single-ref
 }
 
 runPlatformRestChildStepsContract() {
@@ -2650,6 +2651,7 @@ runPlatformRestChildStepsContract() {
         legacy-users-module-removed \
         install-entry-refresh \
         install-module-paths \
+        install-module-manifest-complete \
         install-early-capability-list \
         install-menu-recommended-ids \
         validate-install-loads-runtime \

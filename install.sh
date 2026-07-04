@@ -457,15 +457,42 @@ scriptModulesReady() {
 
 moduleManifestReady() {
     local manifestPath=$1
-    local line expectedHash relativePath actualHash
+    local moduleList requiredPath expectedHash actualHash moduleCount manifestCount
     command -v sha256sum >/dev/null 2>&1 || return 0
     [[ -f "${manifestPath}" ]] || return 1
-    while IFS='  ' read -r expectedHash relativePath; do
-        [[ -n "${expectedHash}" && -n "${relativePath}" ]] || continue
-        [[ -f "${SCRIPT_DIR}/${relativePath}" ]] || return 1
-        actualHash=$(sha256sum "${SCRIPT_DIR}/${relativePath}" | cut -d ' ' -f 1) || return 1
-        [[ "${actualHash}" == "${expectedHash}" ]] || return 1
-    done <"${manifestPath}"
+    moduleList=$(scriptCreateTempPath padm-modules.XXXXXX) || return 1
+    if ! modulePaths >"${moduleList}"; then
+        rm -f "${moduleList}"
+        return 1
+    fi
+    moduleCount=$(wc -l <"${moduleList}" | tr -d ' ')
+    manifestCount=$(awk 'NF == 0 { next } NF != 2 { bad = 1 } { count++ } END { if (bad) exit 1; print count + 0 }' "${manifestPath}") || {
+        rm -f "${moduleList}"
+        return 1
+    }
+    [[ "${manifestCount}" == "${moduleCount}" ]] || {
+        rm -f "${moduleList}"
+        return 1
+    }
+    while IFS= read -r requiredPath; do
+        expectedHash=$(awk -v path="${requiredPath}" '$2 == path { if (seen++) exit 2; print $1 }' "${manifestPath}") || {
+            rm -f "${moduleList}"
+            return 1
+        }
+        [[ -n "${expectedHash}" && -f "${SCRIPT_DIR}/${requiredPath}" ]] || {
+            rm -f "${moduleList}"
+            return 1
+        }
+        actualHash=$(sha256sum "${SCRIPT_DIR}/${requiredPath}" | cut -d ' ' -f 1) || {
+            rm -f "${moduleList}"
+            return 1
+        }
+        [[ "${actualHash}" == "${expectedHash}" ]] || {
+            rm -f "${moduleList}"
+            return 1
+        }
+    done <"${moduleList}"
+    rm -f "${moduleList}"
 }
 
 writeModuleManifest() {
@@ -491,7 +518,8 @@ ensureScriptModules() {
         if regressionWorktreeRefreshForbidden; then
             return 1
         fi
-        remoteRef=$(fetchRemoteRef || true)
+        remoteRef="${PADM_SCRIPT_MODULE_REF:-}"
+        [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef || true)
         refreshScriptModules "${remoteRef}"
         if [[ -s "${SCRIPT_REF_FILE}" ]]; then
             cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}"
