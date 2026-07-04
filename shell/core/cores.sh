@@ -71,10 +71,31 @@ downloadXrayGeoFilesToStage() {
     [[ -s "${stageDir}/geosite.dat" && -s "${stageDir}/geoip.dat" ]]
 }
 
+backupXrayGeoFileIfPresent() {
+    local targetFile=$1
+    local backupFile=$2
+    [[ -e "${targetFile}" || -L "${targetFile}" ]] || return 0
+    cp -p "${targetFile}" "${backupFile}"
+}
+
+restoreXrayGeoCommitBackup() {
+    local backupDir=$1
+    local geositeTarget=$2
+    local geoipTarget=$3
+    local versionTarget=$4
+    local status=0
+
+    restoreCoreOptionalFileBackup "${backupDir}/geosite.dat" "${geositeTarget}" 644 || status=1
+    restoreCoreOptionalFileBackup "${backupDir}/geoip.dat" "${geoipTarget}" 644 || status=1
+    restoreCoreOptionalFileBackup "${backupDir}/geo.version" "${versionTarget}" 644 || status=1
+    return "${status}"
+}
+
 commitXrayGeoFilesFromStage() {
     local stageDir=$1
     local targetDir=$2
     local geoVersion=$3
+    local backupDir=
     local geositeStage
     local geoipStage
     local versionStage
@@ -108,21 +129,43 @@ commitXrayGeoFilesFromStage() {
         padmRemoveCleanupPath "${versionStage}"
         return 1
     fi
+    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-xray-geo-backup.XXXXXX)" || {
+        padmRemoveCleanupPath "${geositeStage}"
+        padmRemoveCleanupPath "${geoipStage}"
+        padmRemoveCleanupPath "${versionStage}"
+        return 1
+    }
+    if ! backupXrayGeoFileIfPresent "${geositeTarget}" "${backupDir}/geosite.dat" ||
+        ! backupXrayGeoFileIfPresent "${geoipTarget}" "${backupDir}/geoip.dat" ||
+        ! backupXrayGeoFileIfPresent "${versionTarget}" "${backupDir}/geo.version"; then
+        padmRemoveCleanupPath "${backupDir}"
+        padmRemoveCleanupPath "${geositeStage}"
+        padmRemoveCleanupPath "${geoipStage}"
+        padmRemoveCleanupPath "${versionStage}"
+        return 1
+    fi
     commitGeneratedFile "${geositeStage}" "${geositeTarget}" 644 || {
+        restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1 || true
+        padmRemoveCleanupPath "${backupDir}"
         padmRemoveCleanupPath "${geositeStage}"
         padmRemoveCleanupPath "${geoipStage}"
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
     commitGeneratedFile "${geoipStage}" "${geoipTarget}" 644 || {
+        restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1 || true
+        padmRemoveCleanupPath "${backupDir}"
         padmRemoveCleanupPath "${geoipStage}"
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
     commitGeneratedFile "${versionStage}" "${versionTarget}" 644 || {
+        restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1 || true
+        padmRemoveCleanupPath "${backupDir}"
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
+    padmRemoveCleanupPath "${backupDir}"
 }
 
 ensureXrayGeoFiles() {
@@ -850,7 +893,7 @@ xrayCompatibilityAuditScanJsonFile() {
             (.streamSettings.httpupgradeSettings? != null) or
             (.streamSettings.xhttpSettings? != null)
         ) |
-        select(((.sockopt.trustedXForwardedFor? // "") | tostring | length) == 0)
+        select((((.streamSettings.sockopt.trustedXForwardedFor? // .sockopt.trustedXForwardedFor?) // "") | tostring | length) == 0)
     ' "${file}" >/dev/null 2>&1; then
         xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 XHTTP/WS/HTTPUpgrade 入站未设置 trustedXForwardedFor；如前置 CDN/反代请专项复核：${file}"
     fi

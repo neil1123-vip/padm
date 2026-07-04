@@ -12,8 +12,30 @@ vlessEncryptionConfigFile() {
 
 validateVlessEncryptionConfig() {
     local xrayBinary
-    xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
-    "${xrayBinary}" -test -confdir "${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}" >"$(padmFallbackTmpFilePath padm-xray-test.log)" 2>&1
+    local xrayConfigDir
+    xrayBinary=$(manageXrayBinaryPath)
+    xrayConfigDir=$(manageXrayConfigDir)
+    "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(padmFallbackTmpFilePath padm-xray-test.log)" 2>&1
+}
+
+manageXrayBinaryPath() {
+    if declare -F coreXrayBinaryPath >/dev/null 2>&1; then
+        coreXrayBinaryPath
+        return
+    fi
+    printf '%s\n' "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+}
+
+manageXrayConfigDir() {
+    if declare -F coreXrayConfigDir >/dev/null 2>&1; then
+        coreXrayConfigDir
+        return
+    fi
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        printf '%s\n' "${PADM_XRAY_CONF_DIR%/}"
+        return
+    fi
+    printf '%s\n' "${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
 }
 
 xrayVersionAtLeast() {
@@ -808,7 +830,11 @@ applyTraditionalTlsAlpn() {
         errorCard "写入 ALPN 配置失败"
         return 1
     fi
-    if [[ -x /etc/padm/xray/xray ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"$(traditionalTlsAlpnTestLog)" 2>&1; then
+    local xrayBinary
+    local xrayConfigDir
+    xrayBinary=$(manageXrayBinaryPath)
+    xrayConfigDir=$(manageXrayConfigDir)
+    if [[ -x "${xrayBinary}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(traditionalTlsAlpnTestLog)" 2>&1; then
         if ! restoreTraditionalTlsAlpnBackup "${backupFile}" "${configFile}" "$(xrayConfigValidationFailureTitle)"; then
             return 1
         fi
@@ -2743,8 +2769,12 @@ configTransactionCommit() {
 }
 
 validateXHTTPConfigUpdate() {
-    [[ -x /etc/padm/xray/xray ]] || return 0
-    /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"$(xhttpConfigTestLog)" 2>&1
+    local xrayBinary
+    local xrayConfigDir
+    xrayBinary=$(manageXrayBinaryPath)
+    xrayConfigDir=$(manageXrayConfigDir)
+    [[ -x "${xrayBinary}" ]] || return 0
+    "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(xhttpConfigTestLog)" 2>&1
 }
 
 xhttpConfigTestLog() {

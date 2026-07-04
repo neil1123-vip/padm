@@ -68,6 +68,7 @@ listRegressionTransactionCoreSelectorEntries() {
         'default light sing-box-managed-cleanup' \
         'default light sing-box-protocol-reload-failure' \
         'default light geo-update-reload-failure' \
+        'default light xray-geo-commit-rollback' \
         'default light core-cleanup-failure-propagation' \
         'default medium reload-core-propagation' \
         'default medium sing-box-log-transaction' \
@@ -109,6 +110,7 @@ listRegressionTransactionCoreSelectorEntries() {
         'light light sing-box-managed-cleanup' \
         'light light sing-box-protocol-reload-failure' \
         'light light geo-update-reload-failure' \
+        'light light xray-geo-commit-rollback' \
         'light light core-cleanup-failure-propagation' \
         'light light user-config-write' \
         'light light remove-user'
@@ -251,6 +253,8 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         esac
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
+    runRegressionRealityLegacyLeafWithCompat() { "$@"; }
+    runRegressionTlsLegacyLeafWithCompat() { "$@"; }
     runCoreRollbackResultMessageRegression() { runRegressionAllSelector core-rollback-result-message; }
     runConfigTransactionRegression() { runRegressionAllSelector config-transaction; }
     runCorePortFileTransactionRegression() { runRegressionAllSelector core-port-file-transaction; }
@@ -285,6 +289,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
     runSingBoxManagedCleanupRegression() { runRegressionAllSelector sing-box-managed-cleanup; }
     runSingBoxProtocolReloadFailureRegression() { runRegressionAllSelector sing-box-protocol-reload-failure; }
     runGeoUpdateReloadFailureRegression() { runRegressionAllSelector geo-update-reload-failure; }
+    runXrayGeoCommitRollbackRegression() { runRegressionAllSelector xray-geo-commit-rollback; }
     runCoreCleanupFailurePropagationRegression() { runRegressionAllSelector core-cleanup-failure-propagation; }
     runReloadCorePropagationRegression() { runRegressionAllSelector reload-core-propagation; }
     runSingBoxLogTransactionRegression() { runRegressionAllSelector sing-box-log-transaction; }
@@ -437,6 +442,7 @@ registerRegressionFunctionLeaf sing-box-uninstall-rejects-unsafe-config-path run
 registerRegressionFunctionLeaf sing-box-uninstall-failure-propagation runSingBoxUninstallFailurePropagationRegression
 registerRegressionFunctionLeaf sing-box-protocol-reload-failure runSingBoxProtocolReloadFailureRegression
 registerRegressionFunctionLeaf geo-update-reload-failure runGeoUpdateReloadFailureRegression
+registerRegressionFunctionLeaf xray-geo-commit-rollback runXrayGeoCommitRollbackRegression
 registerRegressionFunctionLeaf core-cleanup-failure-propagation runCoreCleanupFailurePropagationRegression
 registerRegressionFunctionLeaf sing-box-log-transaction runSingBoxLogTransactionRegression
 registerRegressionFunctionLeaf core-upgrade-directory-target runCoreUpgradeRejectsDirectoryTargetRegression

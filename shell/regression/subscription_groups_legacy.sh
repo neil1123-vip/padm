@@ -5159,6 +5159,37 @@ runGeoUpdateReloadFailureRegression() (
     ! grep -q '更新完毕' "${statusLog}"
 )
 
+runXrayGeoCommitRollbackRegression() (
+    local root="${TMP_DIR}/xray-geo-commit-rollback"
+    local stageDir="${root}/stage"
+    local targetDir="${root}/target"
+    local rc
+
+    mkdir -p "${stageDir}" "${targetDir}"
+    printf 'old-geosite\n' >"${targetDir}/geosite.dat"
+    printf 'old-geoip\n' >"${targetDir}/geoip.dat"
+    printf 'old-version\n' >"${targetDir}/geo.version"
+    printf 'new-geosite\n' >"${stageDir}/geosite.dat"
+    printf 'new-geoip\n' >"${stageDir}/geoip.dat"
+
+    eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+    commitGeneratedFile() {
+        local targetFile=$2
+        [[ "${targetFile}" == "${targetDir}/geoip.dat" ]] && return 1
+        originalCommitGeneratedFile "$@"
+    }
+
+    set +e
+    commitXrayGeoFilesFromStage "${stageDir}" "${targetDir}" v-new
+    rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${targetDir}/geosite.dat")" == "old-geosite" ]]
+    [[ "$(<"${targetDir}/geoip.dat")" == "old-geoip" ]]
+    [[ "$(<"${targetDir}/geo.version")" == "old-version" ]]
+)
+
 runCoreCleanupFailurePropagationRegression() (
     local root="${TMP_DIR}/core-cleanup-failure"
     local serviceLog="${root}/service.log"
@@ -6862,6 +6893,7 @@ runCleanLastInstallationConfigResolvesRelativeAcmeHomeRegression() (
 
 runEntryHelperConfigRegression() {
     local entryConfigPath="${TMP_DIR}/entry-helper-conf/"
+    local entryFakeBin="${TMP_DIR}/entry-helper-fake-bin"
     local entryLogBase="${TMP_DIR}/entry-helper-logs/"
     local entryTmpRoot="${TMP_DIR}/entry-helper-tmp"
     local oldTmpDir="${TMPDIR:-}"
@@ -6871,8 +6903,8 @@ runEntryHelperConfigRegression() {
     local protocolSelectionIncludesDef=
     local nginxTarget="${TMP_DIR}/entry-helper-nginx/sing_box_VMess_HTTPUpgrade.conf"
     local originalContent
-    mkdir -p "${entryConfigPath}" "${entryLogBase}" "${TMP_DIR}/fake-bin" "${TMP_DIR}/entry-helper-nginx" "${entryTmpRoot}"
-    cat >"${TMP_DIR}/fake-bin/nginx" <<'SH'
+    mkdir -p "${entryConfigPath}" "${entryLogBase}" "${entryFakeBin}" "${TMP_DIR}/entry-helper-nginx" "${entryTmpRoot}"
+    cat >"${entryFakeBin}/nginx" <<'SH'
 #!/usr/bin/env bash
 if [[ "$1" == "-v" ]]; then
     printf 'nginx version: nginx/1.24.0\n' >&2
@@ -6882,8 +6914,8 @@ fi
 printf 'entry-helper validate %s\n' "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}"
 [[ "${PADM_FAKE_NGINX_VALIDATE_MODE:-success}" == "success" ]]
 SH
-    chmod +x "${TMP_DIR}/fake-bin/nginx"
-    PATH="${TMP_DIR}/fake-bin:${PATH}"
+    chmod +x "${entryFakeBin}/nginx"
+    PATH="${entryFakeBin}:${PATH}"
     TMPDIR="${entryTmpRoot}"
     protocolSelectionIncludesDef=$(declare -f protocolSelectionIncludes)
     protocolSelectionIncludesDef="${protocolSelectionIncludesDef/protocolSelectionIncludes/regressionOriginalProtocolSelectionIncludes}"

@@ -3880,6 +3880,58 @@ runCoreRunningFallsBackToServiceStateRegression() {
     )
 }
 
+runXrayConfiguredServicePathRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/services.sh"
+        local root="${TMP_DIR}/xray-configured-service-path"
+        local customXray="${root}/custom/xray"
+        local customConf="${root}/custom/conf"
+        local validateLog="${root}/validate.log"
+        local serviceState="${root}/running"
+
+        mkdir -p "${customConf}" "$(dirname "${customXray}")"
+        export PADM_XRAY_BINARY="${customXray}"
+        export PADM_XRAY_CONF_DIR="${customConf}"
+        printf '{"log":{}}\n' >"${customConf}/00_log.json"
+        cat >"${customXray}" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${PADM_FAKE_XRAY_VALIDATE_LOG}"
+[[ "$1" == "-test" && "$2" == "-confdir" && "$3" == "${PADM_XRAY_CONF_DIR}" ]]
+SH
+        chmod +x "${customXray}"
+        export PADM_FAKE_XRAY_VALIDATE_LOG="${validateLog}"
+
+        pgrep() { printf '4242\n'; }
+        padmReadProcExe() { printf '%s\n' "${customXray}"; }
+        padmReadProcCmdline() { printf '%s run -confdir %s' "${customXray}" "${customConf}"; }
+        xrayRunning
+
+        rm -f "${serviceState}" "${validateLog}"
+        pgrep() { return 1; }
+        xrayRunning() { [[ -f "${serviceState}" ]]; }
+        find() {
+            case "$*" in
+            '/bin /usr/bin -name systemctl' | '/etc/systemd/system/ -name xray.service')
+                printf '%s\n' "${root}/systemctl"
+                ;;
+            esac
+        }
+        systemctl() {
+            [[ "$1" == "start" && "$2" == "xray.service" ]] && : >"${serviceState}"
+        }
+        xrayConfigValidationFailureCard() { return 1; }
+        successCard() { return 0; }
+        errorCard() { return 1; }
+        uiStyle() { shift; printf '%s' "$*"; }
+        menuLine() { return 0; }
+
+        handleXray start
+        grep -qx -- "-test -confdir ${customConf}" "${validateLog}"
+    )
+}
+
 runSingBoxRunningIgnoresClientProcessRegression() {
     (
         set -euo pipefail
@@ -4259,6 +4311,65 @@ JSON
         grep -q 'echForceQuery' "${logFile}"
         grep -q 'legacy reverse' "${logFile}"
         grep -q 'trustedXForwardedFor' "${logFile}"
+    )
+}
+
+runXrayCompatibilityTrustedXffRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/xray-compat-trusted-xff"
+        local xrayRoot="${root}/etc/padm/xray"
+        export PADM_XRAY_BINARY="${xrayRoot}/xray"
+        export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${PADM_XRAY_BINARY}"
+        chmod +x "${PADM_XRAY_BINARY}"
+        cat >"${PADM_XRAY_CONF_DIR}/12_VLESS_XHTTP_inbounds.json" <<'JSON'
+{"inbounds":[{"streamSettings":{"network":"xhttp","sockopt":{"trustedXForwardedFor":"1.2.3.4"},"xhttpSettings":{}},"settings":{"clients":[]}}]}
+JSON
+        local statusFile warnFile logFile
+        statusFile=$(coreTmpFilePath padm-xray-compat-trusted-xff.status)
+        warnFile=$(coreTmpFilePath padm-xray-compat-trusted-xff.warn)
+        logFile=$(coreTmpFilePath padm-xray-compat-trusted-xff.log)
+        collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+        ! grep -q 'trustedXForwardedFor' "${logFile}"
+        ! grep -q 'trustedXForwardedFor' "${warnFile}"
+    )
+}
+
+runXrayConfiguredValidationPathRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/xray-configured-validation-path"
+        local xrayRoot="${root}/custom-xray"
+        local validateLog="${root}/validate.log"
+        local xhttpConfig="${xrayRoot}/conf/12_VLESS_XHTTP_inbounds.json"
+        local alpnConfig="${xrayRoot}/conf/27_tls.json"
+        export PADM_XRAY_BINARY="${xrayRoot}/xray"
+        export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
+        export PADM_XHTTP_CONFIG_FILE="${xhttpConfig}"
+        mkdir -p "${PADM_XRAY_CONF_DIR}"
+        cat >"${PADM_XRAY_BINARY}" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${PADM_FAKE_XRAY_VALIDATE_LOG}"
+[[ "$1" == "-test" && "$2" == "-confdir" && "$3" == "${PADM_XRAY_CONF_DIR}" ]]
+SH
+        chmod +x "${PADM_XRAY_BINARY}"
+        export PADM_FAKE_XRAY_VALIDATE_LOG="${validateLog}"
+        cat >"${xhttpConfig}" <<'JSON'
+{"inbounds":[{"streamSettings":{"xhttpSettings":{"mode":"auto"}}}]}
+JSON
+        cat >"${alpnConfig}" <<'JSON'
+{"inbounds":[{"streamSettings":{"tlsSettings":{"alpn":["http/1.1"]}}}]}
+JSON
+        coreInstallType=1
+        refreshXHTTPSubscriptions() { return 0; }
+        reloadCore() { return 0; }
+        traditionalTlsFallbackConfigFile() { printf '%s\n' "${alpnConfig}"; }
+
+        validateXHTTPConfigUpdate
+        applyTraditionalTlsAlpn '["h2","http/1.1"]'
+        [[ "$(grep -c -- "-test -confdir ${PADM_XRAY_CONF_DIR}" "${validateLog}")" == "2" ]]
     )
 }
 

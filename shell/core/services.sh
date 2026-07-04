@@ -13,6 +13,26 @@ xraySystemdStart() {
     systemctl start xray.service
 }
 
+xrayServiceBinaryPath() {
+    if declare -F coreXrayBinaryPath >/dev/null 2>&1; then
+        coreXrayBinaryPath
+        return
+    fi
+    printf '%s\n' "${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+}
+
+xrayServiceConfigDir() {
+    if declare -F coreXrayConfigDir >/dev/null 2>&1; then
+        coreXrayConfigDir
+        return
+    fi
+    if [[ -n "${PADM_XRAY_CONF_DIR:-}" ]]; then
+        printf '%s\n' "${PADM_XRAY_CONF_DIR%/}"
+        return
+    fi
+    printf '%s\n' "${PADM_XRAY_DIR:-/etc/padm/xray}/conf"
+}
+
 waitForServiceState() {
     local checkFunc=$1
     local expectState=$2
@@ -287,13 +307,15 @@ xrayRunning() {
     local pid
     local exe
     local cmdline
+    local xrayBinary
     local systemdServiceFile=${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}
     local openRcServiceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
+    xrayBinary=$(xrayServiceBinaryPath)
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] || continue
         exe=$(padmReadProcExe "/proc/${pid}/exe")
         cmdline=$(padmReadProcCmdline "/proc/${pid}/cmdline")
-        [[ "${exe}" == "/etc/padm/xray/xray" || "${cmdline}" == *"/etc/padm/xray/xray"* ]] || continue
+        [[ "${exe}" == "${xrayBinary}" || "${exe}" == "${xrayBinary} (deleted)" || "${cmdline}" == *"${xrayBinary}"* ]] || continue
         [[ "${cmdline}" == *" api statsquery "* ]] && continue
         return 0
     done < <(pgrep -x xray 2>/dev/null)
@@ -309,10 +331,14 @@ xrayRunning() {
 # 操作 Xray-core
 handleXray() {
     local logFile
+    local xrayBinary
+    local xrayConfigDir
+    xrayBinary=$(xrayServiceBinaryPath)
+    xrayConfigDir=$(xrayServiceConfigDir)
     if [[ -n $(find /bin /usr/bin -name "systemctl") ]] && [[ -n $(find /etc/systemd/system/ -name "xray.service") ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
-            if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
+            if [[ -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
                 xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
                 exit 0
@@ -324,7 +350,7 @@ handleXray() {
     elif [[ -f "/etc/init.d/xray" ]]; then
         if ! xrayRunning && [[ "$1" == "start" ]]; then
             logFile=$(xrayStartTestLog)
-            if [[ -x /etc/padm/xray/xray && -d /etc/padm/xray/conf ]] && ! /etc/padm/xray/xray -test -confdir /etc/padm/xray/conf >"${logFile}" 2>&1; then
+            if [[ -x "${xrayBinary}" && -d "${xrayConfigDir}" ]] && ! "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"${logFile}" 2>&1; then
                 xrayConfigValidationFailureCard "已取消启动" "排查日志: ${logFile}"
                 [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
                 exit 0
@@ -340,7 +366,7 @@ handleXray() {
         else
             errorCard "Xray启动失败"
             menuLine "$(uiStyle warn "请手动执行以下命令并反馈错误日志：")"
-            menuLine "$(uiStyle value "/etc/padm/xray/xray -confdir /etc/padm/xray/conf")"
+            menuLine "$(uiStyle value "${xrayBinary} -confdir ${xrayConfigDir}")"
             [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
             exit 0
         fi

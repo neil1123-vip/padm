@@ -19,8 +19,11 @@ listRegressionFastOnlyCoreChildSelectors() {
         fail2ban-profile \
         fail2ban-sshd-systemd-backend \
         fail2ban-menu \
+        xray-configured-service-path \
         xray-strict-validation \
         xray-compat-audit \
+        xray-compat-trusted-xff \
+        xray-configured-validation-path \
         xray-prerelease-dry-run \
         singbox-compat-audit \
         singbox-prerelease-dry-run \
@@ -168,8 +171,11 @@ registerRegressionFunctionLeaf warp-config-generation-failure runWarpConfigGener
 registerRegressionFunctionLeaf fail2ban-profile runFail2banProfileRegression
 registerRegressionFunctionLeaf fail2ban-sshd-systemd-backend runFail2banSshdSystemdBackendRegression
 registerRegressionFunctionLeaf fail2ban-menu runFail2banMenuRegression
+registerRegressionFunctionLeaf xray-configured-service-path runXrayConfiguredServicePathRegression
 registerRegressionFunctionLeaf xray-strict-validation runXrayStrictValidationRegression
 registerRegressionFunctionLeaf xray-compat-audit runXrayCompatibilityAuditRegression
+registerRegressionFunctionLeaf xray-compat-trusted-xff runXrayCompatibilityTrustedXffRegression
+registerRegressionFunctionLeaf xray-configured-validation-path runXrayConfiguredValidationPathRegression
 registerRegressionFunctionLeaf xray-prerelease-dry-run runXrayPrereleaseDryRunRegression
 registerRegressionFunctionLeaf singbox-compat-audit runSingBoxCompatibilityAuditRegression
 registerRegressionFunctionLeaf singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
