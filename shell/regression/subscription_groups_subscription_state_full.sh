@@ -1534,7 +1534,7 @@ JSON
     grep -qx 'success' "${resultStatus}"
     grep -qx 'apply' "${callLog}"
     grep -qx 'reconcile:<empty>' "${callLog}"
-    grep -qx 'remote' "${callLog}"
+    ! grep -qx 'remote' "${callLog}"
     grep -qx 'read-subscribe' "${callLog}"
     grep -qx 'subscribe:false false' "${callLog}"
 )
