@@ -1203,7 +1203,6 @@ downloadGitHubReleaseAsset() {
     local outputPath=
     local expectedSha256=
     local actualSha256=
-    local usedMetadata=true
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1253,41 +1252,46 @@ downloadGitHubReleaseAsset() {
         downloadUrl=$(jq -r '.url // empty' <<<"${metadata}" 2>/dev/null)
         digest=$(jq -r '.digest // empty' <<<"${metadata}" 2>/dev/null)
     fi
-    if [[ -z "${downloadUrl}" ]]; then
-        usedMetadata=false
-        downloadUrl=$(githubReleaseAssetDirectUrl "${repo}" "${version}" "${assetName}")
+    if [[ -z "${metadata}" ]]; then
         echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
-        menuLine "Release 元数据暂不可用，已回退直链下载: ${assetName}"
+        menuLine "Release 元数据不可用或未找到资产，已取消下载: ${assetName}"
         menuClose
+        return 1
+    fi
+    if [[ -z "${downloadUrl}" ]]; then
+        echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
+        menuLine "Release 资产 URL 缺失，已取消下载: ${assetName}"
+        menuClose
+        return 1
+    fi
+    if [[ "${digest}" != sha256:* ]]; then
+        echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
+        menuLine "GitHub 未提供 sha256 digest，已取消下载: ${assetName}"
+        menuClose
+        return 1
     fi
     outputPath="${outputDir%/}/${assetName}"
     if ! downloadFile -P "${outputDir}" "${downloadUrl}"; then
         return 1
     fi
-    if [[ "${digest}" == sha256:* ]]; then
-        if ! command -v sha256sum >/dev/null 2>&1; then
-            echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
-            menuLine "缺少 sha256sum，无法校验下载文件"
-            menuClose
-            return 1
-        fi
-        expectedSha256=${digest#sha256:}
-        actualSha256=$(sha256sum "${outputPath}" | awk '{print $1}')
-        if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
-            echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
-            menuLine "下载文件 sha256 校验失败: ${assetName}"
-            menuClose
-            rm -f "${outputPath}"
-            return 1
-        fi
+    if ! command -v sha256sum >/dev/null 2>&1; then
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
-        menuLine "sha256 校验通过: ${assetName}"
+        menuLine "缺少 sha256sum，无法校验下载文件"
         menuClose
-    elif [[ "${usedMetadata}" == "true" ]]; then
-        echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
-        menuLine "GitHub 未提供 sha256 digest，已完成精确资产匹配下载: ${assetName}"
-        menuClose
+        return 1
     fi
+    expectedSha256=${digest#sha256:}
+    actualSha256=$(sha256sum "${outputPath}" | awk '{print $1}')
+    if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
+        echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
+        menuLine "下载文件 sha256 校验失败: ${assetName}"
+        menuClose
+        rm -f "${outputPath}"
+        return 1
+    fi
+    echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
+    menuLine "sha256 校验通过: ${assetName}"
+    menuClose
 }
 
 # 初始化安装目录

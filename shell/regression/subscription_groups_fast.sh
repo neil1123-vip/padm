@@ -163,26 +163,43 @@ runGitHubReleaseAssetDirectFallbackRegression() {
         source "${PROJECT_ROOT}/shell/core/runtime.sh"
         local root="${TMP_DIR}/github-release-direct-fallback"
         local outputDir="${root}/out"
+        local downloadLog="${root}/download.calls"
+        local expectedAssetSha256
         mkdir -p "${outputDir}"
-        curl() { return 22; }
-        wget() {
-            if [[ "${1:-}" == "-qO-" ]]; then
-                if [[ "${2:-}" == "https://api.github.com/repos/example/repo/releases/tags/v1.2.3" ]]; then
-                    return 1
-                fi
-                if [[ "${2:-}" == "https://github.com/example/repo/releases/download/v1.2.3/asset.tar.gz" ]]; then
-                    printf 'asset-content\n'
-                    return 0
-                fi
-            elif [[ "${1:-}" == "-c" && "${2:-}" == "-q" && "${3:-}" == "-P" ]]; then
-                mkdir -p "${4}"
-                printf 'asset-content\n' >"${4}/asset.tar.gz"
-                return 0
-            fi
-            return 1
+        expectedAssetSha256=$(printf 'asset-content\n' | sha256sum | awk '{print $1}')
+        fetchUrlToStdout() {
+            case "$1" in
+            */v1.2.3)
+                return 1
+                ;;
+            */v1.2.4)
+                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://downloads.example/no-digest.tar.gz"}]}\n'
+                ;;
+            */v1.2.5)
+                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://downloads.example/asset.tar.gz","digest":"sha256:%s"}]}\n' "${expectedAssetSha256}"
+                ;;
+            *)
+                return 1
+                ;;
+            esac
         }
-        downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.3 asset.tar.gz
-        [[ "$(<"${outputDir}/asset.tar.gz")" == "asset-content" ]]
+        downloadFile() {
+            printf '%s\n' "${3:-}" >>"${downloadLog}"
+            mkdir -p "${2}"
+            printf 'asset-content\n' >"${2%/}/asset.tar.gz"
+            return 0
+        }
+        if downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.3 asset.tar.gz; then
+            return 1
+        fi
+        [[ ! -e "${downloadLog}" ]] || return 1
+        if downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.4 asset.tar.gz; then
+            return 1
+        fi
+        [[ ! -e "${downloadLog}" ]] || return 1
+        downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.5 asset.tar.gz || return 1
+        [[ "$(<"${outputDir}/asset.tar.gz")" == "asset-content" ]] || return 1
+        grep -qxF 'https://downloads.example/asset.tar.gz' "${downloadLog}" || return 1
     )
 }
 

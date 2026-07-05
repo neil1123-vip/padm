@@ -491,11 +491,27 @@ subscriptionControlServiceFile() {
     echo /etc/systemd/system/padm-subscription-control.service
 }
 
+subscriptionControlPythonStringLiteral() {
+    command -v python3 >/dev/null 2>&1 || return 1
+    python3 -c 'import json, sys; print(json.dumps(sys.argv[1], ensure_ascii=False))' "$1"
+}
+
+subscriptionControlSystemdQuotedArgument() {
+    local value=$1
+    [[ "${value}" != *$'\n'* ]] || return 1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    printf '"%s"\n' "${value}"
+}
+
 writeSubscriptionControlServer() {
     local serverScript
     local scriptPath
+    local scriptPathLiteral
     local scriptVersion
+    local scriptVersionLiteral
     local tokenFile
+    local tokenFileLiteral
     local tmpFile
     serverScript=$(subscriptionControlServerScript)
     scriptPath=$(subscriptionGroupSyncInstallScript)
@@ -505,6 +521,9 @@ writeSubscriptionControlServer() {
         scriptPath=$(cygpath -m "${scriptPath}")
         tokenFile=$(cygpath -m "${tokenFile}")
     fi
+    scriptPathLiteral=$(subscriptionControlPythonStringLiteral "${scriptPath}") || return 1
+    tokenFileLiteral=$(subscriptionControlPythonStringLiteral "${tokenFile}") || return 1
+    scriptVersionLiteral=$(subscriptionControlPythonStringLiteral "${scriptVersion}") || return 1
     padmCreateTempFileForTarget tmpFile "${serverScript}" control-server || return 1
     cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 #!/usr/bin/env python3
@@ -514,9 +533,9 @@ import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-SCRIPT_PATH = "${scriptPath}"
-TOKEN_FILE = "${tokenFile}"
-VERSION = "${scriptVersion}"
+SCRIPT_PATH = ${scriptPathLiteral}
+TOKEN_FILE = ${tokenFileLiteral}
+VERSION = ${scriptVersionLiteral}
 CAPABILITIES = ["health", "sync", "subscribe"]
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
@@ -756,6 +775,7 @@ subscriptionControlFailInstall() {
 installSubscriptionControlService() {
     local serviceFile
     local serverScript
+    local serverScriptArg
     local tmpFile
     local token
     local i
@@ -773,6 +793,7 @@ installSubscriptionControlService() {
     [[ -n "${token}" ]] || return 1
     subscriptionGroupsSecureStateFiles || return 1
     serverScript=$(subscriptionControlServerScript)
+    serverScriptArg=$(subscriptionControlSystemdQuotedArgument "${serverScript}") || return 1
     serviceFile=$(subscriptionControlServiceFile)
     if systemctl is-active --quiet padm-subscription-control.service; then
         serviceWasActive=true
@@ -796,7 +817,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env python3 ${serverScript}
+ExecStart=/usr/bin/env python3 ${serverScriptArg}
 Restart=always
 RestartSec=3
 

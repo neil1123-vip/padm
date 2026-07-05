@@ -1693,7 +1693,7 @@ runSubscriptionControlServiceInstallRegression() (
         : >"${healthTokensFile}"
         installSubscriptionControlService
         [[ -x "$(subscriptionControlServerScript)" ]]
-        grep -q 'ExecStart=/usr/bin/env python3' "$(subscriptionControlServiceFile)"
+        grep -qxF "ExecStart=/usr/bin/env python3 \"$(subscriptionControlServerScript)\"" "$(subscriptionControlServiceFile)" || return 1
         grep -qxF 'enable --now padm-subscription-control.service' "${actionsFile}"
         grep -qxF "${knownToken}" "${healthTokensFile}"
         successServiceFile=$(<"$(subscriptionControlServiceFile)")
@@ -1773,7 +1773,15 @@ runSubscriptionControlServerResponseRegression() (
     local status
     local body
     local ready=
+    local literal
     mkdir -p "${controlRoot}"
+    literal=$(subscriptionControlPythonStringLiteral 'path "quoted" \ slash') || return 1
+    PADM_TEST_PYTHON_LITERAL="${literal}" python3 <<'PY'
+import ast
+import os
+assert ast.literal_eval(os.environ["PADM_TEST_PYTHON_LITERAL"]) == 'path "quoted" \\ slash'
+PY
+    [[ "$?" == "0" ]] || return 1
     testPort=$(python3 <<'PY'
 import socket
 with socket.socket() as sock:

@@ -11594,7 +11594,39 @@ runPadmBbrManagedCleanupRegression() (
     local applyFailHelper="${root}/apply-fail.helper"
     local disableStatus="${root}/disable.status"
     local disableHelper="${root}/disable.helper"
+    local thirdPartyStatus="${root}/third-party.status"
+    local thirdPartyHelper="${root}/third-party.helper"
+    local thirdPartyMarker="${root}/third-party.executed"
     mkdir -p "${root}"
+
+    bash -c '
+        set -e
+        export TMPDIR="$1"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        marker=$5
+        warnCard() { printf "warn:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4" >>"${helperLog}"; }
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        autoConfirm() { printf -v "$4" y; }
+        curl() {
+            [[ "${1:-}" == "-fsSL" && "${3:-}" == "-o" ]] || return 1
+            cat >"${4}" <<SH
+#!/usr/bin/env bash
+printf executed >"${marker}"
+SH
+        }
+        sha256sum() {
+            printf "0000000000000000000000000000000000000000000000000000000000000000  %s\n" "$1"
+        }
+        runThirdPartyTcpAccelerationScript
+    ' _ "${root}" "${PROJECT_ROOT}" "${thirdPartyStatus}" "${thirdPartyHelper}" "${thirdPartyMarker}"
+    [[ ! -e "${thirdPartyMarker}" ]] || return 1
+    [[ ! -e "${root}/padm-tcpx.sh" ]] || return 1
+    grep -q '第三方脚本 sha256 校验失败' "${thirdPartyStatus}" || return 1
+    grep -qx 'menu' "${thirdPartyHelper}" || return 1
 
     bash -c '
         set -e
