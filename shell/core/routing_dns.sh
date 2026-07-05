@@ -280,8 +280,8 @@ addSingBoxDNSConfig() {
         if [[ "${actionType}" == "predefined" ]]; then
             local predefined={}
             while read -r line; do
-                predefined=$(echo "${predefined}" | jq ".\"${line}\"=\"${ip}\"")
-            done < <(echo "${domainList}" | tr ',' '\n' | grep -v '^$' | sort -n | uniq | paste -sd ',' | tr ',' '\n')
+                predefined=$(jq --arg key "${line}" --arg value "${ip}" '. + {($key): $value}' <<<"${predefined}") || return 1
+            done < <({ jq -r '.[]' <<<"${domainRules}"; jq -r '.[]' <<<"${suffixRules}"; } | grep -v '^$' | sort -u)
 
             if ! writeRoutingJsonConfig "${singBoxConfigPath}dns.json" <<EOF
 {

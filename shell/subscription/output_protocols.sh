@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+singBoxSubscribeAppendFilter() {
+    local objectFilter=$1
+    shift
+    jq -nr "$@" "${objectFilter} | \". += [\" + (. | tojson) + \"]\""
+}
+
 emitVlessTcpSubscribeOutput() {
     local port=$1
     local email=$2
@@ -25,7 +31,7 @@ emitVlessTcpSubscribeOutput() {
     client-fingerprint: chrome
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${currentHost}\",\"server_port\":${port},\"uuid\":\"${id}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"packet_encoding\":\"xudp\"}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS TCP TLS Vision"
     echoContent green "    vless://${id}@${currentHost}:${port}?encryption=none&security=tls&fp=chrome&type=tcp&host=${currentHost}&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}\n"
@@ -78,7 +84,7 @@ emitVmessWsSubscribeOutput() {
         Host: ${currentHost}
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"vmess\",\"server\":\"${add}\",\"server_port\":${port},\"uuid\":\"${id}\",\"alter_id\":0,\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"packet_encoding\":\"packetaddr\",\"transport\":{\"type\":\"ws\",\"path\":\"${path}\",\"max_early_data\":2048,\"early_data_header_name\":\"Sec-WebSocket-Protocol\"}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"ws",path:$path,max_early_data:2048,early_data_header_name:"Sec-WebSocket-Protocol"}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
     echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
@@ -114,7 +120,7 @@ emitVlessWsSubscribeOutput() {
         Host: ${currentHost}
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${add}\",\"server_port\":${port},\"uuid\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"multiplex\":{\"enabled\":false,\"protocol\":\"smux\",\"max_streams\":32},\"packet_encoding\":\"xudp\",\"transport\":{\"type\":\"ws\",\"path\":\"${path}\",\"headers\":{\"Host\":\"${currentHost}\"}}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},multiplex:{enabled:false,protocol:"smux",max_streams:32},packet_encoding:"xudp",transport:{type:"ws",path:$path,headers:{Host:$host}}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}" --arg host "${currentHost}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS WS TLS"
     echoContent green "    ${defaultLink}\n"
@@ -210,7 +216,7 @@ emitVlessGrpcSubscribeOutput() {
       grpc-service-name: ${currentPath}grpc
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\": \"vless\",\"server\": \"${add}\",\"server_port\": ${port},\"uuid\": \"${id}\",\"tls\": {  \"enabled\": true,  \"server_name\": \"${currentHost}\",  \"utls\": {    \"enabled\": true,    \"fingerprint\": \"chrome\"  }},\"packet_encoding\": \"xudp\",\"transport\": {  \"type\": \"grpc\",  \"service_name\": \"${currentPath}grpc\"}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:$service}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg service "${currentPath}grpc") || return 1
 
     subscribeOutputTitle "通用格式：VLESS gRPC TLS"
     echoContent green "    vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&fp=chrome&serviceName=${currentPath}grpc&alpn=h2&sni=${currentHost}#${email}\n"
@@ -250,7 +256,7 @@ emitTrojanSubscribeOutput() {
     sni: ${currentHost}
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"trojan\",\"server\":\"${currentHost}\",\"server_port\":${port},\"password\":\"${id}\",\"tls\":{\"alpn\":[\"http/1.1\"],\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"trojan",server:$server,server_port:$port,password:$password,tls:{alpn:["http/1.1"],enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg password "${id}" --arg sni "${currentHost}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
     subscribeOutputTitle "二维码：Trojan TLS"
@@ -286,7 +292,7 @@ emitTrojanGrpcSubscribeOutput() {
       grpc-service-name: ${currentPath}trojangrpc
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"trojan\",\"server\":\"${add}\",\"server_port\":${port},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"transport\":{\"type\":\"grpc\",\"service_name\":\"${currentPath}trojangrpc\",\"idle_timeout\":\"15s\",\"ping_timeout\":\"15s\",\"permit_without_stream\":false},\"multiplex\":{\"enabled\":false,\"protocol\":\"smux\",\"max_streams\":32}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"trojan",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},transport:{type:"grpc",service_name:$service,idle_timeout:"15s",ping_timeout:"15s",permit_without_stream:false},multiplex:{enabled:false,protocol:"smux",max_streams:32}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg password "${id}" --arg sni "${currentHost}" --arg service "${currentPath}trojangrpc") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
     subscribeOutputTitle "二维码：Trojan gRPC TLS"
@@ -328,7 +334,7 @@ emitHysteriaSubscribeOutput() {
     down: "${hysteria2ClientDownloadSpeed} Mbps"
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"hysteria2\",\"server\":\"${currentHost}\",\"server_port\":${singBoxHysteria2Port},\"up_mbps\":${hysteria2ClientUploadSpeed},\"down_mbps\":${hysteria2ClientDownloadSpeed},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"alpn\":[\"h3\"]}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"hysteria2",server:$server,server_port:$port,up_mbps:$up,down_mbps:$down,password:$password,tls:{enabled:true,server_name:$sni,alpn:["h3"]}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxHysteria2Port}" --argjson up "${hysteria2ClientUploadSpeed}" --argjson down "${hysteria2ClientDownloadSpeed}" --arg password "${id}" --arg sni "${currentHost}") || return 1
 
     echoContent green "    ${defaultLink}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
@@ -389,7 +395,9 @@ emitVlessRealitySubscribeOutput() {
       short-id: 6ba85179e30d4fc2
     client-fingerprint: chrome"
 
-    appendSingBoxSubscribeLocalConfig "${user}" ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${entryHost}\",\"server_port\":${port},\"uuid\":\"${id}\",\"flow\":\"xtls-rprx-vision\",\"tls\":{\"enabled\":true,\"server_name\":\"${realitySNI}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"${publicKey}\",\"short_id\":\"6ba85179e30d4fc2\"}},\"packet_encoding\":\"xudp\"}]"
+    local singBoxFilter
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
+    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
 
     subscribeOutputTitle "二维码：VLESS Reality Vision"
     echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${entryHost}%3A${port}%3Fencryption%3D${vlessEncryption}%26security%3Dreality%26type%3Dtcp%26sni%3D${realitySNI}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26flow%3Dxtls-rprx-vision%23${email}\n"
@@ -440,7 +448,9 @@ emitVlessRealityGrpcSubscribeOutput() {
       grpc-service-name: \"grpc\"
     client-fingerprint: chrome"
 
-    appendSingBoxSubscribeLocalConfig "${user}" ". += [{\"tag\":\"${email}\",\"type\":\"vless\",\"server\":\"${entryHost}\",\"server_port\":${port},\"uuid\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${realitySNI}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"},\"reality\":{\"enabled\":true,\"public_key\":\"${publicKey}\",\"short_id\":\"6ba85179e30d4fc2\"}},\"packet_encoding\":\"xudp\",\"transport\":{\"type\":\"grpc\",\"service_name\":\"grpc\"}}]"
+    local singBoxFilter
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:"grpc"}}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
+    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
 
     subscribeOutputTitle "二维码：VLESS Reality gRPC"
     echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${entryHost}%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26pqv%3D${realityMldsa65Verify}%26type%3Dgrpc%26sni%3D${realitySNI}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26path%3Dgrpc%26serviceName%3Dgrpc%23${email}\n"
@@ -488,7 +498,7 @@ emitTuicSubscribeOutput() {
     sni: ${currentHost}
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\": \"tuic\",\"server\": \"${currentHost}\",\"server_port\": ${singBoxServerPort},\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"congestion_control\": \"${tuicAlgorithm}\",\"udp_relay_mode\": \"native\",\"zero_rtt_handshake\": false,\"tls\": {\"enabled\": true,\"server_name\": \"${currentHost}\",\"alpn\": [\"h3\"]}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"tuic",server:$server,server_port:$port,uuid:$uuid,password:$password,congestion_control:$congestion,udp_relay_mode:"native",zero_rtt_handshake:false,tls:{enabled:true,server_name:$sni,alpn:["h3"]}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxServerPort}" --arg uuid "${tuicUUID}" --arg password "${tuicPassword}" --arg congestion "${tuicAlgorithm}" --arg sni "${currentHost}") || return 1
 
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
     subscribeOutputTitle "v2rayN：Tuic TLS"
@@ -522,7 +532,7 @@ emitShadowsocksSubscribeOutput() {
     password: "${id}"
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"shadowsocks\",\"server\":\"${currentHost}\",\"server_port\":${port},\"method\":\"${method}\",\"password\":\"${id}\"}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"shadowsocks",server:$server,server_port:$port,method:$method,password:$password}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg method "${method}" --arg password "${id}") || return 1
 
     subscribeOutputTitle "通用链接：Shadowsocks"
     echoContent green "    ${defaultLink}\n"
@@ -592,7 +602,7 @@ emitVmessHTTPUpgradeSubscribeOutput() {
      v2ray-http-upgrade: true
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"vmess\",\"server\":\"${add}\",\"server_port\":${port},\"uuid\":\"${id}\",\"security\":\"auto\",\"alter_id\":0,\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\",\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}},\"packet_encoding\":\"packetaddr\",\"transport\":{\"type\":\"httpupgrade\",\"path\":\"${path}\"}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,security:"auto",alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"httpupgrade",path:$path}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
     echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
@@ -629,7 +639,7 @@ emitAnyTlsSubscribeOutput() {
       - http/1.1
 EOF
 )
-    singBoxFilter=". += [{\"tag\":\"${email}\",\"type\":\"anytls\",\"server\":\"${currentHost}\",\"server_port\":${singBoxAnyTLSPort},\"password\":\"${id}\",\"tls\":{\"enabled\":true,\"server_name\":\"${currentHost}\"}}]"
+    singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"anytls",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxAnyTLSPort}" --arg password "${id}" --arg sni "${currentHost}") || return 1
 
     echoContent green "    ${defaultLink}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"

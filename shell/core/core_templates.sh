@@ -74,7 +74,7 @@ initXrayConfig() {
     fi
 
     if [[ -n "${uuid}" ]]; then
-        currentClients='[{"id":"'${uuid}'","add":"'${add}'","flow":"xtls-rprx-vision","email":"'${customEmail}'"}]'
+        currentClients=$(jq -nc --arg uuid "${uuid}" --arg add "${add}" --arg email "${customEmail}" '[{id:$uuid,add:$add,flow:"xtls-rprx-vision",email:$email}]') || return 1
         echoContent green "\n ${customEmail}:${uuid}"
         echo
     fi
@@ -663,7 +663,7 @@ initSingBoxConfig() {
     fi
 
     if [[ -n "${uuid}" ]]; then
-        currentClients='[{"uuid":"'${uuid}'","flow":"xtls-rprx-vision","name":"'${customEmail}'"}]'
+        currentClients=$(jq -nc --arg uuid "${uuid}" --arg name "${customEmail}" '[{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}]') || return 1
         echoContent yellow "\n ${customEmail}:${uuid}"
     fi
 

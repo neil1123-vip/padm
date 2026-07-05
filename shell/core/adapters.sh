@@ -760,25 +760,27 @@ installTools() {
             local acmeDownloadScript
             local acmeHomeDirPath
             local acmeBackupDir
-            acmeInstallScript="$(adapterTmpPath padm-tls)/acme.sh"
+            local acmeTmpDir
             acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
             adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
             adapterRegisterPackageManagedRollback "${acmeBackupDir}"
-            padmEnsureSafeDirectory "$(adapterTmpPath padm-tls)" || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
-            padmCreateTempPath acmeDownloadScript "$(adapterTmpPath padm-tls/acme.sh.download.XXXXXX)" || failPackageInstallTransaction "acme安装脚本临时文件创建失败"
+            padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
+            acmeInstallScript="${acmeTmpDir}/acme.sh"
+            padmCreateTempPath acmeDownloadScript "${acmeTmpDir}/acme.sh.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本临时文件创建失败"; }
             if curl -fsSL -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
                 if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then
-                    padmRemoveCleanupPath "${acmeDownloadScript}"
+                    padmRemoveCleanupPath "${acmeTmpDir}"
                     failPackageInstallTransaction "acme安装脚本提交失败"
                 fi
                 padmForgetCleanupPath "${acmeDownloadScript}"
             else
-                padmRemoveCleanupPath "${acmeDownloadScript}"
+                padmRemoveCleanupPath "${acmeTmpDir}"
                 failPackageInstallTransaction "acme安装脚本下载失败"
             fi
-            runWithTimeout 600 "sh \"${acmeInstallScript}\" >/etc/padm/tls/acme.log 2>&1" || failPackageInstallTransaction "acme.sh安装失败"
+            runWithTimeout 600 "sh \"${acmeInstallScript}\" >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
 
             if [[ ! -d "$HOME/.acme.sh" ]] || [[ -z $(find "$HOME/.acme.sh/acme.sh") ]]; then
+                padmRemoveCleanupPath "${acmeTmpDir}"
                 echoContent title "\n┌─ acme.sh 安装失败 ─────────────────────────────────"
                 menuLine "安装日志：/etc/padm/tls/acme.log"
                 menuClose
@@ -792,6 +794,7 @@ installTools() {
                 menuClose
                 failPackageInstallTransaction "acme.sh安装结果校验失败"
             fi
+            padmRemoveCleanupPath "${acmeTmpDir}"
         fi
     fi
 

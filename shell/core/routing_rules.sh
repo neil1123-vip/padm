@@ -3,8 +3,7 @@
 # 下载 dlc.dat_plain.yml 到核心目录
 downloadDLCPlainYAML() {
     local corePath=$1
-    local dlcFilePath tmpFilePath
-    local dlcDownloadURL="https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat_plain.yml"
+    local dlcFilePath tmpDir tmpFilePath
 
     if [[ -z "${corePath}" ]]; then
         return 1
@@ -17,13 +16,15 @@ downloadDLCPlainYAML() {
         return 0
     fi
 
-    padmCreateTempFileForTarget tmpFilePath "${dlcFilePath}" dlc || return 1
-    if ! downloadFile -O "${tmpFilePath}" "${dlcDownloadURL}" >/dev/null 2>&1 || [[ ! -s "${tmpFilePath}" ]]; then
-        padmRemoveCleanupPath "${tmpFilePath}"
+    padmCreateTmpRootPath tmpDir padm-dlc.XXXXXX -d || return 1
+    tmpFilePath="${tmpDir}/dlc.dat_plain.yml"
+    if ! downloadGitHubReleaseAsset -P "${tmpDir}" v2fly/domain-list-community latest dlc.dat_plain.yml >/dev/null 2>&1 || [[ ! -s "${tmpFilePath}" ]]; then
+        padmRemoveCleanupPath "${tmpDir}"
         return 1
     fi
 
-    commitGeneratedFile "${tmpFilePath}" "${dlcFilePath}" 644 || { padmRemoveCleanupPath "${tmpFilePath}"; return 1; }
+    commitGeneratedFile "${tmpFilePath}" "${dlcFilePath}" 644 || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
+    padmRemoveCleanupPath "${tmpDir}"
 }
 
 isDomainFormat() {

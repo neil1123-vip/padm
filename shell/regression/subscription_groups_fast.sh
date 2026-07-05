@@ -178,6 +178,12 @@ runGitHubReleaseAssetDirectFallbackRegression() {
             */v1.2.5)
                 printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://downloads.example/asset.tar.gz","digest":"sha256:%s"}]}\n' "${expectedAssetSha256}"
                 ;;
+            */releases/latest)
+                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://downloads.example/latest-asset.tar.gz","digest":"sha256:%s"}]}\n' "${expectedAssetSha256}"
+                ;;
+            */tags/latest)
+                return 1
+                ;;
             *)
                 return 1
                 ;;
@@ -200,6 +206,8 @@ runGitHubReleaseAssetDirectFallbackRegression() {
         downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.5 asset.tar.gz || return 1
         [[ "$(<"${outputDir}/asset.tar.gz")" == "asset-content" ]] || return 1
         grep -qxF 'https://downloads.example/asset.tar.gz' "${downloadLog}" || return 1
+        downloadGitHubReleaseAsset -P "${outputDir}" example/repo latest asset.tar.gz || return 1
+        grep -qxF 'https://downloads.example/latest-asset.tar.gz' "${downloadLog}" || return 1
     )
 }
 
@@ -3944,12 +3952,19 @@ runCoreClientOptionalArgsRegression() {
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
-        currentClients='[{"id":"u1","email":"acct-one"},{"uuid":"u2","name":"acct-two"}]'
-        protocolSelectionIncludes() { return 1; }
+        currentClients='[{"id":"u1","email":"acct \"one"},{"uuid":"u2","name":"acct \"two"}]'
+        protocolSelectionIncludes() {
+            local type=$1
+            local target=$2
+            [[ ",${type}," == *",${target},"* ]]
+        }
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/cores.sh"
-        initXrayClients 1 >/dev/null
-        initSingBoxClients 1 >/dev/null
+        local xrayUsers singboxUsers
+        xrayUsers=$(initXrayClients 1)
+        singboxUsers=$(initSingBoxClients 1)
+        jq -e 'any(.[]; .email == "acct \"one-vless_reality_vision" and .id == "u1")' <<<"${xrayUsers}" >/dev/null
+        jq -e 'any(.[]; .name == "acct \"two-VLESS_Reality_Vision" and .uuid == "u2")' <<<"${singboxUsers}" >/dev/null
     )
 }
 

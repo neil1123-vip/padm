@@ -1203,6 +1203,7 @@ downloadGitHubReleaseAsset() {
     local outputPath=
     local expectedSha256=
     local actualSha256=
+    local releaseMetadataUrl=
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1247,7 +1248,12 @@ downloadGitHubReleaseAsset() {
     fi
 
     mkdir -p "${outputDir}"
-    metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/tags/${version}" 3 | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // "")}' | head -1) || metadata=
+    if [[ "${version}" == "latest" ]]; then
+        releaseMetadataUrl="https://api.github.com/repos/${repo}/releases/latest"
+    else
+        releaseMetadataUrl="https://api.github.com/repos/${repo}/releases/tags/${version}"
+    fi
+    metadata=$(fetchUrlToStdout "${releaseMetadataUrl}" 3 | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // "")}' | head -1) || metadata=
     if [[ -n "${metadata}" ]]; then
         downloadUrl=$(jq -r '.url // empty' <<<"${metadata}" 2>/dev/null)
         digest=$(jq -r '.digest // empty' <<<"${metadata}" 2>/dev/null)

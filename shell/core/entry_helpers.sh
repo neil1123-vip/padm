@@ -877,9 +877,15 @@ runThirdPartyTcpAccelerationScript() {
         return
     fi
 
+    local tmpDir
     local scriptPath
     local actualSha256
-    scriptPath=$(thirdPartyTcpScriptPath)
+    if ! padmCreateTmpRootPath tmpDir padm-tcpx.XXXXXX -d; then
+        statusCard "下载失败" "第三方脚本临时目录创建失败" "未执行任何第三方脚本"
+        bbrInstall
+        return
+    fi
+    scriptPath="${tmpDir}/tcpx.sh"
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "${PADM_THIRD_PARTY_TCP_SCRIPT_URL}" -o "${scriptPath}"
     else
@@ -887,27 +893,35 @@ runThirdPartyTcpAccelerationScript() {
     fi
 
     if [[ ! -s "${scriptPath}" ]] || ! grep -q "^#!" "${scriptPath}"; then
-        rm -f "${scriptPath}"
+        padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本为空或格式异常" "未执行任何第三方脚本"
         bbrInstall
         return
     fi
     if ! command -v sha256sum >/dev/null 2>&1; then
-        rm -f "${scriptPath}"
+        padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "缺少 sha256sum，无法校验第三方脚本" "未执行任何第三方脚本"
         bbrInstall
         return
     fi
     actualSha256=$(sha256sum "${scriptPath}" | awk '{print $1}')
     if [[ "${actualSha256}" != "${PADM_THIRD_PARTY_TCP_SCRIPT_SHA256}" ]]; then
-        rm -f "${scriptPath}"
+        padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本 sha256 校验失败" "未执行任何第三方脚本"
         bbrInstall
         return
     fi
 
-    chmod +x "${scriptPath}"
-    "${scriptPath}"
+    if ! chmod +x "${scriptPath}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        statusCard "下载失败" "第三方脚本权限设置失败" "未执行任何第三方脚本"
+        bbrInstall
+        return
+    fi
+    local scriptStatus=0
+    "${scriptPath}" || scriptStatus=$?
+    padmRemoveCleanupPath "${tmpDir}"
+    return "${scriptStatus}"
 }
 
 bbrInstall() {

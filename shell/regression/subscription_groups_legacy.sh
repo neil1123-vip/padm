@@ -394,13 +394,38 @@ YAML
     [[ "$(getDLCMatchedRuleValue openai "${singBoxConfigPath}")" == "geosite:openai" ]]
     ! grep -q 'regexp:' < <(getDLCMatchedRuleValue example.com "${singBoxConfigPath}")
     (
+        local dlcRoot="${routingRoot}/dlc-release"
+        local dlcCorePath="${dlcRoot}/core"
+        local dlcTarget="${dlcCorePath}/dlc.dat_plain.yml"
+        local seenOutputDir= seenRepo= seenVersion= seenAsset=
+        mkdir -p "${dlcCorePath}"
+        downloadFile() {
+            return 1
+        }
+        downloadGitHubReleaseAsset() {
+            [[ "${1:-}" == "-P" ]] || return 1
+            seenOutputDir=$2
+            seenRepo=$3
+            seenVersion=$4
+            seenAsset=$5
+            [[ "${seenVersion}" == "latest" ]] || return 1
+            mkdir -p "${seenOutputDir}"
+            printf -- '- name: openai\n' >"${seenOutputDir}/${seenAsset}"
+        }
+        downloadDLCPlainYAML "${dlcCorePath}" || return 1
+        [[ "${seenRepo}" == "v2fly/domain-list-community" ]]
+        [[ "${seenAsset}" == "dlc.dat_plain.yml" ]]
+        [[ -s "${dlcTarget}" ]]
+    )
+    (
         local dlcRoot="${routingRoot}/dlc-commit"
         local dlcCorePath="${dlcRoot}/core"
         local dlcTarget="${dlcCorePath}/dlc.dat_plain.yml"
         mkdir -p "${dlcCorePath}"
-        downloadFile() {
-            [[ "$1" == "-O" ]] || return 1
-            printf -- '- name: openai\n' >"$2"
+        downloadGitHubReleaseAsset() {
+            [[ "${1:-}" == "-P" ]] || return 1
+            mkdir -p "$2"
+            printf -- '- name: openai\n' >"$2/$5"
         }
         commitGeneratedFile() {
             return 1
@@ -604,6 +629,10 @@ JSON
       (.route.rules[]? | select(.action == "resolve" and .server == "padm-hosts")) and
       (.dns.rules[0].domain_regex | not) and
       (.dns.servers[] | select(.tag == "padm-hosts") | .predefined["example.org"] == "203.0.113.10")
+    ' "${singBoxConfigPath}dns.json" >/dev/null
+    addSingBoxDNSConfig "203.0.113.11" 'domain:bad"key.example' "predefined"
+    jq -e '
+      (.dns.servers[] | select(.tag == "padm-hosts") | .predefined["bad\"key.example"] == "203.0.113.11")
     ' "${singBoxConfigPath}dns.json" >/dev/null
     printf '{"dns":{"servers":["old-xray"]}}\n' >"${configPath}11_dns.json"
     if writeRoutingJsonConfig "${configPath}11_dns.json" <<'JSON' 2>/dev/null
@@ -11035,6 +11064,12 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
 }
 
 runSubscriptionOutputTlsVlessVmessTrojanRegression() {
+local quotedTlsUser='tls-"quoted-user'
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+currentHost="tls.example.com"
+defaultBase64Code vlesstcp 443 "${quotedTlsUser}" uuid-quoted "" ""
+jq -e --arg tag "${quotedTlsUser}" '.[0].tag == $tag and .[0].uuid == "uuid-quoted"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${quotedTlsUser}" >/dev/null
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vlesstcp 443 tls-user uuid-tls "" ""
@@ -11597,6 +11632,7 @@ runPadmBbrManagedCleanupRegression() (
     local thirdPartyStatus="${root}/third-party.status"
     local thirdPartyHelper="${root}/third-party.helper"
     local thirdPartyMarker="${root}/third-party.executed"
+    local thirdPartyPathLog="${root}/third-party.path"
     mkdir -p "${root}"
 
     bash -c '
@@ -11627,6 +11663,42 @@ SH
     [[ ! -e "${root}/padm-tcpx.sh" ]] || return 1
     grep -q '第三方脚本 sha256 校验失败' "${thirdPartyStatus}" || return 1
     grep -qx 'menu' "${thirdPartyHelper}" || return 1
+
+    rm -f "${thirdPartyMarker}" "${thirdPartyPathLog}"
+    : >"${thirdPartyStatus}"
+    : >"${thirdPartyHelper}"
+    bash -c '
+        set -e
+        export TMPDIR="$1"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        marker=$5
+        pathLog=$6
+        warnCard() { printf "warn:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4" >>"${helperLog}"; }
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        autoConfirm() { printf -v "$4" y; }
+        curl() {
+            [[ "${1:-}" == "-fsSL" && "${3:-}" == "-o" ]] || return 1
+            cat >"${4}" <<SH
+#!/usr/bin/env bash
+printf executed >"${marker}"
+printf "%s\n" "\$0" >"${pathLog}"
+SH
+        }
+        sha256sum() {
+            printf "%s  %s\n" "${PADM_THIRD_PARTY_TCP_SCRIPT_SHA256}" "$1"
+        }
+        runThirdPartyTcpAccelerationScript
+    ' _ "${root}" "${PROJECT_ROOT}" "${thirdPartyStatus}" "${thirdPartyHelper}" "${thirdPartyMarker}" "${thirdPartyPathLog}"
+    [[ "$(<"${thirdPartyMarker}")" == "executed" ]]
+    local executedThirdPartyPath
+    executedThirdPartyPath=$(<"${thirdPartyPathLog}")
+    [[ "${executedThirdPartyPath}" == "${root}/padm-tcpx."*/tcpx.sh ]]
+    [[ ! -e "${root}/padm-tcpx.sh" ]]
+    [[ ! -e "$(dirname -- "${executedThirdPartyPath}")" ]]
 
     bash -c '
         set -e
@@ -13684,9 +13756,11 @@ runInstallToolsAcmeResultFailureRegression() {
         local tmpRoot="${TMP_DIR}/install-tools-acme-result-tmp"
         local errorLog="${TMP_DIR}/install-tools-acme-result-error.log"
         local statusLog="${TMP_DIR}/install-tools-acme-result-status.log"
+        local acmeRunCommandLog="${TMP_DIR}/install-tools-acme-result-command.log"
         local installStatus
 
         rm -rf "${fakeHome}" "${tmpRoot}"
+        rm -f "${acmeRunCommandLog}"
         mkdir -p "${fakeHome}" "${tmpRoot}"
         mkdir -p "${fakeHome}/.acme.sh"
         printf 'legacy-state\n' >"${fakeHome}/.acme.sh/account.conf"
@@ -13712,6 +13786,7 @@ runInstallToolsAcmeResultFailureRegression() {
         }
         runWithTimeout() {
             if [[ "${2:-}" == *"acme.sh"* ]]; then
+                printf '%s\n' "${2:-}" >"${acmeRunCommandLog}"
                 mkdir -p "${fakeHome}/.acme.sh"
                 printf 'partial-install\n' >"${fakeHome}/.acme.sh/partial.txt"
             fi
@@ -13750,6 +13825,10 @@ runInstallToolsAcmeResultFailureRegression() {
         set -e
         [[ "${installStatus}" -ne 0 ]]
         grep -q "acme.sh安装结果校验失败" "${errorLog}"
+        [[ -s "${acmeRunCommandLog}" ]]
+        ! grep -qF "${tmpRoot}/padm-tls/acme.sh" "${acmeRunCommandLog}"
+        grep -Eq "${tmpRoot}/padm-tls\\.[^/]+/acme\\.sh" "${acmeRunCommandLog}"
+        [[ ! -d "${tmpRoot}/padm-tls" ]]
         [[ ! -e "${fakeHome}/.acme.sh/acme.sh" ]]
         [[ "$(<"${fakeHome}/.acme.sh/account.conf")" == "legacy-state" ]]
         [[ ! -e "${fakeHome}/.acme.sh/partial.txt" ]]
@@ -13851,6 +13930,7 @@ runInstallToolsAcmeCommitFailureRegression() {
         [[ "${installStatus}" -ne 0 ]]
         grep -q "acme安装脚本提交失败" "${errorLog}"
         [[ ! -e "${runMarker}" ]]
+        [[ ! -d "${tmpRoot}/padm-tls" ]]
         if regressionFindHasMatches "${tmpRoot}" -type f -name 'acme.sh.download.*'; then
             return 1
         fi
