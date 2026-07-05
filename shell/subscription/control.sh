@@ -1092,6 +1092,16 @@ subscriptionControlApplySync() {
             return 1
         fi
     else
+        if ! reloadCore; then
+            if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+                subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "核心重载失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
+            else
+                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+            fi
+            jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-核心重载失败}" '{ok:false, changed:true, dry_run:false, error:"reload_failed", error_detail:{type:"reload_failed", message:$message}, plan:$plan}'
+            return 1
+        fi
         subscribePort=
         subscribeType=
         subscribeDomain=
@@ -1101,6 +1111,9 @@ subscriptionControlApplySync() {
         fi
         if [[ "${refreshPublishedStatus}" -ne 0 ]]; then
             if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
+                if ! reloadCore; then
+                    subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "订阅发布刷新失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
+                fi
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
             else
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"

@@ -1737,29 +1737,23 @@ EOF
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
-runInstallRefreshFallbackMainRegression() {
+runInstallRefreshRefFailClosedRegression() {
     (
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
 
-        local fixtureDir archiveRoot outputLog oldTmpDir
-        fixtureDir="${TMP_DIR}/install-refresh-fallback-main"
+        local fixtureDir outputLog downloadLog oldTmpDir
+        fixtureDir="${TMP_DIR}/install-refresh-ref-fail-closed"
         mkdir -p "${fixtureDir}"
-        archiveRoot="${fixtureDir}/archive"
         outputLog="${fixtureDir}/refresh.log"
+        downloadLog="${fixtureDir}/downloads.log"
         oldTmpDir="${TMPDIR:-}"
-        mkdir -p "${archiveRoot}/padm-main/shell/core" "${archiveRoot}/padm-main/documents" "${archiveRoot}/padm-main/assets" "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/tmp"
+        mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/tmp"
         printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
         printf 'old-shell\n' >"${fixtureDir}/shell/marker"
         printf 'old-doc\n' >"${fixtureDir}/documents/marker"
         printf 'old-readme\n' >"${fixtureDir}/README.md"
-        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
-        printf '# bootstrap fixture\n' >"${archiveRoot}/padm-main/shell/core/bootstrap.sh"
-        printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/shell/validate_install.sh"
-        printf 'new-shell\n' >"${archiveRoot}/padm-main/shell/marker"
-        printf 'new-doc\n' >"${archiveRoot}/padm-main/documents/marker"
-        printf 'new-readme\n' >"${archiveRoot}/padm-main/README.md"
 
         (
             set +e
@@ -1776,28 +1770,36 @@ runInstallRefreshFallbackMainRegression() {
             SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
             REPO_ZIP_URL="fixture.tar.gz"
             scriptIsSafeAbsolutePath() { return 0; }
-            command() {
-                if [[ "$1" == "-v" && "$2" == "curl" ]]; then
-                    return 0
+            fetchRemoteRef() { printf 'fallback-ref\n'; }
+            downloadRepoArchive() {
+                local archiveUrl=$1
+                local extractDir=$2
+                printf '%s\n' "${archiveUrl}" >>"${downloadLog}"
+                if [[ "${archiveUrl}" == *"dead-ref.tar.gz" ]]; then
+                    return 1
                 fi
-                builtin command "$@"
+                rm -rf "${extractDir}"
+                mkdir -p "${extractDir}/padm-main/shell" "${extractDir}/padm-main/documents" || return 1
+                printf 'new-shell\n' >"${extractDir}/padm-main/shell/marker"
+                printf 'new-doc\n' >"${extractDir}/padm-main/documents/marker"
+                printf 'new-readme\n' >"${extractDir}/padm-main/README.md"
+                return 0
             }
-            curl() {
-                if [[ "$*" == *"dead-ref.tar.gz"* ]]; then
-                    return 22
-                fi
-                tar -cz -C "${archiveRoot}" padm-main
-            }
-            refreshScriptModules dead-ref
+            ( refreshScriptModules dead-ref )
+            refreshStatus=$?
+            [[ "${refreshStatus}" -ne 0 ]]
         ) >"${outputLog}" 2>&1
 
-        grep -q '指定版本完整安装包不可用，回退到主分支最新完整安装包' "${outputLog}"
-        [[ ! -f "${fixtureDir}/.padm-ref" || "$(<"${fixtureDir}/.padm-ref")" != "dead-ref" ]]
-        [[ ! -f "${fixtureDir}/.padm-entry-ref" || "$(<"${fixtureDir}/.padm-entry-ref")" != "dead-ref" ]]
+        ! grep -q '回退到主分支最新完整安装包' "${outputLog}"
+        [[ "$(wc -l <"${downloadLog}" | tr -d ' ')" == "1" ]]
+        grep -q 'dead-ref.tar.gz' "${downloadLog}"
+        ! grep -q '回退到主分支最新完整安装包' "${PROJECT_ROOT}/install.sh"
+        [[ ! -f "${fixtureDir}/.padm-ref" ]]
+        [[ ! -f "${fixtureDir}/.padm-entry-ref" ]]
         [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
-        [[ "$(<"${fixtureDir}/shell/marker")" == "new-shell" ]]
-        [[ "$(<"${fixtureDir}/documents/marker")" == "new-doc" ]]
-        [[ "$(<"${fixtureDir}/README.md")" == "new-readme" ]]
+        [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+        [[ "$(<"${fixtureDir}/documents/marker")" == "old-doc" ]]
+        [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
 
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     )
@@ -2937,6 +2939,48 @@ EOF
         ! scriptModulesReady >/dev/null
     )
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
+runInstallModuleManifestRequiresSha256Regression() {
+    local fixtureDir moduleTmpRoot oldPath oldTmpDir
+    fixtureDir="${TMP_DIR}/install-module-manifest-requires-sha256"
+    moduleTmpRoot="${TMP_DIR}/install-module-manifest-requires-sha256-tmp"
+    oldPath="${PATH}"
+    oldTmpDir="${TMPDIR:-}"
+    mkdir -p "${moduleTmpRoot}" "${fixtureDir}/missing-bin" "${fixtureDir}/shell/core"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
+    cat >"${fixtureDir}/shell/core/bootstrap.sh" <<'EOF'
+#!/usr/bin/env bash
+source "${CORE_DIR}/version.sh"
+EOF
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/validate_install.sh"
+    (
+        TMPDIR="${moduleTmpRoot}"
+        eval "$(awk '
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="${fixtureDir}"
+        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        PATH="${fixtureDir}/missing-bin"
+        hash -r
+        ! writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
+        ! moduleManifestReady "${SCRIPT_MANIFEST_FILE}"
+    )
+    PATH="${oldPath}"
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+}
+
+runSubscribeNginxLocationPatternRegression() {
+    local strictPattern='location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {'
+    grep -qF "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/subscription.sh"
+    grep -qF "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+    ! grep -qF 'location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/(.*) {' "${PROJECT_ROOT}/shell/subscription/subscription.sh"
+    ! grep -qF 'location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/(.*) {' "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
 }
 
 runInstallEarlyCapabilityListRegression() {
@@ -4504,7 +4548,7 @@ runRegressionPlatformUpdate() {
 }
 
 runRegressionPlatformRefresh() {
-    runRegressionStep install-refresh-fallback-main runInstallRefreshFallbackMainRegression &&
+    runRegressionStep install-refresh-ref-fail-closed runInstallRefreshRefFailClosedRegression &&
         runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
         runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
         runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
@@ -4543,6 +4587,8 @@ runRegressionPlatformRest() {
         runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
         runRegressionStep install-module-paths runInstallModulePathsRegression &&
         runRegressionStep install-module-manifest-complete runInstallModuleManifestCompleteRegression &&
+        runRegressionStep install-module-manifest-requires-sha256 runInstallModuleManifestRequiresSha256Regression &&
+        runRegressionStep subscribe-nginx-location-pattern runSubscribeNginxLocationPatternRegression &&
         runRegressionStep install-early-capability-list runInstallEarlyCapabilityListRegression &&
         runRegressionStep install-menu-recommended-ids runInstallMenuRecommendedIdsRegression &&
         runRegressionStep validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression &&

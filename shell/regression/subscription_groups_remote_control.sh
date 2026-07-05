@@ -809,6 +809,9 @@ JSON
             subscribeCalls=$((subscribeCalls + 1))
             subscribeArgs="$*"
         }
+        reloadCore() {
+            reloadCalls=$((${reloadCalls:-0} + 1))
+        }
         subscriptionSyncReconcileLocalServices() {
             reconcileCalls=$((reconcileCalls + 1))
         }
@@ -900,6 +903,7 @@ JSON
                     local controlledSkipResponse controlledSkipStatus
                     resetVirtualSubscriptionGroupsState
                     subscribeCalls=0
+                    reloadCalls=0
                     subscribeArgs=
                     subscriptionControlRefreshPublishedSubscriptions() {
                         return 98
@@ -920,6 +924,7 @@ JSON
                     [[ "${controlledSkipStatus}" -eq 0 ]]
                     responseHasApplySuccess "${controlledSkipResponse}" true false
                     [[ "${subscribeCalls}" == "0" ]]
+                    [[ "${reloadCalls}" == "1" ]]
                 )
 
                 subscriptionSyncPlanFromAccounts() {
@@ -927,9 +932,11 @@ JSON
                 }
                 local remoteSuccessResponse localSuccessResponse
                 local remoteSuccessStatus localSuccessStatus
+                reloadCalls=0
                 runControlApplyCapture remoteSuccessResponse remoteSuccessStatus server '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}'
                 [[ "${remoteSuccessStatus}" -eq 0 ]]
                 responseHasApplySuccess "${remoteSuccessResponse}" true false
+                [[ "${reloadCalls}" == "1" ]]
                 [[ "${subscribeCalls}" == "1" ]]
                 [[ "${subscribeArgs}" == "false false" ]]
                 [[ "${reconcileCalls}" == "0" ]]

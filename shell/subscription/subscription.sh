@@ -246,7 +246,7 @@ server {
     resolver_timeout           2s;
     client_max_body_size 100m;
     root ${nginxStaticPath};
-    location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/(.*) {
+    location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {
         default_type 'text/plain; charset=utf-8';
         alias /etc/padm/subscribe/\$1/\$2;
     }

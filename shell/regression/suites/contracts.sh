@@ -2604,7 +2604,7 @@ runPlatformFastHelperIsolationGuardRegisteredContract() {
 runPlatformRefreshChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRefresh \
-        install-refresh-fallback-main \
+        install-refresh-ref-fail-closed \
         install-refresh-keep-ref-on-lookup-fail \
         install-refresh-rejects-unsafe-script-dir \
         install-refresh-rejects-unsafe-archive \
@@ -2652,6 +2652,8 @@ runPlatformRestChildStepsContract() {
         install-entry-refresh \
         install-module-paths \
         install-module-manifest-complete \
+        install-module-manifest-requires-sha256 \
+        subscribe-nginx-location-pattern \
         install-early-capability-list \
         install-menu-recommended-ids \
         validate-install-loads-runtime \

@@ -288,7 +288,7 @@ resolveExtractedArchiveDir() {
 
 refreshScriptModules() {
     local remoteRef=$1
-    local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl fallbackRef resolvedRef downloadStatus
+    local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl resolvedRef downloadStatus
     if regressionWorktreeRefreshForbidden; then
         exit 1
     fi
@@ -311,46 +311,15 @@ refreshScriptModules() {
     downloadRepoArchive "${archiveUrl}" "${extractDir}"
     downloadStatus=$?
     if [[ "${downloadStatus}" -ne 0 ]]; then
-        if [[ -n "${remoteRef}" ]]; then
-            fallbackRef=$(fetchRemoteRef || true)
-            printf '指定版本完整安装包不可用，回退到主分支最新完整安装包\n'
-            downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"
-            downloadStatus=$?
-            if [[ "${downloadStatus}" -ne 0 ]]; then
-                printRepoArchiveDownloadFailure "${downloadStatus}"
-                scriptRemovePath "${tmpDir}" || true
-                exit 1
-            fi
-            archiveUrl="${REPO_ZIP_URL}"
-            resolvedRef="${fallbackRef:-}"
-            archiveDir="${extractDir}/${REPO_ARCHIVE_DIR}"
-        else
-            printRepoArchiveDownloadFailure "${downloadStatus}"
-            scriptRemovePath "${tmpDir}" || true
-            exit 1
-        fi
+        printRepoArchiveDownloadFailure "${downloadStatus}"
+        scriptRemovePath "${tmpDir}" || true
+        exit 1
     fi
 
     if ! archiveDir=$(resolveExtractedArchiveDir "${extractDir}" "${archiveDir}"); then
-        if [[ -n "${remoteRef}" && "${archiveUrl}" != "${REPO_ZIP_URL}" ]]; then
-            fallbackRef=$(fetchRemoteRef || true)
-            printf '指定版本完整安装包结构异常，回退到主分支最新完整安装包\n'
-            if ! downloadRepoArchive "${REPO_ZIP_URL}" "${extractDir}"; then
-                printf '完整安装包下载失败，请重新执行安装命令\n'
-                scriptRemovePath "${tmpDir}" || true
-                exit 1
-            fi
-            archiveDir=$(resolveExtractedArchiveDir "${extractDir}" "${extractDir}/${REPO_ARCHIVE_DIR}") || {
-                printf '完整安装包下载失败，请重新执行安装命令\n'
-                scriptRemovePath "${tmpDir}" || true
-                exit 1
-            }
-            resolvedRef="${fallbackRef:-}"
-        else
-            printf '完整安装包下载失败，请重新执行安装命令\n'
-            scriptRemovePath "${tmpDir}" || true
-            exit 1
-        fi
+        printf '完整安装包下载失败，请重新执行安装命令\n'
+        scriptRemovePath "${tmpDir}" || true
+        exit 1
     fi
 
     if [[ ! -d "${archiveDir}/shell" ]]; then
@@ -458,7 +427,7 @@ scriptModulesReady() {
 moduleManifestReady() {
     local manifestPath=$1
     local moduleList requiredPath expectedHash actualHash moduleCount manifestCount
-    command -v sha256sum >/dev/null 2>&1 || return 0
+    command -v sha256sum >/dev/null 2>&1 || return 1
     [[ -f "${manifestPath}" ]] || return 1
     moduleList=$(scriptCreateTempPath padm-modules.XXXXXX) || return 1
     if ! modulePaths >"${moduleList}"; then
@@ -498,7 +467,7 @@ moduleManifestReady() {
 writeModuleManifest() {
     local manifestPath=$1
     local requiredPath moduleList
-    command -v sha256sum >/dev/null 2>&1 || return 0
+    command -v sha256sum >/dev/null 2>&1 || return 1
     moduleList=$(scriptCreateTempPath padm-modules.XXXXXX) || return 1
     if ! modulePaths >"${moduleList}"; then
         rm -f "${moduleList}"
