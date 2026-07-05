@@ -1293,6 +1293,12 @@ downloadGitHubReleaseAsset() {
 # 初始化安装目录
 mkdirTools() {
     local dir status=0
+    local subscribeLocalDirs=(
+        /etc/padm/subscribe_local
+        /etc/padm/subscribe_local/default
+        /etc/padm/subscribe_local/clashMeta
+        /etc/padm/subscribe_local/sing-box
+    )
     local dirs=(
         /etc/padm/tls
         /etc/padm/subscribe_local/default
@@ -1317,6 +1323,9 @@ mkdirTools() {
     for dir in "${dirs[@]}"; do
         mkdir -p "${dir}" || status=1
     done
+    if [[ "${status}" -eq 0 ]]; then
+        chmod 700 "${subscribeLocalDirs[@]}" || status=1
+    fi
     return "${status}"
 }
 

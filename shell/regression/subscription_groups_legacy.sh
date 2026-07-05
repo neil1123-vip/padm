@@ -393,6 +393,39 @@ YAML
     [[ "$(getDLCMatchedRuleValue full:api.example.com "${singBoxConfigPath}")" == "full:api.example.com" ]]
     [[ "$(getDLCMatchedRuleValue openai "${singBoxConfigPath}")" == "geosite:openai" ]]
     ! grep -q 'regexp:' < <(getDLCMatchedRuleValue example.com "${singBoxConfigPath}")
+    (
+        local dlcRoot="${routingRoot}/dlc-commit"
+        local dlcCorePath="${dlcRoot}/core"
+        local dlcTarget="${dlcCorePath}/dlc.dat_plain.yml"
+        mkdir -p "${dlcCorePath}"
+        downloadFile() {
+            [[ "$1" == "-O" ]] || return 1
+            printf -- '- name: openai\n' >"$2"
+        }
+        commitGeneratedFile() {
+            return 1
+        }
+        if downloadDLCPlainYAML "${dlcCorePath}" 2>/dev/null; then
+            return 1
+        fi
+        [[ ! -e "${dlcTarget}" ]]
+        [[ ! -e "${dlcTarget}.tmp" ]]
+    )
+    (
+        local unsafeRoot="${routingRoot}/dlc-unsafe"
+        local downloadCalled=
+        mkdir -p "${unsafeRoot}/child"
+        cd "${unsafeRoot}/child"
+        downloadFile() {
+            downloadCalled=1
+            return 1
+        }
+        if downloadDLCPlainYAML "../outside-core" 2>/dev/null; then
+            return 1
+        fi
+        [[ -z "${downloadCalled}" ]]
+        [[ ! -e "${unsafeRoot}/outside-core" ]]
+    )
     originalContent=$(<"${singBoxConfigPath}test_route.json")
     if updateRoutingJsonConfig "${singBoxConfigPath}test_route.json" '.route.rules = [' 2>/dev/null; then
         return 1
@@ -2133,6 +2166,23 @@ runRuntimeTempDirRegression() (
     grep -qx -- '-p /etc/padm/xray/conf' "${mkdirToolsLog}"
     grep -qx -- "-p ${tmpRoot}/padm-tls" "${mkdirToolsLog}"
     grep -qx -- '-p /usr/share/nginx/html/' "${mkdirToolsLog}"
+
+    : >"${mkdirToolsLog}"
+    (
+        mkdir() {
+            printf 'mkdir:%s\n' "$*" >>"${mkdirToolsLog}"
+            return 0
+        }
+        chmod() {
+            printf 'chmod:%s\n' "$*" >>"${mkdirToolsLog}"
+            return 0
+        }
+        mkdirTools
+    )
+    grep -q -- 'chmod:700 .*subscribe_local' "${mkdirToolsLog}"
+    grep -q -- 'chmod:700 .*subscribe_local/default' "${mkdirToolsLog}"
+    grep -q -- 'chmod:700 .*subscribe_local/clashMeta' "${mkdirToolsLog}"
+    grep -q -- 'chmod:700 .*subscribe_local/sing-box' "${mkdirToolsLog}"
 
     [[ "$(padmTmpFilePath padm-runtime-direct.log)" == "${tmpRoot}/padm-runtime-direct.log" ]]
     [[ "$(traditionalTlsAlpnTestLog)" == "${tmpRoot}/padm-alpn-xray-test.log" ]]
@@ -7229,11 +7279,17 @@ EOF
     (
         local inlineRootRel="${TMP_DIR}/subscribe-local-output-inline-helpers"
         local inlineRoot inlineLocalDir
+        local modeLog
 
         mkdir -p "${inlineRootRel}"
         inlineRoot=$(cd -- "${inlineRootRel}" && pwd -P)
         inlineLocalDir="${inlineRoot}/subscribe_local"
+        modeLog="${inlineRoot}/commit-modes.log"
         export PADM_SUBSCRIBE_LOCAL_DIR="${inlineLocalDir}"
+        commitGeneratedFile() {
+            printf '%s|%s\n' "$2" "${3:-}" >>"${modeLog}"
+            originalCommitGeneratedFile "$@"
+        }
         subscribeLocalOutputCategoryDir() {
             return 91
         }
@@ -7244,9 +7300,17 @@ EOF
         padmRealAppendDefaultSubscribeLine user 'new-default-inline'
         padmRealAppendClashMetaSubscribeBlock user 'new-clash-inline'
         padmRealAppendSingBoxSubscribeLocalConfig user '. += [{"tag":"inline-user"}]'
+        padmRealAppendClashMetaSubscribeLines xhttp-user <<'EOF'
+  - name: "xhttp-user"
+    type: vless
+EOF
 
         [[ "$(<"${inlineLocalDir}/default/user")" == "new-default-inline" ]]
         [[ "$(<"${inlineLocalDir}/clashMeta/user")" == "new-clash-inline" ]]
+        grep -q 'xhttp-user' "${inlineLocalDir}/clashMeta/xhttp-user"
+        grep -Fxq "${inlineLocalDir}/default/user|600" "${modeLog}"
+        grep -Fxq "${inlineLocalDir}/clashMeta/user|600" "${modeLog}"
+        grep -Fxq "${inlineLocalDir}/clashMeta/xhttp-user|600" "${modeLog}"
         jq -e '.[0].tag == "inline-user"' "${inlineLocalDir}/sing-box/user" >/dev/null
     )
 )
@@ -7278,10 +7342,12 @@ runSubscribeSaltWriteTransactionRegression() (
     ! compgen -G "${root}/.subscribeSalt.subscribe.*" >/dev/null
 
     commitGeneratedFile() {
+        printf '%s|%s\n' "$2" "${3:-}" >"${root}/commit-mode.log"
         originalCommitGeneratedFile "$@"
     }
     writeSubscribeSalt "${saltFile}" "new-salt"
     [[ "$(<"${saltFile}")" == "new-salt" ]]
+    grep -Fxq "${saltFile}|600" "${root}/commit-mode.log"
     ! compgen -G "${root}/.subscribeSalt.subscribe.*" >/dev/null
 )
 
@@ -8238,13 +8304,17 @@ runSubscribeUserOutputTransactionRegression() {
     writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
     (
+        local downloadMarker="${root}/sing-box-template-download.log"
         SCRIPT_DIR="${root}/missing-sing-box-template"
         downloadFile() {
-            return 1
+            printf 'download\n' >"${downloadMarker}"
+            [[ "$1" == "-O" ]] || return 1
+            cp "${PROJECT_ROOT}/documents/sing-box.json" "$2"
         }
         if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
             return 1
         fi
+        [[ ! -e "${downloadMarker}" ]]
     )
     [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
     [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
@@ -8405,7 +8475,8 @@ runSubscribeUserOutputTransactionRegression() {
     subscribeSalt=
     resolveSubscribeSalt "${localDir}/subscribeSalt" renew
     [[ -s "${localDir}/subscribeSalt" ]]
-    [[ -n "${subscribeSalt}" ]]
+    [[ "${subscribeSalt}" =~ ^[0-9a-f]{32}$ ]]
+    [[ "$(<"${localDir}/subscribeSalt")" == "${subscribeSalt}" ]]
 
     subscribeDomain=subscribe.example.com
     currentHost=

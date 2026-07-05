@@ -2079,7 +2079,7 @@ writeSubscribeSalt() {
     subscribeSaltFile=$(padmResolveManagedAbsolutePath "${subscribeSaltFile}") || return 1
     padmCreateTempFileForTarget stagedPath "${subscribeSaltFile}" subscribe || return 1
     printf '%s\n' "${salt}" >"${stagedPath}" || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
-    commitGeneratedFile "${stagedPath}" "${subscribeSaltFile}" 644 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
+    commitGeneratedFile "${stagedPath}" "${subscribeSaltFile}" 600 || { padmRemoveCleanupPath "${stagedPath}"; return 1; }
 }
 
 resolveSubscribeSalt() {
@@ -2100,13 +2100,13 @@ resolveSubscribeSalt() {
             subscribeSalt=${existingSalt}
         fi
     elif [[ -n "${renewSalt}" || -n "${AUTO_INSTALL:-}" ]]; then
-        subscribeSalt=$(initRandomSalt)
+        subscribeSalt=$(initRandomSalt) || return 1
     else
         autoRead subscribe_salt "请输入salt值, [回车]使用随机:" subscribeSalt
     fi
 
     if [[ -z "${subscribeSalt}" ]]; then
-        subscribeSalt=$(initRandomSalt)
+        subscribeSalt=$(initRandomSalt) || return 1
     fi
     writeSubscribeSalt "${subscribeSaltFile}" "${subscribeSalt}"
 }
@@ -2362,14 +2362,13 @@ renderSubscribeUserOutputs() {
             padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
-        [[ -z "${showStatus}" ]] && statusCard "sing-box 通用配置" "正在下载 sing-box 通用配置文件"
+        [[ -z "${showStatus}" ]] && statusCard "sing-box 通用配置" "正在生成 sing-box 通用配置文件"
         localSingBoxTemplate="${SCRIPT_DIR:-/etc/padm}/documents/sing-box.json"
-        if [[ -f "${localSingBoxTemplate}" ]]; then
-            cp "${localSingBoxTemplate}" "${singBoxPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-        elif ! downloadFile -O "${singBoxPath}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/documents/sing-box.json"; then
+        if [[ ! -f "${localSingBoxTemplate}" ]]; then
             padmRemoveCleanupPath "${stageDir}"
             return 1
         fi
+        cp "${localSingBoxTemplate}" "${singBoxPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         padmCreateTempFileForTarget singBoxTmpPath "${singBoxPath}" singbox || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         if ! jq --slurpfile localOutbounds "${localBase}/sing-box/${email}" '
           ($localOutbounds[0] | map(.tag)) as $tags |
@@ -2498,13 +2497,22 @@ showSubscriptionUrlCard() {
 
 # 随机订阅 salt
 initRandomSalt() {
-    local chars="abcdefghijklmnopqrtuxyz"
-    local initCustomPath=
-    for i in {1..10}; do
-        echo "${i}" >/dev/null
-        initCustomPath+="${chars:RANDOM%${#chars}:1}"
-    done
-    echo "${initCustomPath}"
+    local salt=
+    if command -v openssl >/dev/null 2>&1; then
+        salt=$(openssl rand -hex 16 2>/dev/null || true)
+        if [[ "${salt}" =~ ^[0-9a-f]{32}$ ]]; then
+            printf '%s\n' "${salt}"
+            return 0
+        fi
+    fi
+    if [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
+        salt=$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || true)
+        if [[ "${salt}" =~ ^[0-9a-f]{32}$ ]]; then
+            printf '%s\n' "${salt}"
+            return 0
+        fi
+    fi
+    return 1
 }
 
 manageRealityTarget() {

@@ -19,7 +19,7 @@ subscribeLocalOutputAppendLine() {
         cp -p "${targetPath}" "${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     fi
     printf '%s\n' "${line}" >>"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 600 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 initSubscribeLocalConfig() {
@@ -57,7 +57,7 @@ appendClashMetaSubscribeLines() {
         cp -p "${targetPath}" "${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
     fi
     cat >>"${tmpPath}" || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
-    commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
+    commitGeneratedFile "${tmpPath}" "${targetPath}" 600 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
 serializeVlessRealityVisionLink() {

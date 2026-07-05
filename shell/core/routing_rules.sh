@@ -3,27 +3,27 @@
 # 下载 dlc.dat_plain.yml 到核心目录
 downloadDLCPlainYAML() {
     local corePath=$1
-    local dlcFilePath="${corePath}/dlc.dat_plain.yml"
-    local tmpFilePath="${dlcFilePath}.tmp"
+    local dlcFilePath tmpFilePath
+    local dlcDownloadURL="https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat_plain.yml"
 
     if [[ -z "${corePath}" ]]; then
         return 1
     fi
 
-    mkdir -p "${corePath}" >/dev/null 2>&1
+    corePath=$(padmResolveManagedAbsolutePath "${corePath}") || return 1
+    padmEnsureSafeDirectory "${corePath}" || return 1
+    dlcFilePath="${corePath}/dlc.dat_plain.yml"
     if [[ -s "${dlcFilePath}" ]]; then
         return 0
     fi
-    local dlcDownloadURL="https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat_plain.yml"
-    downloadFile -O "${tmpFilePath}" "${dlcDownloadURL}" >/dev/null 2>&1
 
-    # shellcheck disable=SC2181
-    if [[ "$?" -ne 0 || ! -s "${tmpFilePath}" ]]; then
-        rm -f "${tmpFilePath}" >/dev/null 2>&1
+    padmCreateTempFileForTarget tmpFilePath "${dlcFilePath}" dlc || return 1
+    if ! downloadFile -O "${tmpFilePath}" "${dlcDownloadURL}" >/dev/null 2>&1 || [[ ! -s "${tmpFilePath}" ]]; then
+        padmRemoveCleanupPath "${tmpFilePath}"
         return 1
     fi
 
-    mv "${tmpFilePath}" "${dlcFilePath}" >/dev/null 2>&1
+    commitGeneratedFile "${tmpFilePath}" "${dlcFilePath}" 644 || { padmRemoveCleanupPath "${tmpFilePath}"; return 1; }
 }
 
 isDomainFormat() {

@@ -627,6 +627,31 @@ runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression() {
         [[ "$(<"${staticDir}/check")" == "marker" ]]
         [[ ! -e "${root}/render.log" ]]
         ! compgen -G "${root}/.static.*" >/dev/null
+
+        local missingRoot="${TMP_DIR}/install-nginx-static-missing-local-template"
+        local missingScriptDir="${missingRoot}/script"
+        local missingStaticDir="${missingRoot}/static"
+        local downloadMarker="${missingRoot}/download.log"
+        mkdir -p "${missingScriptDir}/assets/static-sites/templates" "${missingStaticDir}"
+        printf 'keep\n' >"${missingStaticDir}/index.html"
+        SCRIPT_DIR="${missingScriptDir}"
+        nginxStaticPath="${missingStaticDir}"
+        downloadFile() {
+            printf 'download\n' >"${downloadMarker}"
+            [[ "$1" == "-O" ]] || return 1
+            printf 'zip\n' >"$2"
+        }
+        unzip() {
+            return 0
+        }
+        renderNginxStaticTemplate() {
+            printf 'render\n' >"${missingRoot}/render.log"
+        }
+
+        ! installNginxStaticTemplate 1
+        [[ ! -e "${downloadMarker}" ]]
+        [[ -f "${missingStaticDir}/index.html" ]] || return 1
+        [[ "$(<"${missingStaticDir}/index.html")" == "keep" ]]
     )
 }
 

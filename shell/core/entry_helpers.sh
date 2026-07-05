@@ -361,14 +361,14 @@ installNginxStaticTemplate() {
             errorCard "静态站点模板准备失败"
             return 1
         }
-    elif ! downloadFile -O "${targetZip}" "https://raw.githubusercontent.com/neil1123-vip/padm/main/assets/static-sites/templates/html${templateIndex}.zip"; then
+    else
         cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板下载失败"
+        errorCard "静态站点模板缺失"
         return 1
     fi
     if [[ ! -f "${targetZip}" ]]; then
         cleanupInstallSyncPath "${stageRoot}"
-        errorCard "静态站点模板下载失败"
+        errorCard "静态站点模板准备失败"
         return 1
     fi
     if ! unzip -o "${targetZip}" -d "${stageStaticPath}" >/dev/null; then
