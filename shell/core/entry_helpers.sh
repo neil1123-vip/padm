@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-PADM_THIRD_PARTY_TCP_SCRIPT_URL="https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/5839b649aea456a49331026bb2352cf3c5563421/tcpx.sh"
-PADM_THIRD_PARTY_TCP_SCRIPT_SHA256="3178202a6cf70a33305ee3506c3e9aea9b06d5263d8fa516e4c6768b129c1d14"
+PADM_THIRD_PARTY_TCP_SCRIPT_URL="https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh"
 
 # 初始化 Nginx 证书验证配置
 entryHelperTmpPath() {
@@ -879,7 +878,6 @@ runThirdPartyTcpAccelerationScript() {
 
     local tmpDir
     local scriptPath
-    local actualSha256
     if ! padmCreateTmpRootPath tmpDir padm-tcpx.XXXXXX -d; then
         statusCard "下载失败" "第三方脚本临时目录创建失败" "未执行任何第三方脚本"
         bbrInstall
@@ -895,19 +893,6 @@ runThirdPartyTcpAccelerationScript() {
     if [[ ! -s "${scriptPath}" ]] || ! grep -q "^#!" "${scriptPath}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本为空或格式异常" "未执行任何第三方脚本"
-        bbrInstall
-        return
-    fi
-    if ! command -v sha256sum >/dev/null 2>&1; then
-        padmRemoveCleanupPath "${tmpDir}"
-        statusCard "下载失败" "缺少 sha256sum，无法校验第三方脚本" "未执行任何第三方脚本"
-        bbrInstall
-        return
-    fi
-    actualSha256=$(sha256sum "${scriptPath}" | awk '{print $1}')
-    if [[ "${actualSha256}" != "${PADM_THIRD_PARTY_TCP_SCRIPT_SHA256}" ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        statusCard "下载失败" "第三方脚本 sha256 校验失败" "未执行任何第三方脚本"
         bbrInstall
         return
     fi

@@ -6095,6 +6095,27 @@ runWarpConfigSafeDirRegression() (
 
     (
         source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        PADM_WARP_DIR="${root}/warp-latest"
+        warpRegCoreCPUVendor="warp-reg-linux-amd64"
+        local versionLog="${root}/warp-download-version.log"
+        mkdir -p "${PADM_WARP_DIR}"
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        autoRead() { printf -v "$3" y; }
+        errorCard() { return 1; }
+        downloadGitHubReleaseAsset() {
+            [[ "$1" == "-P" && "$3" == "badafans/warp-reg" ]] || return 1
+            printf '%s\n' "$4" >"${versionLog}"
+            printf 'binary\n' >"${2%/}/$5"
+        }
+        installWarpReg >/dev/null 2>&1
+        [[ "$(<"${versionLog}")" == "latest" ]]
+        [[ -s "${PADM_WARP_DIR}/warp-reg" ]]
+    )
+
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
         coreInstallType=1
         configPath="${root}/xray/"
         singBoxConfigPath=
@@ -11633,38 +11654,11 @@ runPadmBbrManagedCleanupRegression() (
     local thirdPartyHelper="${root}/third-party.helper"
     local thirdPartyMarker="${root}/third-party.executed"
     local thirdPartyPathLog="${root}/third-party.path"
+    local thirdPartyUrlLog="${root}/third-party.url"
+    local thirdPartyHashLog="${root}/third-party.hash"
     mkdir -p "${root}"
 
-    bash -c '
-        set -e
-        export TMPDIR="$1"
-        source "$2/shell/core/runtime.sh"
-        source "$2/shell/core/entry_helpers.sh"
-        statusLog=$3
-        helperLog=$4
-        marker=$5
-        warnCard() { printf "warn:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4" >>"${helperLog}"; }
-        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
-        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
-        autoConfirm() { printf -v "$4" y; }
-        curl() {
-            [[ "${1:-}" == "-fsSL" && "${3:-}" == "-o" ]] || return 1
-            cat >"${4}" <<SH
-#!/usr/bin/env bash
-printf executed >"${marker}"
-SH
-        }
-        sha256sum() {
-            printf "0000000000000000000000000000000000000000000000000000000000000000  %s\n" "$1"
-        }
-        runThirdPartyTcpAccelerationScript
-    ' _ "${root}" "${PROJECT_ROOT}" "${thirdPartyStatus}" "${thirdPartyHelper}" "${thirdPartyMarker}"
-    [[ ! -e "${thirdPartyMarker}" ]] || return 1
-    [[ ! -e "${root}/padm-tcpx.sh" ]] || return 1
-    grep -q '第三方脚本 sha256 校验失败' "${thirdPartyStatus}" || return 1
-    grep -qx 'menu' "${thirdPartyHelper}" || return 1
-
-    rm -f "${thirdPartyMarker}" "${thirdPartyPathLog}"
+    rm -f "${thirdPartyMarker}" "${thirdPartyPathLog}" "${thirdPartyUrlLog}" "${thirdPartyHashLog}"
     : >"${thirdPartyStatus}"
     : >"${thirdPartyHelper}"
     bash -c '
@@ -11676,12 +11670,15 @@ SH
         helperLog=$4
         marker=$5
         pathLog=$6
+        urlLog=$7
+        hashLog=$8
         warnCard() { printf "warn:%s|%s|%s|%s\n" "$1" "$2" "$3" "$4" >>"${helperLog}"; }
         statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
         bbrInstall() { printf "menu\n" >>"${helperLog}"; }
         autoConfirm() { printf -v "$4" y; }
         curl() {
             [[ "${1:-}" == "-fsSL" && "${3:-}" == "-o" ]] || return 1
+            printf "%s\n" "${2}" >"${urlLog}"
             cat >"${4}" <<SH
 #!/usr/bin/env bash
 printf executed >"${marker}"
@@ -11689,11 +11686,15 @@ printf "%s\n" "\$0" >"${pathLog}"
 SH
         }
         sha256sum() {
-            printf "%s  %s\n" "${PADM_THIRD_PARTY_TCP_SCRIPT_SHA256}" "$1"
+            printf "sha256sum:%s\n" "$1" >>"${hashLog}"
+            return 1
         }
         runThirdPartyTcpAccelerationScript
-    ' _ "${root}" "${PROJECT_ROOT}" "${thirdPartyStatus}" "${thirdPartyHelper}" "${thirdPartyMarker}" "${thirdPartyPathLog}"
+    ' _ "${root}" "${PROJECT_ROOT}" "${thirdPartyStatus}" "${thirdPartyHelper}" "${thirdPartyMarker}" "${thirdPartyPathLog}" "${thirdPartyUrlLog}" "${thirdPartyHashLog}"
     [[ "$(<"${thirdPartyMarker}")" == "executed" ]]
+    grep -qxF 'https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh' "${thirdPartyUrlLog}"
+    ! grep -Eq '/[0-9a-f]{40}/tcpx\.sh$' "${thirdPartyUrlLog}"
+    [[ ! -s "${thirdPartyHashLog}" ]]
     local executedThirdPartyPath
     executedThirdPartyPath=$(<"${thirdPartyPathLog}")
     [[ "${executedThirdPartyPath}" == "${root}/padm-tcpx."*/tcpx.sh ]]
