@@ -450,6 +450,9 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         rm -f "${nginxRoot}/padm-control-wg.conf"
         ensureSubscriptionWireGuardNginxConfig
         grep -q 'listen 10.77.0.1:39778;' "${nginxRoot}/padm-control-wg.conf"
+        grep -q 'proxy_connect_timeout 5s;' "${nginxRoot}/padm-control-wg.conf"
+        grep -q 'proxy_send_timeout 180s;' "${nginxRoot}/padm-control-wg.conf"
+        grep -q 'proxy_read_timeout 180s;' "${nginxRoot}/padm-control-wg.conf"
     )
 }
 
