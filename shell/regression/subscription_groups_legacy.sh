@@ -11315,6 +11315,17 @@ JSON
     eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
 
     if remoteSubscribeFetchPartSelected unique; then
+        (
+        local curlArgsLog="${TMP_DIR}/remote-subscribe-curl-args.log"
+        curl() {
+            printf '%s\n' "$*" >"${curlArgsLog}"
+            return 23
+        }
+        if fetchRemoteSubscribeContent "https://remote.example/s/default/${emailMd5}" >/dev/null 2>&1; then
+            return 1
+        fi
+        grep -q -- '--max-filesize 1048576' "${curlArgsLog}"
+        )
         printf '%s\n' old same >"${uniqueFile}"
         appendUniqueLines $'same\nnew\nnew' "${uniqueFile}"
         cmp -s "${uniqueFile}" <(printf '%s\n' old same new)
@@ -11339,7 +11350,8 @@ JSON
             printf '%s\n' '[{"tag":"sub_team"}]'
             ;;
         *remote2.example*/s/default/*)
-            printf '%s\n' 'not-base64'
+            printf '%s' 'vless://bad@remote2.example:443#sub_team' | base64
+            printf '@@'
             ;;
         *remote2.example*/s/sing-box_profiles/*)
             if [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-partial}" == "fail-singbox-merge" ]]; then
@@ -11395,6 +11407,9 @@ JSON
         updateRemoteSubscribe "${emailMd5}" "${email}"
         grep -qxF -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}"
         grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
+        if grep -qxF 'vless://bad@remote2.example:443#sub_team_r2' "${publicDir}/default/${emailMd5}"; then
+            return 1
+        fi
         grep -qxF 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}"
         jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
         [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]

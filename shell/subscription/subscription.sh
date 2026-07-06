@@ -292,7 +292,7 @@ unInstallSubscribe() {
 
 fetchRemoteSubscribeContent() {
     local url=$1
-    curl -fsSL --connect-timeout 5 --max-time 15 "${url}" 2>/dev/null
+    curl -fsSL --connect-timeout 5 --max-time 15 --max-filesize 1048576 "${url}" 2>/dev/null
 }
 
 appendUniqueLines() {
@@ -390,6 +390,7 @@ updateRemoteSubscribe() {
         local remoteUrl=
         local clashMetaProxies=
         local default=
+        local decodedDefault=
         local singBoxSubscribe=
         local controlledResponse=
         local controlledPayload=
@@ -441,7 +442,11 @@ updateRemoteSubscribe() {
 
         default=$(<"${defaultFile}")
         if [[ -n "${default}" && "${default}" != *nginx* ]]; then
-            default=$(echo "${default}" | { base64 -d 2>/dev/null || true; } | sed "s/#${email}/#${email}_${serverAlias}/g")
+            if decodedDefault=$(printf '%s' "${default}" | base64 -d 2>/dev/null); then
+                default=$(printf '%s' "${decodedDefault}" | sed "s/#${email}/#${email}_${serverAlias}/g")
+            else
+                default=
+            fi
             if [[ -n "${default}" ]]; then
                 if ! appendUniqueLines "${default}" "${defaultTarget}"; then
                     padmRemoveCleanupPath "${tmpDir}"
