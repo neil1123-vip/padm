@@ -145,6 +145,7 @@ subscriptionRemoteControlRequest() {
         -sS
         --connect-timeout 5
         --max-time "${maxTime}"
+        --max-filesize 1048576
         -H "Content-Type: application/json"
         -H "Authorization: Bearer ${token}"
         -X POST
@@ -237,6 +238,7 @@ subscriptionRemoteControlHealth() {
         -sS
         --connect-timeout 5
         --max-time 15
+        --max-filesize 1048576
         -H "Authorization: Bearer ${token}"
         -w '\n%{http_code}'
         "${url}"
@@ -667,7 +669,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             self.respond(401, {"ok": False, "error": "unauthorized", "error_detail": {"type": "unauthorized", "message": "控制 token 验证失败"}})
             return
-        length = int(self.headers.get("Content-Length", "0") or "0")
+        try:
+            length = int(self.headers.get("Content-Length", "0") or "0")
+        except ValueError:
+            self.respond(400, {"ok": False, "error": "invalid_payload", "error_detail": {"type": "invalid_payload", "message": "Content-Length 无效"}})
+            return
+        if length < 0:
+            self.respond(400, {"ok": False, "error": "invalid_payload", "error_detail": {"type": "invalid_payload", "message": "Content-Length 无效"}})
+            return
         if length > MAX_BODY_SIZE:
             self.respond(413, {"ok": False, "error": "payload_too_large"})
             return

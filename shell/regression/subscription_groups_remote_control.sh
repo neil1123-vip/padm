@@ -254,6 +254,9 @@ runRemoteControlInlineRequestHelpersRegression() (
     local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
     local requestResponse
     local healthResponse
+    local curlArgsLog="${TMP_DIR}/remote-control-inline-request-curl-args.log"
+
+    : >"${curlArgsLog}"
 
     subscriptionRemoteControlUrl() {
         return 97
@@ -271,6 +274,7 @@ runRemoteControlInlineRequestHelpersRegression() (
         printf 'https://control.example/%s\n' "$2"
     }
     curl() {
+        printf '%s\n' "$*" >>"${curlArgsLog}"
         case "$*" in
         *'https://control.example/sync'*)
             printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
@@ -299,6 +303,7 @@ runRemoteControlInlineRequestHelpersRegression() (
     [[ "${healthResponse}" == *'"capabilities":["health","sync"]'* ]] || return 1
     [[ "${healthResponse}" == *'"id":"edge-remote"'* ]] || return 1
     [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
+    [[ "$(grep -c -- '--max-filesize 1048576' "${curlArgsLog}")" == "2" ]] || return 1
 )
 
 runRemoteControlInlineWireGuardPeerHelpersRegression() (
@@ -1889,6 +1894,7 @@ SH
     python3 <<'PY' >"${responseFile}"
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -1929,6 +1935,41 @@ def request(method, endpoint, payload="", token_override=None):
         body = None
     return {"status": status, "body": body}
 
+def raw_post(endpoint, content_length):
+    payload = "{}"
+    request_text = (
+        f"POST /s/control/{endpoint} HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        f"Authorization: Bearer {token}\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {content_length}\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        f"{payload}"
+    )
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=10) as sock:
+            sock.sendall(request_text.encode("utf-8"))
+            chunks = []
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except Exception as error:
+        return {"status": 0, "error": type(error).__name__, "body": None}
+    response = b"".join(chunks).decode("utf-8", errors="replace")
+    head, _, body_text = response.partition("\r\n\r\n")
+    try:
+        status = int(head.split()[1])
+    except Exception:
+        return {"status": 0, "body": None}
+    try:
+        body = json.loads(body_text) if body_text else None
+    except json.JSONDecodeError:
+        body = None
+    return {"status": status, "body": body}
+
 results = {}
 set_mode("noise")
 for _ in range(80):
@@ -1946,6 +1987,7 @@ results["sync_empty_payload"] = request("POST", "sync", "")
 results["sync_invalid_payload"] = request("POST", "sync", "not-json")
 results["subscribe_empty_payload"] = request("POST", "subscribe", "")
 results["subscribe_invalid_payload"] = request("POST", "subscribe", "not-json")
+results["sync_bad_content_length"] = raw_post("sync", "abc")
 
 set_mode("failed")
 results["sync_failed"] = request("POST", "sync", '{"desired_users":[]}')
@@ -1965,6 +2007,7 @@ PY
     jq -e '.sync_invalid_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.subscribe_empty_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.subscribe_invalid_payload.status == 400' "${responseFile}" >/dev/null
+    jq -e '.sync_bad_content_length.status == 400 and .sync_bad_content_length.body.error == "invalid_payload"' "${responseFile}" >/dev/null
     jq -e '.sync_failed.status == 503 and .sync_failed.body.error == "script_failed" and .sync_failed.body.error_detail.type == "script_failed" and .sync_failed.body.exit_code == 7' "${responseFile}" >/dev/null
     jq -e '.sync_timeout.status == 503 and .sync_timeout.body.error == "script_timeout" and .sync_timeout.body.error_detail.type == "script_timeout"' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_response.status == 503 and .sync_invalid_response.body.error == "invalid_response" and .sync_invalid_response.body.error_detail.type == "invalid_response"' "${responseFile}" >/dev/null
