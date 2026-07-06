@@ -887,17 +887,20 @@ JSON
 
         if [[ "${runLightApplySections}" == "true" ]]; then
             if [[ "${runLightApplyBasicSections}" == "true" ]]; then
-                local invalidEmptyIdResponse invalidDuplicateResponse invalidUuidResponse
-                local invalidEmptyIdStatus invalidDuplicateStatus invalidUuidStatus
+                local invalidEmptyIdResponse invalidDuplicateResponse invalidUuidResponse invalidUuidStringResponse
+                local invalidEmptyIdStatus invalidDuplicateStatus invalidUuidStatus invalidUuidStringStatus
                 runControlApplyCapture invalidEmptyIdResponse invalidEmptyIdStatus local '{"desired_users":[{"id":"","uuid":""}]}'
                 runControlApplyCapture invalidDuplicateResponse invalidDuplicateStatus local '{"desired_users":[{"id":"team-a"},{"id":"team-a"}]}'
                 runControlApplyCapture invalidUuidResponse invalidUuidStatus local '{"desired_users":[{"id":"team-a","uuid":123}]}'
+                runControlApplyCapture invalidUuidStringResponse invalidUuidStringStatus local '{"desired_users":[{"id":"team-a","uuid":"not-a-uuid"}]}'
                 [[ "${invalidEmptyIdStatus}" -ne 0 ]]
                 [[ "${invalidDuplicateStatus}" -ne 0 ]]
                 [[ "${invalidUuidStatus}" -ne 0 ]]
+                [[ "${invalidUuidStringStatus}" -ne 0 ]]
                 responseHasErrorType "${invalidEmptyIdResponse}" invalid_payload
                 responseHasErrorType "${invalidDuplicateResponse}" invalid_payload
                 responseHasErrorType "${invalidUuidResponse}" invalid_payload
+                responseHasErrorType "${invalidUuidStringResponse}" invalid_payload
 
                 (
                     local controlledSkipResponse controlledSkipStatus
