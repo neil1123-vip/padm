@@ -571,7 +571,7 @@ parseHostPort() {
 validateRealityTarget() {
     local targetHost=$1
     local targetPort=$2
-    [[ -n "${targetHost}" && "${targetPort}" =~ ^[0-9]+$ && ${targetPort} -ge 1 && ${targetPort} -le 65535 ]]
+    padmIsValidHostName "${targetHost}" && [[ "${targetPort}" =~ ^[0-9]+$ && ${targetPort} -ge 1 && ${targetPort} -le 65535 ]]
 }
 
 collectTLSProfile() {
@@ -599,6 +599,12 @@ collectEntryProfile() {
         realityEntryHost=${currentHost}
     else
         realityEntryHost=$(getPublicIP)
+    fi
+    if ! padmIsValidHostName "${realityEntryHost}"; then
+        if declare -F errorCard >/dev/null 2>&1; then
+            errorCard "Reality 客户端入口不合法" "${realityEntryHost}"
+        fi
+        return 1
     fi
 }
 
@@ -665,6 +671,14 @@ collectRealityProfile() {
         ;;
     esac
 
+    if ! validateRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}"; then
+        realityTargetStatusBlock red "REALITY 目标站" "伪装目标不合法: ${realityTargetHost}:${realityTargetPort:-443}"
+        return 1
+    fi
+    if ! padmIsValidHostName "${realitySNI:-${realityTargetHost}}"; then
+        realityTargetStatusBlock red "Reality SNI" "SNI 不合法: ${realitySNI:-${realityTargetHost}}"
+        return 1
+    fi
     if [[ "${realityTargetHost}" =~ ^[0-9.]+$ && -z "${AUTO_REALITY_SERVER_NAME:-}" ]]; then
         statusCard "Reality SNI 提醒" "目标站是 IP" "建议在高级场景手动指定 --reality-server-name" "或确认客户端 SNI 行为"
     fi

@@ -2908,14 +2908,14 @@ setXHTTPPathHost() {
     currentHost=$(jq -r '.inbounds[0].streamSettings.xhttpSettings.host // ""' "${configFile}" 2>/dev/null)
     autoRead xhttp_path "请输入 XHTTP path，[回车保持 ${currentPath}]:" newPath
     newPath=${newPath:-${currentPath}}
-    if [[ ! "${newPath}" =~ ^/[^[:space:]]*$ ]]; then
-        errorCard "path 必须以 / 开头且不能包含空格"
+    if ! padmIsSafeRoutePath "${newPath}"; then
+        errorCard "path 不合法"
         return 1
     fi
     autoRead xhttp_host "请输入 XHTTP host，[回车保持 ${currentHost}]:" newHost
     newHost=${newHost:-${currentHost}}
-    if [[ -z "${newHost}" || "${newHost}" =~ [[:space:]/] ]]; then
-        errorCard "host 不能为空，且不能包含空格或 /"
+    if ! padmIsValidHostName "${newHost}"; then
+        errorCard "host 不合法"
         return 1
     fi
     echoContent title "\n┌─ XHTTP path/host 提醒 ─────────────────────────────"
@@ -2967,7 +2967,7 @@ setXHTTPDownloadSettings() {
     menuLine "下行配置完全独立，填错会导致连接失败"
     menuClose
     autoRead xhttp_download_address "请输入下行入口 address/IP/域名:" address
-    [[ -n "${address}" && ! "${address}" =~ [[:space:]/] ]] || { errorCard "address 不合法"; return 1; }
+    padmIsValidConnectAddress "${address}" || { errorCard "address 不合法"; return 1; }
     autoRead xhttp_download_port "请输入下行入口端口[回车默认 443]:" port
     port=${port:-443}
     [[ "${port}" =~ ^[0-9]+$ && "${port}" -ge 1 && "${port}" -le 65535 ]] || { errorCard "端口不合法"; return 1; }
@@ -2980,6 +2980,9 @@ setXHTTPDownloadSettings() {
     host=${host:-${serverName}}
     autoRead xhttp_download_path "请输入下行 XHTTP path[回车默认沿用当前 path]:" path
     path=${path:-$(jq -r '.inbounds[0].streamSettings.xhttpSettings.path // ""' "${configFile}" 2>/dev/null)}
+    padmIsValidHostName "${serverName}" || { errorCard "serverName 不合法"; return 1; }
+    padmIsValidHostName "${host}" || { errorCard "host 不合法"; return 1; }
+    padmIsSafeRoutePath "${path}" || { errorCard "path 不合法"; return 1; }
     autoRead xhttp_download_alpn "请输入下行 ALPN[h2/h3，回车默认 h3]:" alpn
     alpn=${alpn:-h3}
     [[ "${alpn}" == "h2" || "${alpn}" == "h3" ]] || { errorCard "ALPN 仅支持 h2 或 h3"; return 1; }

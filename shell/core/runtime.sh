@@ -63,6 +63,69 @@ padmManagedPathWithinRoot() {
     printf '%s\n' "${rootPath}/${relativePath}"
 }
 
+padmIsValidHostName() {
+    local host=$1
+    local label octet
+    [[ -n "${host}" && ${#host} -le 253 ]] || return 1
+    [[ "${host}" != *[[:space:]]* && "${host}" != *[\"\'\\/:\;\,\{\}\[\]\(\)]* ]] || return 1
+    if [[ "${host}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+        local IFS=.
+        read -r -a octets <<<"${host}"
+        for octet in "${octets[@]}"; do
+            [[ "${octet}" =~ ^[0-9]+$ ]] && ((10#${octet} <= 255)) || return 1
+        done
+        return 0
+    fi
+    [[ "${host}" != .* && "${host}" != *. && "${host}" != *..* ]] || return 1
+    local IFS=.
+    read -r -a labels <<<"${host}"
+    for label in "${labels[@]}"; do
+        [[ ${#label} -ge 1 && ${#label} -le 63 ]] || return 1
+        [[ "${label}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+    done
+}
+
+padmIsValidIPv6Address() {
+    local address=$1
+    local part
+    local -a parts
+    [[ -n "${address}" && ${#address} -le 45 ]] || return 1
+    [[ "${address}" == *:*:* && "${address}" =~ ^[0-9A-Fa-f:]+$ ]] || return 1
+    [[ "${address}" != *:::* && "${address}" != *::*::* ]] || return 1
+    [[ "${address}" == ::* || "${address}" != :* ]] || return 1
+    [[ "${address}" == *:: || "${address}" != *: ]] || return 1
+
+    local IFS=:
+    read -r -a parts <<<"${address}"
+    if [[ "${address}" != *::* ]]; then
+        ((${#parts[@]} == 8)) || return 1
+    else
+        ((${#parts[@]} <= 8)) || return 1
+    fi
+    for part in "${parts[@]}"; do
+        [[ -z "${part}" || "${part}" =~ ^[0-9A-Fa-f]{1,4}$ ]] || return 1
+    done
+}
+
+padmIsValidConnectAddress() {
+    padmIsValidHostName "$1" || padmIsValidIPv6Address "$1"
+}
+
+padmIsSafeRoutePath() {
+    local path=$1
+    [[ "${path}" =~ ^/[A-Za-z0-9._~/-]+$ ]] || return 1
+    [[ "${path}" != *'//'*
+        && "${path}" != *'/../'*
+        && "${path}" != '/../'*
+        && "${path}" != *'/..'
+        && "${path}" != *'/%'* ]]
+}
+
+padmIsSafeRoutePathSegment() {
+    local segment=$1
+    [[ -n "${segment}" && ${#segment} -le 64 && "${segment}" =~ ^[A-Za-z0-9._~-]+$ ]]
+}
+
 padmInstallCleanupTrap() {
     if [[ -n "${PADM_CLEANUP_TRAP_INSTALLED}" ]]; then
         return 0

@@ -1318,6 +1318,10 @@ parseRealityTargetInput() {
         realityTargetStatusBlock red "REALITY 目标站" "伪装目标不合法: ${targetInput}"
         return 1
     fi
+    if [[ -n "${AUTO_REALITY_SERVER_NAME:-}" ]] && ! padmIsValidHostName "${AUTO_REALITY_SERVER_NAME}"; then
+        realityTargetStatusBlock red "REALITY SNI" "SNI 不合法: ${AUTO_REALITY_SERVER_NAME}"
+        return 1
+    fi
     realityTargetHost=${targetHost}
     realityTargetPort=${targetPort}
     realitySNI=${AUTO_REALITY_SERVER_NAME:-${realityTargetHost}}
@@ -2264,6 +2268,10 @@ applyRealityTargetToInstalledConfigs() {
         return 1
     fi
     [[ -n "${sni}" ]] || sni=${host}
+    if ! padmIsValidHostName "${sni}"; then
+        realityTargetStatusBlock red "REALITY SNI" "SNI 不合法: ${sni}"
+        return 1
+    fi
 
     if [[ -f "${xrayRealityConfigPath}" ]]; then
         if ! updateRoutingJsonConfig "${xrayRealityConfigPath}" '

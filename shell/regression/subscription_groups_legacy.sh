@@ -7499,16 +7499,22 @@ runSubscribeServerNameRegression() {
     currentHost=host.example.com
     domain=
     [[ "$(resolveSubscribeServerName)" == "host.example.com" ]]
+    currentHost=$'bad.example.com;\nreturn 444'
+    ! resolveSubscribeServerName >/dev/null
 
     currentHost=
     domain=domain.example.com
     [[ "$(resolveSubscribeServerName)" == "domain.example.com" ]]
+    domain='bad domain.example.com'
+    ! resolveSubscribeServerName >/dev/null
 
     currentHost=
     domain=
     export PADM_TLS_DIR="${tlsDir}"
     printf 'cert\n' >"${tlsDir}/cert.example.com.crt"
     printf 'key\n' >"${tlsDir}/cert.example.com.key"
+    printf 'cert\n' >"${tlsDir}/bad;name.crt"
+    printf 'key\n' >"${tlsDir}/bad;name.key"
     [[ "$(resolveSubscribeServerName)" == "cert.example.com" ]]
 
     currentHost="${oldCurrentHost}"
@@ -10042,6 +10048,13 @@ runRuntimeAndRealityRegression() {
     rm -f "${geoTmpDir}/geo.version"
     [[ "$(xrayGeoDisplayVersion "${geoTmpDir}")" == 更新时间* || "$(xrayGeoDisplayVersion "${geoTmpDir}")" == "版本未知" ]]
 
+    padmIsValidConnectAddress "example.org"
+    padmIsValidConnectAddress "203.0.113.10"
+    padmIsValidConnectAddress "2001:db8::1"
+    ! padmIsValidConnectAddress "bad host"
+    ! padmIsValidConnectAddress $'bad\nhost'
+    ! padmIsValidConnectAddress "2001:::1"
+
     AUTO_REALITY_SERVER_NAME=
     parseRealityTargetInput "example.com"
     [[ "${realityTargetHost}" == "example.com" ]]
@@ -10049,6 +10062,21 @@ runRuntimeAndRealityRegression() {
     parseRealityTargetInput "example.org:8443"
     [[ "${realityTargetHost}" == "example.org" ]]
     [[ "${realityTargetPort}" == "8443" ]]
+    ! parseRealityTargetInput $'bad","extra":"x:443'
+    ! parseRealityTargetInput "bad host:443"
+    AUTO_REALITY_SERVER_NAME=$'bad"\nname'
+    ! parseRealityTargetInput "example.net:443"
+    AUTO_REALITY_SERVER_NAME=www.example.net
+    parseRealityTargetInput "example.net:443"
+    [[ "${realitySNI}" == "www.example.net" ]]
+    AUTO_ENTRY_HOST=$'bad\nentry'
+    ! collectEntryProfile
+    AUTO_ENTRY_HOST=entry.example.com
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "entry.example.com" ]]
+    AUTO_ENTRY_HOST=
+    AUTO_REALITY_SERVER_NAME=
+    parseRealityTargetInput "example.org:8443"
     ! parseRealityTargetInput "bad.example.org:70000"
     [[ "${realityTargetHost}" == "example.org" ]]
     [[ "${realityTargetPort}" == "8443" ]]
@@ -10785,6 +10813,16 @@ h2
 auto
 "
     jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.security == "tls" and (.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.realitySettings | not) and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings.serverName == "tls-down.example.com" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.tlsSettings.alpn == ["h2"]' "${xhttpConfigFile}" >/dev/null
+    setXHTTPDownloadSettings <<<"2001:db8::1
+443
+tls
+tls-down.example.com
+front-tls.example.com
+/ipv6-down
+h3
+auto
+"
+    jq -e '.inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.address == "2001:db8::1" and .inbounds[0].streamSettings.xhttpSettings.extra.downloadSettings.xhttpSettings.path == "/ipv6-down"' "${xhttpConfigFile}" >/dev/null
     if [[ -n "${oldConfigFile}" ]]; then
         PADM_XHTTP_CONFIG_FILE="${oldConfigFile}"
     else
@@ -11851,7 +11889,7 @@ SH
     grep -q 'BBR 启用失败|sysctl 应用失败，且本次写入清理失败，请手动检查 '"${root}"'/apply-cleanup-fail-sysctl.conf 和 '"${root}"'/apply-cleanup-fail.state' "${applyFailStatus}" || return 1
 
     printf 'net.core.default_qdisc = fq\n' >"${root}/disable-sysctl.conf" || return 1
-    printf 'previous_congestion=reno\nprevious_qdisc=cake\n' >"${root}/disable.state" || return 1
+    printf 'previous_congestion=reno\nprintf sourced >"%s"\nprevious_qdisc=cake\n' "${root}/disable-sourced.marker" >"${root}/disable.state" || return 1
     bash -c '
         set -e
         export PADM_BBR_SYSCTL_CONF="$1/disable-sysctl.conf"
@@ -11869,6 +11907,9 @@ SH
     ' _ "${root}" "${PROJECT_ROOT}" "${disableStatus}" "${disableHelper}"
     grep -q "remove-files:${root}/disable-sysctl.conf|${root}/disable.state" "${disableHelper}" || return 1
     grep -q 'sysctl:--system' "${disableHelper}" || return 1
+    grep -q 'sysctl:-w net.ipv4.tcp_congestion_control=reno' "${disableHelper}" || return 1
+    grep -q 'sysctl:-w net.core.default_qdisc=cake' "${disableHelper}" || return 1
+    [[ ! -e "${root}/disable-sourced.marker" ]]
     grep -q 'padm BBR 已关闭|已删除 '"${root}"'/disable-sysctl.conf' "${disableStatus}" || return 1
 
     printf 'net.core.default_qdisc = fq\n' >"${root}/disable-cleanup-fail-sysctl.conf" || return 1

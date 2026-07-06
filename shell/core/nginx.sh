@@ -918,6 +918,14 @@ removeNginx302FromFile() {
 # 修改 Nginx 重定向配置
 updateRedirectNginxConf() {
     local redirectDomain=
+    if ! padmIsValidHostName "${domain}" || ! validPortNumber "${port}"; then
+        errorCard "Nginx 域名或端口不合法" "${domain}:${port}"
+        return 1
+    fi
+    if { [[ -z "${selectCustomInstallType:-}" ]] || protocolSelectionNeedsPath "${selectCustomInstallType}"; } && ! padmIsSafeRoutePathSegment "${currentPath}"; then
+        errorCard "Nginx path 不合法" "${currentPath}"
+        return 1
+    fi
     redirectDomain=${domain}:${port}
 
     local nginxH2Conf=

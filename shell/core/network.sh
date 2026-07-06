@@ -158,6 +158,10 @@ writeCheckPortOpenNginxConfig() {
     local nginxTestLog
     nginxTestLog="$(padmFallbackTmpFilePath padm-check-port-open-nginx-test.log)"
     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
+    if ! validPortNumber "${port}" || ! padmIsValidHostName "${domain}"; then
+        CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 监听端口或域名不合法"
+        return 1
+    fi
     if ! padmCommitTargetIsFileLike "${targetPath}"; then
         coreSetManualCheckMessage CHECK_PORT_OPEN_NGINX_CONFIG_ERROR "端口检测 Nginx 配置目标异常" " ${targetPath}"
         return 1

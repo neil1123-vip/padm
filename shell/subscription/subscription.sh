@@ -157,16 +157,19 @@ resolveSubscribeServerName() {
     local certDir="${PADM_TLS_DIR:-/etc/padm/tls}"
     local certFile domainName
     if [[ -n "${currentHost:-}" ]]; then
+        padmIsValidHostName "${currentHost}" || return 1
         printf '%s\n' "${currentHost}"
         return 0
     fi
     if [[ -n "${domain:-}" ]]; then
+        padmIsValidHostName "${domain}" || return 1
         printf '%s\n' "${domain}"
         return 0
     fi
     for certFile in "${certDir}"/*.crt; do
         [[ -s "${certFile}" ]] || continue
         domainName=$(basename "${certFile}" .crt)
+        padmIsValidHostName "${domainName}" || continue
         [[ -s "${certDir}/${domainName}.key" ]] || continue
         printf '%s\n' "${domainName}"
         return 0

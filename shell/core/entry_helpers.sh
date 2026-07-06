@@ -56,6 +56,10 @@ initTLSNginxConfig() {
         [[ "${AUTO_INSTALL:-}" == "true" ]] && return 1
         initTLSNginxConfig 3
     else
+        if ! padmIsValidHostName "${domain}"; then
+            errorCard "域名不合法" "${domain}"
+            return 1
+        fi
         dnsTLSDomain=$(echo "${domain}" | awk -F "." '{$1="";print $0}' | sed 's/^[[:space:]]*//' | sed 's/ /./g')
         if [[ "${selectCoreType}" == "1" ]]; then
             customPortFunction || return 1
@@ -119,6 +123,15 @@ writeSingBoxVMessHTTPUpgradeNginxConfig() {
 singBoxNginxConfig() {
     local type=$1
     local port=$2
+
+    if ! padmIsValidHostName "${domain}"; then
+        errorCard "域名不合法" "${domain}"
+        return 1
+    fi
+    if protocolSelectionIncludes "${selectCustomInstallType}" 23 "$1" && ! padmIsSafeRoutePathSegment "${currentPath}"; then
+        errorCard "path 不合法" "${currentPath}"
+        return 1
+    fi
 
     local nginxH2Conf=
     nginxH2Conf="listen ${port} http2 so_keepalive=on ssl;"
@@ -235,6 +248,10 @@ randomPathFunction() {
     fi
 
     if [[ -n "${currentPath}" ]]; then
+        if ! padmIsSafeRoutePathSegment "${currentPath}"; then
+            errorCard "path 不合法" "${currentPath}"
+            return 1
+        fi
         customPath=${currentPath}
         successCard "已复用上次安装的path路径"
     else
@@ -738,6 +755,16 @@ restorePadmBbrRuntime() {
     sysctl -w "net.core.default_qdisc=${qdisc}" >>"${logFile}" 2>&1 || true
 }
 
+readPadmBbrStateValue() {
+    local key=$1
+    local stateFile=${2:-${PADM_BBR_STATE_FILE}}
+    local value
+    [[ -f "${stateFile}" ]] || return 1
+    value=$(awk -F= -v key="${key}" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "${stateFile}") || return 1
+    [[ "${value}" =~ ^[A-Za-z0-9_.+-]+$ ]] || return 1
+    printf '%s\n' "${value}"
+}
+
 enableOfficialBbrFq() {
     if ! padmBbrAvailable; then
         modprobe tcp_bbr >/dev/null 2>&1 || true
@@ -842,7 +869,8 @@ disablePadmBbr() {
     local previousCongestion="cubic"
     local previousQdisc="fq_codel"
     if [[ -f "${PADM_BBR_STATE_FILE}" ]]; then
-        . "${PADM_BBR_STATE_FILE}"
+        previousCongestion=$(readPadmBbrStateValue previous_congestion "${PADM_BBR_STATE_FILE}" || printf '%s' "${previousCongestion}")
+        previousQdisc=$(readPadmBbrStateValue previous_qdisc "${PADM_BBR_STATE_FILE}" || printf '%s' "${previousQdisc}")
     fi
 
     if ! removeManagedFilesIfPresent "${PADM_BBR_SYSCTL_CONF}" "${PADM_BBR_STATE_FILE}"; then
@@ -856,8 +884,8 @@ disablePadmBbr() {
     local logFile
     logFile=$(bbrSysctlLog)
     sysctl --system >"${logFile}" 2>&1 || true
-    sysctl -w "net.ipv4.tcp_congestion_control=${previous_congestion:-${previousCongestion}}" >>"${logFile}" 2>&1 || true
-    sysctl -w "net.core.default_qdisc=${previous_qdisc:-${previousQdisc}}" >>"${logFile}" 2>&1 || true
+    sysctl -w "net.ipv4.tcp_congestion_control=${previousCongestion}" >>"${logFile}" 2>&1 || true
+    sysctl -w "net.core.default_qdisc=${previousQdisc}" >>"${logFile}" 2>&1 || true
     statusCard "padm BBR 已关闭" "已删除 ${PADM_BBR_SYSCTL_CONF}" "已尝试恢复启用前的拥塞控制和 qdisc" "未改动用户其它 sysctl 配置"
     printNetworkOptimizationStatus
     bbrInstall
