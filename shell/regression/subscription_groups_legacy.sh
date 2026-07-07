@@ -7229,6 +7229,40 @@ JSON
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
+    (
+        local errorLog="${TMP_DIR}/entry-helper-port-expression-error.log"
+        local allowLog="${TMP_DIR}/entry-helper-port-expression-allow.log"
+        local rc
+        : >"${errorLog}"
+        : >"${allowLog}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        btDomain=
+        currentPort=
+        customPort=
+        xrayVLESSRealityPort=
+        domain=port.example.com
+        autoRead() {
+            printf -v "$3" '1+2'
+        }
+        allowPort() {
+            printf '%s\n' "$1" >>"${allowLog}"
+        }
+        checkDNSIP() { return 0; }
+        removeNginxDefaultConf() { return 0; }
+        checkPortOpen() { return 0; }
+        errorCard() {
+            printf '%s\n' "$*" >>"${errorLog}"
+        }
+        set +e
+        customPortFunction >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -q '端口输入错误' "${errorLog}"
+        [[ ! -s "${allowLog}" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    )
+
     PATH="${oldPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     eval "${protocolSelectionIncludesDef}"
@@ -7814,6 +7848,7 @@ SH
 runSingBoxPortFailureRegression() (
     local result=()
     local subscribeRoot="${TMP_DIR}/subscribe-port-failure"
+    local allowLog="${TMP_DIR}/subscribe-port-allow.log"
     local oldPath="${PATH}"
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldStaticPath="${nginxStaticPath:-}"
@@ -7823,7 +7858,17 @@ runSingBoxPortFailureRegression() (
     local oldTlsDir="${PADM_TLS_DIR:-}"
     local writeCalls=0
 
-    allowPort() { return 0; }
+    : >"${allowLog}"
+    allowPort() {
+        printf '%s\n' "$1" >>"${allowLog}"
+        return 0
+    }
+
+    if readSingBoxPortResult result '1+2' false 2>/dev/null; then
+        return 1
+    fi
+    [[ "${#result[@]}" == "0" ]]
+    [[ ! -s "${allowLog}" ]]
 
     if readSingBoxPortResult result 70000 false 2>/dev/null; then
         return 1

@@ -452,7 +452,7 @@ initSingBoxPort() {
     local port=$1
     local promptHistory=${2:-true}
     if [[ -n "${port}" && "${promptHistory}" != "true" ]]; then
-        if ((port >= 1 && port <= 65535)); then
+        if validPortNumber "${port}"; then
             allowPort "${port}" || return 1
             allowPort "${port}" "udp" || return 1
             echo "${port}"
@@ -467,9 +467,11 @@ initSingBoxPort() {
         if [[ "${historyPort}" != "y" ]]; then
             port=
         else
+            validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
             echo "${port}"
         fi
     elif [[ -n "${port}" && -n "${lastInstallationConfig}" ]]; then
+        validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
         echo "${port}"
     fi
     if [[ -z "${port}" ]]; then
@@ -477,7 +479,7 @@ initSingBoxPort() {
         if [[ -z "${port}" ]]; then
             port=$((RANDOM % 50001 + 10000))
         fi
-        if ((port >= 1 && port <= 65535)); then
+        if validPortNumber "${port}"; then
             allowPort "${port}" || return 1
             allowPort "${port}" "udp" || return 1
             echo "${port}"

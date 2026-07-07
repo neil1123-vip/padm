@@ -1028,7 +1028,9 @@ runPortHoppingWithoutPersistentRegression() (
 
     local natStateFile="${TMP_DIR}/port-hopping-nat.state"
     local allowCalls=0
+    local downloadCount=0
     local inputCount=0
+    local uploadCount=0
     local warnLog="${TMP_DIR}/port-hopping-warn.log"
     : >"${warnLog}"
     : >"${natStateFile}"
@@ -1062,6 +1064,22 @@ runPortHoppingWithoutPersistentRegression() (
                 printf -v "$3" '%s' '33000-33005'
             fi
             ;;
+        hysteria_download_speed)
+            downloadCount=$((downloadCount + 1))
+            if [[ "${downloadCount}" == "1" ]]; then
+                printf -v "$3" '%s' '120abc'
+            else
+                printf -v "$3" '%s' '120'
+            fi
+            ;;
+        hysteria_upload_speed)
+            uploadCount=$((uploadCount + 1))
+            if [[ "${uploadCount}" == "1" ]]; then
+                printf -v "$3" '%s' '60abc'
+            else
+                printf -v "$3" '%s' '60'
+            fi
+            ;;
         *)
             printf -v "$3" '%s' ''
             ;;
@@ -1076,6 +1094,7 @@ runPortHoppingWithoutPersistentRegression() (
         hysteriaPort=
         tuicPort=
     }
+    hysteria2RequireSingBoxField() { return 0; }
     command() {
         if [[ "${1:-}" == "-v" && "${2:-}" == "netfilter-persistent" ]]; then
             return 1
@@ -1127,6 +1146,14 @@ EOF
     }
 
     rhelLike=false
+    downloadCount=0
+    uploadCount=0
+    : >"${warnLog}"
+    initHysteria2Network
+    grep -q '带宽不合法' "${warnLog}"
+    [[ "${hysteria2ClientDownloadSpeed}" == "120" ]]
+    [[ "${hysteria2ClientUploadSpeed}" == "60" ]]
+
     inputCount=0
     initHysteriaPort
     grep -q '端口不合法' "${warnLog}"

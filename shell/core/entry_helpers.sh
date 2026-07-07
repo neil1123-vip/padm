@@ -220,7 +220,7 @@ customPortFunction() {
         fi
 
         if [[ -n "${port}" ]]; then
-            if ((port >= 1 && port <= 65535)); then
+            if validPortNumber "${port}"; then
                 allowPort "${port}" || return 1
                 statusCard "TLS 入口端口" "${port}"
                 if [[ -z "${btDomain}" ]]; then
