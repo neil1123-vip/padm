@@ -559,7 +559,7 @@ configureRealityStreamSplit() {
 
     autoRead reality_stream_website_port "请输入网站后端端口，[回车]默认8443:" websitePort
     websitePort=${websitePort:-8443}
-    if [[ ! "${websitePort}" =~ ^[0-9]+$ || "${websitePort}" -lt 1 || "${websitePort}" -gt 65535 ]]; then
+    if ! validPortNumber "${websitePort}"; then
         errorCard "网站后端端口不合法"
         removeRealityStreamBackup "${backupDir}"
         return 1
@@ -570,7 +570,7 @@ configureRealityStreamSplit() {
     if [[ "${defaultProtocol}" == "vision" ]]; then
         autoRead reality_stream_vision_port "请输入 Reality Vision 后端端口，[回车]默认2443:" visionInternalPort
         visionInternalPort=${visionInternalPort:-2443}
-        if [[ ! "${visionInternalPort}" =~ ^[0-9]+$ || "${visionInternalPort}" -lt 1 || "${visionInternalPort}" -gt 65535 ]]; then
+        if ! validPortNumber "${visionInternalPort}"; then
             errorCard "Reality Vision 后端端口不合法"
             removeRealityStreamBackup "${backupDir}"
             return 1
@@ -585,7 +585,7 @@ configureRealityStreamSplit() {
     if [[ "${defaultProtocol}" == "xhttp" ]]; then
         autoRead reality_stream_xhttp_port "请输入 Reality XHTTP 后端端口，[回车]默认2444:" xhttpInternalPort
         xhttpInternalPort=${xhttpInternalPort:-2444}
-        if [[ ! "${xhttpInternalPort}" =~ ^[0-9]+$ || "${xhttpInternalPort}" -lt 1 || "${xhttpInternalPort}" -gt 65535 ]]; then
+        if ! validPortNumber "${xhttpInternalPort}"; then
             errorCard "Reality XHTTP 后端端口不合法"
             removeRealityStreamBackup "${backupDir}"
             return 1

@@ -584,7 +584,7 @@ parseHostPort() {
 validateRealityTarget() {
     local targetHost=$1
     local targetPort=$2
-    padmIsValidHostName "${targetHost}" && [[ "${targetPort}" =~ ^[0-9]+$ && ${targetPort} -ge 1 && ${targetPort} -le 65535 ]]
+    padmIsValidHostName "${targetHost}" && validPortNumber "${targetPort}"
 }
 
 collectTLSProfile() {

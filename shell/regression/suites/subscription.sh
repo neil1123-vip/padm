@@ -25,6 +25,7 @@ listRegressionSubscriptionRemoteChildSelectors() {
         subscription-remote-unique \
         subscription-remote-rollback \
         subscription-remote-merge \
+        subscription-remote-disabled-source \
         subscription-remote-controlled \
         subscription-remote-append-failure \
         subscription-remote-commit-failure \
@@ -336,6 +337,7 @@ registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive r
 registerRegressionFunctionLeaf subscription-remote-unique runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchUniqueRegression
 registerRegressionFunctionLeaf subscription-remote-rollback runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchRollbackRegression
 registerRegressionFunctionLeaf subscription-remote-merge runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchMergeRegression
+registerRegressionFunctionLeaf subscription-remote-disabled-source runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchDisabledSourceRegression
 registerRegressionFunctionLeaf subscription-remote-controlled runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchControlledRegression
 registerRegressionFunctionLeaf subscription-remote-append-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchAppendFailureRegression
 registerRegressionFunctionLeaf subscription-remote-commit-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchCommitFailureRegression

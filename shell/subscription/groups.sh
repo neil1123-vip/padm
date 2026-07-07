@@ -449,7 +449,7 @@ setSubscriptionGroupSyncInterval() {
 
 subscriptionGroupSyncIntervalValid() {
     local interval=$1
-    [[ "${interval}" =~ ^[0-9]+$ ]] && [[ "${interval}" -ge 1 ]] && [[ "${interval}" -le 59 ]]
+    [[ "${interval}" =~ ^[0-9]{1,2}$ ]] && ((10#${interval} >= 1 && 10#${interval} <= 59))
 }
 
 addSubscriptionSourceState() {

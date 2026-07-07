@@ -385,7 +385,7 @@ updateRemoteSubscribe() {
     if [[ -z "${sourceLines}" ]]; then
         sourceLines=$(subscriptionActiveGroupRead -r '
           .sources[]?
-          | select(.role != "main" and .transport != "wireguard")
+          | select(.role != "main" and .enabled == true and .transport != "wireguard")
           | "\(.host):\(.port):\(.id):\(.scheme)"')
     fi
     escapedEmail=$(printf '%s\n' "${email}" | sed 's/[][\/.^$*+?(){}|]/\\&/g')

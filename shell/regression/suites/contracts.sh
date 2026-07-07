@@ -1979,7 +1979,7 @@ runRemoteControlAggregatesSupportSourceOnlyExecutionContract() (
     [[ "${calls[1]}" =~ ^framework:list:.*/remote-control-smoke-refresh:listRegressionRemoteControlSmokeRefreshChildSelectors:remote-control-smoke-refresh-apply\ remote-control-smoke-refresh-restore\ remote-control-smoke-refresh-reconcile$ ]] || return 1
     [[ "${calls[2]}" =~ ^framework:list:.*/remote-control-smoke-refresh-apply:listRegressionRemoteControlSmokeRefreshApplyChildSelectors:remote-control-smoke-refresh-apply-basic\ remote-control-smoke-refresh-apply-prepare\ remote-control-smoke-refresh-apply-failure$ ]] || return 1
     [[ "${calls[3]}" =~ ^framework:list:.*/remote-control-smoke:listRegressionRemoteControlSmokeChildSelectors:remote-control-smoke-core\ remote-control-smoke-refresh$ ]] || return 1
-    [[ "${calls[4]}" == "framework:sequential:listRegressionRemoteControlSmokeCoreChildSelectors:remote-control-concurrency remote-control-aggregation-failure remote-control-inline-aggregation-helpers remote-control-health remote-control-inline-request-helpers remote-control-inline-wireguard-peer-helpers remote-control-inline-token-consumers remote-control-inline-sync-runner remote-control-handle-inline-helpers" ]] || return 1
+    [[ "${calls[4]}" == "framework:sequential:listRegressionRemoteControlSmokeCoreChildSelectors:remote-control-concurrency remote-control-aggregation-failure remote-control-inline-aggregation-helpers remote-control-sources-parsed-once remote-control-health remote-control-inline-request-helpers remote-control-inline-wireguard-peer-helpers remote-control-inline-token-consumers remote-control-inline-sync-runner remote-control-inline-sync-parallel-runner remote-control-handle-inline-helpers" ]] || return 1
     [[ "${calls[5]}" =~ ^framework:list:.*/remote-control-contract:listRegressionRemoteControlContractChildSelectors:remote-control-contract-service-install\ remote-control-contract-server-response$ ]] || return 1
     [[ "${calls[6]}" =~ ^framework:list:.*/remote-control-contract-service-install:listRegressionRemoteControlContractServiceInstallChildSelectors:remote-control-contract-service-install-success\ remote-control-contract-service-install-systemctl-fail\ remote-control-contract-service-install-health-fail\ remote-control-contract-service-install-health-rollback\ remote-control-contract-service-install-token-transaction$ ]] || return 1
     ! grep -q '^legacy-runner:' "${callsFile}" || return 1
@@ -2938,8 +2938,11 @@ warp-config-generation-failure
 fail2ban-profile
 fail2ban-sshd-systemd-backend
 fail2ban-menu
+xray-configured-service-path
 xray-strict-validation
 xray-compat-audit
+xray-compat-trusted-xff
+xray-configured-validation-path
 xray-prerelease-dry-run
 singbox-compat-audit
 singbox-prerelease-dry-run
@@ -3690,6 +3693,7 @@ subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionLegacyL
 subscription-remote-unique runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchUniqueRegression
 subscription-remote-rollback runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchRollbackRegression
 subscription-remote-merge runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchMergeRegression
+subscription-remote-disabled-source runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchDisabledSourceRegression
 subscription-remote-controlled runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchControlledRegression
 subscription-remote-append-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchAppendFailureRegression
 subscription-remote-commit-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchCommitFailureRegression
@@ -3719,6 +3723,7 @@ runSubscriptionNoCompatWrapperFunctionsContract() {
         runRemoteSubscribeFetchUniqueCompatRegression \
         runRemoteSubscribeFetchRollbackCompatRegression \
         runRemoteSubscribeFetchMergeCompatRegression \
+        runRemoteSubscribeFetchDisabledSourceCompatRegression \
         runRemoteSubscribeFetchControlledCompatRegression \
         runRemoteSubscribeFetchAppendFailureCompatRegression \
         runRemoteSubscribeFetchCommitFailureCompatRegression \
@@ -3851,6 +3856,7 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
         subscription-remote-unique \
         subscription-remote-rollback \
         subscription-remote-merge \
+        subscription-remote-disabled-source \
         subscription-remote-controlled \
         subscription-remote-append-failure \
         subscription-remote-commit-failure \
@@ -5001,6 +5007,7 @@ sing-box-uninstall-rejects-unsafe-config-path
 sing-box-managed-cleanup
 sing-box-protocol-reload-failure
 geo-update-reload-failure
+xray-geo-commit-rollback
 core-cleanup-failure-propagation
 reload-core-propagation
 sing-box-log-transaction
@@ -5836,6 +5843,7 @@ runSubscriptionRemoteRegisteredChildSelectorsAlignedContract() (
 subscription-remote-unique
 subscription-remote-rollback
 subscription-remote-merge
+subscription-remote-disabled-source
 subscription-remote-controlled
 subscription-remote-append-failure
 subscription-remote-commit-failure

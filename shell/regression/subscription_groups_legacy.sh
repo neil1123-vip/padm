@@ -2855,6 +2855,12 @@ runXrayRealityPortFailureRegression() (
     }
 
     ! validPortNumber 999999999999999999999
+    corePortIsValid 08
+    ! corePortIsValid 999999999999999999999
+    subscriptionGroupSyncIntervalValid 08
+    ! subscriptionGroupSyncIntervalValid 999999999999999999999
+    validateRealityTarget example.com 08
+    ! validateRealityTarget example.com 999999999999999999999
 
     if initXrayRealityPort 2>/dev/null; then
         return 1
@@ -11592,6 +11598,24 @@ JSON
         [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
     fi
 
+    if remoteSubscribeFetchPartSelected disabled-source; then
+        local disabledStateBackup="${TMP_DIR}/remote-subscribe-disabled-state.backup.json"
+        writeRemoteSubscribeOldOutputs
+        cp "$(subscriptionGroupsFile)" "${disabledStateBackup}"
+        jq '
+          .groups[0].user_groups = [] |
+          .groups[0].sources |= map(if .id == "r2" or .id == "r3" then .enabled = false else . end)
+        ' "$(subscriptionGroupsFile)" >"${TMP_DIR}/remote-subscribe-disabled-state.json"
+        mv "${TMP_DIR}/remote-subscribe-disabled-state.json" "$(subscriptionGroupsFile)"
+        updateRemoteSubscribe "${emailMd5}" "${email}"
+        grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
+        if grep -q 'remote3.example' "${publicDir}/default/${emailMd5}"; then
+            return 1
+        fi
+        jq -e 'length == 2 and .[0].tag == "old-local" and .[1].tag == "sub_team_r1"' "${localDir}/sing-box/${email}" >/dev/null
+        cp "${disabledStateBackup}" "$(subscriptionGroupsFile)"
+    fi
+
     if remoteSubscribeFetchPartSelected controlled; then
         (
         local controlledRoot="${TMP_DIR}/remote-controlled-fetch"
@@ -16213,6 +16237,10 @@ runRemoteSubscribeFetchRollbackRegression() {
 
 runRemoteSubscribeFetchMergeRegression() {
     runRemoteSubscribeFetchRegression merge
+}
+
+runRemoteSubscribeFetchDisabledSourceRegression() {
+    runRemoteSubscribeFetchRegression disabled-source
 }
 
 runRemoteSubscribeFetchControlledRegression() {

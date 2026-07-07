@@ -898,7 +898,7 @@ setTraditionalTlsAlpnManual() {
 # 入口端口管理
 corePortIsValid() {
     local port=$1
-    [[ "${port}" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535))
+    validPortNumber "${port}"
 }
 
 corePortParseList() {
@@ -2140,7 +2140,7 @@ renderAllSubscribeUserOutputs() {
             fi
         done <<<"${publishAccounts}"
         if [[ "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
-            subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .transport != "wireguard")' >/dev/null 2>&1
+            subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .enabled == true and .transport != "wireguard")' >/dev/null 2>&1
             SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
         fi
     else
@@ -2852,17 +2852,17 @@ readXHTTPRange() {
     local input from to
     autoRead xhttp_range "${prompt}[回车默认 ${defaultFrom}-${defaultTo}]:" input
     input=${input:-${defaultFrom}-${defaultTo}}
-    if [[ "${input}" =~ ^[0-9]+$ ]]; then
+    if [[ "${input}" =~ ^[0-9]{1,10}$ ]]; then
         from=${input}
         to=${input}
-    elif [[ "${input}" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+    elif [[ "${input}" =~ ^([0-9]{1,10})-([0-9]{1,10})$ ]]; then
         from=${BASH_REMATCH[1]}
         to=${BASH_REMATCH[2]}
     else
         errorCard "范围格式错误，应为数字或 from-to"
         return 1
     fi
-    if ((from < 0 || to < from)); then
+    if ((10#${to} < 10#${from})); then
         errorCard "范围不合法"
         return 1
     fi
@@ -2877,16 +2877,16 @@ setXHTTPCustomXmux() {
     read -r concurrencyFrom concurrencyTo <<<"${concurrency}"
     read -r requestFrom requestTo <<<"${requestTimes}"
     read -r reusableFrom reusableTo <<<"${reusableSecs}"
-    if ((concurrencyFrom < 1)); then
+    if ((10#${concurrencyFrom} < 1)); then
         errorCard "maxConcurrency 必须大于 0"
         return 1
     fi
-    if ((requestTo > 1000)); then
+    if ((10#${requestTo} > 1000)); then
         echoContent title "\n┌─ XHTTP XMUX 提醒 ──────────────────────────────────"
         menuLine "hMaxRequestTimes 超过 1000 可能触发部分 Nginx/CDN 限制"
         menuClose
     fi
-    if ((reusableTo > 3600)); then
+    if ((10#${reusableTo} > 3600)); then
         echoContent title "\n┌─ XHTTP XMUX 提醒 ──────────────────────────────────"
         menuLine "hMaxReusableSecs 超过 3600 可能触发部分中间盒旧连接清理"
         menuClose
@@ -2970,7 +2970,7 @@ setXHTTPDownloadSettings() {
     padmIsValidConnectAddress "${address}" || { errorCard "address 不合法"; return 1; }
     autoRead xhttp_download_port "请输入下行入口端口[回车默认 443]:" port
     port=${port:-443}
-    [[ "${port}" =~ ^[0-9]+$ && "${port}" -ge 1 && "${port}" -le 65535 ]] || { errorCard "端口不合法"; return 1; }
+    validPortNumber "${port}" || { errorCard "端口不合法"; return 1; }
     autoRead xhttp_download_security "请输入下行 security[tls/reality，回车默认 tls]:" security
     security=${security:-tls}
     [[ "${security}" == "tls" || "${security}" == "reality" ]] || { errorCard "security 仅支持 tls 或 reality"; return 1; }
