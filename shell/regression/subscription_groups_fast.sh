@@ -1023,10 +1023,12 @@ runPortHoppingWithoutPersistentRegression() (
     set -euo pipefail
     AUTO_INSTALL=
     lastInstallationConfig=
+    source "${PROJECT_ROOT}/shell/core/network.sh"
     source "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
 
     local natStateFile="${TMP_DIR}/port-hopping-nat.state"
     local allowCalls=0
+    local inputCount=0
     local warnLog="${TMP_DIR}/port-hopping-warn.log"
     : >"${warnLog}"
     : >"${natStateFile}"
@@ -1035,9 +1037,45 @@ runPortHoppingWithoutPersistentRegression() (
         printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"${warnLog}"
     }
     autoRead() {
-        printf -v "$3" '%s' '33000-33005'
+        case "$1" in
+        hysteria_port)
+            inputCount=$((inputCount + 1))
+            if [[ "${inputCount}" == "1" ]]; then
+                printf -v "$3" '%s' '12abc'
+            else
+                printf -v "$3" '%s' '16295'
+            fi
+            ;;
+        tuic_port)
+            inputCount=$((inputCount + 1))
+            if [[ "${inputCount}" == "1" ]]; then
+                printf -v "$3" '%s' '12abc'
+            else
+                printf -v "$3" '%s' '26451'
+            fi
+            ;;
+        port_hopping_range)
+            inputCount=$((inputCount + 1))
+            if [[ "${inputCount}" == "1" ]]; then
+                printf -v "$3" '%s' '33000-33005x'
+            else
+                printf -v "$3" '%s' '33000-33005'
+            fi
+            ;;
+        *)
+            printf -v "$3" '%s' ''
+            ;;
+        esac
     }
-    allowPort() { allowCalls=$((allowCalls + 1)); return 0; }
+    allowPort() {
+        printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${warnLog}"
+        allowCalls=$((allowCalls + 1))
+        return 0
+    }
+    readSingBoxConfig() {
+        hysteriaPort=
+        tuicPort=
+    }
     command() {
         if [[ "${1:-}" == "-v" && "${2:-}" == "netfilter-persistent" ]]; then
             return 1
@@ -1089,11 +1127,29 @@ EOF
     }
 
     rhelLike=false
+    inputCount=0
+    initHysteriaPort
+    grep -q '端口不合法' "${warnLog}"
+    ! grep -q 'allow:12abc' "${warnLog}"
+    grep -q 'allow:16295:tcp' "${warnLog}"
+    grep -q 'allow:16295:udp' "${warnLog}"
+
+    inputCount=0
+    : >"${warnLog}"
+    initTuicPort
+    grep -q '端口不合法' "${warnLog}"
+    ! grep -q 'allow:12abc' "${warnLog}"
+    grep -q 'allow:26451:tcp' "${warnLog}"
+    grep -q 'allow:26451:udp' "${warnLog}"
+
+    inputCount=0
+    : >"${warnLog}"
     portHoppingStart=
     portHoppingEnd=
     addPortHopping hysteria2 16295
     [[ -s "${natStateFile}" ]]
-    [[ "${allowCalls}" == "1" ]]
+    grep -q '范围不合法' "${warnLog}"
+    [[ "${allowCalls}" == "5" ]]
     grep -Eq '端口跳跃持久化|未检测到 netfilter-persistent' "${warnLog}"
 
     readPortHopping hysteria2 16295

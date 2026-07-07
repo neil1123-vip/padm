@@ -538,6 +538,14 @@ parseUserSubscriptionSources() {
     printf '%s' "${sourceIds}" | jq -R -e -c 'split(",") | map(gsub("^ +| +$"; "")) | map(select(length > 0)) | select(length > 0)'
 }
 
+validateUserSubscriptionSourcesJson() {
+    local sourceJson=$1
+    local knownSources
+    knownSources=$(subscriptionActiveGroupRead -r '.sources[]?.id' | jq -R -s -c 'split("\n") | map(select(length > 0))') || return 1
+    jq -n -e --argjson sources "${sourceJson}" --argjson knownSources "${knownSources}" \
+        'all($sources[]; . as $source | $source == "*" or ($knownSources | index($source)))' >/dev/null
+}
+
 createAndSyncUserSubscriptionWizard() {
     local id=
     local name=
@@ -570,6 +578,10 @@ createAndSyncUserSubscriptionWizard() {
     sourceIds=${sourceIds:-main}
     if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
         errorCard "服务器范围不能为空；直接回车使用本机 main"
+        return 1
+    fi
+    if ! validateUserSubscriptionSourcesJson "${sourceJson}"; then
+        errorCard "服务器范围包含不存在的服务器源"
         return 1
     fi
 
@@ -786,6 +798,10 @@ setUserSubscriptionSourcesMenu() {
     autoRead user_subscription_sources "请输入服务器范围，多个用逗号分隔:" sourceIds
     if ! sourceJson=$(parseUserSubscriptionSources "${sourceIds}"); then
         errorCard "服务器范围不能为空；直接回车使用本机 main"
+        return 1
+    fi
+    if ! validateUserSubscriptionSourcesJson "${sourceJson}"; then
+        errorCard "服务器范围包含不存在的服务器源"
         return 1
     fi
     if ! setUserSubscriptionSources "${userSubscriptionId}" "${sourceJson}"; then

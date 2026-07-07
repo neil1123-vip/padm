@@ -9206,6 +9206,8 @@ runUserSubscriptionMenuMutationFailureRegression() (
         user_subscription_sources)
             if [[ "${mode}" == "empty-sources" ]]; then
                 printf -v "${targetVar}" ', ,'
+            elif [[ "${mode}" == "invalid-source" ]]; then
+                printf -v "${targetVar}" 'main,missing-source'
             else
                 printf -v "${targetVar}" 'main,remote-a'
             fi
@@ -9247,6 +9249,15 @@ runUserSubscriptionMenuMutationFailureRegression() (
     showUserSubscriptions() { return 0; }
     showUserSubscriptionTraffic() { return 0; }
     showSubscriptionLocalSyncPlan() { return 0; }
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'.sources[]?.id'* ]]; then
+            printf '%s\n' main remote-a
+        else
+            printf '%s\n' \
+                'main:Main:main:local:127.0.0.1:0:true:local' \
+                'remote-a:Remote A:secondary:wireguard:10.77.0.2:39778:true:success'
+        fi
+    }
     removeUserSubscriptionMenu() { return 0; }
     toggleUserSubscriptionState() {
         printf 'toggle:%s\n' "$1" >>"${callLog}"
@@ -9296,6 +9307,17 @@ runUserSubscriptionMenuMutationFailureRegression() (
     [[ "${rc}" == "1" ]]
     ! grep -q '^sources:team-a:' "${callLog}"
     grep -q '服务器范围不能为空' "${errorLog}"
+    [[ ! -s "${successLog}" ]]
+
+    mode=invalid-source
+    resetLogs
+    set +e
+    setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    ! grep -q '^sources:team-a:' "${callLog}"
+    grep -q '服务器范围包含不存在的服务器源' "${errorLog}"
     [[ ! -s "${successLog}" ]]
 
     mode=sources-fail

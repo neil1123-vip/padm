@@ -97,12 +97,14 @@ initHysteriaPort() {
             hysteriaPort=$((RANDOM % 20001 + 10000))
         fi
     fi
-    if [[ -z ${hysteriaPort} ]]; then
+    if [[ -z "${hysteriaPort}" ]]; then
         protocolPortInputStatusCard "端口不可为空"
-        initHysteriaPort "$2"
-    elif ((hysteriaPort < 1 || hysteriaPort > 65535)); then
+        initHysteriaPort "${2:-}"
+        return $?
+    elif ! validPortNumber "${hysteriaPort}"; then
         protocolPortInputStatusCard "端口不合法"
-        initHysteriaPort "$2"
+        initHysteriaPort "${2:-}"
+        return $?
     fi
     allowPort "${hysteriaPort}" || return 1
     allowPort "${hysteriaPort}" "udp" || return 1
@@ -225,7 +227,8 @@ addPortHopping() {
         if [[ -z "${portStart}" || -z "${portEnd}" ]]; then
             protocolPortHoppingRangeStatusCard "范围不合法"
             addPortHopping "${type}" "${targetPort}"
-        elif ((portStart < 30000 || portStart > 40000 || portEnd < 30000 || portEnd > 40000 || portEnd < portStart)); then
+        elif ! validPortNumber "${portStart}" || ! validPortNumber "${portEnd}" ||
+            ((10#${portStart} < 30000 || 10#${portStart} > 40000 || 10#${portEnd} < 30000 || 10#${portEnd} > 40000 || 10#${portEnd} < 10#${portStart})); then
             protocolPortHoppingRangeStatusCard "范围不合法"
             addPortHopping "${type}" "${targetPort}"
         else
@@ -425,12 +428,14 @@ initTuicPort() {
             tuicPort=$((RANDOM % 20001 + 10000))
         fi
     fi
-    if [[ -z ${tuicPort} ]]; then
+    if [[ -z "${tuicPort}" ]]; then
         protocolPortInputStatusCard "端口不可为空"
-        initTuicPort "$2"
-    elif ((tuicPort < 1 || tuicPort > 65535)); then
+        initTuicPort "${2:-}"
+        return $?
+    elif ! validPortNumber "${tuicPort}"; then
         protocolPortInputStatusCard "端口不合法"
-        initTuicPort "$2"
+        initTuicPort "${2:-}"
+        return $?
     fi
     statusCard "Tuic 端口" "${tuicPort}"
     allowPort "${tuicPort}" || return 1
