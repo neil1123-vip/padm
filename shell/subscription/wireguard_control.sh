@@ -535,10 +535,13 @@ ensureSubscriptionWireGuardNginxConfig() {
     local targetPath
     local tmpPath
     local backupPath=
+    local subscribePublicBase
     state=$(subscriptionWireGuardReadState)
     listenHost=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${state}")")
     controlPort=$(jq -r '.control_port' <<<"${state}")
     [[ -n "${listenHost}" && "${listenHost}" != "null" ]] || return 1
+    subscribePublicBase=$(padmResolveManagedAbsolutePath "$(subscribePublicBaseDir)") || return 1
+    subscribePublicBase="${subscribePublicBase%/}"
     targetPath=$(subscriptionWireGuardNginxConfigFile) || return 1
     padmCommitTargetIsFileLike "${targetPath}" || return 1
     padmCreateTempFileForTarget tmpPath "${targetPath}" nginx || return 1
@@ -561,7 +564,7 @@ server {
 
     location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {
         default_type 'text/plain; charset=utf-8';
-        alias /etc/padm/subscribe/\$1/\$2;
+        alias ${subscribePublicBase}/\$1/\$2;
     }
 }
 EOF

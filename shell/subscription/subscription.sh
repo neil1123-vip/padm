@@ -154,8 +154,9 @@ writeSubscribeNginxConfig() {
 }
 
 resolveSubscribeServerName() {
-    local certDir="${PADM_TLS_DIR:-/etc/padm/tls}"
+    local certDir
     local certFile domainName
+    certDir=$(tlsManagedDir) || return 1
     if [[ -n "${currentHost:-}" ]]; then
         padmIsValidHostName "${currentHost}" || return 1
         printf '%s\n' "${currentHost}"
@@ -196,6 +197,8 @@ installSubscribe() {
     local SSLType=
     local listenIPv6=
     local subscribeServerName=
+    local subscribePublicBase=
+    local tlsDir=
     if [[ -n "${AUTO_SUBSCRIBE_PORT:-}" && "${subscribePort}" != "${AUTO_SUBSCRIBE_PORT}" ]]; then
         subscribePort=
     fi
@@ -226,7 +229,10 @@ installSubscribe() {
 
         SSLType="ssl"
         serverName="server_name ${subscribeServerName};"
-        nginxSubscribeSSL="ssl_certificate ${PADM_TLS_DIR:-/etc/padm/tls}/${subscribeServerName}.crt;ssl_certificate_key ${PADM_TLS_DIR:-/etc/padm/tls}/${subscribeServerName}.key;"
+        tlsDir=$(tlsManagedDir) || return 1
+        subscribePublicBase=$(padmResolveManagedAbsolutePath "$(subscribePublicBaseDir)") || return 1
+        subscribePublicBase="${subscribePublicBase%/}"
+        nginxSubscribeSSL="ssl_certificate ${tlsDir}/${subscribeServerName}.crt;ssl_certificate_key ${tlsDir}/${subscribeServerName}.key;"
         if hasIPv6Connectivity; then
             listenIPv6="listen [::]:${result[-1]} ${SSLType};"
         fi
@@ -251,7 +257,7 @@ server {
     root ${nginxStaticPath};
     location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {
         default_type 'text/plain; charset=utf-8';
-        alias /etc/padm/subscribe/\$1/\$2;
+        alias ${subscribePublicBase}/\$1/\$2;
     }
     location / {
     }

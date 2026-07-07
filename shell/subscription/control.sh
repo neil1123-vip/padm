@@ -1051,13 +1051,13 @@ subscriptionControlApplySync() {
     local refreshPublishedStatus=0
     if ! jq -e '
       def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
-      def valid_uuid: type == "string" and (length == 0 or test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"));
+      def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
       type == "object" and
       (.desired_users? | type == "array") and
       ((has("dry_run") | not) or (.dry_run | type == "boolean")) and
       all(.desired_users[]?; type == "object" and
         (.id | valid_id) and
-        ((has("uuid") | not) or (.uuid | valid_uuid)) and
+        (has("uuid") and (.uuid | valid_uuid)) and
         ((has("name") | not) or (.name | type == "string")) and
         ((has("account") | not) or (.account | type == "string")) and
         ((has("traffic_limit_gb") | not) or ((.traffic_limit_gb | type) as $type | $type == "number" or $type == "string"))) and
@@ -1067,7 +1067,7 @@ subscriptionControlApplySync() {
         return 1
     fi
     dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
-    desiredUsers=$(jq '[.desired_users[]? | {id, uuid: (.uuid // "")}]' <<<"${payload}") || {
+    desiredUsers=$(jq '[.desired_users[]? | {id, uuid}]' <<<"${payload}") || {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     }

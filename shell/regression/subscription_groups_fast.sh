@@ -430,13 +430,15 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         local root="${TMP_DIR}/write-wireguard-control-nginx-path-safety"
         local unsafeRoot="${root}/unsafe"
         local nginxRoot="${root}/nginx conf.d"
-        mkdir -p "${unsafeRoot}" "${nginxRoot}" "${root}/static"
+        local subscribeRoot="${root}/public-subscribe"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}" "${root}/static" "${subscribeRoot}"
 
         nginx() { return 0; }
         subscriptionWireGuardReadState() { printf '%s\n' '{"address":"10.77.0.1/24","control_port":39778}'; }
         fail2banPadmControlLogFile() { printf '%s\n' "${TMP_DIR}/wg-control-access.log"; }
         subscriptionControlPort() { printf '%s\n' 39999; }
         nginxStaticPath="${root}/static"
+        export PADM_SUBSCRIBE_DIR="${subscribeRoot}"
 
         (
             cd "${unsafeRoot}"
@@ -453,6 +455,7 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         grep -q 'proxy_connect_timeout 5s;' "${nginxRoot}/padm-control-wg.conf"
         grep -q 'proxy_send_timeout 180s;' "${nginxRoot}/padm-control-wg.conf"
         grep -q 'proxy_read_timeout 180s;' "${nginxRoot}/padm-control-wg.conf"
+        grep -q "alias ${subscribeRoot}/\\\$1/\\\$2;" "${nginxRoot}/padm-control-wg.conf"
     )
 }
 

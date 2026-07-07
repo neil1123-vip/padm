@@ -892,18 +892,24 @@ JSON
 
         if [[ "${runLightApplySections}" == "true" ]]; then
             if [[ "${runLightApplyBasicSections}" == "true" ]]; then
-                local invalidEmptyIdResponse invalidDuplicateResponse invalidUuidResponse invalidUuidStringResponse
-                local invalidEmptyIdStatus invalidDuplicateStatus invalidUuidStatus invalidUuidStringStatus
+                local invalidEmptyIdResponse invalidDuplicateResponse invalidUuidMissingResponse invalidUuidEmptyResponse invalidUuidResponse invalidUuidStringResponse
+                local invalidEmptyIdStatus invalidDuplicateStatus invalidUuidMissingStatus invalidUuidEmptyStatus invalidUuidStatus invalidUuidStringStatus
                 runControlApplyCapture invalidEmptyIdResponse invalidEmptyIdStatus local '{"desired_users":[{"id":"","uuid":""}]}'
                 runControlApplyCapture invalidDuplicateResponse invalidDuplicateStatus local '{"desired_users":[{"id":"team-a"},{"id":"team-a"}]}'
+                runControlApplyCapture invalidUuidMissingResponse invalidUuidMissingStatus local '{"desired_users":[{"id":"team-a"}]}'
+                runControlApplyCapture invalidUuidEmptyResponse invalidUuidEmptyStatus local '{"desired_users":[{"id":"team-a","uuid":""}]}'
                 runControlApplyCapture invalidUuidResponse invalidUuidStatus local '{"desired_users":[{"id":"team-a","uuid":123}]}'
                 runControlApplyCapture invalidUuidStringResponse invalidUuidStringStatus local '{"desired_users":[{"id":"team-a","uuid":"not-a-uuid"}]}'
                 [[ "${invalidEmptyIdStatus}" -ne 0 ]]
                 [[ "${invalidDuplicateStatus}" -ne 0 ]]
+                [[ "${invalidUuidMissingStatus}" -ne 0 ]]
+                [[ "${invalidUuidEmptyStatus}" -ne 0 ]]
                 [[ "${invalidUuidStatus}" -ne 0 ]]
                 [[ "${invalidUuidStringStatus}" -ne 0 ]]
                 responseHasErrorType "${invalidEmptyIdResponse}" invalid_payload
                 responseHasErrorType "${invalidDuplicateResponse}" invalid_payload
+                responseHasErrorType "${invalidUuidMissingResponse}" invalid_payload
+                responseHasErrorType "${invalidUuidEmptyResponse}" invalid_payload
                 responseHasErrorType "${invalidUuidResponse}" invalid_payload
                 responseHasErrorType "${invalidUuidStringResponse}" invalid_payload
 

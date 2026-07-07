@@ -27,6 +27,17 @@ tlsAcmeLogFile() {
     printf '%s/acme.log\n' "${tlsDir}"
 }
 
+tlsDomainNameIsSafe() {
+    padmIsValidHostName "$1"
+}
+
+tlsCertificatePairExists() {
+    local tlsDir=$1
+    local certDomain=$2
+    tlsDomainNameIsSafe "${certDomain}" || return 1
+    [[ -s "${tlsDir}/${certDomain}.crt" && -s "${tlsDir}/${certDomain}.key" ]]
+}
+
 # 自定义 Email
 customSSLEmail() {
     local accountFile accountTmp accountStage
@@ -215,6 +226,7 @@ installTLSFromAcme() {
     local backupKey=
     local installStatus=0
 
+    tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
     crtFile="${tlsDir}/${tlsDomain}.crt"
     keyFile="${tlsDir}/${tlsDomain}.key"
@@ -287,6 +299,7 @@ installTLS() {
     local crtFile
     local keyFile
     local reinstallBackupDir=
+    tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
     crtFile="${tlsDir}/${tlsDomain}.crt"
     keyFile="${tlsDir}/${tlsDomain}.key"
@@ -385,7 +398,7 @@ resolveInstalledTLSDomain() {
     tlsDir=$(tlsManagedDir) || return 1
     local candidate
     for candidate in "${currentHost:-}" "${tlsDomain:-}" "${domain:-}"; do
-        if [[ -n "${candidate}" && -s "${tlsDir}/${candidate}.crt" && -s "${tlsDir}/${candidate}.key" ]]; then
+        if tlsCertificatePairExists "${tlsDir}" "${candidate}"; then
             printf '%s\n' "${candidate}"
             return 0
         fi
@@ -395,6 +408,7 @@ resolveInstalledTLSDomain() {
     for certFile in "${tlsDir}"/*.crt; do
         [[ -s "${certFile}" ]] || continue
         certName=$(basename "${certFile}" .crt)
+        tlsDomainNameIsSafe "${certName}" || continue
         keyFile="${tlsDir}/${certName}.key"
         [[ -s "${keyFile}" ]] || continue
         printf '%s\n' "${certName}"
@@ -419,7 +433,10 @@ tlsCertificateStatusJson() {
         domain=${tlsDomain}
     fi
     tlsDir=$(tlsManagedDir) || return 1
-    if [[ -z "${domain}" || ! -s "${tlsDir}/${domain}.crt" || ! -s "${tlsDir}/${domain}.key" ]]; then
+    if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
+        domain=
+    fi
+    if ! tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         domain=$(resolveInstalledTLSDomain)
     fi
 
@@ -429,7 +446,7 @@ tlsCertificateStatusJson() {
         sslDays=180
     fi
 
-    if [[ -n "${domain}" && -s "${tlsDir}/${domain}.crt" && -s "${tlsDir}/${domain}.key" ]]; then
+    if tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         if [[ -d "$HOME/.acme.sh/${domain}_ecc" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
             local modifyTime currentTime stampDiff days remainingDays sourceType
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
@@ -570,7 +587,10 @@ renewalTLS() {
         domain=${tlsDomain}
     fi
     tlsDir=$(tlsManagedDir) || return 1
-    if [[ -z "${domain}" || ! -s "${tlsDir}/${domain}.crt" || ! -s "${tlsDir}/${domain}.key" ]]; then
+    if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
+        domain=
+    fi
+    if ! tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         domain=$(resolveInstalledTLSDomain)
     fi
 
@@ -651,7 +671,7 @@ renewalTLS() {
         else
             successCard "证书有效"
         fi
-    elif [[ -n "${domain}" && -s "${tlsDir}/${domain}.crt" && -s "${tlsDir}/${domain}.key" ]]; then
+    elif tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         tlsCertificateCard "检测到使用自定义证书，无法执行 renew 操作"
     else
         errorCard "未安装本机 TLS 证书；无域名 Reality 不需要这里，域名 Reality 或传统 TLS 请检查 acme 与 /etc/padm/tls"

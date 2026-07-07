@@ -7630,6 +7630,58 @@ EOF
     PATH="${oldPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     unset PADM_FAKE_NGINX_VALIDATE_MODE
+
+    (
+        local root="${TMP_DIR}/subscribe-nginx-custom-alias"
+        local nginxRoot="${root}/nginx"
+        local tlsRoot="${root}/tls"
+        local subscribeRoot="${root}/public-subscribe"
+        local staticRoot="${root}/static"
+        local oldSubscribeDir="${PADM_SUBSCRIBE_DIR:-}"
+        local oldTlsDir="${PADM_TLS_DIR:-}"
+        local oldCurrentHost="${currentHost:-}"
+        local configPath
+
+        mkdir -p "${root}/fake-bin" "${nginxRoot}" "${tlsRoot}" "${subscribeRoot}" "${staticRoot}"
+        cat >"${root}/fake-bin/nginx" <<'SH'
+#!/usr/bin/env bash
+if [[ "$1" == "-v" ]]; then
+    printf 'nginx version: nginx/1.26.0\n' >&2
+    exit 0
+fi
+[[ "$1" == "-t" ]]
+SH
+        chmod +x "${root}/fake-bin/nginx"
+        PATH="${root}/fake-bin:${oldPath}"
+        nginxConfigPath="${nginxRoot}/"
+        nginxStaticPath="${staticRoot}"
+        export PADM_TLS_DIR="${tlsRoot}"
+        export PADM_SUBSCRIBE_DIR="${subscribeRoot}"
+        currentHost=subscribe.example.com
+        printf 'cert\n' >"${tlsRoot}/subscribe.example.com.crt"
+        printf 'key\n' >"${tlsRoot}/subscribe.example.com.key"
+
+        readNginxSubscribe() { subscribePort=; }
+        readSingBoxPortResult() {
+            local -n resultRef=$1
+            resultRef=(39778)
+        }
+        nginxBlog() { return 0; }
+        hasIPv6Connectivity() { return 1; }
+        installSubscriptionControlService() { return 0; }
+        bootStartup() { return 0; }
+        handleNginx() { return 0; }
+        pgrep() { return 0; }
+
+        installSubscribe >/dev/null 2>&1
+        configPath="${nginxRoot}/subscribe.conf"
+        grep -q "alias ${subscribeRoot}/\\\$1/\\\$2;" "${configPath}"
+        grep -q "ssl_certificate ${tlsRoot}/subscribe.example.com.crt;ssl_certificate_key ${tlsRoot}/subscribe.example.com.key;" "${configPath}"
+
+        if [[ -n "${oldSubscribeDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldSubscribeDir}"; else unset PADM_SUBSCRIBE_DIR; fi
+        if [[ -n "${oldTlsDir}" ]]; then export PADM_TLS_DIR="${oldTlsDir}"; else unset PADM_TLS_DIR; fi
+        currentHost="${oldCurrentHost}"
+    )
 }
 
 runSubscribeNginxServiceFailureRegression() (
@@ -15638,6 +15690,7 @@ runTlsRenewalFailurePropagationRegression() (
     local commandLog="${root}/commands.log"
     local statusLog="${root}/status.log"
     local errorLog="${root}/error.log"
+    local statusJson
     local mode rc
 
     mkdir -p "${tlsDir}" "${homeDir}"
@@ -15709,6 +15762,37 @@ runTlsRenewalFailurePropagationRegression() (
         rc=$?
         set -e
     }
+
+    rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
+    mkdir -p "${tlsDir}" "${homeDir}"
+    currentHost=../escape
+    domain=
+    tlsDomain=
+    installedDNSAPIStatus=
+    dnsTLSDomain=
+    printf 'cert\n' >"${root}/escape.crt"
+    printf 'key\n' >"${root}/escape.key"
+    : >"${statusLog}"
+    : >"${errorLog}"
+    statusJson=$(tlsCertificateStatusJson)
+    jq -e '.status == "missing"' <<<"${statusJson}" >/dev/null
+    renewalTLS >/dev/null 2>&1
+    grep -q "未安装本机 TLS 证书" "${errorLog}"
+    ! grep -q "检测到使用自定义证书" "${statusLog}"
+    rm -f "${root}/escape.crt" "${root}/escape.key"
+
+    currentHost=
+    printf 'cert\n' >"${tlsDir}/bad;name.crt"
+    printf 'key\n' >"${tlsDir}/bad;name.key"
+    : >"${statusLog}"
+    : >"${errorLog}"
+    statusJson=$(tlsCertificateStatusJson)
+    jq -e '.status == "missing"' <<<"${statusJson}" >/dev/null
+    renewalTLS >/dev/null 2>&1
+    grep -q "未安装本机 TLS 证书" "${errorLog}"
+    ! grep -q "检测到使用自定义证书" "${statusLog}"
+    rm -f "${tlsDir}/bad;name.crt" "${tlsDir}/bad;name.key"
+    currentHost=renew.example.com
 
     runRenewalCase nginx-stop-fail
     [[ "${rc}" == "1" ]]
