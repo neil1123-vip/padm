@@ -8375,6 +8375,24 @@ runSubscribeUserOutputTransactionRegression() {
         printf '[{"tag":"atomic-user","type":"direct"}]\n' >"${localDir}/sing-box/${email}"
     }
 
+    (
+        currentHost=example.com
+        rm -rf "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+        mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+        if defaultBase64Code vmessws 443 'bad"name' '11111111-1111-1111-1111-111111111111' example.com /ws >/dev/null 2>&1; then
+            return 1
+        fi
+        if defaultBase64Code vlessws 443 safe-user '11111111-1111-1111-1111-111111111111' example.com $'/ws\nproxy-groups:' >/dev/null 2>&1; then
+            return 1
+        fi
+        if defaultBase64Code vlessws 443 safe-user '11111111-1111-1111-1111-111111111111' example.com ../ws >/dev/null 2>&1; then
+            return 1
+        fi
+        if regressionFindHasMatches "${localDir}" -mindepth 2 -type f; then
+            return 1
+        fi
+    )
+
     clashMetaConfig() {
         find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-subscribe-user.*' -print >>"${stageMarker}" 2>/dev/null || true
         originalClashMetaConfig "$@"
@@ -11178,8 +11196,8 @@ runSubscriptionOutputTlsVlessVmessTrojanRegression() {
 local quotedTlsUser='tls-"quoted-user'
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
-defaultBase64Code vlesstcp 443 "${quotedTlsUser}" uuid-quoted "" ""
-jq -e --arg tag "${quotedTlsUser}" '.[0].tag == $tag and .[0].uuid == "uuid-quoted"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${quotedTlsUser}" >/dev/null
+! defaultBase64Code vlesstcp 443 "${quotedTlsUser}" uuid-quoted "" "" >/dev/null 2>&1
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${quotedTlsUser}" ]]
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"

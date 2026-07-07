@@ -107,6 +107,42 @@ subscriptionWireGuardValidPublicKeyValue() {
     [[ -n "${value}" && "${value}" != "null" && ! "${value}" =~ [[:space:]] ]]
 }
 
+subscriptionWireGuardValidEndpointValue() {
+    local endpoint=$1
+    local host port
+    [[ -n "${endpoint}" && "${endpoint}" != "null" && "${endpoint}" == *:* && ! "${endpoint}" =~ [[:space:]] ]] || return 1
+    host=${endpoint%:*}
+    port=${endpoint##*:}
+    [[ "${host}" != "${endpoint}" && -n "${host}" && -n "${port}" ]] || return 1
+    subscriptionWireGuardValidEndpointHost "${host}" &&
+        subscriptionWireGuardValidPort "${port}"
+}
+
+subscriptionWireGuardValidateStateForConfig() {
+    local state=$1
+    local address listenPort peer peerAddress peerPublicKey peerEndpoint
+    address=$(jq -r '.address // empty' <<<"${state}") || return 1
+    listenPort=$(jq -r '.listen_port // empty' <<<"${state}") || return 1
+    subscriptionWireGuardValidIPv4Cidr "${address}" &&
+        subscriptionWireGuardValidPort "${listenPort}" || return 1
+    while IFS= read -r peer; do
+        [[ -n "${peer}" ]] || continue
+        peerAddress=$(jq -r '.address // empty' <<<"${peer}") || return 1
+        peerPublicKey=$(jq -r '.public_key // empty' <<<"${peer}") || return 1
+        peerEndpoint=$(jq -r '.endpoint // empty' <<<"${peer}") || return 1
+        subscriptionWireGuardValidIPv4Cidr "${peerAddress}" &&
+            subscriptionWireGuardValidPublicKeyValue "${peerPublicKey}" || return 1
+        [[ -z "${peerEndpoint}" || "${peerEndpoint}" == "null" ]] ||
+            subscriptionWireGuardValidEndpointValue "${peerEndpoint}" || return 1
+    done < <(jq -c '.peers[]? | select(.enabled == true)' <<<"${state}")
+}
+
+subscriptionWireGuardValidNginxLogPath() {
+    local path=$1
+    [[ -n "${path}" && "${path}" == /* && "${path}" != *$'\n'* && "${path}" != *$'\r'* ]] &&
+        padmIsSafeAbsolutePath "${path}"
+}
+
 subscriptionWireGuardValidateMainCredentialJson() {
     local credentialJson=$1
     local endpointHost listenPort network address publicKey
@@ -434,10 +470,11 @@ writeSubscriptionWireGuardConfig() {
     state=$(subscriptionWireGuardReadState)
     privateKeyFile=$(subscriptionWireGuardPrivateKeyFile)
     configFile=$(subscriptionWireGuardConfigFile)
-    padmCreateTempFileForTarget tmpFile "${configFile}" wireguard || return 1
     listenPort=$(jq -r '.listen_port' <<<"${state}")
     address=$(jq -r '.address' <<<"${state}")
-    [[ -n "${address}" && -s "${privateKeyFile}" ]] || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    [[ -n "${address}" && -s "${privateKeyFile}" ]] || return 1
+    subscriptionWireGuardValidateStateForConfig "${state}" || return 1
+    padmCreateTempFileForTarget tmpFile "${configFile}" wireguard || return 1
     {
         printf '[Interface]\n'
         printf 'Address = %s\n' "${address}"
@@ -536,10 +573,14 @@ ensureSubscriptionWireGuardNginxConfig() {
     local tmpPath
     local backupPath=
     local subscribePublicBase
+    local controlLog
     state=$(subscriptionWireGuardReadState)
     listenHost=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${state}")")
     controlPort=$(jq -r '.control_port' <<<"${state}")
-    [[ -n "${listenHost}" && "${listenHost}" != "null" ]] || return 1
+    controlLog=$(fail2banPadmControlLogFile)
+    subscriptionWireGuardValidIPv4Host "${listenHost}" || return 1
+    subscriptionWireGuardValidPort "${controlPort}" || return 1
+    subscriptionWireGuardValidNginxLogPath "${controlLog}" || return 1
     subscribePublicBase=$(padmResolveManagedAbsolutePath "$(subscribePublicBaseDir)") || return 1
     subscribePublicBase="${subscribePublicBase%/}"
     targetPath=$(subscriptionWireGuardNginxConfigFile) || return 1
@@ -552,7 +593,7 @@ server {
     root ${nginxStaticPath};
 
     location /s/control/ {
-        access_log $(fail2banPadmControlLogFile);
+        access_log ${controlLog};
         client_max_body_size 256k;
         proxy_connect_timeout 5s;
         proxy_send_timeout 180s;

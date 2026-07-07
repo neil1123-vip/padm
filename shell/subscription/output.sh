@@ -143,6 +143,41 @@ appendStandardTLSSubscribeOutputs() {
     appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
 }
 
+subscribeOutputSafeLabel() {
+    local value=$1
+    [[ -n "${value}" && "${value}" =~ ^[A-Za-z0-9._~@+/:=-]+$ ]]
+}
+
+subscribeOutputSafeFileName() {
+    local value=$1
+    [[ -n "${value}" && "${value}" != "." && "${value}" != ".." && "${value}" =~ ^[A-Za-z0-9._~@+=:-]+$ ]]
+}
+
+subscribeOutputSafeRouteValue() {
+    local value=$1
+    [[ -n "${value}" && "${value}" =~ ^/?[A-Za-z0-9._~/-]+$ ]] || return 1
+    [[ "${value}" != *'//'*
+        && "${value}" != "."
+        && "${value}" != ".."
+        && "${value}" != ./*
+        && "${value}" != ../*
+        && "${value}" != */./*
+        && "${value}" != *'/../'*
+        && "${value}" != '/../'*
+        && "${value}" != *'/..'
+        && "${value}" != */.
+        && "${value}" != *'/%'* ]]
+}
+
+subscribeOutputSafeHostValue() {
+    local value=$1
+    if declare -F padmIsValidConnectAddress >/dev/null 2>&1; then
+        padmIsValidConnectAddress "${value}"
+    else
+        [[ "${value}" =~ ^[A-Za-z0-9.-]+$ || "${value}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+    fi
+}
+
 subscribeOutputTitle() {
     local title=$1
     echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
@@ -172,6 +207,12 @@ defaultBase64Code() {
     local user=
     local defaultDir clashDir singBoxDir
     user=$(stripClientNameSuffix "${email}")
+    subscribeOutputSafeLabel "${email}" || return 1
+    subscribeOutputSafeFileName "${user}" || return 1
+    [[ -z "${path}" ]] || subscribeOutputSafeRouteValue "${path}" || return 1
+    [[ -z "${currentPath:-}" ]] || subscribeOutputSafeRouteValue "${currentPath}" || return 1
+    [[ -z "${add}" ]] || subscribeOutputSafeHostValue "${add}" || return 1
+    [[ -z "${currentHost:-}" ]] || subscribeOutputSafeHostValue "${currentHost}" || return 1
     defaultDir=$(subscribeLocalOutputSafeCategoryDir default) || return 1
     clashDir=$(subscribeLocalOutputSafeCategoryDir clashMeta) || return 1
     singBoxDir=$(subscribeLocalOutputSafeCategoryDir sing-box) || return 1

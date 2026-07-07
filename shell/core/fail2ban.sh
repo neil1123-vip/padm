@@ -155,6 +155,23 @@ fail2banPadmControlPort() {
     printf '%s\n' "${port}"
 }
 
+fail2banIsSingleLineValue() {
+    local value=$1
+    [[ -n "${value}" && "${value}" != *$'\n'* && "${value}" != *$'\r'* ]]
+}
+
+fail2banIsValidPortValue() {
+    local port=$1
+    [[ "${port}" =~ ^[0-9]+$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535))
+}
+
+fail2banIsSafeLogPathValue() {
+    local path=$1
+    fail2banIsSingleLineValue "${path}" &&
+        [[ "${path}" == /* ]] &&
+        padmIsSafeAbsolutePath "${path}"
+}
+
 fail2banGuessNginxAccessLogFile() {
     local candidate
     for candidate in \
@@ -180,6 +197,10 @@ fail2banGuessNginxAccessLogFile() {
 fail2banSshdBackend() {
     local backend="${PADM_FAIL2BAN_SSHD_BACKEND:-}"
     if [[ -n "${backend}" ]]; then
+        case "${backend}" in
+        auto | systemd | polling | gamin | pyinotify) ;;
+        *) return 1 ;;
+        esac
         printf '%s\n' "${backend}"
         return 0
     fi
@@ -404,8 +425,11 @@ fail2banWriteManagedJail() {
     controlLog=$(fail2banPadmControlLogFile)
     controlPort=$(fail2banPadmControlPort)
     nginxAccessLog=$(fail2banNginxAccessLogFile)
-    sshdBackend=$(fail2banSshdBackend)
+    sshdBackend=$(fail2banSshdBackend) || return 1
     sshdJournalMatch=$(fail2banSshdJournalMatch)
+    fail2banIsSafeLogPathValue "${controlLog}" || return 1
+    fail2banIsValidPortValue "${controlPort}" || return 1
+    fail2banIsSafeLogPathValue "${nginxAccessLog}" || return 1
     padmCreateTempFileForTarget tmpFile "${jailFile}" fail2ban || return 1
     cat >"${tmpFile}" <<EOF || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 # Managed by padm. Edit via 系统与脚本 -> Fail2ban 防护.

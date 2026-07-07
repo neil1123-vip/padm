@@ -456,6 +456,20 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         grep -q 'proxy_send_timeout 180s;' "${nginxRoot}/padm-control-wg.conf"
         grep -q 'proxy_read_timeout 180s;' "${nginxRoot}/padm-control-wg.conf"
         grep -q "alias ${subscribeRoot}/\\\$1/\\\$2;" "${nginxRoot}/padm-control-wg.conf"
+
+        subscriptionWireGuardReadState() { printf '%s\n' '{"address":"10.77.0.1/24","control_port":"39778;\nserver{}"}'; }
+        ! ensureSubscriptionWireGuardNginxConfig
+
+        local wireGuardRoot="${root}/wireguard"
+        mkdir -p "${wireGuardRoot}"
+        export PADM_WIREGUARD_CONTROL_DIR="${wireGuardRoot}"
+        subscriptionWireGuardConfigFile() { printf '%s\n' "${wireGuardRoot}/wg-padm.conf"; }
+        printf 'private-key\n' >"${wireGuardRoot}/private.key"
+        subscriptionWireGuardReadState() {
+            printf '%s\n' '{"address":"10.77.0.1/24","listen_port":51820,"peers":[{"id":"edge","address":"10.77.0.2/32","public_key":"pub\nkey","enabled":true}]}'
+        }
+        ! writeSubscriptionWireGuardConfig
+        [[ ! -e "${wireGuardRoot}/wg-padm.conf" ]]
     )
 }
 
@@ -4260,6 +4274,21 @@ runFail2banProfileRegression() {
         grep -q "logpath = ${root//\\/\\\\}/nginx/access.log" "${PADM_FAIL2BAN_JAIL_FILE}" || grep -q 'logpath = .*/nginx/access.log' "${PADM_FAIL2BAN_JAIL_FILE}"
         grep -q '/s/control/' "${PADM_FAIL2BAN_FILTER_FILE}"
         grep -Eq 'wp-login\.php|\.env|phpmyadmin|actuator' "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+
+        export PADM_FAIL2BAN_SSHD_BACKEND=$'systemd\n[evil]\nenabled = true'
+        ! fail2banWriteManagedJail sshd false
+        export PADM_FAIL2BAN_SSHD_BACKEND=systemd
+        export PADM_FAIL2BAN_CONTROL_LOG_FILE=$'/var/log/nginx/padm-control-access.log\nbackend = systemd'
+        ! fail2banWriteManagedJail sshd+control false
+        export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/nginx/padm-control-access.log"
+        subscriptionWireGuardReadState() {
+            jq -n --arg port $'39778\nlogpath = /tmp/evil.log' '{enabled:true, role:"main", address:"10.77.0.1/24", control_port:$port, peers:[{id:"edge-a"}]}'
+        }
+        ! fail2banWriteManagedJail sshd+control false
+        subscriptionWireGuardReadState() {
+            jq -n '{enabled:true, role:"main", address:"10.77.0.1/24", control_port:39778, peers:[{id:"edge-a"}]}'
+        }
+
         [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd,padm-control" ]]
         [[ "$(fail2banCurrentProfileName)" == "sshd+control" ]]
         ! fail2banCurrentNginxScanEnabled
@@ -4301,6 +4330,7 @@ EOF
         [[ "$(fail2banCurrentEnabledJailsCsv)" == "sshd" ]]
         ! fail2banCurrentNginxScanEnabled
 
+        subscriptionWireGuardControlEnabled() { return 1; }
         cat >"${PADM_FAIL2BAN_JAIL_FILE}" <<'EOF'
 [sshd]
 enabled = false
