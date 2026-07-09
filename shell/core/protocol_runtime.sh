@@ -527,7 +527,7 @@ initRealityKey() {
                 statusCard "Reality Key" "输入的 Private Key 不合法"
                 initRealityKey
             else
-                statusCard "Reality Key" "privateKey:${realityPrivateKey}" "publicKey:${realityPublicKey}"
+                statusCard "Reality Key" "publicKey:${realityPublicKey}"
             fi
         fi
     fi

@@ -6118,6 +6118,7 @@ runWarpConfigSafeDirRegression() (
         installWarpReg >/dev/null 2>&1
         [[ "$(<"${versionLog}")" == "latest" ]]
         [[ -s "${PADM_WARP_DIR}/warp-reg" ]]
+        [[ "$(stat -c '%a' "${PADM_WARP_DIR}/warp-reg")" == "755" ]]
     )
 
     (
@@ -8926,6 +8927,8 @@ runSubscriptionGroupsBackupFailureRegression() (
     local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
     local oldTmpDir="${TMPDIR:-}"
     local beforeSnapshot
+    local backupModeLog="${root}/backup-mode.log"
+    local chmodLog="${root}/chmod.log"
     local backupFile
     local rc
 
@@ -8937,6 +8940,13 @@ runSubscriptionGroupsBackupFailureRegression() (
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     beforeSnapshot=$(<"${stateFile}")
+    : >"${backupModeLog}"
+    : >"${chmodLog}"
+    eval "$(declare -f backupManagedFileToPath | sed '1s/^backupManagedFileToPath/originalBackupManagedFileToPath/')"
+    backupManagedFileToPath() {
+        printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >>"${backupModeLog}"
+        originalBackupManagedFileToPath "$@"
+    }
 
     cp() {
         return 1
@@ -8953,6 +8963,20 @@ JSON
     if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-*.json'; then
         return 1
     fi
+    chmod() {
+        printf '%s\n' "$*" >>"${chmodLog}"
+        command chmod "$@"
+    }
+    backupFile=$(createSubscriptionGroupsBackup)
+    [[ -f "${backupFile}" ]]
+    grep -Fxq "${stateFile}|${backupFile}|600" "${backupModeLog}"
+    grep -Fxq "700 ${backupsDir}" "${chmodLog}"
+    command chmod 755 "${backupsDir}"
+    command chmod 644 "${backupFile}"
+    : >"${chmodLog}"
+    subscriptionGroupsSecureStateFiles
+    grep -Fxq "700 ${backupsDir}" "${chmodLog}"
+    grep -Fxq "600 ${backupFile}" "${chmodLog}"
 
     if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -10110,6 +10134,7 @@ EOF
     [[ "${realityPublicKey}" == "public-generated" ]]
     [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
     ! compgen -G "${root}/config/.reality_key.reality.*" >/dev/null
+    ! grep -qF 'statusCard "Reality Key" "privateKey:${realityPrivateKey}"' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
 
     if [[ -n "${oldSingBoxBinary}" ]]; then
         PADM_SINGBOX_BINARY="${oldSingBoxBinary}"

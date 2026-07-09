@@ -118,6 +118,21 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
     return 1
 }
 
+subscriptionRemoteControlCurl() {
+    local token=$1
+    shift
+    local headerFile
+    local curlStatus
+    [[ -n "${token}" ]] || return 1
+    padmCreateTmpRootPath headerFile padm-control-auth.XXXXXX || return 1
+    chmod 600 "${headerFile}" || { padmRemoveCleanupPath "${headerFile}"; return 1; }
+    printf 'Authorization: Bearer %s\n' "${token}" >"${headerFile}" || { padmRemoveCleanupPath "${headerFile}"; return 1; }
+    curl -H "@${headerFile}" "$@"
+    curlStatus=$?
+    padmRemoveCleanupPath "${headerFile}"
+    return "${curlStatus}"
+}
+
 subscriptionRemoteControlRequest() {
     local source=$1
     local endpoint=$2
@@ -147,7 +162,6 @@ subscriptionRemoteControlRequest() {
         --max-time "${maxTime}"
         --max-filesize 1048576
         -H "Content-Type: application/json"
-        -H "Authorization: Bearer ${token}"
         -X POST
         --data "${payload}"
         -w '\n%{http_code}'
@@ -159,10 +173,10 @@ subscriptionRemoteControlRequest() {
             IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
         fi
     fi
-    if ! response=$(curl "${curlArgs[@]}" 2>/dev/null); then
+    if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null); then
         if subscriptionRemoteSourceUsesWireGuard "${source}"; then
             subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(curl "${curlArgs[@]}" 2>/dev/null) || return 1
+            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || return 1
         else
             return 1
         fi
@@ -239,14 +253,13 @@ subscriptionRemoteControlHealth() {
         --connect-timeout 5
         --max-time 15
         --max-filesize 1048576
-        -H "Authorization: Bearer ${token}"
         -w '\n%{http_code}'
         "${url}"
     )
-    response=$(curl "${curlArgs[@]}" 2>/dev/null) || {
+    response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
         if subscriptionRemoteSourceUsesWireGuard "${source}"; then
             subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(curl "${curlArgs[@]}" 2>/dev/null) || {
+            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
                 jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
                 return 0
             }
@@ -912,11 +925,20 @@ subscriptionControlEnsureToken() {
 subscriptionGroupsSecureStateFiles() {
     local groupsDir
     local groupsFile
+    local backupDir
+    local backupFile
     groupsDir=$(subscriptionGroupsSafeDir) || return 1
     groupsFile=$(subscriptionGroupsFile)
+    backupDir=$(subscriptionGroupsBackupDir) || return 1
     padmEnsureSafeDirectory "${groupsDir}" || return 1
     chmod 700 "${groupsDir}" 2>/dev/null || true
     [[ -f "${groupsFile}" ]] && chmod 600 "${groupsFile}" 2>/dev/null || true
+    if [[ -d "${backupDir}" ]]; then
+        chmod 700 "${backupDir}" 2>/dev/null || true
+        for backupFile in "${backupDir}"/groups-*.json; do
+            [[ -f "${backupFile}" ]] && chmod 600 "${backupFile}" 2>/dev/null || true
+        done
+    fi
 }
 
 subscriptionControlToken() {

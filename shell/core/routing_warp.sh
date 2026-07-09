@@ -79,7 +79,7 @@ installWarpReg() {
                 exit 1
             fi
             mv "${warpDir}/${warpRegCoreCPUVendor}" "${warpBinary}"
-            chmod 655 "${warpBinary}"
+            chmod 755 "${warpBinary}"
 
         else
             coreCancelledStatusCard "放弃安装"

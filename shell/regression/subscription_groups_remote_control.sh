@@ -255,8 +255,12 @@ runRemoteControlInlineRequestHelpersRegression() (
     local requestResponse
     local healthResponse
     local curlArgsLog="${TMP_DIR}/remote-control-inline-request-curl-args.log"
+    local curlHeaderFilesLog="${TMP_DIR}/remote-control-inline-request-curl-header-files.log"
+    local curlChmodLog="${TMP_DIR}/remote-control-inline-request-curl-chmod.log"
 
     : >"${curlArgsLog}"
+    : >"${curlHeaderFilesLog}"
+    : >"${curlChmodLog}"
 
     subscriptionRemoteControlUrl() {
         return 97
@@ -273,8 +277,26 @@ runRemoteControlInlineRequestHelpersRegression() (
     subscriptionWireGuardControlUrl() {
         printf 'https://control.example/%s\n' "$2"
     }
+    chmod() {
+        printf '%s\n' "$*" >>"${curlChmodLog}"
+        command chmod "$@"
+    }
     curl() {
+        local expectHeader=false
+        local arg
         printf '%s\n' "$*" >>"${curlArgsLog}"
+        for arg in "$@"; do
+            if [[ "${expectHeader}" == "true" ]]; then
+                if [[ "${arg}" == @* ]]; then
+                    local headerFile="${arg#@}"
+                    printf '%s\n' "${headerFile}" >>"${curlHeaderFilesLog}"
+                    [[ "$(<"${headerFile}")" == "Authorization: Bearer token" ]] || return 1
+                fi
+                expectHeader=false
+                continue
+            fi
+            [[ "${arg}" == "-H" ]] && expectHeader=true
+        done
         case "$*" in
         *'https://control.example/sync'*)
             printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
@@ -304,6 +326,13 @@ runRemoteControlInlineRequestHelpersRegression() (
     [[ "${healthResponse}" == *'"id":"edge-remote"'* ]] || return 1
     [[ "${healthResponse}" == *'"name":"Edge Remote"'* ]] || return 1
     [[ "$(grep -c -- '--max-filesize 1048576' "${curlArgsLog}")" == "2" ]] || return 1
+    ! grep -qF 'Authorization: Bearer token' "${curlArgsLog}"
+    [[ "$(wc -l <"${curlHeaderFilesLog}" | tr -d ' ')" == "2" ]] || return 1
+    [[ "$(grep -c '^600 .*/padm-control-auth\.' "${curlChmodLog}")" == "2" ]] || return 1
+    while IFS= read -r headerFile; do
+        [[ -n "${headerFile}" ]] || continue
+        [[ ! -e "${headerFile}" ]] || return 1
+    done <"${curlHeaderFilesLog}"
 )
 
 runRemoteControlInlineWireGuardPeerHelpersRegression() (
