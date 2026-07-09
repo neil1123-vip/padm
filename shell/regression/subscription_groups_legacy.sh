@@ -3218,6 +3218,10 @@ runCoreBinaryInstallCopyFailureRegression() (
         : >"${outputDir}/${assetName}"
     }
     unzip() {
+        if [[ "${1:-}" == "-Z1" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3234,6 +3238,18 @@ runCoreBinaryInstallCopyFailureRegression() (
         chmod 755 "${dest}/xray"
     }
     tar() {
+        case "${1:-}" in
+        -tzf)
+            printf 'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so\n'
+            return 0
+            ;;
+        -tvzf)
+            printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
+            printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
+            printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so'
+            return 0
+            ;;
+        esac
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3595,6 +3611,10 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
         : >"${outputDir}/${assetName}"
     }
     unzip() {
+        if [[ "${1:-}" == "-Z1" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3611,6 +3631,18 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
         chmod 755 "${dest}/xray"
     }
     tar() {
+        case "${1:-}" in
+        -tzf)
+            printf 'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so\n'
+            return 0
+            ;;
+        -tvzf)
+            printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
+            printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
+            printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so'
+            return 0
+            ;;
+        esac
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3760,6 +3792,141 @@ runSingBoxDownloadArtifactsCleanupRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
+)
+
+runCoreReleaseArchiveRejectsUnsafePathRegression() (
+    local root="${TMP_DIR}/core-release-archive-unsafe-path"
+    local tmpDir="${root}/tmp"
+    local xrayRc singBoxRc
+
+    rm -rf "${root}"
+    mkdir -p "${tmpDir}"
+    xrayCoreCPUVendor=Xray-linux-64
+    singBoxCoreCPUVendor=-linux-amd64
+    downloadGitHubReleaseAsset() {
+        local outputDir= assetName=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -P) outputDir=$2; shift 2 ;;
+            *) assetName=$1; shift ;;
+            esac
+        done
+        mkdir -p "${outputDir}"
+        : >"${outputDir}/${assetName}"
+    }
+    unzip() {
+        if [[ "${1:-}" == "-Z1" ]]; then
+            printf '../xray\n'
+            return 0
+        fi
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -d) dest=$2; shift 2 ;;
+            *) shift ;;
+            esac
+        done
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
+        chmod 755 "${dest}/xray"
+    }
+    tar() {
+        case "$1" in
+        -tzf) printf '../sing-box\n'; return 0 ;;
+        -tvzf) printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 ../sing-box'; return 0 ;;
+        esac
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -C) dest=$2; shift 2 ;;
+            *) shift ;;
+            esac
+        done
+        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
+        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+    }
+
+    set +e
+    downloadXrayReleaseBinaryToTempDir v1.2.3 "${tmpDir}/xray"
+    xrayRc=$?
+    downloadSingBoxReleaseBinaryToTempDir v1.2.3 "${tmpDir}/sing"
+    singBoxRc=$?
+    set -e
+
+    [[ "${xrayRc}" -ne 0 ]]
+    [[ "${singBoxRc}" -ne 0 ]]
+)
+
+runCoreReleaseArchiveRejectsSymlinkPayloadRegression() (
+    local root="${TMP_DIR}/core-release-archive-symlink-payload"
+    local tmpDir="${root}/tmp"
+    local xrayRc singBoxRc
+
+    rm -rf "${root}"
+    mkdir -p "${tmpDir}"
+    xrayCoreCPUVendor=Xray-linux-64
+    singBoxCoreCPUVendor=-linux-amd64
+    downloadGitHubReleaseAsset() {
+        local outputDir= assetName=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -P) outputDir=$2; shift 2 ;;
+            *) assetName=$1; shift ;;
+            esac
+        done
+        mkdir -p "${outputDir}"
+        : >"${outputDir}/${assetName}"
+    }
+    unzip() {
+        if [[ "${1:-}" == "-Z1" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -d) dest=$2; shift 2 ;;
+            *) shift ;;
+            esac
+        done
+        mkdir -p "${dest}/xray"
+    }
+    tar() {
+        case "$1" in
+        -tzf)
+            printf 'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so\n'
+            return 0
+            ;;
+        -tvzf)
+            printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
+            printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
+            printf '%s\n' 'lrwxrwxrwx root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so -> /tmp/libcronet.so'
+            return 0
+            ;;
+        esac
+        local dest=
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+            -C) dest=$2; shift 2 ;;
+            *) shift ;;
+            esac
+        done
+        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
+        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
+    }
+
+    set +e
+    downloadXrayReleaseBinaryToTempDir v1.2.3 "${tmpDir}/xray"
+    xrayRc=$?
+    downloadSingBoxReleaseBinaryToTempDir v1.2.3 "${tmpDir}/sing"
+    singBoxRc=$?
+    set -e
+
+    [[ "${xrayRc}" -ne 0 ]]
+    [[ "${singBoxRc}" -ne 0 ]]
 )
 
 runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
@@ -3998,6 +4165,10 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
     padmRemoveCleanupPath() { rm -rf "$1"; }
     downloadGitHubReleaseAsset() { return 0; }
     unzip() {
+        if [[ "${1:-}" == "-Z1" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -4014,6 +4185,18 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
         chmod 755 "${dest}/xray"
     }
     tar() {
+        case "${1:-}" in
+        -tzf)
+            printf 'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so\n'
+            return 0
+            ;;
+        -tvzf)
+            printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
+            printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
+            printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so'
+            return 0
+            ;;
+        esac
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -4433,6 +4616,38 @@ runTlsCustomSSLEmailTransactionRegression() (
     ! grep -q "new@example.com" "${accountFile}"
     ! compgen -G "${homeDir}/.acme.sh/.account.conf.*" >/dev/null
     unset -f commitGeneratedFile originalCommitGeneratedFile
+    HOME="${oldHome}"
+)
+
+runTlsCustomSSLEmailRejectsUnsafeAddressRegression() (
+    local root="${TMP_DIR}/tls-custom-email-unsafe-address"
+    local homeDir="${root}/home"
+    local accountFile="${homeDir}/.acme.sh/account.conf"
+    local oldHome="${HOME}"
+    local rc
+
+    mkdir -p "$(dirname -- "${accountFile}")"
+    printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
+    HOME="${homeDir}"
+    sslType=zerossl
+    autoRead() {
+        case "$3" in
+        sslEmailStatus) printf -v "$3" 'y' ;;
+        sslEmail) printf -v "$3" "bad'@example.com" ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+
+    set +e
+    customSSLEmail "validate email"
+    rc=$?
+    set -e
+
+    [[ "${rc}" == "1" ]]
+    grep -qxF "ACCOUNT_EMAIL='old@example.com'" "${accountFile}"
+    ! grep -qF "bad'" "${accountFile}"
+    [[ ! -e "${accountFile}_tmp" ]]
+    ! compgen -G "${homeDir}/.acme.sh/.account.conf.*" >/dev/null
     HOME="${oldHome}"
 )
 
@@ -14192,6 +14407,76 @@ runInstallToolsAcmeCommitFailureRegression() {
         HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
         unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl mv
+    )
+}
+
+runInstallToolsAcmeDownloadBoundsRegression() {
+    (
+        local oldHome="${HOME}"
+        local oldSelect="${selectCustomInstallType:-}"
+        local oldTmpDir="${TMPDIR:-}"
+        local oldInstallLog="${PADM_INSTALL_LOG:-}"
+        local fakeHome="${TMP_DIR}/install-tools-acme-download-bounds-home"
+        local tmpRoot="${TMP_DIR}/install-tools-acme-download-bounds-tmp"
+        local curlLog="${TMP_DIR}/install-tools-acme-download-bounds-curl.log"
+
+        rm -rf "${fakeHome}" "${tmpRoot}"
+        rm -f "${curlLog}"
+        mkdir -p "${fakeHome}" "${tmpRoot}"
+        HOME="${fakeHome}"
+        TMPDIR="${tmpRoot}"
+        release=debian
+        rhelLike=false
+        upgrade=true
+        updateReleaseInfoChange=true
+        packageManager=apt
+        installType=true
+        removeType=true
+        PADM_INSTALL_LOG="${TMP_DIR}/install-tools-acme-download-bounds-install.log"
+        selectCustomInstallType=",7,"
+        command() {
+            if [[ "$1" == "-v" && "$2" == "qrencode" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        runWithTimeout() {
+            if [[ "${2:-}" == *"acme.sh"* ]]; then
+                mkdir -p "${fakeHome}/.acme.sh"
+                printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
+            fi
+            return 0
+        }
+        runPackageCommandWithProgress() { return 0; }
+        waitAptProcess() { return 0; }
+        installBasePackages() { return 0; }
+        installNginxTools() { return 0; }
+        nginx() { return 0; }
+        protocolSelectionSkipsNginx() { return 0; }
+        protocolSelectionNeedsLocalCertificate() { return 0; }
+        curl() {
+            local outputFile=
+            printf '%s\n' "$*" >"${curlLog}"
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -o) outputFile=$2; shift 2 ;;
+                *) shift ;;
+                esac
+            done
+            [[ -n "${outputFile}" ]] || return 1
+            printf '#!/usr/bin/env sh\nexit 0\n' >"${outputFile}"
+        }
+
+        installTools 1 >/dev/null 2>&1
+        grep -q -- '--connect-timeout 10' "${curlLog}"
+        grep -q -- '--max-time 120' "${curlLog}"
+        grep -q -- '--max-filesize 1048576' "${curlLog}"
+
+        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+        if [[ -n "${oldInstallLog}" ]]; then PADM_INSTALL_LOG="${oldInstallLog}"; else unset PADM_INSTALL_LOG; fi
+        HOME="${oldHome}"
+        selectCustomInstallType="${oldSelect}"
+        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl
     )
 }
 

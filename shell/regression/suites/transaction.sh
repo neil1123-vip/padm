@@ -54,6 +54,8 @@ listRegressionTransactionCoreSelectorEntries() {
         'default light core-first-install-failure-clean' \
         'default light core-first-install-commit-rollback' \
         'default light core-install-unsafe-binary-path' \
+        'default light core-release-archive-unsafe-path' \
+        'default light core-release-archive-symlink-payload' \
         'default light sing-box-download-artifacts-cleanup' \
         'default light network-check-return-failure' \
         'default light tls-failure-return' \
@@ -99,6 +101,8 @@ listRegressionTransactionCoreSelectorEntries() {
         'light light core-first-install-failure-clean' \
         'light light core-first-install-commit-rollback' \
         'light light core-install-unsafe-binary-path' \
+        'light light core-release-archive-unsafe-path' \
+        'light light core-release-archive-symlink-payload' \
         'light light sing-box-download-artifacts-cleanup' \
         'light light network-check-return-failure' \
         'light light tls-failure-return' \
@@ -275,6 +279,8 @@ runRegressionTransactionCoreParallelCompositionRegression() (
     runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() { runRegressionAllSelector core-first-install-failure-clean; }
     runCoreFirstInstallCommitFailureRollbackRegression() { runRegressionAllSelector core-first-install-commit-rollback; }
     runCoreInstallRejectsUnsafeBinaryPathRegression() { runRegressionAllSelector core-install-unsafe-binary-path; }
+    runCoreReleaseArchiveRejectsUnsafePathRegression() { runRegressionAllSelector core-release-archive-unsafe-path; }
+    runCoreReleaseArchiveRejectsSymlinkPayloadRegression() { runRegressionAllSelector core-release-archive-symlink-payload; }
     runSingBoxDownloadArtifactsCleanupRegression() { runRegressionAllSelector sing-box-download-artifacts-cleanup; }
     runNetworkCheckReturnFailureRegression() { runRegressionAllSelector network-check-return-failure; }
     runTlsFailureReturnRegression() { runRegressionAllSelector tls-failure-return; }
@@ -450,6 +456,8 @@ registerRegressionFunctionLeaf legacy-core-upgrade-keeps-existing runLegacyCoreU
 registerRegressionFunctionLeaf core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
 registerRegressionFunctionLeaf core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
 registerRegressionFunctionLeaf core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression
+registerRegressionFunctionLeaf core-release-archive-unsafe-path runCoreReleaseArchiveRejectsUnsafePathRegression
+registerRegressionFunctionLeaf core-release-archive-symlink-payload runCoreReleaseArchiveRejectsSymlinkPayloadRegression
 registerRegressionFunctionLeaf sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
 registerRegressionFunctionLeaf network-check-return-failure runNetworkCheckReturnFailureRegression
 registerRegressionFunctionLeaf sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression

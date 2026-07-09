@@ -31,6 +31,16 @@ tlsDomainNameIsSafe() {
     padmIsValidHostName "$1"
 }
 
+tlsEmailAddressIsSafe() {
+    local email=$1
+    local localPart domainPart
+    [[ -n "${email}" && ${#email} -le 254 && "${email}" == *@* && "${email}" != *@*@* ]] || return 1
+    localPart=${email%@*}
+    domainPart=${email#*@}
+    [[ -n "${localPart}" && ${#localPart} -le 64 && "${localPart}" =~ ^[A-Za-z0-9._%+-]+$ ]] || return 1
+    tlsDomainNameIsSafe "${domainPart}"
+}
+
 tlsCertificatePairExists() {
     local tlsDir=$1
     local certDomain=$2
@@ -40,35 +50,23 @@ tlsCertificatePairExists() {
 
 # 自定义 Email
 customSSLEmail() {
-    local accountFile accountTmp accountStage
+    local accountFile accountStage retryEmail=false
     accountFile=$(acmeAccountFile)
-    accountTmp="${accountFile}_tmp"
-    if echo "${1:-}" | grep -q "validate email"; then
+    if [[ "${1:-}" == *"validate email"* ]]; then
         autoRead tls_email_retry "是否重新输入邮箱地址[y/n]:" sslEmailStatus
         if [[ "${sslEmailStatus}" == "y" ]]; then
-            sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountTmp}" || return 1
-            padmCreateTempFileForTarget accountStage "${accountFile}" account || {
-                removeManagedFilesIfPresentIgnoreFailure "${accountTmp}"
-                return 1
-            }
-            if ! cp "${accountTmp}" "${accountStage}"; then
-                removeManagedFilesIfPresentIgnoreFailure "${accountTmp}"
-                padmRemoveCleanupPath "${accountStage}"
-                return 1
-            fi
-            removeManagedFilesIfPresentIgnoreFailure "${accountTmp}"
-            commitGeneratedFile "${accountStage}" "${accountFile}" 600 || { padmRemoveCleanupPath "${accountStage}"; return 1; }
+            retryEmail=true
         else
             return 1
         fi
     fi
 
     if [[ -d "$(acmeHomeDir)" && -f "${accountFile}" ]]; then
-        if ! grep -q "ACCOUNT_EMAIL" <"${accountFile}" && ! echo "${sslType}" | grep -q "letsencrypt"; then
+        if [[ "${retryEmail}" == "true" ]] || { ! grep -q "ACCOUNT_EMAIL" <"${accountFile}" && ! echo "${sslType}" | grep -q "letsencrypt"; }; then
             autoRead tls_account_email "请输入邮箱地址:" sslEmail
-            if echo "${sslEmail}" | grep -q "@"; then
+            if tlsEmailAddressIsSafe "${sslEmail}"; then
                 padmCreateTempFileForTarget accountStage "${accountFile}" account || return 1
-                if ! cp "${accountFile}" "${accountStage}" || ! printf "ACCOUNT_EMAIL='%s'\n" "${sslEmail}" >>"${accountStage}"; then
+                if ! sed '/ACCOUNT_EMAIL/d' "${accountFile}" >"${accountStage}" || ! printf "ACCOUNT_EMAIL='%s'\n" "${sslEmail}" >>"${accountStage}"; then
                     padmRemoveCleanupPath "${accountStage}"
                     return 1
                 fi
@@ -76,7 +74,7 @@ customSSLEmail() {
                 successCard "添加完毕"
             else
                 echoContent yellow "请重新输入正确的邮箱格式[例: username@example.com]"
-                customSSLEmail || return 1
+                return 1
             fi
         fi
     fi

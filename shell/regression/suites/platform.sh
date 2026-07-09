@@ -32,6 +32,7 @@ listRegressionPlatformIoChildSelectors() {
         install-tools-certificate-dependency \
         install-tools-acme-result-failure \
         install-tools-acme-commit-failure \
+        install-tools-acme-download-bounds \
         install-tools-configured-log \
         install-tools-update-failure \
         install-tools-release-info-failure \
@@ -109,6 +110,7 @@ registerRegressionFunctionLeaf platform-rest runRegressionPlatformFastLeafWithCo
 registerRegressionFunctionLeaf install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
 registerRegressionFunctionLeaf install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
 registerRegressionFunctionLeaf install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
+registerRegressionFunctionLeaf install-tools-acme-download-bounds runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeDownloadBoundsRegression
 registerRegressionFunctionLeaf install-tools-configured-log runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression
 registerRegressionFunctionLeaf install-tools-update-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression
 registerRegressionFunctionLeaf install-tools-release-info-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression

@@ -2399,6 +2399,7 @@ runPlatformSuiteUsesFunctionRegistryContract() {
 install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
 install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
 install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
+install-tools-acme-download-bounds runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeDownloadBoundsRegression
 install-tools-configured-log runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression
 install-tools-update-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression
 install-tools-release-info-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression
@@ -2547,6 +2548,7 @@ runPlatformIoLeavesUseLegacyCompatHelperContract() (
 runInstallToolsCertificateDependencyRegression
 runInstallToolsAcmeResultFailureRegression
 runInstallToolsAcmeCommitFailureRegression
+runInstallToolsAcmeDownloadBoundsRegression
 runInstallToolsUsesConfiguredInstallLogRegression
 runInstallToolsUpdateFailureRegression
 runInstallToolsReleaseInfoFailureRegression
@@ -2687,6 +2689,7 @@ runPlatformIoChildStepsContract() {
         listRegressionPlatformIoChildSelectors
     grep -qx 'dispatch:install-tools-acme-result-failure' "${callLog}"
     grep -qx 'dispatch:install-tools-acme-commit-failure' "${callLog}"
+    grep -qx 'dispatch:install-tools-acme-download-bounds' "${callLog}"
     grep -qx 'dispatch:install-tools-configured-log' "${callLog}"
     grep -qx 'dispatch:install-tools-update-failure' "${callLog}"
     grep -qx 'dispatch:install-tools-release-info-failure' "${callLog}"
@@ -3318,6 +3321,7 @@ runTlsSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf tls ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf tls ' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf tls-failure-return runRegressionTlsLegacyLeafWithCompat runTlsFailureReturnRegression$' "${suiteFile}"
+    grep -q '^registerRegressionFunctionLeaf tls-custom-email-unsafe-address runRegressionTlsLegacyLeafWithCompat runTlsCustomSSLEmailRejectsUnsafeAddressRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf tls-reinstall-rollback runRegressionTlsLegacyLeafWithCompat runTlsReinstallRollbackRegression$' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf tls-renew-failure-propagation runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
@@ -3334,6 +3338,7 @@ runTlsSelectorHelpersStayAlignedContract() (
 
     cat <<'EOF' >"${expectedDefaultSelectorsFile}"
 tls-failure-return
+tls-custom-email-unsafe-address
 tls-reinstall-rollback
 tls-renew-failure-propagation
 EOF
@@ -3373,11 +3378,13 @@ runTlsLegacyPublicSelectorRetirementContract() {
 
     grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-failure-return"]:-}" == "function" ]] || return 1
+    [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-custom-email-unsafe-address"]:-}" == "function" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-reinstall-rollback"]:-}" == "function" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["tls-renew-failure-propagation"]:-}" == "function" ]] || return 1
 
     runLegacyPublicSelectorRetirementAssertions "${legacyFile}" \
         tls-failure-return \
+        tls-custom-email-unsafe-address \
         tls-reinstall-rollback \
         tls-renew-failure-propagation
 }
@@ -3397,11 +3404,13 @@ runTlsLeavesUseCompatHelperContract() (
     }
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-failure-return
+    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-custom-email-unsafe-address
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-reinstall-rollback
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain tls-renew-failure-propagation
 
     cat <<'EOF' >"${TMP_DIR}/tls-compat-helper.expected.log"
 runTlsFailureReturnRegression
+runTlsCustomSSLEmailRejectsUnsafeAddressRegression
 runTlsReinstallRollbackRegression
 runTlsRenewalFailurePropagationRegression
 EOF
@@ -3636,6 +3645,8 @@ legacy-core-upgrade-keeps-existing runLegacyCoreUpgradeKeepsExistingBinaryRegres
 core-first-install-failure-clean runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression
 core-install-unsafe-binary-path runCoreInstallRejectsUnsafeBinaryPathRegression
 core-first-install-commit-rollback runCoreFirstInstallCommitFailureRollbackRegression
+core-release-archive-unsafe-path runCoreReleaseArchiveRejectsUnsafePathRegression
+core-release-archive-symlink-payload runCoreReleaseArchiveRejectsSymlinkPayloadRegression
 sing-box-download-artifacts-cleanup runSingBoxDownloadArtifactsCleanupRegression
 network-check-return-failure runNetworkCheckReturnFailureRegression
 sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression
@@ -3660,6 +3671,7 @@ runPlatformIoDirectLeafSelectorsUseFunctionRegistryContract() {
 install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
 install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
 install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
+install-tools-acme-download-bounds runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeDownloadBoundsRegression
 install-tools-configured-log runRegressionPlatformLegacyLeafWithCompat runInstallToolsUsesConfiguredInstallLogRegression
 install-tools-update-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsUpdateFailureRegression
 install-tools-release-info-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsReleaseInfoFailureRegression
@@ -4995,6 +5007,8 @@ legacy-core-upgrade-keeps-existing
 core-first-install-failure-clean
 core-first-install-commit-rollback
 core-install-unsafe-binary-path
+core-release-archive-unsafe-path
+core-release-archive-symlink-payload
 sing-box-download-artifacts-cleanup
 network-check-return-failure
 tls-failure-return

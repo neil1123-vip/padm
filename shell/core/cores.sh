@@ -26,6 +26,70 @@ cleanSingBoxDownloadArtifacts() {
     [[ ! -e "${extractedDir}" ]]
 }
 
+coreArchiveEntryIsSafe() {
+    local entryPath=$1
+    local normalizedPath segment
+    local -a pathSegments
+    [[ -n "${entryPath}" ]] || return 1
+    normalizedPath="${entryPath}"
+    while [[ "${normalizedPath}" == ./* ]]; do
+        normalizedPath="${normalizedPath#./}"
+    done
+    normalizedPath="${normalizedPath%/}"
+    [[ -n "${normalizedPath}" && "${normalizedPath}" != /* ]] || return 1
+    IFS='/' read -r -a pathSegments <<<"${normalizedPath}"
+    for segment in "${pathSegments[@]}"; do
+        [[ -n "${segment}" && "${segment}" != "." && "${segment}" != ".." ]] || return 1
+    done
+}
+
+validateCoreZipArchive() {
+    local archiveFile=$1
+    local entryList entry
+    padmCreateTempPath entryList "$(coreTmpFilePath padm-core-zip-entries.XXXXXX)" || return 1
+    if ! unzip -Z1 "${archiveFile}" >"${entryList}" 2>/dev/null; then
+        padmRemoveCleanupPath "${entryList}"
+        return 1
+    fi
+    while IFS= read -r entry; do
+        coreArchiveEntryIsSafe "${entry}" || { padmRemoveCleanupPath "${entryList}"; return 1; }
+    done <"${entryList}"
+    padmRemoveCleanupPath "${entryList}"
+}
+
+validateCoreTarArchive() {
+    local archiveFile=$1
+    local entryList detailList entry line lineType
+    padmCreateTempPath entryList "$(coreTmpFilePath padm-core-tar-entries.XXXXXX)" || return 1
+    padmCreateTempPath detailList "$(coreTmpFilePath padm-core-tar-details.XXXXXX)" || { padmRemoveCleanupPath "${entryList}"; return 1; }
+    if ! tar -tzf "${archiveFile}" >"${entryList}" 2>/dev/null; then
+        padmRemoveCleanupPath "${entryList}"
+        padmRemoveCleanupPath "${detailList}"
+        return 1
+    fi
+    while IFS= read -r entry; do
+        coreArchiveEntryIsSafe "${entry}" || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    done <"${entryList}"
+    if ! tar -tvzf "${archiveFile}" >"${detailList}" 2>/dev/null; then
+        padmRemoveCleanupPath "${entryList}"
+        padmRemoveCleanupPath "${detailList}"
+        return 1
+    fi
+    while IFS= read -r line; do
+        lineType="${line:0:1}"
+        case "${lineType}" in
+        - | d) ;;
+        *) padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1 ;;
+        esac
+    done <"${detailList}"
+    padmRemoveCleanupPath "${entryList}"
+    padmRemoveCleanupPath "${detailList}"
+}
+
+coreExtractedFileIsRegular() {
+    [[ -f "$1" && ! -L "$1" ]]
+}
+
 downloadXrayReleaseBinaryToTempDir() {
     local version=$1
     local tmpDir=$2
@@ -34,10 +98,13 @@ downloadXrayReleaseBinaryToTempDir() {
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" XTLS/Xray-core "${version}" "${xrayCoreCPUVendor}.zip"; then
         return 1
     fi
+    if ! validateCoreZipArchive "${tmpDir}/${xrayCoreCPUVendor}.zip"; then
+        return 2
+    fi
     if ! unzip -o "${tmpDir}/${xrayCoreCPUVendor}.zip" -d "${tmpDir}" >/dev/null 2>&1; then
         return 2
     fi
-    [[ -x "${binary}" ]] || return 3
+    coreExtractedFileIsRegular "${binary}" && [[ -x "${binary}" ]] || return 3
 }
 
 downloadSingBoxReleaseBinaryToTempDir() {
@@ -50,11 +117,14 @@ downloadSingBoxReleaseBinaryToTempDir() {
     if ! downloadGitHubReleaseAsset -P "${tmpDir}/" SagerNet/sing-box "${version}" "${asset}"; then
         return 1
     fi
+    if ! validateCoreTarArchive "${tmpDir}/${asset}"; then
+        return 2
+    fi
     if ! tar zxf "${tmpDir}/${asset}" -C "${tmpDir}" >/dev/null 2>&1; then
         return 2
     fi
-    [[ -f "${extractedDir}/libcronet.so" ]] || return 3
-    [[ -x "${binary}" ]] || return 4
+    coreExtractedFileIsRegular "${extractedDir}/libcronet.so" || return 3
+    coreExtractedFileIsRegular "${binary}" && [[ -x "${binary}" ]] || return 4
 }
 
 downloadXrayGeoFilesToStage() {

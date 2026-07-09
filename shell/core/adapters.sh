@@ -767,7 +767,7 @@ installTools() {
             padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
             acmeInstallScript="${acmeTmpDir}/acme.sh"
             padmCreateTempPath acmeDownloadScript "${acmeTmpDir}/acme.sh.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本临时文件创建失败"; }
-            if curl -fsSL -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
+            if curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize 1048576 -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
                 if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then
                     padmRemoveCleanupPath "${acmeTmpDir}"
                     failPackageInstallTransaction "acme安装脚本提交失败"

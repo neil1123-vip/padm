@@ -24,11 +24,13 @@ runRegressionTlsLegacyTmpDirIsolationRegression() (
 listRegressionTlsChildSelectors() {
     printf '%s\n' \
         tls-failure-return \
+        tls-custom-email-unsafe-address \
         tls-reinstall-rollback \
         tls-renew-failure-propagation
 }
 
 registerRegressionFunctionLeaf tls-failure-return runRegressionTlsLegacyLeafWithCompat runTlsFailureReturnRegression
+registerRegressionFunctionLeaf tls-custom-email-unsafe-address runRegressionTlsLegacyLeafWithCompat runTlsCustomSSLEmailRejectsUnsafeAddressRegression
 registerRegressionFunctionLeaf tls-reinstall-rollback runRegressionTlsLegacyLeafWithCompat runTlsReinstallRollbackRegression
 registerRegressionFunctionLeaf tls-renew-failure-propagation runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression
 registerRegressionFunctionLeaf regression-tls-legacy-tmpdir-isolation runRegressionTlsLegacyTmpDirIsolationRegression
