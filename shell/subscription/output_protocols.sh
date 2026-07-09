@@ -40,9 +40,6 @@ EOF
     echoContent green "协议类型:VLESS，地址:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证），传输方式:tcp，flow:xtls-rprx-vision，账户名:${email}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
-    subscribeOutputTitle "二维码：VLESS TCP TLS Vision"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${currentHost}%3A${port}%3Fencryption%3Dnone%26fp%3Dchrome%26security%3Dtls%26type%3Dtcp%26${currentHost}%3D${currentHost}%26headerType%3Dnone%26sni%3D${currentHost}%26flow%3Dxtls-rprx-vision%23${email}\n"
-
 }
 
 emitVmessWsSubscribeOutput() {
@@ -59,7 +56,6 @@ emitVmessWsSubscribeOutput() {
     echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
     subscribeOutputTitle "通用链接：VMess WS TLS"
     echoContent green "    vmess://${qrCodeBase64Default}\n"
-    subscribeOutputTitle "二维码：VMess WS TLS"
 
     local defaultLink
     local clashMetaBlock
@@ -86,8 +82,6 @@ EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"ws",path:$path,max_early_data:2048,early_data_header_name:"Sec-WebSocket-Protocol"}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
-
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
 
 }
 
@@ -128,9 +122,6 @@ EOF
     subscribeOutputTitle "格式化明文：VLESS WS TLS"
     echoContent green "    协议类型:VLESS，地址:${add}，TLS域名/SNI:${currentHost}，端口:${port}，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证）,用户ID:${id}，安全:tls，传输方式:ws，路径:${path}，账户名:${email}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
-
-    subscribeOutputTitle "二维码：VLESS WS TLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dws%26host%3D${currentHost}%26fp%3Dchrome%26sni%3D${currentHost}%26path%3D${path}%23${email}"
 
 }
 
@@ -184,9 +175,6 @@ emitVlessXHTTPSubscribeOutput() {
       short-id: 6ba85179e30d4fc2
 EOF
 
-    subscribeOutputTitle "二维码：VLESS Reality XHTTP Vision XMUX"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3D${vlessEncryption}%26security%3Dreality%26type%3Dxhttp%26sni%3D${xrayVLESSRealityXHTTPSNI}%26fp%3Dchrome%26path%3D${path}%26mode%3D${xhttpMode}%26host%3D${xhttpHost}%26pbk%3D${currentRealityXHTTPPublicKey}%26sid%3D6ba85179e30d4fc2%23${email}\n"
-
 }
 
 emitVlessGrpcSubscribeOutput() {
@@ -225,9 +213,6 @@ EOF
     echoContent green "    协议类型:VLESS，地址:${add}，TLS域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:gRPC，alpn:h2，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证）,serviceName:${currentPath}grpc，账户名:${email}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
-    subscribeOutputTitle "二维码：VLESS gRPC TLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${add}%3A${port}%3Fencryption%3Dnone%26security%3Dtls%26type%3Dgrpc%26host%3D${currentHost}%26serviceName%3D${currentPath}grpc%26fp%3Dchrome%26path%3D${currentPath}grpc%26sni%3D${currentHost}%26alpn%3Dh2%23${email}"
-
 }
 
 emitTrojanSubscribeOutput() {
@@ -258,9 +243,6 @@ EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"trojan",server:$server,server_port:$port,password:$password,tls:{alpn:["http/1.1"],enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg password "${id}" --arg sni "${currentHost}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
-
-    subscribeOutputTitle "二维码：Trojan TLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=trojan%3a%2f%2f${id}%40${currentHost}%3a${port}%3fpeer%3d${currentHost}%26fp%3Dchrome%26sni%3d${currentHost}%26alpn%3Dhttp/1.1%23${email}\n"
 
 }
 
@@ -294,9 +276,6 @@ EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"trojan",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},transport:{type:"grpc",service_name:$service,idle_timeout:"15s",ping_timeout:"15s",permit_without_stream:false},multiplex:{enabled:false,protocol:"smux",max_streams:32}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg password "${id}" --arg sni "${currentHost}" --arg service "${currentPath}trojangrpc") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
-
-    subscribeOutputTitle "二维码：Trojan gRPC TLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=trojan%3a%2f%2f${id}%40${add}%3a${port}%3Fencryption%3Dnone%26fp%3Dchrome%26security%3Dtls%26peer%3d${currentHost}%26type%3Dgrpc%26sni%3d${currentHost}%26path%3D${currentPath}trojangrpc%26alpn%3Dh2%26serviceName%3D${currentPath}trojangrpc%23${email}\n"
 
 }
 
@@ -340,9 +319,6 @@ EOF
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
     subscribeOutputTitle "v2rayN：Hysteria2 TLS"
     echo "{\"server\": \"${currentHost}:${port}\",\"socks5\": { \"listen\": \"127.0.0.1:7798\", \"timeout\": 300},\"auth\":\"${id}\",\"tls\":{\"sni\":\"${currentHost}\"}}" | jq
-
-    subscribeOutputTitle "二维码：Hysteria2 TLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=hysteria2%3A%2F%2F${id}%40${currentHost}%3A${uriPortEncode}%3Fpeer%3D${currentHost}%26insecure%3D0%26sni%3D${currentHost}%26alpn%3Dh3%23${email}\n"
 
 }
 
@@ -399,9 +375,6 @@ emitVlessRealitySubscribeOutput() {
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
 
-    subscribeOutputTitle "二维码：VLESS Reality Vision"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${entryHost}%3A${port}%3Fencryption%3D${vlessEncryption}%26security%3Dreality%26type%3Dtcp%26sni%3D${realitySNI}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26flow%3Dxtls-rprx-vision%23${email}\n"
-
 }
 
 emitVlessRealityGrpcSubscribeOutput() {
@@ -452,8 +425,6 @@ emitVlessRealityGrpcSubscribeOutput() {
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:"grpc"}}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
     appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
 
-    subscribeOutputTitle "二维码：VLESS Reality gRPC"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vless%3A%2F%2F${id}%40${entryHost}%3A${port}%3Fencryption%3Dnone%26security%3Dreality%26pqv%3D${realityMldsa65Verify}%26type%3Dgrpc%26sni%3D${realitySNI}%26fp%3Dchrome%26pbk%3D${publicKey}%26sid%3D6ba85179e30d4fc2%26path%3Dgrpc%26serviceName%3Dgrpc%23${email}\n"
 }
 
 emitTuicSubscribeOutput() {
@@ -504,8 +475,6 @@ EOF
     subscribeOutputTitle "v2rayN：Tuic TLS"
     echo "{\"relay\": {\"server\": \"${currentHost}:${port}\",\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"ip\": \"${currentHost}\",\"congestion_control\": \"${tuicAlgorithm}\",\"alpn\": [\"h3\"]},\"local\": {\"server\": \"127.0.0.1:7798\"},\"log_level\": \"warn\"}" | jq
 
-    subscribeOutputTitle "二维码：Tuic TLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=tuic%3A%2F%2F${tuicUUID}%3A${tuicPassword}%40${currentHost}%3A${port}%3Fcongestion_control%3D${tuicAlgorithm}%26alpn%3Dh3%26sni%3D${currentHost}%26udp_relay_mode%3Dnative%26allow_insecure%3D0%23${email}\n"
 }
 
 emitShadowsocksSubscribeOutput() {
@@ -558,8 +527,6 @@ emitNaiveSubscribeOutput() {
 
     echoContent green "    ${defaultLink}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"
-    subscribeOutputTitle "二维码：Naive TLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=naive%2Bhttps%3A%2F%2F${email}%3A${id}%40${currentHost}%3A${port}%3Fpadding%3Dtrue%23${email}\n"
 }
 
 emitVmessHTTPUpgradeSubscribeOutput() {
@@ -576,7 +543,6 @@ emitVmessHTTPUpgradeSubscribeOutput() {
     echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
     subscribeOutputTitle "通用链接：VMess HTTPUpgrade TLS"
     echoContent green "    vmess://${qrCodeBase64Default}\n"
-    subscribeOutputTitle "二维码：VMess HTTPUpgrade TLS"
 
     local defaultLink
     local clashMetaBlock
@@ -604,8 +570,6 @@ EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vmess",server:$server,server_port:$port,uuid:$uuid,security:"auto",alter_id:0,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"packetaddr",transport:{type:"httpupgrade",path:$path}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg path "${path}") || return 1
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
-
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=vmess://${qrCodeBase64Default}\n"
 
 }
 
@@ -644,6 +608,4 @@ EOF
     echoContent green "    ${defaultLink}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
-    subscribeOutputTitle "二维码：AnyTLS"
-    echoContent green "    https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=anytls%3A%2F%2F${id}%40${currentHost}%3A${singBoxAnyTLSPort}%3Fpeer%3D${currentHost}%26insecure%3D0%26sni%3D${currentHost}%23${email}\n"
 }

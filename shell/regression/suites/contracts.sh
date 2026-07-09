@@ -2741,7 +2741,9 @@ runFastOnlySafetyChildStepsContract() {
         subscription-sync-config-directory-target \
         subscription-sync-create-local-apply-backups-rollback \
         subscription-sync-config-unmanaged-target \
-        subscription-sync-missing-restore-scope
+        subscription-sync-missing-restore-scope \
+        no-third-party-qr-service \
+        install-refresh-download-bounds
 }
 
 runFastOnlyOutputRestChildStepsContract() {

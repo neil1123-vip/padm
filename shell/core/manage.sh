@@ -2487,7 +2487,6 @@ showSubscriptionUrlCard() {
     echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
     [[ -n "${email}" ]] && menuLine "账号：${email}"
     menuLine "订阅地址：${url}"
-    menuLine "在线二维码：https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${url}"
     menuClose
     if [[ "${release}" != "alpine" ]] && command -v qrencode >/dev/null 2>&1; then
         echo "${url}" | qrencode -s 10 -m 1 -t UTF8

@@ -2465,6 +2465,68 @@ runInstallRefreshSingleArchiveGuardRegression() {
     [[ "${archiveGuardCount}" == "1" ]]
 }
 
+runNoThirdPartyQrServiceRegression() {
+    ! grep -R "api.qrserver.com" \
+        "${PROJECT_ROOT}/shell/core" \
+        "${PROJECT_ROOT}/shell/subscription"
+}
+
+runInstallRefreshDownloadBoundsRegression() (
+    set -euo pipefail
+
+    local root="${TMP_DIR}/install-refresh-download-bounds"
+    local archiveRoot="${root}/archive"
+    local curlLog="${root}/curl.log"
+    local wgetLog="${root}/wget.log"
+    local oldTmpDir="${TMPDIR:-}"
+
+    mkdir -p "${archiveRoot}/padm-main/shell/core" "${root}/tmp"
+    printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
+    printf '# bootstrap fixture\n' >"${archiveRoot}/padm-main/shell/core/bootstrap.sh"
+    printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/shell/validate_install.sh"
+
+    TMPDIR="${root}/tmp"
+    eval "$(awk '
+        /^scriptTmpPath\(\)/ { capture = 1 }
+        /^ensureScriptModules\(\)/ { capture = 0 }
+        capture { print }
+    ' "${PROJECT_ROOT}/install.sh")"
+
+    command() {
+        if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+            return 0
+        fi
+        builtin command "$@"
+    }
+    curl() {
+        printf '%s\n' "$*" >"${curlLog}"
+        tar -cz -C "${archiveRoot}" padm-main
+    }
+    downloadRepoArchive "https://example.invalid/padm.tar.gz" "${root}/curl-extract"
+    grep -q -- '--connect-timeout' "${curlLog}"
+    grep -q -- '--max-time' "${curlLog}"
+    grep -q -- '--max-filesize' "${curlLog}"
+
+    command() {
+        if [[ "$1" == "-v" && "$2" == "curl" ]]; then
+            return 1
+        fi
+        if [[ "$1" == "-v" && "$2" == "wget" ]]; then
+            return 0
+        fi
+        builtin command "$@"
+    }
+    wget() {
+        printf '%s\n' "$*" >"${wgetLog}"
+        tar -cz -C "${archiveRoot}" padm-main
+    }
+    downloadRepoArchive "https://example.invalid/padm.tar.gz" "${root}/wget-extract"
+    grep -q -- '-T' "${wgetLog}"
+    grep -q -- '-t' "${wgetLog}"
+
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runRemoteControlSystemctlStubDefaultStopDisableRegression() {
     local explicitStopDisableCount
     explicitStopDisableCount=$(awk '
@@ -4866,7 +4928,9 @@ runRegressionFastOnlySafety() {
         runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&
         runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression &&
         runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression &&
-        runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression
+        runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
+        runRegressionStep no-third-party-qr-service runNoThirdPartyQrServiceRegression &&
+        runRegressionStep install-refresh-download-bounds runInstallRefreshDownloadBoundsRegression
 }
 
 runRegressionFastOnlyOutputAutoInstall() {

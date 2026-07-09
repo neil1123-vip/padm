@@ -231,12 +231,12 @@ downloadRepoArchive() {
     mkdir -p "${extractDir}" || return 1
     archiveFile=$(scriptCreateTempPath padm-archive.XXXXXX.tar.gz) || return 1
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${archiveUrl}" >"${archiveFile}" || {
+        curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize 52428800 "${archiveUrl}" >"${archiveFile}" || {
             scriptRemovePath "${archiveFile}" || true
             return 1
         }
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "${archiveUrl}" >"${archiveFile}" || {
+        wget -T 30 -t 2 -qO- "${archiveUrl}" >"${archiveFile}" || {
             scriptRemovePath "${archiveFile}" || true
             return 1
         }
