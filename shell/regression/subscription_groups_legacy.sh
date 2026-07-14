@@ -4238,6 +4238,7 @@ runNetworkCheckReturnFailureRegression() (
     local serviceLog="${root}/port-services.log"
     local cleanLog="${root}/port-clean.log"
     local writeLog="${root}/port-write.log"
+    local publicIpCurlLog="${root}/public-ip-curl.log"
     local mode=
     local dnsShellRc ipShellRc portShellRc templateShellRc
 
@@ -4245,6 +4246,23 @@ runNetworkCheckReturnFailureRegression() (
     errorCard() { return 0; }
     sleep() { return 0; }
     dig() { return 1; }
+    curl() {
+        printf '%s\n' "$*" >>"${publicIpCurlLog}"
+        case "$*" in
+        *" -4 "*) printf 'ip=203.0.113.10\n' ;;
+        *" -6 "*) printf 'ip=2001:db8::10\n' ;;
+        *) return 1 ;;
+        esac
+    }
+    [[ "$(getPublicIP 4)" == "203.0.113.10" ]]
+    [[ "$(getPublicIP 6)" == "2001:db8::10" ]]
+    hasIPv6Connectivity
+    grep -q -- 'https://www.cloudflare.com/cdn-cgi/trace' "${publicIpCurlLog}"
+    grep -q -- '--connect-timeout 5' "${publicIpCurlLog}"
+    grep -q -- '--max-time 10' "${publicIpCurlLog}"
+    curl() { printf 'ip=not-an-ip\n'; }
+    [[ -z "$(getPublicIP 4)" ]]
+    unset -f curl
     getPublicIP() { printf '203.0.113.10\n'; }
 
     set +e
@@ -8426,40 +8444,47 @@ SH
         ! grep -q '已恢复旧 alone.conf' "${errorLog}"
     ) || return 1
 
-    PADM_ALONE_NGINX_BACKUP_FILE="${TMP_DIR}/alone_backup.conf"
-    printf 'backup config\n' >"${PADM_ALONE_NGINX_BACKUP_FILE}"
-    printf 'changed config\n' >"${targetPath}"
-    currentHost=example.com
-    currentPort=443
-    curl() { printf '200 OK\n'; }
-    if checkNginx302 2>/dev/null; then
-        return 1
-    fi
-    [[ "$(<"${targetPath}")" == "backup config" ]]
-    [[ ! -e "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]
-    printf 'backup config\n' >"${PADM_ALONE_NGINX_BACKUP_FILE}"
-    printf 'changed config\n' >"${targetPath}"
     (
-        local errorLog="${TMP_DIR}/nginx-302-restore-error.log"
-        : >"${errorLog}"
-        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
-        cp() {
-            if [[ "$1" == "-p" && "$2" == "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]; then
-                return 1
-            fi
-            command cp "$@"
-        }
-        if checkNginx302 >/dev/null 2>&1; then
+        local curlLog="${TMP_DIR}/nginx-302-curl.log"
+        local serviceLog="${TMP_DIR}/nginx-302-service.log"
+        PADM_ALONE_NGINX_BACKUP_FILE="${TMP_DIR}/alone_backup.conf"
+        printf 'backup config\n' >"${PADM_ALONE_NGINX_BACKUP_FILE}"
+        printf 'changed config\n' >"${targetPath}"
+        currentHost=example.com
+        currentPort=443
+        curl() { printf '%s\n' "$*" >>"${curlLog}"; printf '200'; }
+        serviceQueueRestart() { printf 'restart\n' >>"${serviceLog}"; }
+        serviceQueueApply() { printf 'apply\n' >>"${serviceLog}"; }
+        if checkNginx302 2>/dev/null; then
             return 1
         fi
+        [[ "$(<"${targetPath}")" == "backup config" ]]
+        [[ ! -e "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]
+        grep -qx 'restart' "${serviceLog}"
+        grep -qx 'apply' "${serviceLog}"
+        grep -q -- '--connect-timeout 5' "${curlLog}"
+        grep -q -- '--max-time 15' "${curlLog}"
+
+        printf 'backup config\n' >"${PADM_ALONE_NGINX_BACKUP_FILE}"
+        printf 'changed config\n' >"${targetPath}"
+        curl() { printf '302'; }
+        checkNginx302
         [[ "$(<"${targetPath}")" == "changed config" ]]
-        [[ -e "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]
-        grep -q '恢复备份失败' "${errorLog}"
     )
-    rm -f "${PADM_ALONE_NGINX_BACKUP_FILE}"
-    curl() { printf '302 Found\n'; }
-    checkNginx302
-    unset -f curl
+
+    (
+        local actionLog="${TMP_DIR}/nginx-302-backup-failure.log"
+        autoRead() { printf -v "$3" '1'; }
+        ensureTraditionalTlsFallbackNginxConfig() { return 0; }
+        backupNginxConfig() { printf 'backup\n' >>"${actionLog}"; return 1; }
+        removeNginx302() { printf 'remove\n' >>"${actionLog}"; return 0; }
+        set +e
+        manageTraditionalTlsRedirect >/dev/null 2>&1
+        local rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        ! grep -q '^remove$' "${actionLog}"
+    )
     PATH="${oldPath}"
     unset PADM_FAKE_NGINX_VALIDATE_MODE
 }
@@ -12917,6 +12942,11 @@ enable"
 )
 
 runSubscriptionWireGuardMenuFlowBootstrapRegression() {
+    local validPublicKey
+    validPublicKey=$(printf '01234567890123456789012345678901' | base64 -w 0)
+    subscriptionWireGuardValidPublicKeyValue "${validPublicKey}"
+    ! subscriptionWireGuardValidPublicKeyValue 'not-a-wireguard-key'
+    ! subscriptionWireGuardValidPublicKeyValue 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
     runSubscriptionWireGuardMenuFlowRegression bootstrap
 }
 

@@ -58,22 +58,33 @@ validPortNumber() {
 }
 
 # 获取公网 IP
+fetchPublicIP() {
+    local type=$1
+    local currentIP
+    [[ "${type}" == "4" || "${type}" == "6" ]] || return 1
+    currentIP=$(curl -fsS --connect-timeout 5 --max-time 10 "-${type}" https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null |
+        awk -F= '$1 == "ip" {print $2; exit}') || return 1
+    if [[ "${type}" == "4" ]]; then
+        [[ "${currentIP}" =~ ^[0-9]+(\.[0-9]+){3}$ ]] && padmIsValidHostName "${currentIP}" || return 1
+    else
+        padmIsValidIPv6Address "${currentIP}" || return 1
+    fi
+    printf '%s\n' "${currentIP}"
+}
+
 hasIPv6Connectivity() {
-    [[ -n "$(curl --connect-timeout 2 -s -6 http://www.cloudflare.com/cdn-cgi/trace | grep "ip" | cut -d "=" -f 2)" ]]
+    fetchPublicIP 6 >/dev/null 2>&1
 }
 
 getPublicIP() {
-    local type=4
-    if [[ -n "$1" ]]; then
-        type=$1
-    fi
-    if [[ -n "${currentHost}" && -z "$1" ]] && [[ "${singBoxVLESSRealityVisionSNI}" == "${currentHost}" || "${singBoxVLESSRealityGRPCSNI}" == "${currentHost}" || "${xrayVLESSRealitySNI}" == "${currentHost}" ]]; then
+    local type=${1:-4}
+    if [[ -n "${currentHost:-}" && -z "${1:-}" ]] && [[ "${singBoxVLESSRealityVisionSNI:-}" == "${currentHost}" || "${singBoxVLESSRealityGRPCSNI:-}" == "${currentHost}" || "${xrayVLESSRealitySNI:-}" == "${currentHost}" ]]; then
         echo "${currentHost}"
     else
         local currentIP=
-        currentIP=$(curl -s "-${type}" http://www.cloudflare.com/cdn-cgi/trace | grep "ip" | awk -F "[=]" '{print $2}')
-        if [[ -z "${currentIP}" && -z "$1" ]]; then
-            currentIP=$(curl -s "-6" http://www.cloudflare.com/cdn-cgi/trace | grep "ip" | awk -F "[=]" '{print $2}')
+        currentIP=$(fetchPublicIP "${type}" 2>/dev/null || true)
+        if [[ -z "${currentIP}" && -z "${1:-}" ]]; then
+            currentIP=$(fetchPublicIP 6 2>/dev/null || true)
         fi
         echo "${currentIP}"
     fi

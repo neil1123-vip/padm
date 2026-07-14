@@ -1085,13 +1085,18 @@ removeNginx302() {
 # 检查 302 重定向响应
 checkNginx302() {
     local domain302Status=
-    domain302Status=$(curl -s "https://${currentHost}:${currentPort}")
-    if echo "${domain302Status}" | grep -q "302"; then
+    domain302Status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 "https://${currentHost}:${currentPort}" 2>/dev/null || true)
+    if [[ "${domain302Status}" == "302" ]]; then
         successCard "302重定向设置完毕"
         return 0
     fi
     errorCard "302重定向设置失败，请仔细检查是否和示例相同"
     backupNginxConfig restoreBackup || return 1
+    serviceQueueRestart nginx
+    if ! serviceQueueApply; then
+        errorCard "Nginx 302 回滚配置重载失败" "请手动检查 Nginx 当前运行配置"
+        return 1
+    fi
     return 1
 }
 

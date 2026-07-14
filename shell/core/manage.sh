@@ -725,7 +725,7 @@ manageTraditionalTlsRedirect() {
         if ! ensureTraditionalTlsFallbackNginxConfig; then
             return 1
         fi
-        backupNginxConfig backup
+        backupNginxConfig backup || return 1
         autoRead redirect_domain "请输入要重定向的域名,例如 https://www.baidu.com:" redirectDomain
         if ! removeNginx302 || ! addNginx302 "${redirectDomain}"; then
             backupNginxConfig restoreBackup
@@ -733,7 +733,9 @@ manageTraditionalTlsRedirect() {
         fi
         serviceQueueRestart nginx
         if ! serviceQueueApply; then
-            backupNginxConfig restoreBackup
+            backupNginxConfig restoreBackup || return 1
+            serviceQueueRestart nginx
+            serviceQueueApply || return 1
             return 1
         fi
         if [[ -z $(pgrep -f "nginx") ]]; then

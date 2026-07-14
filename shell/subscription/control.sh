@@ -152,7 +152,7 @@ subscriptionRemoteControlRequest() {
     [[ -n "${token}" ]] || return 2
     url=$(subscriptionWireGuardControlUrl "${source}" "${endpoint}") || return 1
     if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
-        maxTime=180
+        maxTime=210
     else
         maxTime=15
     fi
@@ -546,7 +546,8 @@ import json
 import os
 import shutil
 import subprocess
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
 
 SCRIPT_PATH = ${scriptPathLiteral}
 TOKEN_FILE = ${tokenFileLiteral}
@@ -554,6 +555,7 @@ VERSION = ${scriptVersionLiteral}
 CAPABILITIES = ["health", "sync", "subscribe"]
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
+CONTROL_REQUEST_LOCK = Lock()
 try:
     SCRIPT_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "180") or "180"))
 except ValueError:
@@ -694,10 +696,16 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(413, {"ok": False, "error": "payload_too_large"})
             return
         payload = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else ""
-        body = self.call_script(endpoint, payload)
+        if not CONTROL_REQUEST_LOCK.acquire(blocking=False):
+            self.respond(503, {"ok": False, "error": "busy", "error_detail": {"type": "busy", "message": "控制服务正在处理其他变更请求"}})
+            return
+        try:
+            body = self.call_script(endpoint, payload)
+        finally:
+            CONTROL_REQUEST_LOCK.release()
         self.respond(self.response_status(endpoint, body), body)
 
-HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 EOF
     commitGeneratedFile "${tmpFile}" "${serverScript}" 755 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }

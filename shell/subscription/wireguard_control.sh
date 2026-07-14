@@ -104,7 +104,7 @@ subscriptionWireGuardValidTokenValue() {
 
 subscriptionWireGuardValidPublicKeyValue() {
     local value=$1
-    [[ -n "${value}" && "${value}" != "null" && ! "${value}" =~ [[:space:]] ]]
+    [[ "${value}" =~ ^[A-Za-z0-9+/]{43}=$ ]] && printf '%s' "${value}" | base64 -d >/dev/null 2>&1
 }
 
 subscriptionWireGuardValidEndpointValue() {
@@ -597,7 +597,7 @@ server {
         client_max_body_size 256k;
         proxy_connect_timeout 5s;
         proxy_send_timeout 180s;
-        proxy_read_timeout 180s;
+        proxy_read_timeout 195s;
         proxy_pass http://127.0.0.1:$(subscriptionControlPort);
         proxy_set_header Authorization \$http_authorization;
         proxy_set_header Content-Type \$content_type;
