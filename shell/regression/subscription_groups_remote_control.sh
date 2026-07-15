@@ -257,10 +257,12 @@ runRemoteControlInlineRequestHelpersRegression() (
     local curlArgsLog="${TMP_DIR}/remote-control-inline-request-curl-args.log"
     local curlHeaderFilesLog="${TMP_DIR}/remote-control-inline-request-curl-header-files.log"
     local curlChmodLog="${TMP_DIR}/remote-control-inline-request-curl-chmod.log"
+    local curlPayloadLog="${TMP_DIR}/remote-control-inline-request-curl-payload.log"
 
     : >"${curlArgsLog}"
     : >"${curlHeaderFilesLog}"
     : >"${curlChmodLog}"
+    : >"${curlPayloadLog}"
 
     subscriptionRemoteControlUrl() {
         return 97
@@ -284,6 +286,9 @@ runRemoteControlInlineRequestHelpersRegression() (
     curl() {
         local expectHeader=false
         local arg
+        local stdinPayload
+        stdinPayload=$(cat)
+        printf '%s\n' "${stdinPayload}" >>"${curlPayloadLog}"
         printf '%s\n' "$*" >>"${curlArgsLog}"
         for arg in "$@"; do
             if [[ "${expectHeader}" == "true" ]]; then
@@ -330,6 +335,9 @@ runRemoteControlInlineRequestHelpersRegression() (
     [[ "$(wc -l <"${curlHeaderFilesLog}" | tr -d ' ')" == "2" ]] || return 1
     [[ "$(grep -c '^600 .*/padm-control-auth\.' "${curlChmodLog}")" == "2" ]] || return 1
     grep -q -- '--max-time 210' "${curlArgsLog}" || return 1
+    grep -qF -- '--data-binary @-' "${curlArgsLog}" || return 1
+    ! grep -qF 'desired_users' "${curlArgsLog}"
+    grep -qxF '{"desired_users":[]}' "${curlPayloadLog}" || return 1
     while IFS= read -r headerFile; do
         [[ -n "${headerFile}" ]] || continue
         [[ ! -e "${headerFile}" ]] || return 1
@@ -611,6 +619,9 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
 
 runRemoteControlHandleInlineHelpersRegression() (
     local controlRoot="${TMP_DIR}/remote-control-handle-inline-helpers"
+    local configDir="${controlRoot}/config"
+    local desiredBySource
+    local credentialPlan
     local healthResponse
     local syncResponse
     local subscribeResponse
@@ -635,7 +646,8 @@ runRemoteControlHandleInlineHelpersRegression() (
     subscriptionControlRenderSubscribe() {
         return 97
     }
-    subscriptionSyncAccountPlanFromIds() {
+    eval "$(declare -f subscriptionSyncPlanFromDesiredUsers | sed '1s/^subscriptionSyncPlanFromDesiredUsers/originalSubscriptionSyncPlanFromDesiredUsers/')"
+    subscriptionSyncPlanFromDesiredUsers() {
         printf '{"create":[],"remove":[]}'
     }
     subscriptionControlRenderSubscribeAccount() {
@@ -645,12 +657,29 @@ runRemoteControlHandleInlineHelpersRegression() (
     healthResponse=$(handleSubscriptionControl health test-token | jq -c .)
     [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync","subscribe"]'* ]]
 
-    syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a"}],"dry_run":false}' | jq -c .)
+    syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' | jq -c .)
     [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":false'* ]]
     [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
 
     subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}' | jq -c .)
     [[ "${subscribeResponse}" == *'"ok":true'*'"account":"team_a"'* ]]
+
+    mkdir -p "${configDir}"
+    configPath="${configDir}/"
+    singBoxConfigPath=
+    cat >"$(subscriptionGroupsFile)" <<'JSON'
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":0,"token":""}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"event_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+JSON
+    subscriptionSyncGenerateUUID() { printf '22222222-2222-2222-2222-222222222222\n'; }
+    desiredBySource=$(subscriptionRemoteDesiredUsersBySource '[{"id":"edge"}]')
+    jq -e '.["edge"][0].uuid == "22222222-2222-2222-2222-222222222222"' <<<"${desiredBySource}" >/dev/null
+    subscriptionActiveGroupRead -e '.user_groups[0].uuid == "22222222-2222-2222-2222-222222222222"' >/dev/null
+
+    cat >"${configDir}/01_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-VLESS_WS","id":"33333333-3333-3333-3333-333333333333"}]}}]}
+JSON
+    credentialPlan=$(originalSubscriptionSyncPlanFromDesiredUsers '[{"id":"team-a","uuid":"22222222-2222-2222-2222-222222222222"}]')
+    jq -e '.create == ["sub_team_a"] and .remove == ["sub_team_a"]' <<<"${credentialPlan}" >/dev/null
 )
 
 runRemoteControlServerRefreshRegression() (
@@ -1809,6 +1838,7 @@ runSubscriptionControlServerResponseRegression() (
     local fakeInstall="${controlRoot}/install.sh"
     local modeFile="${controlRoot}/mode"
     local startedFile="${controlRoot}/sync.started"
+    local descendantSurvivedFile="${controlRoot}/descendant.survived"
     local responseFile="${controlRoot}/response.txt"
     local serverLog="${controlRoot}/server.log"
     local serverScript
@@ -1886,7 +1916,11 @@ sync:failed)
     ;;
 sync:timeout)
     : >"${PADM_FAKE_CONTROL_STARTED_FILE}"
-    /bin/sleep 2
+    (
+        /bin/sleep 2
+        printf 'survived\n' >"${PADM_FAKE_CONTROL_DESCENDANT_FILE}"
+    ) &
+    wait
     printf '{"ok":true}\n'
     ;;
     sync:invalid)
@@ -1919,11 +1953,12 @@ SH
     mkdir -p "$(dirname "$(subscriptionControlTokenFile)")"
     printf '%s\n' "${serverToken}" >"$(subscriptionControlTokenFile)"
     export PADM_FAKE_SERVER_TOKEN="${serverToken}"
+    export PADM_FAKE_CONTROL_DESCENDANT_FILE="${descendantSurvivedFile}"
     writeSubscriptionControlServer
     serverScript=$(subscriptionControlServerScript)
     printf 'noise\n' >"${modeFile}"
     : >"${startedFile}"
-    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" PADM_FAKE_CONTROL_STARTED_FILE="${startedFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
+    PADM_CONTROL_SCRIPT_TIMEOUT=1 PADM_CONTROL_REQUEST_TIMEOUT=0.5 PADM_FAKE_CONTROL_MODE_FILE="${modeFile}" PADM_FAKE_CONTROL_STARTED_FILE="${startedFile}" python3 "${serverScript}" >"${serverLog}" 2>&1 &
     serverPid=$!
     trap '[[ -n "${serverPid}" ]] && kill "${serverPid}" >/dev/null 2>&1 || true; [[ -n "${serverPid}" ]] && wait "${serverPid}" 2>/dev/null || true' EXIT
     export PADM_TEST_CONTROL_STARTED_FILE="${startedFile}"
@@ -2011,6 +2046,38 @@ def raw_post(endpoint, content_length):
         body = None
     return {"status": status, "body": body}
 
+def slow_post(endpoint):
+    request_text = (
+        f"POST /s/control/{endpoint} HTTP/1.1\r\n"
+        "Host: 127.0.0.1\r\n"
+        f"Authorization: Bearer {token}\r\n"
+        "Content-Type: application/json\r\n"
+        "Content-Length: 10\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "{"
+    )
+    try:
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=10) as sock:
+            sock.sendall(request_text.encode("utf-8"))
+            time.sleep(1)
+            chunks = []
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except Exception as error:
+        return {"status": 0, "error": type(error).__name__, "body": None}
+    response = b"".join(chunks).decode("utf-8", errors="replace")
+    head, _, body_text = response.partition("\r\n\r\n")
+    try:
+        status = int(head.split()[1])
+        body = json.loads(body_text) if body_text else None
+    except Exception:
+        return {"status": 0, "body": None}
+    return {"status": status, "body": body}
+
 results = {}
 set_mode("noise")
 for _ in range(80):
@@ -2029,6 +2096,7 @@ results["sync_invalid_payload"] = request("POST", "sync", "not-json")
 results["subscribe_empty_payload"] = request("POST", "subscribe", "")
 results["subscribe_invalid_payload"] = request("POST", "subscribe", "not-json")
 results["sync_bad_content_length"] = raw_post("sync", "abc")
+results["sync_slow_body"] = slow_post("sync")
 
 set_mode("failed")
 results["sync_failed"] = request("POST", "sync", '{"desired_users":[]}')
@@ -2056,6 +2124,9 @@ results["sync_while_busy"]["elapsed"] = time.monotonic() - busy_started
 sync_thread.join(timeout=10)
 assert not sync_thread.is_alive()
 results["sync_timeout"] = sync_holder["result"]
+time.sleep(1.5)
+results["os_name"] = os.name
+results["timeout_descendant_survived"] = os.path.exists(os.environ["PADM_FAKE_CONTROL_DESCENDANT_FILE"])
 set_mode("invalid")
 results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[]}')
 
@@ -2071,8 +2142,10 @@ PY
     jq -e '.subscribe_empty_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.subscribe_invalid_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_bad_content_length.status == 400 and .sync_bad_content_length.body.error == "invalid_payload"' "${responseFile}" >/dev/null
+    jq -e '.sync_slow_body.status == 408 and .sync_slow_body.body.error == "request_timeout"' "${responseFile}" >/dev/null
     jq -e '.sync_failed.status == 503 and .sync_failed.body.error == "script_failed" and .sync_failed.body.error_detail.type == "script_failed" and .sync_failed.body.exit_code == 7' "${responseFile}" >/dev/null
     jq -e '.sync_timeout.status == 503 and .sync_timeout.body.error == "script_timeout" and .sync_timeout.body.error_detail.type == "script_timeout"' "${responseFile}" >/dev/null
+    jq -e '.os_name != "posix" or .timeout_descendant_survived == false' "${responseFile}" >/dev/null
     jq -e '.health_during_sync.status == 200 and .health_during_sync.body.ok == true and .health_during_sync.elapsed < 0.5' "${responseFile}" >/dev/null
     jq -e '.sync_while_busy.status == 503 and .sync_while_busy.body.error == "busy" and .sync_while_busy.body.error_detail.type == "busy" and .sync_while_busy.elapsed < 0.5' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_response.status == 503 and .sync_invalid_response.body.error == "invalid_response" and .sync_invalid_response.body.error_detail.type == "invalid_response"' "${responseFile}" >/dev/null

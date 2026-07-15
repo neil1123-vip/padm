@@ -1571,14 +1571,19 @@ selectRealityScannerRange() {
 ensureRealityScannerBinary() {
     local scannerDir=$1
     local scannerBin=$2
-    local version=
-    local assetName="RealiTLScanner-linux-64"
+    local assetName=
     local stageDir=
     local stageBin=
 
     padmIsSafeAbsolutePath "${scannerDir%/}" || return 1
     padmIsSafeAbsolutePath "${scannerBin}" || return 1
     [[ "${scannerBin}" == "${scannerDir%/}/"* ]] || return 1
+
+    case "$(uname -m)" in
+    amd64 | x86_64) assetName="RealiTLScanner-linux-amd64" ;;
+    armv8 | aarch64) assetName="RealiTLScanner-linux-arm64" ;;
+    *) return 1 ;;
+    esac
 
     if [[ -x "${scannerBin}" ]]; then
         return 0
@@ -1588,16 +1593,7 @@ ensureRealityScannerBinary() {
     padmCreateTempPath stageDir -d "${scannerDir%/}/.scanner-download.XXXXXX" || return 1
     stageBin="${stageDir}/${assetName}"
     realityTargetStatusBlock yellow "RealiTLScanner 下载" "正在下载官方 Release 二进制"
-    version=$(fetchUrlToStdout "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" 3 | jq -r '.[0].tag_name // empty') || {
-        padmRemoveCleanupPath "${stageDir}"
-        return 1
-    }
-    if [[ -z "${version}" ]]; then
-        realityTargetStatusBlock red "RealiTLScanner 下载" "未获取到最新 Release 版本"
-        padmRemoveCleanupPath "${stageDir}"
-        return 1
-    fi
-    if ! downloadGitHubReleaseAsset -P "${stageDir}" "XTLS/RealiTLScanner" "${version}" "${assetName}"; then
+    if ! downloadGitHubReleaseAsset -P "${stageDir}" "XTLS/RealiTLScanner" latest "${assetName}"; then
         realityTargetStatusBlock red "RealiTLScanner 下载" "下载 Release 资产失败: ${assetName}"
         padmRemoveCleanupPath "${stageDir}"
         return 1

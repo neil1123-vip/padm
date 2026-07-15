@@ -165,21 +165,23 @@ runGitHubReleaseAssetDirectFallbackRegression() {
         local outputDir="${root}/out"
         local downloadLog="${root}/download.calls"
         local expectedAssetSha256
+        local expectedAssetSize
         mkdir -p "${outputDir}"
         expectedAssetSha256=$(printf 'asset-content\n' | sha256sum | awk '{print $1}')
+        expectedAssetSize=$(printf 'asset-content\n' | wc -c | tr -d ' ')
         fetchUrlToStdout() {
             case "$1" in
             */v1.2.3)
                 return 1
                 ;;
             */v1.2.4)
-                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://downloads.example/no-digest.tar.gz"}]}\n'
+                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://github.com/example/repo/releases/download/v1.2.4/asset.tar.gz","size":%s}]}\n' "${expectedAssetSize}"
                 ;;
             */v1.2.5)
-                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://downloads.example/asset.tar.gz","digest":"sha256:%s"}]}\n' "${expectedAssetSha256}"
+                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://github.com/example/repo/releases/download/v1.2.5/asset.tar.gz","size":%s,"digest":"sha256:%s"}]}\n' "${expectedAssetSize}" "${expectedAssetSha256}"
                 ;;
             */releases/latest)
-                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://downloads.example/latest-asset.tar.gz","digest":"sha256:%s"}]}\n' "${expectedAssetSha256}"
+                printf '{"assets":[{"name":"asset.tar.gz","browser_download_url":"https://github.com/example/repo/releases/download/v2.0.0/asset.tar.gz","size":%s,"digest":"sha256:%s"}]}\n' "${expectedAssetSize}" "${expectedAssetSha256}"
                 ;;
             */tags/latest)
                 return 1
@@ -203,11 +205,12 @@ runGitHubReleaseAssetDirectFallbackRegression() {
             return 1
         fi
         [[ ! -e "${downloadLog}" ]] || return 1
+        downloadGitHubReleaseAsset --allow-missing-digest -P "${outputDir}" example/repo v1.2.4 asset.tar.gz || return 1
         downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.5 asset.tar.gz || return 1
         [[ "$(<"${outputDir}/asset.tar.gz")" == "asset-content" ]] || return 1
-        grep -qxF 'https://downloads.example/asset.tar.gz' "${downloadLog}" || return 1
+        grep -qxF 'https://github.com/example/repo/releases/download/v1.2.5/asset.tar.gz' "${downloadLog}" || return 1
         downloadGitHubReleaseAsset -P "${outputDir}" example/repo latest asset.tar.gz || return 1
-        grep -qxF 'https://downloads.example/latest-asset.tar.gz' "${downloadLog}" || return 1
+        grep -qxF 'https://github.com/example/repo/releases/download/v2.0.0/asset.tar.gz' "${downloadLog}" || return 1
     )
 }
 
@@ -219,15 +222,31 @@ runDownloadArgumentMissingValueRegression() {
         local root="${TMP_DIR}/download-arg-missing-value"
         local calls="${root}/wget.calls"
         mkdir -p "${root}"
+        cd "${root}"
+        curl() { return 1; }
         wget() {
             printf '%s\n' "$*" >>"${calls}"
-            return 0
+            printf 'payload\n'
         }
         downloadFile -O https://example.invalid/file.tar.gz
-        grep -qx -- '-c -q -T 30 -t 2 --quota=52428800 https://example.invalid/file.tar.gz' "${calls}"
-        [[ ! -e "${root}/https:" ]]
+        grep -qx -- '-T 30 -t 2 -qO- https://example.invalid/file.tar.gz' "${calls}"
+        [[ "$(<"${root}/file.tar.gz")" == "payload" ]]
     )
 }
+
+runFetchUrlWgetHardLimitRegression() (
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/core/runtime.sh"
+    local outputFile="${TMP_DIR}/fetch-url-wget-hard-limit.out"
+    curl() { return 63; }
+    wget() { head -c 6291456 /dev/zero; }
+
+    if fetchUrlToStdout https://example.invalid/oversized 1 >"${outputFile}"; then
+        return 1
+    fi
+    [[ ! -s "${outputFile}" ]]
+)
 
 runGitHubReleaseArgumentMissingValueRegression() {
     (
@@ -2539,8 +2558,17 @@ runInstallRefreshDownloadBoundsRegression() (
         builtin command "$@"
     }
     curl() {
+        local outputFile=
         printf '%s\n' "$*" >"${curlLog}"
-        tar -cz -C "${archiveRoot}" padm-main
+        while [[ $# -gt 0 ]]; do
+            if [[ "$1" == "-o" && $# -ge 2 ]]; then
+                outputFile=$2
+                break
+            fi
+            shift
+        done
+        [[ -n "${outputFile}" ]] || return 1
+        tar -cz -C "${archiveRoot}" padm-main >"${outputFile}"
     }
     downloadRepoArchive "https://example.invalid/padm.tar.gz" "${root}/curl-extract"
     grep -q -- '--connect-timeout' "${curlLog}"
@@ -2563,7 +2591,13 @@ runInstallRefreshDownloadBoundsRegression() (
     downloadRepoArchive "https://example.invalid/padm.tar.gz" "${root}/wget-extract"
     grep -q -- '-T' "${wgetLog}"
     grep -q -- '-t' "${wgetLog}"
-    grep -q -- '--quota=52428800' "${wgetLog}"
+    grep -q -- '-qO-' "${wgetLog}"
+
+    wget() { head -c 32 /dev/zero; }
+    if scriptDownloadUrlToFileBounded "https://example.invalid/oversized" "${root}/oversized" 16; then
+        return 1
+    fi
+    [[ "$(wc -c <"${root}/oversized" | tr -d ' ')" == "17" ]]
 
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
@@ -3235,6 +3269,8 @@ runSubscribeNginxLocationPatternRegression() {
     local strictPattern='location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {'
     grep -qF "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/subscription.sh"
     grep -qF "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+    grep -A3 -F "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/subscription.sh" | grep -qF 'access_log off;'
+    grep -A3 -F "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh" | grep -qF 'access_log off;'
     ! grep -qF 'location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/(.*) {' "${PROJECT_ROOT}/shell/subscription/subscription.sh"
     ! grep -qF 'location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/(.*) {' "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
 }
@@ -4948,6 +4984,7 @@ runRegressionFastOnlySafety() {
         runRegressionStep restore-managed-file-directory-target runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression &&
         runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
         runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
+        runRegressionStep fetch-url-wget-hard-limit runFetchUrlWgetHardLimitRegression &&
         runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
         runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
         runRegressionStep remove-install-path-file-mode runRemoveInstallPathFileModeRegression &&

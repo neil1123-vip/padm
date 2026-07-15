@@ -64,6 +64,39 @@ scriptCreateTempDir() {
     printf '%s\n' "${tempPath}"
 }
 
+scriptDownloadUrlToFileBounded() {
+    local url=$1
+    local targetFile=$2
+    local maxSize=$3
+    local maxTime=${4:-30}
+    local toolFound=false
+    local -a pipelineStatus=()
+    [[ -n "${url}" && "${maxSize}" =~ ^[0-9]+$ && "${maxSize}" -gt 0 ]] || return 1
+    [[ "${maxTime}" =~ ^[0-9]+$ && "${maxTime}" -gt 0 ]] || return 1
+
+    : >"${targetFile}" || return 1
+    if command -v curl >/dev/null 2>&1; then
+        toolFound=true
+        if curl -fsSL --connect-timeout 10 --max-time "${maxTime}" --max-filesize "${maxSize}" -o "${targetFile}" "${url}" &&
+            [[ "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+            return 0
+        fi
+    fi
+
+    : >"${targetFile}" || return 1
+    if command -v wget >/dev/null 2>&1; then
+        toolFound=true
+        wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
+        pipelineStatus=("${PIPESTATUS[@]}")
+        if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
+            "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+            return 0
+        fi
+    fi
+    [[ "${toolFound}" == "true" ]] || return 127
+    return 1
+}
+
 protectedRegressionWorktreeRoot() {
     local worktreeRoot=${PADM_REGRESSION_WORKTREE_ROOT:-}
     [[ "${PADM_REGRESSION_PROTECT_WORKTREE:-}" == "1" ]] || return 1
@@ -233,14 +266,15 @@ failScriptModuleRefreshAfterBackup() {
 }
 
 fetchRemoteRef() {
+    local metadataFile
     local metadata
-    if command -v curl >/dev/null 2>&1; then
-        metadata=$(curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 "${REPO_REF_URL}") || return 1
-    elif command -v wget >/dev/null 2>&1; then
-        metadata=$(wget -T 30 -t 2 --quota=1048576 -qO- "${REPO_REF_URL}") || return 1
-    else
+    metadataFile=$(scriptCreateTempPath padm-ref.XXXXXX) || return 1
+    if ! scriptDownloadUrlToFileBounded "${REPO_REF_URL}" "${metadataFile}" 1048576; then
+        scriptRemovePath "${metadataFile}" || true
         return 1
     fi
+    metadata=$(<"${metadataFile}")
+    scriptRemovePath "${metadataFile}" || true
     printf '%s\n' "${metadata}" | grep -m 1 '"sha"' | cut -d '"' -f 4
 }
 
@@ -248,22 +282,14 @@ downloadRepoArchive() {
     local archiveUrl=$1
     local extractDir=$2
     local archiveFile
+    local downloadStatus=0
     scriptRemovePath "${extractDir}" >/dev/null 2>&1 || return 1
     mkdir -p "${extractDir}" || return 1
     archiveFile=$(scriptCreateTempPath padm-archive.XXXXXX.tar.gz) || return 1
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize 52428800 "${archiveUrl}" >"${archiveFile}" || {
-            scriptRemovePath "${archiveFile}" || true
-            return 1
-        }
-    elif command -v wget >/dev/null 2>&1; then
-        wget -T 30 -t 2 --quota=52428800 -qO- "${archiveUrl}" >"${archiveFile}" || {
-            scriptRemovePath "${archiveFile}" || true
-            return 1
-        }
-    else
+    scriptDownloadUrlToFileBounded "${archiveUrl}" "${archiveFile}" 52428800 120 || downloadStatus=$?
+    if [[ "${downloadStatus}" -ne 0 ]]; then
         scriptRemovePath "${archiveFile}" || true
-        return 127
+        return "${downloadStatus}"
     fi
     [[ -s "${archiveFile}" ]] || {
         scriptRemovePath "${archiveFile}" || true
@@ -642,7 +668,7 @@ handleScriptCommand() {
         exit 0
     elif [[ "${cronName}" == "RenewTLS" ]]; then
         renewalTLS
-        exit 0
+        exit $?
     elif [[ "${cronName}" == "UpdateGeo" ]]; then
         updateGeoSite >>/etc/padm/crontab_updateGeoSite.log
         printf 'geo更新日期:%s\n' "$(date "+%F %H:%M:%S")" >>/etc/padm/crontab_updateGeoSite.log

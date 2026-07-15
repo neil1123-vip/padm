@@ -6406,9 +6406,9 @@ runWarpConfigSafeDirRegression() (
         autoRead() { printf -v "$3" y; }
         errorCard() { return 1; }
         downloadGitHubReleaseAsset() {
-            [[ "$1" == "-P" && "$3" == "badafans/warp-reg" ]] || return 1
-            printf '%s\n' "$4" >"${versionLog}"
-            printf 'binary\n' >"${2%/}/$5"
+            [[ "$1" == "--allow-missing-digest" && "$2" == "-P" && "$4" == "badafans/warp-reg" ]] || return 1
+            printf '%s\n' "$5" >"${versionLog}"
+            printf '#!/usr/bin/env sh\n' >"${3%/}/$6"
         }
         installWarpReg >/dev/null 2>&1
         [[ "$(<"${versionLog}")" == "latest" ]]
@@ -8714,6 +8714,19 @@ runSubscribeUserOutputTransactionRegression() {
     : >"${stageMarker}"
     eval "$(declare -f clashMetaConfig | sed '1s/^clashMetaConfig/originalClashMetaConfig/')"
     eval "$(declare -f commitSubscribeUserOutputFile | sed '1s/^commitSubscribeUserOutputFile/originalCommitSubscribeUserOutputFile/')"
+
+    (
+        local stagedPath="${root}/public-mode.stage"
+        local targetPath="${root}/public-mode.target"
+        eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+        commitGeneratedFile() {
+            [[ "${3:-}" == "640" ]] || return 1
+            originalCommitGeneratedFile "$@"
+        }
+        printf 'secret\n' >"${stagedPath}"
+        commitSubscribePublicFile "${stagedPath}" "${targetPath}"
+        [[ "$(<"${targetPath}")" == "secret" ]]
+    )
 
     writeOldSubscribeOutputs() {
         printf 'old-default\n' >"${publicDir}/default/${emailMd5}"
@@ -12218,9 +12231,23 @@ runPadmBbrManagedCleanupRegression() (
         bbrInstall() { printf "menu\n" >>"${helperLog}"; }
         autoConfirm() { printf -v "$4" y; }
         curl() {
-            [[ "${1:-}" == "-fsSL" && "${3:-}" == "-o" ]] || return 1
-            printf "%s\n" "${2}" >"${urlLog}"
-            cat >"${4}" <<SH
+            local outputFile= url=
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                -o)
+                    outputFile=${2:-}
+                    shift 2
+                    ;;
+                http://* | https://*)
+                    url=$1
+                    shift
+                    ;;
+                *) shift ;;
+                esac
+            done
+            [[ -n "${outputFile}" && -n "${url}" ]] || return 1
+            printf "%s\n" "${url}" >"${urlLog}"
+            cat >"${outputFile}" <<SH
 #!/usr/bin/env bash
 printf executed >"${marker}"
 printf "%s\n" "\$0" >"${pathLog}"
@@ -15364,15 +15391,12 @@ runRealityScannerBinaryRegression() {
         printf '#!/usr/bin/env bash\n' >"${capturedDir}/${capturedAsset}"
         return 0
     }
-    fetchUrlToStdout() { [[ "$1" == "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" && "$2" == "3" ]] && printf 'v0.2.0\n'; }
-    jq() { printf 'v0.2.0\n'; }
-
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}"
     [[ -x "${scannerBin}" ]]
     [[ "${capturedRepo}" == "XTLS/RealiTLScanner" ]]
-    [[ "${capturedVersion}" == "v0.2.0" ]]
-    [[ "${capturedAsset}" == "RealiTLScanner-linux-64" ]]
-    unset -f rm mkdir downloadGitHubReleaseAsset fetchUrlToStdout jq
+    [[ "${capturedVersion}" == "latest" ]]
+    [[ "${capturedAsset}" == "RealiTLScanner-linux-amd64" ]]
+    unset -f rm mkdir downloadGitHubReleaseAsset
 }
 
 runRealityScannerDownloadFailureKeepsExistingDirRegression() {
@@ -15392,9 +15416,6 @@ runRealityScannerDownloadFailureKeepsExistingDirRegression() {
         command rm "$@"
     }
     downloadGitHubReleaseAsset() { return 1; }
-    fetchUrlToStdout() { [[ "$1" == "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" && "$2" == "3" ]] && printf 'v0.2.0\n'; }
-    jq() { printf 'v0.2.0\n'; }
-
     set +e
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" >/dev/null 2>&1
     rc=$?
@@ -15403,7 +15424,7 @@ runRealityScannerDownloadFailureKeepsExistingDirRegression() {
     [[ "${rc}" == "1" ]]
     [[ "$(<"${scannerDir}/sentinel")" == "keep" ]]
     ! grep -qxF "rm:-rf ${scannerDir}" "${rmLog}"
-    unset -f rm downloadGitHubReleaseAsset fetchUrlToStdout jq
+    unset -f rm downloadGitHubReleaseAsset
 }
 
 runRealityScannerRejectsUnsafeDirRegression() (
@@ -16230,7 +16251,7 @@ runTlsRenewalFailurePropagationRegression() (
     local statusLog="${root}/status.log"
     local errorLog="${root}/error.log"
     local statusJson
-    local mode rc
+    local mode rc tlsRegressionStatMode=
 
     mkdir -p "${tlsDir}" "${homeDir}"
     HOME="${homeDir}"
@@ -16269,6 +16290,10 @@ runTlsRenewalFailurePropagationRegression() (
         return 0
     }
     stat() {
+        if [[ "${tlsRegressionStatMode:-}" == "unsafe-acme" && "$1" == "--format=%a" ]]; then
+            printf '777\n'
+            return 0
+        fi
         if [[ "$1" == "--format=%z" && "${2:-}" == *"/renew.example.com_ecc/renew.example.com.cer" ]]; then
             date -d '89 days ago' '+%F %T.000000000 %z'
             return 0
@@ -16277,7 +16302,8 @@ runTlsRenewalFailurePropagationRegression() (
     }
     sudo() {
         printf 'sudo:%s\n' "$*" >>"${commandLog}"
-        [[ "${mode}" == "install-fail" ]] && return 1
+        [[ "${mode}" == "renew-fail" && "$*" == *" --cron "* ]] && return 1
+        [[ "${mode}" == "install-fail" && "$*" == *" --installcert "* ]] && return 1
         return 0
     }
     prepareRenewalFixture() {
@@ -16287,6 +16313,8 @@ runTlsRenewalFailurePropagationRegression() (
         printf 'key\n' >"${tlsDir}/renew.example.com.key"
         printf 'cert\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.cer"
         printf 'key\n' >"${homeDir}/.acme.sh/renew.example.com_ecc/renew.example.com.key"
+        printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
+        chmod 755 "${homeDir}/.acme.sh/acme.sh"
         : >"${serviceLog}"
         : >"${commandLog}"
         : >"${statusLog}"
@@ -16333,6 +16361,20 @@ runTlsRenewalFailurePropagationRegression() (
     rm -f "${tlsDir}/bad;name.crt" "${tlsDir}/bad;name.key"
     currentHost=renew.example.com
 
+    mode=unsafe-acme
+    prepareRenewalFixture
+    tlsRegressionStatMode=unsafe-acme
+    chmod 777 "${homeDir}/.acme.sh"
+    set +e
+    renewalTLS >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ ! -s "${commandLog}" ]]
+    [[ ! -s "${serviceLog}" ]]
+    grep -q 'acme.sh 路径、所有者或权限异常' "${errorLog}"
+    tlsRegressionStatMode=
+
     runRenewalCase nginx-stop-fail
     [[ "${rc}" == "1" ]]
     grep -qx 'nginx:stop:true' "${serviceLog}"
@@ -16348,12 +16390,21 @@ runTlsRenewalFailurePropagationRegression() (
     ! grep -q '^sudo:' "${commandLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
+    runRenewalCase renew-fail
+    [[ "${rc}" == "1" ]]
+    grep -q '^sudo:.*--cron --home ' "${commandLog}"
+    ! grep -q '^sudo:.*--installcert ' "${commandLog}"
+    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
     runRenewalCase install-fail
     [[ "${rc}" == "1" ]]
     grep -qx 'nginx:stop:true' "${serviceLog}"
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'reload' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -q '^sudo:.*--cron --home ' "${commandLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
@@ -16370,6 +16421,15 @@ runTlsRenewalFailurePropagationRegression() (
     grep -qx 'nginx:start:true' "${serviceLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    eval "$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")"
+    renewalTLS() { return 37; }
+    cronName=RenewTLS
+    set +e
+    (handleScriptCommand)
+    rc=$?
+    set -e
+    [[ "${rc}" == "37" ]]
 )
 
 runTlsRenewalInstallRollbackRegression() (
@@ -16579,6 +16639,8 @@ runTlsReinstallRollbackRegression() (
     printf 'old-key\n' >"${tlsDir}/reinstall.example.com.key"
     printf 'acme-cert\n' >"${homeDir}/.acme.sh/reinstall.example.com_ecc/reinstall.example.com.cer"
     printf 'acme-key\n' >"${homeDir}/.acme.sh/reinstall.example.com_ecc/reinstall.example.com.key"
+    printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
+    chmod 755 "${homeDir}/.acme.sh/acme.sh"
     : >"${statusLog}"
     : >"${errorLog}"
     : >"${cleanLog}"

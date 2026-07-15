@@ -9,6 +9,7 @@ subscriptionRemoteDesiredUsersBySource() {
     local sources=$1
     local sourceIds
     local enabledUsers
+    subscriptionSyncEnsureEnabledUserUUIDs || return 1
     sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
     enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
     jq -c -n --argjson sourceIds "${sourceIds}" --argjson users "${enabledUsers}" '
@@ -163,7 +164,7 @@ subscriptionRemoteControlRequest() {
         --max-filesize 1048576
         -H "Content-Type: application/json"
         -X POST
-        --data "${payload}"
+        --data-binary @-
         -w '\n%{http_code}'
         "${url}"
     )
@@ -173,10 +174,10 @@ subscriptionRemoteControlRequest() {
             IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
         fi
     fi
-    if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null); then
+    if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null); then
         if subscriptionRemoteSourceUsesWireGuard "${source}"; then
             subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || return 1
+            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || return 1
         else
             return 1
         fi
@@ -544,8 +545,11 @@ writeSubscriptionControlServer() {
 #!/usr/bin/env python3
 import json
 import os
+import signal
 import shutil
+import socket
 import subprocess
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 
@@ -560,8 +564,16 @@ try:
     SCRIPT_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_SCRIPT_TIMEOUT", "180") or "180"))
 except ValueError:
     SCRIPT_TIMEOUT = 180
+try:
+    REQUEST_READ_TIMEOUT = max(0.1, float(os.environ.get("PADM_CONTROL_REQUEST_TIMEOUT", "10") or "10"))
+except ValueError:
+    REQUEST_READ_TIMEOUT = 10
 
 class Handler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(REQUEST_READ_TIMEOUT)
+
     def log_message(self, *_):
         return
 
@@ -573,7 +585,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(data)
-        except BrokenPipeError:
+        except OSError:
             pass
 
     def token(self):
@@ -658,13 +670,64 @@ class Handler(BaseHTTPRequestHandler):
         env["PADM_CONTROL_SERVER"] = "1"
         env["PADM_CONTROL_TOKEN"] = self.token()
         env["PADM_SKIP_REMOTE_REF_CHECK"] = "1"
+        popen_options = {"start_new_session": True} if os.name == "posix" else {
+            "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        }
         try:
-            result = subprocess.run(cmd, input=payload, text=True, capture_output=True, timeout=SCRIPT_TIMEOUT, env=env, encoding="utf-8", errors="replace")
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                encoding="utf-8",
+                errors="replace",
+                **popen_options,
+            )
+            stdout, _ = process.communicate(payload, timeout=SCRIPT_TIMEOUT)
         except subprocess.TimeoutExpired:
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                taskkill = shutil.which("taskkill.exe") or shutil.which("taskkill")
+                if taskkill:
+                    subprocess.run(
+                        [taskkill, "/PID", str(process.pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                if process.poll() is None:
+                    process.kill()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
             return {"ok": False, "error": "script_timeout", "error_detail": {"type": "script_timeout", "message": "脚本执行超时"}}
         except OSError:
             return {"ok": False, "error": "script_exec_failed", "error_detail": {"type": "script_exec_failed", "message": "脚本无法执行"}}
-        return self.parse_script_response(result.stdout, result.returncode)
+        return self.parse_script_response(stdout, process.returncode)
+
+    def read_body(self, length):
+        deadline = time.monotonic() + REQUEST_READ_TIMEOUT
+        chunks = []
+        remaining = length
+        while remaining > 0:
+            timeout = deadline - time.monotonic()
+            if timeout <= 0:
+                raise TimeoutError
+            self.connection.settimeout(timeout)
+            chunk = self.rfile.read(min(65536, remaining))
+            if not chunk:
+                raise ValueError
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
 
     def do_GET(self):
         endpoint = self.endpoint()
@@ -695,7 +758,14 @@ class Handler(BaseHTTPRequestHandler):
         if length > MAX_BODY_SIZE:
             self.respond(413, {"ok": False, "error": "payload_too_large"})
             return
-        payload = self.rfile.read(length).decode("utf-8", errors="replace") if length > 0 else ""
+        try:
+            payload = self.read_body(length).decode("utf-8", errors="replace") if length > 0 else ""
+        except (socket.timeout, TimeoutError):
+            self.respond(408, {"ok": False, "error": "request_timeout", "error_detail": {"type": "request_timeout", "message": "请求体读取超时"}})
+            return
+        except ValueError:
+            self.respond(400, {"ok": False, "error": "invalid_payload", "error_detail": {"type": "invalid_payload", "message": "请求体不完整"}})
+            return
         if not CONTROL_REQUEST_LOCK.acquire(blocking=False):
             self.respond(503, {"ok": False, "error": "busy", "error_detail": {"type": "busy", "message": "控制服务正在处理其他变更请求"}})
             return
@@ -935,12 +1005,15 @@ subscriptionGroupsSecureStateFiles() {
     local groupsFile
     local backupDir
     local backupFile
+    local lockFile
     groupsDir=$(subscriptionGroupsSafeDir) || return 1
     groupsFile=$(subscriptionGroupsFile)
     backupDir=$(subscriptionGroupsBackupDir) || return 1
+    lockFile=$(subscriptionGroupsLockFile) || return 1
     padmEnsureSafeDirectory "${groupsDir}" || return 1
     chmod 700 "${groupsDir}" 2>/dev/null || true
     [[ -f "${groupsFile}" ]] && chmod 600 "${groupsFile}" 2>/dev/null || true
+    [[ -f "${lockFile}" ]] && chmod 600 "${lockFile}" 2>/dev/null || true
     if [[ -d "${backupDir}" ]]; then
         chmod 700 "${backupDir}" 2>/dev/null || true
         for backupFile in "${backupDir}"/groups-*.json; do
@@ -1101,7 +1174,7 @@ subscriptionControlApplySync() {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     }
-    if ! plan=$(subscriptionSyncAccountPlanFromIds sync < <(jq -r '.[].id' <<<"${desiredUsers}")); then
+    if ! plan=$(subscriptionSyncPlanFromDesiredUsers "${desiredUsers}"); then
         jq -n '{ok:false, error:"plan_failed", error_detail:{type:"plan_failed", message:"同步计划生成失败"}}'
         return 1
     fi

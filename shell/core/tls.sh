@@ -9,6 +9,29 @@ acmeAccountFile() {
     printf '%s\n' "$(acmeHomeDir)/account.conf"
 }
 
+acmeExecutable() {
+    local acmeDir
+    local homeDir
+    local executable
+    local expectedOwner
+    local path
+    local owner
+    local mode
+    acmeDir=$(acmeSafeHomeDir) || return 1
+    homeDir=$(dirname -- "${acmeDir}")
+    executable="${acmeDir}/acme.sh"
+    expectedOwner=$(id -u) || return 1
+    [[ -d "${homeDir}" && -d "${acmeDir}" && -f "${executable}" && -x "${executable}" ]] || return 1
+    [[ ! -L "${homeDir}" && ! -L "${acmeDir}" && ! -L "${executable}" ]] || return 1
+    for path in "${homeDir}" "${acmeDir}" "${executable}"; do
+        owner=$(stat --format=%u -- "${path}") || return 1
+        mode=$(stat --format=%a -- "${path}") || return 1
+        [[ "${owner}" == "${expectedOwner}" && "${mode}" =~ ^[0-7]{3,4}$ ]] || return 1
+        (( (8#${mode} & 8#22) == 0 )) || return 1
+    done
+    printf '%s\n' "${executable}"
+}
+
 tlsManagedDir() {
     local tlsDir="${PADM_TLS_DIR:-/etc/padm/tls}"
     tlsDir=$(padmResolveManagedAbsolutePath "${tlsDir}") || return 1
@@ -189,7 +212,9 @@ selectAcmeInstallSSL() {
 acmeInstallSSL() {
     local dnsAPIDomain="${tlsDomain}"
     local dnsAPIExtraDomain=
+    local acmeBin
     local acmeLogFile
+    acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
     acmeLogFile=$(tlsAcmeLogFile) || return 1
     padmEnsureSafeDirectory "$(dirname -- "${acmeLogFile}")" || return 1
     if [[ "${dnsAPIStatus:-}" == "y" ]]; then
@@ -200,16 +225,16 @@ acmeInstallSSL() {
     if [[ "${dnsAPIType:-}" == "cloudflare" ]]; then
         successCard "DNS API 生成证书中"
         if [[ -n "${cfZoneID:-}" ]]; then
-            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+            CF_Token="${cfAPIToken}" CF_Zone_ID="${cfZoneID}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
         else
-            CF_Token="${cfAPIToken}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+            CF_Token="${cfAPIToken}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_cf -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
         fi
     elif [[ "${dnsAPIType:-}" == "aliyun" ]]; then
         successCard "DNS API 生成证书中"
-        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "$HOME/.acme.sh/acme.sh" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+        Ali_Key="${aliKey}" Ali_Secret="${aliSecret}" "${acmeBin}" --issue -d "${dnsAPIDomain}" ${dnsAPIExtraDomain} --dns dns_ali -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
     else
         successCard "生成证书中"
-        sudo "$HOME/.acme.sh/acme.sh" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
+        sudo "${acmeBin}" --issue -d "${tlsDomain}" --standalone -k ec-256 --server "${sslType}" ${sslIPv6:-} 2>&1 | tee -a "${acmeLogFile}" >/dev/null
     fi
 }
 
@@ -223,12 +248,14 @@ installTLSFromAcme() {
     local backupCrt=
     local backupKey=
     local installStatus=0
+    local acmeBin
 
     tlsDomainNameIsSafe "${tlsDomain}" || { errorCard "TLS 域名不合法"; return 1; }
     tlsDir=$(tlsManagedDir) || return 1
     crtFile="${tlsDir}/${tlsDomain}.crt"
     keyFile="${tlsDir}/${tlsDomain}.key"
     acmeLogFile=$(tlsAcmeLogFile) || return 1
+    acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
 
     if [[ -s "${crtFile}" && -s "${keyFile}" ]]; then
         padmCreateTmpRootPath backupDir padm-tls-install.XXXXXX -d || return 1
@@ -239,9 +266,9 @@ installTLSFromAcme() {
     fi
 
     if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-        sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
+        sudo "${acmeBin}" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
     else
-        sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
+        sudo "${acmeBin}" --installcert -d "${tlsDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
     fi
 
     if [[ "${installStatus}" -ne 0 || ! -f "${crtFile}" || ! -f "${keyFile}" ]] || [[ -z $(cat "${keyFile}") || -z $(cat "${crtFile}") ]]; then
@@ -437,10 +464,12 @@ tlsCertificateStatusJson() {
     local domain=${currentHost}
     local sslTypeFile
     local tlsDir
+    local acmeDir
     if [[ -z "${domain}" && -n "${tlsDomain}" ]]; then
         domain=${tlsDomain}
     fi
     tlsDir=$(tlsManagedDir) || return 1
+    acmeDir=$(acmeSafeHomeDir 2>/dev/null || true)
     if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
         domain=
     fi
@@ -455,13 +484,13 @@ tlsCertificateStatusJson() {
     fi
 
     if tlsCertificatePairExists "${tlsDir}" "${domain}"; then
-        if [[ -d "$HOME/.acme.sh/${domain}_ecc" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+        if [[ -n "${acmeDir}" ]] && { [[ -d "${acmeDir}/${domain}_ecc" && -f "${acmeDir}/${domain}_ecc/${domain}.key" && -f "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
             local modifyTime currentTime stampDiff days remainingDays sourceType
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-                modifyTime=$(stat --format=%z "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
+                modifyTime=$(stat --format=%z "${acmeDir}/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
                 sourceType="acme-dns-api"
             else
-                modifyTime=$(stat --format=%z "$HOME/.acme.sh/${domain}_ecc/${domain}.cer")
+                modifyTime=$(stat --format=%z "${acmeDir}/${domain}_ecc/${domain}.cer")
                 sourceType="acme-standalone"
             fi
             modifyTime=$(date +%s -d "${modifyTime}")
@@ -591,10 +620,14 @@ renewalTLS() {
     local domain=${currentHost}
     local sslTypeFile
     local tlsDir
+    local acmeDir
+    local acmeBin
+    local renewStatus
     if [[ -z "${domain}" && -n "${tlsDomain}" ]]; then
         domain=${tlsDomain}
     fi
     tlsDir=$(tlsManagedDir) || return 1
+    acmeDir=$(acmeSafeHomeDir 2>/dev/null || true)
     if [[ -n "${domain}" ]] && ! tlsDomainNameIsSafe "${domain}"; then
         domain=
     fi
@@ -608,13 +641,18 @@ renewalTLS() {
             sslRenewalDays=180
         fi
     fi
-    if [[ -d "$HOME/.acme.sh/${domain}_ecc" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.key" && -f "$HOME/.acme.sh/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+    if [[ "${installedDNSAPIStatus:-}" == "true" && -z "${acmeDir}" ]]; then
+        errorCard "acme.sh HOME 路径异常"
+        return 1
+    fi
+    if [[ -n "${acmeDir}" ]] && { [[ -d "${acmeDir}/${domain}_ecc" && -f "${acmeDir}/${domain}_ecc/${domain}.key" && -f "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
+        acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
         modifyTime=
 
         if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-            modifyTime=$(stat --format=%z "$HOME/.acme.sh/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
+            modifyTime=$(stat --format=%z "${acmeDir}/*.${dnsTLSDomain}_ecc/*.${dnsTLSDomain}.cer")
         else
-            modifyTime=$(stat --format=%z "$HOME/.acme.sh/${domain}_ecc/${domain}.cer")
+            modifyTime=$(stat --format=%z "${acmeDir}/${domain}_ecc/${domain}.cer")
         fi
 
         modifyTime=$(date +%s -d "${modifyTime}")
@@ -662,7 +700,23 @@ renewalTLS() {
                 failTlsRenewalBeforeInstall "TLS 旧证书备份失败"
                 return 1
             }
-            sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || {
+            if sudo "${acmeBin}" --cron --home "${acmeDir}"; then
+                :
+            else
+                renewStatus=$?
+                errorCard "TLS 证书续签失败，正在恢复旧证书和服务"
+                restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || restoreStatus=1
+                restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600 || restoreStatus=1
+                if [[ "${restoreStatus}" -eq 0 ]]; then
+                    padmRemoveCleanupPath "${backupDir}"
+                else
+                    padmForgetCleanupPath "${backupDir}"
+                    errorCard "TLS 证书恢复失败，请手动检查备份目录: ${backupDir}"
+                fi
+                restoreServicesAfterTLSRenewal || errorCard "TLS 证书续签失败，且服务恢复失败"
+                return "${renewStatus}"
+            fi
+            sudo "${acmeBin}" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || {
                 local installStatus=$?
                 errorCard "TLS 证书安装失败，正在尝试恢复服务"
                 restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || restoreStatus=1

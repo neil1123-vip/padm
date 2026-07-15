@@ -25,6 +25,91 @@ subscriptionGroupsBackupDir() {
     printf '%s/backups\n' "${groupsDir}"
 }
 
+subscriptionGroupsLockFile() {
+    local groupsDir
+    groupsDir=$(subscriptionGroupsSafeDir) || return 1
+    printf '%s/groups.lock\n' "${groupsDir}"
+}
+
+subscriptionGroupsWithDirectoryLock() {
+    local lockTimeout=$1
+    local lockDir=$2
+    shift 2
+    local deadline=$((SECONDS + lockTimeout))
+    local lockMtime
+    local now
+    local ownerPid
+    local status
+
+    while ! mkdir -- "${lockDir}" 2>/dev/null; do
+        ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
+        if [[ "${ownerPid}" =~ ^[0-9]+$ ]] && ! kill -0 "${ownerPid}" 2>/dev/null; then
+            rm -f -- "${lockDir}/pid" 2>/dev/null || true
+            rmdir -- "${lockDir}" 2>/dev/null || true
+            continue
+        fi
+        if [[ -z "${ownerPid}" ]]; then
+            now=$(date +%s)
+            lockMtime=$(stat --format=%Y -- "${lockDir}" 2>/dev/null || printf '%s\n' "${now}")
+            if ((now - lockMtime > 5)); then
+                rmdir -- "${lockDir}" 2>/dev/null || true
+                continue
+            fi
+        fi
+        ((SECONDS < deadline)) || return 1
+        sleep 0.1
+    done
+    printf '%s\n' "${BASHPID:-$$}" >"${lockDir}/pid" || { rmdir -- "${lockDir}" 2>/dev/null || true; return 1; }
+
+    local SUBSCRIPTION_GROUPS_LOCK_HELD=1
+    if "$@"; then
+        status=0
+    else
+        status=$?
+    fi
+    rm -f -- "${lockDir}/pid" 2>/dev/null || true
+    rmdir -- "${lockDir}" 2>/dev/null || true
+    return "${status}"
+}
+
+subscriptionGroupsWithLock() {
+    if [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]]; then
+        "$@"
+        return $?
+    fi
+
+    local groupsDir
+    local lockFile
+    local lockTimeout=${PADM_SUBSCRIPTION_GROUPS_LOCK_TIMEOUT:-30}
+    local lockFd
+    local status
+    [[ "${lockTimeout}" =~ ^[0-9]+$ ]] || lockTimeout=30
+    groupsDir=$(subscriptionGroupsSafeDir) || return 1
+    padmEnsureSafeDirectory "${groupsDir}" || return 1
+    lockFile=$(subscriptionGroupsLockFile) || return 1
+    # ponytail: one state lock; split only if subscription write throughput becomes material.
+    if ! command -v flock >/dev/null 2>&1; then
+        subscriptionGroupsWithDirectoryLock "${lockTimeout}" "${lockFile}.d" "$@"
+        return $?
+    fi
+    exec {lockFd}>"${lockFile}" || return 1
+    chmod 600 "${lockFile}" 2>/dev/null || true
+    if ! flock -w "${lockTimeout}" "${lockFd}"; then
+        exec {lockFd}>&-
+        return 1
+    fi
+
+    local SUBSCRIPTION_GROUPS_LOCK_HELD=1
+    if "$@"; then
+        status=0
+    else
+        status=$?
+    fi
+    flock -u "${lockFd}" >/dev/null 2>&1 || true
+    exec {lockFd}>&-
+    return "${status}"
+}
+
 subscriptionGroupsSchemaVersion() {
     echo 2
 }
@@ -90,7 +175,10 @@ backupSubscriptionGroupsStateForMigration() {
     [[ -f "${stateFile}" ]] || return 0
     padmEnsureSafeDirectory "${backupDir}" || return 1
     chmod 700 "${backupDir}" 2>/dev/null || true
-    backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S').json"
+    backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    while [[ -e "${backupFile}" ]]; do
+        backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    done
     if ! backupManagedFileToPath "${stateFile}" "${backupFile}" 600; then
         removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         return 1
@@ -167,7 +255,7 @@ normalizeSubscriptionGroupsState() {
     '
 }
 
-migrateSubscriptionGroupsState() {
+migrateSubscriptionGroupsStateUnlocked() {
     local stateFile
     local tmpFile
     local currentVersion
@@ -193,7 +281,11 @@ migrateSubscriptionGroupsState() {
     padmRemoveCleanupPath "${backupFile}"
 }
 
-ensureSubscriptionGroupsState() {
+migrateSubscriptionGroupsState() {
+    subscriptionGroupsWithLock migrateSubscriptionGroupsStateUnlocked "$@"
+}
+
+ensureSubscriptionGroupsStateUnlocked() {
     local stateDir
     local stateFile
     local stageFile
@@ -213,12 +305,17 @@ ensureSubscriptionGroupsState() {
     subscriptionGroupsSecureStateFiles 2>/dev/null || true
 }
 
+
+ensureSubscriptionGroupsState() {
+    subscriptionGroupsWithLock ensureSubscriptionGroupsStateUnlocked "$@"
+}
+
 subscriptionGroupsStateRead() {
     ensureSubscriptionGroupsState || return 1
     jq "$@" "$(subscriptionGroupsFile)"
 }
 
-subscriptionGroupsStateReplace() {
+subscriptionGroupsStateReplaceUnlocked() {
     local sourceFile=$1
     local targetFile=$2
     local tmpFile
@@ -233,7 +330,11 @@ subscriptionGroupsStateReplace() {
     commitGeneratedJsonFile "${tmpFile}" "${targetFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
-subscriptionGroupsStateWrite() {
+subscriptionGroupsStateReplace() {
+    subscriptionGroupsWithLock subscriptionGroupsStateReplaceUnlocked "$@"
+}
+
+subscriptionGroupsStateWriteUnlocked() {
     local stateFile
     local tmpFile
     stateFile=$(subscriptionGroupsFile)
@@ -248,19 +349,30 @@ subscriptionGroupsStateWrite() {
     subscriptionGroupsSecureStateFiles 2>/dev/null || true
 }
 
-createSubscriptionGroupsBackup() {
+subscriptionGroupsStateWrite() {
+    subscriptionGroupsWithLock subscriptionGroupsStateWriteUnlocked "$@"
+}
+
+createSubscriptionGroupsBackupUnlocked() {
     local backupDir
     local backupFile
     backupDir=$(subscriptionGroupsBackupDir)
     ensureSubscriptionGroupsState || return 1
     padmEnsureSafeDirectory "${backupDir}" || return 1
     chmod 700 "${backupDir}" 2>/dev/null || true
-    backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S').json"
+    backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    while [[ -e "${backupFile}" ]]; do
+        backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    done
     if ! backupManagedFileToPath "$(subscriptionGroupsFile)" "${backupFile}" 600; then
         removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
         return 1
     fi
     echo "${backupFile}"
+}
+
+createSubscriptionGroupsBackup() {
+    subscriptionGroupsWithLock createSubscriptionGroupsBackupUnlocked "$@"
 }
 
 listSubscriptionGroupsBackups() {
@@ -272,7 +384,7 @@ listSubscriptionGroupsBackups() {
     done
 }
 
-restoreSubscriptionGroupsBackup() {
+restoreSubscriptionGroupsBackupUnlocked() {
     local backupFile=$1
     local stateFile
     local restoreBackupFile
@@ -291,6 +403,10 @@ restoreSubscriptionGroupsBackup() {
         return 1
     fi
     padmRemoveCleanupPath "${restoreBackupFile}"
+}
+
+restoreSubscriptionGroupsBackup() {
+    subscriptionGroupsWithLock restoreSubscriptionGroupsBackupUnlocked "$@"
 }
 
 activeSubscriptionGroupId() {

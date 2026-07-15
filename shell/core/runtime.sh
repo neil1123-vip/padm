@@ -1165,11 +1165,39 @@ downloadFileOptionHasValue() {
     [[ $# -ge 3 && -n "${2}" && "${2}" != -* ]]
 }
 
+downloadUrlToFileBounded() {
+    local url=$1
+    local targetFile=$2
+    local maxSize=$3
+    local maxTime=${4:-30}
+    local -a pipelineStatus=()
+    [[ -n "${url}" && "${maxSize}" =~ ^[0-9]+$ && "${maxSize}" -gt 0 ]] || return 1
+    [[ "${maxTime}" =~ ^[0-9]+$ && "${maxTime}" -gt 0 ]] || return 1
+
+    : >"${targetFile}" || return 1
+    if command -v curl >/dev/null 2>&1; then
+        if curl -fsSL --connect-timeout 10 --max-time "${maxTime}" --max-filesize "${maxSize}" --retry 1 --retry-delay 1 -o "${targetFile}" "${url}" &&
+            [[ "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+            return 0
+        fi
+    fi
+
+    : >"${targetFile}" || return 1
+    if command -v wget >/dev/null 2>&1; then
+        wget -T 30 -t 2 -qO- "${url}" | head -c "$((maxSize + 1))" >"${targetFile}"
+        pipelineStatus=("${PIPESTATUS[@]}")
+        if [[ "${pipelineStatus[0]:-1}" -eq 0 && "${pipelineStatus[1]:-1}" -eq 0 &&
+            "$(wc -c <"${targetFile}")" -le "${maxSize}" ]]; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
 downloadFile() {
     local outputDir=
     local outputFile=
     local url=
-    local args=(-c -q -T 30 -t 2 --quota=52428800)
     local outputParent=
     local outputName=
     local tmpFile=
@@ -1199,53 +1227,50 @@ downloadFile() {
         esac
     done
 
-    if [[ -n "${wgetShowProgressStatus:-}" ]]; then
-        args+=("${wgetShowProgressStatus}")
-    fi
+    [[ -n "${url}" ]] || return 1
     if [[ -n "${outputDir}" ]]; then
-        wget "${args[@]}" -P "${outputDir}" "${url}"
-    elif [[ -n "${outputFile}" ]]; then
-        outputParent=$(dirname -- "${outputFile}")
-        outputName=$(basename -- "${outputFile}")
-        padmCreateTempPath tmpFile "${outputParent}/.${outputName}.download.XXXXXX" || return 1
-        if wget "${args[@]}" -O "${tmpFile}" "${url}" &&
-            [[ -s "${tmpFile}" ]] &&
-            [[ "$(wc -c <"${tmpFile}")" -le 52428800 ]]; then
-            if ! mv -f -- "${tmpFile}" "${outputFile}"; then
-                padmRemoveCleanupPath "${tmpFile}"
-                return 1
-            fi
-            padmForgetCleanupPath "${tmpFile}"
-        else
-            padmRemoveCleanupPath "${tmpFile}"
-            return 1
-        fi
-    else
-        wget "${args[@]}" "${url}"
+        outputName=$(basename -- "${url%%[?#]*}")
+        [[ -n "${outputName}" && "${outputName}" != "." && "${outputName}" != ".." ]] || return 1
+        outputFile="${outputDir%/}/${outputName}"
+    elif [[ -z "${outputFile}" ]]; then
+        outputFile=$(basename -- "${url%%[?#]*}")
+        [[ -n "${outputFile}" && "${outputFile}" != "." && "${outputFile}" != ".." ]] || return 1
     fi
+
+    outputParent=$(dirname -- "${outputFile}")
+    outputName=$(basename -- "${outputFile}")
+    padmCreateTempPath tmpFile "${outputParent}/.${outputName}.download.XXXXXX" || return 1
+    if ! downloadUrlToFileBounded "${url}" "${tmpFile}" 52428800 120 || [[ ! -s "${tmpFile}" ]]; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    if ! mv -f -- "${tmpFile}" "${outputFile}"; then
+        padmRemoveCleanupPath "${tmpFile}"
+        return 1
+    fi
+    padmForgetCleanupPath "${tmpFile}"
 }
 
 fetchUrlToStdout() {
     local url=$1
     local maxAttempts=${2:-3}
     local attempt=1
+    local tmpFile
+
+    padmCreateTmpRootPath tmpFile padm-fetch-url.XXXXXX || return 1
 
     while [[ ${attempt} -le ${maxAttempts} ]]; do
-        if command -v curl >/dev/null 2>&1; then
-            if curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 5242880 "${url}"; then
-                return 0
-            fi
-        fi
-        if command -v wget >/dev/null 2>&1; then
-            if wget -T 30 -t 2 --quota=5242880 -qO- "${url}"; then
-                return 0
-            fi
+        if downloadUrlToFileBounded "${url}" "${tmpFile}" 5242880; then
+            cat "${tmpFile}"
+            padmRemoveCleanupPath "${tmpFile}"
+            return 0
         fi
         if [[ ${attempt} -lt ${maxAttempts} ]]; then
             sleep 1
         fi
         attempt=$((attempt + 1))
     done
+    padmRemoveCleanupPath "${tmpFile}"
     return 1
 }
 
@@ -1271,10 +1296,17 @@ downloadGitHubReleaseAsset() {
     local outputPath=
     local expectedSha256=
     local actualSha256=
+    local expectedSize=
+    local actualSize=
     local releaseMetadataUrl=
+    local allowMissingDigest=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
+        --allow-missing-digest)
+            allowMissingDigest=true
+            shift
+            ;;
         -P)
             if argumentHasValue "$@"; then
                 outputDir=$2
@@ -1296,7 +1328,8 @@ downloadGitHubReleaseAsset() {
         esac
     done
 
-    if [[ -z "${outputDir}" || -z "${repo}" || -z "${version}" || -z "${assetName}" ]]; then
+    if [[ -z "${outputDir}" || -z "${repo}" || -z "${version}" || -z "${assetName}" ||
+        ! "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
         echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
         menuLine "下载参数不完整"
         menuClose
@@ -1321,10 +1354,11 @@ downloadGitHubReleaseAsset() {
     else
         releaseMetadataUrl="https://api.github.com/repos/${repo}/releases/tags/${version}"
     fi
-    metadata=$(fetchUrlToStdout "${releaseMetadataUrl}" 3 | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // "")}' | head -1) || metadata=
+    metadata=$(fetchUrlToStdout "${releaseMetadataUrl}" 3 | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // ""), size:(.size // 0)}' | head -1) || metadata=
     if [[ -n "${metadata}" ]]; then
         downloadUrl=$(jq -r '.url // empty' <<<"${metadata}" 2>/dev/null)
         digest=$(jq -r '.digest // empty' <<<"${metadata}" 2>/dev/null)
+        expectedSize=$(jq -r '.size // 0' <<<"${metadata}" 2>/dev/null)
     fi
     if [[ -z "${metadata}" ]]; then
         echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
@@ -1338,7 +1372,14 @@ downloadGitHubReleaseAsset() {
         menuClose
         return 1
     fi
-    if [[ "${digest}" != sha256:* ]]; then
+    if [[ "${downloadUrl}" != "https://github.com/${repo}/releases/download/"*"/${assetName}" ||
+        ! "${expectedSize}" =~ ^[0-9]+$ || "${expectedSize}" -le 0 || "${expectedSize}" -gt 52428800 ]]; then
+        echoContent title "\n┌─ GitHub Release 下载 ─────────────────────────────"
+        menuLine "Release 资产 URL 或大小异常，已取消下载: ${assetName}"
+        menuClose
+        return 1
+    fi
+    if [[ "${digest}" != sha256:* && "${allowMissingDigest}" != "true" ]]; then
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
         menuLine "GitHub 未提供 sha256 digest，已取消下载: ${assetName}"
         menuClose
@@ -1348,12 +1389,23 @@ downloadGitHubReleaseAsset() {
     if ! downloadFile -P "${outputDir}" "${downloadUrl}"; then
         return 1
     fi
-    if [[ ! -f "${outputPath}" || "$(wc -c <"${outputPath}")" -gt 52428800 ]]; then
+    if [[ -f "${outputPath}" ]]; then
+        actualSize=$(wc -c <"${outputPath}")
+    else
+        actualSize=0
+    fi
+    if [[ ! -f "${outputPath}" || "${actualSize}" -ne "${expectedSize}" ]]; then
         echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
-        menuLine "下载文件过大或未落地，已取消下载: ${assetName}"
+        menuLine "下载文件大小与 Release 元数据不一致，已取消下载: ${assetName}"
         menuClose
         rm -f -- "${outputPath}"
         return 1
+    fi
+    if [[ "${digest}" != sha256:* ]]; then
+        echoContent title "\n┌─ GitHub Release 校验 ─────────────────────────────"
+        menuLine "上游未提供 sha256 digest，已仅校验 GitHub 资产 URL 和精确大小: ${assetName}"
+        menuClose
+        return 0
     fi
     if ! command -v sha256sum >/dev/null 2>&1; then
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"

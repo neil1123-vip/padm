@@ -83,21 +83,21 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
 
 runSubscriptionGroupStateStructureFoundationCredentialRegression() {
     local credential decodedCredential invalidCredential
-    credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
+    credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778,"token":"token-abc"}')
     decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
     jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
     if subscriptionWireGuardCredentialDecode "remote.example.com:39778:token-abc" >/dev/null 2>&1; then
         return 1
     fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":39778}')
+    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778}')
     if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
         return 1
     fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.999.2/24","public_key":"pubkey-abc","control_port":39778,"token":"token-abc"}')
+    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.999.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778,"token":"token-abc"}')
     if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
         return 1
     fi
-    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"pubkey-abc","control_port":70000,"token":"token-abc"}')
+    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":70000,"token":"token-abc"}')
     if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
         return 1
     fi
@@ -637,7 +637,9 @@ runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
     writeSubscriptionStateDefaultFixture
     ensureSubscriptionGroupsState
 
-    local stateSnapshot badBackup
+    local stateSnapshot badBackup firstBackup secondBackup pid worker
+    local workerCount=40
+    local -a pids=()
     stateSnapshot=$(<"$(subscriptionGroupsFile)")
     if subscriptionGroupsStateWrite '.groups = "broken" | .dangling = ' 2>/dev/null; then
         return 1
@@ -653,6 +655,35 @@ runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
     fi
     [[ "$(<"$(subscriptionGroupsFile)")" == "${stateSnapshot}" ]]
     [[ ! -e "$(subscriptionGroupsFile).restore.tmp" ]]
+
+    case "${OSTYPE:-}" in
+    msys* | cygwin* | win32*) workerCount=8 ;;
+    esac
+    for ((worker = 0; worker < workerCount; worker++)); do
+        (
+            trap - EXIT INT TERM
+            PADM_CLEANUP_PATHS=()
+            subscriptionGroupsStateWrite '.groups[0].traffic.global.upload += 1'
+        ) &
+        pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do
+        wait "${pid}"
+    done
+    subscriptionGroupsStateRead -e --argjson workerCount "${workerCount}" '.groups[0].traffic.global.upload == $workerCount' >/dev/null
+
+    date() {
+        if [[ "${1:-}" == "+%Y%m%d%H%M%S" ]]; then
+            printf '20260715000000\n'
+        else
+            command date "$@"
+        fi
+    }
+    firstBackup=$(createSubscriptionGroupsBackup)
+    secondBackup=$(createSubscriptionGroupsBackup)
+    unset -f date
+    [[ "${firstBackup}" != "${secondBackup}" ]]
+    [[ -f "${firstBackup}" && -f "${secondBackup}" ]]
 }
 
 runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression() {

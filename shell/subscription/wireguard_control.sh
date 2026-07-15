@@ -609,6 +609,7 @@ server {
     }
 
     location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {
+        access_log off;
         default_type 'text/plain; charset=utf-8';
         alias ${subscribePublicBase}/\$1/\$2;
     }

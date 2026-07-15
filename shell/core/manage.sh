@@ -2059,7 +2059,7 @@ commitSubscribeUserOutputFile() {
     targetParent=$(dirname -- "${targetPath}")
     padmEnsureSafeDirectory "${targetParent}" || return 1
     if [[ -f "${stagedPath}" ]]; then
-        commitGeneratedFile "${stagedPath}" "${targetPath}" 644 || return 1
+        commitSubscribePublicFile "${stagedPath}" "${targetPath}" || return 1
     else
         removeManagedFileIfPresent "${targetPath}" || return 1
     fi

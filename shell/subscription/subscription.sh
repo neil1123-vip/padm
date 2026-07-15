@@ -8,6 +8,42 @@ subscribePublicBaseDir() {
     printf '%s' "${PADM_SUBSCRIBE_DIR:-/etc/padm/subscribe}"
 }
 
+subscriptionNginxWorkerGroup() {
+    local workerUser=${PADM_NGINX_USER:-}
+    local candidate
+    if [[ "$(id -u)" -ne 0 && -z "${workerUser}" ]]; then
+        id -gn
+        return 0
+    fi
+    if [[ -z "${workerUser}" ]] && command -v nginx >/dev/null 2>&1; then
+        workerUser=$(nginx -T 2>/dev/null | awk '$1 == "user" { gsub(/;$/, "", $2); print $2; exit }' || true)
+    fi
+    if [[ -z "${workerUser}" ]] && command -v ps >/dev/null 2>&1; then
+        workerUser=$(ps -eo user=,comm= 2>/dev/null | awk '$2 ~ /^nginx/ && $1 != "root" { print $1; exit }' || true)
+    fi
+    for candidate in "${workerUser}" www-data nginx http nobody; do
+        [[ -n "${candidate}" ]] || continue
+        if id -g "${candidate}" >/dev/null 2>&1; then
+            id -gn "${candidate}"
+            return 0
+        fi
+    done
+    id -gn
+}
+
+commitSubscribePublicFile() {
+    local stagedPath=$1
+    local targetPath=$2
+    local targetParent
+    local nginxGroup
+    targetPath=$(padmResolveManagedAbsolutePath "${targetPath}") || return 1
+    targetParent=$(dirname -- "${targetPath}")
+    padmEnsureSafeDirectory "${targetParent}" || return 1
+    nginxGroup=$(subscriptionNginxWorkerGroup) || return 1
+    chgrp -- "${nginxGroup}" "${stagedPath}" || return 1
+    commitGeneratedFile "${stagedPath}" "${targetPath}" 640
+}
+
 resolveSubscribeNginxAccessLogFile() {
     local subscribeConfig="${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf"
     local logPath=
@@ -256,6 +292,7 @@ server {
     client_max_body_size 100m;
     root ${nginxStaticPath};
     location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {
+        access_log off;
         default_type 'text/plain; charset=utf-8';
         alias ${subscribePublicBase}/\$1/\$2;
     }
@@ -500,8 +537,8 @@ updateRemoteSubscribe() {
     padmEnsureSafeDirectory "${publicBase}/default" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     padmEnsureSafeDirectory "${publicBase}/clashMeta" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     padmEnsureSafeDirectory "${localBase}/sing-box" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-    commitGeneratedFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" 644 || commitFailed=true
-    commitGeneratedFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" 644 || commitFailed=true
+    commitSubscribePublicFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" || commitFailed=true
+    commitSubscribePublicFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" || commitFailed=true
     commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || commitFailed=true
     if [[ "${commitFailed}" == "true" ]]; then
         if ! checkLogBackupRestore "${remoteBackupDir}"; then

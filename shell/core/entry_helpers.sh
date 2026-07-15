@@ -587,13 +587,7 @@ updatePadm() {
     installUrl="https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"
     [[ -n "${remoteRef}" ]] && installUrl="https://raw.githubusercontent.com/neil1123-vip/padm/${remoteRef}/install.sh"
 
-    if [[ "${release}" == "alpine" ]]; then
-        if ! wget -T 30 -t 2 --quota=52428800 -c -q -P "${tmpDir}/" -N "${installUrl}"; then
-            padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
-            errorCard "更新入口下载失败"
-            return 1
-        fi
-    elif ! downloadFile -P "${tmpDir}/" "${installUrl}"; then
+    if ! downloadFile -P "${tmpDir}/" "${installUrl}"; then
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
         errorCard "更新入口下载失败"
         return 1
@@ -917,13 +911,8 @@ runThirdPartyTcpAccelerationScript() {
         return
     fi
     scriptPath="${tmpDir}/tcpx.sh"
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize 1048576 -o "${scriptPath}" "${PADM_THIRD_PARTY_TCP_SCRIPT_URL}"
-    else
-        wget -T 30 -t 2 --quota=1048576 -O "${scriptPath}" "${PADM_THIRD_PARTY_TCP_SCRIPT_URL}"
-    fi
-
-    if [[ ! -s "${scriptPath}" || "$(wc -c <"${scriptPath}")" -gt 1048576 ]] || ! grep -q "^#!" "${scriptPath}"; then
+    if ! downloadUrlToFileBounded "${PADM_THIRD_PARTY_TCP_SCRIPT_URL}" "${scriptPath}" 1048576 120 ||
+        [[ ! -s "${scriptPath}" ]] || ! grep -q "^#!" "${scriptPath}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本为空或格式异常" "未执行任何第三方脚本"
         bbrInstall

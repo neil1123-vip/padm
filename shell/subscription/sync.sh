@@ -54,6 +54,35 @@ subscriptionSyncGenerateUUID() {
     fi
 }
 
+subscriptionSyncUUIDIsValid() {
+    [[ "$1" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
+}
+
+subscriptionSyncEnsureEnabledUserUUIDs() {
+    local id
+    local uuid
+    local generated='[]'
+    local missingIds
+    missingIds=$(subscriptionActiveGroupRead -r '
+      .user_groups[]?
+      | select(.enabled == true)
+      | select(((.uuid // "") | type) != "string" or ((.uuid // "") | test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$") | not))
+      | .id
+    ') || return 1
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        uuid=$(subscriptionSyncGenerateUUID) || return 1
+        subscriptionSyncUUIDIsValid "${uuid}" || return 1
+        generated=$(jq -c --arg id "${id}" --arg uuid "${uuid}" '. + [{id:$id, uuid:$uuid}]' <<<"${generated}") || return 1
+    done <<<"${missingIds}"
+    if jq -e 'length > 0' <<<"${generated}" >/dev/null 2>&1; then
+        subscriptionActiveGroupWrite --argjson generated "${generated}" '
+          reduce $generated[] as $user (.;
+            .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end))
+        ' || return 1
+    fi
+}
+
 subscriptionSyncConfiguredAccountNamesJson() {
     local file
     local validFiles=()
@@ -81,6 +110,37 @@ subscriptionSyncConfiguredManagedUsers() {
     local accountsJson
     accountsJson=$(subscriptionSyncConfiguredAccountNamesJson "$@") || return 1
     jq -c '[.[]? | select(startswith("sub_"))] | unique' <<<"${accountsJson}"
+}
+
+subscriptionSyncConfiguredManagedCredentials() {
+    local file
+    local validFiles=()
+    if (($# > 0)); then
+        for file in "$@"; do
+            [[ -f "${file}" ]] && validFiles+=("${file}")
+        done
+    else
+        while IFS= read -r file; do
+            [[ -f "${file}" ]] && validFiles+=("${file}")
+        done < <(subscriptionSyncConfigFiles)
+    fi
+    [[ "${#validFiles[@]}" -gt 0 ]] || {
+        printf '[]\n'
+        return 0
+    }
+    jq -c -s '
+      [.[] | [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
+       | {
+           account: ('"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"'),
+           credential: ((.id // .uuid // .password // "") | tostring)
+         }
+       | select(.account | startswith("sub_"))]
+      | sort_by(.account)
+      | group_by(.account)
+      | map({
+          account: .[0].account,
+          uuids: ([.[].credential | select(test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"))] | unique)
+        })' "${validFiles[@]}"
 }
 
 subscriptionSyncCurrentManagedUsers() {
@@ -221,16 +281,46 @@ subscriptionSyncPlanFromAccounts() {
       '{create: ($desired - $current), remove: ($current - $desired)}'
 }
 
+subscriptionSyncCredentialMismatchAccounts() {
+    local desiredUsers=$1
+    local currentAccounts
+    local currentCredentials
+    currentAccounts=$(subscriptionSyncCurrentManagedUsers) || return 1
+    currentCredentials=$(subscriptionSyncConfiguredManagedCredentials) || return 1
+    jq -c -n \
+      --argjson desiredUsers "${desiredUsers}" \
+      --argjson currentAccounts "${currentAccounts}" \
+      --argjson currentCredentials "${currentCredentials}" '
+      [$desiredUsers[]?
+       | . as $user
+       | ($user.id | '"${SUBSCRIPTION_SYNC_ACCOUNT_NAME_FROM_ID_JQ}"') as $account
+       | select($currentAccounts | index($account))
+       | ([$currentCredentials[]? | select(.account == $account) | .uuids[]?] | unique) as $currentUuids
+       | select($currentUuids != [$user.uuid])
+       | $account]
+      | unique'
+}
+
+subscriptionSyncPlanFromDesiredUsers() {
+    local desiredUsers=$1
+    local plan
+    local credentialUpdates
+    plan=$(subscriptionSyncAccountPlanFromIds sync < <(jq -r '.[].id' <<<"${desiredUsers}")) || return 1
+    credentialUpdates=$(subscriptionSyncCredentialMismatchAccounts "${desiredUsers}") || return 1
+    jq -c -n --argjson plan "${plan}" --argjson updates "${credentialUpdates}" '
+      $plan
+      | .create = ((.create + $updates) | unique)
+      | .remove = ((.remove + $updates) | unique)'
+}
+
 subscriptionSyncPlan() {
     local enabledUsers
+    local desiredUsers
     local plan
+    subscriptionSyncEnsureEnabledUserUUIDs || return 1
     enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
-    plan=$(subscriptionSyncAccountPlanFromIds sync < <(
-        jq -r '
-          .[]?
-          | select((.allows_main // false) == true)
-          | .id' <<<"${enabledUsers}"
-    )) || return 1
+    desiredUsers=$(jq -c '[.[]? | select((.allows_main // false) == true) | {id, uuid}]' <<<"${enabledUsers}") || return 1
+    plan=$(subscriptionSyncPlanFromDesiredUsers "${desiredUsers}") || return 1
     printf '%s\n' "${plan}"
 }
 
