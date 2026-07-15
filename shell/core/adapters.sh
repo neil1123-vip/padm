@@ -67,7 +67,7 @@ installAptKeyringFromUrl() {
 
     targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || failPackageInstallTransaction "${displayName} apt key 路径异常"
     padmCreateTempFileForTarget stagedFile "${targetFile}" aptkey || failPackageInstallTransaction "${displayName} apt key 临时文件创建失败"
-    if ! curl -fsSL "${url}" | gpg --dearmor >"${stagedFile}"; then
+    if ! curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize 1048576 "${url}" | gpg --dearmor >"${stagedFile}" || [[ ! -s "${stagedFile}" ]]; then
         padmRemoveCleanupPath "${stagedFile}"
         failPackageInstallTransaction "${displayName} apt key 安装失败"
     fi
@@ -821,7 +821,7 @@ installNginxTools() {
         local nginxRepoCodename
         local nginxKeyringFile nginxRepoTarget nginxPinTarget repoBackupDir
         nginxRepoCodename=$(lsb_release -cs)
-        if curl -fsSL "https://nginx.org/packages/mainline/debian/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
+        if curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 "https://nginx.org/packages/mainline/debian/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
             nginxKeyringFile=$(adapterNginxAptKeyringFile)
             nginxRepoTarget=$(adapterNginxAptRepoFile)
             nginxPinTarget=$(adapterNginxAptPinFile)
@@ -844,7 +844,7 @@ installNginxTools() {
         local nginxRepoCodename
         local nginxKeyringFile nginxRepoTarget nginxPinTarget repoBackupDir
         nginxRepoCodename=$(lsb_release -cs)
-        if curl -fsSL "https://nginx.org/packages/mainline/ubuntu/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
+        if curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 "https://nginx.org/packages/mainline/ubuntu/dists/${nginxRepoCodename}/Release" >/dev/null 2>&1; then
             nginxKeyringFile=$(adapterNginxAptKeyringFile)
             nginxRepoTarget=$(adapterNginxAptRepoFile)
             nginxPinTarget=$(adapterNginxAptPinFile)

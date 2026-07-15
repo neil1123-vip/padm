@@ -3222,6 +3222,10 @@ runCoreBinaryInstallCopyFailureRegression() (
             printf 'xray\n'
             return 0
         fi
+        if [[ "${1:-}" == "-p" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3247,6 +3251,10 @@ runCoreBinaryInstallCopyFailureRegression() (
             printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
             printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
             printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so'
+            return 0
+            ;;
+        -xOzf)
+            printf 'sing-box\ncronet\n'
             return 0
             ;;
         esac
@@ -3619,6 +3627,10 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
             printf 'xray\n'
             return 0
         fi
+        if [[ "${1:-}" == "-p" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3644,6 +3656,10 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
             printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
             printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
             printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so'
+            return 0
+            ;;
+        -xOzf)
+            printf 'sing-box\ncronet\n'
             return 0
             ;;
         esac
@@ -3823,6 +3839,10 @@ runCoreReleaseArchiveRejectsUnsafePathRegression() (
             printf '../xray\n'
             return 0
         fi
+        if [[ "${1:-}" == "-p" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3837,6 +3857,7 @@ runCoreReleaseArchiveRejectsUnsafePathRegression() (
         case "$1" in
         -tzf) printf '../sing-box\n'; return 0 ;;
         -tvzf) printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 ../sing-box'; return 0 ;;
+        -xOzf) printf 'sing-box\n'; return 0 ;;
         esac
         local dest=
         while [[ $# -gt 0 ]]; do
@@ -3887,6 +3908,10 @@ runCoreReleaseArchiveRejectsSymlinkPayloadRegression() (
             printf 'xray\n'
             return 0
         fi
+        if [[ "${1:-}" == "-p" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -3906,6 +3931,10 @@ runCoreReleaseArchiveRejectsSymlinkPayloadRegression() (
             printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
             printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
             printf '%s\n' 'lrwxrwxrwx root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so -> /tmp/libcronet.so'
+            return 0
+            ;;
+        -xOzf)
+            printf 'sing-box\ncronet\n'
             return 0
             ;;
         esac
@@ -4173,6 +4202,10 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
             printf 'xray\n'
             return 0
         fi
+        if [[ "${1:-}" == "-p" ]]; then
+            printf 'xray\n'
+            return 0
+        fi
         local dest=
         while [[ $# -gt 0 ]]; do
             case "$1" in
@@ -4198,6 +4231,10 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
             printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
             printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
             printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so'
+            return 0
+            ;;
+        -xOzf)
+            printf 'sing-box\ncronet\n'
             return 0
             ;;
         esac
@@ -14879,7 +14916,8 @@ runAptKeyInstallFailureRegression() {
             return 22
         }
         gpg() {
-            cat >/dev/null
+            [[ "${1:-}" == "--dearmor" ]] || return 1
+            cat
         }
         sudo() {
             "$@"
@@ -14894,6 +14932,7 @@ runAptKeyInstallFailureRegression() {
         [[ "${keyStatus}" -ne 0 ]]
         grep -q "测试源 apt key 安装失败" "${errorLog}"
         grep -q "https://example.invalid/key.gpg" "${curlCalls}"
+        grep -q -- '--connect-timeout 10 --max-time 120 --max-filesize 1048576' "${curlCalls}"
         ! compgen -G "${TMP_DIR}/.missing-keyring.gpg.aptkey.*" >/dev/null
 
         mkdir -p "${keyRootRel}"
@@ -14937,10 +14976,12 @@ runNginxAptRepoRefreshRollbackRegression() {
         local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
         local errorLog="${TMP_DIR}/nginx-apt-refresh-error.log"
         local rootRel="${TMP_DIR}/nginx-apt-refresh-rollback"
-        local root repoRoot keyringRoot
+        local root repoRoot keyringRoot curlCalls
         local keyringFile repoFile pinFile
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         : >"${errorLog}"
+        curlCalls="${TMP_DIR}/nginx-apt-refresh-curl-calls.log"
+        : >"${curlCalls}"
         mkdir -p "${rootRel}"
         root=$(cd -- "${rootRel}" && pwd -P)
         repoRoot="${root}/apt"
@@ -14963,7 +15004,9 @@ runNginxAptRepoRefreshRollbackRegression() {
         bootStartup() { return 0; }
         lsb_release() { [[ "$1" == "-cs" ]] && printf 'bookworm\n'; }
         curl() {
-            case "${2:-}" in
+            local url=${!#}
+            printf '%s\n' "$*" >>"${curlCalls}"
+            case "${url}" in
             https://nginx.org/packages/mainline/debian/dists/bookworm/Release)
                 return 0
                 ;;
@@ -14993,6 +15036,7 @@ runNginxAptRepoRefreshRollbackRegression() {
         [[ "$(<"${repoFile}")" == "old-repo" ]]
         [[ "$(<"${pinFile}")" == "old-pin" ]]
         grep -q "Nginx apt 源刷新失败" "${errorLog}"
+        grep -q -- '--connect-timeout 10 --max-time 30 --max-filesize 1048576 https://nginx.org/packages/mainline/debian/dists/bookworm/Release' "${curlCalls}"
         ! compgen -G "${keyringRoot}/.nginx-archive-keyring.gpg.aptkey.*" >/dev/null
         if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
@@ -15320,7 +15364,7 @@ runRealityScannerBinaryRegression() {
         printf '#!/usr/bin/env bash\n' >"${capturedDir}/${capturedAsset}"
         return 0
     }
-    curl() { printf 'v0.2.0\n'; }
+    fetchUrlToStdout() { [[ "$1" == "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" && "$2" == "3" ]] && printf 'v0.2.0\n'; }
     jq() { printf 'v0.2.0\n'; }
 
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}"
@@ -15328,7 +15372,7 @@ runRealityScannerBinaryRegression() {
     [[ "${capturedRepo}" == "XTLS/RealiTLScanner" ]]
     [[ "${capturedVersion}" == "v0.2.0" ]]
     [[ "${capturedAsset}" == "RealiTLScanner-linux-64" ]]
-    unset -f rm mkdir downloadGitHubReleaseAsset curl jq
+    unset -f rm mkdir downloadGitHubReleaseAsset fetchUrlToStdout jq
 }
 
 runRealityScannerDownloadFailureKeepsExistingDirRegression() {
@@ -15348,7 +15392,7 @@ runRealityScannerDownloadFailureKeepsExistingDirRegression() {
         command rm "$@"
     }
     downloadGitHubReleaseAsset() { return 1; }
-    curl() { printf 'v0.2.0\n'; }
+    fetchUrlToStdout() { [[ "$1" == "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" && "$2" == "3" ]] && printf 'v0.2.0\n'; }
     jq() { printf 'v0.2.0\n'; }
 
     set +e
@@ -15359,7 +15403,7 @@ runRealityScannerDownloadFailureKeepsExistingDirRegression() {
     [[ "${rc}" == "1" ]]
     [[ "$(<"${scannerDir}/sentinel")" == "keep" ]]
     ! grep -qxF "rm:-rf ${scannerDir}" "${rmLog}"
-    unset -f rm downloadGitHubReleaseAsset curl jq
+    unset -f rm downloadGitHubReleaseAsset fetchUrlToStdout jq
 }
 
 runRealityScannerRejectsUnsafeDirRegression() (

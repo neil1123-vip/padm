@@ -662,10 +662,7 @@ normalizeAsnOrg() {
 lookupRealityTargetAsn() {
     local ip=$1
     local response asn org
-    if ! command -v curl >/dev/null 2>&1; then
-        return 1
-    fi
-    response=$(curl -fsSL --connect-timeout 5 --max-time 10 "https://api.bgpview.io/ip/${ip}" 2>/dev/null || true)
+    response=$(fetchUrlToStdout "https://api.bgpview.io/ip/${ip}" 3 2>/dev/null || true)
     if [[ -n "${response}" ]] && command -v jq >/dev/null 2>&1; then
         asn=$(printf '%s\n' "${response}" | jq -r '.data.prefixes[0].asn.asn // empty' 2>/dev/null)
         org=$(printf '%s\n' "${response}" | jq -r '.data.prefixes[0].asn.name // empty' 2>/dev/null)
@@ -674,7 +671,7 @@ lookupRealityTargetAsn() {
             return 0
         fi
     fi
-    response=$(curl -fsSL --connect-timeout 5 --max-time 10 "https://ipinfo.io/${ip}/org" 2>/dev/null || true)
+    response=$(fetchUrlToStdout "https://ipinfo.io/${ip}/org" 3 2>/dev/null || true)
     if [[ "${response}" =~ ^AS[0-9]+ ]]; then
         asn=$(printf '%s\n' "${response}" | awk '{print $1}')
         org=$(printf '%s\n' "${response}" | cut -d' ' -f2-)
@@ -686,7 +683,7 @@ lookupRealityTargetAsn() {
 
 currentRealityNetworkProfile() {
     local currentIp profile
-    currentIp=$(curl -fsSL --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || true)
+    currentIp=$(fetchUrlToStdout https://api.ipify.org 3 2>/dev/null || true)
     [[ "${currentIp}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
     profile=$(lookupRealityTargetAsn "${currentIp}") || return 1
     printf '%s\t%s\n' "${currentIp}" "${profile}"
@@ -733,9 +730,8 @@ fetchRealityAsnPrefixes() {
     local asn=$1
     local response
     asn=$(normalizeRealityAsn "${asn}") || return 1
-    command -v curl >/dev/null 2>&1 || return 1
     command -v jq >/dev/null 2>&1 || return 1
-    response=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://stat.ripe.net/data/announced-prefixes/data.json?resource=${asn}" 2>/dev/null) || return 1
+    response=$(fetchUrlToStdout "https://stat.ripe.net/data/announced-prefixes/data.json?resource=${asn}" 3 2>/dev/null) || return 1
     printf '%s\n' "${response}" | jq -r '.data.prefixes[]?.prefix | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+/[0-9]+$"))' 2>/dev/null
 }
 
@@ -1592,7 +1588,7 @@ ensureRealityScannerBinary() {
     padmCreateTempPath stageDir -d "${scannerDir%/}/.scanner-download.XXXXXX" || return 1
     stageBin="${stageDir}/${assetName}"
     realityTargetStatusBlock yellow "RealiTLScanner 下载" "正在下载官方 Release 二进制"
-    version=$(curl -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" | jq -r '.[0].tag_name // empty') || {
+    version=$(fetchUrlToStdout "https://api.github.com/repos/XTLS/RealiTLScanner/releases?per_page=1" 3 | jq -r '.[0].tag_name // empty') || {
         padmRemoveCleanupPath "${stageDir}"
         return 1
     }
@@ -1750,7 +1746,7 @@ runRealityScannerPrefixFile() {
 
 runRealityScannerAdvanced() {
     local currentIp scanRange confirm selectedRealityScannerRange
-    currentIp=$(curl -fsSL --connect-timeout 5 --max-time 10 https://api.ipify.org 2>/dev/null || true)
+    currentIp=$(fetchUrlToStdout https://api.ipify.org 3 2>/dev/null || true)
     realityTargetStatusBlock yellow "RealiTLScanner 风险提示" "会扫描目标网段 TLS 证书" "作者建议本地运行；云端扫描可能导致 VPS 被标记"
     autoRead reality_scanner_confirm "确认在本机运行高级扫描？[y/n]:" confirm
     [[ "${confirm}" == "y" ]] || return 1

@@ -97,6 +97,22 @@ scriptArchiveEntryIsSafe() {
     done
 }
 
+scriptArchiveExpandedSizeIsSafe() {
+    local archiveFile=$1
+    local entryList=$2
+    local entryCount expandedBytes
+
+    entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || return 1
+    [[ "${entryCount}" =~ ^[0-9]+$ ]] && ((entryCount <= 10000)) || return 1
+    expandedBytes=$(
+        { tar -xOzf "${archiveFile}" 2>/dev/null || true; } |
+            head -c 104857601 |
+            wc -c |
+            tr -d '[:space:]'
+    ) || return 1
+    [[ "${expandedBytes}" =~ ^[0-9]+$ ]] && ((expandedBytes <= 104857600))
+}
+
 validateRepoArchive() {
     local archiveFile=$1
     local entryList detailList entry line lineType
@@ -133,6 +149,11 @@ validateRepoArchive() {
             ;;
         esac
     done <"${detailList}"
+    scriptArchiveExpandedSizeIsSafe "${archiveFile}" "${entryList}" || {
+        scriptRemovePath "${entryList}" || true
+        scriptRemovePath "${detailList}" || true
+        return 1
+    }
     scriptRemovePath "${entryList}" || true
     scriptRemovePath "${detailList}" || true
 }

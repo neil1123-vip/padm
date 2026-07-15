@@ -43,6 +43,22 @@ coreArchiveEntryIsSafe() {
     done
 }
 
+coreArchiveExpandedSizeIsSafe() {
+    local archiveType=$1
+    local archiveFile=$2
+    local entryList=$3
+    local entryCount expandedBytes
+
+    entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || return 1
+    [[ "${entryCount}" =~ ^[0-9]+$ ]] && ((entryCount <= 4096)) || return 1
+    case "${archiveType}" in
+    zip) expandedBytes=$({ unzip -p "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c | tr -d '[:space:]') ;;
+    tar) expandedBytes=$({ tar -xOzf "${archiveFile}" 2>/dev/null || true; } | head -c 268435457 | wc -c | tr -d '[:space:]') ;;
+    *) return 1 ;;
+    esac
+    [[ "${expandedBytes}" =~ ^[0-9]+$ ]] && ((expandedBytes <= 268435456))
+}
+
 validateCoreZipArchive() {
     local archiveFile=$1
     local entryList entry
@@ -54,6 +70,10 @@ validateCoreZipArchive() {
     while IFS= read -r entry; do
         coreArchiveEntryIsSafe "${entry}" || { padmRemoveCleanupPath "${entryList}"; return 1; }
     done <"${entryList}"
+    if ! coreArchiveExpandedSizeIsSafe zip "${archiveFile}" "${entryList}"; then
+        padmRemoveCleanupPath "${entryList}"
+        return 1
+    fi
     padmRemoveCleanupPath "${entryList}"
 }
 
@@ -82,6 +102,7 @@ validateCoreTarArchive() {
         *) padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1 ;;
         esac
     done <"${detailList}"
+    coreArchiveExpandedSizeIsSafe tar "${archiveFile}" "${entryList}" || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     padmRemoveCleanupPath "${entryList}"
     padmRemoveCleanupPath "${detailList}"
 }

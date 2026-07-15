@@ -2160,7 +2160,7 @@ runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
         printf 'new-shell\n' >"${archiveRoot}/padm-main/shell/marker"
         mkfifo "${archiveRoot}/padm-main/unsupported.pipe"
 
-        (
+        runFixtureRefresh() (
             set +e
             TMPDIR="${fixtureDir}/tmp"
             eval "$(awk '
@@ -2183,12 +2183,23 @@ runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
             }
             curl() { tar -cz -C "${archiveRoot}" padm-main; }
             refreshScriptModules new-ref
-        ) >"${outputLog}" 2>&1 && return 1
+        )
+
+        runFixtureRefresh >"${outputLog}" 2>&1 && return 1
 
         grep -q '完整安装包结构异常，请重新执行安装命令' "${outputLog}"
         [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
         [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
         [[ ! -e "${fixtureDir}/unsupported.pipe" ]]
+
+        rm "${archiveRoot}/padm-main/unsupported.pipe"
+        truncate -s 104857601 "${archiveRoot}/padm-main/oversized.bin"
+        runFixtureRefresh >"${outputLog}" 2>&1 && return 1
+
+        grep -q '完整安装包结构异常，请重新执行安装命令' "${outputLog}"
+        [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
+        [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+        [[ ! -e "${fixtureDir}/oversized.bin" ]]
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     )
 }
