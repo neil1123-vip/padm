@@ -775,6 +775,25 @@ enableOfficialBbrFq() {
         return
     fi
 
+    if [[ -f "${PADM_BBR_SYSCTL_CONF}" && -f "${PADM_BBR_STATE_FILE}" ]] &&
+        grep -Fxq 'net.core.default_qdisc = fq' "${PADM_BBR_SYSCTL_CONF}" &&
+        grep -Fxq 'net.ipv4.tcp_congestion_control = bbr' "${PADM_BBR_SYSCTL_CONF}" &&
+        readPadmBbrStateValue previous_congestion >/dev/null 2>&1 &&
+        readPadmBbrStateValue previous_qdisc >/dev/null 2>&1; then
+        local existingLogFile
+        existingLogFile=$(bbrSysctlLog)
+        if ! sysctl -p "${PADM_BBR_SYSCTL_CONF}" >"${existingLogFile}" 2>&1; then
+            bbrEnableFailureCard "现有 sysctl 配置应用失败，未改动首次启用前状态" "日志：${existingLogFile}"
+        elif [[ "$(readSysctlValue net.ipv4.tcp_congestion_control)" == "bbr" && "$(readSysctlValue net.core.default_qdisc)" == "fq" ]]; then
+            statusCard "BBR 已启用" "沿用已有 padm 配置和首次启用前状态"
+        else
+            bbrEnableFailureCard "现有配置已应用但当前状态未完全匹配，未改动首次启用前状态" "日志：${existingLogFile}"
+        fi
+        printNetworkOptimizationStatus
+        bbrInstall
+        return
+    fi
+
     local previousCongestion previousQdisc stateTmp sysctlTmp logFile
     logFile=$(bbrSysctlLog)
     previousCongestion="$(readSysctlValue net.ipv4.tcp_congestion_control)"

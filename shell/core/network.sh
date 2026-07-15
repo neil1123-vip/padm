@@ -1,51 +1,66 @@
 #!/usr/bin/env bash
 
+ufwRulePresent() {
+    local rule="$1/${2:-tcp}"
+    ufw status | awk -v rule="${rule}" '$1 == rule { found = 1 } END { exit !found }'
+}
+
+firewalldRulePresent() {
+    local rule="$1/${2:-tcp}"
+    firewall-cmd --list-ports --permanent | tr ' ' '\n' | grep -Fxq "${rule}"
+}
+
 # 开放防火墙端口
 allowPort() {
-    local type=${2:-}
-    local firewallPort=$1
-    if [[ -z "${type}" ]]; then
-        type=tcp
-    fi
-    if [[ "${firewallPort}" == *:* ]]; then
-        firewallPort=${firewallPort/:/-}
+    local requestedPort=$1
+    local type=${2:-tcp}
+    local firewallPort=${requestedPort}
+    local portStart portEnd
+    [[ "${type}" == "tcp" || "${type}" == "udp" ]] || return 1
+    if [[ "${requestedPort}" == *:* ]]; then
+        portStart=${requestedPort%%:*}
+        portEnd=${requestedPort#*:}
+        validPortNumber "${portStart}" && validPortNumber "${portEnd}" && ((10#${portStart} <= 10#${portEnd})) || return 1
+        firewallPort="${portStart}-${portEnd}"
+    else
+        validPortNumber "${requestedPort}" || return 1
     fi
     # 如果防火墙启动状态则添加相应的开放端口
     if command -v dpkg >/dev/null 2>&1 && dpkg -l | grep -Eq "^[[:space:]]*ii[[:space:]]+ufw[[:space:]]"; then
         if ufw status | grep -q "Status: active"; then
-            if ! ufw status | grep -q "$1/${type}"; then
-                if ! sudo ufw allow "$1/${type}" || ! checkUFWAllowPort "$1"; then
-                    sudo ufw delete allow "$1/${type}" >/dev/null 2>&1 || true
-                    errorCard "$1端口开放失败，已尝试回滚本次 ufw 规则"
+            if ! ufwRulePresent "${requestedPort}" "${type}"; then
+                if ! sudo ufw allow "${requestedPort}/${type}" || ! checkUFWAllowPort "${requestedPort}" "${type}"; then
+                    sudo ufw delete allow "${requestedPort}/${type}" >/dev/null 2>&1 || true
+                    errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
                     return 1
                 fi
             fi
         fi
     elif systemctl status firewalld 2>/dev/null | grep -q "active (running)"; then
-        if ! firewall-cmd --list-ports --permanent | grep -qw "${firewallPort}/${type}"; then
-            if ! firewall-cmd --zone=public --add-port="${firewallPort}/${type}" --permanent || ! firewall-cmd --reload || ! checkFirewalldAllowPort "${firewallPort}"; then
+        if ! firewalldRulePresent "${firewallPort}" "${type}"; then
+            if ! firewall-cmd --zone=public --add-port="${firewallPort}/${type}" --permanent || ! firewall-cmd --reload || ! checkFirewalldAllowPort "${firewallPort}" "${type}"; then
                 firewall-cmd --zone=public --remove-port="${firewallPort}/${type}" --permanent >/dev/null 2>&1 || true
                 firewall-cmd --reload >/dev/null 2>&1 || true
-                errorCard "$1端口开放失败，已尝试回滚本次 firewalld 规则"
+                errorCard "${requestedPort}端口开放失败，已尝试回滚本次 firewalld 规则"
                 return 1
             fi
         fi
     elif rc-update show 2>/dev/null | grep -q ufw; then
         if ufw status | grep -q "Status: active"; then
-            if ! ufw status | grep -q "$1/${type}"; then
-                if ! sudo ufw allow "$1/${type}" || ! checkUFWAllowPort "$1"; then
-                    sudo ufw delete allow "$1/${type}" >/dev/null 2>&1 || true
-                    errorCard "$1端口开放失败，已尝试回滚本次 ufw 规则"
+            if ! ufwRulePresent "${requestedPort}" "${type}"; then
+                if ! sudo ufw allow "${requestedPort}/${type}" || ! checkUFWAllowPort "${requestedPort}" "${type}"; then
+                    sudo ufw delete allow "${requestedPort}/${type}" >/dev/null 2>&1 || true
+                    errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
                     return 1
                 fi
             fi
         fi
     elif dpkg-query -W -f='${db:Status-Abbrev}' netfilter-persistent 2>/dev/null | grep -q '^ii' && systemctl is-active --quiet netfilter-persistent; then
-        if ! iptables -L | grep -q "$1/${type}(neil1123-vip)"; then
-            if ! iptables -I INPUT -p "${type}" --dport "$1" -m comment --comment "allow $1/${type}(neil1123-vip)" -j ACCEPT || ! netfilter-persistent save; then
-                iptables -D INPUT -p "${type}" --dport "$1" -m comment --comment "allow $1/${type}(neil1123-vip)" -j ACCEPT >/dev/null 2>&1 || true
+        if ! iptables -L | grep -Fq "allow ${requestedPort}/${type}(neil1123-vip)"; then
+            if ! iptables -I INPUT -p "${type}" --dport "${requestedPort}" -m comment --comment "allow ${requestedPort}/${type}(neil1123-vip)" -j ACCEPT || ! netfilter-persistent save; then
+                iptables -D INPUT -p "${type}" --dport "${requestedPort}" -m comment --comment "allow ${requestedPort}/${type}(neil1123-vip)" -j ACCEPT >/dev/null 2>&1 || true
                 netfilter-persistent save >/dev/null 2>&1 || true
-                errorCard "$1端口开放失败，已尝试回滚本次 iptables 规则"
+                errorCard "${requestedPort}端口开放失败，已尝试回滚本次 iptables 规则"
                 return 1
             fi
         fi
@@ -94,7 +109,7 @@ getPublicIP() {
 
 # 输出 ufw 端口开放状态
 checkUFWAllowPort() {
-    if ufw status | grep -q "$1"; then
+    if ufwRulePresent "$1" "${2:-tcp}"; then
         successCard "$1端口开放成功"
     else
         errorCard "$1端口开放失败"
@@ -105,7 +120,7 @@ checkUFWAllowPort() {
 
 # 输出 firewalld 端口开放状态
 checkFirewalldAllowPort() {
-    if firewall-cmd --list-ports --permanent | grep -q "$1"; then
+    if firewalldRulePresent "$1" "${2:-tcp}"; then
         successCard "$1端口开放成功"
     else
         errorCard "$1端口开放失败"
@@ -246,31 +261,109 @@ removeCheckPortOpenNginxConfig() {
     rm -f -- "${targetPath}" >/dev/null 2>&1
 }
 
+checkPortOpenBackupCreate() {
+    local resultVar=$1
+    local backupRoot targetPath nginxMainConf file
+    local -a backupArgs=()
+
+    padmCreateTmpRootPath backupRoot padm-check-port-open.XXXXXX -d || return 1
+    for file in alone.conf sing_box_VMess_HTTPUpgrade.conf subscribe.conf checkPortOpen.conf; do
+        targetPath=$(nginxConfigFilePath "${file}") || { padmRemoveCleanupPath "${backupRoot}"; return 1; }
+        backupArgs+=("nginx/${file}" "${targetPath}")
+    done
+    backupArgs+=(
+        "stream/padm-reality.conf" "$(realityStreamSplitConfFile)"
+        "stream/reality-state.json" "$(realityStreamSplitStateFile)"
+    )
+    nginxMainConf=$(realityStreamSplitNginxConf)
+    if [[ -n "${nginxMainConf}" ]]; then
+        backupArgs+=("nginx/nginx.conf" "${nginxMainConf}")
+    fi
+    if ! padmWriteManagedFileBackupManifest "${backupRoot}" "${backupArgs[@]}"; then
+        padmRemoveCleanupPath "${backupRoot}"
+        return 1
+    fi
+    printf -v "${resultVar}" '%s' "${backupRoot}"
+}
+
+checkPortOpenRestoreCoreServiceState() {
+    local wasRunning=$1
+    local runningFn=$2
+    local actionFn=$3
+    if [[ "${wasRunning}" == "true" ]]; then
+        "${runningFn}" || runCoreServiceActionAllowFailure "${actionFn}" start
+    elif "${runningFn}"; then
+        runCoreServiceActionAllowFailure "${actionFn}" stop
+    fi
+}
+
+checkPortOpenAbort() {
+    local backupDir=$1
+    local singBoxWasRunning=$2
+    local xrayWasRunning=$3
+    local nginxWasRunning=$4
+    local nginxConfigChanged=$5
+    local reason=$6
+    local status=0
+
+    padmRestoreManagedFileBackupManifest "${backupDir}" || status=1
+    checkPortOpenRestoreCoreServiceState "${singBoxWasRunning}" singBoxRunning handleSingBox || status=1
+    checkPortOpenRestoreCoreServiceState "${xrayWasRunning}" xrayRunning handleXray || status=1
+    if [[ "${nginxConfigChanged}" == "true" ]]; then
+        if nginxRunning; then
+            runCoreServiceActionAllowFailure handleNginx stop || status=1
+        fi
+        if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
+            runCoreServiceActionAllowFailure handleNginx start || status=1
+        fi
+    else
+        checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx || status=1
+    fi
+    if [[ "${status}" -eq 0 ]]; then
+        padmRemoveCleanupPath "${backupDir}"
+        errorCard "${reason}，已恢复原配置和服务状态"
+    else
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，恢复失败，请手动检查备份目录: ${backupDir}"
+    fi
+    return 1
+}
+
 # 检查端口实际开放状态
 checkPortOpen() {
     local port=$1
     local domain=$2
     local checkPortOpenResult=
     local localIP=
+    local backupDir=
+    local singBoxWasRunning=false
+    local xrayWasRunning=false
+    local nginxWasRunning=false
+    local nginxConfigChanged=false
 
     allowPort "${port}" || return 1
+    checkPortOpenBackupCreate backupDir || { errorCard "端口检测配置备份失败"; return 1; }
+    singBoxRunning && singBoxWasRunning=true
+    xrayRunning && xrayWasRunning=true
+    nginxRunning && nginxWasRunning=true
     if ! runCoreServiceActionAllowFailure handleSingBox stop >/dev/null 2>&1; then
-        errorCard "sing-box 服务停止失败，无法检测端口开放状态"
+        checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "sing-box 服务停止失败，无法检测端口开放状态"
         return 1
     fi
     if ! runCoreServiceActionAllowFailure handleXray stop >/dev/null 2>&1; then
-        errorCard "Xray 服务停止失败，无法检测端口开放状态"
+        checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "Xray 服务停止失败，无法检测端口开放状态"
         return 1
     fi
+    nginxConfigChanged=true
     if ! cleanAgentNginxConf; then
-        errorCard "Nginx 配置清理失败，无法检测端口开放状态"
+        checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "Nginx 配置清理失败，无法检测端口开放状态"
         return 1
     fi
 
     if [[ -z "${btDomain}" ]]; then
 
         if ! runCoreServiceActionAllowFailure handleNginx stop; then
-            statusCard "Nginx 停止失败" "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 关闭失败日志"
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "Nginx 停止失败，无法检测 ${port} 端口开放状态"
             return 1
         fi
         # 初始化 Nginx 端口检测配置
@@ -281,24 +374,30 @@ checkPortOpen() {
         fi
         if ! writeCheckPortOpenNginxConfig "${port}" "${domain}" "${listenIPv6PortConfig}"; then
             statusCard "Nginx 配置校验失败" "无法检测 ${port} 端口开放状态" "${CHECK_PORT_OPEN_NGINX_CONFIG_ERROR:-请检查上方 Nginx 配置错误}" "也可以执行 nginx -t 查看配置错误"
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口检测 Nginx 配置写入失败"
             return 1
         fi
         if ! runCoreServiceActionAllowFailure handleNginx start; then
             nginxStartFailureCard "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
             removeCheckPortOpenNginxConfig || true
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口检测 Nginx 启动失败"
             return 1
         fi
         if [[ -z $(pgrep -f "nginx") ]]; then
             nginxStartFailureCard "无法检测 ${port} 端口开放状态" "请检查上方 Nginx 启动失败日志" "也可以执行 nginx -t 查看配置错误"
             removeCheckPortOpenNginxConfig || true
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口检测未发现 Nginx 进程"
             return 1
         fi
         # 检查域名和端口开放状态
         checkPortOpenResult=$(curl -s -m 10 "http://${domain}:${port}/checkPort")
         localIP=$(curl -s -m 10 "http://${domain}:${port}/ip")
-        removeCheckPortOpenNginxConfig || { errorCard "端口检测 Nginx 配置删除失败"; return 1; }
+        removeCheckPortOpenNginxConfig || {
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口检测 Nginx 配置删除失败"
+            return 1
+        }
         if ! runCoreServiceActionAllowFailure handleNginx stop; then
-            errorCard "Nginx 服务停止失败，端口检测配置已删除"
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "Nginx 服务停止失败，端口检测配置已删除"
             return 1
         fi
         if [[ "${checkPortOpenResult}" == "fjkvymb6len" ]]; then
@@ -314,10 +413,15 @@ checkPortOpen() {
                     statusCard "端口开放检测失败" "错误日志：${checkPortOpenResult}" "请将此错误日志通过 issues 提交反馈"
                 fi
             fi
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "未检测到 ${port} 端口开放"
             return 1
         fi
-        checkIP "${localIP}" || return 1
+        if ! checkIP "${localIP}"; then
+            checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口回源 IP 检查失败"
+            return 1
+        fi
     fi
+    padmRemoveCleanupPath "${backupDir}"
     return 0
 }
 

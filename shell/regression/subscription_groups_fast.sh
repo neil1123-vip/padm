@@ -623,16 +623,19 @@ runInstallNginxAlpineDefaultPathSafetyRegression() {
         local root="${TMP_DIR}/install-nginx-alpine-default-path-safety"
         local unsafeRoot="${root}/unsafe"
         local nginxRoot="${root}/nginx conf.d"
+        local openRcServiceFile="${root}/init.d/nginx"
+        local bootLog="${root}/boot.log"
         local rc
-        mkdir -p "${unsafeRoot}" "${nginxRoot}"
+        mkdir -p "${unsafeRoot}" "${nginxRoot}" "$(dirname -- "${openRcServiceFile}")"
         printf 'default\n' >"${unsafeRoot}/default.conf"
+        printf 'nginx-openrc\n' >"${openRcServiceFile}"
 
         release=alpine
+        export PADM_NGINX_OPENRC_SERVICE_FILE="${openRcServiceFile}"
         beginPackageInstallTransaction() { PADM_PACKAGE_TRANSACTION_STARTED=true; }
         endPackageInstallTransaction() { return 0; }
         installPackageTracked() { return 0; }
-        nginxServiceInstalled() { return 0; }
-        bootStartup() { return 0; }
+        bootStartup() { printf '%s\n' "$*" >>"${bootLog}"; }
         failPackageInstallTransaction() { exit 77; }
 
         (
@@ -650,6 +653,7 @@ runInstallNginxAlpineDefaultPathSafetyRegression() {
         nginxConfigPath="${nginxRoot}/"
         installNginxTools
         [[ ! -e "${nginxRoot}/default.conf" ]]
+        grep -qx 'nginx' "${bootLog}"
     )
 }
 

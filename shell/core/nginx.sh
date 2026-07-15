@@ -646,7 +646,10 @@ configureRealityStreamSplit() {
         return 1
     fi
     realityStreamApplyServicesOrRollback "${backupDir}" "Reality 443 共存分流服务应用失败" || return 1
-    realityStreamRefreshSubscribeIfInstalled
+    if ! realityStreamRefreshSubscribeIfInstalled; then
+        errorCard "Reality 443 共存分流已生效，但订阅刷新失败"
+        return 1
+    fi
     successCard "Reality 443 共存分流配置完成"
 }
 
@@ -694,7 +697,10 @@ disableRealityStreamSplit() {
         return 1
     fi
     realityStreamApplyServicesOrRollback "${backupDir}" "关闭 Reality 443 共存分流服务应用失败" || return 1
-    realityStreamRefreshSubscribeIfInstalled
+    if ! realityStreamRefreshSubscribeIfInstalled; then
+        errorCard "Reality 443 共存分流已关闭，但订阅刷新失败"
+        return 1
+    fi
     successCard "已关闭 Reality 443 共存分流"
 }
 

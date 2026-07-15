@@ -439,7 +439,7 @@ initInstallProgress() {
     ! command -v iptables-save >/dev/null 2>&1 && missingBaseTools=true
     [[ "${missingBaseTools}" == "true" ]] && countInstallStep
     if ! protocolSelectionSkipsNginx "${selectCustomInstallType}"; then
-        if ! nginx >/dev/null 2>&1; then
+        if ! command -v nginx >/dev/null 2>&1; then
             if [[ "${packageManager}" == "apt" || "${packageManager}" == "yum" ]]; then
                 countInstallStep
             fi
@@ -450,6 +450,7 @@ initInstallProgress() {
             [[ ${nginxMinorVersion:-0} -lt 14 ]] && countInstallStep
         fi
     fi
+    return 0
 }
 
 runPackageCommandWithProgress() {
@@ -729,7 +730,7 @@ installTools() {
     if protocolSelectionSkipsNginx "${selectCustomInstallType}"; then
         successCard "检测到无需依赖Nginx的服务，跳过安装"
     else
-        if ! nginx >/dev/null 2>&1; then
+        if ! command -v nginx >/dev/null 2>&1; then
             successCard "安装nginx"
             installNginxTools
         else

@@ -4280,10 +4280,97 @@ runNetworkCheckReturnFailureRegression() (
     local cleanLog="${root}/port-clean.log"
     local writeLog="${root}/port-write.log"
     local publicIpCurlLog="${root}/public-ip-curl.log"
+    local firewallLog="${root}/firewall.log"
     local mode=
     local dnsShellRc ipShellRc portShellRc templateShellRc
 
     mkdir -p "${root}/nginx"
+    eval "$(declare -f cleanAgentNginxConf | sed '1s/^cleanAgentNginxConf/originalCleanAgentNginxConf/')"
+
+    if allowPort 0 || allowPort 65536 || allowPort 2000:1000 || allowPort 443 sctp; then
+        return 1
+    fi
+
+    local ufwTcpAdded=false
+    local ufwUdpAdded=false
+    : >"${firewallLog}"
+    dpkg() {
+        [[ "$1" == "-l" ]] || return 1
+        printf 'ii  ufw  0  all  firewall\n'
+    }
+    ufw() {
+        case "$1" in
+        status)
+            printf 'Status: active\n1443/tcp ALLOW Anywhere\n'
+            [[ "${ufwTcpAdded}" == "true" ]] && printf '443/tcp ALLOW Anywhere\n'
+            [[ "${ufwUdpAdded}" == "true" ]] && printf '443/udp ALLOW Anywhere\n'
+            return 0
+            ;;
+        allow)
+            printf 'ufw:allow:%s\n' "$2" >>"${firewallLog}"
+            [[ "$2" == "443/tcp" ]] && ufwTcpAdded=true
+            [[ "$2" == "443/udp" ]] && ufwUdpAdded=true
+            return 0
+            ;;
+        delete) return 0 ;;
+        *) return 1 ;;
+        esac
+    }
+    sudo() { "$@"; }
+    allowPort 443
+    allowPort 443 udp
+    grep -qx 'ufw:allow:443/tcp' "${firewallLog}"
+    grep -qx 'ufw:allow:443/udp' "${firewallLog}"
+    : >"${firewallLog}"
+    allowPort 443
+    allowPort 443 udp
+    [[ ! -s "${firewallLog}" ]]
+    unset -f dpkg ufw sudo
+
+    local firewalldTcpAdded=false
+    : >"${firewallLog}"
+    dpkg() { return 1; }
+    systemctl() {
+        [[ "$*" == "status firewalld" ]] && printf 'Active: active (running)\n'
+    }
+    firewall-cmd() {
+        case "$1" in
+        --list-ports)
+            printf '443/udp'
+            [[ "${firewalldTcpAdded}" == "true" ]] && printf ' 443/tcp'
+            printf '\n'
+            ;;
+        --zone=public)
+            printf 'firewalld:add:%s\n' "$2" >>"${firewallLog}"
+            firewalldTcpAdded=true
+            ;;
+        --reload) return 0 ;;
+        *) return 1 ;;
+        esac
+    }
+    allowPort 443
+    grep -qx 'firewalld:add:--add-port=443/tcp' "${firewallLog}"
+    unset -f dpkg systemctl firewall-cmd
+
+    : >"${firewallLog}"
+    dpkg() { return 1; }
+    systemctl() {
+        [[ "$*" == "is-active --quiet netfilter-persistent" ]]
+    }
+    rc-update() { return 1; }
+    dpkg-query() { printf 'ii\n'; }
+    iptables() {
+        if [[ "$1" == "-L" ]]; then
+            printf 'ACCEPT tcp -- anywhere anywhere /* allow 1443/tcp(neil1123-vip) */\n'
+        elif [[ "$1" == "-I" ]]; then
+            printf 'iptables:add:%s\n' "$*" >>"${firewallLog}"
+        fi
+    }
+    netfilter-persistent() { return 0; }
+    allowPort 443
+    grep -q '^iptables:add:-I INPUT -p tcp --dport 443 ' "${firewallLog}"
+    unset -f dpkg systemctl rc-update dpkg-query iptables netfilter-persistent
+
     errorCard() { return 0; }
     sleep() { return 0; }
     dig() { return 1; }
@@ -4499,6 +4586,88 @@ runNetworkCheckReturnFailureRegression() (
     runCheckPortStopFailureCase nginx-stop-fail nginx
     grep -qx 'nginx:stop:true' "${serviceLog}"
     ! grep -q '^systemctl:' "${serviceLog}"
+
+    local singBoxState=true
+    local xrayState=true
+    local nginxState=true
+    local realityConf="${root}/reality-stream.conf"
+    local realityState="${root}/reality-stream.state"
+    local nginxMainConf="${root}/nginx.conf"
+    export PADM_REALITY_STREAM_CONF_FILE="${realityConf}"
+    export PADM_REALITY_STREAM_STATE_FILE="${realityState}"
+    export PADM_REALITY_STREAM_NGINX_CONF="${nginxMainConf}"
+    printf 'old-alone\n' >"${root}/nginx/alone.conf"
+    printf 'old-stream\n' >"${realityConf}"
+    printf 'old-state\n' >"${realityState}"
+    cat >"${nginxMainConf}" <<EOF
+events {}
+# padm stream include start
+include ${root}/stream.d/*.conf;
+# padm stream include end
+http {}
+EOF
+    local originalNginxMainConf
+    originalNginxMainConf=$(<"${nginxMainConf}")
+    allowPort() { return 0; }
+    singBoxRunning() { [[ "${singBoxState}" == "true" ]]; }
+    xrayRunning() { [[ "${xrayState}" == "true" ]]; }
+    nginxRunning() { [[ "${nginxState}" == "true" ]]; }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "stop" ]] && singBoxState=false
+        [[ "$1" == "start" ]] && singBoxState=true
+        return 0
+    }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "stop" ]] && xrayState=false
+        [[ "$1" == "start" ]] && xrayState=true
+        return 0
+    }
+    handleNginx() {
+        printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "stop" ]] && nginxState=false
+        [[ "$1" == "start" ]] && nginxState=true
+        return 0
+    }
+    cleanAgentNginxConf() {
+        printf 'clean:%s\n' "${mode}" >>"${cleanLog}"
+        originalCleanAgentNginxConf
+    }
+
+    mode=write-fail
+    : >"${serviceLog}"
+    set +e
+    checkPortOpen 443 example.com >/dev/null 2>&1
+    local restoreRc=$?
+    set -e
+    [[ "${restoreRc}" == "1" ]]
+    [[ "$(<"${root}/nginx/alone.conf")" == "old-alone" ]]
+    [[ "$(<"${realityConf}")" == "old-stream" ]]
+    [[ "$(<"${realityState}")" == "old-state" ]]
+    [[ "$(<"${nginxMainConf}")" == "${originalNginxMainConf}" ]]
+    [[ "${singBoxState}" == "true" && "${xrayState}" == "true" && "${nginxState}" == "true" ]]
+    grep -qx 'sing-box:start:true' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+
+    mode=success
+    singBoxState=true
+    xrayState=true
+    nginxState=true
+    pgrep() { [[ "$*" == "-f nginx" ]] && printf '123\n'; }
+    curl() {
+        [[ "${!#}" == */checkPort ]] && printf 'fjkvymb6len' || printf '203.0.113.10'
+    }
+    checkIP() { return 0; }
+    checkPortOpen 443 example.com >/dev/null 2>&1
+    [[ ! -e "${root}/nginx/alone.conf" ]]
+    [[ ! -e "${realityConf}" && ! -e "${realityState}" ]]
+    ! grep -q 'padm stream include start' "${nginxMainConf}"
+    [[ "${singBoxState}" == "false" && "${xrayState}" == "false" && "${nginxState}" == "false" ]]
+    if regressionFindHasMatches "${TMP_DIR}" -mindepth 1 -maxdepth 1 -name 'padm-check-port-open.*'; then
+        return 1
+    fi
 
     currentUUID=existing-user
     currentClients='[]'
@@ -5499,6 +5668,9 @@ runGeoUpdateReloadFailureRegression() (
     local callLog="${root}/calls.log"
     local statusLog="${root}/status.log"
     local geoVersionFile="${root}/geo-version.txt"
+    local geoCronLog="${root}/geo-cron.log"
+    local handlerSource
+    local mode=reload-fail
     local rc
 
     mkdir -p "${root}"
@@ -5507,6 +5679,7 @@ runGeoUpdateReloadFailureRegression() (
     printf 'old-version\n' >"${geoVersionFile}"
     ensureXrayGeoFiles() {
         printf 'geo:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" == "ensure-fail" ]] && return 1
         printf 'new-version\n' >"${geoVersionFile}"
         return 0
     }
@@ -5521,6 +5694,18 @@ runGeoUpdateReloadFailureRegression() (
         printf '%s\n' "$*" >>"${statusLog}"
     }
 
+    mode=ensure-fail
+    set +e
+    updateGeoSite >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'geo:/etc/padm/xray force' "${callLog}"
+    ! grep -q '^reload$' "${callLog}"
+
+    mode=reload-fail
+    : >"${callLog}"
+    printf 'old-version\n' >"${geoVersionFile}"
     set +e
     updateGeoSite >/dev/null 2>&1
     rc=$?
@@ -5531,6 +5716,35 @@ runGeoUpdateReloadFailureRegression() (
     grep -qx 'reload' "${callLog}"
     grep -q '核心重载失败' "${statusLog}"
     ! grep -q '更新完毕' "${statusLog}"
+
+    handlerSource=$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")
+    handlerSource=${handlerSource//\/etc\/padm\/crontab_updateGeoSite.log/${geoCronLog}}
+    eval "${handlerSource}"
+    updateGeoSite() {
+        printf 'geo-failed\n'
+        return 23
+    }
+    cronName=UpdateGeo
+    : >"${geoCronLog}"
+    set +e
+    (handleScriptCommand)
+    rc=$?
+    set -e
+    [[ "${rc}" == "23" ]]
+    ! grep -q 'geo更新日期:' "${geoCronLog}"
+
+    updateGeoSite() {
+        printf 'geo-updated\n'
+        return 0
+    }
+    : >"${geoCronLog}"
+    set +e
+    (handleScriptCommand)
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    grep -q '^geo-updated$' "${geoCronLog}"
+    grep -q '^geo更新日期:' "${geoCronLog}"
 )
 
 runXrayGeoCommitRollbackRegression() (
@@ -7121,6 +7335,32 @@ runCleanLastInstallationConfigFailureRegression() (
         'systemd 配置重载失败，已取消清空上次安装配置' \
         'systemctl:daemon-reload' \
         'read-install-type'
+
+    local xrayOpenRcServiceFile="${root}/init.d/xray"
+    local singBoxOpenRcServiceFile="${root}/init.d/sing-box"
+    mkdir -p "${root}/init.d"
+    printf 'xray-service\n' >"${xrayOpenRcServiceFile}"
+    printf 'sing-box-service\n' >"${singBoxOpenRcServiceFile}"
+    export PADM_XRAY_OPENRC_SERVICE_FILE="${xrayOpenRcServiceFile}"
+    export PADM_SINGBOX_OPENRC_SERVICE_FILE="${singBoxOpenRcServiceFile}"
+    release=alpine
+    coreInstallType=1
+    rc-update() {
+        printf 'rc-update:%s\n' "$*" >>"${cleanupLog}"
+        return 0
+    }
+    mode=
+    : >"${cleanupLog}"
+    cleanLastInstallationConfig >/dev/null 2>&1
+    grep -qx 'rc-update:del xray default' "${cleanupLog}"
+    grep -qx 'rc-update:del sing-box default' "${cleanupLog}"
+    grep -qxF "rm:-f -- ${xrayOpenRcServiceFile}" "${cleanupLog}"
+    grep -qxF "rm:-f -- ${singBoxOpenRcServiceFile}" "${cleanupLog}"
+    ! grep -q '^systemctl:' "${cleanupLog}"
+    release=debian
+    coreInstallType=
+    unset PADM_XRAY_OPENRC_SERVICE_FILE PADM_SINGBOX_OPENRC_SERVICE_FILE
+    unset -f rc-update
 
     mode=xray-stop-fail
     : >"${serviceLog}"
@@ -9769,7 +10009,9 @@ runRealityStreamDisableRegression() {
     local streamConf="${streamDir}/padm-reality.conf"
     local nginxMainConf="${streamDir}/nginx.conf"
     local serviceMode=success
+    local refreshMode=success
     local serviceLog="${TMP_DIR}/reality-stream-disable-services.log"
+    local errorLog="${TMP_DIR}/reality-stream-disable-errors.log"
     local originalVision originalXHTTP originalState originalStreamConf originalNginxConf
     mkdir -p "${fakeBin}" "${streamDir}" "${streamTmpRoot}"
     TMPDIR="${streamTmpRoot}"
@@ -9793,6 +10035,7 @@ SH
     export PADM_REALITY_STREAM_VISION_CONFIG_FILE="${visionFile}"
     export PADM_REALITY_STREAM_XHTTP_CONFIG_FILE="${xhttpFile}"
     : >"${serviceLog}"
+    : >"${errorLog}"
 
     reloadCore() {
         printf 'reload:%s\n' "${serviceMode}" >>"${serviceLog}"
@@ -9813,7 +10056,11 @@ SH
 
     realityStreamRefreshSubscribeIfInstalled() {
         printf 'refresh\n' >>"${serviceLog}"
-        return 0
+        [[ "${refreshMode}" == "success" ]]
+    }
+
+    errorCard() {
+        printf '%s\n' "$*" >>"${errorLog}"
     }
 
     writeRealityStreamFixture() {
@@ -9906,6 +10153,21 @@ EOF
 
     writeRealityStreamFixture
     serviceMode=success
+    refreshMode=fail
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    set +e
+    disableRealityStreamSplit >/dev/null 2>&1
+    disableStatus=$?
+    set -e
+    [[ "${disableStatus}" == "1" ]]
+    [[ ! -e "${stateFile}" && ! -e "${streamConf}" ]]
+    grep -qx 'refresh' "${serviceLog}"
+    grep -q 'Reality 443 共存分流已关闭，但订阅刷新失败' "${errorLog}"
+
+    writeRealityStreamFixture
+    serviceMode=success
+    refreshMode=success
     : >"${serviceLog}"
     export PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE=success
     disableRealityStreamSplit
@@ -12198,6 +12460,8 @@ runManagedFileBackupManifestRegression() (
 
 runPadmBbrManagedCleanupRegression() (
     local root="${TMP_DIR}/padm-bbr-managed-cleanup"
+    local repeatStatus="${root}/repeat.status"
+    local repeatHelper="${root}/repeat.helper"
     local tempFailStatus="${root}/temp-fail.status"
     local tempFailHelper="${root}/temp-fail.helper"
     local applyFailStatus="${root}/apply-fail.status"
@@ -12268,6 +12532,46 @@ SH
     [[ "${executedThirdPartyPath}" == "${root}/padm-tcpx."*/tcpx.sh ]]
     [[ ! -e "${root}/padm-tcpx.sh" ]]
     [[ ! -e "$(dirname -- "${executedThirdPartyPath}")" ]]
+
+    cat >"${root}/repeat-sysctl.conf" <<'EOF'
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+EOF
+    cat >"${root}/repeat.state" <<'EOF'
+previous_congestion=reno
+previous_qdisc=cake
+EOF
+    : >"${repeatStatus}"
+    : >"${repeatHelper}"
+    bash -c '
+        set -e
+        export TMPDIR="$1"
+        export PADM_BBR_SYSCTL_CONF="$1/repeat-sysctl.conf"
+        export PADM_BBR_STATE_FILE="$1/repeat.state"
+        source "$2/shell/core/runtime.sh"
+        source "$2/shell/core/entry_helpers.sh"
+        statusLog=$3
+        helperLog=$4
+        statusCard() { printf "%s|%s|%s\n" "$1" "$2" "${3:-}" >>"${statusLog}"; }
+        bbrInstall() { printf "menu\n" >>"${helperLog}"; }
+        padmBbrAvailable() { return 0; }
+        printNetworkOptimizationStatus() { printf "print-status\n" >>"${helperLog}"; }
+        readSysctlValue() {
+            case "$1" in
+            net.ipv4.tcp_congestion_control) printf "bbr\n" ;;
+            net.core.default_qdisc) printf "fq\n" ;;
+            *) return 0 ;;
+            esac
+        }
+        sysctl() { printf "sysctl:%s\n" "$*" >>"${helperLog}"; return 0; }
+        commitGeneratedFile() { printf "unexpected-commit:%s\n" "$2" >>"${helperLog}"; return 1; }
+        enableOfficialBbrFq
+    ' _ "${root}" "${PROJECT_ROOT}" "${repeatStatus}" "${repeatHelper}"
+    grep -qx "sysctl:-p ${root}/repeat-sysctl.conf" "${repeatHelper}"
+    ! grep -q '^unexpected-commit:' "${repeatHelper}"
+    grep -q 'BBR 已启用|沿用已有 padm 配置和首次启用前状态' "${repeatStatus}"
+    grep -qx 'previous_congestion=reno' "${root}/repeat.state"
+    grep -qx 'previous_qdisc=cake' "${root}/repeat.state"
 
     bash -c '
         set -e
@@ -14290,11 +14594,14 @@ runInstallToolsCertificateDependencyRegression() {
     local statusLog="${TMP_DIR}/install-tools-cert-status.log"
     local fakeHome="${TMP_DIR}/install-tools-cert-home"
     local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
+    local oldSuccessLog="${REGRESSION_SUCCESS_CARD_LOG:-}"
     local oldInstallLog="${PADM_INSTALL_LOG:-}"
+    local nginxCommandLog="${TMP_DIR}/install-tools-nginx-command.log"
     mkdir -p "${fakeHome}/.acme.sh"
     printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
     HOME="${fakeHome}"
     export REGRESSION_STATUS_CARD_LOG="${statusLog}"
+    export REGRESSION_SUCCESS_CARD_LOG="${statusLog}"
     PADM_INSTALL_LOG="${TMP_DIR}/install-tools-install.log"
     : >"${statusLog}"
     release=debian
@@ -14328,10 +14635,27 @@ runInstallToolsCertificateDependencyRegression() {
     installTools 1
     ! grep -q "跳过安装 acme.sh" "${statusLog}"
 
+    : >"${nginxCommandLog}"
+    protocolSelectionSkipsNginx() { return 1; }
+    nginx() {
+        printf '%s\n' "$*" >>"${nginxCommandLog}"
+        [[ "${1:-}" == "-v" ]] || return 1
+        printf 'nginx version: nginx/1.26.0\n' >&2
+    }
+    installTools 1
+    [[ -s "${nginxCommandLog}" ]]
+    ! grep -vx -- '-v' "${nginxCommandLog}"
+    ! grep -q 'unexpected-nginx' "${statusLog}"
+
     if [[ -n "${oldStatusLog}" ]]; then
         REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
     else
         unset REGRESSION_STATUS_CARD_LOG
+    fi
+    if [[ -n "${oldSuccessLog}" ]]; then
+        REGRESSION_SUCCESS_CARD_LOG="${oldSuccessLog}"
+    else
+        unset REGRESSION_SUCCESS_CARD_LOG
     fi
     if [[ -n "${oldInstallLog}" ]]; then
         PADM_INSTALL_LOG="${oldInstallLog}"

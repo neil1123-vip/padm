@@ -1632,7 +1632,7 @@ updateGeoSite() {
     local oldVersion newVersion
     oldVersion=$(xrayGeoDisplayVersion "${targetDir}")
     if ! ensureXrayGeoFiles "${targetDir}" force; then
-        exit 1
+        return 1
     fi
 
     newVersion=$(xrayGeoDisplayVersion "${targetDir}")

@@ -671,8 +671,11 @@ handleScriptCommand() {
         exit $?
     elif [[ "${cronName}" == "UpdateGeo" ]]; then
         updateGeoSite >>/etc/padm/crontab_updateGeoSite.log
-        printf 'geo更新日期:%s\n' "$(date "+%F %H:%M:%S")" >>/etc/padm/crontab_updateGeoSite.log
-        exit 0
+        local updateStatus=$?
+        if [[ "${updateStatus}" -eq 0 ]]; then
+            printf 'geo更新日期:%s\n' "$(date "+%F %H:%M:%S")" >>/etc/padm/crontab_updateGeoSite.log
+        fi
+        exit "${updateStatus}"
     elif [[ "${cronName}" == "SyncSubscriptionGroups" ]]; then
         runSubscriptionGroupSyncCron skip-subscribe-refresh
         exit $?

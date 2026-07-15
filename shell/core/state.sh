@@ -529,6 +529,8 @@ showLastInstallationConfig() {
 # 清空上次安装配置
 cleanLastInstallationConfig() {
     local oldPorts
+    local xrayOpenRcServiceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
+    local singBoxOpenRcServiceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
     oldPorts=$(printf '%s\n' "${currentDefaultPort}" "${currentPort}" "${customPort}" "${xrayVLESSRealityPort}" "${xrayVLESSRealityXHTTPort}" "${singBoxVLESSVisionPort}" "${singBoxVLESSRealityVisionPort}" "${singBoxVLESSRealityGRPCPort}" "${singBoxHysteria2Port}" "${singBoxTuicPort}" "${singBoxSocks5Port}" "${hysteriaPort}" "${tuicPort}" | grep -E '^[0-9]+$' | sort -n | uniq)
 
     statusCard "安装配置" "清空上次安装配置"
@@ -589,13 +591,28 @@ cleanLastInstallationConfig() {
         errorCard "Reality entry host 清理失败，已取消清空上次安装配置"
         return 1
     fi
-    if ! removeManagedFilesIfPresent /etc/systemd/system/xray.service /etc/systemd/system/sing-box.service; then
-        errorCard "核心服务文件清理失败，已取消清空上次安装配置"
-        return 1
-    fi
-    if ! systemctl daemon-reload >/dev/null 2>&1; then
-        errorCard "systemd 配置重载失败，已取消清空上次安装配置"
-        return 1
+    if [[ "${release:-}" == "alpine" ]]; then
+        if [[ "${coreInstallType:-}" == "1" || -e "${xrayOpenRcServiceFile}" || -L "${xrayOpenRcServiceFile}" ]] && ! rc-update del xray default >/dev/null 2>&1; then
+            errorCard "Xray OpenRC 开机自启清理失败，已取消清空上次安装配置"
+            return 1
+        fi
+        if [[ "${coreInstallType:-}" == "2" || -e "${singBoxOpenRcServiceFile}" || -L "${singBoxOpenRcServiceFile}" ]] && ! rc-update del sing-box default >/dev/null 2>&1; then
+            errorCard "sing-box OpenRC 开机自启清理失败，已取消清空上次安装配置"
+            return 1
+        fi
+        if ! removeManagedFilesIfPresent "${xrayOpenRcServiceFile}" "${singBoxOpenRcServiceFile}"; then
+            errorCard "核心 OpenRC 服务文件清理失败，已取消清空上次安装配置"
+            return 1
+        fi
+    else
+        if ! removeManagedFilesIfPresent /etc/systemd/system/xray.service /etc/systemd/system/sing-box.service; then
+            errorCard "核心服务文件清理失败，已取消清空上次安装配置"
+            return 1
+        fi
+        if ! systemctl daemon-reload >/dev/null 2>&1; then
+            errorCard "systemd 配置重载失败，已取消清空上次安装配置"
+            return 1
+        fi
     fi
 
     if [[ -n "${oldPorts}" ]]; then

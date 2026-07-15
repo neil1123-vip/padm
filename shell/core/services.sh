@@ -155,7 +155,12 @@ nginxRunning() {
 }
 
 nginxServiceInstalled() {
-    [[ -e /etc/systemd/system/nginx.service || -e /usr/lib/systemd/system/nginx.service || -e /lib/systemd/system/nginx.service ]]
+    if [[ "${release:-}" == "alpine" ]]; then
+        local openRcServiceFile=${PADM_NGINX_OPENRC_SERVICE_FILE:-/etc/init.d/nginx}
+        [[ -e "${openRcServiceFile}" || -L "${openRcServiceFile}" ]]
+    else
+        [[ -e /etc/systemd/system/nginx.service || -e /usr/lib/systemd/system/nginx.service || -e /lib/systemd/system/nginx.service ]]
+    fi
 }
 
 # 操作 Nginx
