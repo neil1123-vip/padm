@@ -239,26 +239,24 @@ installTLSFromAcme() {
     fi
 
     if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
-        if ! sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null; then
-            installStatus=$?
-        fi
+        sudo "$HOME/.acme.sh/acme.sh" --installcert -d "*.${dnsTLSDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
     else
-        if ! sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null; then
-            installStatus=$?
-        fi
+        sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${tlsDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
     fi
 
     if [[ "${installStatus}" -ne 0 || ! -f "${crtFile}" || ! -f "${keyFile}" ]] || [[ -z $(cat "${keyFile}") || -z $(cat "${crtFile}") ]]; then
         tail -n 10 "${acmeLogFile}" 2>/dev/null || true
         if [[ -n "${backupDir}" ]]; then
-            restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || {
-                padmRemoveCleanupPath "${backupDir}"
+            if ! restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644; then
+                padmForgetCleanupPath "${backupDir}"
+                errorCard "TLS安装失败，旧证书恢复失败，请手动检查备份目录: ${backupDir}"
                 return 1
-            }
-            restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600 || {
-                padmRemoveCleanupPath "${backupDir}"
+            fi
+            if ! restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600; then
+                padmForgetCleanupPath "${backupDir}"
+                errorCard "TLS安装失败，旧私钥恢复失败，请手动检查备份目录: ${backupDir}"
                 return 1
-            }
+            fi
         fi
         if [[ ${installTLSCount:-} == "1" ]]; then
             [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
@@ -286,6 +284,20 @@ installTLSFromAcme() {
 
     [[ -n "${backupDir}" ]] && padmRemoveCleanupPath "${backupDir}"
     successCard "TLS生成成功"
+}
+
+restoreTLSReinstallBackup() {
+    local backupDir=$1
+    local tlsDir=$2
+    local reason=$3
+
+    if cp -a "${backupDir}/." "${tlsDir}/" >/dev/null 2>&1; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 0
+    fi
+    padmForgetCleanupPath "${backupDir}"
+    errorCard "${reason}，且恢复失败，请手动检查备份目录: ${backupDir}"
+    return 1
 }
 
 # 安装 TLS 证书
@@ -320,13 +332,11 @@ installTLS() {
                             return 1
                         fi
                         if ! cleanDirectoryContent "${tlsDir}"; then
-                            cp -a "${reinstallBackupDir}/." "${tlsDir}/" >/dev/null 2>&1 || true
-                            padmRemoveCleanupPath "${reinstallBackupDir}"
+                            restoreTLSReinstallBackup "${reinstallBackupDir}" "${tlsDir}" "TLS 目录清理失败" || return 1
                             return 1
                         fi
                         if ! installTLSFromAcme; then
-                            cp -a "${reinstallBackupDir}/." "${tlsDir}/" >/dev/null 2>&1 || true
-                            padmRemoveCleanupPath "${reinstallBackupDir}"
+                            restoreTLSReinstallBackup "${reinstallBackupDir}" "${tlsDir}" "TLS安装失败" || return 1
                             return 1
                         fi
                         padmRemoveCleanupPath "${reinstallBackupDir}"
@@ -635,7 +645,7 @@ renewalTLS() {
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 installDomain="*.${dnsTLSDomain}"
             fi
-            local backupDir backupCrt backupKey
+            local backupDir backupCrt backupKey restoreStatus=0
             padmCreateTmpRootPath backupDir padm-tls-renew.XXXXXX -d || {
                 failTlsRenewalBeforeInstall "TLS 旧证书备份目录创建失败"
                 return 1
@@ -655,9 +665,14 @@ renewalTLS() {
             sudo "$HOME/.acme.sh/acme.sh" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || {
                 local installStatus=$?
                 errorCard "TLS 证书安装失败，正在尝试恢复服务"
-                restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || errorCard "TLS 证书恢复失败"
-                restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600 || errorCard "TLS 证书恢复失败"
-                padmRemoveCleanupPath "${backupDir}"
+                restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || restoreStatus=1
+                restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600 || restoreStatus=1
+                if [[ "${restoreStatus}" -eq 0 ]]; then
+                    padmRemoveCleanupPath "${backupDir}"
+                else
+                    padmForgetCleanupPath "${backupDir}"
+                    errorCard "TLS 证书恢复失败，请手动检查备份目录: ${backupDir}"
+                fi
                 restoreServicesAfterTLSRenewal || errorCard "TLS 证书安装失败，且服务恢复失败"
                 return "${installStatus}"
             }

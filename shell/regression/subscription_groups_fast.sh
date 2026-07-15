@@ -224,7 +224,7 @@ runDownloadArgumentMissingValueRegression() {
             return 0
         }
         downloadFile -O https://example.invalid/file.tar.gz
-        grep -qx -- '-c -q https://example.invalid/file.tar.gz' "${calls}"
+        grep -qx -- '-c -q -T 30 -t 2 --quota=52428800 https://example.invalid/file.tar.gz' "${calls}"
         [[ ! -e "${root}/https:" ]]
     )
 }
@@ -470,6 +470,35 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
         }
         ! writeSubscriptionWireGuardConfig
         [[ ! -e "${wireGuardRoot}/wg-padm.conf" ]]
+
+        (
+            set -euo pipefail
+            local rollbackRoot="${root}/rollback-failure"
+            local rollbackNginx="${rollbackRoot}/nginx"
+            local rollbackPublic="${rollbackRoot}/public"
+            local rollbackTarget
+            local rollbackBackup
+            mkdir -p "${rollbackNginx}" "${rollbackPublic}"
+            nginx() { return 1; }
+            nginxConfigPath="${rollbackNginx}/"
+            export PADM_SUBSCRIBE_DIR="${rollbackPublic}"
+            fail2banPadmControlLogFile() { printf '%s/access.log\n' "${rollbackRoot}"; }
+            subscriptionWireGuardReadState() { printf '%s\n' '{"address":"10.77.0.1/24","control_port":39778}'; }
+            rollbackTarget="${rollbackNginx}/padm-control-wg.conf"
+            printf 'old config\n' >"${rollbackTarget}"
+            eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
+            local commitCount=0
+            commitGeneratedFile() {
+                commitCount=$((commitCount + 1))
+                [[ "${commitCount}" != "3" ]] || return 1
+                originalCommitGeneratedFile "$@"
+            }
+            ! ensureSubscriptionWireGuardNginxConfig
+            rollbackBackup=$(find "${rollbackNginx}" -maxdepth 1 -type f -name '.padm-control-wg.conf.backup.*' -print)
+            [[ -n "${rollbackBackup}" ]]
+            grep -qxF 'old config' "${rollbackBackup}"
+            ! grep -qxF 'old config' "${rollbackTarget}"
+        )
     )
 }
 
@@ -2523,6 +2552,7 @@ runInstallRefreshDownloadBoundsRegression() (
     downloadRepoArchive "https://example.invalid/padm.tar.gz" "${root}/wget-extract"
     grep -q -- '-T' "${wgetLog}"
     grep -q -- '-t' "${wgetLog}"
+    grep -q -- '--quota=52428800' "${wgetLog}"
 
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )

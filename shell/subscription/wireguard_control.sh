@@ -626,7 +626,7 @@ EOF
         commitGeneratedFile "${tmpPath}" "${targetPath}" 644 || { padmRemoveCleanupPath "${tmpPath}"; [[ -n "${backupPath}" ]] && padmRemoveCleanupPath "${backupPath}"; return 1; }
         if ! nginx -t >"$(subscriptionWireGuardNginxTestLog)" 2>&1; then
             if [[ -n "${backupPath}" && -f "${backupPath}" ]]; then
-                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || padmRemoveCleanupPath "${backupPath}"
+                commitGeneratedFile "${backupPath}" "${targetPath}" 644 || padmForgetCleanupPath "${backupPath}"
             else
                 removeManagedFileIfPresent "${targetPath}" || return 1
             fi

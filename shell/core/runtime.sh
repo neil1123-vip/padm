@@ -1169,7 +1169,7 @@ downloadFile() {
     local outputDir=
     local outputFile=
     local url=
-    local args=(-c -q)
+    local args=(-c -q -T 30 -t 2 --quota=52428800)
     local outputParent=
     local outputName=
     local tmpFile=
@@ -1208,8 +1208,13 @@ downloadFile() {
         outputParent=$(dirname -- "${outputFile}")
         outputName=$(basename -- "${outputFile}")
         padmCreateTempPath tmpFile "${outputParent}/.${outputName}.download.XXXXXX" || return 1
-        if wget "${args[@]}" -O "${tmpFile}" "${url}" && [[ -s "${tmpFile}" ]]; then
-            mv "${tmpFile}" "${outputFile}"
+        if wget "${args[@]}" -O "${tmpFile}" "${url}" &&
+            [[ -s "${tmpFile}" ]] &&
+            [[ "$(wc -c <"${tmpFile}")" -le 52428800 ]]; then
+            if ! mv -f -- "${tmpFile}" "${outputFile}"; then
+                padmRemoveCleanupPath "${tmpFile}"
+                return 1
+            fi
             padmForgetCleanupPath "${tmpFile}"
         else
             padmRemoveCleanupPath "${tmpFile}"
@@ -1227,12 +1232,12 @@ fetchUrlToStdout() {
 
     while [[ ${attempt} -le ${maxAttempts} ]]; do
         if command -v curl >/dev/null 2>&1; then
-            if curl -fsSL --connect-timeout 10 --max-time 30 "${url}"; then
+            if curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 5242880 "${url}"; then
                 return 0
             fi
         fi
         if command -v wget >/dev/null 2>&1; then
-            if wget -qO- "${url}"; then
+            if wget -T 30 -t 2 --quota=5242880 -qO- "${url}"; then
                 return 0
             fi
         fi
@@ -1341,6 +1346,13 @@ downloadGitHubReleaseAsset() {
     fi
     outputPath="${outputDir%/}/${assetName}"
     if ! downloadFile -P "${outputDir}" "${downloadUrl}"; then
+        return 1
+    fi
+    if [[ ! -f "${outputPath}" || "$(wc -c <"${outputPath}")" -gt 52428800 ]]; then
+        echoContent title "\n┌─ GitHub Release 下载 ──────────────────────────────"
+        menuLine "下载文件过大或未落地，已取消下载: ${assetName}"
+        menuClose
+        rm -f -- "${outputPath}"
         return 1
     fi
     if ! command -v sha256sum >/dev/null 2>&1; then

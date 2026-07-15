@@ -214,9 +214,9 @@ failScriptModuleRefreshAfterBackup() {
 fetchRemoteRef() {
     local metadata
     if command -v curl >/dev/null 2>&1; then
-        metadata=$(curl -fsSL "${REPO_REF_URL}") || return 1
+        metadata=$(curl -fsSL --connect-timeout 10 --max-time 30 --max-filesize 1048576 "${REPO_REF_URL}") || return 1
     elif command -v wget >/dev/null 2>&1; then
-        metadata=$(wget -qO- "${REPO_REF_URL}") || return 1
+        metadata=$(wget -T 30 -t 2 --quota=1048576 -qO- "${REPO_REF_URL}") || return 1
     else
         return 1
     fi
@@ -236,7 +236,7 @@ downloadRepoArchive() {
             return 1
         }
     elif command -v wget >/dev/null 2>&1; then
-        wget -T 30 -t 2 -qO- "${archiveUrl}" >"${archiveFile}" || {
+        wget -T 30 -t 2 --quota=52428800 -qO- "${archiveUrl}" >"${archiveFile}" || {
             scriptRemovePath "${archiveFile}" || true
             return 1
         }

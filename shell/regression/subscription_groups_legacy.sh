@@ -4554,6 +4554,21 @@ runTlsFailureReturnRegression() (
     installTLSCount=
     captureFailureReturn "${installRcFile}" installTLS 1
 
+    local existingTlsRoot="${root}/existing-tls"
+    mkdir -p "${existingTlsRoot}"
+    export PADM_TLS_DIR="${existingTlsRoot}"
+    domain=existing.example.com
+    printf 'old-cert\n' >"${existingTlsRoot}/existing.example.com.crt"
+    printf 'old-key\n' >"${existingTlsRoot}/existing.example.com.key"
+    installTLSCount=
+    sudo() { return 1; }
+    set +e
+    installTLSFromAcme >/dev/null 2>&1
+    shellRc=$?
+    set -e
+    [[ "${shellRc}" == "1" ]]
+    unset -f sudo
+
     btDomain=
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }
