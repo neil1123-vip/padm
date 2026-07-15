@@ -241,10 +241,15 @@ subscriptionWireGuardWriteState() {
 subscriptionWireGuardRestoreStateAndConfig() {
     local previousState=$1
     local previousAddress
+    local previousEnabled
     previousAddress=$(jq -r '.address // empty' <<<"${previousState}") || return 1
+    previousEnabled=$(jq -r '.enabled == true' <<<"${previousState}") || return 1
     subscriptionWireGuardWriteState --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1 || return 1
-    if [[ -n "${previousAddress}" ]]; then
+    if [[ "${previousEnabled}" == "true" && -n "${previousAddress}" ]]; then
         applySubscriptionWireGuardService >/dev/null 2>&1 || return 1
+    elif [[ -n "${previousAddress}" ]]; then
+        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || return 1
+        writeSubscriptionWireGuardConfig >/dev/null 2>&1 || return 1
     else
         stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || return 1
         removeSubscriptionWireGuardNginxConfig >/dev/null 2>&1 || return 1

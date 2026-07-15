@@ -215,23 +215,35 @@ commitXrayGeoFilesFromStage() {
         return 1
     fi
     commitGeneratedFile "${geositeStage}" "${geositeTarget}" 644 || {
-        restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1 || true
-        padmRemoveCleanupPath "${backupDir}"
+        if restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1; then
+            padmRemoveCleanupPath "${backupDir}"
+        else
+            printf 'Xray Geo 文件恢复失败，请手动检查备份目录: %s\n' "${backupDir}" >&2
+            padmForgetCleanupPath "${backupDir}"
+        fi
         padmRemoveCleanupPath "${geositeStage}"
         padmRemoveCleanupPath "${geoipStage}"
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
     commitGeneratedFile "${geoipStage}" "${geoipTarget}" 644 || {
-        restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1 || true
-        padmRemoveCleanupPath "${backupDir}"
+        if restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1; then
+            padmRemoveCleanupPath "${backupDir}"
+        else
+            printf 'Xray Geo 文件恢复失败，请手动检查备份目录: %s\n' "${backupDir}" >&2
+            padmForgetCleanupPath "${backupDir}"
+        fi
         padmRemoveCleanupPath "${geoipStage}"
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
     commitGeneratedFile "${versionStage}" "${versionTarget}" 644 || {
-        restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1 || true
-        padmRemoveCleanupPath "${backupDir}"
+        if restoreXrayGeoCommitBackup "${backupDir}" "${geositeTarget}" "${geoipTarget}" "${versionTarget}" >/dev/null 2>&1; then
+            padmRemoveCleanupPath "${backupDir}"
+        else
+            printf 'Xray Geo 文件恢复失败，请手动检查备份目录: %s\n' "${backupDir}" >&2
+            padmForgetCleanupPath "${backupDir}"
+        fi
         padmRemoveCleanupPath "${versionStage}"
         return 1
     }
@@ -1295,6 +1307,7 @@ finalizeFailedCoreBinaryInstall() {
     local targetBinary=$3
     local startFunction=$4
     local logFile=$5
+    local startRestoredService=${6:-true}
     local restoreMessage="无旧二进制需要恢复"
     local serviceRestoreMessage="未尝试恢复服务"
     local restoredBinary=false
@@ -1308,12 +1321,14 @@ finalizeFailedCoreBinaryInstall() {
             restoreMessage="旧二进制恢复失败"
         fi
     fi
-    if [[ "${restoredBinary}" == "true" ]]; then
+    if [[ "${restoredBinary}" == "true" && "${startRestoredService}" == "true" ]]; then
         if runCoreServiceActionAllowFailure "${startFunction}" start >/dev/null 2>&1; then
             serviceRestoreMessage="旧服务已尝试恢复启动"
         else
             coreSetManualCheckMessage serviceRestoreMessage "旧服务恢复启动失败" "服务状态"
         fi
+    elif [[ "${restoredBinary}" == "true" ]]; then
+        serviceRestoreMessage="旧服务未启动，等待依赖恢复"
     elif [[ -f "${backupBinary}" ]]; then
         serviceRestoreMessage="旧二进制未恢复，已跳过服务启动"
     fi
@@ -1340,9 +1355,13 @@ finalizeFailedSingBoxBinaryInstall() {
     local cronetPath=$4
     local logFile=$5
     local restoreStatus=0
+    local cronetRestored=true
 
-    finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" || restoreStatus=$?
     if ! restoreCoreOptionalFileBackup "${cronetBackup}" "${cronetPath}" 644; then
+        cronetRestored=false
+    fi
+    finalizeFailedCoreBinaryInstall "sing-box" "${backupBinary}" "${targetBinary}" handleSingBox "${logFile}" "${cronetRestored}" || restoreStatus=$?
+    if [[ "${cronetRestored}" != "true" ]]; then
         local manualCheckMessage
         coreSetManualCheckMessage manualCheckMessage "libcronet.so 恢复失败" " ${cronetPath}"
         statusCard "sing-box 更新失败" "${manualCheckMessage}" "排查日志: ${logFile}"

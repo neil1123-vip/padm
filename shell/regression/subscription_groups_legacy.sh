@@ -3455,6 +3455,7 @@ runSingBoxCronetRollbackRegression() (
     }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "start" ]] && printf 'cronet-at-start:%s\n' "$(<"${singBoxCronet}")" >>"${serviceLog}"
         [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
         return 0
     }
@@ -3475,6 +3476,7 @@ runSingBoxCronetRollbackRegression() (
     grep -q '旧服务已尝试恢复启动' "${statusLog}"
     grep -qx 'sing-box:stop:true' "${serviceLog}"
     grep -qx 'sing-box:start:true' "${serviceLog}"
+    grep -qx 'cronet-at-start:old-cronet' "${serviceLog}"
     [[ -z "${SERVICE_QUEUE_ALLOW_FAILURE}" ]]
 
     : >"${statusLog}"
@@ -3524,6 +3526,7 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
     }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "start" ]] && printf 'cronet-at-start:%s\n' "$(<"${singBoxCronet}")" >>"${serviceLog}"
         [[ "$1" == "start" && "${singBoxStartShouldFail}" == "true" ]] && return 1
         return 0
     }
@@ -3543,6 +3546,7 @@ runFinalizeSingBoxBinaryInstallRollbackRegression() (
     grep -q '旧服务恢复启动失败，请手动检查服务状态' "${statusLog}"
     grep -q 'manual-check:旧服务恢复启动失败|服务状态' "${serviceLog}"
     grep -qx 'sing-box:start:true' "${serviceLog}"
+    grep -qx 'cronet-at-start:old-cronet' "${serviceLog}"
 
     : >"${statusLog}"
     : >"${serviceLog}"
@@ -5482,6 +5486,7 @@ runXrayGeoCommitRollbackRegression() (
     local stageDir="${root}/stage"
     local targetDir="${root}/target"
     local rc
+    local preservedBackupDir=
 
     mkdir -p "${stageDir}" "${targetDir}"
     printf 'old-geosite\n' >"${targetDir}/geosite.dat"
@@ -5496,6 +5501,9 @@ runXrayGeoCommitRollbackRegression() (
         [[ "${targetFile}" == "${targetDir}/geoip.dat" ]] && return 1
         originalCommitGeneratedFile "$@"
     }
+    padmForgetCleanupPath() {
+        [[ "$1" == *padm-xray-geo-backup.* ]] && preservedBackupDir=$1
+    }
 
     set +e
     commitXrayGeoFilesFromStage "${stageDir}" "${targetDir}" v-new
@@ -5506,6 +5514,8 @@ runXrayGeoCommitRollbackRegression() (
     [[ "$(<"${targetDir}/geosite.dat")" == "old-geosite" ]]
     [[ "$(<"${targetDir}/geoip.dat")" == "old-geoip" ]]
     [[ "$(<"${targetDir}/geo.version")" == "old-version" ]]
+    [[ -n "${preservedBackupDir}" && -d "${preservedBackupDir}" ]]
+    rm -rf -- "${preservedBackupDir}"
 )
 
 runCoreCleanupFailurePropagationRegression() (
@@ -12527,10 +12537,14 @@ runSubscriptionWireGuardMenuFlowRegression() (
         printf 'public-key\n' >"$(subscriptionWireGuardPublicKeyFile)"
     }
     subscriptionWireGuardPublicKey() { printf 'public-key\n'; }
-    applySubscriptionWireGuardService() {
-        [[ "${wireGuardApplyShouldFail}" == "true" ]] && return 1
+    writeSubscriptionWireGuardConfig() {
         mkdir -p "$(dirname "$(subscriptionWireGuardConfigFile)")"
         printf 'Address = %s\n' "$(subscriptionWireGuardReadState | jq -r '.address')" >"$(subscriptionWireGuardConfigFile)"
+    }
+    applySubscriptionWireGuardService() {
+        recordMenuAction applySubscriptionWireGuardService
+        [[ "${wireGuardApplyShouldFail}" == "true" ]] && return 1
+        writeSubscriptionWireGuardConfig
     }
     eval "$(declare -f subscriptionWireGuardWriteState | sed '1s/^subscriptionWireGuardWriteState/originalSubscriptionWireGuardWriteState/')"
     subscriptionWireGuardWriteState() {
@@ -12934,6 +12948,23 @@ enable"
         assertMenuAction 'stopSubscriptionWireGuardControlService:true'
         [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
         [[ ! -e "${nginxTarget}" ]]
+
+        local disabledConfiguredState
+        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState | .enabled = false'
+        disabledConfiguredState=$(subscriptionWireGuardReadState)
+        subscriptionWireGuardWriteState '.enabled = true | .peers += [{id:"edge-b", address:"10.77.0.3/24", public_key:"peer-key", enabled:true}]'
+        printf 'new-config\n' >"$(subscriptionWireGuardConfigFile)"
+        nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+        printf 'keep-nginx-control\n' >"${nginxTarget}"
+        resetMenuActions
+        subscriptionWireGuardRestoreStateAndConfig "${disabledConfiguredState}"
+        assertMenuAction 'stopSubscriptionWireGuardControlService:true'
+        if assertMenuAction applySubscriptionWireGuardService; then
+            return 1
+        fi
+        subscriptionWireGuardReadState | jq -e '.enabled == false and .role == "main" and .address == "10.77.0.1/24" and (.peers | length) == 0' >/dev/null
+        grep -qx 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
+        grep -qx 'keep-nginx-control' "${nginxTarget}"
     fi
 
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
