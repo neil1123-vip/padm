@@ -330,6 +330,99 @@ unInstallRouting() {
     fi
 }
 
+routingConfigBackupCreate() {
+    local resultVar=$1
+    local includeInbounds=${2:-false}
+    local includeWarpConfig=${3:-false}
+    local createdBackupDir fileName targetPath inboundList warpDir
+    local -a targets=()
+    local -a xrayFiles=(
+        09_routing.json IPv4_out.json IPv6_out.json z_direct_outbound.json
+        blackhole_out.json wireguard_out_IPv4.json wireguard_out_IPv6.json socks5_outbound.json
+    )
+    local -a singBoxFiles=(
+        01_direct_outbound.json IPv4_out.json IPv6_out.json IPv6_route.json bt_block_route.json
+        socks5_02_inbound_route.json wireguard_endpoints_IPv4_route.json
+        wireguard_endpoints_IPv6_route.json wireguard_endpoints_IPv4.json
+        wireguard_endpoints_IPv6.json wireguard_outbound.json
+    )
+
+    if [[ -n "${configPath:-}" ]]; then
+        for fileName in "${xrayFiles[@]}"; do
+            targetPath=$(padmManagedFilePath "${configPath}" "${fileName}") || return 1
+            targets+=("${targetPath}")
+        done
+        if [[ "${includeInbounds}" == "true" ]]; then
+            inboundList=$(find "${configPath%/}" -type f -name '*inbounds.json' -print) || return 1
+            while IFS= read -r targetPath; do
+                [[ -n "${targetPath}" ]] && targets+=("${targetPath}")
+            done <<<"${inboundList}"
+        fi
+    fi
+    if [[ -n "${singBoxConfigPath:-}" ]]; then
+        for fileName in "${singBoxFiles[@]}"; do
+            targetPath=$(padmManagedFilePath "${singBoxConfigPath}" "${fileName}") || return 1
+            targets+=("${targetPath}")
+        done
+    fi
+    if [[ "${includeWarpConfig}" == "true" ]]; then
+        warpDir=$(warpConfigSafeDir) || return 1
+        targets+=("${warpDir}/config")
+    fi
+    [[ "${#targets[@]}" -gt 0 ]] || return 1
+    checkLogBackupCreate createdBackupDir "${targets[@]}" || return 1
+    printf -v "${resultVar}" '%s' "${createdBackupDir}"
+}
+
+routingConfigRollback() {
+    local backupDir=$1
+    local reason=$2
+    local retryReload=${3:-false}
+
+    if ! checkLogBackupRestore "${backupDir}"; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，且旧配置恢复失败" "请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
+    if [[ "${retryReload}" == "true" ]] && ! reloadCore; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，旧配置已恢复但核心重载失败" "请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
+    if ! padmRemoveCleanupPath "${backupDir}"; then
+        errorCard "${reason}，旧配置已恢复但备份目录清理失败" "请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
+    errorCard "${reason}，已恢复旧配置"
+    return 1
+}
+
+routingConfigApplyTransaction() {
+    local failureTitle=$1
+    local includeInbounds=$2
+    local includeWarpConfig=$3
+    local applyFn=$4
+    local backupDir=
+    shift 4
+
+    routingConfigBackupCreate backupDir "${includeInbounds}" "${includeWarpConfig}" || {
+        errorCard "${failureTitle}：配置备份失败，已取消修改"
+        return 1
+    }
+    if ! "${applyFn}" "$@"; then
+        routingConfigRollback "${backupDir}" "${failureTitle}" false
+        return 1
+    fi
+    if ! reloadCore; then
+        routingConfigRollback "${backupDir}" "${failureTitle}：核心重载失败" true
+        return 1
+    fi
+    if ! padmRemoveCleanupPath "${backupDir}"; then
+        errorCard "${failureTitle}：配置已生效，但备份目录清理失败" "请手动检查备份目录: ${backupDir}"
+        return 1
+    fi
+}
+
 # 安装嗅探配置
 installSniffing() {
     local inbound

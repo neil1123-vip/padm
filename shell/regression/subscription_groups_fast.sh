@@ -3485,6 +3485,41 @@ runShowAccountsOptionalStepRegression() {
             return 1
         fi
     )
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local callLog="${TMP_DIR}/account-display-first-failure.log"
+        configPath="${TMP_DIR}/account-display-first-failure/"
+        currentDefaultPort=443
+        singBoxVLESSVisionPort=
+        : >"${callLog}"
+        currentProtocolHas() { [[ "$1" == "27" ]]; }
+        subscribeSectionTitle() { return 0; }
+        subscribeAccountTitle() { return 0; }
+        subscriptionAccountProfile() {
+            if [[ "$1" == *first* ]]; then
+                printf 'first\037id-first\037\037\037\037\037\n'
+            else
+                printf 'second\037id-second\037\037\037\037\037\n'
+            fi
+        }
+        jq() {
+            if [[ " $* " == *" -c "* ]]; then
+                printf '%s\n' '{"email":"first","id":"id-first"}' '{"email":"second","id":"id-second"}'
+            else
+                printf '[]\n'
+            fi
+        }
+        defaultBase64Code() {
+            printf '%s\n' "$3" >>"${callLog}"
+            [[ "$3" != "first" ]]
+        }
+        if showVlessTcpAccounts >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "$(<"${callLog}")" == "first" ]]
+    )
 }
 
 runInitSubscribeLocalConfigCleansAllFormatsRegression() {

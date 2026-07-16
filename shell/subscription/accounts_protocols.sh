@@ -23,7 +23,7 @@ showVlessTcpAccounts() {
 
             subscribeAccountTitle "${email}"
             echo
-            defaultBase64Code vlesstcp "${currentDefaultPort}${singBoxVLESSVisionPort}" "${email}" "${accountId}"
+            defaultBase64Code vlesstcp "${currentDefaultPort}${singBoxVLESSVisionPort}" "${email}" "${accountId}" || return 1
         done
     fi
 
@@ -55,7 +55,7 @@ showVlessWsAccounts() {
             while read -r line; do
                 subscribeAccountTitle "${email}${count}"
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vlessws "${vlessWSPort}" "${email}${count}" "${accountId}" "${line}" "${path}"
+                    defaultBase64Code vlessws "${vlessWSPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
                     count=$((count + 1))
                     echo
                 fi
@@ -76,7 +76,7 @@ showTrojanGrpcAccounts() {
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code trojangrpc "${currentDefaultPort}" "${email}${count}" "${password}" "${line}"
+                    defaultBase64Code trojangrpc "${currentDefaultPort}" "${email}${count}" "${password}" "${line}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -109,7 +109,7 @@ showVmessWsAccounts() {
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vmessws "${vmessPort}" "${email}${count}" "${accountId}" "${line}" "${path}"
+                    defaultBase64Code vmessws "${vmessPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -133,7 +133,7 @@ showTrojanAccounts() {
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${email}"
 
-            defaultBase64Code trojan "${currentDefaultPort}${singBoxTrojanPort}" "${email}" "${password}"
+            defaultBase64Code trojan "${currentDefaultPort}${singBoxTrojanPort}" "${email}" "${password}" || return 1
         done
     fi
 }
@@ -151,7 +151,7 @@ showVlessGrpcAccounts() {
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vlessgrpc "${currentDefaultPort}" "${email}${count}" "${accountId}" "${line}"
+                    defaultBase64Code vlessgrpc "${currentDefaultPort}" "${email}${count}" "${accountId}" "${line}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -181,7 +181,7 @@ showHysteriaAccounts() {
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code hysteria "${hysteria2DefaultPort}" "${name}" "${password}"
+            defaultBase64Code hysteria "${hysteria2DefaultPort}" "${name}" "${password}" || return 1
         done
 
     fi
@@ -204,7 +204,7 @@ showVlessRealityAccounts() {
             if [[ "${coreInstallType}" == "1" && -n "${streamPublicPort}" ]]; then
                 realityVisionPort=${streamPublicPort}
             fi
-            defaultBase64Code vlessReality "${realityVisionPort}" "${email}" "${accountId}"
+            defaultBase64Code vlessReality "${realityVisionPort}" "${email}" "${accountId}" || return 1
         done
     fi
 }
@@ -242,7 +242,7 @@ showVlessRealityGrpcAccountsFromConfig() {
             local currentRealityMldsa65Verify="${realityGRPCMldsa65Verify}"
             local singBoxVLESSRealityGRPCSNI="${realityGRPCSNI}"
             local singBoxVLESSRealityPublicKey="${realityGRPCPublicKey}"
-            defaultBase64Code vlessRealityGRPC "${realityGRPCPort}" "${email}" "${accountId}"
+            defaultBase64Code vlessRealityGRPC "${realityGRPCPort}" "${email}" "${accountId}" || return 1
         done
 }
 
@@ -264,7 +264,7 @@ showTuicAccounts() {
             IFS=$'\037' read -r _ _ password _ name uuid <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code tuic "${tuicDefaultPort}" "${name}" "${uuid}_${password}"
+            defaultBase64Code tuic "${tuicDefaultPort}" "${name}" "${uuid}_${password}" || return 1
         done
 
     fi
@@ -283,7 +283,7 @@ showNaiveAccounts() {
             IFS=$'\037' read -r _ _ password username _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${username}"
             echo
-            defaultBase64Code naive "${singBoxNaivePort}" "${username}" "${password}"
+            defaultBase64Code naive "${singBoxNaivePort}" "${username}" "${password}" || return 1
         done
 
     fi
@@ -304,7 +304,7 @@ showShadowsocksAccounts() {
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code shadowsocks "${singBoxShadowsocksPort}" "${name}" "${serverPassword}:${password}"
+            defaultBase64Code shadowsocks "${singBoxShadowsocksPort}" "${name}" "${serverPassword}:${password}" || return 1
         done
 
     fi
@@ -341,7 +341,7 @@ showVmessHTTPUpgradeAccounts() {
                 subscribeAccountTitle "${email}${count}"
                 echo
                 if [[ -n "${line}" ]]; then
-                    defaultBase64Code vmessHTTPUpgrade "${vmessHTTPUpgradePort}" "${email}${count}" "${accountId}" "${line}" "${path}"
+                    defaultBase64Code vmessHTTPUpgrade "${vmessHTTPUpgradePort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
                     count=$((count + 1))
                 fi
             done < <(echo "${currentCDNAddress}" | tr ',' '\n')
@@ -374,7 +374,7 @@ showVlessRealityXHTTPAccounts() {
                     if [[ -n "${streamPublicPort}" ]]; then
                         xhttpPort=${streamPublicPort}
                     fi
-                    defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}${count}" "${accountId}" "${line}" "${path}"
+                    defaultBase64Code vlessXHTTP "${xhttpPort}" "${email}${count}" "${accountId}" "${line}" "${path}" || return 1
                     count=$((count + 1))
                     echo
                 fi
@@ -396,7 +396,7 @@ showAnyTlsAccounts() {
             IFS=$'\037' read -r _ _ password _ name _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${name}"
             echo
-            defaultBase64Code anytls "${singBoxAnyTLSPort}" "${name}" "${password}"
+            defaultBase64Code anytls "${singBoxAnyTLSPort}" "${name}" "${password}" || return 1
         done
 
     fi

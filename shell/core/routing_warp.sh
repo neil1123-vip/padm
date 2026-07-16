@@ -189,9 +189,69 @@ removeWireGuardRoute() {
     unInstallWireGuard "${type}" || return 1
 }
 # WARP 第三方分流管理
+warpRoutingAddress() {
+    case "$1" in
+    IPv4) printf '%s\n' "172.16.0.2/32" ;;
+    IPv6)
+        [[ -n "${addressWarpReg:-}" ]] || return 1
+        printf '%s/128\n' "${addressWarpReg}"
+        ;;
+    *) return 1 ;;
+    esac
+}
+
+setWireGuardGlobalRoutingConfig() {
+    local type=$1
+    if [[ "${coreInstallType}" == "1" ]]; then
+        local xrayRoutingFile
+        addXrayOutbound "wireguard_out_${type}" || return 1
+        xrayRoutingFile=$(padmManagedFilePath "${configPath:-/etc/padm/xray/conf/}" "09_routing.json") || return 1
+        removeManagedFileIfPresent "${xrayRoutingFile}" || return 1
+        if [[ "${type}" == "IPv4" ]]; then
+            removeXrayOutbound "wireguard_out_IPv6" || return 1
+        else
+            removeXrayOutbound "wireguard_out_IPv4" || return 1
+        fi
+        removeXrayOutbound IPv4_out || return 1
+        removeXrayOutbound IPv6_out || return 1
+        removeXrayOutbound z_direct_outbound || return 1
+        removeXrayOutbound blackhole_out || return 1
+        removeXrayOutbound socks5_outbound || return 1
+    fi
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        removeSingBoxConfig IPv4_out || return 1
+        removeSingBoxConfig IPv6_out || return 1
+        removeSingBoxConfig 01_direct_outbound || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
+        removeSingBoxConfig IPv6_route || return 1
+        removeSingBoxConfig socks5_02_inbound_route || return 1
+        addWireGuardRoute "${type}" outboundTag "" || return 1
+        if [[ "${type}" == "IPv4" ]]; then
+            removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
+        else
+            removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
+        fi
+    fi
+}
+
+removeWireGuardRoutingConfig() {
+    local type=$1
+    removeWireGuardRoute "${type}" || return 1
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        removeSingBoxConfig "wireguard_endpoints_${type}" || return 1
+        addSingBoxOutbound "01_direct_outbound" || return 1
+    fi
+}
+
 warpRoutingReg() {
     local type=$2
     local title="WARP 分流 ${type}"
+    local address= successMessage=
+    [[ "${type}" == "IPv4" || "${type}" == "IPv6" ]] || {
+        errorCard "IP获取失败，退出安装"
+        return 1
+    }
     progressCard "$1" "${title}"
     echoContent title "\n┌─ ${title} ────────────────────────────────────────"
     menuLine "依赖 Cloudflare WARP WireGuard 出站与第三方 warp-reg 账号注册工具"
@@ -203,18 +263,6 @@ warpRoutingReg() {
     menuReturnItem 5 "返回 WARP 出站" "回到 WARP 出站菜单"
     menuClose
     autoRead warp_ipv4_menu "请选择:" warpStatus
-    installWarpReg || return 1
-    readConfigWarpReg || return 1
-    local address=
-    if [[ ${type} == "IPv4" ]]; then
-        address="172.16.0.2/32"
-    elif [[ ${type} == "IPv6" ]]; then
-        address="${addressWarpReg}/128"
-    else
-        errorCard "IP获取失败，退出安装"
-        return 1
-    fi
-    local successMessage=
 
     if [[ "${warpStatus}" == "1" ]]; then
         showWireGuardDomain "${type}"
@@ -224,89 +272,43 @@ warpRoutingReg() {
         menuLine "支持 sing-box、Xray-core"
         menuLine "请按 README 中的分流说明配置域名或规则"
         menuClose
-
         autoRead routing_domain_rules "请按照上面示例录入域名:" domainList
         if [[ -z "${domainList}" ]]; then
             coreDomainRequiredErrorCard
             return 1
         fi
-        addWireGuardRoute "${type}" outboundTag "${domainList}" || return 1
+        installWarpReg || return 1
+        readConfigWarpReg || return 1
+        address=$(warpRoutingAddress "${type}") || return 1
+        routingConfigApplyTransaction "添加 WARP ${type} 分流失败" false true addWireGuardRoute "${type}" outboundTag "${domainList}" || return 1
         successMessage="添加完毕"
-
     elif [[ "${warpStatus}" == "3" ]]; then
-
         warnCard \
             "会删除所有设置的分流规则" \
             "会删除除 WARP[第三方] 之外的所有出站规则"
         autoConfirm warp_global_confirm "确认设置 WARP 全局出站？" n warpOutStatus
-
         if [[ "${warpOutStatus}" == "y" ]]; then
+            installWarpReg || return 1
             readConfigWarpReg || return 1
-            if [[ "${coreInstallType}" == "1" ]]; then
-                local xrayRoutingFile
-                addXrayOutbound "wireguard_out_${type}" || return 1
-                xrayRoutingFile=$(padmManagedFilePath "${configPath:-/etc/padm/xray/conf/}" "09_routing.json") || return 1
-                removeManagedFileIfPresent "${xrayRoutingFile}" || return 1
-                if [[ "${type}" == "IPv4" ]]; then
-                    removeXrayOutbound "wireguard_out_IPv6" || return 1
-                elif [[ "${type}" == "IPv6" ]]; then
-                    removeXrayOutbound "wireguard_out_IPv4" || return 1
-                fi
-
-                removeXrayOutbound IPv4_out || return 1
-                removeXrayOutbound IPv6_out || return 1
-                removeXrayOutbound z_direct_outbound || return 1
-                removeXrayOutbound blackhole_out || return 1
-                removeXrayOutbound socks5_outbound || return 1
-            fi
-
-            if [[ -n "${singBoxConfigPath}" ]]; then
-
-                removeSingBoxConfig IPv4_out || return 1
-                removeSingBoxConfig IPv6_out || return 1
-                removeSingBoxConfig 01_direct_outbound || return 1
-
-                # 删除所有分流规则
-                removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
-                removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
-
-                removeSingBoxConfig IPv6_route || return 1
-                removeSingBoxConfig socks5_02_inbound_route || return 1
-
-                addWireGuardRoute "${type}" outboundTag "" || return 1
-                if [[ "${type}" == "IPv4" ]]; then
-                    removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
-                else
-                    removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
-                fi
-
-            fi
-
+            address=$(warpRoutingAddress "${type}") || return 1
+            routingConfigApplyTransaction "设置 WARP ${type} 全局出站失败" false true setWireGuardGlobalRoutingConfig "${type}" || return 1
             successMessage="WARP全局出站设置完毕"
         else
             coreCancelledStatusCard "未设置 WARP 全局出站"
             warpRoutingReg "$1" "${type}"
             return 0
         fi
-
     elif [[ "${warpStatus}" == "4" ]]; then
-        removeWireGuardRoute "${type}" || return 1
-        if [[ -n "${singBoxConfigPath}" ]]; then
-            removeSingBoxConfig "wireguard_endpoints_${type}" || return 1
-            addSingBoxOutbound "01_direct_outbound" || return 1
-        fi
-
+        routingConfigApplyTransaction "卸载 WARP ${type} 分流失败" false true removeWireGuardRoutingConfig "${type}" || return 1
         successMessage="卸载WARP ${type}分流完毕"
     elif [[ "${warpStatus}" == "5" ]]; then
         warpRoutingMenu
         return 0
     else
-
         coreSelectionErrorCard "选择错误"
         warpRoutingReg "$1" "${type}"
         return 0
     fi
-    reloadCore || return 1
     [[ -n "${successMessage}" ]] && successCard "${successMessage}"
 }
 

@@ -1117,7 +1117,7 @@ runBTRoutingFailureReturnRegression() (
     local sniffMarker="${root}/sniff"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
-    local rc
+    local rc reloadCalls=0
 
     mkdir -p "${root}/xray" "${root}/sing-box"
     configPath="${root}/xray/"
@@ -1163,13 +1163,19 @@ JSON
     autoRead() { printf -v "$3" '1'; }
     installBTBlock() {
         printf 'install\n' >"${installMarker}"
+        printf 'new-routing\n' >"${configPath}09_routing.json"
+        printf 'new-inbound\n' >"${configPath}02_test_inbounds.json"
         return 0
     }
     reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        return 1
+        reloadCalls=$((reloadCalls + 1))
+        printf 'reload\n' >>"${reloadMarker}"
+        [[ "${reloadCalls}" -gt 1 ]]
     }
+    printf 'old-routing\n' >"${configPath}09_routing.json"
+    printf 'old-inbound\n' >"${configPath}02_test_inbounds.json"
     rm -f "${installMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     btTools >/dev/null 2>&1
     rc=$?
@@ -1177,13 +1183,19 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -e "${installMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "$(<"${configPath}09_routing.json")" == "old-routing" ]]
+    [[ "$(<"${configPath}02_test_inbounds.json")" == "old-inbound" ]]
+    [[ "${reloadCalls}" == "2" ]]
 
     autoRead() { printf -v "$3" '2'; }
     uninstallBTBlock() {
         printf 'uninstall\n' >"${uninstallMarker}"
+        printf 'new-routing\n' >"${configPath}09_routing.json"
         return 0
     }
+    printf 'old-routing\n' >"${configPath}09_routing.json"
     rm -f "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     btTools >/dev/null 2>&1
     rc=$?
@@ -1191,6 +1203,8 @@ JSON
     [[ "${rc}" == "1" ]]
     [[ -e "${uninstallMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "$(<"${configPath}09_routing.json")" == "old-routing" ]]
+    [[ "${reloadCalls}" == "2" ]]
 )
 
 runIPv6RoutingFailureReturnRegression() (
@@ -1202,7 +1216,7 @@ runIPv6RoutingFailureReturnRegression() (
     local reloadMarker="${root}/reload"
     local mode=success
     local menuChoice=2
-    local rc
+    local rc reloadCalls=0
 
     mkdir -p "${root}/xray"
     configPath="${root}/xray/"
@@ -1231,10 +1245,12 @@ runIPv6RoutingFailureReturnRegression() (
     }
     addXrayOutbound() {
         printf 'outbound:%s\n' "$1" >>"${outboundMarker}"
+        printf 'new-outbound\n' >"${configPath}$1.json"
         [[ "${mode}" != "outbound-fail" ]]
     }
     addXrayRouting() {
         printf 'routing\n' >"${routingMarker}"
+        printf 'new-routing\n' >"${configPath}09_routing.json"
         [[ "${mode}" != "routing-fail" ]]
     }
     removeXrayOutbound() {
@@ -1243,11 +1259,13 @@ runIPv6RoutingFailureReturnRegression() (
     }
     unInstallRouting() {
         printf 'uninstall\n' >"${uninstallMarker}"
+        printf 'new-routing\n' >"${configPath}09_routing.json"
         [[ "${mode}" != "uninstall-fail" ]]
     }
     reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
+        reloadCalls=$((reloadCalls + 1))
+        printf 'reload\n' >>"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" || "${reloadCalls}" -gt 1 ]]
     }
 
     hasIPv6Connectivity() { return 1; }
@@ -1274,6 +1292,7 @@ runIPv6RoutingFailureReturnRegression() (
 
     mode=routing-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1282,19 +1301,26 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${configPath}IPv6_out.json" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
 
     mode=reload-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "${reloadCalls}" == "2" ]]
+    [[ ! -e "${configPath}IPv6_out.json" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
 
     mode=outbound-fail
     menuChoice=3
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1303,10 +1329,12 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${configPath}IPv6_out.json" ]]
 
     mode=uninstall-fail
     menuChoice=4
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1315,9 +1343,11 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
 
     mode=reload-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     ipv6Routing >/dev/null 2>&1
     rc=$?
@@ -1327,6 +1357,9 @@ runIPv6RoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "${reloadCalls}" == "2" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
+    [[ ! -e "${configPath}z_direct_outbound.json" ]]
 )
 
 runWARPRoutingFailureReturnRegression() (
@@ -1338,13 +1371,15 @@ runWARPRoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local uninstallMarker="${root}/uninstall"
     local reloadMarker="${root}/reload"
+    local returnMarker="${root}/return"
     local mode=success
     local menuChoice=2
-    local rc
+    local rc reloadCalls=0
 
-    mkdir -p "${root}/xray"
+    mkdir -p "${root}/xray" "${root}/warp"
     configPath="${root}/xray/"
     singBoxConfigPath=
+    PADM_WARP_DIR="${root}/warp"
     coreInstallType=1
 
     errorCard() { return 0; }
@@ -1380,10 +1415,12 @@ runWARPRoutingFailureReturnRegression() (
     }
     addXrayOutbound() {
         printf 'outbound:%s\n' "$1" >>"${outboundMarker}"
+        printf 'new-outbound\n' >"${configPath}$1.json"
         [[ "${mode}" != "outbound-fail" ]]
     }
     addXrayRouting() {
         printf 'routing\n' >"${routingMarker}"
+        printf 'new-routing\n' >"${configPath}09_routing.json"
         [[ "${mode}" != "routing-fail" ]]
     }
     removeXrayOutbound() {
@@ -1392,12 +1429,20 @@ runWARPRoutingFailureReturnRegression() (
     }
     unInstallRouting() {
         printf 'uninstall\n' >"${uninstallMarker}"
+        printf 'new-routing\n' >"${configPath}09_routing.json"
         [[ "${mode}" != "uninstall-fail" ]]
     }
-    unInstallWireGuard() { return 0; }
+    unInstallWireGuard() {
+        rm -f "${PADM_WARP_DIR}/config"
+        return 0
+    }
+    warpRoutingMenu() {
+        printf 'return\n' >"${returnMarker}"
+    }
     reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        [[ "${mode}" != "reload-fail" ]]
+        reloadCalls=$((reloadCalls + 1))
+        printf 'reload\n' >>"${reloadMarker}"
+        [[ "${mode}" != "reload-fail" || "${reloadCalls}" -gt 1 ]]
     }
 
     mode=install-fail
@@ -1419,13 +1464,14 @@ runWARPRoutingFailureReturnRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    [[ -e "${installMarker}" ]]
-    [[ -e "${readMarker}" ]]
+    [[ ! -e "${installMarker}" ]]
+    [[ ! -e "${readMarker}" ]]
     [[ ! -e "${outboundMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
 
     mode=routing-fail
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1434,19 +1480,27 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${configPath}wireguard_out_IPv4.json" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
 
     mode=reload-fail
+    printf 'old-warp-config\n' >"${PADM_WARP_DIR}/config"
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "${reloadCalls}" == "2" ]]
+    [[ ! -e "${configPath}wireguard_out_IPv4.json" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
 
     mode=outbound-fail
     menuChoice=3
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1455,10 +1509,12 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${configPath}wireguard_out_IPv4.json" ]]
 
     mode=uninstall-fail
     menuChoice=4
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1467,9 +1523,11 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${uninstallMarker}" ]]
     [[ ! -e "${removeMarker}" ]]
     [[ ! -e "${reloadMarker}" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
 
     mode=reload-fail
     rm -f "${installMarker}" "${readMarker}" "${outboundMarker}" "${routingMarker}" "${removeMarker}" "${uninstallMarker}" "${reloadMarker}"
+    reloadCalls=0
     set +e
     warpRoutingReg 1 IPv4 >/dev/null 2>&1
     rc=$?
@@ -1479,6 +1537,19 @@ runWARPRoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "${reloadCalls}" == "2" ]]
+    [[ ! -e "${configPath}09_routing.json" ]]
+    [[ ! -e "${configPath}IPv4_out.json" ]]
+    [[ "$(<"${PADM_WARP_DIR}/config")" == "old-warp-config" ]]
+
+    mode=success
+    menuChoice=5
+    rm -f "${installMarker}" "${readMarker}" "${reloadMarker}" "${returnMarker}"
+    warpRoutingReg 1 IPv4 >/dev/null 2>&1
+    [[ -e "${returnMarker}" ]]
+    [[ ! -e "${installMarker}" ]]
+    [[ ! -e "${readMarker}" ]]
+    [[ ! -e "${reloadMarker}" ]]
 )
 
 runSocks5RoutingFailureReturnRegression() (
@@ -10135,7 +10206,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
     local successLog="${root}/success.log"
     local statusLog="${root}/status.log"
     local errorLog="${root}/error.log"
-    local mode rc menuStep=0
+    local mode rc menuStep=0 syncMenuChoice=8
 
     mkdir -p "${root}"
     : >"${callLog}"
@@ -10172,6 +10243,14 @@ runUserSubscriptionMenuMutationFailureRegression() (
                 printf -v "${targetVar}" '9'
             fi
             ;;
+        sync_settings_menu)
+            menuStep=$((menuStep + 1))
+            if [[ "${menuStep}" == "1" ]]; then
+                printf -v "${targetVar}" "${syncMenuChoice}"
+            else
+                printf -v "${targetVar}" '12'
+            fi
+            ;;
         *) printf -v "${targetVar}" '' ;;
         esac
     }
@@ -10200,8 +10279,11 @@ runUserSubscriptionMenuMutationFailureRegression() (
     showUserSubscriptions() { return 0; }
     showUserSubscriptionTraffic() { return 0; }
     showSubscriptionLocalSyncPlan() { return 0; }
+    subscriptionRequireMainRole() { return 0; }
     subscriptionActiveGroupRead() {
-        if [[ "$*" == *'.sources[]?.id'* ]]; then
+        if [[ "$*" == *'.sync'* ]]; then
+            printf '{}\n'
+        elif [[ "$*" == *'.sources[]?.id'* ]]; then
             printf '%s\n' main remote-a
         else
             printf '%s\n' \
@@ -10213,6 +10295,18 @@ runUserSubscriptionMenuMutationFailureRegression() (
     toggleUserSubscriptionState() {
         printf 'toggle:%s\n' "$1" >>"${callLog}"
         [[ "${mode}" != "toggle-fail" ]]
+    }
+    toggleSubscriptionGroupRemoteSyncEnabled() {
+        printf 'sync-toggle:remote\n' >>"${callLog}"
+        [[ "${mode}" != "sync-settings-fail" ]]
+    }
+    toggleSubscriptionGroupQuotaAutoApplyEnabled() {
+        printf 'sync-toggle:quota\n' >>"${callLog}"
+        [[ "${mode}" != "sync-settings-fail" ]]
+    }
+    toggleSubscriptionEventSyncEnabled() {
+        printf 'sync-toggle:event\n' >>"${callLog}"
+        [[ "${mode}" != "sync-settings-fail" ]]
     }
     userResultCard() { return 0; }
     successCard() {
@@ -10299,6 +10393,28 @@ runUserSubscriptionMenuMutationFailureRegression() (
     grep -qx 'toggle:team-a' "${callLog}"
     grep -q '用户订阅状态切换失败' "${errorLog}"
     ! grep -q '用户订阅状态已切换' "${successLog}"
+
+    mode=sync-settings-fail
+    syncMenuChoice=8
+    resetLogs
+    manageSubscriptionSyncSettings >/dev/null 2>&1
+    grep -qx 'sync-toggle:remote' "${callLog}"
+    grep -q '远程同步状态切换失败' "${errorLog}"
+    ! grep -q '远程同步状态已切换' "${successLog}"
+
+    syncMenuChoice=9
+    resetLogs
+    manageSubscriptionSyncSettings >/dev/null 2>&1
+    grep -qx 'sync-toggle:quota' "${callLog}"
+    grep -q '限额自动执行状态切换失败' "${errorLog}"
+    ! grep -q '限额自动执行状态已切换' "${successLog}"
+
+    syncMenuChoice=10
+    resetLogs
+    manageSubscriptionSyncSettings >/dev/null 2>&1
+    grep -qx 'sync-toggle:event' "${callLog}"
+    grep -q '事件同步状态切换失败' "${errorLog}"
+    ! grep -q '事件同步状态已切换' "${successLog}"
 
     mode=success
     resetLogs

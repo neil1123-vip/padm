@@ -64,30 +64,7 @@ ipv6Routing() {
             return 1
         fi
 
-        if [[ "${coreInstallType}" == "1" ]]; then
-
-            addXrayOutbound IPv6_out || return 1
-
-            addXrayRouting IPv6_out outboundTag "${domainList}" || return 1
-
-        fi
-
-
-
-        if [[ -n "${singBoxConfigPath}" ]]; then
-
-            addSingBoxOutbound 01_direct_outbound || return 1
-
-            addSingBoxOutbound IPv6_out || return 1
-
-            addSingBoxOutbound IPv4_out || return 1
-
-            addSingBoxRouteRule "IPv6_out" "${domainList}" "IPv6_route" || return 1
-
-        fi
-
-
-
+        routingConfigApplyTransaction "添加 IPv6 分流失败" false false addIPv6RoutingConfig "${domainList}" || return 1
         successMessage="添加完毕"
 
 
@@ -107,69 +84,7 @@ ipv6Routing() {
 
 
         if [[ "${IPv6OutStatus}" == "y" ]]; then
-
-            if [[ "${coreInstallType}" == "1" ]]; then
-                local xrayRoutingFile
-
-                addXrayOutbound IPv6_out || return 1
-
-                xrayRoutingFile=$(padmManagedFilePath "${configPath:-/etc/padm/xray/conf/}" "09_routing.json") || return 1
-                removeManagedFileIfPresent "${xrayRoutingFile}" || return 1
-
-                removeXrayOutbound IPv4_out || return 1
-
-                removeXrayOutbound z_direct_outbound || return 1
-
-                removeXrayOutbound blackhole_out || return 1
-
-                removeXrayOutbound wireguard_out_IPv4 || return 1
-
-                removeXrayOutbound wireguard_out_IPv6 || return 1
-
-                removeXrayOutbound socks5_outbound || return 1
-
-
-
-            fi
-
-            if [[ -n "${singBoxConfigPath}" ]]; then
-
-
-
-                removeSingBoxConfig IPv4_out || return 1
-
-
-
-                removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
-
-                removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
-
-                removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
-
-                removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
-
-
-
-                removeSingBoxConfig socks5_02_inbound_route || return 1
-
-
-
-                removeSingBoxConfig IPv6_route || return 1
-
-
-
-                removeSingBoxConfig 01_direct_outbound || return 1
-
-
-
-                addSingBoxOutbound IPv6_out || return 1
-
-
-
-            fi
-
-
-
+            routingConfigApplyTransaction "设置 IPv6 全局出站失败" false false setIPv6GlobalRoutingConfig || return 1
             successMessage="IPv6全局出站设置完毕"
 
         else
@@ -187,33 +102,7 @@ ipv6Routing() {
 
 
     elif [[ "${ipv6Status}" == "4" ]]; then
-
-        if [[ "${coreInstallType}" == "1" ]]; then
-
-            unInstallRouting IPv6_out outboundTag || return 1
-
-
-
-            removeXrayOutbound IPv6_out || return 1
-
-            addXrayOutbound "z_direct_outbound" || return 1
-
-        fi
-
-
-
-        if [[ -n "${singBoxConfigPath}" ]]; then
-
-            removeSingBoxConfig IPv6_out || return 1
-
-            removeSingBoxConfig "IPv6_route" || return 1
-
-            addSingBoxOutbound "01_direct_outbound" || return 1
-
-        fi
-
-
-
+        routingConfigApplyTransaction "卸载 IPv6 分流失败" false false removeIPv6RoutingConfig || return 1
         successMessage="IPv6分流卸载成功"
 
     elif [[ "${ipv6Status}" == "5" ]]; then
@@ -228,12 +117,61 @@ ipv6Routing() {
         return
 
     fi
-
-
-
-    reloadCore || return 1
     [[ -n "${successMessage}" ]] && successCard "${successMessage}"
 
+}
+
+addIPv6RoutingConfig() {
+    local domainList=$1
+    if [[ "${coreInstallType}" == "1" ]]; then
+        addXrayOutbound IPv6_out || return 1
+        addXrayRouting IPv6_out outboundTag "${domainList}" || return 1
+    fi
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        addSingBoxOutbound 01_direct_outbound || return 1
+        addSingBoxOutbound IPv6_out || return 1
+        addSingBoxOutbound IPv4_out || return 1
+        addSingBoxRouteRule "IPv6_out" "${domainList}" "IPv6_route" || return 1
+    fi
+}
+
+setIPv6GlobalRoutingConfig() {
+    if [[ "${coreInstallType}" == "1" ]]; then
+        local xrayRoutingFile
+        addXrayOutbound IPv6_out || return 1
+        xrayRoutingFile=$(padmManagedFilePath "${configPath:-/etc/padm/xray/conf/}" "09_routing.json") || return 1
+        removeManagedFileIfPresent "${xrayRoutingFile}" || return 1
+        removeXrayOutbound IPv4_out || return 1
+        removeXrayOutbound z_direct_outbound || return 1
+        removeXrayOutbound blackhole_out || return 1
+        removeXrayOutbound wireguard_out_IPv4 || return 1
+        removeXrayOutbound wireguard_out_IPv6 || return 1
+        removeXrayOutbound socks5_outbound || return 1
+    fi
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        removeSingBoxConfig IPv4_out || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
+        removeSingBoxConfig socks5_02_inbound_route || return 1
+        removeSingBoxConfig IPv6_route || return 1
+        removeSingBoxConfig 01_direct_outbound || return 1
+        addSingBoxOutbound IPv6_out || return 1
+    fi
+}
+
+removeIPv6RoutingConfig() {
+    if [[ "${coreInstallType}" == "1" ]]; then
+        unInstallRouting IPv6_out outboundTag || return 1
+        removeXrayOutbound IPv6_out || return 1
+        addXrayOutbound "z_direct_outbound" || return 1
+    fi
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        removeSingBoxConfig IPv6_out || return 1
+        removeSingBoxConfig "IPv6_route" || return 1
+        addSingBoxOutbound "01_direct_outbound" || return 1
+    fi
 }
 
 

@@ -1156,16 +1156,25 @@ manageSubscriptionSyncSettings() {
         6) showSubscriptionQuotaPlan ;;
         7) executeSubscriptionQuotaPlanMenu ;;
         8)
-            toggleSubscriptionGroupRemoteSyncEnabled
-            successCard "远程同步状态已切换"
+            if toggleSubscriptionGroupRemoteSyncEnabled; then
+                successCard "远程同步状态已切换"
+            else
+                errorCard "远程同步状态切换失败"
+            fi
             ;;
         9)
-            toggleSubscriptionGroupQuotaAutoApplyEnabled
-            successCard "限额自动执行状态已切换"
+            if toggleSubscriptionGroupQuotaAutoApplyEnabled; then
+                successCard "限额自动执行状态已切换"
+            else
+                errorCard "限额自动执行状态切换失败"
+            fi
             ;;
         10)
-            toggleSubscriptionEventSyncEnabled
-            successCard "事件同步状态已切换"
+            if toggleSubscriptionEventSyncEnabled; then
+                successCard "事件同步状态已切换"
+            else
+                errorCard "事件同步状态切换失败"
+            fi
             ;;
         11) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
         12) return ;;

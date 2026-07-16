@@ -44,17 +44,13 @@ btTools() {
 
     if [[ "${btStatus}" == "1" ]]; then
 
-        installBTBlock || return 1
-
-        reloadCore || return 1
+        routingConfigApplyTransaction "启用 BT 阻断失败" true false installBTBlock || return 1
 
         successCard "已启用 BT 阻断"
 
     elif [[ "${btStatus}" == "2" ]]; then
 
-        uninstallBTBlock || return 1
-
-        reloadCore || return 1
+        routingConfigApplyTransaction "关闭 BT 阻断失败" true false uninstallBTBlock || return 1
 
         successCard "已关闭 BT 阻断"
 
