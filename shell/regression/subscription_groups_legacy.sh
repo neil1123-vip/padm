@@ -5039,7 +5039,10 @@ runCoreInstallServiceActionFailureRegression() (
     }
     installXray() { printf 'installXray:%s\n' "$*" >>"${callLog}"; return 0; }
     installXrayService() { printf 'installXrayService:%s\n' "$*" >>"${callLog}"; return 0; }
-    initXrayConfig() { printf 'initXrayConfig:%s\n' "$*" >>"${callLog}"; return 0; }
+    initXrayConfig() {
+        printf 'initXrayConfig:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "xray-config-fail" ]]
+    }
     installSingBox() { printf 'installSingBox:%s\n' "$*" >>"${callLog}"; return 0; }
     installSingBoxService() { printf 'installSingBoxService:%s\n' "$*" >>"${callLog}"; return 0; }
     initSingBoxConfig() { printf 'initSingBoxConfig:%s\n' "$*" >>"${callLog}"; return 0; }
@@ -5050,11 +5053,20 @@ runCoreInstallServiceActionFailureRegression() (
     subscriptionWireGuardControlEnabled() { return 0; }
     refreshSubscriptionWireGuardNginxControl() {
         printf 'wg-refresh\n' >>"${callLog}"
-        [[ "${mode}" != "wg-refresh-fail" ]]
+        [[ "${mode}" != "wg-refresh-fail" ]] || return 1
+        serviceQueueRestart nginx
     }
-    serviceQueueRestart() { printf 'queueRestart:%s\n' "$*" >>"${callLog}"; return 0; }
+    serviceQueueRestart() {
+        printf 'queueRestart:%s\n' "$*" >>"${callLog}"
+        SERVICE_ACTIONS="${SERVICE_ACTIONS}
+$1:restart"
+    }
     serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; return 0; }
-    serviceQueueApply() { printf 'queueApply\n' >>"${callLog}"; return 0; }
+    serviceQueueApply() {
+        printf 'queueApply\n' >>"${callLog}"
+        SERVICE_ACTIONS=
+        return 0
+    }
     checkGFWStatue() { printf 'reached\n' >"${reachedFile}"; return 0; }
     showAccounts() { printf 'reached\n' >"${reachedFile}"; return 0; }
     handleNginx() {
@@ -5085,6 +5097,7 @@ runCoreInstallServiceActionFailureRegression() (
         currentHost=install.example.com
         domain=install.example.com
         nginxRuntimeState=true
+        SERVICE_ACTIONS=
     }
 
     resetInstallServiceFixture nginx-stop-fail
@@ -5111,6 +5124,24 @@ runCoreInstallServiceActionFailureRegression() (
     ! grep -q '^installXray:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
     grep -q 'WireGuard Nginx 控制面刷新失败，已恢复原 Nginx 运行状态' "${errorLog}"
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture xray-config-fail
+    SERVICE_ACTIONS="existing:start"
+    set +e
+    installXrayReality >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'wg-refresh' "${callLog}"
+    grep -qx 'queueRestart:nginx' "${callLog}"
+    grep -qx 'initXrayConfig:custom 4' "${callLog}"
+    ! grep -q '^cleanup:' "${callLog}"
+    [[ "${nginxRuntimeState}" == "true" ]]
+    [[ "${SERVICE_ACTIONS}" == "existing:start" ]]
+    grep -q 'Xray Reality 配置初始化失败，已恢复原 Nginx 运行状态' "${errorLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture nginx-start-fail
@@ -6643,6 +6674,55 @@ runUninstallWireGuardCleanupRegression() (
     grep -qxF 'systemctl:disable --now padm-subscription-control.service' <<<"${actions}"
     [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
     [[ ! -e "$(subscriptionControlServiceFile)" ]]
+
+    local nginxTarget="${targetDir}/nginx/padm-control-wg.conf"
+    local nginxBackupDir=
+    local nginxRuntimeState=true
+    mkdir -p "$(dirname "${nginxTarget}")"
+    printf 'old-nginx\n' >"${nginxTarget}"
+    checkLogBackupCreate nginxBackupDir "${nginxTarget}"
+    printf 'new-nginx\n' >"${nginxTarget}"
+    actions=
+    subscriptionWireGuardWriteState() { actions+="state-restored"$'\n'; return 0; }
+    applySubscriptionWireGuardService() { actions+="wireguard-restored"$'\n'; return 0; }
+    nginxRunning() { [[ "${nginxRuntimeState}" == "true" ]]; }
+    handleNginx() {
+        actions+="nginx:$1:${SERVICE_QUEUE_ALLOW_FAILURE:-}"$'\n'
+        [[ "$1" == "start" ]] && nginxRuntimeState=true
+        [[ "$1" == "stop" ]] && nginxRuntimeState=false
+        return 0
+    }
+    subscriptionWireGuardRestoreStateAndConfig \
+        '{"enabled":true,"address":"10.77.0.2/24"}' \
+        "${nginxBackupDir}" \
+        true
+    grep -qxF 'old-nginx' "${nginxTarget}"
+    [[ "${nginxRuntimeState}" == "true" ]]
+    grep -qx 'nginx:stop:true' <<<"${actions}"
+    grep -qx 'nginx:start:true' <<<"${actions}"
+    [[ ! -e "${nginxBackupDir}" ]]
+
+    printf 'old-nginx-after-state-failure\n' >"${nginxTarget}"
+    checkLogBackupCreate nginxBackupDir "${nginxTarget}"
+    printf 'new-nginx-after-state-failure\n' >"${nginxTarget}"
+    actions=
+    subscriptionWireGuardWriteState() { actions+="state-restore-failed"$'\n'; return 1; }
+    set +e
+    subscriptionWireGuardRestoreStateAndConfig \
+        '{"enabled":true,"address":"10.77.0.2/24"}' \
+        "${nginxBackupDir}" \
+        true
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qxF 'old-nginx-after-state-failure' "${nginxTarget}"
+    [[ "${nginxRuntimeState}" == "true" ]]
+    grep -qx 'state-restore-failed' <<<"${actions}"
+    grep -qx 'nginx:stop:true' <<<"${actions}"
+    grep -qx 'nginx:start:true' <<<"${actions}"
+    [[ -d "${nginxBackupDir}" ]]
+    padmRemoveCleanupPath "${nginxBackupDir}"
+
     if [[ -n "${oldWireGuardDir}" ]]; then PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
 )
 
@@ -7123,6 +7203,7 @@ runUninstallServiceStopFailureRegression() (
     }
     cleanupSubscriptionWireGuardControlOnUninstall() {
         printf 'wireguard-cleanup\n' >>"${actionLog}"
+        [[ "${mode:-}" == "wireguard-cleanup-fail" ]] && return 1
         return 0
     }
     cleanupPadmManagedRootOnUninstall() {
@@ -7270,12 +7351,46 @@ runUninstallServiceStopFailureRegression() (
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
+    runUninstallWireGuardCleanupFailureCase() {
+        mode=wireguard-cleanup-fail
+        : >"${serviceLog}"
+        : >"${actionLog}"
+        : >"${errorLog}"
+        rm -f "${rcFile}"
+        release=centos
+        coreInstallType=1
+        currentInstallProtocolType=",1,"
+        singBoxConfigPath=
+        nginxConfigPath="${root}/nginx/"
+        nginxStaticPath="${root}/static"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        (
+            set +e
+            unInstall >/dev/null 2>&1
+            printf '%s\n' "$?" >"${rcFile}"
+        )
+        shellRc=$?
+        set -e
+        [[ "${shellRc}" == "0" ]]
+        [[ "$(<"${rcFile}")" == "1" ]]
+        grep -qxF 'wireguard-cleanup' "${actionLog}"
+        ! grep -qxF 'nginx-fragments' "${actionLog}"
+        ! grep -qxF 'padm-root-cleanup' "${actionLog}"
+        ! grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        ! grep -qF 'remove:/usr/bin/padm:' "${actionLog}"
+        ! grep -qF 'remove:/usr/sbin/padm:' "${actionLog}"
+        grep -q 'WireGuard 控制面清理失败，已取消后续删除' "${errorLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
     runUninstallStopFailureCase nginx-stop-fail
     runUninstallStopFailureCase xray-stop-fail
     runUninstallStopFailureCase sing-box-stop-fail
     runUninstallStillRunningCase xray-still-running
     runUninstallStillRunningCase sing-box-still-running
     runUninstallNoNginxProtocolCase
+    runUninstallWireGuardCleanupFailureCase
 )
 
 runCleanLastInstallationConfigFailureRegression() (

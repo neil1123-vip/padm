@@ -189,7 +189,7 @@ subscriptionWireGuardBase64UrlDecode() {
 subscriptionWireGuardReadState() {
     local stateFile
     stateFile=$(subscriptionWireGuardStateFile)
-    if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
+    if [[ ! -e "${stateFile}" && ! -L "${stateFile}" ]]; then
         jq -n \
           --arg interface "$(subscriptionWireGuardInterface)" \
           --arg network "10.77.0.0/24" \
@@ -197,6 +197,9 @@ subscriptionWireGuardReadState() {
           --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
           '{enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, address:"", endpoint_host:"", public_key:"", peers:[]}'
         return 0
+    fi
+    if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
+        return 1
     fi
     jq -c \
       --arg interface "$(subscriptionWireGuardInterface)" \
@@ -240,21 +243,44 @@ subscriptionWireGuardWriteState() {
 
 subscriptionWireGuardRestoreStateAndConfig() {
     local previousState=$1
+    local nginxBackupDir=${2:-}
+    local nginxWasRunning=${3:-}
     local previousAddress
     local previousEnabled
-    previousAddress=$(jq -r '.address // empty' <<<"${previousState}") || return 1
-    previousEnabled=$(jq -r '.enabled == true' <<<"${previousState}") || return 1
-    subscriptionWireGuardWriteState --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1 || return 1
-    if [[ "${previousEnabled}" == "true" && -n "${previousAddress}" ]]; then
-        applySubscriptionWireGuardService >/dev/null 2>&1 || return 1
+    local restoreFailed=false
+    if ! previousAddress=$(jq -r '.address // empty' <<<"${previousState}") ||
+        ! previousEnabled=$(jq -r '.enabled == true' <<<"${previousState}") ||
+        ! subscriptionWireGuardWriteState --argjson previousState "${previousState}" '$previousState' >/dev/null 2>&1; then
+        restoreFailed=true
+    elif [[ "${previousEnabled}" == "true" && -n "${previousAddress}" ]]; then
+        applySubscriptionWireGuardService >/dev/null 2>&1 || restoreFailed=true
     elif [[ -n "${previousAddress}" ]]; then
-        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || return 1
-        writeSubscriptionWireGuardConfig >/dev/null 2>&1 || return 1
+        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || restoreFailed=true
+        writeSubscriptionWireGuardConfig >/dev/null 2>&1 || restoreFailed=true
     else
-        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || return 1
-        removeSubscriptionWireGuardNginxConfig >/dev/null 2>&1 || return 1
-        rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || return 1
+        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || restoreFailed=true
+        removeSubscriptionWireGuardNginxConfig >/dev/null 2>&1 || restoreFailed=true
+        rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || restoreFailed=true
     fi
+    if [[ -n "${nginxBackupDir}" ]]; then
+        checkLogBackupRestore "${nginxBackupDir}" >/dev/null 2>&1 || restoreFailed=true
+        if [[ "${nginxWasRunning}" == "true" ]]; then
+            if nginxRunning && ! runCoreServiceActionAllowFailure handleNginx stop; then
+                restoreFailed=true
+            fi
+            if ! nginxRunning && ! runCoreServiceActionAllowFailure handleNginx start; then
+                restoreFailed=true
+            fi
+        elif nginxRunning; then
+            runCoreServiceActionAllowFailure handleNginx stop || restoreFailed=true
+        fi
+        if [[ "${restoreFailed}" == "true" ]]; then
+            padmForgetCleanupPath "${nginxBackupDir}"
+        else
+            padmRemoveCleanupPath "${nginxBackupDir}"
+        fi
+    fi
+    [[ "${restoreFailed}" != "true" ]]
 }
 
 subscriptionWireGuardRestoreGroupsState() {
@@ -264,23 +290,26 @@ subscriptionWireGuardRestoreGroupsState() {
 
 subscriptionWireGuardReportRestoreFailure() {
     local failureTitle=$1
+    local nginxBackupDir=${2:-}
     local restoreMessage
     local groupsFile=
     local stateCheckLine
     local configCheckLine
     local groupsCheckLine
+    local -a checkLines=()
     subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${failureTitle}" false "" "旧状态" "" false || true
     subscriptionWireGuardAppendManualCheckLine stateCheckLine "请手动检查 WireGuard 状态文件" "$(subscriptionWireGuardStateFile)"
     subscriptionWireGuardAppendManualCheckLine configCheckLine "请手动检查 WireGuard 配置文件" "$(subscriptionWireGuardConfigFile)"
+    checkLines+=("${stateCheckLine}" "${configCheckLine}")
     if declare -F subscriptionGroupsFile >/dev/null 2>&1; then
         groupsFile=$(subscriptionGroupsFile)
     fi
     if [[ -n "${groupsFile}" ]]; then
         subscriptionWireGuardAppendManualCheckLine groupsCheckLine "请手动检查订阅组状态文件" "${groupsFile}"
-        errorCard "${restoreMessage}" "${stateCheckLine}" "${configCheckLine}" "${groupsCheckLine}"
-    else
-        errorCard "${restoreMessage}" "${stateCheckLine}" "${configCheckLine}"
+        checkLines+=("${groupsCheckLine}")
     fi
+    [[ -n "${nginxBackupDir}" ]] && checkLines+=("请手动检查 Nginx 备份目录：${nginxBackupDir}")
+    errorCard "${restoreMessage}" "${checkLines[@]}"
 }
 
 subscriptionWireGuardAppendManualCheckLine() {
@@ -294,14 +323,16 @@ subscriptionWireGuardRunRestoreSteps() {
     local previousState=$1
     local previousGroupsState=${2:-}
     local failureTitle=$3
+    local nginxBackupDir=${4:-}
+    local nginxWasRunning=${5:-}
     local restoreFailed=false
 
-    subscriptionWireGuardRestoreStateAndConfig "${previousState}" >/dev/null 2>&1 || restoreFailed=true
+    subscriptionWireGuardRestoreStateAndConfig "${previousState}" "${nginxBackupDir}" "${nginxWasRunning}" >/dev/null 2>&1 || restoreFailed=true
     if [[ -n "${previousGroupsState}" ]]; then
         subscriptionWireGuardRestoreGroupsState "${previousGroupsState}" >/dev/null 2>&1 || restoreFailed=true
     fi
     if [[ "${restoreFailed}" == "true" ]]; then
-        subscriptionWireGuardReportRestoreFailure "${failureTitle}"
+        subscriptionWireGuardReportRestoreFailure "${failureTitle}" "${nginxBackupDir}"
         return 1
     fi
 }
@@ -309,7 +340,9 @@ subscriptionWireGuardRunRestoreSteps() {
 subscriptionWireGuardRestoreStateOrReport() {
     local previousState=$1
     local failureTitle=$2
-    subscriptionWireGuardRunRestoreSteps "${previousState}" "" "${failureTitle}"
+    local nginxBackupDir=${3:-}
+    local nginxWasRunning=${4:-}
+    subscriptionWireGuardRunRestoreSteps "${previousState}" "" "${failureTitle}" "${nginxBackupDir}" "${nginxWasRunning}"
 }
 
 subscriptionWireGuardRestoreStateAndGroupsOrReport() {
@@ -735,6 +768,10 @@ initSubscriptionWireGuardControlled() {
     local controlPort
     local publicKey
     local previousState
+    local nginxTarget
+    local nginxBackupDir=
+    local nginxWasRunning=false
+    local previousServiceActions
     if [[ "$(subscriptionWireGuardRole)" == "main" ]]; then
         errorCard "当前机器已初始化为主控" "第一版只支持星型拓扑，主控不能再作为被控"
         return 1
@@ -780,20 +817,37 @@ initSubscriptionWireGuardControlled() {
         errorCard "被控控制服务安装失败"
         return 1
     }
+    nginxTarget=$(subscriptionWireGuardNginxConfigFile) || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置路径异常" || return 1
+        errorCard "WireGuard Nginx 控制面配置路径异常"
+        return 1
+    }
+    checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置备份失败" || return 1
+        errorCard "WireGuard Nginx 控制面配置备份失败"
+        return 1
+    }
+    nginxRunning && nginxWasRunning=true
+    previousServiceActions="${SERVICE_ACTIONS:-}"
     refreshSubscriptionWireGuardNginxControl || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置失败" || return 1
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard Nginx 控制面配置失败"
         return 1
     }
     serviceQueueApply || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" || return 1
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard Nginx 控制面重载失败"
         return 1
     }
     [[ -f "$(subscriptionWireGuardStateFile)" && -f "$(subscriptionWireGuardConfigFile)" ]] || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控配置未落地" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard 被控配置未落地"
         return 1
     }
+    padmRemoveCleanupPath "${nginxBackupDir}"
     successCard "WireGuard 被控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "控制面：WireGuard 内网 ${controlPort} 端口" "无需安装公网订阅服务；把被控接入凭据交回主控即可"
 }
 

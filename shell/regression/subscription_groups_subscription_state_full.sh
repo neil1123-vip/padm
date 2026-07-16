@@ -128,11 +128,40 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
     local initRoot="${TMP_DIR}/subscription-state-init-transaction"
     local initGroupsDir="${initRoot}/groups"
     local initStateFile="${initGroupsDir}/groups.json"
+    local initWireGuardDir="${initRoot}/wireguard"
+    local initWireGuardStateFile="${initWireGuardDir}/control.json"
     local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
+    local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     local initStatus
 
     export PADM_SUBSCRIPTION_GROUPS_DIR="${initGroupsDir}"
     mkdir -p "${initRoot}"
+
+    mkdir -p "${initGroupsDir}"
+    printf '{existing-bad-json\n' >"${initStateFile}"
+    set +e
+    ensureSubscriptionGroupsState >/dev/null 2>&1
+    initStatus=$?
+    set -e
+    [[ "${initStatus}" == "1" ]]
+    grep -qxF '{existing-bad-json' "${initStateFile}"
+    rm -rf "${initGroupsDir}"
+
+    export PADM_WIREGUARD_CONTROL_DIR="${initWireGuardDir}"
+    mkdir -p "${initWireGuardDir}"
+    printf '{existing-bad-json\n' >"${initWireGuardStateFile}"
+    set +e
+    subscriptionWireGuardReadState >/dev/null 2>&1
+    initStatus=$?
+    set -e
+    [[ "${initStatus}" == "1" ]]
+    set +e
+    subscriptionWireGuardWriteState '.enabled = true' >/dev/null 2>&1
+    initStatus=$?
+    set -e
+    [[ "${initStatus}" == "1" ]]
+    grep -qxF '{existing-bad-json' "${initWireGuardStateFile}"
+
     writeDefaultSubscriptionGroupsState() {
         printf '{bad-json\n' >"$1"
         return 1
@@ -150,6 +179,7 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
     fi
 
     if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
+    if [[ -n "${oldWireGuardDir}" ]]; then export PADM_WIREGUARD_CONTROL_DIR="${oldWireGuardDir}"; else unset PADM_WIREGUARD_CONTROL_DIR; fi
 )
 
 runSubscriptionGroupStateStructureFoundationSerialRegression() {

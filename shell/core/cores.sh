@@ -2077,6 +2077,9 @@ initSingBoxClients() {
 # 安装 Xray-core
 installXrayReality() {
     local nginxWasRunning=false
+    local previousServiceActions="${SERVICE_ACTIONS:-}"
+    local installFailure=
+    local restoreFailed=false
     selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
     unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
@@ -2087,23 +2090,40 @@ installXrayReality() {
     coreInstallServiceAction "Nginx 服务停止失败，已取消 Xray Reality 安装" handleNginx stop || return 1
     if subscriptionWireGuardControlEnabled; then
         if ! refreshSubscriptionWireGuardNginxControl; then
-            if [[ "${nginxWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleNginx start; then
-                errorCard "WireGuard Nginx 控制面刷新失败，且 Nginx 运行状态恢复失败"
-            else
-                errorCard "WireGuard Nginx 控制面刷新失败，已恢复原 Nginx 运行状态"
-            fi
-            return 1
+            installFailure="WireGuard Nginx 控制面刷新失败"
         fi
     fi
 
-    # 安装 Xray
-    installXray 2 false
-    installXrayService 3
-    initXrayConfig custom 4 || return 1
-    cleanUp singBoxDel || return 1
-
-    serviceQueueRestart xray
-    serviceQueueApply || return 1
+    if [[ -z "${installFailure}" ]] && ! installXray 2 false; then
+        installFailure="Xray 安装失败"
+    fi
+    if [[ -z "${installFailure}" ]] && ! installXrayService 3; then
+        installFailure="Xray 服务安装失败"
+    fi
+    if [[ -z "${installFailure}" ]] && ! initXrayConfig custom 4; then
+        installFailure="Xray Reality 配置初始化失败"
+    fi
+    if [[ -z "${installFailure}" ]] && ! cleanUp singBoxDel; then
+        installFailure="旧 sing-box 配置清理失败"
+    fi
+    if [[ -z "${installFailure}" ]]; then
+        serviceQueueRestart xray
+        serviceQueueApply || installFailure="Xray Reality 服务应用失败"
+    fi
+    if [[ -n "${installFailure}" ]]; then
+        SERVICE_ACTIONS="${previousServiceActions}"
+        if [[ "${nginxWasRunning}" == "true" ]]; then
+            nginxRunning || runCoreServiceActionAllowFailure handleNginx start || restoreFailed=true
+        elif nginxRunning; then
+            runCoreServiceActionAllowFailure handleNginx stop || restoreFailed=true
+        fi
+        if [[ "${restoreFailed}" == "true" ]]; then
+            errorCard "${installFailure}，且 Nginx 运行状态恢复失败"
+        else
+            errorCard "${installFailure}，已恢复原 Nginx 运行状态"
+        fi
+        return 1
+    fi
     # 生成账号
     checkGFWStatue 5 || return 1
     showAccounts 6

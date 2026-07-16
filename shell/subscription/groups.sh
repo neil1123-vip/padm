@@ -292,7 +292,7 @@ ensureSubscriptionGroupsStateUnlocked() {
     stateDir=$(subscriptionGroupsSafeDir) || return 1
     stateFile=$(subscriptionGroupsFile)
     padmEnsureSafeDirectory "${stateDir}" || return 1
-    if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
+    if [[ ! -e "${stateFile}" && ! -L "${stateFile}" ]]; then
         padmCreateTempFileForTarget stageFile "${stateFile}" init || return 1
         if ! writeDefaultSubscriptionGroupsState "${stageFile}" ||
             ! subscriptionGroupsStateReplace "${stageFile}" "${stateFile}"; then
@@ -300,6 +300,8 @@ ensureSubscriptionGroupsStateUnlocked() {
             return 1
         fi
         padmRemoveCleanupPath "${stageFile}"
+    elif [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
+        return 1
     fi
     migrateSubscriptionGroupsState || return 1
     if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then

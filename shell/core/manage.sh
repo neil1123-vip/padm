@@ -1511,7 +1511,10 @@ unInstall() {
         fi
     fi
 
-    cleanupSubscriptionWireGuardControlOnUninstall || uninstallFailed=true
+    if ! cleanupSubscriptionWireGuardControlOnUninstall; then
+        errorCard "WireGuard 控制面清理失败，已取消后续删除"
+        return 1
+    fi
     cleanupFail2banManagedFilesOnUninstall || uninstallFailed=true
 
     if ! removePadmNginxConfigFragments; then
