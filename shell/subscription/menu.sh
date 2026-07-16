@@ -601,9 +601,12 @@ createAndSyncUserSubscriptionWizard() {
         autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync
         enableSync=${enableSync:-yes}
         if [[ "${enableSync}" == "yes" || "${enableSync}" == "y" ]]; then
-            setSubscriptionGroupSyncEnabled true
-            refreshSubscriptionGroupSyncCron
-            successCard "自动同步已开启" "后续会按当前间隔自动同步；可在 主控维护与排障 -> 自动同步设置 中调整间隔"
+            if setSubscriptionGroupSyncEnabledWithCron true; then
+                successCard "自动同步已开启" "后续会按当前间隔自动同步；可在 主控维护与排障 -> 自动同步设置 中调整间隔"
+            else
+                errorCard "自动同步开启失败"
+                return 1
+            fi
         else
             statusCard "自动同步未开启" "事件同步开启时，菜单变更仍会立即同步一次；cron 兜底可稍后到 主控维护与排障 -> 自动同步设置 中开启"
         fi
@@ -1044,17 +1047,56 @@ clearSubscriptionSourceSyncErrorMenu() {
 }
 
 refreshSubscriptionGroupSyncCron() {
-    ensureSubscriptionGroupsState
+    ensureSubscriptionGroupsState || return 1
     if subscriptionGroupSyncEnabled; then
         installSubscriptionGroupSyncCron
     else
         local cronFile
         local currentCron
         cronFile=$(subscriptionGroupSyncCronFile)
-        mkdir -p "$(dirname "${cronFile}")"
-        currentCron=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
+        mkdir -p "$(dirname "${cronFile}")" || return 1
+        currentCron=$(readUserCrontabContent) || return 1
+        currentCron=$(sed '\|/etc/padm/install.sh SyncSubscriptionGroups|d' <<<"${currentCron}") || return 1
         installUserCrontabContent "${currentCron}"
     fi
+}
+
+setSubscriptionGroupSyncEnabledWithCron() {
+    local enabled=$1
+    local previousEnabled
+    previousEnabled=$(subscriptionActiveGroupRead -r '.sync.enabled == true') || return 1
+    setSubscriptionGroupSyncEnabled "${enabled}" || return 1
+    if refreshSubscriptionGroupSyncCron; then
+        return 0
+    fi
+    setSubscriptionGroupSyncEnabled "${previousEnabled}" || {
+        errorCard "自动同步定时任务更新失败，且原状态恢复失败"
+        return 1
+    }
+    refreshSubscriptionGroupSyncCron || {
+        errorCard "自动同步状态已恢复，但原定时任务恢复失败"
+        return 1
+    }
+    return 1
+}
+
+setSubscriptionGroupSyncIntervalWithCron() {
+    local interval=$1
+    local previousInterval
+    previousInterval=$(subscriptionActiveGroupRead -r '.sync.interval_minutes') || return 1
+    setSubscriptionGroupSyncInterval "${interval}" || return 1
+    if refreshSubscriptionGroupSyncCron; then
+        return 0
+    fi
+    setSubscriptionGroupSyncInterval "${previousInterval}" || {
+        errorCard "自动同步定时任务更新失败，且原间隔恢复失败"
+        return 1
+    }
+    refreshSubscriptionGroupSyncCron || {
+        errorCard "自动同步间隔已恢复，但原定时任务恢复失败"
+        return 1
+    }
+    return 1
 }
 
 manageSubscriptionSyncSettings() {
@@ -1085,9 +1127,15 @@ manageSubscriptionSyncSettings() {
         autoRead sync_settings_menu "请选择:" syncSettingsStatus
         case "${syncSettingsStatus}" in
         1)
-            toggleSubscriptionGroupSyncEnabled
-            refreshSubscriptionGroupSyncCron
-            successCard "自动同步状态已切换"
+            local targetSyncEnabled=true
+            if subscriptionGroupSyncEnabled; then
+                targetSyncEnabled=false
+            fi
+            if setSubscriptionGroupSyncEnabledWithCron "${targetSyncEnabled}"; then
+                successCard "自动同步状态已切换"
+            else
+                errorCard "自动同步状态切换失败"
+            fi
             ;;
         2)
             local interval=
@@ -1096,9 +1144,11 @@ manageSubscriptionSyncSettings() {
                 errorCard "输入有误，同步间隔需为 1-59 分钟"
                 continue
             fi
-            setSubscriptionGroupSyncInterval "${interval}"
-            refreshSubscriptionGroupSyncCron
-            successCard "自动同步间隔已更新"
+            if setSubscriptionGroupSyncIntervalWithCron "${interval}"; then
+                successCard "自动同步间隔已更新"
+            else
+                errorCard "自动同步间隔更新失败"
+            fi
             ;;
         3) showSubscriptionLocalSyncPlan ;;
         4) showSubscriptionRemoteSyncPlan ;;

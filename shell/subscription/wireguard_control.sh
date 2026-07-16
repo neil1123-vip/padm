@@ -223,7 +223,7 @@ subscriptionWireGuardWriteState() {
     [[ -n "${stateFile}" ]] || return 1
     stateDir=$(dirname "${stateFile}")
     padmEnsureSafeDirectory "${stateDir}" || return 1
-    chmod 700 "${stateDir}" 2>/dev/null || true
+    chmod 700 "${stateDir}" 2>/dev/null || return 1
     padmCreateTempFileForTarget tmpFile "${stateFile}" state || return 1
     while (($# > 1)); do
         jqArgs+=("$1")
@@ -384,7 +384,7 @@ subscriptionWireGuardEnsureKeys() {
     [[ -n "${privateKeyFile}" && -n "${publicKeyFile}" ]] || return 1
     privateDir=$(dirname "${privateKeyFile}")
     padmEnsureSafeDirectory "${privateDir}" || return 1
-    chmod 700 "${privateDir}" 2>/dev/null || true
+    chmod 700 "${privateDir}" 2>/dev/null || return 1
     if [[ ! -s "${privateKeyFile}" ]]; then
         privateKey=$(umask 077 && wg genkey) || return 1
         [[ -n "${privateKey}" ]] || return 1
@@ -452,7 +452,7 @@ subscriptionWireGuardEnsureKeys() {
         [[ -s "${publicStage}" ]] || { padmRemoveCleanupPath "${publicStage}"; return 1; }
         commitGeneratedFile "${publicStage}" "${publicKeyFile}" 600 || { padmRemoveCleanupPath "${publicStage}"; return 1; }
     fi
-    chmod 600 "${privateKeyFile}" "${publicKeyFile}" 2>/dev/null || true
+    chmod 600 "${privateKeyFile}" "${publicKeyFile}" 2>/dev/null || return 1
 }
 
 subscriptionWireGuardPublicKey() {

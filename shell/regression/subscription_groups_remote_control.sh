@@ -1607,6 +1607,23 @@ SH
     if regressionFindHasMatches "${tokenRoot}" -maxdepth 2 -type f -name '.control.token.token.*'; then
         return 1
     fi
+
+    mkdir -p "$(dirname "${tokenFile}")"
+    printf 'existing-token\n' >"${tokenFile}"
+    command chmod 644 "${tokenFile}"
+    chmod() {
+        if [[ "$1" == "600" && "$2" == "${tokenFile}" ]]; then
+            return 1
+        fi
+        command chmod "$@"
+    }
+    set +e
+    subscriptionControlEnsureToken >/dev/null 2>&1
+    tokenStatus=$?
+    set -e
+    unset -f chmod
+    [[ "${tokenStatus}" == "1" ]]
+    [[ "$(stat -c '%a' "${tokenFile}")" == "644" ]]
 )
 
 runSubscriptionControlServiceInstallRegression() (

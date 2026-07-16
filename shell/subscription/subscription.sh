@@ -224,6 +224,40 @@ runSubscribeNginxAction() {
     return "${rc}"
 }
 
+rollbackSubscribeNginxInstall() {
+    local backupDir=$1
+    local nginxWasRunning=$2
+    local reason=$3
+    local configRestored=true
+    local serviceRestored=true
+
+    if ! checkLogBackupRestore "${backupDir}"; then
+        configRestored=false
+        padmForgetCleanupPath "${backupDir}"
+    else
+        padmRemoveCleanupPath "${backupDir}"
+    fi
+
+    if [[ "${nginxWasRunning}" == "true" ]]; then
+        if ! nginxRunning && ! runSubscribeNginxAction start; then
+            serviceRestored=false
+        fi
+    elif nginxRunning && ! runSubscribeNginxAction stop; then
+        serviceRestored=false
+    fi
+
+    if [[ "${configRestored}" == "true" && "${serviceRestored}" == "true" ]]; then
+        errorCard "${reason}，已恢复旧 Nginx 配置和运行状态"
+        return 0
+    fi
+    if [[ "${configRestored}" != "true" ]]; then
+        errorCard "${reason}，且回滚未完全成功" "请手动检查 Nginx 配置和服务状态；备份目录: ${backupDir}"
+    else
+        errorCard "${reason}，旧 Nginx 配置已恢复但运行状态恢复失败" "请手动检查 Nginx 服务状态"
+    fi
+    return 1
+}
+
 # 安装订阅服务
 installSubscribe() {
     readNginxSubscribe
@@ -235,6 +269,9 @@ installSubscribe() {
     local subscribeServerName=
     local subscribePublicBase=
     local tlsDir=
+    local targetPath=
+    local installBackupDir=
+    local nginxWasRunning=false
     if [[ -n "${AUTO_SUBSCRIBE_PORT:-}" && "${subscribePort}" != "${AUTO_SUBSCRIBE_PORT}" ]]; then
         subscribePort=
     fi
@@ -278,6 +315,18 @@ installSubscribe() {
             nginxSubscribeListen="listen ${result[-1]} ${SSLType} so_keepalive=on;${listenIPv6}"
         fi
 
+        targetPath=$(nginxConfigFilePath subscribe.conf) || {
+            errorCard "订阅 Nginx 配置路径异常"
+            return 1
+        }
+        checkLogBackupCreate installBackupDir "${targetPath}" || {
+            errorCard "订阅 Nginx 配置备份失败"
+            return 1
+        }
+        if nginxRunning; then
+            nginxWasRunning=true
+        fi
+
         if ! writeSubscribeNginxConfig <<EOF
 server {
     ${nginxSubscribeListen}
@@ -301,18 +350,25 @@ server {
 }
 EOF
         then
-            errorCard "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR:-订阅 Nginx 配置校验失败，已回滚}"
+            rollbackSubscribeNginxInstall \
+                "${installBackupDir}" \
+                "${nginxWasRunning}" \
+                "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR:-订阅 Nginx 配置校验失败}" || true
             return 1
         fi
         if ! installSubscriptionControlService; then
-            errorCard "订阅控制服务安装失败"
+            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "订阅控制服务安装失败" || true
             return 1
         fi
-        bootStartup nginx
+        if ! bootStartup nginx; then
+            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "Nginx 开机自启配置失败" || true
+            return 1
+        fi
         if ! runSubscribeNginxAction stop || ! runSubscribeNginxAction start; then
-            errorCard "订阅 Nginx 服务重载失败"
+            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "订阅 Nginx 服务重载失败" || true
             return 1
         fi
+        padmRemoveCleanupPath "${installBackupDir}"
     fi
     if [[ -z $(pgrep -f "nginx") ]]; then
         if ! runSubscribeNginxAction start; then

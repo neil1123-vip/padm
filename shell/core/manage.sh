@@ -1268,12 +1268,31 @@ removePadmNginxConfigFragments() {
 }
 
 cleanupSubscriptionWireGuardControlOnUninstall() {
-    stopSubscriptionWireGuardControlService
-    if command -v systemctl >/dev/null 2>&1; then
-        systemctl disable --now padm-subscription-control.service >/dev/null 2>&1 || true
+    local wireGuardConfigFile
+    local wireGuardStateFile
+    local controlServiceFile
+    wireGuardConfigFile=$(subscriptionWireGuardConfigFile) || return 1
+    wireGuardStateFile=$(subscriptionWireGuardStateFile) || return 1
+    controlServiceFile=$(subscriptionControlServiceFile) || return 1
+
+    if [[ -e "${wireGuardConfigFile}" || -L "${wireGuardConfigFile}" || -e "${wireGuardStateFile}" || -L "${wireGuardStateFile}" ]]; then
+        if ! stopSubscriptionWireGuardControlService; then
+            errorCard "WireGuard 控制面停止失败，已取消删除控制面文件"
+            return 1
+        fi
     fi
-    removeInstallPath "$(subscriptionWireGuardConfigFile)" "WireGuard控制面配置" || return 1
-    removeInstallPath "$(subscriptionControlServiceFile)" "订阅控制面systemd服务" || return 1
+    if command -v systemctl >/dev/null 2>&1; then
+        if [[ -e "${controlServiceFile}" || -L "${controlServiceFile}" ]] ||
+            systemctl is-active --quiet padm-subscription-control.service ||
+            systemctl is-enabled --quiet padm-subscription-control.service; then
+            if ! systemctl disable --now padm-subscription-control.service >/dev/null 2>&1; then
+                errorCard "订阅控制服务停止失败，已取消删除控制面文件"
+                return 1
+            fi
+        fi
+    fi
+    removeInstallPath "${wireGuardConfigFile}" "WireGuard控制面配置" || return 1
+    removeInstallPath "${controlServiceFile}" "订阅控制面systemd服务" || return 1
 }
 
 cleanupFail2banManagedFilesOnUninstall() {
@@ -1292,6 +1311,7 @@ uninstallShouldStopNginx() {
         return 0
     fi
     [[ -f "${nginxConfigPath:-/etc/nginx/conf.d/}subscribe.conf" ]] && return 0
+    [[ -f "${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf" ]] && return 0
     [[ -d "${nginxStaticPath:-}" && -f "${nginxStaticPath}/check" ]] && return 0
     return 1
 }
@@ -1470,12 +1490,24 @@ unInstall() {
             return 1
         fi
         if [[ "${coreInstallType}" == "1" || -e /etc/systemd/system/xray.service || -L /etc/systemd/system/xray.service ]]; then
-            removeInstallPath /etc/systemd/system/xray.service "Xray systemd服务" || uninstallFailed=true
-            successCard "删除Xray开机自启完成"
+            if ! systemctl disable xray.service >/dev/null 2>&1; then
+                errorCard "Xray systemd 开机自启删除失败"
+                return 1
+            elif ! removeInstallPath /etc/systemd/system/xray.service "Xray systemd服务"; then
+                return 1
+            else
+                successCard "删除Xray开机自启完成"
+            fi
         fi
         if [[ "${coreInstallType}" == "2" || -n "${singBoxConfigPath}" || -e /etc/systemd/system/sing-box.service || -L /etc/systemd/system/sing-box.service ]]; then
-            removeInstallPath /etc/systemd/system/sing-box.service "sing-box systemd服务" || uninstallFailed=true
-            successCard "删除sing-box开机自启完成"
+            if ! systemctl disable sing-box.service >/dev/null 2>&1; then
+                errorCard "sing-box systemd 开机自启删除失败"
+                return 1
+            elif ! removeInstallPath /etc/systemd/system/sing-box.service "sing-box systemd服务"; then
+                return 1
+            else
+                successCard "删除sing-box开机自启完成"
+            fi
         fi
     fi
 
@@ -1498,6 +1530,10 @@ unInstall() {
 
     removeInstallPath /usr/bin/padm "PADM快捷方式" || uninstallFailed=true
     removeInstallPath /usr/sbin/padm "PADM快捷方式" || uninstallFailed=true
+    if [[ "${release}" != "alpine" ]] && ! uninstallReloadSystemdUnits; then
+        errorCard "systemd 配置重载失败，卸载未完全完成"
+        uninstallFailed=true
+    fi
     if [[ "${uninstallFailed}" == "true" ]]; then
         errorCard "卸载未完全完成，请根据上方失败项手动处理"
         return 1

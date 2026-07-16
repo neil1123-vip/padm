@@ -976,7 +976,7 @@ subscriptionControlEnsureToken() {
     tokenFile=$(subscriptionControlTokenFile)
     tokenDir=$(dirname -- "${tokenFile}")
     padmEnsureSafeDirectory "${tokenDir}" || return 1
-    chmod 700 "${tokenDir}" 2>/dev/null || true
+    chmod 700 "${tokenDir}" 2>/dev/null || return 1
     if [[ ! -s "${tokenFile}" ]]; then
         padmCreateTempFileForTarget tmpFile "${tokenFile}" token || return 1
         if command -v openssl >/dev/null 2>&1; then
@@ -997,7 +997,7 @@ subscriptionControlEnsureToken() {
         fi
     fi
     [[ -s "${tokenFile}" ]] || return 1
-    chmod 600 "${tokenFile}" 2>/dev/null || true
+    chmod 600 "${tokenFile}" 2>/dev/null || return 1
 }
 
 subscriptionGroupsSecureStateFiles() {
@@ -1011,13 +1011,19 @@ subscriptionGroupsSecureStateFiles() {
     backupDir=$(subscriptionGroupsBackupDir) || return 1
     lockFile=$(subscriptionGroupsLockFile) || return 1
     padmEnsureSafeDirectory "${groupsDir}" || return 1
-    chmod 700 "${groupsDir}" 2>/dev/null || true
-    [[ -f "${groupsFile}" ]] && chmod 600 "${groupsFile}" 2>/dev/null || true
-    [[ -f "${lockFile}" ]] && chmod 600 "${lockFile}" 2>/dev/null || true
+    chmod 700 "${groupsDir}" 2>/dev/null || return 1
+    if [[ -f "${groupsFile}" ]]; then
+        chmod 600 "${groupsFile}" 2>/dev/null || return 1
+    fi
+    if [[ -f "${lockFile}" ]]; then
+        chmod 600 "${lockFile}" 2>/dev/null || return 1
+    fi
     if [[ -d "${backupDir}" ]]; then
-        chmod 700 "${backupDir}" 2>/dev/null || true
+        chmod 700 "${backupDir}" 2>/dev/null || return 1
         for backupFile in "${backupDir}"/groups-*.json; do
-            [[ -f "${backupFile}" ]] && chmod 600 "${backupFile}" 2>/dev/null || true
+            if [[ -f "${backupFile}" ]]; then
+                chmod 600 "${backupFile}" 2>/dev/null || return 1
+            fi
         done
     fi
 }

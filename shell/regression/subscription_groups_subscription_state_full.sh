@@ -276,13 +276,40 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
     setSubscriptionGroupSyncInterval 17
     (
         local crontabLog="${TMP_DIR}/subscription-sync-crontab.txt"
+        local crontabReadMode=default
+        local crontabInstallShouldFail=false
+        local syncCalls=0
         crontab() {
             case "${1:-}" in
             -l)
-                printf '5 0 * * * /bin/bash /etc/padm/install.sh RenewTLS\n'
-                printf '10 0 * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups old\n'
+                case "${crontabReadMode}" in
+                no-crontab)
+                    printf 'no crontab for root\n' >&2
+                    return 1
+                    ;;
+                busybox-no-crontab)
+                    printf "crontab: can't open 'root': No such file or directory\n" >&2
+                    return 1
+                    ;;
+                failure)
+                    printf 'crontab read failed\n' >&2
+                    return 2
+                    ;;
+                tls-mixed)
+                    printf '45 2 * * * /bin/bash /etc/padm/install.sh RenewTLS old\n'
+                    printf '35 1 * * * /bin/bash /etc/padm/install.sh UpdateGeo\n'
+                    printf '*/10 * * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups\n'
+                    printf '0 0 * * * /root/.acme.sh/acme.sh --cron\n'
+                    printf '5 5 * * * /usr/local/bin/keep\n'
+                    ;;
+                *)
+                    printf '5 0 * * * /bin/bash /etc/padm/install.sh RenewTLS\n'
+                    printf '10 0 * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups old\n'
+                    ;;
+                esac
                 ;;
             *)
+                [[ "${crontabInstallShouldFail}" != "true" ]] || return 1
                 cat "$1" >"${crontabLog}"
                 ;;
             esac
@@ -296,6 +323,36 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         refreshSubscriptionGroupSyncCron
         grep -qx '5 0 \* \* \* /bin/bash /etc/padm/install.sh RenewTLS' "${crontabLog}" || return 1
         ! grep -q 'SyncSubscriptionGroups' "${crontabLog}" || return 1
+
+        for crontabReadMode in no-crontab busybox-no-crontab; do
+            [[ -z "$(readUserCrontabContent)" ]]
+        done
+        crontabReadMode=failure
+        if readUserCrontabContent >/dev/null 2>&1; then
+            return 1
+        fi
+
+        crontabReadMode=default
+        crontabInstallShouldFail=true
+        if setSubscriptionGroupSyncEnabledWithCron true >/dev/null 2>&1; then
+            return 1
+        fi
+        subscriptionActiveGroupRead -e '.sync.enabled == false' >/dev/null
+
+        runSubscriptionGroupSync() { syncCalls=$((syncCalls + 1)); }
+        runSubscriptionGroupSyncCron
+        [[ "${syncCalls}" == "0" ]]
+
+        crontabInstallShouldFail=false
+        crontabReadMode=tls-mixed
+        btDomain=
+        installCronTLS 1 >/dev/null
+        grep -qx '35 1 \* \* \* /bin/bash /etc/padm/install.sh UpdateGeo' "${crontabLog}"
+        grep -qx '\*/10 \* \* \* \* /bin/bash /etc/padm/install.sh SyncSubscriptionGroups' "${crontabLog}"
+        grep -qx '0 0 \* \* \* /root/.acme.sh/acme.sh --cron' "${crontabLog}"
+        grep -qx '5 5 \* \* \* /usr/local/bin/keep' "${crontabLog}"
+        [[ "$(grep -c '/etc/padm/install.sh RenewTLS' "${crontabLog}")" == "1" ]]
+        ! grep -q 'RenewTLS old' "${crontabLog}"
     )
 }
 

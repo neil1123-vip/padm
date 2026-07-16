@@ -505,9 +505,8 @@ fail2banStartOrReloadService() {
         return $?
     fi
     if command -v rc-service >/dev/null 2>&1 && fail2banOpenRcServiceInstalled; then
-        if command -v rc-update >/dev/null 2>&1; then
-            rc-update add fail2ban default >/dev/null 2>&1 || true
-        fi
+        command -v rc-update >/dev/null 2>&1 || return 1
+        rc-update add fail2ban default >/dev/null 2>&1 || return 1
         if fail2banServiceActive; then
             rc-service fail2ban restart >/dev/null 2>&1
         else
@@ -538,7 +537,7 @@ fail2banRestoreManagedFiles() {
         if [[ "${serviceWasEnabled}" == "true" ]]; then
             fail2banMarkRollbackFailure systemctl enable fail2ban.service
         else
-            systemctl disable fail2ban.service >/dev/null 2>&1 || true
+            fail2banMarkRollbackFailure systemctl disable fail2ban.service
         fi
     elif command -v rc-service >/dev/null 2>&1 && fail2banOpenRcServiceInstalled; then
         if [[ "${serviceWasActive}" == "true" ]]; then
@@ -550,7 +549,7 @@ fail2banRestoreManagedFiles() {
             if [[ "${serviceWasEnabled}" == "true" ]]; then
                 fail2banMarkRollbackFailure rc-update add fail2ban default
             else
-                rc-update del fail2ban default >/dev/null 2>&1 || true
+                fail2banMarkRollbackFailure rc-update del fail2ban default
             fi
         fi
     fi

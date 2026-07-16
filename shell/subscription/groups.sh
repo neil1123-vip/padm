@@ -93,7 +93,7 @@ subscriptionGroupsWithLock() {
         return $?
     fi
     exec {lockFd}>"${lockFile}" || return 1
-    chmod 600 "${lockFile}" 2>/dev/null || true
+    chmod 600 "${lockFile}" 2>/dev/null || { exec {lockFd}>&-; return 1; }
     if ! flock -w "${lockTimeout}" "${lockFd}"; then
         exec {lockFd}>&-
         return 1
@@ -174,7 +174,7 @@ backupSubscriptionGroupsStateForMigration() {
     stateFile=$(subscriptionGroupsFile)
     [[ -f "${stateFile}" ]] || return 0
     padmEnsureSafeDirectory "${backupDir}" || return 1
-    chmod 700 "${backupDir}" 2>/dev/null || true
+    chmod 700 "${backupDir}" 2>/dev/null || return 1
     backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
     while [[ -e "${backupFile}" ]]; do
         backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
@@ -302,7 +302,9 @@ ensureSubscriptionGroupsStateUnlocked() {
         padmRemoveCleanupPath "${stageFile}"
     fi
     migrateSubscriptionGroupsState || return 1
-    subscriptionGroupsSecureStateFiles 2>/dev/null || true
+    if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
+        subscriptionGroupsSecureStateFiles 2>/dev/null || return 1
+    fi
 }
 
 
@@ -346,7 +348,9 @@ subscriptionGroupsStateWriteUnlocked() {
     fi
     padmRemoveCleanupPath "${tmpFile}"
     migrateSubscriptionGroupsState || return 1
-    subscriptionGroupsSecureStateFiles 2>/dev/null || true
+    if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
+        subscriptionGroupsSecureStateFiles 2>/dev/null || return 1
+    fi
 }
 
 subscriptionGroupsStateWrite() {
@@ -359,7 +363,7 @@ createSubscriptionGroupsBackupUnlocked() {
     backupDir=$(subscriptionGroupsBackupDir)
     ensureSubscriptionGroupsState || return 1
     padmEnsureSafeDirectory "${backupDir}" || return 1
-    chmod 700 "${backupDir}" 2>/dev/null || true
+    chmod 700 "${backupDir}" 2>/dev/null || return 1
     backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
     while [[ -e "${backupFile}" ]]; do
         backupFile="${backupDir}/groups-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"

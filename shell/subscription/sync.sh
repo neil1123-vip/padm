@@ -1202,6 +1202,9 @@ runSubscriptionGroupSync() {
 }
 
 runSubscriptionGroupSyncCron() {
+    local enabled
+    enabled=$(subscriptionActiveGroupRead -r '.sync.enabled == true') || return 1
+    [[ "${enabled}" == "true" ]] || return 0
     if [[ $# -eq 0 ]]; then
         runSubscriptionGroupSync skip-subscribe-refresh
     else
@@ -1227,7 +1230,8 @@ installSubscriptionGroupSyncCron() {
     local syncCron
 
     ensureSubscriptionGroupsState || return 1
-    currentCrontab=$(crontab -l 2>/dev/null | sed '/SyncSubscriptionGroups/d' || true)
+    currentCrontab=$(readUserCrontabContent) || return 1
+    currentCrontab=$(sed '\|/etc/padm/install.sh SyncSubscriptionGroups|d' <<<"${currentCrontab}") || return 1
     syncCron=$(subscriptionGroupSyncCronCommand) || return 1
     installUserCrontabContent "${currentCrontab}
 ${syncCron}"

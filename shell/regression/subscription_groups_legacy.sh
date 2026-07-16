@@ -5019,7 +5019,7 @@ runCoreInstallServiceActionFailureRegression() (
     local callLog="${root}/calls.log"
     local errorLog="${root}/errors.log"
     local reachedFile="${root}/reached"
-    local mode rc
+    local mode rc nginxRuntimeState
 
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
@@ -5048,7 +5048,10 @@ runCoreInstallServiceActionFailureRegression() (
     installCronTLS() { printf 'cron:%s\n' "$*" >>"${callLog}"; return 0; }
     customPortFunction() { printf 'customPort\n' >>"${callLog}"; return 0; }
     subscriptionWireGuardControlEnabled() { return 0; }
-    refreshSubscriptionWireGuardNginxControl() { printf 'wg-refresh\n' >>"${callLog}"; return 0; }
+    refreshSubscriptionWireGuardNginxControl() {
+        printf 'wg-refresh\n' >>"${callLog}"
+        [[ "${mode}" != "wg-refresh-fail" ]]
+    }
     serviceQueueRestart() { printf 'queueRestart:%s\n' "$*" >>"${callLog}"; return 0; }
     serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; return 0; }
     serviceQueueApply() { printf 'queueApply\n' >>"${callLog}"; return 0; }
@@ -5058,8 +5061,11 @@ runCoreInstallServiceActionFailureRegression() (
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
+        [[ "$1" == "stop" ]] && nginxRuntimeState=false
+        [[ "$1" == "start" ]] && nginxRuntimeState=true
         return 0
     }
+    nginxRunning() { [[ "${nginxRuntimeState}" == "true" ]]; }
     handleXray() {
         printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
@@ -5078,6 +5084,7 @@ runCoreInstallServiceActionFailureRegression() (
         realityOnlyWithDomain=
         currentHost=install.example.com
         domain=install.example.com
+        nginxRuntimeState=true
     }
 
     resetInstallServiceFixture nginx-stop-fail
@@ -5090,6 +5097,20 @@ runCoreInstallServiceActionFailureRegression() (
     ! grep -q '^installXray:' "${callLog}"
     ! grep -q '^wg-refresh$' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture wg-refresh-fail
+    set +e
+    installXrayReality >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'wg-refresh' "${callLog}"
+    ! grep -q '^installXray:' "${callLog}"
+    [[ "${nginxRuntimeState}" == "true" ]]
+    grep -q 'WireGuard Nginx 控制面刷新失败，已恢复原 Nginx 运行状态' "${errorLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture nginx-start-fail
@@ -6474,6 +6495,31 @@ SH
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=false handleNginx stop >/dev/null 2>&1
+
+    mkdir -p "${serviceTmp}/nginx"
+    nginxConfigPath="${serviceTmp}/nginx/"
+    selectCustomInstallType=",1,"
+    protocolSelectionSkipsNginx() { return 0; }
+    subscriptionWireGuardControlEnabled() { return 1; }
+    printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    handleNginx start >/dev/null 2>&1
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "false" ]]
+    : >"${nginxConfigPath}subscribe.conf"
+    handleNginx start >/dev/null 2>&1
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
+    rm -f "${nginxConfigPath}subscribe.conf"
+    handleNginx stop >/dev/null 2>&1
+    : >"${nginxConfigPath}padm-control-wg.conf"
+    handleNginx start >/dev/null 2>&1
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
+    rm -f "${nginxConfigPath}padm-control-wg.conf"
+    handleNginx stop >/dev/null 2>&1
+    subscriptionWireGuardControlEnabled() { return 0; }
+    handleNginx start >/dev/null 2>&1
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
+    protocolSelectionSkipsNginx() { return 1; }
+    subscriptionWireGuardControlEnabled() { return 1; }
+
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     SERVICE_ACTIONS=
     serviceQueueStart nginx
@@ -6550,13 +6596,24 @@ SH
 
 runUninstallWireGuardCleanupRegression() (
     local actions=
+    local mode=success
+    local rc
     local targetDir="${TMP_DIR}/uninstall-wireguard"
     local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     PADM_WIREGUARD_CONTROL_DIR="${targetDir}/state"
     mkdir -p "${PADM_WIREGUARD_CONTROL_DIR}" "${targetDir}/etc-wireguard" "${targetDir}/systemd"
     subscriptionWireGuardWriteState '.enabled = true'
     removeInstallPath() { actions+="remove:$1:$2"$'\n'; rm -rf "$1"; }
-    systemctl() { actions+="systemctl:$*"$'\n'; return 0; }
+    systemctl() {
+        actions+="systemctl:$*"$'\n'
+        if [[ "${mode}" == "wg-stop-fail" && "$*" == "disable --now wg-quick@wg-padm" ]]; then
+            return 1
+        fi
+        if [[ "${mode}" == "control-stop-fail" && "$*" == "disable --now padm-subscription-control.service" ]]; then
+            return 1
+        fi
+        return 0
+    }
     command() {
         if [[ "$1" == "-v" && "$2" == "systemctl" ]]; then
             return 0
@@ -6567,6 +6624,20 @@ runUninstallWireGuardCleanupRegression() (
     subscriptionControlServiceFile() { printf '%s\n' "${targetDir}/systemd/padm-subscription-control.service"; }
     printf 'wg\n' >"$(subscriptionWireGuardConfigFile)"
     printf 'svc\n' >"$(subscriptionControlServiceFile)"
+
+    for mode in wg-stop-fail control-stop-fail; do
+        actions=
+        set +e
+        cleanupSubscriptionWireGuardControlOnUninstall >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ -e "$(subscriptionWireGuardConfigFile)" ]]
+        [[ -e "$(subscriptionControlServiceFile)" ]]
+    done
+
+    mode=success
+    actions=
     cleanupSubscriptionWireGuardControlOnUninstall
     grep -qxF 'systemctl:disable --now wg-quick@wg-padm' <<<"${actions}"
     grep -qxF 'systemctl:disable --now padm-subscription-control.service' <<<"${actions}"
@@ -6752,6 +6823,21 @@ runWireGuardKeyTransactionRegression() (
     if regressionFindHasMatches "${wireGuardDir}" -maxdepth 1 -type f -name '.*.wireguard.*'; then
         return 1
     fi
+
+    command chmod 644 "${privateKeyFile}"
+    chmod() {
+        if [[ "$1" == "600" && "$2" == "${privateKeyFile}" ]]; then
+            return 1
+        fi
+        command chmod "$@"
+    }
+    set +e
+    subscriptionWireGuardEnsureKeys >/dev/null 2>&1
+    rc=$?
+    set -e
+    unset -f chmod
+    [[ "${rc}" == "1" ]]
+    [[ "$(stat -c '%a' "${privateKeyFile}")" == "644" ]]
 )
 
 runWarpConfigFileCleanupRegression() (
@@ -6921,6 +7007,8 @@ runFail2banApplyTransactionRegression() (
     local rc
     local jailCommitFailures=0
 
+    eval "$(declare -f fail2banStartOrReloadService | sed '1s/^fail2banStartOrReloadService/originalFail2banStartOrReloadService/')"
+
     mkdir -p "${rootRel}/fail2ban/jail.d" "${rootRel}/fail2ban/filter.d"
     root=$(cd -- "${rootRel}" && pwd -P)
     export TMPDIR="${root}"
@@ -6981,6 +7069,31 @@ runFail2banApplyTransactionRegression() (
     if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
+
+    (
+        fail2banSystemdServiceInstalled() { return 1; }
+        fail2banOpenRcServiceInstalled() { return 0; }
+        fail2banServiceActive() { return 1; }
+        systemctl() { return 1; }
+        rc-update() { return 1; }
+        rc-service() { return 0; }
+        if originalFail2banStartOrReloadService; then
+            return 1
+        fi
+    )
+
+    (
+        checkLogBackupRestore() { return 0; }
+        fail2banSystemdServiceInstalled() { return 0; }
+        fail2banOpenRcServiceInstalled() { return 1; }
+        fail2banServiceActive() { return 1; }
+        systemctl() {
+            [[ "$1" != "disable" ]]
+        }
+        if fail2banRestoreManagedFiles "${root}/unused-backup" false false; then
+            return 1
+        fi
+    )
 )
 
 runUninstallServiceStopFailureRegression() (
@@ -7026,6 +7139,10 @@ runUninstallServiceStopFailureRegression() (
     }
     uninstallReloadSystemdUnits() {
         printf 'daemon-reload\n' >>"${serviceLog}"
+        return 0
+    }
+    systemctl() {
+        printf 'systemctl:%s\n' "$*" >>"${serviceLog}"
         return 0
     }
     handleNginx() {
@@ -7146,6 +7263,9 @@ runUninstallServiceStopFailureRegression() (
         grep -qx 'sing-box:stop:true' "${serviceLog}"
         grep -qxF 'padm-root-cleanup' "${actionLog}"
         grep -qxF 'unsubscribe-cleanup' "${actionLog}"
+        grep -qx 'systemctl:disable xray.service' "${serviceLog}"
+        grep -qx 'systemctl:disable sing-box.service' "${serviceLog}"
+        [[ "$(grep -c '^daemon-reload$' "${serviceLog}")" == "2" ]]
         [[ ! -s "${errorLog}" ]]
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
@@ -8267,6 +8387,8 @@ runSubscribeNginxServiceFailureRegression() (
     local errorLog="${root}/error.log"
     local mode=reload
     local rc writeCalls controlCalls bootCalls
+    local runtimeRunning=true
+    local startFailures=0
 
     mkdir -p "${root}/fake-bin" "${root}/nginx" "${root}/static" "${root}/tls"
     cat >"${root}/fake-bin/nginx" <<'SH'
@@ -8285,15 +8407,16 @@ SH
     currentHost=subscribe.example.com
     printf 'cert\n' >"${PADM_TLS_DIR}/subscribe.example.com.crt"
     printf 'key\n' >"${PADM_TLS_DIR}/subscribe.example.com.key"
+    printf 'old-subscribe-config\n' >"${nginxConfigPath}subscribe.conf"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     : >"${serviceLog}"
     : >"${errorLog}"
 
     readNginxSubscribe() {
-        if [[ "${mode}" == "reload" || "${mode}" == "config-fail" ]]; then
-            subscribePort=
-        else
+        if [[ "${mode}" == "existing-port" ]]; then
             subscribePort=39778
+        else
+            subscribePort=
         fi
     }
     readSingBoxPortResult() {
@@ -8305,24 +8428,37 @@ SH
     hasIPv6Connectivity() { return 1; }
     writeSubscribeNginxConfig() {
         writeCalls=$((writeCalls + 1))
-        cat >/dev/null
+        local generatedConfig
+        generatedConfig=$(cat)
         if [[ "${mode}" == "config-fail" ]]; then
             SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR="订阅 Nginx 配置校验失败，且旧配置恢复失败"
             return 1
         fi
-        return 0
+        printf '%s\n' "${generatedConfig}" >"${nginxConfigPath}subscribe.conf"
     }
     installSubscriptionControlService() {
         controlCalls=$((controlCalls + 1))
+        [[ "${mode}" == "control-fail" ]] && return 1
         return 0
     }
     bootStartup() {
         bootCalls=$((bootCalls + 1))
+        [[ "${mode}" == "boot-fail" ]] && return 1
         return 0
     }
+    nginxRunning() { [[ "${runtimeRunning}" == "true" ]]; }
     handleNginx() {
         printf '%s:%s:%s\n' "${mode}" "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
-        [[ "$1" != "start" ]]
+        if [[ "$1" == "stop" ]]; then
+            runtimeRunning=false
+            return 0
+        fi
+        if ((startFailures > 0)); then
+            startFailures=$((startFailures - 1))
+            return 1
+        fi
+        runtimeRunning=true
+        return 0
     }
     pgrep() {
         [[ "${mode}" == "existing-port" ]] && return 1
@@ -8333,6 +8469,8 @@ SH
     controlCalls=0
     bootCalls=0
     SERVICE_QUEUE_ALLOW_FAILURE=previous
+    runtimeRunning=true
+    startFailures=1
     set +e
     installSubscribe >/dev/null 2>&1
     rc=$?
@@ -8344,6 +8482,8 @@ SH
     grep -qx 'reload:stop:true' "${serviceLog}"
     grep -qx 'reload:start:true' "${serviceLog}"
     grep -q '订阅 Nginx 服务重载失败' "${errorLog}"
+    grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
+    [[ "${runtimeRunning}" == "true" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     mode=existing-port
@@ -8353,6 +8493,8 @@ SH
     controlCalls=0
     bootCalls=0
     SERVICE_QUEUE_ALLOW_FAILURE=previous
+    runtimeRunning=false
+    startFailures=1
     set +e
     installSubscribe >/dev/null 2>&1
     rc=$?
@@ -8372,6 +8514,8 @@ SH
     controlCalls=0
     bootCalls=0
     SERVICE_QUEUE_ALLOW_FAILURE=previous
+    runtimeRunning=true
+    startFailures=0
     set +e
     installSubscribe >/dev/null 2>&1
     rc=$?
@@ -8381,8 +8525,34 @@ SH
     [[ "${controlCalls}" == "0" ]]
     [[ "${bootCalls}" == "0" ]]
     grep -q '订阅 Nginx 配置校验失败，且旧配置恢复失败' "${errorLog}"
-    ! grep -q '订阅 Nginx 配置校验失败，已回滚' "${errorLog}"
+    grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    for mode in control-fail boot-fail; do
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        writeCalls=0
+        controlCalls=0
+        bootCalls=0
+        runtimeRunning=true
+        startFailures=0
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        installSubscribe >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ "${writeCalls}" == "1" ]]
+        [[ "${controlCalls}" == "1" ]]
+        if [[ "${mode}" == "control-fail" ]]; then
+            [[ "${bootCalls}" == "0" ]]
+        else
+            [[ "${bootCalls}" == "1" ]]
+        fi
+        grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
+        [[ "${runtimeRunning}" == "true" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    done
 
     PATH="${oldPath}"
 )

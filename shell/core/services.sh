@@ -163,11 +163,24 @@ nginxServiceInstalled() {
     fi
 }
 
+nginxRuntimeRequired() {
+    local configRoot="${nginxConfigPath:-/etc/nginx/conf.d/}"
+
+    if ! protocolSelectionSkipsNginx "${selectCustomInstallType:-}"; then
+        return 0
+    fi
+    if declare -F subscriptionWireGuardControlEnabled >/dev/null 2>&1 &&
+        subscriptionWireGuardControlEnabled >/dev/null 2>&1; then
+        return 0
+    fi
+    [[ -f "${configRoot%/}/subscribe.conf" || -f "${configRoot%/}/padm-control-wg.conf" ]]
+}
+
 # 操作 Nginx
 handleNginx() {
     local nginxErrorLog="${PADM_NGINX_ERROR_LOG:-/etc/padm/nginx_error.log}"
 
-    if ! protocolSelectionSkipsNginx "${selectCustomInstallType}" && ! nginxRunning && [[ "$1" == "start" ]]; then
+    if [[ "$1" == "start" ]] && nginxRuntimeRequired && ! nginxRunning; then
         if [[ "${release}" == "alpine" ]]; then
             rc-service nginx start 2>"${nginxErrorLog}"
         elif nginxServiceInstalled; then

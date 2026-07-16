@@ -1074,7 +1074,10 @@ EOF
     ]
 }
 EOF
-        bootStartup nginx
+        if ! bootStartup nginx; then
+            errorCard "Nginx 开机自启配置失败"
+            return 1
+        fi
         if [[ -n "$3" ]] && ! runCoreServiceActionAllowFailure handleNginx start; then
             errorCard "Nginx 服务启动失败，VMess HTTPUpgrade 配置已写入"
             return 1

@@ -1742,13 +1742,19 @@ EOF
             errorCard "sing-box systemd 模板提交失败"
             exit 1
         fi
-        bootStartup "sing-box.service"
+        if ! bootStartup "sing-box.service"; then
+            errorCard "sing-box 开机自启配置失败"
+            exit 1
+        fi
     elif [[ "${release}" == "alpine" ]]; then
         if ! installAlpineStartup "sing-box"; then
             errorCard "sing-box OpenRC 模板提交失败"
             exit 1
         fi
-        bootStartup "sing-box"
+        if ! bootStartup "sing-box"; then
+            errorCard "sing-box 开机自启配置失败"
+            exit 1
+        fi
     fi
 
     successCard "配置sing-box开机启动完毕"
@@ -1788,14 +1794,20 @@ EOF
             errorCard "Xray systemd 模板提交失败"
             exit 1
         fi
-        bootStartup "xray.service"
+        if ! bootStartup "xray.service"; then
+            errorCard "Xray 开机自启配置失败"
+            exit 1
+        fi
         successCard "配置Xray开机自启成功"
     elif [[ "${release}" == "alpine" ]]; then
         if ! installAlpineStartup "xray"; then
             errorCard "Xray OpenRC 模板提交失败"
             exit 1
         fi
-        bootStartup "xray"
+        if ! bootStartup "xray"; then
+            errorCard "Xray 开机自启配置失败"
+            exit 1
+        fi
     fi
 }
 
@@ -2064,15 +2076,24 @@ initSingBoxClients() {
 
 # 安装 Xray-core
 installXrayReality() {
+    local nginxWasRunning=false
     selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
-    unInstallSubscribe
+    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     totalProgress=6
     installTools 1
 
+    nginxRunning && nginxWasRunning=true
     coreInstallServiceAction "Nginx 服务停止失败，已取消 Xray Reality 安装" handleNginx stop || return 1
     if subscriptionWireGuardControlEnabled; then
-        refreshSubscriptionWireGuardNginxControl
+        if ! refreshSubscriptionWireGuardNginxControl; then
+            if [[ "${nginxWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleNginx start; then
+                errorCard "WireGuard Nginx 控制面刷新失败，且 Nginx 运行状态恢复失败"
+            else
+                errorCard "WireGuard Nginx 控制面刷新失败，已恢复原 Nginx 运行状态"
+            fi
+            return 1
+        fi
     fi
 
     # 安装 Xray
@@ -2093,7 +2114,7 @@ installSingBoxReality() {
 
     selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
-    unInstallSubscribe
+    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     totalProgress=6
     installTools 1
 
@@ -2167,7 +2188,7 @@ customXrayInstall() {
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
         protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
-        unInstallSubscribe
+        unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
         # checkBTPanel
         # check1Panel
         totalProgress=12
@@ -2271,7 +2292,7 @@ customSingBoxInstall() {
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
         protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
-        unInstallSubscribe
+        unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
         totalProgress=9
         installTools 1
         # 申请tls
@@ -2345,7 +2366,7 @@ selectCoreInstall() {
 # Xray-core 个性化安装
 xrayCoreInstall() {
     readLastInstallationConfig || return 1
-    unInstallSubscribe
+    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     # checkBTPanel
     # check1Panel
     selectCustomInstallType=
@@ -2389,7 +2410,7 @@ xrayCoreInstall() {
 # sing-box 全部安装
 singBoxInstall() {
     readLastInstallationConfig || return 1
-    unInstallSubscribe
+    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     # checkBTPanel
     # check1Panel
     selectCustomInstallType=

@@ -2344,6 +2344,10 @@ runUninstallPadmRootScopeRegression() {
             printf '%s:%s\n' "$1" "$2" >>"${serviceLog}"
             return 0
         }
+        systemctl() {
+            printf 'systemctl:%s\n' "$*" >>"${serviceLog}"
+            return 0
+        }
         cleanupSubscriptionWireGuardControlOnUninstall() { return 0; }
         cleanupFail2banManagedFilesOnUninstall() { return 0; }
         removePadmNginxConfigFragments() { return 0; }
@@ -4232,8 +4236,16 @@ runSingBoxServiceMainPidTemplateRegression() {
         padmCreateTempPath() { printf -v "$1" '%s' "$(mktemp "$2")"; }
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/cores.sh"
-        installSingBoxService 1 >/dev/null 2>&1 || true
+        installSingBoxService 1 >/dev/null 2>&1
         grep -q 'ExecReload=/bin/kill -HUP \$MAINPID' "${TMP_DIR}/sing-box.service"
+
+        bootStartup() { return 1; }
+        if (installSingBoxService 1 >/dev/null 2>&1); then
+            return 1
+        fi
+        if (installXrayService 1 >/dev/null 2>&1); then
+            return 1
+        fi
     )
 }
 

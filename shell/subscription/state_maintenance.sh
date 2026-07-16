@@ -163,7 +163,9 @@ resetSubscriptionGroupsStateMenu() {
         errorCard "${rollbackMessage}" "当前状态备份：${currentBackup}"
         return 1
     fi
-    subscriptionGroupsSecureStateFiles 2>/dev/null || true
+    if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
+        subscriptionGroupsSecureStateFiles 2>/dev/null || return 1
+    fi
     successCard "订阅状态已重建" "重建前备份：${currentBackup}"
 }
 

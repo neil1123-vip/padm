@@ -661,6 +661,28 @@ padmCleanupTempPaths() {
     exit "${status}"
 }
 
+readUserCrontabContent() {
+    local errorFile
+    local currentCrontab
+    local status
+
+    padmCreateTempPath errorFile "$(padmTmpFilePath "padm-crontab-read.XXXXXX")" || return 1
+    if currentCrontab=$(LC_ALL=C crontab -l 2>"${errorFile}"); then
+        :
+    else
+        status=$?
+        if grep -qiE "^no crontab for |^no crontab$|^crontab: can't open '[^']+': No such file or directory$" "${errorFile}"; then
+            currentCrontab=
+        else
+            cat "${errorFile}" >&2
+            padmRemoveCleanupPath "${errorFile}"
+            return "${status}"
+        fi
+    fi
+    padmRemoveCleanupPath "${errorFile}"
+    printf '%s\n' "${currentCrontab}"
+}
+
 installUserCrontabContent() {
     local tmpFile
 

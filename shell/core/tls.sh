@@ -397,7 +397,14 @@ installCronTLS() {
     if [[ -z "${btDomain}" ]]; then
         progressCard "$1" "添加定时维护证书"
         local historyCrontab
-        historyCrontab=$(crontab -l 2>/dev/null | sed '/padm/d;/acme.sh/d')
+        historyCrontab=$(readUserCrontabContent) || {
+            errorCard "读取现有定时任务失败，已取消添加证书维护任务"
+            exit 1
+        }
+        historyCrontab=$(sed '\|/etc/padm/install.sh RenewTLS|d' <<<"${historyCrontab}") || {
+            errorCard "整理现有定时任务失败，已取消添加证书维护任务"
+            exit 1
+        }
         if ! installUserCrontabContent "${historyCrontab}
 30 1 * * * /bin/bash /etc/padm/install.sh RenewTLS >> /etc/padm/crontab_tls.log 2>&1"; then
             errorCard "添加定时维护证书失败，已保留原定时任务"
@@ -416,7 +423,10 @@ installCronUpdateGeo() {
         fi
         progressCard "1" "添加定时更新 Geo 文件" "1"
         local historyCrontab
-        historyCrontab=$(crontab -l 2>/dev/null || true)
+        historyCrontab=$(readUserCrontabContent) || {
+            errorCard "读取现有定时任务失败，已取消添加 Geo 更新任务"
+            exit 1
+        }
         if ! installUserCrontabContent "${historyCrontab}
 35 1 * * * /bin/bash /etc/padm/install.sh UpdateGeo >> /etc/padm/crontab_tls.log 2>&1"; then
             errorCard "添加定时更新 Geo 文件失败，已保留原定时任务"
