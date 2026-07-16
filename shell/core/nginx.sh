@@ -867,7 +867,7 @@ ensureTraditionalTlsFallbackNginxConfig() {
         readInstallProtocolType
     fi
     if [[ -z "${currentHost:-}" || -z "${currentPath:-}" ]]; then
-        readConfigHostPathUUID
+        readConfigHostPathUUID || return 1
     fi
     if [[ -z "${currentPort:-}" ]]; then
         readCustomPort

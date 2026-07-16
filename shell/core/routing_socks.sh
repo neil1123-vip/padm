@@ -221,28 +221,29 @@ showSingBoxRoutingRules() {
             menuLine "$(uiStyle value "$(jq .outbounds[0] ${singBoxConfigPath}socks5_outbound.json)")"
         elif [[ "$1" == "socks5_02_inbound_route" && -f "${singBoxConfigPath}20_socks5_inbounds.json" ]]; then
             echoContent yellow "已安装 sing-box socks5全局入站分流"
-            menuLine "$(uiStyle warn "出站分流配置：")"
-            menuLine "$(uiStyle value "$(jq .outbounds[0] ${singBoxConfigPath}socks5_outbound.json)")"
+            menuLine "$(uiStyle warn "入站配置：")"
+            menuLine "$(uiStyle value "$(jq .inbounds[0] "${singBoxConfigPath}20_socks5_inbounds.json")")"
         fi
     fi
 }
 
 # Xray-core 分流规则
 showXrayRoutingRules() {
-    if [[ "${coreInstallType}" == "1" ]]; then
-        if [[ -f "${configPath}09_routing.json" ]]; then
-            jq ".routing.rules[]|select(.outboundTag==\"$1\")" "${configPath}09_routing.json"
-
-            echoContent yellow "\n已安装 xray-core socks5全局出站分流"
-            menuLine "$(uiStyle warn "出站分流配置：")"
-            menuLine "$(uiStyle value "$(jq .outbounds[0].settings.servers[0] ${configPath}socks5_outbound.json)")"
-
-        elif [[ "$1" == "socks5_outbound" && -f "${configPath}socks5_outbound.json" ]]; then
-            echoContent yellow "\n已安装 xray-core socks5全局出站分流"
-            menuLine "$(uiStyle warn "出站分流配置：")"
-            menuLine "$(uiStyle value "$(jq .outbounds[0].settings.servers[0] ${configPath}socks5_outbound.json)")"
-        fi
+    local routingFile="${configPath}09_routing.json"
+    local outboundFile="${configPath}socks5_outbound.json"
+    if [[ "${coreInstallType}" != "1" || "$1" != "socks5_outbound" || ! -f "${outboundFile}" ]] ||
+        ! jq -e --arg tag "$1" '.outbounds[]? | select(.tag == $tag and .protocol == "socks")' "${outboundFile}" >/dev/null 2>&1; then
+        return 0
     fi
+    if [[ -f "${routingFile}" ]]; then
+        jq -e --arg tag "$1" '.routing.rules[]? | select(.outboundTag == $tag)' "${routingFile}" >/dev/null 2>&1 || return 0
+        jq --arg tag "$1" '.routing.rules[]? | select(.outboundTag == $tag)' "${routingFile}"
+        echoContent yellow "\n已安装 xray-core socks5出站分流"
+    else
+        echoContent yellow "\n已安装 xray-core socks5全局出站分流"
+    fi
+    menuLine "$(uiStyle warn "出站分流配置：")"
+    menuLine "$(uiStyle value "$(jq .outbounds[0].settings.servers[0] "${outboundFile}")")"
 }
 
 stopSocks5SingBox() {
@@ -389,24 +390,12 @@ writeSocks5InboundConfig() {
     local targetPath=$1
     local listenPort=$2
     local uuid=$3
-    writeRoutingJsonConfig "${targetPath}" <<EOF || return 1
-{
-    "inbounds":[
-        {
-          "type": "socks",
-          "listen":"::",
-          "listen_port":${listenPort},
-          "tag":"socks5_inbound",
-          "users":[
-            {
-                  "username": "${uuid}",
-                  "password": "${uuid}"
-            }
-          ]
-        }
-    ]
-}
-EOF
+    local inboundConfig
+    inboundConfig=$(jq -n \
+      --argjson listenPort "${listenPort}" \
+      --arg uuid "${uuid}" \
+      '{inbounds:[{type:"socks", listen:"::", listen_port:$listenPort, tag:"socks5_inbound", users:[{username:$uuid, password:$uuid}]}]}') || return 1
+    writeRoutingJsonConfig "${targetPath}" <<<"${inboundConfig}"
 }
 
 # Socks5 入站配置
@@ -547,21 +536,14 @@ setSocks5Outbound() {
     fi
     echo
     if [[ -n "${singBoxConfigPath}" ]]; then
-        writeRoutingJsonConfig "${singBoxConfigPath}socks5_outbound.json" <<EOF || return 1
-{
-    "outbounds":[
-        {
-          "type": "socks",
-          "tag":"socks5_outbound",
-          "server": "${socks5RoutingOutboundIP}",
-          "server_port": ${socks5RoutingOutboundPort},
-          "version": "5",
-          "username":"${socks5RoutingOutboundUserName}",
-          "password":"${socks5RoutingOutboundPassword}"
-        }
-    ]
-}
-EOF
+        local singBoxOutbound
+        singBoxOutbound=$(jq -n \
+          --arg server "${socks5RoutingOutboundIP}" \
+          --argjson serverPort "${socks5RoutingOutboundPort}" \
+          --arg username "${socks5RoutingOutboundUserName}" \
+          --arg password "${socks5RoutingOutboundPassword}" \
+          '{outbounds:[{type:"socks", tag:"socks5_outbound", server:$server, server_port:$serverPort, version:"5", username:$username, password:$password}]}') || return 1
+        writeRoutingJsonConfig "${singBoxConfigPath}socks5_outbound.json" <<<"${singBoxOutbound}" || return 1
     fi
     if [[ "${coreInstallType}" == "1" ]]; then
         addXrayOutbound socks5_outbound || return 1

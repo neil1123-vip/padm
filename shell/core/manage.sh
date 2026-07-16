@@ -2559,7 +2559,7 @@ manageRealityTarget() {
     local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary
     while true; do
     readInstallProtocolType
-    readConfigHostPathUUID
+    readConfigHostPathUUID || return 1
     readCustomPort
     readSingBoxConfig
     if [[ -n "${realityTargetHost:-}" ]]; then
@@ -2653,7 +2653,7 @@ regenerateRealityProfile() {
 
 manageReality() {
     readInstallProtocolType
-    readConfigHostPathUUID
+    readConfigHostPathUUID || return 1
     readCustomPort
     readSingBoxConfig
 

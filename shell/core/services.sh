@@ -179,29 +179,33 @@ nginxRuntimeRequired() {
 # 操作 Nginx
 handleNginx() {
     local nginxErrorLog="${PADM_NGINX_ERROR_LOG:-/etc/padm/nginx_error.log}"
+    local selinuxRetryDone=false
 
     if [[ "$1" == "start" ]] && nginxRuntimeRequired && ! nginxRunning; then
-        if [[ "${release}" == "alpine" ]]; then
-            rc-service nginx start 2>"${nginxErrorLog}"
-        elif nginxServiceInstalled; then
-            systemctl start nginx 2>"${nginxErrorLog}"
-        else
-            nginx 2>"${nginxErrorLog}"
-        fi
+        while true; do
+            if [[ "${release}" == "alpine" ]]; then
+                rc-service nginx start 2>"${nginxErrorLog}"
+            elif nginxServiceInstalled; then
+                systemctl start nginx 2>"${nginxErrorLog}"
+            else
+                nginx 2>"${nginxErrorLog}"
+            fi
 
-        sleep 0.5
+            sleep 0.5
 
-        if ! nginxRunning; then
+            if nginxRunning; then
+                successCard "Nginx启动成功"
+                return 0
+            fi
             nginxStartFailureCard "请查看下方日志" "如无法处理，请将日志反馈给开发者"
             nginx -t 2>&1 || true
-            if grep -q "journalctl -xe" <"${nginxErrorLog}"; then
-                updateSELinuxHTTPPortT
+            if [[ "${selinuxRetryDone}" == "false" ]] && grep -q "journalctl -xe" <"${nginxErrorLog}" && updateSELinuxHTTPPortT; then
+                selinuxRetryDone=true
+                continue
             fi
             [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
             exit 0
-        fi
-        successCard "Nginx启动成功"
-        return 0
+        done
 
     elif nginxRunning && [[ "$1" == "stop" ]]; then
 

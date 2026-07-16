@@ -395,9 +395,9 @@ subscriptionSyncAppendProtocolUser() {
     fi
     currentClients=$(jq -c "${userPath} // []" "${file}") || return 1
     if [[ "${coreInstallType}" == "2" ]]; then
-        clients=$(initSingBoxClients "${protocolId}" "${uuid}" "${accountName}")
+        clients=$(initSingBoxClients "${protocolId}" "${uuid}" "${accountName}") || return 1
     else
-        clients=$(initXrayClients "${protocolId}" "${uuid}" "${accountName}")
+        clients=$(initXrayClients "${protocolId}" "${uuid}" "${accountName}") || return 1
     fi
     subscriptionSyncSetUsersInFile "${file}" "${userPath}" "${clients}"
 }
@@ -1059,7 +1059,11 @@ runSubscriptionGroupSync() {
     ensureSubscriptionGroupsState || return 1
     readInstallType
     readInstallProtocolType
-    readConfigHostPathUUID
+    readConfigHostPathUUID || {
+        failures=$(jq '. + ["本机配置读取失败"]' <<<"${failures}")
+        subscriptionSyncMarkResult partial "${failures}" || true
+        return 1
+    }
 
     if subscriptionGroupQuotaAutoApplyEnabled; then
         if collectSubscriptionTraffic; then

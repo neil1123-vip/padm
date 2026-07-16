@@ -1934,64 +1934,70 @@ initXrayClients() {
     local type=",$1,"
     local newUUID=${2:-}
     local newEmail=${3:-}
+    local clientRows user uuid email
+    jq -e 'type == "array"' <<<"${currentClients}" >/dev/null 2>&1 || return 1
     if [[ -n "${newUUID}" ]]; then
-        currentClients=$(appendJsonObject "${currentClients}" '{id:$uuid,flow:"xtls-rprx-vision",email:$email}' --arg uuid "${newUUID}" --arg email "${newEmail}-VLESS_TCP/TLS_Vision")
+        currentClients=$(appendJsonObject "${currentClients}" '{id:$uuid,flow:"xtls-rprx-vision",email:$email}' --arg uuid "${newUUID}" --arg email "${newEmail}-VLESS_TCP/TLS_Vision") || return 1
     fi
     local users=
     users=[]
-    while read -r user; do
-        uuid=$(echo "${user}" | jq -r .id//.uuid)
-        email=$(stripClientNameSuffix "$(echo "${user}" | jq -r .email//.name//.username)")
+    clientRows=$(jq -c '.[]' <<<"${currentClients}") || return 1
+    while IFS= read -r user; do
+        [[ -n "${user}" ]] || continue
+        uuid=$(jq -r '.id // .uuid // empty' <<<"${user}") || return 1
+        email=$(jq -r '.email // .name // .username // empty' <<<"${user}") || return 1
+        [[ -n "${uuid}" && -n "${email}" ]] || return 1
+        email=$(stripClientNameSuffix "${email}") || return 1
         if protocolSelectionIncludes "${type}" 27; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,flow:"xtls-rprx-vision",email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_TCP/TLS_Vision")
+            users=$(appendJsonObject "${users}" '{id:$uuid,flow:"xtls-rprx-vision",email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_TCP/TLS_Vision") || return 1
         fi
 
         # VLESS WS
         if protocolSelectionIncludes "${type}" 21; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_WS")
+            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_WS") || return 1
         fi
         # VLESS XHTTP
         if protocolSelectionIncludes "${type}" 2; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_Reality_XHTTP")
+            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_Reality_XHTTP") || return 1
         fi
         # Trojan gRPC
         if protocolSelectionIncludes "${type}" 25; then
-            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_gRPC")
+            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_gRPC") || return 1
         fi
         # VMess WS
         if protocolSelectionIncludes "${type}" 22; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_WS")
+            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_WS") || return 1
         fi
         # VMess HTTPUpgrade
         if protocolSelectionIncludes "${type}" 23; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_HTTPUpgrade")
+            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_HTTPUpgrade") || return 1
         fi
 
         # Trojan TCP
         if protocolSelectionIncludes "${type}" 28; then
-            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_TCP_direct")
+            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_TCP_direct") || return 1
         fi
 
         if protocolSelectionIncludes "${type}" 29; then
-            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-trojan_tcp")
+            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-trojan_tcp") || return 1
         fi
 
         # VLESS gRPC
         if protocolSelectionIncludes "${type}" 24; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_grpc")
+            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_grpc") || return 1
         fi
 
         # VLESS Reality Vision
         if protocolSelectionIncludes "${type}" 1; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,flow:"xtls-rprx-vision"}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_vision")
+            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,flow:"xtls-rprx-vision"}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_vision") || return 1
         fi
 
         # VLESS Reality gRPC
         if protocolSelectionIncludes "${type}" 26; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_grpc")
+            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_grpc") || return 1
         fi
-    done < <(echo "${currentClients}" | jq -c '.[]')
-    echo "${users}"
+    done <<<"${clientRows}"
+    printf '%s\n' "${users}"
 }
 
 # 读取 sing-box 用户数据并初始化
@@ -1999,78 +2005,84 @@ initSingBoxClients() {
     local type=",$1,"
     local newUUID=${2:-}
     local newName=${3:-}
+    local clientRows user uuid name
 
+    jq -e 'type == "array"' <<<"${currentClients}" >/dev/null 2>&1 || return 1
     if [[ -n "${newUUID}" ]]; then
-        currentClients=$(appendJsonObject "${currentClients}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${newUUID}" --arg name "${newName}-VLESS_TCP/TLS_Vision")
+        currentClients=$(appendJsonObject "${currentClients}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${newUUID}" --arg name "${newName}-VLESS_TCP/TLS_Vision") || return 1
     fi
     local users=
     users=[]
-    while read -r user; do
-        uuid=$(echo "${user}" | jq -r .uuid//.id//.password)
-        name=$(stripClientNameSuffix "$(echo "${user}" | jq -r .name//.email//.username)")
+    clientRows=$(jq -c '.[]' <<<"${currentClients}") || return 1
+    while IFS= read -r user; do
+        [[ -n "${user}" ]] || continue
+        uuid=$(jq -r '.uuid // .id // .password // empty' <<<"${user}") || return 1
+        name=$(jq -r '.name // .email // .username // empty' <<<"${user}") || return 1
+        [[ -n "${uuid}" && -n "${name}" ]] || return 1
+        name=$(stripClientNameSuffix "${name}") || return 1
         # VLESS Vision
         if protocolSelectionIncludes "${type}" 27; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_TCP/TLS_Vision")
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_TCP/TLS_Vision") || return 1
         fi
         # VLESS WS
         if protocolSelectionIncludes "${type}" 21; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_WS")
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_WS") || return 1
         fi
         # VMess WS
         if protocolSelectionIncludes "${type}" 22; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_WS")
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_WS") || return 1
         fi
 
         # Trojan TCP
         if protocolSelectionIncludes "${type}" 28; then
-            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-Trojan_TCP")
+            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-Trojan_TCP") || return 1
         fi
 
         # Shadowsocks
         if protocolSelectionIncludes "${type}" 30; then
             local ssPassword
             ssPassword=$(shadowsocks2022KeyFromSeed "user:${uuid}") || return 1
-            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${ssPassword}" --arg name "${name}-shadowsocks")
+            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${ssPassword}" --arg name "${name}-shadowsocks") || return 1
         fi
 
         # VLESS Reality Vision
         if protocolSelectionIncludes "${type}" 1; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_Vision")
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_Vision") || return 1
         fi
         # VLESS Reality gRPC
         if protocolSelectionIncludes "${type}" 26; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_gPRC")
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_gPRC") || return 1
         fi
 
         # Hysteria2
         if protocolSelectionIncludes "${type}" 3; then
-            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-singbox_hysteria2")
+            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-singbox_hysteria2") || return 1
         fi
 
         # TUIC
         if protocolSelectionIncludes "${type}" 31; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,password:$password,name:$name}' --arg uuid "${uuid}" --arg password "${uuid}" --arg name "${name}-singbox_tuic")
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,password:$password,name:$name}' --arg uuid "${uuid}" --arg password "${uuid}" --arg name "${name}-singbox_tuic") || return 1
         fi
 
         # Naive
         if protocolSelectionIncludes "${type}" 5; then
-            users=$(appendJsonObject "${users}" '{password:$password,username:$username}' --arg password "${uuid}" --arg username "${name}-singbox_naive")
+            users=$(appendJsonObject "${users}" '{password:$password,username:$username}' --arg password "${uuid}" --arg username "${name}-singbox_naive") || return 1
         fi
         # VMess HTTPUpgrade
         if protocolSelectionIncludes "${type}" 23; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_HTTPUpgrade")
+            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_HTTPUpgrade") || return 1
         fi
         # AnyTLS
         if protocolSelectionIncludes "${type}" 4; then
-            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-anytls")
+            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-anytls") || return 1
         fi
 
         if protocolSelectionIncludes "${type}" 201; then
-            users=$(appendJsonObject "${users}" '{username:$username,password:$password}' --arg username "${uuid}" --arg password "${uuid}")
+            users=$(appendJsonObject "${users}" '{username:$username,password:$password}' --arg username "${uuid}" --arg password "${uuid}") || return 1
         fi
 
-    done < <(echo "${currentClients}" | jq -c '.[]')
-    echo "${users}"
+    done <<<"${clientRows}"
+    printf '%s\n' "${users}"
 }
 
 
@@ -2094,10 +2106,10 @@ installXrayReality() {
         fi
     fi
 
-    if [[ -z "${installFailure}" ]] && ! installXray 2 false; then
+    if [[ -z "${installFailure}" ]] && ! (installXray 2 false); then
         installFailure="Xray 安装失败"
     fi
-    if [[ -z "${installFailure}" ]] && ! installXrayService 3; then
+    if [[ -z "${installFailure}" ]] && ! (installXrayService 3); then
         installFailure="Xray 服务安装失败"
     fi
     if [[ -z "${installFailure}" ]] && ! initXrayConfig custom 4; then

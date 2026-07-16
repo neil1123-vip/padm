@@ -568,7 +568,7 @@ ensureSubscriptionWireGuardNginx() {
     if command -v nginx >/dev/null 2>&1; then
         return 0
     fi
-    installNginxTools || return 1
+    (installNginxTools) || return 1
 }
 
 refreshSubscriptionWireGuardNginxControl() {
@@ -812,11 +812,6 @@ initSubscriptionWireGuardControlled() {
         errorCard "WireGuard 被控地址就绪失败"
         return 1
     }
-    installSubscriptionControlService || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "被控控制服务安装失败" || return 1
-        errorCard "被控控制服务安装失败"
-        return 1
-    }
     nginxTarget=$(subscriptionWireGuardNginxConfigFile) || {
         subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置路径异常" || return 1
         errorCard "WireGuard Nginx 控制面配置路径异常"
@@ -845,6 +840,12 @@ initSubscriptionWireGuardControlled() {
         SERVICE_ACTIONS="${previousServiceActions}"
         subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控配置未落地" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard 被控配置未落地"
+        return 1
+    }
+    installSubscriptionControlService || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "被控控制服务安装失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+        errorCard "被控控制服务安装失败"
         return 1
     }
     padmRemoveCleanupPath "${nginxBackupDir}"

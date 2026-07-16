@@ -192,30 +192,15 @@ EOF
     fi
     # socks5 outbound
     if [[ "${tag}" == *socks5* ]]; then
-        writeRoutingJsonConfig "${xrayConfigPath}${tag}.json" <<EOF || return 1
-{
-  "outbounds": [
-    {
-      "protocol": "socks",
-      "tag": "${tag}",
-      "settings": {
-        "servers": [
-          {
-            "address": "${socks5RoutingOutboundIP}",
-            "port": ${socks5RoutingOutboundPort},
-            "users": [
-              {
-                "user": "${socks5RoutingOutboundUserName}",
-                "pass": "${socks5RoutingOutboundPassword}"
-              }
-            ]
-          }
-        ]
-      }
-    }
-  ]
-}
-EOF
+        local socks5Outbound
+        socks5Outbound=$(jq -n \
+          --arg tag "${tag}" \
+          --arg address "${socks5RoutingOutboundIP}" \
+          --argjson port "${socks5RoutingOutboundPort}" \
+          --arg user "${socks5RoutingOutboundUserName}" \
+          --arg pass "${socks5RoutingOutboundPassword}" \
+          '{outbounds:[{protocol:"socks", tag:$tag, settings:{servers:[{address:$address, port:$port, users:[{user:$user, pass:$pass}]}]}}]}') || return 1
+        writeRoutingJsonConfig "${xrayConfigPath}${tag}.json" <<<"${socks5Outbound}" || return 1
     fi
     if [[ "${tag}" == *wireguard_out_IPv4* ]]; then
         writeRoutingJsonConfig "${xrayConfigPath}${tag}.json" <<EOF || return 1

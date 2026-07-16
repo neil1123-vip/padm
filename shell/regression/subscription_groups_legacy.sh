@@ -1561,6 +1561,7 @@ runSocks5RoutingFailureReturnRegression() (
     local reloadMarker="${root}/reload"
     local stopMarker="${root}/stop"
     local singBoxPathMarker="${root}/sing-box-path"
+    local statusLog="${root}/status.log"
     local inboundChoice=1
     local menuChoice=1
     local uninstallChoice=1
@@ -1571,6 +1572,7 @@ runSocks5RoutingFailureReturnRegression() (
     configPath="${root}/xray/"
     singBoxConfigPath=
     coreInstallType=1
+    eval "$(declare -f addXrayOutbound | sed '1s/^addXrayOutbound/originalAddXrayOutbound/')"
 
     errorCard() { return 0; }
     warnCard() { return 0; }
@@ -1591,8 +1593,20 @@ runSocks5RoutingFailureReturnRegression() (
                 printf -v "$3" '1080'
             fi
             ;;
-        socks5_outbound_username) printf -v "$3" 'user' ;;
-        socks5_outbound_password) printf -v "$3" 'pass' ;;
+        socks5_outbound_username)
+            if [[ "${mode}" == "escaped-credentials" ]]; then
+                printf -v "$3" '%s' 'us"er\name'
+            else
+                printf -v "$3" 'user'
+            fi
+            ;;
+        socks5_outbound_password)
+            if [[ "${mode}" == "escaped-credentials" ]]; then
+                printf -v "$3" '%s' 'pa"ss\word'
+            else
+                printf -v "$3" 'pass'
+            fi
+            ;;
         socks5_outbound_domains) printf -v "$3" 'example.com' ;;
         *) printf -v "$3" '' ;;
         esac
@@ -1635,6 +1649,42 @@ runSocks5RoutingFailureReturnRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${outboundMarker}" ]]
+
+    mode=escaped-credentials
+    singBoxConfigPath="${root}/sing-box/"
+    addXrayOutbound() { originalAddXrayOutbound "$@"; }
+    if ! setSocks5Outbound >"${statusLog}" 2>&1; then
+        cat "${statusLog}" >&2
+        return 1
+    fi
+    jq -e --arg username 'us"er\name' --arg password 'pa"ss\word' '
+      .outbounds[0].username == $username and .outbounds[0].password == $password
+    ' "${singBoxConfigPath}socks5_outbound.json" >/dev/null
+    jq -e --arg username 'us"er\name' --arg password 'pa"ss\word' '
+      .outbounds[0].settings.servers[0].users[0].user == $username and
+      .outbounds[0].settings.servers[0].users[0].pass == $password
+    ' "${configPath}socks5_outbound.json" >/dev/null
+
+    echoContent() { printf '%s\n' "$*" >>"${statusLog}"; }
+    menuLine() { printf '%s\n' "$*" >>"${statusLog}"; }
+    printf '{"routing":{"rules":[{"type":"field","outboundTag":"z_direct_outbound"}]}}\n' >"${configPath}09_routing.json"
+    : >"${statusLog}"
+    showXrayRoutingRules socks5_outbound
+    [[ ! -s "${statusLog}" ]]
+    printf '{"routing":{"rules":[{"type":"field","outboundTag":"socks5_outbound"}]}}\n' >"${configPath}09_routing.json"
+    showXrayRoutingRules socks5_outbound >/dev/null
+    grep -q '已安装 xray-core socks5出站分流' "${statusLog}"
+
+    rm -f "${singBoxConfigPath}socks5_02_inbound_route.json"
+    writeSocks5InboundConfig "${singBoxConfigPath}20_socks5_inbounds.json" 1081 'inbound-secret'
+    : >"${statusLog}"
+    showSingBoxRoutingRules socks5_02_inbound_route
+    grep -q 'inbound-secret' "${statusLog}"
+    singBoxConfigPath=
+    addXrayOutbound() {
+        printf 'outbound:%s\n' "$1" >>"${outboundMarker}"
+        [[ "${mode}" != "outbound-fail" ]]
+    }
 
     mode=uninstall-fail
     rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
@@ -5144,8 +5194,16 @@ runCoreInstallServiceActionFailureRegression() (
         [[ "${mode}" == "redirect-fail" ]] && return 1
         return 0
     }
-    installXray() { printf 'installXray:%s\n' "$*" >>"${callLog}"; return 0; }
-    installXrayService() { printf 'installXrayService:%s\n' "$*" >>"${callLog}"; return 0; }
+    installXray() {
+        printf 'installXray:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" == "xray-install-exit" ]] && exit 1
+        return 0
+    }
+    installXrayService() {
+        printf 'installXrayService:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" == "xray-service-exit" ]] && exit 1
+        return 0
+    }
     initXrayConfig() {
         printf 'initXrayConfig:%s\n' "$*" >>"${callLog}"
         [[ "${mode}" != "xray-config-fail" ]]
@@ -5250,6 +5308,27 @@ $1:restart"
     [[ "${SERVICE_ACTIONS}" == "existing:start" ]]
     grep -q 'Xray Reality 配置初始化失败，已恢复原 Nginx 运行状态' "${errorLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    for mode in xray-install-exit xray-service-exit; do
+        resetInstallServiceFixture "${mode}"
+        set +e
+        installXrayReality >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -qx 'nginx:start:true' "${serviceLog}"
+        grep -qx 'wg-refresh' "${callLog}"
+        grep -qx 'queueRestart:nginx' "${callLog}"
+        grep -q '^installXray:' "${callLog}"
+        if [[ "${mode}" == "xray-service-exit" ]]; then
+            grep -q '^installXrayService:' "${callLog}"
+        else
+            ! grep -q '^installXrayService:' "${callLog}"
+        fi
+        [[ "${nginxRuntimeState}" == "true" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    done
 
     resetInstallServiceFixture nginx-start-fail
     set +e
@@ -6565,10 +6644,17 @@ runNginxServiceFailureRegression() (
 #!/usr/bin/env bash
 case "$1" in
 start)
+    printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS:-/dev/null}"
+    if [[ "${PADM_FAKE_SYSTEMCTL_RETRY_ONCE:-false}" == "true" && ! -e "${PADM_FAKE_SYSTEMCTL_RETRY_MARKER}" ]]; then
+        : >"${PADM_FAKE_SYSTEMCTL_RETRY_MARKER}"
+        printf 'See "journalctl -xe" for details\n' >&2
+        exit 1
+    fi
     [[ "${PADM_FAKE_SYSTEMCTL_START_RC:-0}" == "0" ]] || exit "${PADM_FAKE_SYSTEMCTL_START_RC}"
     printf '%s\n' "${PADM_FAKE_SYSTEMCTL_START_STATE:-true}" >"${PADM_FAKE_NGINX_STATE_FILE}"
     ;;
 stop)
+    printf '%s\n' "$*" >>"${PADM_FAKE_SYSTEMCTL_ACTIONS:-/dev/null}"
     [[ "${PADM_FAKE_SYSTEMCTL_STOP_RC:-0}" == "0" ]] || exit "${PADM_FAKE_SYSTEMCTL_STOP_RC}"
     printf '%s\n' "${PADM_FAKE_SYSTEMCTL_STOP_STATE:-false}" >"${PADM_FAKE_NGINX_STATE_FILE}"
     ;;
@@ -6606,7 +6692,25 @@ SH
     source "${PROJECT_ROOT}/shell/core/protocols.sh"
     source "${PROJECT_ROOT}/shell/core/services.sh"
     errorCard() { return 0; }
-    updateSELinuxHTTPPortT() { return 0; }
+    export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
+    eval "$(declare -f updateSELinuxHTTPPortT | sed '1s/^updateSELinuxHTTPPortT/originalUpdateSELinuxHTTPPortT/')"
+    journalctl() { printf '31300 Permission denied\n'; }
+    getenforce() { printf 'Enforcing\n'; }
+    semanage() {
+        if [[ "$1" == "port" && "$2" == "-l" ]]; then
+            printf 'http_port_t tcp 80\n'
+            return 0
+        fi
+        return 1
+    }
+    if originalUpdateSELinuxHTTPPortT >/dev/null 2>&1; then
+        return 1
+    fi
+    unset -f journalctl getenforce semanage
+    updateSELinuxHTTPPortT() {
+        printf 'update\n' >>"${serviceTmp}/selinux-update"
+        return 0
+    }
     protocolSelectionSkipsNginx() { return 1; }
     nginxServiceInstalled() { return 0; }
     padmReadProcExe() {
@@ -6623,6 +6727,8 @@ SH
     SERVICE_QUEUE_ALLOW_FAILURE=true
     export PADM_FAKE_NGINX_STATE_FILE="${serviceTmp}/nginx-running"
     export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
+    export PADM_FAKE_SYSTEMCTL_ACTIONS="${serviceTmp}/systemctl-actions"
+    export PADM_FAKE_SYSTEMCTL_RETRY_MARKER="${serviceTmp}/selinux-retry"
 
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
@@ -6657,6 +6763,18 @@ SH
     [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
     protocolSelectionSkipsNginx() { return 1; }
     subscriptionWireGuardControlEnabled() { return 1; }
+
+    : >"${PADM_FAKE_SYSTEMCTL_ACTIONS}"
+    rm -f "${PADM_FAKE_SYSTEMCTL_RETRY_MARKER}"
+    export PADM_FAKE_SYSTEMCTL_RETRY_ONCE=true
+    printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    if ! handleNginx start >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
+    [[ "$(grep -c '^start nginx$' "${PADM_FAKE_SYSTEMCTL_ACTIONS}")" == "2" ]]
+    [[ "$(grep -c '^update$' "${serviceTmp}/selinux-update")" == "1" ]]
+    unset PADM_FAKE_SYSTEMCTL_RETRY_ONCE
 
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     SERVICE_ACTIONS=
@@ -8660,11 +8778,13 @@ SH
     }
     installSubscriptionControlService() {
         controlCalls=$((controlCalls + 1))
+        printf '%s:control\n' "${mode}" >>"${serviceLog}"
         [[ "${mode}" == "control-fail" ]] && return 1
         return 0
     }
     bootStartup() {
         bootCalls=$((bootCalls + 1))
+        printf '%s:boot\n' "${mode}" >>"${serviceLog}"
         [[ "${mode}" == "boot-fail" ]] && return 1
         return 0
     }
@@ -8699,7 +8819,7 @@ SH
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${writeCalls}" == "1" ]]
-    [[ "${controlCalls}" == "1" ]]
+    [[ "${controlCalls}" == "0" ]]
     [[ "${bootCalls}" == "1" ]]
     grep -qx 'reload:stop:true' "${serviceLog}"
     grep -qx 'reload:start:true' "${serviceLog}"
@@ -8765,10 +8885,16 @@ SH
         set -e
         [[ "${rc}" == "1" ]]
         [[ "${writeCalls}" == "1" ]]
-        [[ "${controlCalls}" == "1" ]]
         if [[ "${mode}" == "control-fail" ]]; then
-            [[ "${bootCalls}" == "0" ]]
+            [[ "${controlCalls}" == "1" ]]
+            [[ "${bootCalls}" == "1" ]]
+            awk '
+                $0 == "control-fail:start:true" { start = NR }
+                $0 == "control-fail:control" { control = NR }
+                END { exit !(start && control && start < control) }
+            ' "${serviceLog}"
         else
+            [[ "${controlCalls}" == "0" ]]
             [[ "${bootCalls}" == "1" ]]
         fi
         grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
@@ -13356,7 +13482,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         printf 'private-key\n' >"$(subscriptionWireGuardPrivateKeyFile)"
         printf 'public-key\n' >"$(subscriptionWireGuardPublicKeyFile)"
     }
-    subscriptionWireGuardPublicKey() { printf 'public-key\n'; }
+    subscriptionWireGuardPublicKey() { printf '%s\n' "${validPublicKey:-MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=}"; }
     writeSubscriptionWireGuardConfig() {
         mkdir -p "$(dirname "$(subscriptionWireGuardConfigFile)")"
         printf 'Address = %s\n' "$(subscriptionWireGuardReadState | jq -r '.address')" >"$(subscriptionWireGuardConfigFile)"
@@ -13366,6 +13492,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         [[ "${wireGuardApplyShouldFail}" == "true" ]] && return 1
         writeSubscriptionWireGuardConfig
     }
+    subscriptionWireGuardWaitForAddress() { return 0; }
     eval "$(declare -f subscriptionWireGuardWriteState | sed '1s/^subscriptionWireGuardWriteState/originalSubscriptionWireGuardWriteState/')"
     subscriptionWireGuardWriteState() {
         if [[ "${restoreStateWriteShouldFail}" == "true" && "${*: -1}" == '$previousState' ]]; then
@@ -13497,6 +13624,20 @@ SH
         PATH="${oldPath}"
         grep -qxF 'old config' "${nginxTarget}"
         ! regressionFindHasMatches "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \)
+
+        wireGuardMenuResetFixture
+        refreshControlShouldFail=true
+        resetMenuActions
+        if initSubscriptionWireGuardControlled <<<"" >/dev/null 2>&1; then
+            refreshControlShouldFail=
+            return 1
+        fi
+        refreshControlShouldFail=
+        assertMenuAction refreshSubscriptionWireGuardNginxControl
+        if assertMenuAction installSubscriptionControlService; then
+            return 1
+        fi
+        subscriptionWireGuardReadState | jq -e '.role == "uninitialized" and .enabled == false' >/dev/null
     fi
 
     if wireGuardMenuPartSelected peer-add-update; then

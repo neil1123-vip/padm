@@ -454,25 +454,24 @@ nginxBlog() {
 
 # 更新 SELinux http_port_t 端口
 updateSELinuxHTTPPortT() {
+    local nginxErrorLog="${PADM_NGINX_ERROR_LOG:-/etc/padm/nginx_error.log}"
+    local semanagePorts port
 
-    $(find /usr/bin /usr/sbin | grep -w journalctl) -xe >/etc/padm/nginx_error.log 2>&1
+    command -v journalctl >/dev/null 2>&1 || return 1
+    command -v semanage >/dev/null 2>&1 || return 1
+    command -v getenforce >/dev/null 2>&1 || return 1
+    [[ "$(getenforce)" == "Enforcing" ]] || return 1
+    journalctl -xe >"${nginxErrorLog}" 2>&1 || return 1
+    grep -E "31300|31302" <"${nginxErrorLog}" | grep -q "Permission denied" || return 1
 
-    if find /usr/bin /usr/sbin | grep -q -w semanage && find /usr/bin /usr/sbin | grep -q -w getenforce && grep -E "31300|31302" </etc/padm/nginx_error.log | grep -q "Permission denied"; then
-        errorCard "检查SELinux端口是否开放"
-        if ! $(find /usr/bin /usr/sbin | grep -w semanage) port -l | grep http_port | grep -q 31300; then
-            $(find /usr/bin /usr/sbin | grep -w semanage) port -a -t http_port_t -p tcp 31300
-            successCard "http_port_t 31300 端口开放成功"
+    errorCard "检查SELinux端口是否开放"
+    semanagePorts=$(semanage port -l) || return 1
+    for port in 31300 31302; do
+        if ! grep '^http_port_t' <<<"${semanagePorts}" | grep -Eq "(^|[[:space:],])${port}([[:space:],]|$)"; then
+            semanage port -a -t http_port_t -p tcp "${port}" || return 1
+            successCard "http_port_t ${port} 端口开放成功"
         fi
-
-        if ! $(find /usr/bin /usr/sbin | grep -w semanage) port -l | grep http_port | grep -q 31302; then
-            $(find /usr/bin /usr/sbin | grep -w semanage) port -a -t http_port_t -p tcp 31302
-            successCard "http_port_t 31302 端口开放成功"
-        fi
-        handleNginx start
-
-    else
-        exit 0
-    fi
+    done
 }
 
 # 检查 wget 进度显示支持

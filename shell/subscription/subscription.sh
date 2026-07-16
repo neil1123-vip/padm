@@ -356,16 +356,16 @@ EOF
                 "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR:-订阅 Nginx 配置校验失败}" || true
             return 1
         fi
-        if ! installSubscriptionControlService; then
-            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "订阅控制服务安装失败" || true
-            return 1
-        fi
         if ! bootStartup nginx; then
             rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "Nginx 开机自启配置失败" || true
             return 1
         fi
         if ! runSubscribeNginxAction stop || ! runSubscribeNginxAction start; then
             rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "订阅 Nginx 服务重载失败" || true
+            return 1
+        fi
+        if ! installSubscriptionControlService; then
+            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "订阅控制服务安装失败" || true
             return 1
         fi
         padmRemoveCleanupPath "${installBackupDir}"

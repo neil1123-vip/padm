@@ -1776,6 +1776,29 @@ runSubscriptionControlServiceInstallRegression() (
     export PADM_CONTROL_HEALTH_TIMEOUT=0.05
     sleep() { return 0; }
 
+    (
+        command() {
+            if [[ "$1" == "-v" && "$2" == "python3" ]]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        if installSubscriptionControlService >/dev/null 2>&1; then
+            return 1
+        fi
+    )
+    (
+        command() {
+            if [[ "$1" == "-v" && "$2" == "systemctl" ]]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        if installSubscriptionControlService >/dev/null 2>&1; then
+            return 1
+        fi
+    )
+
     if [[ "${runSuccessSection}" == "true" || "${runSystemctlFailSection}" == "true" || "${runHealthFailSection}" == "true" ]]; then
         PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/success"
         mkdir -p "${PADM_SUBSCRIPTION_GROUPS_DIR}"

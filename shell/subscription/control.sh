@@ -885,8 +885,13 @@ installSubscriptionControlService() {
     local serviceWasActive=false
     local serviceWasEnabled=false
     SUBSCRIPTION_CONTROL_INSTALL_ERROR=
-    if ! command -v python3 >/dev/null 2>&1 || ! command -v systemctl >/dev/null 2>&1; then
-        return 0
+    if ! command -v python3 >/dev/null 2>&1; then
+        errorCard "订阅控制服务缺少 python3"
+        return 1
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        errorCard "订阅控制服务需要 systemd"
+        return 1
     fi
     subscriptionControlEnsureToken || return 1
     token=$(subscriptionControlToken) || return 1

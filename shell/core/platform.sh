@@ -5,7 +5,7 @@ checkCentosSELinux() {
         echoContent title "\n┌─ SELinux 检测 ─────────────────────────────────────"
         menuLine "检测到 SELinux 已开启，请手动关闭后重新执行脚本"
         menuClose
-        exit 0
+        exit 1
     fi
 }
 
@@ -77,7 +77,7 @@ checkSystem() {
         echoContent red "\n本脚本不支持此系统，请将下方日志反馈给开发者\n"
         echoContent yellow "$(cat /etc/issue)"
         echoContent yellow "$(cat /proc/version)"
-        exit 0
+        exit 1
     fi
 }
 

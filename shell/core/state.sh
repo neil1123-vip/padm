@@ -443,7 +443,7 @@ readSingBoxConfig() {
 # 显示上次安装配置摘要
 showLastInstallationConfig() {
     readInstallProtocolType
-    readConfigHostPathUUID
+    readConfigHostPathUUID || return 1
     readCustomPort
     readNginxSubscribe
     readSingBoxConfig
@@ -700,7 +700,7 @@ cleanLastInstallationConfig() {
 # 读取上次安装的配置
 readLastInstallationConfig() {
     if [[ -n "${configPath}" ]]; then
-        showLastInstallationConfig
+        showLastInstallationConfig || return 1
         autoRead reuse_last "是否使用以上上次安装配置？选择[n]会清空上次安装配置[y/n]:" lastInstallationConfigStatus
         if [[ "${lastInstallationConfigStatus}" == "y" ]]; then
             lastInstallationConfig=true
@@ -713,6 +713,7 @@ readLastInstallationConfig() {
 # 检查文件目录以及path路径
 readConfigHostPathUUID() {
     local realityEntryHostPath
+    local configDir configFile
     currentPath=
     currentDefaultPort=
     currentUUID=
@@ -723,6 +724,14 @@ readConfigHostPathUUID() {
     singBoxVMessWSPath=
     singBoxVLESSWSPath=
     singBoxVMessHTTPUpgradePath=
+
+    for configDir in "${configPath:-}" "${singBoxConfigPath:-}"; do
+        [[ -n "${configDir}" && -d "${configDir}" ]] || continue
+        for configFile in "${configDir%/}"/*.json; do
+            [[ -f "${configFile}" ]] || continue
+            jq empty "${configFile}" >/dev/null 2>&1 || return 1
+        done
+    done
 
     if [[ "${coreInstallType}" == "1" ]]; then
 
@@ -856,6 +865,9 @@ readConfigHostPathUUID() {
         currentCDNAddress=$(head -1 /etc/padm/cdn)
     else
         currentCDNAddress="${currentHost}"
+    fi
+    if [[ -n "${currentClients}" ]]; then
+        jq -e 'type == "array"' <<<"${currentClients}" >/dev/null 2>&1 || return 1
     fi
 }
 

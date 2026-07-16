@@ -930,6 +930,15 @@ runClientNameSuffixPreservesRandomPrefixRegression() {
         singboxUsers=$(initSingBoxClients 1)
         jq -e '.[0].email == "padm-abcdef12-VLESS_TCP/TLS_Vision"' <<<"${xrayUsers}" >/dev/null
         jq -e '.[0].name == "padm-abcdef12-VLESS_Reality_Vision"' <<<"${singboxUsers}" >/dev/null
+
+        currentClients='{}'
+        if initXrayClients 1 >/dev/null 2>&1 || initSingBoxClients 1 >/dev/null 2>&1; then
+            return 1
+        fi
+        currentClients='[{"id":"11111111-1111-1111-1111-111111111111"}]'
+        if initXrayClients 1 >/dev/null 2>&1 || initSingBoxClients 1 >/dev/null 2>&1; then
+            return 1
+        fi
     )
 }
 
@@ -1590,7 +1599,9 @@ EOF
 
 runFedoraDetectionRegression() {
     local osRelease="${TMP_DIR}/fedora-os-release"
+    local unsupportedOsRelease="${TMP_DIR}/unsupported-os-release"
     local oldOsReleaseFile="${PADM_OS_RELEASE_FILE:-}"
+    local rc
 
     cat >"${osRelease}" <<'EOF'
 NAME="Fedora Linux"
@@ -1608,6 +1619,27 @@ EOF
     [[ "${rhelLike}" == "true" ]]
     [[ "${osReleaseId}" == "fedora" ]]
     [[ "${installType}" == "yum -y install" ]]
+
+    getenforce() { printf 'Enforcing\n'; }
+    set +e
+    (checkCentosSELinux >/dev/null 2>&1)
+    rc=$?
+    set -e
+    unset -f getenforce
+    [[ "${rc}" == "1" ]]
+
+    : >"${unsupportedOsRelease}"
+    set +e
+    (
+        release=
+        PADM_OS_RELEASE_FILE="${unsupportedOsRelease}"
+        grep() { return 1; }
+        checkSystem >/dev/null 2>&1
+    )
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+
     PADM_OS_RELEASE_FILE="${oldOsReleaseFile}"
     PADM_YUM_REPOS_DIR=
 }

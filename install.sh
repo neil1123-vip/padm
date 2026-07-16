@@ -658,7 +658,7 @@ initScriptRuntime() {
 
     readInstallType
     readInstallProtocolType
-    readConfigHostPathUUID
+    readConfigHostPathUUID || return 1
     readCustomPort
     readSingBoxConfig
 }
@@ -709,6 +709,6 @@ runMainMenu() {
 
 installHandleEarlyCapabilityListArgs "$@"
 loadScriptModules
-initScriptRuntime "$@"
+initScriptRuntime "$@" || exit 1
 runMainMenu "$@"
 exit $?
