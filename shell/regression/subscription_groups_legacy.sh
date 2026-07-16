@@ -939,6 +939,7 @@ runAccessControlFailureReturnRegression() {
 runAccessControlConfigTransactionRegression() (
     local rootRel="${TMP_DIR}/access-control-config-transaction"
     local root
+    local backupDir
     local statusLog
     local rc reloadCalls=0
 
@@ -947,7 +948,8 @@ runAccessControlConfigTransactionRegression() (
     statusLog="${root}/status.log"
     configPath="${root}/xray/"
     singBoxConfigPath="${root}/sing-box/"
-    PADM_ACCESS_CONTROL_BACKUP_DIR="${root}/backup"
+    unset PADM_ACCESS_CONTROL_BACKUP_DIR
+    ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
     coreInstallType=1
     mkdir -p "${rootRel}/xray" "${rootRel}/sing-box"
     : >"${statusLog}"
@@ -968,6 +970,8 @@ JSON
 {"route":{"rules":[{"domain_suffix":["old.example"],"action":"reject"}]}}
 JSON
     accessControlBackupCreate
+    backupDir=$(accessControlBackupDir)
+    [[ -d "${backupDir}" ]]
     cat >"${configPath}09_routing.json" <<'JSON'
 {"routing":{"rules":[{"outboundTag":"new","domain":["domain:new.example"]}]}}
 JSON
@@ -991,7 +995,8 @@ JSON
     [[ ! -e "${configPath}blackhole_out.json" ]]
     jq -e '.route.rules[0].domain_suffix == ["old.example"]' "${singBoxConfigPath}block_domain_route.json" >/dev/null
     [[ ! -e "${singBoxConfigPath}cn_block_route.json" ]]
-    [[ ! -e "${PADM_ACCESS_CONTROL_BACKUP_DIR}" ]]
+    [[ ! -e "${backupDir}" ]]
+    [[ -z "${ACCESS_CONTROL_ACTIVE_BACKUP_DIR:-}" ]]
     grep -q '核心重载失败，已回滚本次修改' "${statusLog}"
 
     rm -rf "${rootRel}"
@@ -1484,6 +1489,8 @@ runSocks5RoutingFailureReturnRegression() (
     local removeMarker="${root}/remove"
     local reloadMarker="${root}/reload"
     local stopMarker="${root}/stop"
+    local singBoxPathMarker="${root}/sing-box-path"
+    local inboundChoice=1
     local menuChoice=1
     local uninstallChoice=1
     local mode=invalid-port
@@ -1502,6 +1509,7 @@ runSocks5RoutingFailureReturnRegression() (
     }
     autoRead() {
         case "$1" in
+        socks5_inbound_menu) printf -v "$3" "${inboundChoice}" ;;
         socks5_outbound_menu) printf -v "$3" "${menuChoice}" ;;
         socks5_uninstall_menu) printf -v "$3" "${uninstallChoice}" ;;
         socks5_outbound_ip) printf -v "$3" '127.0.0.1' ;;
@@ -1531,7 +1539,7 @@ runSocks5RoutingFailureReturnRegression() (
         return 0
     }
     reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
+        printf 'reload\n' >>"${reloadMarker}"
         [[ "${mode}" != "reload-fail" ]]
     }
     handleSingBox() {
@@ -1569,16 +1577,20 @@ runSocks5RoutingFailureReturnRegression() (
 
     setSocks5Outbound() {
         printf 'outbound-config\n' >"${outboundMarker}"
+        printf 'new-outbound\n' >"${configPath}socks5_outbound.json"
         return 0
     }
     setSocks5OutboundRouting() {
         printf 'routing\n' >"${routingMarker}"
+        printf 'new-routing\n' >"${configPath}09_routing.json"
         return 0
     }
 
     mode=reload-fail
     menuChoice=1
     rm -f "${outboundMarker}" "${routingMarker}" "${uninstallMarker}" "${removeMarker}" "${reloadMarker}"
+    printf 'old-outbound\n' >"${configPath}socks5_outbound.json"
+    printf 'old-routing\n' >"${configPath}09_routing.json"
     set +e
     socks5OutboundRoutingMenu >/dev/null 2>&1
     rc=$?
@@ -1587,6 +1599,9 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${outboundMarker}" ]]
     [[ -e "${routingMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "$(<"${configPath}socks5_outbound.json")" == "old-outbound" ]]
+    [[ "$(<"${configPath}09_routing.json")" == "old-routing" ]]
+    [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
 
     mode=stop-fail
     uninstallChoice=2
@@ -1597,7 +1612,7 @@ runSocks5RoutingFailureReturnRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ -e "${stopMarker}" ]]
-    [[ ! -e "${reloadMarker}" ]]
+    [[ -e "${reloadMarker}" ]]
 
     mode=uninstall-fail
     uninstallChoice=1
@@ -1622,6 +1637,25 @@ runSocks5RoutingFailureReturnRegression() (
     [[ -e "${removeMarker}" ]]
     [[ -e "${outboundMarker}" ]]
     [[ -e "${reloadMarker}" ]]
+    [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
+
+    readInstallType() {
+        coreInstallType=1
+        configPath="${root}/xray/"
+        singBoxConfigPath=
+    }
+    installSingBox() { return 0; }
+    installSingBoxService() { return 0; }
+    socks5RoutingBackupCreate() {
+        printf '%s\n' "${singBoxConfigPath}" >"${singBoxPathMarker}"
+        return 1
+    }
+    set +e
+    socks5InboundRoutingMenu >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${singBoxPathMarker}")" == "/etc/padm/sing-box/conf/config/" ]]
 )
 
 runSocks5UdpAssociateRegression() (
@@ -1763,6 +1797,8 @@ runDNSRoutingFailureReturnRegression() (
             esac
         }
         rm -rf "${PADM_DNS_ROUTING_BACKUP_DIR}"
+        unset PADM_DNS_ROUTING_BACKUP_DIR
+        DNS_ROUTING_ACTIVE_BACKUP_DIR=
         rm -f "${reloadMarker}" "${errorLog}"
         set +e
         setUnlockDNS >/dev/null 2>&1
@@ -1772,7 +1808,7 @@ runDNSRoutingFailureReturnRegression() (
         [[ -e "${reloadMarker}" ]]
         [[ "$(wc -l <"${reloadMarker}")" == "2" ]]
         jq -e '.dns.servers == ["old-xray"]' "${configPath}11_dns.json" >/dev/null
-        [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
+        [[ -z "${DNS_ROUTING_ACTIVE_BACKUP_DIR:-}" ]]
         grep -q 'DNS 分流核心重载失败，已回滚本次修改' "${errorLog}"
     )
 

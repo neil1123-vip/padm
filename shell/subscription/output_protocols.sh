@@ -151,9 +151,9 @@ emitVlessXHTTPSubscribeOutput() {
 
     subscribeOutputTitle "格式化明文：VLESS Reality XHTTP Vision XMUX"
     echoContent green "协议类型:VLESS reality，入口地址:${add}，publicKey:${currentRealityXHTTPPublicKey}，shortId: 6ba85179e30d4fc2,serverNames：${xrayVLESSRealityXHTTPSNI}，端口:${port}，XHTTP host:${xhttpHost}，路径：${path}，mode:${xhttpMode}，Reality SNI:${xrayVLESSRealityXHTTPSNI}，用户ID:${id}，传输方式:xhttp，账户名:${email}\n"
-    appendDefaultSubscribeLine "${user}" "${defaultLink}"
+    appendDefaultSubscribeLine "${user}" "${defaultLink}" || return 1
 
-    appendClashMetaSubscribeLines "${user}" <<EOF
+    appendClashMetaSubscribeLines "${user}" <<EOF || return 1
   - name: "${email}"
     type: vless
     server: ${add}
@@ -355,7 +355,7 @@ emitVlessRealitySubscribeOutput() {
 
     subscribeOutputTitle "格式化明文：VLESS Reality Vision"
     echoContent green "协议类型:VLESS reality，地址:${entryHost}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2，pqv=${realityMldsa65Verify}，Reality目标SNI：${realitySNI}，端口:${port}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
-    appendDefaultSubscribeLine "${user}" "${defaultLink}"
+    appendDefaultSubscribeLine "${user}" "${defaultLink}" || return 1
     appendClashMetaSubscribeBlock "${user}" "  - name: \"${email}\"
     type: vless
     server: ${entryHost}
@@ -369,11 +369,11 @@ emitVlessRealitySubscribeOutput() {
     reality-opts:
       public-key: ${publicKey}
       short-id: 6ba85179e30d4fc2
-    client-fingerprint: chrome"
+    client-fingerprint: chrome" || return 1
 
     local singBoxFilter
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
-    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
+    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}" || return 1
 
 }
 
@@ -404,7 +404,7 @@ emitVlessRealityGrpcSubscribeOutput() {
 
     subscribeOutputTitle "格式化明文：VLESS Reality gRPC"
     echoContent green "协议类型:VLESS reality，serviceName:grpc，地址:${entryHost}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2，Reality目标SNI：${realitySNI}，端口:${port}，用户ID:${id}，传输方式:gRPC，client-fingerprint：chrome（兼容模拟，Reality 伪装不依赖该项），账户名:${email}\n"
-    appendDefaultSubscribeLine "${user}" "${defaultLink}"
+    appendDefaultSubscribeLine "${user}" "${defaultLink}" || return 1
     appendClashMetaSubscribeBlock "${user}" "  - name: \"${email}\"
     type: vless
     server: ${entryHost}
@@ -419,11 +419,11 @@ emitVlessRealityGrpcSubscribeOutput() {
       short-id: 6ba85179e30d4fc2
     grpc-opts:
       grpc-service-name: \"grpc\"
-    client-fingerprint: chrome"
+    client-fingerprint: chrome" || return 1
 
     local singBoxFilter
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"},reality:{enabled:true,public_key:$public_key,short_id:"6ba85179e30d4fc2"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:"grpc"}}' --arg tag "${email}" --arg server "${entryHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${realitySNI}" --arg public_key "${publicKey}") || return 1
-    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
+    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}" || return 1
 
 }
 

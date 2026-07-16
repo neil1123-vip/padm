@@ -23,9 +23,9 @@ subscribeLocalOutputAppendLine() {
 }
 
 initSubscribeLocalConfig() {
-    cleanDirectoryContent "$(subscribeLocalBaseDir)/default"
-    cleanDirectoryContent "$(subscribeLocalBaseDir)/clashMeta"
-    cleanDirectoryContent "$(subscribeLocalBaseDir)/sing-box"
+    cleanDirectoryContent "$(subscribeLocalBaseDir)/default" || return 1
+    cleanDirectoryContent "$(subscribeLocalBaseDir)/clashMeta" || return 1
+    cleanDirectoryContent "$(subscribeLocalBaseDir)/sing-box" || return 1
 }
 
 appendDefaultSubscribeLine() {
@@ -138,9 +138,9 @@ appendStandardTLSSubscribeOutputs() {
     local clashMetaBlock=$3
     local singBoxFilter=$4
 
-    appendDefaultSubscribeLine "${user}" "${defaultLink}"
-    appendClashMetaSubscribeBlock "${user}" "${clashMetaBlock}"
-    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}"
+    appendDefaultSubscribeLine "${user}" "${defaultLink}" || return 1
+    appendClashMetaSubscribeBlock "${user}" "${clashMetaBlock}" || return 1
+    appendSingBoxSubscribeLocalConfig "${user}" "${singBoxFilter}" || return 1
 }
 
 subscribeOutputSafeLabel() {

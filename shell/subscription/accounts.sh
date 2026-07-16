@@ -37,19 +37,19 @@ subscriptionAccountDisplayFunction() {
 showAccounts() {
     local step=${1:-}
     local protocolId displayFn
-    readInstallType
-    readInstallProtocolType
-    readConfigHostPathUUID
-    readSingBoxConfig
+    readInstallType || return 1
+    readInstallProtocolType || return 1
+    readConfigHostPathUUID || return 1
+    readSingBoxConfig || return 1
 
     echo
     progressCard "${step}" "账号"
 
-    initSubscribeLocalConfig
+    initSubscribeLocalConfig || return 1
     while IFS='|' read -r protocolId _; do
         currentProtocolHas "${protocolId}" || continue
         displayFn=$(subscriptionAccountDisplayFunction "${protocolId}" 2>/dev/null || true)
         [[ -n "${displayFn}" ]] || continue
-        "${displayFn}"
+        "${displayFn}" || return 1
     done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
 }

@@ -1080,8 +1080,12 @@ runPortHoppingWithoutPersistentRegression() (
 
     local natStateFile="${TMP_DIR}/port-hopping-nat.state"
     local allowCalls=0
+    local allowPortShouldFail=false
     local downloadCount=0
     local inputCount=0
+    local iptablesDeleteShouldFail=false
+    local iptablesSaveShouldFail=false
+    local rc
     local uploadCount=0
     local warnLog="${TMP_DIR}/port-hopping-warn.log"
     : >"${warnLog}"
@@ -1140,7 +1144,7 @@ runPortHoppingWithoutPersistentRegression() (
     allowPort() {
         printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${warnLog}"
         allowCalls=$((allowCalls + 1))
-        return 0
+        [[ "${allowPortShouldFail}" != "true" ]]
     }
     readSingBoxConfig() {
         hysteriaPort=
@@ -1170,6 +1174,17 @@ EOF
             return 0
         fi
         if [[ "$*" == *"-D PREROUTING"* ]]; then
+            [[ "${iptablesDeleteShouldFail}" != "true" ]] || return 1
+            if [[ "$*" == *"--comment neil1123-vip_hysteria2_portHopping"* ]]; then
+                awk '!/neil1123-vip_hysteria2_portHopping/' "${natStateFile}" >"${natStateFile}.tmp"
+                mv "${natStateFile}.tmp" "${natStateFile}"
+                return 0
+            fi
+            if [[ "$*" == *"--comment neil1123-vip_tuic_portHopping"* ]]; then
+                awk '!/neil1123-vip_tuic_portHopping/' "${natStateFile}" >"${natStateFile}.tmp"
+                mv "${natStateFile}.tmp" "${natStateFile}"
+                return 0
+            fi
             local line=${*: -1}
             if [[ "${line}" == "2" ]]; then
                 printf '%s\n' "-A PREROUTING -p udp -m udp --dport 12000:12005 -m comment --comment keep-other-rule -j DNAT --to-destination :12095" >"${natStateFile}"
@@ -1193,6 +1208,7 @@ EOF
         return 0
     }
     iptables-save() {
+        [[ "${iptablesSaveShouldFail}" != "true" ]] || return 1
         [[ -s "${natStateFile}" ]] && cat "${natStateFile}"
         return 0
     }
@@ -1249,6 +1265,41 @@ EOF
     readPortHopping tuic 26451
     [[ "${tuicPortHoppingStart}" == "33000" ]]
     [[ "${tuicPortHoppingEnd}" == "33005" ]]
+
+    : >"${natStateFile}"
+    inputCount=1
+    hysteria2PortHoppingStart=
+    hysteria2PortHoppingEnd=
+    iptablesSaveShouldFail=true
+    set +e
+    addPortHopping hysteria2 16295 >/dev/null 2>&1
+    rc=$?
+    set -e
+    iptablesSaveShouldFail=false
+    [[ "${rc}" == "1" ]]
+    ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+
+    inputCount=1
+    allowPortShouldFail=true
+    set +e
+    addPortHopping hysteria2 16295 >/dev/null 2>&1
+    rc=$?
+    set -e
+    allowPortShouldFail=false
+    [[ "${rc}" == "1" ]]
+    ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+
+    cat >"${natStateFile}" <<'EOF'
+-A PREROUTING -p udp -m udp --dport 33000:33005 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+EOF
+    iptablesDeleteShouldFail=true
+    set +e
+    deletePortHoppingRules hysteria2 33000 33005 16295 >/dev/null 2>&1
+    rc=$?
+    set -e
+    iptablesDeleteShouldFail=false
+    [[ "${rc}" == "1" ]]
+    grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
 )
 
 runPortHoppingMenuUsesCommandLookupRegression() (
@@ -3429,6 +3480,10 @@ runShowAccountsOptionalStepRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/subscription/accounts.sh"
         showAccounts >/dev/null
+        initSubscribeLocalConfig() { return 1; }
+        if showAccounts >/dev/null 2>&1; then
+            return 1
+        fi
     )
 }
 
@@ -3456,6 +3511,25 @@ runInitSubscribeLocalConfigCleansAllFormatsRegression() {
         [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/default/main" ]]
         [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/main" ]]
         [[ ! -e "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/main" ]]
+
+        local cleanCalls=0
+        cleanDirectoryContent() {
+            cleanCalls=$((cleanCalls + 1))
+            [[ "${cleanCalls}" != "1" ]]
+        }
+        if initSubscribeLocalConfig >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ "${cleanCalls}" == "1" ]]
+
+        local appendCalls=
+        appendDefaultSubscribeLine() { appendCalls=default; return 1; }
+        appendClashMetaSubscribeBlock() { appendCalls=clash; return 0; }
+        appendSingBoxSubscribeLocalConfig() { appendCalls=sing-box; return 0; }
+        if appendStandardTLSSubscribeOutputs user default clash filter; then
+            return 1
+        fi
+        [[ "${appendCalls}" == "default" ]]
     )
 }
 

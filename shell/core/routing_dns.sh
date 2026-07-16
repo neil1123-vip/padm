@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+DNS_ROUTING_ACTIVE_BACKUP_DIR=
+
 # DNS/hosts 路由与覆盖
 dnsRouting() {
 
@@ -75,26 +77,37 @@ dnsRoutingBackupCreate() {
     local singBoxFile
     local xrayManagedFile
     local singBoxManagedFile
+    local createdBackupDir
     local -a backupArgs=()
-    backupDir=$(dnsRoutingSafeBackupDir) || return 1
+    local -a backupTargets=()
     if [[ -n "${configPath:-}" ]]; then
         xrayConfigDir=$(dnsRoutingSafeXrayConfigDir) || return 1
     fi
     if [[ -n "${singBoxConfigPath:-}" ]]; then
         singBoxConfigDir=$(dnsRoutingSafeSingBoxConfigDir) || return 1
     fi
-    removeManagedPathIfPresent "${backupDir}" || return 1
     if [[ -n "${xrayConfigDir}" ]]; then
         xrayManagedFile=$(padmManagedFilePath "${xrayConfigDir}" "11_dns.json") || return 1
         backupArgs+=("xray/11_dns.json" "${xrayManagedFile}")
+        backupTargets+=("${xrayManagedFile}")
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r singBoxFile; do
             singBoxManagedFile=$(padmManagedFilePath "${singBoxConfigDir}" "${singBoxFile}") || return 1
             backupArgs+=("sing-box/${singBoxFile}" "${singBoxManagedFile}")
+            backupTargets+=("${singBoxManagedFile}")
         done < <(dnsRoutingManagedSingBoxFiles)
     fi
-    padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"
+    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_DNS_ROUTING_BACKUP_DIR%/}"
+        padmIsSafeAbsolutePath "${backupDir}" || return 1
+        removeManagedPathIfPresent "${backupDir}" || return 1
+        padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}" || return 1
+    else
+        checkLogBackupCreate createdBackupDir "${backupTargets[@]}" || return 1
+        backupDir="${createdBackupDir}"
+    fi
+    DNS_ROUTING_ACTIVE_BACKUP_DIR="${backupDir}"
 }
 
 dnsRoutingBackupRestore() {
@@ -115,7 +128,9 @@ dnsRoutingBackupRestore() {
 dnsRoutingBackupCleanup() {
     local backupDir
     backupDir=$(dnsRoutingSafeBackupDir) || return 1
-    removeManagedPathIfPresent "${backupDir}"
+    removeManagedPathIfPresent "${backupDir}" || return 1
+    padmForgetCleanupPath "${backupDir}"
+    DNS_ROUTING_ACTIVE_BACKUP_DIR=
 }
 
 dnsRoutingAbortChange() {
@@ -126,6 +141,8 @@ dnsRoutingAbortChange() {
     if dnsRoutingBackupRestore; then
         dnsRoutingBackupCleanup || errorCard "${reason}，旧配置已恢复，但备份目录清理失败: ${backupDir}"
     else
+        padmForgetCleanupPath "${backupDir}"
+        DNS_ROUTING_ACTIVE_BACKUP_DIR=
         coreSetSingleRestoreResultMessage restoreMessage "${reason}" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
         errorCard "${restoreMessage}"
     fi
@@ -142,6 +159,8 @@ dnsRoutingReloadOrRollback() {
         return 0
     fi
     if ! dnsRoutingBackupRestore; then
+        padmForgetCleanupPath "${backupDir}"
+        DNS_ROUTING_ACTIVE_BACKUP_DIR=
         coreSetSingleRestoreResultMessage restoreMessage "${title}核心重载失败" false "已恢复旧配置" "旧配置" "备份目录: ${backupDir}" || true
         errorCard "${restoreMessage}"
         return 1
@@ -155,10 +174,12 @@ dnsRoutingReloadOrRollback() {
 
 dnsRoutingSafeBackupDir() {
     local backupDir
-    if [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
+    if [[ -n "${DNS_ROUTING_ACTIVE_BACKUP_DIR:-}" ]]; then
+        backupDir="${DNS_ROUTING_ACTIVE_BACKUP_DIR}"
+    elif [[ -n "${PADM_DNS_ROUTING_BACKUP_DIR:-}" ]]; then
         backupDir="${PADM_DNS_ROUTING_BACKUP_DIR}"
     else
-        backupDir="$(padmFallbackTmpFilePath padm-dns-routing-backup)"
+        return 1
     fi
     padmIsSafeAbsolutePath "${backupDir%/}" || return 1
     printf '%s\n' "${backupDir%/}"

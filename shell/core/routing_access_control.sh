@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
+
 accessControlMenu() {
     if [[ -z "${configPath}" ]]; then
         coreNotInstalledErrorCard
@@ -93,11 +95,15 @@ showSingBoxAccessRuleFile() {
 }
 
 accessControlAbortChange() {
+    local backupDir
     local rollbackMessage
+    backupDir=$(accessControlBackupDir) || return 1
     if accessControlBackupRestore; then
         accessControlBackupCleanup || errorCard "访问控制修改失败，旧配置已恢复，但备份目录清理失败: $(accessControlBackupDir)"
     else
-        coreSetRollbackFailureMessage rollbackMessage "访问控制修改失败" "$(accessControlBackupDir)"
+        padmForgetCleanupPath "${backupDir}"
+        ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
+        coreSetRollbackFailureMessage rollbackMessage "访问控制修改失败" "${backupDir}"
         errorCard "${rollbackMessage}"
     fi
     return 1
@@ -343,11 +349,15 @@ validateAccessIPList() {
 }
 
 accessControlBackupDir() {
+    if [[ -n "${ACCESS_CONTROL_ACTIVE_BACKUP_DIR:-}" ]]; then
+        printf '%s\n' "${ACCESS_CONTROL_ACTIVE_BACKUP_DIR}"
+        return 0
+    fi
     if [[ -n "${PADM_ACCESS_CONTROL_BACKUP_DIR:-}" ]]; then
         printf '%s\n' "${PADM_ACCESS_CONTROL_BACKUP_DIR}"
         return 0
     fi
-    printf '%s\n' "$(padmFallbackTmpFilePath padm-access-control-backup)"
+    return 1
 }
 
 accessControlSafeBackupDir() {
@@ -399,8 +409,9 @@ accessControlBackupCreate() {
     local singBoxConfigDir=
     local file
     local managedFile
+    local createdBackupDir
     local -a backupArgs=()
-    backupDir=$(accessControlSafeBackupDir) || return 1
+    local -a backupTargets=()
     [[ -n "${configPath:-}" ]] && xrayConfigDir=$(accessControlSafeXrayConfigDir) || true
     [[ -n "${singBoxConfigPath:-}" ]] && singBoxConfigDir=$(accessControlSafeSingBoxConfigDir) || true
     if [[ -n "${configPath:-}" && -z "${xrayConfigDir}" ]]; then
@@ -409,20 +420,30 @@ accessControlBackupCreate() {
     if [[ -n "${singBoxConfigPath:-}" && -z "${singBoxConfigDir}" ]]; then
         return 1
     fi
-    removeManagedPathIfPresent "${backupDir}" || return 1
     if [[ -n "${xrayConfigDir}" ]]; then
         while IFS= read -r file; do
             managedFile=$(accessControlManagedXrayFile "${file}") || return 1
             backupArgs+=("xray/${file}" "${managedFile}")
+            backupTargets+=("${managedFile}")
         done < <(accessControlManagedXrayFiles)
     fi
     if [[ -n "${singBoxConfigDir}" ]]; then
         while IFS= read -r file; do
             managedFile=$(accessControlManagedSingBoxFile "${file}") || return 1
             backupArgs+=("sing-box/${file}" "${managedFile}")
+            backupTargets+=("${managedFile}")
         done < <(accessControlManagedSingBoxFiles)
     fi
-    padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"
+    if [[ -n "${PADM_ACCESS_CONTROL_BACKUP_DIR:-}" ]]; then
+        backupDir="${PADM_ACCESS_CONTROL_BACKUP_DIR%/}"
+        padmIsSafeAbsolutePath "${backupDir}" || return 1
+        removeManagedPathIfPresent "${backupDir}" || return 1
+        padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}" || return 1
+    else
+        checkLogBackupCreate createdBackupDir "${backupTargets[@]}" || return 1
+        backupDir="${createdBackupDir}"
+    fi
+    ACCESS_CONTROL_ACTIVE_BACKUP_DIR="${backupDir}"
 }
 
 accessControlBackupRestore() {
@@ -445,7 +466,9 @@ accessControlBackupRestore() {
 accessControlBackupCleanup() {
     local backupDir
     backupDir=$(accessControlSafeBackupDir) || return 1
-    removeManagedPathIfPresent "${backupDir}"
+    removeManagedPathIfPresent "${backupDir}" || return 1
+    padmForgetCleanupPath "${backupDir}"
+    ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
 }
 
 reportAccessControlApplyFailure() {
@@ -489,6 +512,8 @@ applyAccessControlConfigChange() {
             accessControlBackupCleanup || true
             reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "访问控制配置未通过校验，已回滚本次修改" "${ACCESS_CONTROL_FAILURE_LOG:-}"
         else
+            padmForgetCleanupPath "${backupDir}"
+            ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
             coreSetRollbackFailureMessage rollbackMessage "访问控制配置未通过校验" "${backupDir}"
             reportAccessControlApplyFailure "${ACCESS_CONTROL_FAILURE_TITLE:-访问控制配置校验失败}" "${rollbackMessage}" "${ACCESS_CONTROL_FAILURE_LOG:-}"
         fi
@@ -496,6 +521,8 @@ applyAccessControlConfigChange() {
     fi
     if ! reloadCore; then
         if ! accessControlBackupRestore; then
+            padmForgetCleanupPath "${backupDir}"
+            ACCESS_CONTROL_ACTIVE_BACKUP_DIR=
             coreSetRollbackFailureMessage rollbackMessage "核心重载失败" "${backupDir}"
             reportAccessControlApplyFailure "访问控制重载失败" "${rollbackMessage}"
             return 1

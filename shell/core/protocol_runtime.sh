@@ -183,6 +183,22 @@ portHoppingPersistIptablesRules() {
     return 2
 }
 
+rollbackPortHoppingIptablesRule() {
+    local type=$1
+    local start=$2
+    local end=$3
+    local targetPort=$4
+    local persistStatus
+
+    iptables -t nat -D PREROUTING -p udp --dport "${start}:${end}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" >/dev/null 2>&1 || return 1
+    if portHoppingPersistIptablesRules; then
+        return 0
+    else
+        persistStatus=$?
+    fi
+    [[ "${persistStatus}" == "2" ]]
+}
+
 portHoppingWarnIptablesNotPersistent() {
     statusCard "端口跳跃持久化" "未检测到 netfilter-persistent，当前规则仅在本次运行期生效" "如需开机保留，请安装 netfilter-persistent 后重新配置"
 }
@@ -270,27 +286,32 @@ addPortHopping() {
                 fi
             else
                 if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}"; then
-                    iptables -t nat -D PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" >/dev/null 2>&1 || true
+                    rollbackPortHoppingIptablesRule "${type}" "${portStart}" "${portEnd}" "${targetPort}" || true
                     protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
-                    exit 1
+                    return 1
                 fi
                 local persistStatus=0
+                local savedRules
                 if portHoppingPersistIptablesRules; then
                     persistStatus=0
                 else
                     persistStatus=$?
                 fi
                 if [[ "${persistStatus}" == "1" ]]; then
-                    iptables -t nat -D PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}" >/dev/null 2>&1 || true
-                    portHoppingPersistIptablesRules >/dev/null 2>&1 || true
+                    rollbackPortHoppingIptablesRule "${type}" "${portStart}" "${portEnd}" "${targetPort}" || true
                     protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
-                    exit 1
+                    return 1
                 fi
-                if ! iptables-save | grep -q "neil1123-vip_${type}_portHopping"; then
-                    protocolPortHoppingStatusCard "端口跳跃添加失败"
-                    exit 0
+                if ! savedRules=$(iptables-save) || ! grep -q "neil1123-vip_${type}_portHopping" <<<"${savedRules}"; then
+                    rollbackPortHoppingIptablesRule "${type}" "${portStart}" "${portEnd}" "${targetPort}" || true
+                    protocolPortHoppingStatusCard "端口跳跃添加失败，已尝试回滚本次 iptables 规则"
+                    return 1
                 fi
-                allowPort "${portStart}:${portEnd}" udp || return 1
+                if ! allowPort "${portStart}:${portEnd}" udp; then
+                    rollbackPortHoppingIptablesRule "${type}" "${portStart}" "${portEnd}" "${targetPort}" || true
+                    protocolPortHoppingStatusCard "端口跳跃开放端口失败，已尝试回滚本次 iptables 规则"
+                    return 1
+                fi
                 if [[ "${persistStatus}" == "2" ]]; then
                     portHoppingWarnIptablesNotPersistent
                 fi
@@ -351,21 +372,35 @@ deletePortHoppingRules() {
     local start=$2
     local end=$3
     local targetPort=$4
+    local persistStatus
+    local savedRules
+    local status=0
 
     if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
         for port in $(seq "${start}" "${end}"); do
-            sudo firewall-cmd --permanent --remove-forward-port=port="${port}":proto=udp:toport="${targetPort}"
+            sudo firewall-cmd --permanent --remove-forward-port=port="${port}":proto=udp:toport="${targetPort}" || status=1
         done
-        sudo firewall-cmd --reload
+        sudo firewall-cmd --reload || status=1
     else
         local -a ruleLines=()
         mapfile -t ruleLines < <(iptables -t nat -L PREROUTING --line-numbers | awk -v marker="neil1123-vip_${type}_portHopping" '$0 ~ marker { print $1 }' | sort -rn)
         for line in "${ruleLines[@]}"; do
             [[ -n "${line}" ]] || continue
-            iptables -t nat -D PREROUTING "${line}"
+            iptables -t nat -D PREROUTING "${line}" || status=1
         done
-        portHoppingPersistIptablesRules >/dev/null 2>&1 || true
+        if portHoppingPersistIptablesRules >/dev/null 2>&1; then
+            :
+        else
+            persistStatus=$?
+            [[ "${persistStatus}" == "2" ]] || status=1
+        fi
+        if ! savedRules=$(iptables-save); then
+            status=1
+        elif grep -q "neil1123-vip_${type}_portHopping" <<<"${savedRules}"; then
+            status=1
+        fi
     fi
+    return "${status}"
 }
 
 
@@ -401,10 +436,14 @@ portHoppingMenu() {
     menuClose
     autoRead port_hopping_menu "请选择:" selectPortHoppingStatus
     if [[ "${selectPortHoppingStatus}" == "1" ]]; then
-        addPortHopping "${type}" "${targetPort}"
+        addPortHopping "${type}" "${targetPort}" || return 1
     elif [[ "${selectPortHoppingStatus}" == "2" ]]; then
-        deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${targetPort}"
-        protocolPortHoppingStatusCard "删除成功"
+        if deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${targetPort}"; then
+            protocolPortHoppingStatusCard "删除成功"
+        else
+            protocolPortHoppingStatusCard "删除失败，请检查防火墙规则"
+            return 1
+        fi
     elif [[ "${selectPortHoppingStatus}" == "3" ]]; then
         if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
             protocolPortHoppingStatusCard "当前端口跳跃范围为: ${portHoppingStart}-${portHoppingEnd}"
