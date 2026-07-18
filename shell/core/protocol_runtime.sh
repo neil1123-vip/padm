@@ -106,8 +106,7 @@ initHysteriaPort() {
         initHysteriaPort "${2:-}"
         return $?
     fi
-    allowPort "${hysteriaPort}" || return 1
-    allowPort "${hysteriaPort}" "udp" || return 1
+    allowPortTcpAndUdp "${hysteriaPort}" || return 1
 }
 
 
@@ -259,6 +258,8 @@ addPortHopping() {
             protocolPortHoppingRangeStatusCard "${portHoppingRange}"
             if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
                 local addedMasquerade=
+                local forwardStateKey
+                forwardStateKey=$(padmFirewalldForwardStateKey "${portStart}" "${portEnd}" "${targetPort}")
                 if ! sudo firewall-cmd --query-masquerade --permanent >/dev/null 2>&1; then
                     addedMasquerade=true
                 fi
@@ -284,11 +285,24 @@ addPortHopping() {
                     protocolPortHoppingStatusCard "端口跳跃开放端口失败，已尝试回滚本次 firewalld 规则"
                     exit 1
                 fi
+                if ! padmFirewallStateAdd "${forwardStateKey}"; then
+                    for port in $(seq "${portStart}" "${portEnd}"); do
+                        sudo firewall-cmd --permanent --remove-forward-port=port="${port}":proto=udp:toport="${targetPort}" >/dev/null 2>&1 || true
+                    done
+                    denyPort "${portStart}:${portEnd}" udp >/dev/null 2>&1 || true
+                    if [[ "${addedMasquerade}" == "true" ]]; then
+                        sudo firewall-cmd --permanent --remove-masquerade >/dev/null 2>&1 || true
+                    fi
+                    sudo firewall-cmd --reload >/dev/null 2>&1 || true
+                    protocolPortHoppingStatusCard "端口跳跃状态记录失败，已尝试回滚本次 firewalld 规则"
+                    exit 1
+                fi
                 if [[ "${addedMasquerade}" == "true" ]] && ! padmFirewallStateAdd masquerade:firewalld; then
                     for port in $(seq "${portStart}" "${portEnd}"); do
                         sudo firewall-cmd --permanent --remove-forward-port=port="${port}":proto=udp:toport="${targetPort}" >/dev/null 2>&1 || true
                     done
                     denyPort "${portStart}:${portEnd}" udp >/dev/null 2>&1 || true
+                    padmFirewallStateRemove "${forwardStateKey}" >/dev/null 2>&1 || true
                     sudo firewall-cmd --permanent --remove-masquerade >/dev/null 2>&1 || true
                     sudo firewall-cmd --reload >/dev/null 2>&1 || true
                     protocolPortHoppingStatusCard "端口跳跃状态记录失败，已尝试回滚本次 firewalld 规则"
@@ -387,10 +401,19 @@ deletePortHoppingRules() {
     local status=0
 
     if [[ "${rhelLike:-}" == "true" ]] && systemctl is-active --quiet firewalld; then
-        for port in $(seq "${start}" "${end}"); do
-            sudo firewall-cmd --permanent --remove-forward-port=port="${port}":proto=udp:toport="${targetPort}" || status=1
-        done
-        sudo firewall-cmd --reload || status=1
+        local forwardStateKey stateKind stateBackend stateType stateStart stateEnd stateTarget
+        if forwardStateKey=$(padmFirewalldForwardStateKeyForTarget "${targetPort}"); then
+            IFS=: read -r stateKind stateBackend stateType stateStart stateEnd stateTarget <<<"${forwardStateKey}"
+            start=${stateStart}
+            end=${stateEnd}
+        else
+            forwardStateKey=$(padmFirewalldForwardStateKey "${start}" "${end}" "${targetPort}")
+        fi
+        if removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}"; then
+            padmFirewallStateRemove "${forwardStateKey}" || status=1
+        else
+            status=1
+        fi
     else
         local -a ruleLines=()
         mapfile -t ruleLines < <(iptables -t nat -L PREROUTING --line-numbers | awk -v marker="neil1123-vip_${type}_portHopping" '$0 ~ marker { print $1 }' | sort -rn)
@@ -415,10 +438,10 @@ deletePortHoppingRules() {
     fi
     if [[ "${status}" == "0" && "${rhelLike:-}" == "true" ]] && padmFirewallStateHas masquerade:firewalld; then
         local remainingForwardPorts
-        if ! remainingForwardPorts=$(sudo firewall-cmd --list-forward-ports); then
+        if ! remainingForwardPorts=$(sudo firewall-cmd --permanent --list-forward-ports); then
             status=1
         elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
-            if sudo firewall-cmd --permanent --remove-masquerade && sudo firewall-cmd --reload; then
+            if removeFirewalldMasqueradeRule; then
                 padmFirewallStateRemove masquerade:firewalld || status=1
             else
                 status=1
@@ -510,8 +533,7 @@ initTuicPort() {
         return $?
     fi
     statusCard "Tuic 端口" "${tuicPort}"
-    allowPort "${tuicPort}" || return 1
-    allowPort "${tuicPort}" "udp" || return 1
+    allowPortTcpAndUdp "${tuicPort}" || return 1
 }
 
 
@@ -901,8 +923,7 @@ initXrayXHTTPort() {
             errorCard "Reality XHTTP 端口输入错误"
             return 1
         fi
-        allowPort "${xHTTPort}" || return 1
-        allowPort "${xHTTPort}" "udp" || return 1
+        allowPortTcpAndUdp "${xHTTPort}" || return 1
         statusCard "Reality XHTTP 端口" "${xHTTPort}"
     fi
 }

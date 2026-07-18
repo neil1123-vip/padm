@@ -5,6 +5,11 @@ ufwRulePresent() {
     ufw status | awk -v rule="${rule}" '$1 == rule { found = 1 } END { exit !found }'
 }
 
+ufwConfiguredRulePresent() {
+    local rule="$1/${2:-tcp}"
+    ufw show added | awk -v rule="${rule}" '$1 == "ufw" && $2 == "allow" && $3 == rule { found = 1 } END { exit !found }'
+}
+
 firewalldRulePresent() {
     local rule="$1/${2:-tcp}"
     firewall-cmd --list-ports --permanent | tr ' ' '\n' | grep -Fxq "${rule}"
@@ -61,8 +66,8 @@ removeFirewallPortRule() {
     case "${backend}" in
     ufw)
         command -v ufw >/dev/null 2>&1 || return 1
-        ufw status >/dev/null 2>&1 || return 1
-        if ufwRulePresent "${requestedPort}" "${type}"; then
+        ufw show added >/dev/null 2>&1 || return 1
+        if ufwConfiguredRulePresent "${requestedPort}" "${type}"; then
             sudo ufw delete allow "${requestedPort}/${type}" || return 1
         fi
         ;;
@@ -71,16 +76,16 @@ removeFirewallPortRule() {
         firewall-cmd --list-ports --permanent >/dev/null 2>&1 || return 1
         if firewalldRulePresent "${firewallPort}" "${type}"; then
             firewall-cmd --zone=public --remove-port="${firewallPort}/${type}" --permanent || return 1
-            firewall-cmd --reload || return 1
         fi
+        firewall-cmd --reload || return 1
         ;;
     iptables)
         command -v iptables >/dev/null 2>&1 || return 1
         iptables -L >/dev/null 2>&1 || return 1
         if iptables -L | grep -Fq "allow ${requestedPort}/${type}(neil1123-vip)"; then
             iptables -D INPUT -p "${type}" --dport "${requestedPort}" -m comment --comment "allow ${requestedPort}/${type}(neil1123-vip)" -j ACCEPT || return 1
-            netfilter-persistent save || return 1
         fi
+        netfilter-persistent save || return 1
         ;;
     *) return 1 ;;
     esac
@@ -112,8 +117,67 @@ denyPort() {
     return "${status}"
 }
 
+padmFirewalldForwardStateKey() {
+    printf 'forward:firewalld:udp:%s:%s:%s' "$1" "$2" "$3"
+}
+
+padmFirewalldForwardStateKeyForTarget() {
+    local targetPort=$1
+    local stateFile
+    validPortNumber "${targetPort}" || return 1
+    stateFile=$(padmFirewallStateFile) || return 1
+    [[ -f "${stateFile}" ]] || return 1
+    awk -F: -v targetPort="${targetPort}" '
+        NF == 6 && $1 == "forward" && $2 == "firewalld" && $3 == "udp" && $6 == targetPort {
+            print
+            found = 1
+            exit
+        }
+        END { exit !found }
+    ' "${stateFile}"
+}
+
+removeFirewalldForwardPortRange() {
+    local start=$1
+    local end=$2
+    local targetPort=$3
+    local permanentRules
+    local port rule listedRule
+    local -a listedRules=()
+    local -A existingRules=()
+    local status=0
+    validPortNumber "${start}" && validPortNumber "${end}" && validPortNumber "${targetPort}" && ((10#${start} <= 10#${end})) || return 1
+    command -v firewall-cmd >/dev/null 2>&1 || return 1
+    permanentRules=$(firewall-cmd --permanent --list-forward-ports) || return 1
+    read -r -a listedRules <<<"${permanentRules//$'\n'/ }"
+    for listedRule in "${listedRules[@]}"; do
+        existingRules["${listedRule}"]=1
+    done
+    for ((port = 10#${start}; port <= 10#${end}; port++)); do
+        rule="port=${port}:proto=udp:toport=${targetPort}"
+        if [[ -n "${existingRules[${rule}]:-}" ]]; then
+            firewall-cmd --permanent --remove-forward-port="${rule}" || status=1
+        fi
+    done
+    firewall-cmd --reload || status=1
+    return "${status}"
+}
+
+removeFirewalldMasqueradeRule() {
+    local queryStatus
+    command -v firewall-cmd >/dev/null 2>&1 || return 1
+    if firewall-cmd --permanent --query-masquerade >/dev/null 2>&1; then
+        firewall-cmd --permanent --remove-masquerade || return 1
+    else
+        queryStatus=$?
+        [[ "${queryStatus}" == "1" ]] || return 1
+    fi
+    firewall-cmd --reload
+}
+
 cleanupPadmFirewallRules() {
     local stateFile key rest type requestedPort
+    local kind backend start end targetPort extra
     local remainingForwardPorts=
     local status=0
     local -a keys=()
@@ -121,18 +185,28 @@ cleanupPadmFirewallRules() {
     [[ -f "${stateFile}" ]] || return 0
     mapfile -t keys <"${stateFile}" || return 1
     for key in "${keys[@]}"; do
-        [[ "${key}" == port:* ]] || continue
-        rest=${key#port:}
-        rest=${rest#*:}
-        type=${rest%%:*}
-        requestedPort=${rest#*:}
-        denyPort "${requestedPort}" "${type}" || status=1
+        if [[ "${key}" == port:* ]]; then
+            rest=${key#port:}
+            rest=${rest#*:}
+            type=${rest%%:*}
+            requestedPort=${rest#*:}
+            denyPort "${requestedPort}" "${type}" || status=1
+        elif [[ "${key}" == forward:* ]]; then
+            IFS=: read -r kind backend type start end targetPort extra <<<"${key}"
+            if [[ "${kind}" != "forward" || "${backend}" != "firewalld" || "${type}" != "udp" || -n "${extra}" ]]; then
+                status=1
+            elif removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}"; then
+                padmFirewallStateRemove "${key}" || status=1
+            else
+                status=1
+            fi
+        fi
     done
     if [[ "${status}" == "0" ]] && padmFirewallStateHas masquerade:firewalld; then
-        if ! remainingForwardPorts=$(firewall-cmd --list-forward-ports); then
+        if ! remainingForwardPorts=$(firewall-cmd --permanent --list-forward-ports); then
             status=1
         elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
-            firewall-cmd --permanent --remove-masquerade && firewall-cmd --reload || status=1
+            removeFirewalldMasqueradeRule || status=1
         fi
         [[ "${status}" != "0" ]] || padmFirewallStateRemove masquerade:firewalld || status=1
     fi
@@ -214,6 +288,18 @@ allowPort() {
         fi
         PADM_LAST_ALLOW_PORT_ADDED=true
     fi
+}
+
+allowPortTcpAndUdp() {
+    local requestedPort=$1
+    local tcpAdded=false
+    allowPort "${requestedPort}" || return 1
+    [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && tcpAdded=true
+    allowPort "${requestedPort}" udp && return 0
+    if [[ "${tcpAdded}" == "true" ]] && ! denyPort "${requestedPort}"; then
+        errorCard "${requestedPort}端口 TCP 防火墙规则回滚失败，请检查防火墙状态"
+    fi
+    return 1
 }
 
 validPortNumber() {

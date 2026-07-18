@@ -2891,9 +2891,12 @@ runCorePortFileTransactionRegression() {
 
     (
         local firewallLog="${TMP_DIR}/core-port-firewall-lifecycle.log"
+        local firewallErrorLog="${TMP_DIR}/core-port-firewall-errors.log"
+        local denyShouldFail=false
         local mode=add-fail
         local rc
         : >"${firewallLog}"
+        : >"${firewallErrorLog}"
         eval "$(declare -f addCorePort | sed '1s/^addCorePort/originalAddCorePort/')"
         addCorePort() { return 0; }
         autoRead() {
@@ -2908,7 +2911,11 @@ runCorePortFileTransactionRegression() {
             PADM_LAST_ALLOW_PORT_ADDED=true
             printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
         }
-        denyPort() { printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"; }
+        denyPort() {
+            printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
+            [[ "${denyShouldFail}" != "true" ]]
+        }
+        errorCard() { printf '%s\n' "$1" >>"${firewallErrorLog}"; }
         corePortListExtra() { return 0; }
         corePortResolveByIndex() { printf '2555\n'; }
         corePortApplyReloadTransaction() { [[ "${mode}" == "delete" ]]; }
@@ -2924,6 +2931,16 @@ runCorePortFileTransactionRegression() {
         grep -qx 'deny:2555:udp' "${firewallLog}"
         grep -qx 'deny:2666:tcp' "${firewallLog}"
         grep -qx 'deny:2666:udp' "${firewallLog}"
+
+        denyShouldFail=true
+        : >"${firewallErrorLog}"
+        set +e
+        originalAddCorePort >/dev/null 2>&1
+        rc=$?
+        set -e
+        denyShouldFail=false
+        [[ "${rc}" == "1" ]]
+        grep -qx '入口端口防火墙规则回滚失败，请检查防火墙状态' "${firewallErrorLog}"
 
         mode=delete
         : >"${firewallLog}"
@@ -4511,6 +4528,8 @@ runNetworkCheckReturnFailureRegression() (
 
     local ufwTcpAdded=false
     local ufwUdpAdded=false
+    local ufwActive=true
+    local ufwUdpAllowShouldFail=false
     : >"${firewallLog}"
     dpkg() {
         [[ "$1" == "-l" ]] || return 1
@@ -4519,13 +4538,25 @@ runNetworkCheckReturnFailureRegression() (
     ufw() {
         case "$1" in
         status)
-            printf 'Status: active\n1443/tcp ALLOW Anywhere\n'
-            [[ "${ufwTcpAdded}" == "true" ]] && printf '443/tcp ALLOW Anywhere\n'
-            [[ "${ufwUdpAdded}" == "true" ]] && printf '443/udp ALLOW Anywhere\n'
+            if [[ "${ufwActive}" == "true" ]]; then
+                printf 'Status: active\n1443/tcp ALLOW Anywhere\n'
+                [[ "${ufwTcpAdded}" == "true" ]] && printf '443/tcp ALLOW Anywhere\n'
+                [[ "${ufwUdpAdded}" == "true" ]] && printf '443/udp ALLOW Anywhere\n'
+            else
+                printf 'Status: inactive\n'
+            fi
+            return 0
+            ;;
+        show)
+            [[ "$2" == "added" ]] || return 1
+            printf 'Added user rules:\n'
+            [[ "${ufwTcpAdded}" == "true" ]] && printf 'ufw allow 443/tcp\n'
+            [[ "${ufwUdpAdded}" == "true" ]] && printf 'ufw allow 443/udp\n'
             return 0
             ;;
         allow)
             printf 'ufw:allow:%s\n' "$2" >>"${firewallLog}"
+            [[ "$2" != "443/udp" || "${ufwUdpAllowShouldFail}" != "true" ]] || return 1
             [[ "$2" == "443/tcp" ]] && ufwTcpAdded=true
             [[ "$2" == "443/udp" ]] && ufwUdpAdded=true
             return 0
@@ -4561,14 +4592,27 @@ runNetworkCheckReturnFailureRegression() (
     [[ ! -s "${firewallLog}" ]]
     allowPort 443
     allowPort 443 udp
+    ufwActive=false
     : >"${firewallLog}"
     cleanupPadmFirewallRules
     grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
     grep -qx 'ufw:delete:443/udp' "${firewallLog}"
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+    ufwActive=true
+    ufwUdpAllowShouldFail=true
+    : >"${firewallLog}"
+    if allowPortTcpAndUdp 443; then
+        return 1
+    fi
+    ufwUdpAllowShouldFail=false
+    grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
+    [[ "${ufwTcpAdded}" == "false" ]]
+    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
     unset -f dpkg ufw sudo
 
-    local firewalldTcpAdded=false
+    local firewalldPermanentTcpAdded=false
+    local firewalldRuntimeTcpAdded=false
+    local firewalldReloadShouldFail=false
     : >"${firewallLog}"
     dpkg() { return 1; }
     systemctl() {
@@ -4578,35 +4622,50 @@ runNetworkCheckReturnFailureRegression() (
         case "$1" in
         --list-ports)
             printf '443/udp'
-            [[ "${firewalldTcpAdded}" == "true" ]] && printf ' 443/tcp'
+            [[ "${firewalldPermanentTcpAdded}" == "true" ]] && printf ' 443/tcp'
             printf '\n'
             ;;
         --zone=public)
             case "$2" in
             --add-port=*)
                 printf 'firewalld:add:%s\n' "$2" >>"${firewallLog}"
-                firewalldTcpAdded=true
+                firewalldPermanentTcpAdded=true
                 ;;
             --remove-port=*)
                 printf 'firewalld:remove:%s\n' "$2" >>"${firewallLog}"
-                firewalldTcpAdded=false
+                firewalldPermanentTcpAdded=false
                 ;;
             esac
             ;;
-        --reload) return 0 ;;
+        --reload)
+            [[ "${firewalldReloadShouldFail}" != "true" ]] || return 1
+            firewalldRuntimeTcpAdded=${firewalldPermanentTcpAdded}
+            ;;
         *) return 1 ;;
         esac
     }
     allowPort 443
     grep -qx 'firewalld:add:--add-port=443/tcp' "${firewallLog}"
     grep -qx 'port:firewalld:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
+    [[ "${firewalldRuntimeTcpAdded}" == "true" ]]
+    firewalldReloadShouldFail=true
+    if denyPort 443; then
+        return 1
+    fi
+    [[ "${firewalldPermanentTcpAdded}" == "false" ]]
+    [[ "${firewalldRuntimeTcpAdded}" == "true" ]]
+    grep -qx 'port:firewalld:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
+    firewalldReloadShouldFail=false
     denyPort 443
     grep -qx 'firewalld:remove:--remove-port=443/tcp' "${firewallLog}"
+    [[ "${firewalldRuntimeTcpAdded}" == "false" ]]
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
     unset -f dpkg systemctl firewall-cmd
 
     : >"${firewallLog}"
     local iptablesTcpAdded=false
+    local iptablesTcpPersisted=false
+    local iptablesSaveShouldFail=false
     dpkg() { return 1; }
     systemctl() {
         [[ "$*" == "is-active --quiet netfilter-persistent" ]]
@@ -4625,12 +4684,26 @@ runNetworkCheckReturnFailureRegression() (
             iptablesTcpAdded=false
         fi
     }
-    netfilter-persistent() { return 0; }
+    netfilter-persistent() {
+        [[ "$1" == "save" ]] || return 1
+        [[ "${iptablesSaveShouldFail}" != "true" ]] || return 1
+        iptablesTcpPersisted=${iptablesTcpAdded}
+    }
     allowPort 443
     grep -q '^iptables:add:-I INPUT -p tcp --dport 443 ' "${firewallLog}"
     grep -qx 'port:iptables:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
+    [[ "${iptablesTcpPersisted}" == "true" ]]
+    iptablesSaveShouldFail=true
+    if denyPort 443; then
+        return 1
+    fi
+    [[ "${iptablesTcpAdded}" == "false" ]]
+    [[ "${iptablesTcpPersisted}" == "true" ]]
+    grep -qx 'port:iptables:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
+    iptablesSaveShouldFail=false
     denyPort 443
     grep -q '^iptables:delete:-D INPUT -p tcp --dport 443 ' "${firewallLog}"
+    [[ "${iptablesTcpPersisted}" == "false" ]]
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
     unset -f dpkg systemctl rc-update dpkg-query iptables netfilter-persistent
 

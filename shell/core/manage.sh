@@ -1160,6 +1160,7 @@ corePortRollbackFirewallRules() {
     for rule in "$@"; do
         denyPort "${rule%%|*}" "${rule##*|}" || status=1
     done
+    [[ "${status}" == "0" ]] || errorCard "入口端口防火墙规则回滚失败，请检查防火墙状态"
     return "${status}"
 }
 
@@ -1200,18 +1201,18 @@ addCorePort() {
             fi
             while read -r port; do
                 if ! allowPort "${port}"; then
-                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" >/dev/null 2>&1 || true
+                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
                     return 1
                 fi
                 [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && openedFirewallRules+=("${port}|tcp")
                 if ! allowPort "${port}" "udp"; then
-                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" >/dev/null 2>&1 || true
+                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
                     return 1
                 fi
                 [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && openedFirewallRules+=("${port}|udp")
             done <<<"${parsedPorts}"
             if ! corePortApplyReloadTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
-                corePortRollbackFirewallRules "${openedFirewallRules[@]}" >/dev/null 2>&1 || true
+                corePortRollbackFirewallRules "${openedFirewallRules[@]}" || true
                 errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
                 return 1
             fi
