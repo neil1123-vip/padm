@@ -202,9 +202,8 @@ selectAcmeInstallSSL() {
         sslIPv6="--listen-v6"
     fi
 
-    acmeInstallSSL
-
-    readAcmeTLS
+    acmeInstallSSL || return 1
+    readAcmeTLS || return 1
 }
 
 
@@ -330,7 +329,7 @@ restoreTLSReinstallBackup() {
 # 安装 TLS 证书
 installTLS() {
     progressCard "$1" "申请 TLS 证书"
-    readAcmeTLS
+    readAcmeTLS || return 1
     local tlsDomain=${domain}
     local tlsDir
     local crtFile
@@ -341,11 +340,11 @@ installTLS() {
     crtFile="${tlsDir}/${tlsDomain}.crt"
     keyFile="${tlsDir}/${tlsDomain}.key"
 
-    if [[ -f "${crtFile}" && -f "${keyFile}" && -n $(cat "${crtFile}") ]] || [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+    if tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
         successCard "检测到证书"
-        renewalTLS
+        renewalTLS || return 1
 
-        if [[ -z $(find "${tlsDir}/" -name "${tlsDomain}.crt") ]] || [[ -z $(find "${tlsDir}/" -name "${tlsDomain}.key") ]] || [[ -z $(cat "${crtFile}") ]]; then
+        if ! tlsCertificatePairExists "${tlsDir}" "${tlsDomain}"; then
             installTLSFromAcme || return 1
         else
             if [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
@@ -372,6 +371,9 @@ installTLS() {
             fi
         fi
 
+    elif [[ -d "$HOME/.acme.sh/${tlsDomain}_ecc" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" && -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
+        successCard "检测到证书"
+        installTLSFromAcme || return 1
     elif [[ -d "$HOME/.acme.sh" ]] && [[ ! -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.cer" || ! -f "$HOME/.acme.sh/${tlsDomain}_ecc/${tlsDomain}.key" ]]; then
         switchDNSAPI || return 1
         if [[ -z "${dnsAPIType:-}" ]]; then
@@ -382,7 +384,7 @@ installTLS() {
 
         switchSSLType || return 1
         customSSLEmail || return 1
-        selectAcmeInstallSSL
+        selectAcmeInstallSSL || return 1
 
         installTLSFromAcme || return 1
     else
@@ -399,16 +401,16 @@ installCronTLS() {
         local historyCrontab
         historyCrontab=$(readUserCrontabContent) || {
             errorCard "读取现有定时任务失败，已取消添加证书维护任务"
-            exit 1
+            return 1
         }
         historyCrontab=$(sed '\|/etc/padm/install.sh RenewTLS|d' <<<"${historyCrontab}") || {
             errorCard "整理现有定时任务失败，已取消添加证书维护任务"
-            exit 1
+            return 1
         }
         if ! installUserCrontabContent "${historyCrontab}
 30 1 * * * /bin/bash /etc/padm/install.sh RenewTLS >> /etc/padm/crontab_tls.log 2>&1"; then
             errorCard "添加定时维护证书失败，已保留原定时任务"
-            exit 1
+            return 1
         fi
         successCard "添加定时维护证书成功"
     fi
@@ -470,7 +472,7 @@ tlsRenewCronState() {
 }
 
 tlsCertificateStatusJson() {
-    readAcmeTLS
+    readAcmeTLS || return 1
     local domain=${currentHost}
     local sslTypeFile
     local tlsDir
@@ -626,7 +628,7 @@ renewalTLS() {
     if [[ -n ${1:-} ]]; then
         progressCard "$1" "更新证书" "1"
     fi
-    readAcmeTLS
+    readAcmeTLS || return 1
     local domain=${currentHost}
     local sslTypeFile
     local tlsDir
@@ -752,5 +754,6 @@ renewalTLS() {
         tlsCertificateCard "检测到使用自定义证书，无法执行 renew 操作"
     else
         errorCard "未安装本机 TLS 证书；无域名 Reality 不需要这里，域名 Reality 或传统 TLS 请检查 acme 与 /etc/padm/tls"
+        return 1
     fi
 }

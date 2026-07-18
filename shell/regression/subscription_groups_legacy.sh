@@ -3476,6 +3476,37 @@ runCoreTemplateReturnFailureRegression() (
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     ! grep -q ':udp$' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
+
+    mode=template
+    initRealityProfile() { return 0; }
+    initXrayRealityPort() { return 0; }
+    initRealityKey() { return 1; }
+    initRealityMldsa65() { return 0; }
+    selectCustomInstallType=",1,"
+    set +e
+    initXrayConfig custom 1 true 2>/dev/null
+    xrayRc=$?
+    set -e
+    [[ "${xrayRc}" != "0" ]]
+
+    installSniffing() { return 1; }
+    selectCustomInstallType=",999,"
+    set +e
+    initXrayConfig custom 1 true 2>/dev/null
+    xrayRc=$?
+    set -e
+    [[ "${xrayRc}" != "0" ]]
+
+    installSniffing() { return 0; }
+    removeSingBoxConfig() { return 1; }
+    setSniffRouting() { return 0; }
+    mode=cleanup-fail
+    selectCustomInstallType=",999,"
+    set +e
+    padmRunPortAllowTransaction initSingBoxConfigApply custom 1 2>/dev/null
+    singBoxRc=$?
+    set -e
+    [[ "${singBoxRc}" != "0" ]]
 )
 
 runCoreTemplateManagedConfigRemovalRegression() (
@@ -4393,9 +4424,9 @@ runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
     tar() { printf 'tar:%s\n' "$*" >>"${callLog}"; return 1; }
 
     set +e
-    ( installXray 1 false >/dev/null 2>&1 )
+    installXray 1 false >/dev/null 2>&1
     xrayRc=$?
-    ( installSingBox 1 >/dev/null 2>&1 )
+    installSingBox 1 >/dev/null 2>&1
     singBoxRc=$?
     set -e
 
@@ -5290,6 +5321,91 @@ runTlsFailureReturnRegression() (
     [[ "${shellRc}" == "1" ]]
     unset -f sudo
 
+    (
+        acmeInstallSSL() { return 1; }
+        readAcmeTLS() { return 0; }
+        captureFailureReturn "${root}/select-acme.rc" selectAcmeInstallSSL
+    )
+
+    (
+        readAcmeTLS() { return 1; }
+        captureFailureReturn "${root}/install-read-acme.rc" installTLS 1
+        captureFailureReturn "${root}/status-read-acme.rc" tlsCertificateStatusJson
+        captureFailureReturn "${root}/renew-read-acme.rc" renewalTLS
+    )
+
+    (
+        btDomain=
+        readUserCrontabContent() { return 1; }
+        captureFailureReturn "${root}/install-cron.rc" installCronTLS 1
+    )
+
+    (
+        local renewalRoot="${root}/renewal-install"
+        mkdir -p "${renewalRoot}/home"
+        export PADM_TLS_DIR="${renewalRoot}/tls"
+        HOME="${renewalRoot}/home"
+        mkdir -p "${PADM_TLS_DIR}"
+        domain=renew.example.com
+        currentHost=renew.example.com
+        tlsDomain=renew.example.com
+        lastInstallationConfig=true
+        installedDNSAPIStatus=
+        printf 'cert\n' >"${PADM_TLS_DIR}/renew.example.com.crt"
+        printf 'key\n' >"${PADM_TLS_DIR}/renew.example.com.key"
+        readAcmeTLS() { return 0; }
+        renewalTLS() { return 37; }
+        ! installTLS 1 >/dev/null 2>&1
+    )
+
+    (
+        local emptyKeyRoot="${root}/empty-key"
+        mkdir -p "${emptyKeyRoot}/home" "${emptyKeyRoot}/tls"
+        export PADM_TLS_DIR="${emptyKeyRoot}/tls"
+        HOME="${emptyKeyRoot}/home"
+        domain=empty-key.example.com
+        currentHost=empty-key.example.com
+        tlsDomain=empty-key.example.com
+        lastInstallationConfig=true
+        installedDNSAPIStatus=
+        printf 'cert\n' >"${PADM_TLS_DIR}/empty-key.example.com.crt"
+        : >"${PADM_TLS_DIR}/empty-key.example.com.key"
+        readAcmeTLS() { return 0; }
+        ! installTLS 1 >/dev/null 2>&1
+    )
+
+    (
+        local acmeOnlyRoot="${root}/acme-only"
+        mkdir -p "${acmeOnlyRoot}/home/.acme.sh/acme-only.example.com_ecc"
+        export PADM_TLS_DIR="${acmeOnlyRoot}/tls"
+        HOME="${acmeOnlyRoot}/home"
+        domain=acme-only.example.com
+        currentHost=acme-only.example.com
+        tlsDomain=acme-only.example.com
+        installedDNSAPIStatus=
+        printf 'cert\n' >"${HOME}/.acme.sh/acme-only.example.com_ecc/acme-only.example.com.cer"
+        printf 'key\n' >"${HOME}/.acme.sh/acme-only.example.com_ecc/acme-only.example.com.key"
+        local acmeInstallFromHomeCalled=false
+        readAcmeTLS() { return 0; }
+        installTLSFromAcme() { acmeInstallFromHomeCalled=true; return 0; }
+        installTLS 1 >/dev/null 2>&1
+        [[ "${acmeInstallFromHomeCalled}" == "true" ]]
+    )
+
+    (
+        local missingRenewRoot="${root}/renewal-missing"
+        mkdir -p "${missingRenewRoot}/home" "${missingRenewRoot}/tls"
+        export PADM_TLS_DIR="${missingRenewRoot}/tls"
+        HOME="${missingRenewRoot}/home"
+        currentHost=
+        domain=
+        tlsDomain=
+        installedDNSAPIStatus=
+        readAcmeTLS() { return 0; }
+        errorCard() { return 0; }
+        ! renewalTLS >/dev/null 2>&1
+    )
+
     btDomain=
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }
@@ -5548,8 +5664,14 @@ runCoreInstallServiceActionFailureRegression() (
     installTools() { printf 'installTools:%s\n' "$*" >>"${callLog}"; return 0; }
     initTLSNginxConfig() { printf 'initTLS:%s\n' "$*" >>"${callLog}"; return 0; }
     installTLS() { printf 'installTLS:%s\n' "$*" >>"${callLog}"; return 0; }
-    randomPathFunction() { printf 'path:%s\n' "$*" >>"${callLog}"; return 0; }
-    nginxBlog() { printf 'nginxBlog:%s\n' "$*" >>"${callLog}"; return 0; }
+    randomPathFunction() {
+        printf 'path:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "path-fail" ]]
+    }
+    nginxBlog() {
+        printf 'nginxBlog:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "blog-fail" ]]
+    }
     updateRedirectNginxConf() {
         printf 'redirect\n' >>"${callLog}"
         [[ "${mode}" == "redirect-fail" ]] && return 1
@@ -5574,7 +5696,10 @@ runCoreInstallServiceActionFailureRegression() (
     initSingBoxConfig() { printf 'initSingBoxConfig:%s\n' "$*" >>"${callLog}"; return 0; }
     cleanUp() { printf 'cleanup:%s\n' "$*" >>"${callLog}"; return 0; }
     cleanAgentNginxConf() { printf 'clean-nginx\n' >>"${callLog}"; return 0; }
-    installCronTLS() { printf 'cron:%s\n' "$*" >>"${callLog}"; return 0; }
+    installCronTLS() {
+        printf 'cron:%s\n' "$*" >>"${callLog}"
+        [[ "${mode}" != "cron-fail" ]]
+    }
     customPortFunction() {
         padmFirewallStateAdd 'port:ufw:tcp:2443' || return 1
         padmTrackPortAllowTransactionKey 'port:ufw:tcp:2443'
@@ -5646,6 +5771,35 @@ $1:restart"
     ! grep -q '^wg-refresh$' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture path-fail
+    set +e
+    customXrayInstall 21 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'path:4' "${callLog}"
+    ! grep -q '^nginxBlog:' "${callLog}"
+    ! grep -q '^installXray:' "${callLog}"
+
+    resetInstallServiceFixture blog-fail
+    set +e
+    customXrayInstall 21 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginxBlog:6' "${callLog}"
+    ! grep -q '^installXray:' "${callLog}"
+
+    resetInstallServiceFixture cron-fail
+    set +e
+    customXrayInstall 21 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'cron:10' "${callLog}"
+    ! grep -q '^queueApply$' "${callLog}"
+    [[ ! -e "${reachedFile}" ]]
 
     resetInstallServiceFixture wg-refresh-fail
     set +e
@@ -5778,6 +5932,24 @@ $1:restart"
     ! grep -q '^installSingBox:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture blog-fail
+    set +e
+    xrayCoreInstall >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginxBlog:10' "${callLog}"
+    ! grep -q '^redirect$' "${callLog}"
+
+    resetInstallServiceFixture cron-fail
+    set +e
+    singBoxInstall >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'cron:8' "${callLog}"
+    ! grep -q '^queueApply$' "${callLog}"
 )
 
 runSingBoxMergeStartFailureRegression() (
@@ -11878,6 +12050,34 @@ EOF
     [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
     ! compgen -G "${root}/config/.reality_key.reality.*" >/dev/null
     ! grep -qF 'statusCard "Reality Key" "privateKey:${realityPrivateKey}"' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
+
+    cat >"${singBoxBinary}" <<'EOF'
+#!/usr/bin/env bash
+exit 23
+EOF
+    chmod +x "${singBoxBinary}"
+    realityPrivateKey=
+    realityPublicKey=
+    set +e
+    initRealityKey >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
+
+    cat >"${singBoxBinary}" <<'EOF'
+#!/usr/bin/env bash
+printf 'PrivateKey private-only\n'
+EOF
+    chmod +x "${singBoxBinary}"
+    realityPrivateKey=
+    realityPublicKey=
+    set +e
+    initRealityKey >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${keyFile}")" == "publicKey:public-generated" ]]
 
     if [[ -n "${oldSingBoxBinary}" ]]; then
         PADM_SINGBOX_BINARY="${oldSingBoxBinary}"

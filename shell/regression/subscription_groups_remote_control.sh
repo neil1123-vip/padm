@@ -697,6 +697,7 @@ runRemoteControlServerRefreshRegression() (
     local subscribeCalls=0
     local subscribeArgs=
     local reconcileCalls=0
+    local reloadCalls=0
     local responseFile="${TMP_DIR}/remote-control-server-refresh-${refreshMode}-${lightModeTag}.json"
     local oldConfigPath="${configPath:-}"
     local oldSingBoxConfigPath="${singBoxConfigPath:-}"
@@ -873,12 +874,13 @@ JSON
             subscribeCalls=$((subscribeCalls + 1))
             subscribeArgs="$*"
         }
-        reloadCore() {
-            reloadCalls=$((${reloadCalls:-0} + 1))
-        }
         subscriptionSyncReconcileLocalServices() {
             reconcileCalls=$((reconcileCalls + 1))
         }
+    }
+
+    reloadCore() {
+        reloadCalls=$((reloadCalls + 1))
     }
 
     mkdir -p "${lightweightBackupRoot}"
@@ -1019,6 +1021,36 @@ JSON
                 responseHasApplySuccess "${localSuccessResponse}" true false
                 [[ "${subscribeCalls}" == "1" ]]
                 [[ "${reconcileCalls}" == "1" ]]
+
+                (
+                    setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":5,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"local-only","name":"Local Only","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1,"download":2,"sources":{}},"local-only":{"upload":3,"download":4,"sources":{}}},"sources":{}}}]}'
+                    subscriptionSyncApplyAccountPlanTransaction() { return 0; }
+                    originalSubscriptionControlApplyAccountPlan '{"create":[],"remove":["sub_team_a"]}' '[]'
+                    jq -e '
+                      all(.groups[0].user_groups[]?; .id != "team-a") and
+                      any(.groups[0].user_groups[]?; .id == "local-only") and
+                      (.groups[0].traffic.user_groups | has("team-a") | not) and
+                      (.groups[0].traffic.user_groups | has("local-only"))
+                    ' <<<"${virtualGroupsState}" >/dev/null
+                )
+
+                (
+                    setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Preserved Name","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":5,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}'
+                    subscriptionSyncApplyAccountPlanTransaction() { return 0; }
+                    originalSubscriptionControlApplyAccountPlan \
+                        '{"create":["sub_team_a"],"remove":["sub_team_a"]}' \
+                        '[{"id":"team-a","uuid":"33333333-3333-3333-3333-333333333333"}]'
+                    jq -e '
+                      .groups[0].user_groups == [{
+                        "id":"team-a",
+                        "name":"Preserved Name",
+                        "enabled":true,
+                        "allowed_sources":["main"],
+                        "traffic_limit_gb":5,
+                        "uuid":"33333333-3333-3333-3333-333333333333"
+                      }]
+                    ' <<<"${virtualGroupsState}" >/dev/null
+                )
             fi
 
             if [[ "${runLightApplyPrepareSections}" == "true" ]]; then
@@ -1433,12 +1465,14 @@ JSON
             fi
             command cp "$@"
         }
+        local restoreFailureReloadBefore=${reloadCalls:-0}
         set +e
         PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"restore-fail","uuid":"88888888-8888-8888-8888-888888888888"}],"dry_run":false}' >"${responseFile}.restore-failure"
         local restoreFailureStatus=$?
         set -e
         unset -f cp
         [[ "${restoreFailureStatus}" -ne 0 ]]
+        [[ "${reloadCalls}" -eq $((restoreFailureReloadBefore + 2)) ]]
         jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed" and (.error_detail.message | contains("订阅输出恢复失败"))' "${responseFile}.restore-failure" >/dev/null
         mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
         [[ "${#restoreFailureBackupDirs[@]}" == "2" ]]

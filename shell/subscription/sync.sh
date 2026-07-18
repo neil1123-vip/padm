@@ -306,6 +306,7 @@ subscriptionSyncPlanFromDesiredUsers() {
     local plan
     local credentialUpdates
     plan=$(subscriptionSyncAccountPlanFromIds sync < <(jq -r '.[].id' <<<"${desiredUsers}")) || return 1
+    subscriptionSyncValidateAccountPlan "${plan}" || return 1
     credentialUpdates=$(subscriptionSyncCredentialMismatchAccounts "${desiredUsers}") || return 1
     jq -c -n --argjson plan "${plan}" --argjson updates "${credentialUpdates}" '
       $plan
@@ -735,8 +736,11 @@ subscriptionSyncRollbackLocalApply() {
     local groupsRestoreMessage=
 
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
+    SUBSCRIPTION_SYNC_CONFIG_RESTORED=false
     if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
         configRestored=false
+    else
+        SUBSCRIPTION_SYNC_CONFIG_RESTORED=true
     fi
     if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
         outputRestored=false
@@ -867,6 +871,21 @@ subscriptionSyncSetRollbackRetryMessage() {
         "${retryFn}" \
         "${retryFailureMessage}" \
         "${@:5}"
+}
+
+subscriptionSyncRetryPartiallyRestoredConfig() {
+    local outputVar=$1
+    local configRestored=$2
+    local retryFn=$3
+    local retryFailureMessage=$4
+    shift 4
+
+    [[ "${configRestored}" == "true" ]] || return 0
+    if "${retryFn}" "$@"; then
+        return 0
+    fi
+    subscriptionSyncAppendRestoreFailureDetail "${outputVar}" "" "${retryFailureMessage}"
+    return 1
 }
 
 subscriptionSyncApplyAccountPlanTransaction() {
@@ -1165,6 +1184,12 @@ runSubscriptionGroupSync() {
             else
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
                 localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
+                subscriptionSyncRetryPartiallyRestoredConfig \
+                    localSyncFailure \
+                    "${SUBSCRIPTION_SYNC_CONFIG_RESTORED:-false}" \
+                    subscriptionSyncReconcileLocalServices \
+                    "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
+                    true || true
             fi
             failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
             configBackupDir=

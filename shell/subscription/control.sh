@@ -1062,8 +1062,12 @@ subscriptionControlCreateUsersFromPlan() {
 subscriptionControlApplyAccountPlan() {
     local plan=$1
     local desiredUsers=$2
+    local accountName
+    local accountId
     local createAccounts
     local createUsers
+    local removeAccounts
+    local removeIds='[]'
     local previousGroupsState
     local applyError=
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
@@ -1071,8 +1075,16 @@ subscriptionControlApplyAccountPlan() {
     previousGroupsState=$(subscriptionGroupsStateRead -c '.') || return 1
     createAccounts=$(jq -c '.create' <<<"${plan}") || return 1
     createUsers=$(subscriptionControlCreateUsersFromPlan "${desiredUsers}" "${createAccounts}") || return 1
-    if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1; then
-        if ! subscriptionActiveGroupWrite --argjson users "${createUsers}" '
+    removeAccounts=$(jq -r '(.remove - .create)[]' <<<"${plan}") || return 1
+    while IFS= read -r accountName; do
+        [[ -n "${accountName}" ]] || continue
+        accountId=$(subscriptionSyncAccountIdFromName "${accountName}") || return 1
+        removeIds=$(jq -c --arg id "${accountId}" '. + [$id] | unique' <<<"${removeIds}") || return 1
+    done <<<"${removeAccounts}"
+    if jq -e 'length > 0' <<<"${createUsers}" >/dev/null 2>&1 || jq -e 'length > 0' <<<"${removeIds}" >/dev/null 2>&1; then
+        if ! subscriptionActiveGroupWrite --argjson users "${createUsers}" --argjson removeIds "${removeIds}" '
+          .user_groups = [.user_groups[]? | select(.id as $id | ($removeIds | index($id) | not))] |
+          .traffic.user_groups = (reduce $removeIds[] as $id ((.traffic.user_groups // {}); del(.[$id]))) |
           reduce $users[] as $user (.;
             if any(.user_groups[]?; .id == $user.id) then
               .user_groups |= map(if .id == $user.id then .uuid = $user.uuid else . end)
@@ -1131,6 +1143,7 @@ subscriptionControlRestoreAppliedPlan() {
     local restoreError=
     local restoreDetail=
     SUBSCRIPTION_CONTROL_RESTORE_ERROR=
+    SUBSCRIPTION_CONTROL_CONFIG_RESTORED=false
     if ! subscriptionGroupsStateWrite --argjson previousGroupsState "${previousGroupsState}" '$previousGroupsState' >/dev/null 2>&1; then
         subscriptionSyncSetRestoreFailureDetail restoreDetail "状态"
         subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "${restoreDetail}"
@@ -1139,6 +1152,8 @@ subscriptionControlRestoreAppliedPlan() {
         if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
             subscriptionSyncSetRestoreFailureDetail restoreDetail "配置" "备份目录: ${configBackupDir}"
             subscriptionSyncAppendRestoreFailureDetail restoreError "控制面同步失败后" "${restoreDetail}"
+        else
+            SUBSCRIPTION_CONTROL_CONFIG_RESTORED=true
         fi
     fi
     if [[ -n "${outputBackupDir}" ]]; then
@@ -1232,6 +1247,12 @@ subscriptionControlApplySync() {
                 subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "本机服务重建失败" subscriptionSyncReconcileLocalServices "恢复旧配置后服务重建仍失败，请检查核心服务日志" true
             else
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                subscriptionSyncRetryPartiallyRestoredConfig \
+                    SUBSCRIPTION_CONTROL_RESTORE_ERROR \
+                    "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
+                    subscriptionSyncReconcileLocalServices \
+                    "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
+                    true || true
             fi
             jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-本机服务重建失败}" '{ok:false, changed:true, dry_run:false, error:"reconcile_failed", error_detail:{type:"reconcile_failed", message:$message}, plan:$plan}'
             return 1
@@ -1243,6 +1264,11 @@ subscriptionControlApplySync() {
                 subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "核心重载失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
             else
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                subscriptionSyncRetryPartiallyRestoredConfig \
+                    SUBSCRIPTION_CONTROL_RESTORE_ERROR \
+                    "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
+                    reloadCore \
+                    "恢复旧配置后核心重载仍失败，请检查核心服务日志" || true
             fi
             jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-核心重载失败}" '{ok:false, changed:true, dry_run:false, error:"reload_failed", error_detail:{type:"reload_failed", message:$message}, plan:$plan}'
             return 1
@@ -1262,6 +1288,11 @@ subscriptionControlApplySync() {
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
             else
                 subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                subscriptionSyncRetryPartiallyRestoredConfig \
+                    SUBSCRIPTION_CONTROL_RESTORE_ERROR \
+                    "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
+                    reloadCore \
+                    "恢复旧配置后核心重载仍失败，请检查核心服务日志" || true
             fi
             jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-订阅发布刷新失败}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:$message}, plan:$plan}'
             return 1

@@ -211,7 +211,7 @@ EOF
     if protocolSelectionIncludes "${selectCustomInstallType}" 2 "$1"; then
         initRealityProfile || return 1
         initXrayXHTTPort || return 1
-        initRealityKey
+        initRealityKey || return 1
         initRealityMldsa65
         writeGeneratedJsonFile /etc/padm/xray/conf/12_VLESS_XHTTP_inbounds.json padm-xray-xhttp <<EOF || { errorCard "Xray XHTTP 入站模板提交失败"; return 1; }
 {
@@ -456,7 +456,7 @@ EOF
 
         initRealityProfile || return 1
         initXrayRealityPort || return 1
-        initRealityKey
+        initRealityKey || return 1
         initRealityMldsa65
         writeGeneratedJsonFile /etc/padm/xray/conf/07_VLESS_vision_reality_inbounds.json padm-xray-reality <<EOF || { errorCard "Xray Reality 入站模板提交失败"; return 1; }
 {
@@ -553,7 +553,7 @@ EOF
 
         initRealityProfile || return 1
         initXrayRealityGrpcPort || return 1
-        initRealityKey
+        initRealityKey || return 1
         initRealityMldsa65
         writeGeneratedJsonFile /etc/padm/xray/conf/08_VLESS_vision_gRPC_inbounds.json padm-xray-reality-grpc <<EOF || { errorCard "Xray Reality gRPC 入站模板提交失败"; return 1; }
 {
@@ -597,19 +597,19 @@ EOF
     elif [[ -z "$3" ]]; then
         removeXrayTemplateConfigFiles 08_VLESS_vision_gRPC_inbounds.json || return 1
     fi
-    installSniffing
+    installSniffing || return 1
     if [[ -z "$3" ]]; then
-        removeXrayOutbound wireguard_out_IPv4_route
-        removeXrayOutbound wireguard_out_IPv6_route
-        removeXrayOutbound wireguard_outbound
-        removeXrayOutbound IPv4_out
-        removeXrayOutbound IPv6_out
-        removeXrayOutbound socks5_outbound
-        removeXrayOutbound blackhole_out
-        removeXrayOutbound wireguard_out_IPv6
-        removeXrayOutbound wireguard_out_IPv4
-        addXrayOutbound z_direct_outbound
-        addXrayOutbound blackhole_out
+        removeXrayOutbound wireguard_out_IPv4_route || return 1
+        removeXrayOutbound wireguard_out_IPv6_route || return 1
+        removeXrayOutbound wireguard_outbound || return 1
+        removeXrayOutbound IPv4_out || return 1
+        removeXrayOutbound IPv6_out || return 1
+        removeXrayOutbound socks5_outbound || return 1
+        removeXrayOutbound blackhole_out || return 1
+        removeXrayOutbound wireguard_out_IPv6 || return 1
+        removeXrayOutbound wireguard_out_IPv4 || return 1
+        addXrayOutbound z_direct_outbound || return 1
+        addXrayOutbound blackhole_out || return 1
     fi
 }
 
@@ -677,7 +677,7 @@ initSingBoxConfigApply() {
         statusCard "VLESS Vision端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf
+        removeNginxDefaultConf || return 1
         stopSingBoxBeforeTemplateWrite || return 1
 
         checkPortOpen "${result[-1]}" "${domain}" || return 1
@@ -713,9 +713,9 @@ EOF
         statusCard "VLESS WS端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf
+        removeNginxDefaultConf || return 1
         stopSingBoxBeforeTemplateWrite || return 1
-        randomPathFunction
+        randomPathFunction || return 1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json padm-sing-box-vless-ws <<EOF || { errorCard "sing-box VLESS WS 入站模板提交失败"; return 1; }
 {
@@ -755,9 +755,9 @@ EOF
         statusCard "VMess ws端口" "${result[-1]}"
 
         checkDNSIP "${domain}" || return 1
-        removeNginxDefaultConf
+        removeNginxDefaultConf || return 1
         stopSingBoxBeforeTemplateWrite || return 1
-        randomPathFunction
+        randomPathFunction || return 1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/05_VMess_WS_inbounds.json padm-sing-box-vmess-ws <<EOF || { errorCard "sing-box VMess WS 入站模板提交失败"; return 1; }
 {
@@ -794,7 +794,7 @@ EOF
         menuLine "开始配置 VLESS Reality Vision 协议端口"
         menuClose
         initRealityProfile || return 1
-        initRealityKey
+        initRealityKey || return 1
         echo
         readSingBoxPortResult result "${singBoxVLESSRealityVisionPort}" || return 1
         statusCard "VLESS Reality Vision端口" "${result[-1]}"
@@ -836,7 +836,7 @@ EOF
         menuLine "开始配置 VLESS Reality gRPC 协议端口"
         menuClose
         initRealityProfile || return 1
-        initRealityKey
+        initRealityKey || return 1
         echo
         readSingBoxPortResult result "${singBoxVLESSRealityGRPCPort}" || return 1
         statusCard "VLESS Reality gPRC端口" "${result[-1]}"
@@ -1048,7 +1048,7 @@ EOF
         checkDNSIP "${domain}" || return 1
         removeNginxDefaultConf || return 1
         stopSingBoxBeforeTemplateWrite || return 1
-        randomPathFunction
+        randomPathFunction || return 1
         local httpUpgradeNginxConf
         if ! httpUpgradeNginxConf=$(nginxConfigFilePath sing_box_VMess_HTTPUpgrade.conf); then
             padmShowUnsafePathError "配置 VMess HTTPUpgrade"
@@ -1056,7 +1056,7 @@ EOF
         fi
         removeManagedFileIfPresent "${httpUpgradeNginxConf}" || return 1
         checkPortOpen "${result[-1]}" "${domain}" || return 1
-        singBoxNginxConfig "$1" "${result[-1]}"
+        singBoxNginxConfig "$1" "${result[-1]}" || return 1
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/11_VMess_HTTPUpgrade_inbounds.json padm-sing-box-vmess-httpupgrade <<EOF || { errorCard "sing-box VMess HTTPUpgrade 入站模板提交失败"; return 1; }
 {
     "inbounds":[
@@ -1117,24 +1117,24 @@ EOF
     fi
 
     if [[ -z "$3" ]]; then
-        removeSingBoxConfig wireguard_endpoints_IPv4_route
-        removeSingBoxConfig wireguard_endpoints_IPv6_route
-        removeSingBoxConfig wireguard_endpoints_IPv4
-        removeSingBoxConfig wireguard_endpoints_IPv6
+        removeSingBoxConfig wireguard_endpoints_IPv4_route || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv6_route || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv4 || return 1
+        removeSingBoxConfig wireguard_endpoints_IPv6 || return 1
 
-        removeSingBoxConfig IPv4_out
-        removeSingBoxConfig IPv6_out
-        removeSingBoxConfig IPv6_route
-        removeSingBoxConfig block
-        removeSingBoxConfig cn_block_outbound
-        removeSingBoxConfig cn_block_route
-        removeSingBoxConfig 01_direct_outbound
-        removeSingBoxConfig socks5_outbound.json
-        removeSingBoxConfig block_domain_outbound
-        removeSingBoxConfig dns
+        removeSingBoxConfig IPv4_out || return 1
+        removeSingBoxConfig IPv6_out || return 1
+        removeSingBoxConfig IPv6_route || return 1
+        removeSingBoxConfig block || return 1
+        removeSingBoxConfig cn_block_outbound || return 1
+        removeSingBoxConfig cn_block_route || return 1
+        removeSingBoxConfig 01_direct_outbound || return 1
+        removeSingBoxConfig socks5_outbound.json || return 1
+        removeSingBoxConfig block_domain_outbound || return 1
+        removeSingBoxConfig dns || return 1
     fi
 
-    setSniffRouting
+    setSniffRouting || return 1
 }
 
 initSingBoxConfig() {

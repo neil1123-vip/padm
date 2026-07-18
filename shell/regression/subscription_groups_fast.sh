@@ -4523,6 +4523,26 @@ runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
         grep -q 'boot:nginx' "${actionLog}"
         grep -q 'nginx:start' "${actionLog}"
         [[ -f "${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" ]]
+
+        singBoxNginxConfig() { return 1; }
+        rm -f "${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json"
+        : >"${actionLog}"
+        set +e
+        initSingBoxConfig custom 1 true >/dev/null 2>&1
+        local rc=$?
+        set -e
+        [[ "${rc}" != "0" ]]
+        [[ ! -e "${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" ]]
+        ! grep -q 'boot:nginx' "${actionLog}"
+
+        singBoxNginxConfig() { printf 'server {}\n' >"${nginxRoot}/sing_box_VMess_HTTPUpgrade.conf"; }
+        randomPathFunction() { return 1; }
+        set +e
+        initSingBoxConfig custom 1 true >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" != "0" ]]
+        [[ ! -e "${singBoxRoot}/11_VMess_HTTPUpgrade_inbounds.json" ]]
     )
 }
 

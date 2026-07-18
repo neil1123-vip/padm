@@ -1322,6 +1322,25 @@ JSON
     if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
     fi
+
+    cat >"${syncConfigFile}" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
+JSON
+    printf 'old-local\n' >"${syncLocalFile}"
+    printf 'old-public\n' >"${syncPublicFile}"
+    : >"${reconcileLog}"
+    subscriptionSyncRestoreSubscribeOutputBackups() { return 1; }
+
+    set +e
+    runSubscriptionGroupSync
+    syncStatus=$?
+    set -e
+    [[ "${syncStatus}" == "1" ]]
+    [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
+    [[ "$(wc -l <"${reconcileLog}" | tr -d ' ')" == "2" ]]
+    grep -qx '<empty>' "${reconcileLog}"
+    grep -qx 'true' "${reconcileLog}"
+    grep -q '订阅输出恢复失败' "${resultFailures}"
 )
 
 runSubscriptionGroupSyncReconcileRollbackRegression() (

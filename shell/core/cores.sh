@@ -348,7 +348,7 @@ showXrayGeoStatus() {
 }
 
 # 安装 sing-box
-installSingBox() {
+installSingBoxApply() {
     local version
     local prereleaseStatus=${prereleaseStatus:-false}
     local tmpDir=
@@ -427,9 +427,13 @@ installSingBox() {
 
 }
 
+installSingBox() (
+    installSingBoxApply "$@"
+)
+
 
 # 安装 Xray-core
-installXray() {
+installXrayApply() {
     readInstallType
     local version
     local prereleaseStatus=false
@@ -490,6 +494,10 @@ installXray() {
         fi
     fi
 }
+
+installXray() (
+    installXrayApply "$@"
+)
 
 
 # Core lifecycle helpers
@@ -2351,12 +2359,12 @@ customXrayInstallApply() {
         fi
 
         if protocolSelectionNeedsPath "${selectCustomInstallType}"; then
-            randomPathFunction 4
+            randomPathFunction 4 || return 1
         fi
         if [[ -n "${btDomain}" ]]; then
             statusCard "跳过伪装网站" "检测到宝塔面板/1Panel"
         else
-            nginxBlog 6
+            nginxBlog 6 || return 1
         fi
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             updateRedirectNginxConf || return 1
@@ -2369,7 +2377,7 @@ customXrayInstallApply() {
         cleanUp singBoxDel || return 1
         installXrayService 9 || return 1
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-            installCronTLS 10
+            installCronTLS 10 || return 1
         fi
 
         serviceQueueRestart xray
@@ -2446,7 +2454,7 @@ customSingBoxInstallApply() {
         initSingBoxConfig custom 5 || return 1
         cleanUp xrayDel || return 1
         installSingBoxService 6 || return 1
-        installCronTLS 7
+        installCronTLS 7 || return 1
         serviceQueueRestart sing-box
         serviceQueueRestart nginx
         serviceQueueApply || return 1
@@ -2525,18 +2533,18 @@ xrayCoreInstallApply() {
         installTLS 4 || return 1
     fi
 
-    randomPathFunction 5
+    randomPathFunction 5 || return 1
 
     # 安装 Xray
     installXray 6 false || return 1
     initXrayConfig all 7 || return 1
     cleanUp singBoxDel || return 1
     installXrayService 8 || return 1
-    installCronTLS 9
+    installCronTLS 9 || return 1
     if [[ -n "${btDomain}" ]]; then
         statusCard "跳过伪装网站" "检测到宝塔面板/1Panel"
     else
-        nginxBlog 10
+        nginxBlog 10 || return 1
     fi
     updateRedirectNginxConf || return 1
     coreInstallServiceAction "Xray 服务停止失败，已取消安装收尾" handleXray stop || return 1
@@ -2579,7 +2587,7 @@ singBoxInstallApply() {
     initSingBoxConfig all 6 || return 1
     cleanUp xrayDel || return 1
     installSingBoxService 7 || return 1
-    installCronTLS 8
+    installCronTLS 8 || return 1
 
     serviceQueueRestart sing-box
     serviceQueueStart nginx

@@ -612,9 +612,16 @@ initRealityKey() {
     if [[ -z "${realityPrivateKey}" ]]; then
         if [[ "${selectCoreType}" == "2" || "${coreInstallType}" == "2" ]]; then
             local singBoxBinary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
-            realityX25519Key=$("${singBoxBinary}" generate reality-keypair)
+            if ! realityX25519Key=$("${singBoxBinary}" generate reality-keypair); then
+                errorCard "Reality Key 生成失败"
+                return 1
+            fi
             realityPrivateKey=$(echo "${realityX25519Key}" | head -1 | awk '{print $2}')
             realityPublicKey=$(echo "${realityX25519Key}" | tail -n 1 | awk '{print $2}')
+            if [[ -z "${realityPrivateKey}" || -z "${realityPublicKey}" ]]; then
+                errorCard "Reality Key 生成结果不完整"
+                return 1
+            fi
             local realityKeyPath realityKeyStage
             realityKeyPath=$(realityKeyFile) || return 1
             padmCreateTempFileForTarget realityKeyStage "${realityKeyPath}" reality || return 1
@@ -623,20 +630,20 @@ initRealityKey() {
         else
             autoRead reality_private_key "请输入Private Key[回车自动生成]:" historyPrivateKey
             if [[ -n "${historyPrivateKey}" ]]; then
-                realityX25519Key=$(/etc/padm/xray/xray x25519 -i "${historyPrivateKey}")
+                realityX25519Key=$(/etc/padm/xray/xray x25519 -i "${historyPrivateKey}") || return 1
             else
-                realityX25519Key=$(/etc/padm/xray/xray x25519)
+                realityX25519Key=$(/etc/padm/xray/xray x25519) || return 1
             fi
             realityPrivateKey=$(echo "${realityX25519Key}" | grep "PrivateKey" | awk '{print $2}')
             realityPublicKey=$(echo "${realityX25519Key}" | grep "Password" | awk '{print $3}')
-            if [[ -z "${realityPrivateKey}" ]]; then
-                statusCard "Reality Key" "输入的 Private Key 不合法"
-                initRealityKey
-            else
-                statusCard "Reality Key" "publicKey:${realityPublicKey}"
+            if [[ -z "${realityPrivateKey}" || -z "${realityPublicKey}" ]]; then
+                errorCard "Reality Key 生成结果不完整"
+                return 1
             fi
+            statusCard "Reality Key" "publicKey:${realityPublicKey}"
         fi
     fi
+    [[ -n "${realityPrivateKey}" && -n "${realityPublicKey}" ]]
 }
 
 # 初始化 mldsa65Seed
