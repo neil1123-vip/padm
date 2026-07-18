@@ -3366,8 +3366,12 @@ runCoreTemplateReturnFailureRegression() (
     }
     checkPortOpen() { return 0; }
     initSingBoxPort() {
-        padmFirewallStateAdd "port:ufw:tcp:10890"
-        padmFirewallStateAdd "port:ufw:udp:10890"
+        if [[ "${mode}" == "state-drift" ]]; then
+            padmTrackPortAllowTransactionKey "port:ufw:tcp:10890"
+        else
+            padmFirewallStateAdd "port:ufw:tcp:10890"
+            padmFirewallStateAdd "port:ufw:udp:10890"
+        fi
         printf '10890\n'
     }
     removeFirewallPortRule() {
@@ -3459,6 +3463,18 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${stopRc}" == "1" ]]
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     grep -qx 'ufw:10890:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
+
+    mode=state-drift
+    padmFirewallStateAdd "port:ufw:tcp:10890"
+    : >"${firewallLog}"
+    set +e
+    installSingBoxReality >/dev/null 2>&1
+    stopRc=$?
+    set -e
+    [[ "${stopRc}" == "1" ]]
+    grep -qx 'ufw:10890:tcp' "${firewallLog}"
+    ! grep -q ':udp$' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
 )
 
@@ -4700,6 +4716,21 @@ runNetworkCheckReturnFailureRegression() (
     grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
     grep -qx 'ufw:delete:443/udp' "${firewallLog}"
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
+    padmFirewallStateAdd 'port:ufw:tcp:443'
+    : >"${firewallLog}"
+    failAfterPortAllow() {
+        allowPort 443
+        return 1
+    }
+    if padmRunPortAllowTransaction failAfterPortAllow; then
+        return 1
+    fi
+    grep -qx 'ufw:allow:443/tcp' "${firewallLog}"
+    grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
+    [[ "${ufwTcpAdded}" == "false" ]]
+    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
     : >"${firewallLog}"
     allowPort 1443
     denyPort 1443
@@ -5503,10 +5534,13 @@ runCoreInstallServiceActionFailureRegression() (
     local callLog="${root}/calls.log"
     local errorLog="${root}/errors.log"
     local reachedFile="${root}/reached"
+    local firewallState="${root}/firewall.state"
+    local firewallLog="${root}/firewall.log"
     local mode rc nginxRuntimeState
 
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    PADM_FIREWALL_STATE_FILE="${firewallState}"
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     protocolRegistryMenu() { return 0; }
     readLastInstallationConfig() { return 0; }
@@ -5541,7 +5575,14 @@ runCoreInstallServiceActionFailureRegression() (
     cleanUp() { printf 'cleanup:%s\n' "$*" >>"${callLog}"; return 0; }
     cleanAgentNginxConf() { printf 'clean-nginx\n' >>"${callLog}"; return 0; }
     installCronTLS() { printf 'cron:%s\n' "$*" >>"${callLog}"; return 0; }
-    customPortFunction() { printf 'customPort\n' >>"${callLog}"; return 0; }
+    customPortFunction() {
+        padmFirewallStateAdd 'port:ufw:tcp:2443' || return 1
+        padmTrackPortAllowTransactionKey 'port:ufw:tcp:2443'
+        printf 'customPort\n' >>"${callLog}"
+    }
+    removeFirewallPortRule() {
+        printf '%s:%s:%s\n' "$1" "$2" "$3" >>"${firewallLog}"
+    }
     subscriptionWireGuardControlEnabled() { return 0; }
     refreshSubscriptionWireGuardNginxControl() {
         printf 'wg-refresh\n' >>"${callLog}"
@@ -5582,7 +5623,9 @@ $1:restart"
         : >"${serviceLog}"
         : >"${callLog}"
         : >"${errorLog}"
+        : >"${firewallLog}"
         rm -f "${reachedFile}"
+        rm -f "${firewallState}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
         btDomain=
         realityOnlyWithDomain=
@@ -5667,6 +5710,17 @@ $1:restart"
     ! grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture xray-service-fail
+    btDomain=panel.example.com
+    set +e
+    customXrayInstall 21 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'customPort' "${callLog}"
+    grep -qx 'ufw:2443:tcp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
 
     resetInstallServiceFixture redirect-fail
     set +e

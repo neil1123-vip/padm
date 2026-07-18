@@ -444,6 +444,7 @@ singBoxMergeConfig() {
 initSingBoxPort() {
     local port=$1
     local promptHistory=${2:-true}
+    local historyPort=
     if [[ -n "${port}" && "${promptHistory}" != "true" ]]; then
         if validPortNumber "${port}"; then
             allowPortTcpAndUdp "${port}" || return 1
@@ -485,24 +486,26 @@ readSingBoxPortResult() {
     local -n resultRef=$1
     local port=${2:-}
     local promptHistory=${3:-true}
-    local output stateFile beforeState key backend type
+    local outputFile stateFile beforeState key backend type
 
     resultRef=()
     stateFile=$(padmFirewallStateFile 2>/dev/null || true)
     if [[ -n "${stateFile}" && -f "${stateFile}" ]]; then
         beforeState=$(<"${stateFile}")
     fi
-    output=$(initSingBoxPort "${port}" "${promptHistory}") || return 1
-    mapfile -t resultRef <<<"${output}"
+    padmCreateTmpRootPath outputFile padm-sing-box-port.XXXXXX || return 1
+    if ! initSingBoxPort "${port}" "${promptHistory}" >"${outputFile}"; then
+        padmRemoveCleanupPath "${outputFile}"
+        return 1
+    fi
+    mapfile -t resultRef <"${outputFile}"
+    padmRemoveCleanupPath "${outputFile}" || return 1
     [[ -n "${resultRef[-1]:-}" ]] || return 1
     for backend in ufw firewalld iptables; do
         for type in tcp udp; do
             key="port:${backend}:${type}:${resultRef[-1]}"
             if padmFirewallStateHas "${key}" && ! grep -Fxq -- "${key}" <<<"${beforeState:-}"; then
-                if [[ "${PADM_PORT_ALLOW_TRANSACTION_ACTIVE:-}" == "true" ]] &&
-                    ! grep -Fxq -- "${key}" <<<"${PADM_PORT_ALLOW_TRANSACTION_KEYS:-}"; then
-                    PADM_PORT_ALLOW_TRANSACTION_KEYS+="${key}"$'\n'
-                fi
+                padmTrackPortAllowTransactionKey "${key}"
             fi
         done
     done

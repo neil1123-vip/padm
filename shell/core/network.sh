@@ -59,6 +59,13 @@ padmFirewallStateRemove() {
     fi
 }
 
+padmTrackPortAllowTransactionKey() {
+    local key=$1
+    [[ "${PADM_PORT_ALLOW_TRANSACTION_ACTIVE:-}" == "true" ]] || return 0
+    grep -Fxq -- "${key}" <<<"${PADM_PORT_ALLOW_TRANSACTION_KEYS:-}" && return 0
+    PADM_PORT_ALLOW_TRANSACTION_KEYS+="${key}"$'\n'
+}
+
 removeFirewallPortRule() {
     local backend=$1
     local requestedPort=$2
@@ -372,7 +379,7 @@ allowPort() {
     local type=${2:-tcp}
     local firewallPort=${requestedPort}
     local portStart portEnd
-    local backend=
+    local backend= key
     local added=false
     PADM_LAST_ALLOW_PORT_ADDED=false
     [[ "${type}" == "tcp" || "${type}" == "udp" ]] || return 1
@@ -429,11 +436,13 @@ allowPort() {
         fi
     fi
     if [[ "${added}" == "true" ]]; then
-        if ! padmFirewallStateAdd "port:${backend}:${type}:${requestedPort}"; then
+        key="port:${backend}:${type}:${requestedPort}"
+        if ! padmFirewallStateAdd "${key}"; then
             removeFirewallPortRule "${backend}" "${requestedPort}" "${type}" >/dev/null 2>&1 || true
             errorCard "${requestedPort}端口状态记录失败，已尝试回滚本次防火墙规则"
             return 1
         fi
+        padmTrackPortAllowTransactionKey "${key}"
         PADM_LAST_ALLOW_PORT_ADDED=true
     fi
 }

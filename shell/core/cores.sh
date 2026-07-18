@@ -2187,7 +2187,7 @@ initSingBoxClients() {
 
 
 # 安装 Xray-core
-installXrayReality() {
+installXrayRealityApply() {
     local nginxWasRunning=false
     local previousServiceActions="${SERVICE_ACTIONS:-}"
     local installFailure=
@@ -2240,6 +2240,10 @@ installXrayReality() {
     showAccounts 6
 }
 
+installXrayReality() {
+    padmRunPortAllowTransaction installXrayRealityApply "$@"
+}
+
 # 安装 sing-box Reality
 installSingBoxRealityApply() {
 
@@ -2264,7 +2268,7 @@ installSingBoxReality() {
 }
 
 # Xray-core个性化安装
-customXrayInstall() {
+customXrayInstallApply() {
     local preselectedProtocols=${1:-}
     local preselectedMode=${2:-}
     local allowedIds
@@ -2388,6 +2392,10 @@ customXrayInstall() {
     fi
 }
 
+customXrayInstall() {
+    padmRunPortAllowTransaction customXrayInstallApply "$@"
+}
+
 
 # sing-box 个性化安装
 customSingBoxInstallApply() {
@@ -2500,7 +2508,7 @@ selectCoreInstall() {
 
 
 # Xray-core 个性化安装
-xrayCoreInstall() {
+xrayCoreInstallApply() {
     readLastInstallationConfig || return 1
     # checkBTPanel
     # check1Panel
@@ -2539,6 +2547,10 @@ xrayCoreInstall() {
     # 生成账号
     checkGFWStatue 11 || return 1
     showAccounts 12
+}
+
+xrayCoreInstall() {
+    padmRunPortAllowTransaction xrayCoreInstallApply "$@"
 }
 
 
