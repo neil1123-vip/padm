@@ -333,7 +333,7 @@ EOF
 
 
 # sing-box TUIC 安装
-singBoxTuicInstall() {
+singBoxTuicInstallApply() {
     if ! currentProtocolHasAny 3 5 21 22 23 24 25 27 28 29 31; then
         errorCard "由于需要依赖证书，如安装 Tuic，请先安装带有 TLS 标识协议"
         exit 0
@@ -348,9 +348,13 @@ singBoxTuicInstall() {
     showAccounts 4
 }
 
+singBoxTuicInstall() {
+    padmRunPortAllowTransaction singBoxTuicInstallApply "$@"
+}
+
 
 # sing-box Hysteria2 安装
-singBoxHysteria2Install() {
+singBoxHysteria2InstallApply() {
     if ! currentProtocolHasAny 3 5 21 22 23 24 25 27 28 29 31; then
         errorCard "由于需要依赖证书，如安装 Hysteria2，请先安装带有 TLS 标识协议"
         exit 0
@@ -363,6 +367,10 @@ singBoxHysteria2Install() {
     installSingBoxService 3 || return 1
     reloadCore || return 1
     showAccounts 4
+}
+
+singBoxHysteria2Install() {
+    padmRunPortAllowTransaction singBoxHysteria2InstallApply "$@"
 }
 
 
@@ -477,10 +485,25 @@ readSingBoxPortResult() {
     local -n resultRef=$1
     local port=${2:-}
     local promptHistory=${3:-true}
-    local output
+    local output stateFile beforeState key backend type
 
     resultRef=()
+    stateFile=$(padmFirewallStateFile 2>/dev/null || true)
+    if [[ -n "${stateFile}" && -f "${stateFile}" ]]; then
+        beforeState=$(<"${stateFile}")
+    fi
     output=$(initSingBoxPort "${port}" "${promptHistory}") || return 1
     mapfile -t resultRef <<<"${output}"
     [[ -n "${resultRef[-1]:-}" ]] || return 1
+    for backend in ufw firewalld iptables; do
+        for type in tcp udp; do
+            key="port:${backend}:${type}:${resultRef[-1]}"
+            if padmFirewallStateHas "${key}" && ! grep -Fxq -- "${key}" <<<"${beforeState:-}"; then
+                if [[ "${PADM_PORT_ALLOW_TRANSACTION_ACTIVE:-}" == "true" ]] &&
+                    ! grep -Fxq -- "${key}" <<<"${PADM_PORT_ALLOW_TRANSACTION_KEYS:-}"; then
+                    PADM_PORT_ALLOW_TRANSACTION_KEYS+="${key}"$'\n'
+                fi
+            fi
+        done
+    done
 }

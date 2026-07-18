@@ -1777,6 +1777,55 @@ runSocks5RoutingFailureReturnRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${singBoxPathMarker}")" == "/etc/padm/sing-box/conf/config/" ]]
+
+    local inboundRoot="${root}/inbound-firewall"
+    local inboundFirewallState="${inboundRoot}/firewall.state"
+    local inboundFirewallLog="${inboundRoot}/firewall.log"
+    mkdir -p "${inboundRoot}/sing-box"
+    : >"${inboundFirewallLog}"
+    PADM_FIREWALL_STATE_FILE="${inboundFirewallState}"
+    inboundChoice=1
+    singBoxSocks5Port=
+    readInstallType() {
+        coreInstallType=2
+        singBoxConfigPath="${inboundRoot}/sing-box/"
+    }
+    installSingBox() { return 0; }
+    socks5RoutingBackupCreate() {
+        local resultVar=$1
+        local path="${inboundRoot}/backup"
+        mkdir -p "${path}"
+        printf -v "${resultVar}" '%s' "${path}"
+    }
+    socks5RoutingRollback() {
+        padmRemoveCleanupPath "$1"
+        return 1
+    }
+    initSingBoxPort() {
+        padmFirewallStateAdd "port:ufw:tcp:10891"
+        padmFirewallStateAdd "port:ufw:udp:10891"
+        printf '10891\n'
+    }
+    removeFirewallPortRule() {
+        printf '%s:%s:%s\n' "$1" "$2" "$3" >>"${inboundFirewallLog}"
+        return 0
+    }
+    autoRead() {
+        case "$1" in
+        socks5_inbound_menu) printf -v "$3" '1' ;;
+        socks5_inbound_uuid) printf -v "$3" 'inbound-user' ;;
+        socks5_inbound_ip_type) printf -v "$3" 'invalid' ;;
+        *) printf -v "$3" '' ;;
+        esac
+    }
+    set +e
+    socks5InboundRoutingMenu >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'ufw:10891:tcp' "${inboundFirewallLog}"
+    grep -qx 'ufw:10891:udp' "${inboundFirewallLog}"
+    [[ ! -e "${inboundFirewallState}" ]]
 )
 
 runSocks5UdpAssociateRegression() (
@@ -3288,10 +3337,16 @@ runRealityProfileFailureRegression() (
 )
 
 runCoreTemplateReturnFailureRegression() (
+    local root="${TMP_DIR}/core-template-return"
+    local firewallState="${root}/firewall.state"
+    local firewallLog="${root}/firewall.log"
     local mode=xray
     local xrayRc singBoxRc
     local stopRc writeCalls=0 serviceLog="${TMP_DIR}/core-template-service.log"
 
+    mkdir -p "${root}"
+    PADM_FIREWALL_STATE_FILE="${firewallState}"
+    : >"${firewallLog}"
     currentUUID=existing-user
     currentClients='[]'
     domain=tls.example.com
@@ -3310,9 +3365,13 @@ runCoreTemplateReturnFailureRegression() (
         [[ "${mode}" != "stop-fail" ]]
     }
     checkPortOpen() { return 0; }
-    readSingBoxPortResult() {
-        local -n resultRef=$1
-        resultRef=(10890)
+    initSingBoxPort() {
+        padmFirewallStateAdd "port:ufw:tcp:10890"
+        padmFirewallStateAdd "port:ufw:udp:10890"
+        printf '10890\n'
+    }
+    removeFirewallPortRule() {
+        printf '%s:%s:%s\n' "$1" "$2" "$3" >>"${firewallLog}"
         return 0
     }
     writeGeneratedJsonFile() {
@@ -3339,6 +3398,8 @@ runCoreTemplateReturnFailureRegression() (
     writeCalls=0
     : >"${serviceLog}"
     SERVICE_QUEUE_ALLOW_FAILURE=previous
+    rm -f "${firewallState}"
+    : >"${firewallLog}"
     set +e
     initSingBoxConfig custom 1 true 2>/dev/null
     stopRc=$?
@@ -3347,16 +3408,58 @@ runCoreTemplateReturnFailureRegression() (
     grep -qx 'sing-box:stop:true' "${serviceLog}"
     [[ "${writeCalls}" == "0" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    grep -qx 'ufw:10890:tcp' "${firewallLog}"
+    grep -qx 'ufw:10890:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
 
     mode=sing-box
     selectCustomInstallType=",27,"
     writeCalls=0
+    rm -f "${firewallState}"
+    : >"${firewallLog}"
     set +e
     initSingBoxConfig custom 1 true 2>/dev/null
     singBoxRc=$?
     set -e
     [[ "${singBoxRc}" != "0" ]]
     [[ "${writeCalls}" != "0" ]]
+    grep -qx 'ufw:10890:tcp' "${firewallLog}"
+    grep -qx 'ufw:10890:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
+
+    mode=stop-fail
+    writeCalls=0
+    padmFirewallStateAdd "port:ufw:tcp:10890"
+    : >"${firewallLog}"
+    set +e
+    initSingBoxConfig custom 1 true 2>/dev/null
+    stopRc=$?
+    set -e
+    [[ "${stopRc}" != "0" ]]
+    ! grep -q ':tcp$' "${firewallLog}"
+    grep -qx 'ufw:10890:udp' "${firewallLog}"
+    padmFirewallStateHas "port:ufw:tcp:10890"
+    ! padmFirewallStateHas "port:ufw:udp:10890"
+    rm -f "${firewallState}"
+
+    readLastInstallationConfig() { return 0; }
+    installTools() { return 0; }
+    installSingBox() { return 0; }
+    initSingBoxConfig() {
+        local result=()
+        readSingBoxPortResult result 10890 false
+    }
+    cleanUp() { return 1; }
+    rm -f "${firewallState}"
+    : >"${firewallLog}"
+    set +e
+    installSingBoxReality >/dev/null 2>&1
+    stopRc=$?
+    set -e
+    [[ "${stopRc}" == "1" ]]
+    grep -qx 'ufw:10890:tcp' "${firewallLog}"
+    grep -qx 'ufw:10890:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
 )
 
 runCoreTemplateManagedConfigRemovalRegression() (
@@ -9034,12 +9137,15 @@ runSubscribeNginxServiceFailureRegression() (
     local root="${TMP_DIR}/subscribe-nginx-service-failure"
     local oldPath="${PATH}"
     local serviceLog="${root}/service.log"
+    local firewallState="${root}/firewall.state"
+    local firewallLog="${root}/firewall.log"
     local errorLog="${root}/error.log"
     local mode=reload
     local rc writeCalls controlCalls bootCalls
     local runtimeRunning=true
     local runtimeEnabled=false
     local startFailures=0
+    local startCalls=0
 
     mkdir -p "${root}/fake-bin" "${root}/nginx" "${root}/static" "${root}/tls"
     cat >"${root}/fake-bin/nginx" <<'SH'
@@ -9060,7 +9166,9 @@ SH
     printf 'key\n' >"${PADM_TLS_DIR}/subscribe.example.com.key"
     printf 'old-subscribe-config\n' >"${nginxConfigPath}subscribe.conf"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    PADM_FIREWALL_STATE_FILE="${firewallState}"
     : >"${serviceLog}"
+    : >"${firewallLog}"
     : >"${errorLog}"
 
     readNginxSubscribe() {
@@ -9070,12 +9178,16 @@ SH
             subscribePort=
         fi
     }
-    readSingBoxPortResult() {
-        local -n resultRef=$1
-        resultRef=(39778)
+    initSingBoxPort() {
+        padmFirewallStateAdd "port:ufw:tcp:39778"
+        padmFirewallStateAdd "port:ufw:udp:39778"
+        printf '39778\n'
+    }
+    removeFirewallPortRule() {
+        printf '%s:%s:%s\n' "$1" "$2" "$3" >>"${firewallLog}"
         return 0
     }
-    nginxBlog() { return 0; }
+    nginxBlog() { [[ "${mode}" != "blog-fail" ]]; }
     hasIPv6Connectivity() { return 1; }
     writeSubscribeNginxConfig() {
         writeCalls=$((writeCalls + 1))
@@ -9113,6 +9225,10 @@ SH
             runtimeRunning=false
             return 0
         fi
+        startCalls=$((startCalls + 1))
+        if [[ "${mode}" == "final-start-fail" && "${startCalls}" == "2" ]]; then
+            return 1
+        fi
         if ((startFailures > 0)); then
             startFailures=$((startFailures - 1))
             return 1
@@ -9121,7 +9237,7 @@ SH
         return 0
     }
     pgrep() {
-        [[ "${mode}" == "existing-port" ]] && return 1
+        [[ "${mode}" == "existing-port" || "${mode}" == "final-start-fail" ]] && return 1
         return 0
     }
 
@@ -9132,6 +9248,22 @@ SH
     runtimeRunning=true
     runtimeEnabled=false
     startFailures=1
+    mode=blog-fail
+    rm -f "${firewallState}"
+    : >"${firewallLog}"
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${writeCalls}" == "0" ]]
+    grep -qx 'ufw:39778:tcp' "${firewallLog}"
+    grep -qx 'ufw:39778:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
+
+    mode=reload
+    rm -f "${firewallState}"
+    : >"${firewallLog}"
     set +e
     installSubscribe >/dev/null 2>&1
     rc=$?
@@ -9147,9 +9279,14 @@ SH
     [[ "${runtimeRunning}" == "true" ]]
     [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    grep -qx 'ufw:39778:tcp' "${firewallLog}"
+    grep -qx 'ufw:39778:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
 
     mode=existing-port
     : >"${serviceLog}"
+    : >"${firewallLog}"
+    rm -f "${firewallState}"
     : >"${errorLog}"
     writeCalls=0
     controlCalls=0
@@ -9170,6 +9307,7 @@ SH
     grep -q '订阅 Nginx 服务启动失败' "${errorLog}"
     [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    [[ ! -s "${firewallLog}" ]]
 
     mode=config-fail
     : >"${serviceLog}"
@@ -9181,6 +9319,8 @@ SH
     runtimeRunning=true
     runtimeEnabled=false
     startFailures=0
+    rm -f "${firewallState}"
+    : >"${firewallLog}"
     set +e
     installSubscribe >/dev/null 2>&1
     rc=$?
@@ -9193,6 +9333,9 @@ SH
     grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
     [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    grep -qx 'ufw:39778:tcp' "${firewallLog}"
+    grep -qx 'ufw:39778:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
 
     for mode in control-fail boot-fail; do
         : >"${serviceLog}"
@@ -9207,6 +9350,8 @@ SH
             runtimeEnabled=false
         fi
         startFailures=0
+        rm -f "${firewallState}"
+        : >"${firewallLog}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
         set +e
         installSubscribe >/dev/null 2>&1
@@ -9234,7 +9379,37 @@ SH
             [[ "${runtimeEnabled}" == "false" ]]
         fi
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+        grep -qx 'ufw:39778:tcp' "${firewallLog}"
+        grep -qx 'ufw:39778:udp' "${firewallLog}"
+        [[ ! -e "${firewallState}" ]]
     done
+
+    mode=final-start-fail
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    : >"${firewallLog}"
+    rm -f "${firewallState}"
+    writeCalls=0
+    controlCalls=0
+    bootCalls=0
+    startCalls=0
+    runtimeRunning=true
+    runtimeEnabled=false
+    startFailures=0
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${writeCalls}" == "1" ]]
+    grep -qx 'final-start-fail:start:true' "${serviceLog}"
+    grep -q '订阅 Nginx 服务启动失败' "${errorLog}"
+    grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
+    [[ "${runtimeRunning}" == "true" ]]
+    grep -qx 'ufw:39778:tcp' "${firewallLog}"
+    grep -qx 'ufw:39778:udp' "${firewallLog}"
+    [[ ! -e "${firewallState}" ]]
 
     PATH="${oldPath}"
 )

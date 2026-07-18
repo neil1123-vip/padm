@@ -255,7 +255,7 @@ rollbackSubscribeNginxInstall() {
 }
 
 # 安装订阅服务
-installSubscribe() {
+installSubscribeApply() {
     readNginxSubscribe
     local nginxSubscribeListen=
     local nginxSubscribeSSL=
@@ -367,14 +367,22 @@ EOF
             rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅控制服务安装失败" || true
             return 1
         fi
-        padmRemoveCleanupPath "${installBackupDir}"
     fi
     if [[ -z $(pgrep -f "nginx") ]]; then
         if ! runSubscribeNginxAction start; then
-            errorCard "订阅 Nginx 服务启动失败"
+            if [[ -n "${installBackupDir}" ]]; then
+                rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅 Nginx 服务启动失败" || true
+            else
+                errorCard "订阅 Nginx 服务启动失败"
+            fi
             return 1
         fi
     fi
+    [[ -z "${installBackupDir}" ]] || padmRemoveCleanupPath "${installBackupDir}"
+}
+
+installSubscribe() {
+    padmRunPortAllowTransaction installSubscribeApply "$@"
 }
 
 # 卸载订阅服务

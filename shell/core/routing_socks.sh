@@ -52,18 +52,29 @@ socks5InboundRoutingMenu() {
         installSingBox 1 || return 1
         singBoxConfigPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
         socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站配置备份失败"; return 1; }
-        if ! setSocks5Inbound || ! setSocks5InboundRouting; then
-            socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false
+        local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
+        local PADM_PORT_ALLOW_TRANSACTION_KEYS=
+        if ! setSocks5Inbound; then
+            socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
+            padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
+            return 1
+        fi
+        if ! setSocks5InboundRouting; then
+            socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false || true
+            padmRollbackPortAllowTransaction || errorCard "Socks5 入站配置失败，且新增端口防火墙规则回滚失败"
             return 1
         fi
         if ! installSingBoxService 1; then
-            socks5RoutingRollback "${backupDir}" "sing-box 服务安装失败" false
+            socks5RoutingRollback "${backupDir}" "sing-box 服务安装失败" false || true
+            padmRollbackPortAllowTransaction || errorCard "sing-box 服务安装失败，且 Socks5 入站端口防火墙规则回滚失败"
             return 1
         fi
         if ! reloadCore; then
-            socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true
+            socks5RoutingRollback "${backupDir}" "Socks5 入站核心重载失败" true || true
+            padmRollbackPortAllowTransaction || errorCard "Socks5 入站核心重载失败，且新增端口防火墙规则回滚失败"
             return 1
         fi
+        PADM_PORT_ALLOW_TRANSACTION_KEYS=
         padmRemoveCleanupPath "${backupDir}"
         socks5InboundRoutingMenu
         ;;

@@ -121,6 +121,81 @@ denyPort() {
     return "${status}"
 }
 
+padmRollbackFirewallStateKeys() {
+    local key rest backend type requestedPort
+    local portStart portEnd
+    local status=0
+
+    for key in "$@"; do
+        [[ -n "${key}" ]] || continue
+        if [[ "${key}" != port:* ]]; then
+            status=1
+            continue
+        fi
+        rest=${key#port:}
+        backend=${rest%%:*}
+        rest=${rest#*:}
+        type=${rest%%:*}
+        requestedPort=${rest#*:}
+        if [[ "${backend}" != "ufw" && "${backend}" != "firewalld" && "${backend}" != "iptables" ]] ||
+            [[ "${type}" != "tcp" && "${type}" != "udp" ]]; then
+            status=1
+            continue
+        fi
+        if [[ "${requestedPort}" == *:* ]]; then
+            portStart=${requestedPort%%:*}
+            portEnd=${requestedPort#*:}
+            if ! validPortNumber "${portStart}" || ! validPortNumber "${portEnd}" || ((10#${portStart} > 10#${portEnd})); then
+                status=1
+                continue
+            fi
+        elif ! validPortNumber "${requestedPort}"; then
+            status=1
+            continue
+        fi
+        if removeFirewallPortRule "${backend}" "${requestedPort}" "${type}"; then
+            padmFirewallStateRemove "${key}" || status=1
+        else
+            status=1
+        fi
+    done
+    return "${status}"
+}
+
+padmRollbackPortAllowTransaction() {
+    local -a keys=()
+    if [[ -n "${PADM_PORT_ALLOW_TRANSACTION_KEYS:-}" ]]; then
+        mapfile -t keys <<<"${PADM_PORT_ALLOW_TRANSACTION_KEYS}"
+    fi
+    if padmRollbackFirewallStateKeys "${keys[@]}"; then
+        PADM_PORT_ALLOW_TRANSACTION_KEYS=
+        return 0
+    fi
+    return 1
+}
+
+padmRunPortAllowTransaction() {
+    local operation=$1
+    shift
+    declare -F "${operation}" >/dev/null 2>&1 || return 1
+    if [[ "${PADM_PORT_ALLOW_TRANSACTION_ACTIVE:-}" == "true" ]]; then
+        "${operation}" "$@"
+        return $?
+    fi
+
+    local PADM_PORT_ALLOW_TRANSACTION_ACTIVE=true
+    local PADM_PORT_ALLOW_TRANSACTION_KEYS=
+    local rc=0
+    "${operation}" "$@" || rc=$?
+    if [[ "${rc}" == "0" ]]; then
+        return 0
+    fi
+    if ! padmRollbackPortAllowTransaction; then
+        errorCard "操作失败，且本次新增端口的防火墙规则回滚失败，请检查防火墙状态"
+    fi
+    return "${rc}"
+}
+
 padmFirewalldForwardStateKey() {
     printf 'forward:firewalld:udp:%s:%s:%s' "$1" "$2" "$3"
 }

@@ -2241,7 +2241,7 @@ installXrayReality() {
 }
 
 # 安装 sing-box Reality
-installSingBoxReality() {
+installSingBoxRealityApply() {
 
     selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
@@ -2257,6 +2257,10 @@ installSingBoxReality() {
     # 生成账号
     checkGFWStatue 5 || return 1
     showAccounts 6
+}
+
+installSingBoxReality() {
+    padmRunPortAllowTransaction installSingBoxRealityApply "$@"
 }
 
 # Xray-core个性化安装
@@ -2386,7 +2390,7 @@ customXrayInstall() {
 
 
 # sing-box 个性化安装
-customSingBoxInstall() {
+customSingBoxInstallApply() {
     local preselectedProtocols=${1:-}
     local allowedIds
     allowedIds=$(protocolSelectionCurrentIdsForCore sing-box)
@@ -2454,6 +2458,10 @@ customSingBoxInstall() {
         fi
         customSingBoxInstall
     fi
+}
+
+customSingBoxInstall() {
+    padmRunPortAllowTransaction customSingBoxInstallApply "$@"
 }
 
 
@@ -2535,7 +2543,7 @@ xrayCoreInstall() {
 
 
 # sing-box 全部安装
-singBoxInstall() {
+singBoxInstallApply() {
     readLastInstallationConfig || return 1
     # checkBTPanel
     # check1Panel
@@ -2566,6 +2574,10 @@ singBoxInstall() {
     serviceQueueApply || return 1
     # 生成账号
     showAccounts 9
+}
+
+singBoxInstall() {
+    padmRunPortAllowTransaction singBoxInstallApply "$@"
 }
 
 

@@ -619,7 +619,7 @@ stopSingBoxBeforeTemplateWrite() {
     runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消写入配置"; return 1; }
 }
 
-initSingBoxConfig() {
+initSingBoxConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
     progressCard "$2" "初始化 sing-box 配置"
 
@@ -1135,4 +1135,8 @@ EOF
     fi
 
     setSniffRouting
+}
+
+initSingBoxConfig() {
+    padmRunPortAllowTransaction initSingBoxConfigApply "$@"
 }
