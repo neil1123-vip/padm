@@ -1282,6 +1282,7 @@ EOF
     portHoppingEnd=
     addPortHopping hysteria2 16295
     [[ -s "${natStateFile}" ]]
+    padmFirewallStateHas 'forward:iptables:hysteria2:33000:33005:16295'
     grep -q '范围不合法' "${warnLog}"
     [[ "${allowCalls}" == "5" ]]
     grep -Eq '端口跳跃持久化|未检测到 netfilter-persistent' "${warnLog}"
@@ -1294,6 +1295,7 @@ EOF
     grep -q 'keep-other-rule' "${natStateFile}"
     ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
     grep -qx 'deny:33000:33005:udp' "${warnLog}"
+    ! padmFirewallStateHas 'forward:iptables:hysteria2:33000:33005:16295'
 
     : >"${natStateFile}"
     hysteria2PortHoppingStart=33000
@@ -1302,6 +1304,7 @@ EOF
     tuicPortHoppingEnd=
     addPortHopping tuic 26451
     grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"
+    padmFirewallStateHas 'forward:iptables:tuic:33000:33005:26451'
     readPortHopping tuic 26451
     [[ "${tuicPortHoppingStart}" == "33000" ]]
     [[ "${tuicPortHoppingEnd}" == "33005" ]]
@@ -1341,6 +1344,9 @@ EOF
     [[ "${rc}" == "1" ]]
     grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
     [[ "${denyCalls}" == "1" ]]
+    cleanupPadmFirewallRules
+    ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
     (
         local firewalldLog="${TMP_DIR}/port-hopping-firewalld.log"
@@ -1364,6 +1370,16 @@ EOF
         }
         sudo() { "$@"; }
         firewall-cmd() {
+            local originalArgs=" $* "
+            local -a filteredArgs=()
+            local arg
+            if [[ "$*" != "--reload" && "${originalArgs}" != *" --zone=public "* ]]; then
+                return 1
+            fi
+            for arg in "$@"; do
+                [[ "${arg}" == "--zone=public" || "${arg}" == "--permanent" ]] || filteredArgs+=("${arg}")
+            done
+            set -- "${filteredArgs[@]}"
             case "$1" in
             --query-masquerade) [[ "${masquerade}" == "true" ]] ;;
             --reload) return 0 ;;
@@ -1372,35 +1388,25 @@ EOF
                     printf 'port=%s:proto=udp:toport=16295\n' "${port}"
                 done
                 ;;
-            --permanent)
-                case "$2" in
-                --query-masquerade) [[ "${masquerade}" == "true" ]] ;;
-                --list-forward-ports)
-                    for port in "${!forwardPorts[@]}"; do
-                        printf 'port=%s:proto=udp:toport=16295\n' "${port}"
-                    done
-                    ;;
-                --add-masquerade)
-                    masquerade=true
-                    printf 'masquerade:add\n' >>"${firewalldLog}"
-                    ;;
-                --remove-masquerade)
-                    masquerade=false
-                    printf 'masquerade:remove\n' >>"${firewalldLog}"
-                    ;;
-                --add-forward-port=*)
-                    spec=${2#--add-forward-port=port=}
-                    port=${spec%%:*}
-                    forwardPorts[${port}]=1
-                    ;;
-                --remove-forward-port=*)
-                    spec=${2#--remove-forward-port=port=}
-                    port=${spec%%:*}
-                    [[ "${port}" != "${removeFailurePort}" ]] || { removeFailurePort=; return 1; }
-                    [[ -n "${forwardPorts[${port}]:-}" ]] || return 1
-                    unset 'forwardPorts['"${port}"']'
-                    ;;
-                esac
+            --add-masquerade)
+                masquerade=true
+                printf 'masquerade:add\n' >>"${firewalldLog}"
+                ;;
+            --remove-masquerade)
+                masquerade=false
+                printf 'masquerade:remove\n' >>"${firewalldLog}"
+                ;;
+            --add-forward-port=*)
+                spec=${1#--add-forward-port=port=}
+                port=${spec%%:*}
+                forwardPorts[${port}]=1
+                ;;
+            --remove-forward-port=*)
+                spec=${1#--remove-forward-port=port=}
+                port=${spec%%:*}
+                [[ "${port}" != "${removeFailurePort}" ]] || { removeFailurePort=; return 1; }
+                [[ -n "${forwardPorts[${port}]:-}" ]] || return 1
+                unset 'forwardPorts['"${port}"']'
                 ;;
             esac
         }

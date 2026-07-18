@@ -2893,6 +2893,7 @@ runCorePortFileTransactionRegression() {
         local firewallLog="${TMP_DIR}/core-port-firewall-lifecycle.log"
         local firewallErrorLog="${TMP_DIR}/core-port-firewall-errors.log"
         local denyShouldFail=false
+        local denyTcpShouldFail=false
         local mode=add-fail
         local rc
         : >"${firewallLog}"
@@ -2913,7 +2914,7 @@ runCorePortFileTransactionRegression() {
         }
         denyPort() {
             printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
-            [[ "${denyShouldFail}" != "true" ]]
+            [[ "${denyShouldFail}" != "true" && ( "${denyTcpShouldFail}" != "true" || "${2:-tcp}" != "tcp" ) ]]
         }
         errorCard() { printf '%s\n' "$1" >>"${firewallErrorLog}"; }
         corePortListExtra() { return 0; }
@@ -2945,6 +2946,16 @@ runCorePortFileTransactionRegression() {
         mode=delete
         : >"${firewallLog}"
         originalAddCorePort >/dev/null 2>&1
+        grep -qx 'deny:2555:tcp' "${firewallLog}"
+        grep -qx 'deny:2555:udp' "${firewallLog}"
+
+        denyTcpShouldFail=true
+        : >"${firewallLog}"
+        set +e
+        originalAddCorePort >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
         grep -qx 'deny:2555:tcp' "${firewallLog}"
         grep -qx 'deny:2555:udp' "${firewallLog}"
     )
@@ -4608,6 +4619,25 @@ runNetworkCheckReturnFailureRegression() (
     grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
     [[ "${ufwTcpAdded}" == "false" ]]
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
+    ufwActive=false
+    local fallbackFirewalldAdded=false
+    systemctl() { [[ "$*" == "is-active --quiet firewalld" ]]; }
+    firewall-cmd() {
+        case "$*" in
+        *--list-ports*) [[ "${fallbackFirewalldAdded}" == "true" ]] && printf '2443/tcp\n' ;;
+        *--add-port=2443/tcp*) fallbackFirewalldAdded=true ;;
+        *--remove-port=2443/tcp*) fallbackFirewalldAdded=false ;;
+        *--reload*) return 0 ;;
+        *) return 1 ;;
+        esac
+    }
+    allowPort 2443
+    [[ "${fallbackFirewalldAdded}" == "true" ]]
+    grep -qx 'port:firewalld:tcp:2443' "${PADM_FIREWALL_STATE_FILE}"
+    denyPort 2443
+    [[ "${fallbackFirewalldAdded}" == "false" ]]
+    unset -f systemctl firewall-cmd
     unset -f dpkg ufw sudo
 
     local firewalldPermanentTcpAdded=false
@@ -4616,28 +4646,43 @@ runNetworkCheckReturnFailureRegression() (
     : >"${firewallLog}"
     dpkg() { return 1; }
     systemctl() {
-        [[ "$*" == "status firewalld" ]] && printf 'Active: active (running)\n'
+        if [[ "$*" == "status firewalld" || "$*" == "is-active --quiet firewalld" ]]; then
+            printf 'Active: active (running)\n'
+            return 0
+        fi
+        return 1
     }
     firewall-cmd() {
-        case "$1" in
-        --list-ports)
+        if [[ "$*" != "--reload" && " $* " != *" --zone=public "* ]]; then
+            return 1
+        fi
+        case "$*" in
+        *--list-ports*)
             printf '443/udp'
             [[ "${firewalldPermanentTcpAdded}" == "true" ]] && printf ' 443/tcp'
             printf '\n'
             ;;
-        --zone=public)
-            case "$2" in
-            --add-port=*)
-                printf 'firewalld:add:%s\n' "$2" >>"${firewallLog}"
+        *--add-port=*)
+            for arg in "$@"; do
+                case "${arg}" in
+                --add-port=*)
+                    printf 'firewalld:add:%s\n' "${arg}" >>"${firewallLog}"
+                    ;;
+                esac
+            done
                 firewalldPermanentTcpAdded=true
-                ;;
-            --remove-port=*)
-                printf 'firewalld:remove:%s\n' "$2" >>"${firewallLog}"
-                firewalldPermanentTcpAdded=false
-                ;;
-            esac
             ;;
-        --reload)
+        *--remove-port=*)
+            for arg in "$@"; do
+                case "${arg}" in
+                --remove-port=*)
+                    printf 'firewalld:remove:%s\n' "${arg}" >>"${firewallLog}"
+                    ;;
+                esac
+            done
+                firewalldPermanentTcpAdded=false
+            ;;
+        *--reload*)
             [[ "${firewalldReloadShouldFail}" != "true" ]] || return 1
             firewalldRuntimeTcpAdded=${firewalldPermanentTcpAdded}
             ;;
@@ -5759,60 +5804,121 @@ runSingBoxUninstallFailurePropagationRegression() (
     local root="${TMP_DIR}/sing-box-uninstall-failure"
     local configDir="${root}/conf/config/"
     local serviceLog="${root}/service.log"
-    local rmLog="${root}/rm.log"
+    local firewallLog="${root}/firewall.log"
     local errorLog="${root}/error.log"
-    local rc
+    local startCalls=0
+    local rc oldConfig
 
     mkdir -p "${configDir}"
-    printf '{}\n' >"${configDir}config.json"
+    printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
+    printf '{"inbounds":[{"type":"vless","listen_port":2443}]}\n' >"${configDir}02_other_inbounds.json"
+    printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}config.json"
+    oldConfig=$(<"${configDir}09_tuic_inbounds.json")
     : >"${serviceLog}"
-    : >"${rmLog}"
+    : >"${firewallLog}"
     : >"${errorLog}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    PADM_SINGBOX_BINARY="${root}/missing-sing-box"
+    PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${root}/sing-box.service"
 
     singBoxConfigPath="${configDir}"
-    readInstallType() { return 0; }
-    serviceQueueRestart() {
-        printf 'restart:%s\n' "$1" >>"${serviceLog}"
-        return 0
+    readInstallType() { singBoxConfigPath="${configDir}"; }
+    readPortHopping() {
+        tuicPortHoppingStart=
+        tuicPortHoppingEnd=
     }
-    serviceQueueApply() {
-        printf 'apply\n' >>"${serviceLog}"
-        return 1
+    singBoxRunning() { return 0; }
+    coreStartupServiceEnabled() { return 1; }
+    runCoreServiceActionAllowFailure() {
+        printf '%s:%s\n' "$1" "$2" >>"${serviceLog}"
+        if [[ "$2" == "start" ]]; then
+            startCalls=$((startCalls + 1))
+            [[ "${startCalls}" != "1" ]]
+        fi
+    }
+    denyPort() {
+        printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
     }
 
-    set +e
-    unInstallSingBox other >/dev/null 2>&1
-    rc=$?
-    set -e
+    if unInstallSingBox tuic; then
+        rc=0
+    else
+        rc=$?
+    fi
     [[ "${rc}" == "1" ]]
-    grep -qx 'restart:sing-box' "${serviceLog}"
-    grep -qx 'apply' "${serviceLog}"
-    grep -q 'sing-box 服务重启失败' "${errorLog}"
+    [[ "$(<"${configDir}09_tuic_inbounds.json")" == "${oldConfig}" ]]
+    [[ -f "${configDir}config.json" ]]
+    [[ "${startCalls}" == "2" ]]
+    [[ ! -s "${firewallLog}" ]]
+    grep -q 'sing-box 服务重启失败，已恢复旧配置和服务状态' "${errorLog}"
+
+    printf '{"inbounds":[{"type":"tuic","listen_port":26451}]}\n' >"${configDir}09_tuic_inbounds.json"
+    rm -f "${configDir}config.json"
+    : >"${serviceLog}"
+    : >"${firewallLog}"
+    : >"${errorLog}"
+    singBoxRunning() { return 1; }
+    runCoreServiceActionAllowFailure() { return 0; }
+    readPortHopping() {
+        tuicPortHoppingStart=33000
+        tuicPortHoppingEnd=33005
+    }
+    deletePortHoppingRules() {
+        printf 'hopping:%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${firewallLog}"
+    }
+    unInstallSingBox tuic
+    [[ ! -e "${configDir}09_tuic_inbounds.json" ]]
+    [[ ! -e "${configDir}config.json" ]]
+    grep -qx 'hopping:tuic:33000:33005:26451' "${firewallLog}"
+    grep -qx 'deny:26451:tcp' "${firewallLog}"
+    grep -qx 'deny:26451:udp' "${firewallLog}"
+
+    local alpineConfigDir="${root}/alpine/conf/config/"
+    local openRcService="${root}/alpine/sing-box"
+    local rcUpdateLog="${root}/alpine/rc-update.log"
+    mkdir -p "${alpineConfigDir}"
+    printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}06_hysteria2_inbounds.json"
+    printf '{"inbounds":[{"type":"hysteria2","listen_port":16295}]}\n' >"${alpineConfigDir}config.json"
+    printf '#!/sbin/openrc-run\n' >"${openRcService}"
+    : >"${rcUpdateLog}"
+    : >"${firewallLog}"
+    singBoxConfigPath="${alpineConfigDir}"
+    PADM_SINGBOX_OPENRC_SERVICE_FILE="${openRcService}"
+    release=alpine
+    readInstallType() { singBoxConfigPath=; }
+    readPortHopping() {
+        hysteria2PortHoppingStart=
+        hysteria2PortHoppingEnd=
+    }
+    coreStartupServiceEnabled() { return 0; }
+    rc-update() {
+        printf '%s\n' "$*" >>"${rcUpdateLog}"
+    }
+    cleanCoreInstallDirectory() { return 0; }
+    unInstallSingBox hysteria2
+    grep -qx 'del sing-box default' "${rcUpdateLog}"
+    [[ ! -e "${openRcService}" ]]
+    grep -qx 'deny:16295:tcp' "${firewallLog}"
+    grep -qx 'deny:16295:udp' "${firewallLog}"
 
     singBoxConfigPath=
+    release=debian
     : >"${serviceLog}"
-    : >"${rmLog}"
     : >"${errorLog}"
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
     handleSingBox() {
-        printf 'handle:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'handle:%s\n' "$1" >>"${serviceLog}"
         return 1
     }
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${rmLog}"
-        command rm "$@"
-    }
+    runCoreServiceActionAllowFailure() { "$@"; }
 
-    set +e
-    unInstallSingBox >/dev/null 2>&1
-    rc=$?
-    set -e
+    if unInstallSingBox >/dev/null 2>&1; then
+        rc=0
+    else
+        rc=$?
+    fi
     [[ "${rc}" == "1" ]]
-    grep -qx 'handle:stop:true' "${serviceLog}"
+    grep -qx 'handle:stop' "${serviceLog}"
     grep -q 'sing-box 服务停止失败，已取消卸载' "${errorLog}"
-    [[ ! -s "${rmLog}" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 )
 
 runSingBoxUninstallRejectsUnsafeConfigPathRegression() (
@@ -5850,11 +5956,13 @@ runSingBoxUninstallRejectsUnsafeConfigPathRegression() (
 runSingBoxManagedCleanupRegression() (
     local root="${TMP_DIR}/sing-box-managed-cleanup"
     local serviceLog="${root}/service.log"
+    local registrationLog="${root}/registration.log"
     local rmLog="${root}/rm.log"
     local cleanupLog="${root}/cleanup.log"
 
     mkdir -p "${root}"
     : >"${serviceLog}"
+    : >"${registrationLog}"
     : >"${rmLog}"
     : >"${cleanupLog}"
 
@@ -5867,16 +5975,24 @@ runSingBoxManagedCleanupRegression() (
         printf 'handle:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         return 0
     }
+    coreStartupServiceEnabled() { return 0; }
+    systemctl() {
+        printf '%s\n' "$*" >>"${registrationLog}"
+        return 0
+    }
     rm() {
         printf 'rm:%s\n' "$*" >>"${rmLog}"
         return 0
     }
 
+    release=debian
     singBoxConfigPath=
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     unInstallSingBox >/dev/null 2>&1
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     grep -qx 'handle:stop:true' "${serviceLog}"
+    grep -qx 'disable sing-box.service' "${registrationLog}"
+    grep -qx 'daemon-reload' "${registrationLog}"
     grep -qx 'rm:-f -- /etc/systemd/system/sing-box.service' "${rmLog}"
     grep -qx 'clean-core:/etc/padm/sing-box:sing-box' "${cleanupLog}"
 

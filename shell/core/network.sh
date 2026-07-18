@@ -5,6 +5,10 @@ ufwRulePresent() {
     ufw status | awk -v rule="${rule}" '$1 == rule { found = 1 } END { exit !found }'
 }
 
+ufwActive() {
+    LC_ALL=C ufw status 2>/dev/null | grep -q '^Status: active'
+}
+
 ufwConfiguredRulePresent() {
     local rule="$1/${2:-tcp}"
     ufw show added | awk -v rule="${rule}" '$1 == "ufw" && $2 == "allow" && $3 == rule { found = 1 } END { exit !found }'
@@ -12,7 +16,7 @@ ufwConfiguredRulePresent() {
 
 firewalldRulePresent() {
     local rule="$1/${2:-tcp}"
-    firewall-cmd --list-ports --permanent | tr ' ' '\n' | grep -Fxq "${rule}"
+    firewall-cmd --zone=public --permanent --list-ports | tr ' ' '\n' | grep -Fxq "${rule}"
 }
 
 padmFirewallStateFile() {
@@ -73,9 +77,9 @@ removeFirewallPortRule() {
         ;;
     firewalld)
         command -v firewall-cmd >/dev/null 2>&1 || return 1
-        firewall-cmd --list-ports --permanent >/dev/null 2>&1 || return 1
+        firewall-cmd --zone=public --permanent --list-ports >/dev/null 2>&1 || return 1
         if firewalldRulePresent "${firewallPort}" "${type}"; then
-            firewall-cmd --zone=public --remove-port="${firewallPort}/${type}" --permanent || return 1
+            firewall-cmd --zone=public --permanent --remove-port="${firewallPort}/${type}" || return 1
         fi
         firewall-cmd --reload || return 1
         ;;
@@ -137,6 +141,28 @@ padmFirewalldForwardStateKeyForTarget() {
     ' "${stateFile}"
 }
 
+padmIptablesForwardStateKey() {
+    printf 'forward:iptables:%s:%s:%s:%s' "$1" "$2" "$3" "$4"
+}
+
+padmIptablesForwardStateKeyForTarget() {
+    local type=$1
+    local targetPort=$2
+    local stateFile
+    [[ "${type}" == "hysteria2" || "${type}" == "tuic" ]] || return 1
+    validPortNumber "${targetPort}" || return 1
+    stateFile=$(padmFirewallStateFile) || return 1
+    [[ -f "${stateFile}" ]] || return 1
+    awk -F: -v type="${type}" -v targetPort="${targetPort}" '
+        NF == 6 && $1 == "forward" && $2 == "iptables" && $3 == type && $6 == targetPort {
+            print
+            found = 1
+            exit
+        }
+        END { exit !found }
+    ' "${stateFile}"
+}
+
 removeFirewalldForwardPortRange() {
     local start=$1
     local end=$2
@@ -148,7 +174,7 @@ removeFirewalldForwardPortRange() {
     local status=0
     validPortNumber "${start}" && validPortNumber "${end}" && validPortNumber "${targetPort}" && ((10#${start} <= 10#${end})) || return 1
     command -v firewall-cmd >/dev/null 2>&1 || return 1
-    permanentRules=$(firewall-cmd --permanent --list-forward-ports) || return 1
+    permanentRules=$(firewall-cmd --zone=public --permanent --list-forward-ports) || return 1
     read -r -a listedRules <<<"${permanentRules//$'\n'/ }"
     for listedRule in "${listedRules[@]}"; do
         existingRules["${listedRule}"]=1
@@ -156,7 +182,7 @@ removeFirewalldForwardPortRange() {
     for ((port = 10#${start}; port <= 10#${end}; port++)); do
         rule="port=${port}:proto=udp:toport=${targetPort}"
         if [[ -n "${existingRules[${rule}]:-}" ]]; then
-            firewall-cmd --permanent --remove-forward-port="${rule}" || status=1
+            firewall-cmd --zone=public --permanent --remove-forward-port="${rule}" || status=1
         fi
     done
     firewall-cmd --reload || status=1
@@ -166,8 +192,8 @@ removeFirewalldForwardPortRange() {
 removeFirewalldMasqueradeRule() {
     local queryStatus
     command -v firewall-cmd >/dev/null 2>&1 || return 1
-    if firewall-cmd --permanent --query-masquerade >/dev/null 2>&1; then
-        firewall-cmd --permanent --remove-masquerade || return 1
+    if firewall-cmd --zone=public --permanent --query-masquerade >/dev/null 2>&1; then
+        firewall-cmd --zone=public --permanent --remove-masquerade || return 1
     else
         queryStatus=$?
         [[ "${queryStatus}" == "1" ]] || return 1
@@ -175,14 +201,51 @@ removeFirewalldMasqueradeRule() {
     firewall-cmd --reload
 }
 
+removeIptablesPortHoppingRules() {
+    local type=$1
+    local marker="neil1123-vip_${type}_portHopping"
+    local line savedRules
+    local status=0
+    local -a ruleLines=()
+    [[ "${type}" == "hysteria2" || "${type}" == "tuic" ]] || return 1
+    command -v iptables >/dev/null 2>&1 && command -v iptables-save >/dev/null 2>&1 || return 1
+    iptables -t nat -L PREROUTING --line-numbers >/dev/null 2>&1 || return 1
+    mapfile -t ruleLines < <(iptables -t nat -L PREROUTING --line-numbers | awk -v marker="${marker}" '$0 ~ marker { print $1 }' | sort -rn)
+    for line in "${ruleLines[@]}"; do
+        [[ -n "${line}" ]] || continue
+        iptables -t nat -D PREROUTING "${line}" || status=1
+    done
+    if command -v netfilter-persistent >/dev/null 2>&1; then
+        netfilter-persistent save >/dev/null 2>&1 || status=1
+    fi
+    if ! savedRules=$(iptables-save); then
+        status=1
+    elif grep -Fq "${marker}" <<<"${savedRules}"; then
+        status=1
+    fi
+    return "${status}"
+}
+
 cleanupPadmFirewallRules() {
     local stateFile key rest type requestedPort
-    local kind backend start end targetPort extra
+    local kind backend ruleType start end targetPort extra
+    local hopType savedRules
     local remainingForwardPorts=
     local status=0
     local -a keys=()
     stateFile=$(padmFirewallStateFile) || return 1
-    [[ -f "${stateFile}" ]] || return 0
+    if command -v iptables-save >/dev/null 2>&1; then
+        if ! savedRules=$(iptables-save); then
+            status=1
+        else
+            for hopType in hysteria2 tuic; do
+                if grep -Fq "neil1123-vip_${hopType}_portHopping" <<<"${savedRules}"; then
+                    removeIptablesPortHoppingRules "${hopType}" || status=1
+                fi
+            done
+        fi
+    fi
+    [[ -f "${stateFile}" ]] || return "${status}"
     mapfile -t keys <"${stateFile}" || return 1
     for key in "${keys[@]}"; do
         if [[ "${key}" == port:* ]]; then
@@ -192,18 +255,32 @@ cleanupPadmFirewallRules() {
             requestedPort=${rest#*:}
             denyPort "${requestedPort}" "${type}" || status=1
         elif [[ "${key}" == forward:* ]]; then
-            IFS=: read -r kind backend type start end targetPort extra <<<"${key}"
-            if [[ "${kind}" != "forward" || "${backend}" != "firewalld" || "${type}" != "udp" || -n "${extra}" ]]; then
-                status=1
-            elif removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}"; then
-                padmFirewallStateRemove "${key}" || status=1
-            else
-                status=1
-            fi
+            IFS=: read -r kind backend ruleType start end targetPort extra <<<"${key}"
+            case "${backend}" in
+            firewalld)
+                if [[ "${kind}" != "forward" || "${ruleType}" != "udp" || -n "${extra}" ]]; then
+                    status=1
+                elif removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}"; then
+                    padmFirewallStateRemove "${key}" || status=1
+                else
+                    status=1
+                fi
+                ;;
+            iptables)
+                if [[ "${kind}" != "forward" || ( "${ruleType}" != "hysteria2" && "${ruleType}" != "tuic" ) || -n "${extra}" ]]; then
+                    status=1
+                elif removeIptablesPortHoppingRules "${ruleType}"; then
+                    padmFirewallStateRemove "${key}" || status=1
+                else
+                    status=1
+                fi
+                ;;
+            *) status=1 ;;
+            esac
         fi
     done
     if [[ "${status}" == "0" ]] && padmFirewallStateHas masquerade:firewalld; then
-        if ! remainingForwardPorts=$(firewall-cmd --permanent --list-forward-ports); then
+        if ! remainingForwardPorts=$(firewall-cmd --zone=public --permanent --list-forward-ports); then
             status=1
         elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
             removeFirewalldMasqueradeRule || status=1
@@ -233,22 +310,20 @@ allowPort() {
         validPortNumber "${requestedPort}" || return 1
     fi
     # 如果防火墙启动状态则添加相应的开放端口
-    if command -v dpkg >/dev/null 2>&1 && dpkg -l | grep -Eq "^[[:space:]]*ii[[:space:]]+ufw[[:space:]]"; then
-        if ufw status | grep -q "Status: active"; then
-            if ! ufwRulePresent "${requestedPort}" "${type}"; then
-                if ! sudo ufw allow "${requestedPort}/${type}" || ! checkUFWAllowPort "${requestedPort}" "${type}"; then
-                    sudo ufw delete allow "${requestedPort}/${type}" >/dev/null 2>&1 || true
-                    errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
-                    return 1
-                fi
-                backend=ufw
-                added=true
+    if command -v dpkg >/dev/null 2>&1 && dpkg -l | grep -Eq "^[[:space:]]*ii[[:space:]]+ufw[[:space:]]" && ufwActive; then
+        if ! ufwRulePresent "${requestedPort}" "${type}"; then
+            if ! sudo ufw allow "${requestedPort}/${type}" || ! checkUFWAllowPort "${requestedPort}" "${type}"; then
+                sudo ufw delete allow "${requestedPort}/${type}" >/dev/null 2>&1 || true
+                errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
+                return 1
             fi
+            backend=ufw
+            added=true
         fi
-    elif systemctl status firewalld 2>/dev/null | grep -q "active (running)"; then
+    elif systemctl is-active --quiet firewalld 2>/dev/null; then
         if ! firewalldRulePresent "${firewallPort}" "${type}"; then
-            if ! firewall-cmd --zone=public --add-port="${firewallPort}/${type}" --permanent || ! firewall-cmd --reload || ! checkFirewalldAllowPort "${firewallPort}" "${type}"; then
-                firewall-cmd --zone=public --remove-port="${firewallPort}/${type}" --permanent >/dev/null 2>&1 || true
+            if ! firewall-cmd --zone=public --permanent --add-port="${firewallPort}/${type}" || ! firewall-cmd --reload || ! checkFirewalldAllowPort "${firewallPort}" "${type}"; then
+                firewall-cmd --zone=public --permanent --remove-port="${firewallPort}/${type}" >/dev/null 2>&1 || true
                 firewall-cmd --reload >/dev/null 2>&1 || true
                 errorCard "${requestedPort}端口开放失败，已尝试回滚本次 firewalld 规则"
                 return 1
@@ -256,17 +331,15 @@ allowPort() {
             backend=firewalld
             added=true
         fi
-    elif rc-update show 2>/dev/null | grep -q ufw; then
-        if ufw status | grep -q "Status: active"; then
-            if ! ufwRulePresent "${requestedPort}" "${type}"; then
-                if ! sudo ufw allow "${requestedPort}/${type}" || ! checkUFWAllowPort "${requestedPort}" "${type}"; then
-                    sudo ufw delete allow "${requestedPort}/${type}" >/dev/null 2>&1 || true
-                    errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
-                    return 1
-                fi
-                backend=ufw
-                added=true
+    elif rc-update show 2>/dev/null | grep -q ufw && ufwActive; then
+        if ! ufwRulePresent "${requestedPort}" "${type}"; then
+            if ! sudo ufw allow "${requestedPort}/${type}" || ! checkUFWAllowPort "${requestedPort}" "${type}"; then
+                sudo ufw delete allow "${requestedPort}/${type}" >/dev/null 2>&1 || true
+                errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
+                return 1
             fi
+            backend=ufw
+            added=true
         fi
     elif dpkg-query -W -f='${db:Status-Abbrev}' netfilter-persistent 2>/dev/null | grep -q '^ii' && systemctl is-active --quiet netfilter-persistent; then
         if ! iptables -L | grep -Fq "allow ${requestedPort}/${type}(neil1123-vip)"; then

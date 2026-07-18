@@ -528,45 +528,181 @@ cleanCoreInstallDirectory() {
     cleanDirectoryContent "${targetDir}" || { errorCard "${description}文件清理失败"; return 1; }
 }
 
+singBoxProtocolUninstallRollback() {
+    local backupDir=$1
+    local serviceWasRunning=$2
+    local serviceWasEnabled=$3
+    local restoreRegistration=$4
+    local reason=$5
+    local rollbackFailed=false
+
+    checkLogBackupRestore "${backupDir}" || rollbackFailed=true
+    if [[ "${restoreRegistration}" == "true" ]]; then
+        if [[ "${release:-}" == "alpine" ]]; then
+            if [[ "${serviceWasEnabled}" == "true" ]] && ! rc-update add sing-box default >/dev/null 2>&1; then
+                rollbackFailed=true
+            fi
+        else
+            if ! systemctl daemon-reload >/dev/null 2>&1; then
+                rollbackFailed=true
+            fi
+            if [[ "${serviceWasEnabled}" == "true" ]] && ! systemctl enable sing-box.service >/dev/null 2>&1; then
+                rollbackFailed=true
+            fi
+        fi
+    fi
+    readInstallType || rollbackFailed=true
+    if [[ "${serviceWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleSingBox start; then
+        rollbackFailed=true
+    fi
+    if [[ "${rollbackFailed}" == "true" ]]; then
+        padmForgetCleanupPath "${backupDir}"
+        errorCard "${reason}，且回滚失败，请检查备份目录: ${backupDir}"
+    else
+        padmRemoveCleanupPath "${backupDir}"
+        errorCard "${reason}，已恢复旧配置和服务状态"
+    fi
+    return 1
+}
+
+singBoxRemoveServiceRegistration() {
+    local serviceFile
+    if [[ "${release:-}" == "alpine" ]]; then
+        serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
+        if coreStartupServiceEnabled sing-box && ! rc-update del sing-box default >/dev/null 2>&1; then
+            return 1
+        fi
+        removeManagedFileIfPresent "${serviceFile}" || return 1
+    else
+        serviceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
+        if coreStartupServiceEnabled sing-box && ! systemctl disable sing-box.service >/dev/null 2>&1; then
+            return 1
+        fi
+        removeManagedFileIfPresent "${serviceFile}" || return 1
+        systemctl daemon-reload >/dev/null 2>&1 || return 1
+    fi
+}
+
 # 卸载 sing-box
 unInstallSingBox() {
     local type=${1:-}
-    if [[ -n "${singBoxConfigPath}" ]]; then
-        local targetFile
-        if ! padmIsSafeAbsolutePath "${singBoxConfigPath%/}"; then
-            errorCard "sing-box 配置路径异常，已取消卸载"
-            return 1
-        fi
-        if grep -q 'tuic' </etc/padm/sing-box/conf/config.json && [[ "${type}" == "tuic" ]]; then
-            targetFile=$(padmManagedFilePath "${singBoxConfigPath}" "09_tuic_inbounds.json") || return 1
-            removeManagedFileIfPresent "${targetFile}" || return 1
-            successCard "删除sing-box tuic配置成功"
-        fi
+    local protocolFile protocolPort mergedFile serviceFile uninstallBackupDir
+    local serviceWasRunning=false
+    local serviceWasEnabled=false
+    local portHoppingStart= portHoppingEnd=
+    local firewallStatus=0
+    local validationLog
 
-        if grep -q 'hysteria2' </etc/padm/sing-box/conf/config.json && [[ "${type}" == "hysteria2" ]]; then
-            targetFile=$(padmManagedFilePath "${singBoxConfigPath}" "06_hysteria2_inbounds.json") || return 1
-            removeManagedFileIfPresent "${targetFile}" || return 1
-            successCard "删除sing-box hysteria2配置成功"
-        fi
-        targetFile=$(padmManagedFilePath "${singBoxConfigPath}" "config.json") || return 1
-        removeManagedFileIfPresent "${targetFile}" || return 1
-    fi
-
-    readInstallType
-
-    if [[ -n "${singBoxConfigPath}" ]]; then
-        statusCard "保留配置" "检测到有其他配置，保留 sing-box 核心"
-        serviceQueueRestart sing-box
-        serviceQueueApply || { errorCard "sing-box 服务重启失败"; return 1; }
-    else
+    if [[ -z "${singBoxConfigPath}" ]]; then
         if ! runCoreServiceActionAllowFailure handleSingBox stop; then
             errorCard "sing-box 服务停止失败，已取消卸载"
             return 1
         fi
-        removeManagedFileIfPresent /etc/systemd/system/sing-box.service || { errorCard "sing-box systemd 服务文件删除失败"; return 1; }
+        singBoxRemoveServiceRegistration || {
+            errorCard "sing-box 开机自启清理失败，已取消卸载"
+            return 1
+        }
         cleanCoreInstallDirectory /etc/padm/sing-box "sing-box" || return 1
         successCard "sing-box 卸载完成"
+        return 0
     fi
+
+    if ! padmIsSafeAbsolutePath "${singBoxConfigPath%/}"; then
+        errorCard "sing-box 配置路径异常，已取消卸载"
+        return 1
+    fi
+    case "${type}" in
+    tuic) protocolFile=09_tuic_inbounds.json ;;
+    hysteria2) protocolFile=06_hysteria2_inbounds.json ;;
+    *) errorCard "sing-box 协议类型异常，已取消卸载"; return 1 ;;
+    esac
+    protocolFile=$(padmManagedFilePath "${singBoxConfigPath}" "${protocolFile}") || return 1
+    [[ -f "${protocolFile}" ]] || { errorCard "未找到 sing-box ${type} 配置，已取消卸载"; return 1; }
+    protocolPort=$(jq -er '.inbounds[0].listen_port | select(type == "number" and . >= 1 and . <= 65535 and floor == .)' "${protocolFile}") || {
+        errorCard "sing-box ${type} 端口读取失败，已取消卸载"
+        return 1
+    }
+    validPortNumber "${protocolPort}" || { errorCard "sing-box ${type} 端口异常，已取消卸载"; return 1; }
+    mergedFile=$(padmManagedFilePath "${singBoxConfigPath}" config.json) || return 1
+    if [[ "${release:-}" == "alpine" ]]; then
+        serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
+    else
+        serviceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
+    fi
+    if singBoxRunning; then
+        serviceWasRunning=true
+    fi
+    if coreStartupServiceEnabled sing-box; then
+        serviceWasEnabled=true
+    fi
+    if declare -F readPortHopping >/dev/null 2>&1; then
+        readPortHopping "${type}" "${protocolPort}" >/dev/null 2>&1 || true
+        if [[ "${type}" == "hysteria2" ]]; then
+            portHoppingStart=${hysteria2PortHoppingStart:-}
+            portHoppingEnd=${hysteria2PortHoppingEnd:-}
+        else
+            portHoppingStart=${tuicPortHoppingStart:-}
+            portHoppingEnd=${tuicPortHoppingEnd:-}
+        fi
+    fi
+    checkLogBackupCreate uninstallBackupDir "${protocolFile}" "${mergedFile}" "${serviceFile}" || {
+        errorCard "sing-box 卸载备份失败，已取消卸载"
+        return 1
+    }
+    if [[ "${serviceWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleSingBox stop; then
+        padmRemoveCleanupPath "${uninstallBackupDir}"
+        errorCard "sing-box 服务停止失败，已取消卸载"
+        return 1
+    fi
+    if ! removeManagedFileIfPresent "${protocolFile}"; then
+        singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box ${type} 配置删除失败"
+        return 1
+    fi
+    if ! removeManagedFileIfPresent "${mergedFile}"; then
+        singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 主配置删除失败"
+        return 1
+    fi
+
+    readInstallType || {
+        singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置状态刷新失败"
+        return 1
+    }
+    if [[ -n "${singBoxConfigPath}" ]]; then
+        if [[ -x "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" ]]; then
+            validationLog=$(padmFallbackTmpFilePath padm-sing-box-uninstall.log)
+            if ! singBoxMergeConfigForValidation "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" "${validationLog}" check; then
+                singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置校验失败"
+                return 1
+            fi
+        fi
+        if [[ "${serviceWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleSingBox start; then
+            singBoxProtocolUninstallRollback "${uninstallBackupDir}" true "${serviceWasEnabled}" false "sing-box 服务重启失败"
+            return 1
+        fi
+        statusCard "保留配置" "检测到有其他配置，保留 sing-box 核心"
+    else
+        if ! singBoxRemoveServiceRegistration; then
+            singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" true "sing-box 开机自启清理失败"
+            return 1
+        fi
+        if ! cleanCoreInstallDirectory /etc/padm/sing-box "sing-box"; then
+            padmForgetCleanupPath "${uninstallBackupDir}"
+            errorCard "sing-box 核心清理失败，请检查备份目录: ${uninstallBackupDir}"
+            return 1
+        fi
+    fi
+    padmRemoveCleanupPath "${uninstallBackupDir}"
+
+    if [[ -n "${portHoppingStart}" && -n "${portHoppingEnd}" ]]; then
+        deletePortHoppingRules "${type}" "${portHoppingStart}" "${portHoppingEnd}" "${protocolPort}" || firewallStatus=1
+    fi
+    denyPort "${protocolPort}" || firewallStatus=1
+    denyPort "${protocolPort}" udp || firewallStatus=1
+    if [[ "${firewallStatus}" != "0" ]]; then
+        errorCard "sing-box ${type} 已卸载，但防火墙规则回收失败，请检查防火墙状态"
+        return 1
+    fi
+    successCard "删除sing-box ${type}配置成功"
 }
 
 
@@ -1230,7 +1366,10 @@ addCorePort() {
                 errorCard "入口端口删除或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
                 return 1
             fi
-            if ! denyPort "${port}" || ! denyPort "${port}" udp; then
+            local firewallStatus=0
+            denyPort "${port}" || firewallStatus=1
+            denyPort "${port}" udp || firewallStatus=1
+            if [[ "${firewallStatus}" != "0" ]]; then
                 errorCard "入口端口配置已删除，但防火墙规则回收失败，请检查防火墙状态"
                 return 1
             fi
