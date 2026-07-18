@@ -266,6 +266,7 @@ migrateSubscriptionGroupsStateUnlocked() {
     currentVersion=$(jq -r '.version // 0' "${stateFile}" 2>/dev/null || echo 0)
     if [[ "${currentVersion}" == "${schemaVersion}" ]] && jq -e '
       type == "object" and (.groups | type == "array") and (.groups | length > 0) and
+      (.active_group | type == "string" and length > 0) and (.active_group as $active | any(.groups[]?; .id == $active)) and
       all(.groups[]; (.id // "") != "" and (.sources | type == "array") and any(.sources[]?; .role == "main") and (.user_groups | type == "array") and (.sync | type == "object") and (.sync | has("remote_enabled")) and (.sync | has("event_enabled")) and (.sync | has("quota_auto_apply")) and (.traffic | type == "object"))
     ' "${stateFile}" >/dev/null 2>&1; then
         return 0
@@ -430,7 +431,7 @@ subscriptionGroupRead() {
         argCount=$(($# - 1))
         jqArgs=("${@:1:${argCount}}")
     fi
-    subscriptionGroupsStateRead "${jqArgs[@]}" --arg groupId "${groupId}" ".groups[] | select(.id == \$groupId) | ${query}"
+    subscriptionGroupsStateRead "${jqArgs[@]}" --arg groupId "${groupId}" ".groups | map(select(.id == \$groupId)) | if length > 0 then .[0] | ${query} else error(\"subscription group not found\") end"
 }
 
 subscriptionGroupWrite() {

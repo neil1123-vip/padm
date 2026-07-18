@@ -3379,6 +3379,10 @@ runCoreBinaryInstallCopyFailureRegression() (
             printf 'xray\n'
             return 0
         fi
+        if [[ "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
+            printf '%s\n' '-rwxr-xr-x  3.0 unx 0 b- 0% 2026-01-01 00:00 xray'
+            return 0
+        fi
         if [[ "${1:-}" == "-p" ]]; then
             printf 'xray\n'
             return 0
@@ -3784,6 +3788,10 @@ runCoreUpgradeRejectsDirectoryTargetRegression() (
             printf 'xray\n'
             return 0
         fi
+        if [[ "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
+            printf '%s\n' '-rwxr-xr-x  3.0 unx 0 b- 0% 2026-01-01 00:00 xray'
+            return 0
+        fi
         if [[ "${1:-}" == "-p" ]]; then
             printf 'xray\n'
             return 0
@@ -4063,6 +4071,10 @@ runCoreReleaseArchiveRejectsSymlinkPayloadRegression() (
     unzip() {
         if [[ "${1:-}" == "-Z1" ]]; then
             printf 'xray\n'
+            return 0
+        fi
+        if [[ "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
+            printf '%s\n' 'lrwxrwxrwx  3.0 unx 0 b- 0% 2026-01-01 00:00 xray'
             return 0
         fi
         if [[ "${1:-}" == "-p" ]]; then
@@ -4357,6 +4369,10 @@ runCoreInstallRejectsUnsafeBinaryPathRegression() (
     unzip() {
         if [[ "${1:-}" == "-Z1" ]]; then
             printf 'xray\n'
+            return 0
+        fi
+        if [[ "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
+            printf '%s\n' '-rwxr-xr-x  3.0 unx 0 b- 0% 2026-01-01 00:00 xray'
             return 0
         fi
         if [[ "${1:-}" == "-p" ]]; then
@@ -5201,7 +5217,7 @@ runCoreInstallServiceActionFailureRegression() (
     }
     installXrayService() {
         printf 'installXrayService:%s\n' "$*" >>"${callLog}"
-        [[ "${mode}" == "xray-service-exit" ]] && exit 1
+        [[ "${mode}" == "xray-service-fail" ]] && return 1
         return 0
     }
     initXrayConfig() {
@@ -5302,14 +5318,14 @@ $1:restart"
     grep -qx 'nginx:start:true' "${serviceLog}"
     grep -qx 'wg-refresh' "${callLog}"
     grep -qx 'queueRestart:nginx' "${callLog}"
-    grep -qx 'initXrayConfig:custom 4' "${callLog}"
+    grep -qx 'initXrayConfig:custom 3' "${callLog}"
     ! grep -q '^cleanup:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
     [[ "${SERVICE_ACTIONS}" == "existing:start" ]]
     grep -q 'Xray Reality 配置初始化失败，已恢复原 Nginx 运行状态' "${errorLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
-    for mode in xray-install-exit xray-service-exit; do
+    for mode in xray-install-exit xray-service-fail; do
         resetInstallServiceFixture "${mode}"
         set +e
         installXrayReality >/dev/null 2>&1
@@ -5321,7 +5337,7 @@ $1:restart"
         grep -qx 'wg-refresh' "${callLog}"
         grep -qx 'queueRestart:nginx' "${callLog}"
         grep -q '^installXray:' "${callLog}"
-        if [[ "${mode}" == "xray-service-exit" ]]; then
+        if [[ "${mode}" == "xray-service-fail" ]]; then
             grep -q '^installXrayService:' "${callLog}"
         else
             ! grep -q '^installXrayService:' "${callLog}"
@@ -6996,9 +7012,9 @@ runWarpConfigSafeDirRegression() (
         autoRead() { printf -v "$3" y; }
         errorCard() { return 1; }
         downloadGitHubReleaseAsset() {
-            [[ "$1" == "--allow-missing-digest" && "$2" == "-P" && "$4" == "badafans/warp-reg" ]] || return 1
-            printf '%s\n' "$5" >"${versionLog}"
-            printf '#!/usr/bin/env sh\n' >"${3%/}/$6"
+            [[ "$1" == "-P" && "$3" == "badafans/warp-reg" && "$4" == "latest" && "$5" == "${warpRegCoreCPUVendor}" ]] || return 1
+            printf '%s\n' "$4" >"${versionLog}"
+            printf '#!/usr/bin/env sh\n' >"${2%/}/$5"
         }
         installWarpReg >/dev/null 2>&1
         [[ "$(<"${versionLog}")" == "latest" ]]
@@ -8705,6 +8721,7 @@ SH
         nginxBlog() { return 0; }
         hasIPv6Connectivity() { return 1; }
         installSubscriptionControlService() { return 0; }
+        coreStartupServiceEnabled() { return 1; }
         bootStartup() { return 0; }
         handleNginx() { return 0; }
         pgrep() { return 0; }
@@ -8728,6 +8745,7 @@ runSubscribeNginxServiceFailureRegression() (
     local mode=reload
     local rc writeCalls controlCalls bootCalls
     local runtimeRunning=true
+    local runtimeEnabled=false
     local startFailures=0
 
     mkdir -p "${root}/fake-bin" "${root}/nginx" "${root}/static" "${root}/tls"
@@ -8785,8 +8803,15 @@ SH
     bootStartup() {
         bootCalls=$((bootCalls + 1))
         printf '%s:boot\n' "${mode}" >>"${serviceLog}"
+        runtimeEnabled=true
         [[ "${mode}" == "boot-fail" ]] && return 1
         return 0
+    }
+    coreStartupServiceEnabled() { [[ "${runtimeEnabled}" == "true" ]]; }
+    restoreCoreStartupServiceInstall() {
+        checkLogBackupRestore "$1" || return 1
+        runtimeEnabled=$3
+        padmRemoveCleanupPath "$1"
     }
     nginxRunning() { [[ "${runtimeRunning}" == "true" ]]; }
     handleNginx() {
@@ -8812,6 +8837,7 @@ SH
     bootCalls=0
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     runtimeRunning=true
+    runtimeEnabled=false
     startFailures=1
     set +e
     installSubscribe >/dev/null 2>&1
@@ -8826,6 +8852,7 @@ SH
     grep -q '订阅 Nginx 服务重载失败' "${errorLog}"
     grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
     [[ "${runtimeRunning}" == "true" ]]
+    [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     mode=existing-port
@@ -8836,6 +8863,7 @@ SH
     bootCalls=0
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     runtimeRunning=false
+    runtimeEnabled=false
     startFailures=1
     set +e
     installSubscribe >/dev/null 2>&1
@@ -8847,6 +8875,7 @@ SH
     [[ "${bootCalls}" == "0" ]]
     grep -qx 'existing-port:start:true' "${serviceLog}"
     grep -q '订阅 Nginx 服务启动失败' "${errorLog}"
+    [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     mode=config-fail
@@ -8857,6 +8886,7 @@ SH
     bootCalls=0
     SERVICE_QUEUE_ALLOW_FAILURE=previous
     runtimeRunning=true
+    runtimeEnabled=false
     startFailures=0
     set +e
     installSubscribe >/dev/null 2>&1
@@ -8868,6 +8898,7 @@ SH
     [[ "${bootCalls}" == "0" ]]
     grep -q '订阅 Nginx 配置校验失败，且旧配置恢复失败' "${errorLog}"
     grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
+    [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     for mode in control-fail boot-fail; do
@@ -8877,6 +8908,11 @@ SH
         controlCalls=0
         bootCalls=0
         runtimeRunning=true
+        if [[ "${mode}" == "control-fail" ]]; then
+            runtimeEnabled=true
+        else
+            runtimeEnabled=false
+        fi
         startFailures=0
         SERVICE_QUEUE_ALLOW_FAILURE=previous
         set +e
@@ -8899,6 +8935,11 @@ SH
         fi
         grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
         [[ "${runtimeRunning}" == "true" ]]
+        if [[ "${mode}" == "control-fail" ]]; then
+            [[ "${runtimeEnabled}" == "true" ]]
+        else
+            [[ "${runtimeEnabled}" == "false" ]]
+        fi
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     done
 
@@ -9987,6 +10028,16 @@ JSON
     if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-pre-migrate-*.json'; then
         return 1
     fi
+
+    jq '.version = 2 | .active_group = "missing" | .groups[0].sync.event_enabled = true' "${stateFile}" >"${stateFile}.tmp"
+    mv "${stateFile}.tmp" "${stateFile}"
+    migrateSubscriptionGroupsState
+    [[ "$(jq -r '.active_group' "${stateFile}")" == "default" ]]
+    set +e
+    subscriptionGroupRead missing -r '.id' >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" -ne 0 ]]
 
     if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
@@ -12695,6 +12746,9 @@ JSON
         *remote1.example*/s/sing-box_profiles/*)
             printf '%s\n' '[{"tag":"sub_team"}]'
             ;;
+        *remote2.example*/s/clashMeta/*)
+            [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-partial}" != "fetch-failure" ]]
+            ;;
         *remote2.example*/s/default/*)
             printf '%s' 'vless://bad@remote2.example:443#sub_team' | base64
             printf '@@'
@@ -12725,6 +12779,15 @@ JSON
     }
 
     if remoteSubscribeFetchPartSelected rollback; then
+        writeRemoteSubscribeOldOutputs
+        export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fetch-failure
+        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+            return 1
+        fi
+        [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+        [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+        jq -e '.[0].tag == "old-local"' "${localDir}/sing-box/${email}" >/dev/null
+
         writeRemoteSubscribeOldOutputs
         export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fail-singbox-merge
         printf '{bad local json\n' >"${localDir}/sing-box/${email}"
@@ -13073,12 +13136,20 @@ runPadmBbrManagedCleanupRegression() (
                 esac
             done
             [[ -n "${outputFile}" && -n "${url}" ]] || return 1
-            printf "%s\n" "${url}" >"${urlLog}"
-            cat >"${outputFile}" <<SH
+            printf "%s\n" "${url}" >>"${urlLog}"
+            case "${url}" in
+            https://api.github.com/repos/ylx2016/Linux-NetSpeed/commits/master)
+                printf "%s\n" "{" "  \"sha\": \"0123456789abcdef0123456789abcdef01234567\"" "}" >"${outputFile}"
+                ;;
+            https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/0123456789abcdef0123456789abcdef01234567/tcpx.sh)
+                cat >"${outputFile}" <<SH
 #!/usr/bin/env bash
 printf executed >"${marker}"
 printf "%s\n" "\$0" >"${pathLog}"
 SH
+                ;;
+            *) return 1 ;;
+            esac
         }
         sha256sum() {
             printf "sha256sum:%s\n" "$1" >>"${hashLog}"
@@ -13086,15 +13157,17 @@ SH
         }
         runThirdPartyTcpAccelerationScript
     ' _ "${root}" "${PROJECT_ROOT}" "${thirdPartyStatus}" "${thirdPartyHelper}" "${thirdPartyMarker}" "${thirdPartyPathLog}" "${thirdPartyUrlLog}" "${thirdPartyHashLog}"
-    [[ "$(<"${thirdPartyMarker}")" == "executed" ]]
-    grep -qxF 'https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh' "${thirdPartyUrlLog}"
-    ! grep -Eq '/[0-9a-f]{40}/tcpx\.sh$' "${thirdPartyUrlLog}"
-    [[ ! -s "${thirdPartyHashLog}" ]]
+    [[ -f "${thirdPartyMarker}" && "$(<"${thirdPartyMarker}")" == "executed" ]] || return 1
+    grep -qxF 'https://api.github.com/repos/ylx2016/Linux-NetSpeed/commits/master' "${thirdPartyUrlLog}" || return 1
+    grep -qxF 'https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/0123456789abcdef0123456789abcdef01234567/tcpx.sh' "${thirdPartyUrlLog}" || return 1
+    ! grep -qxF 'https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh' "${thirdPartyUrlLog}" || return 1
+    [[ ! -s "${thirdPartyHashLog}" ]] || return 1
     local executedThirdPartyPath
+    [[ -f "${thirdPartyPathLog}" ]] || return 1
     executedThirdPartyPath=$(<"${thirdPartyPathLog}")
-    [[ "${executedThirdPartyPath}" == "${root}/padm-tcpx."*/tcpx.sh ]]
-    [[ ! -e "${root}/padm-tcpx.sh" ]]
-    [[ ! -e "$(dirname -- "${executedThirdPartyPath}")" ]]
+    [[ "${executedThirdPartyPath}" == "${root}/padm-tcpx."*/tcpx.sh ]] || return 1
+    [[ ! -e "${root}/padm-tcpx.sh" ]] || return 1
+    [[ ! -e "$(dirname -- "${executedThirdPartyPath}")" ]] || return 1
 
     cat >"${root}/repeat-sysctl.conf" <<'EOF'
 net.core.default_qdisc = fq
@@ -15299,6 +15372,7 @@ runInstallToolsAcmeResultFailureRegression() {
         nginx() { return 0; }
         protocolSelectionSkipsNginx() { return 0; }
         protocolSelectionNeedsLocalCertificate() { return 0; }
+        resolveGitHubCommitRef() { [[ "$1" == "acmesh-official/acme.sh" && "$2" == "master" ]] && printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'; }
         curl() {
             local outputFile=
             while [[ $# -gt 0 ]]; do
@@ -15326,6 +15400,7 @@ runInstallToolsAcmeResultFailureRegression() {
         [[ "${installStatus}" -ne 0 ]]
         grep -q "acme.sh安装结果校验失败" "${errorLog}"
         [[ -s "${acmeRunCommandLog}" ]]
+        grep -q -- '--install' "${acmeRunCommandLog}"
         ! grep -qF "${tmpRoot}/padm-tls/acme.sh" "${acmeRunCommandLog}"
         grep -Eq "${tmpRoot}/padm-tls\\.[^/]+/acme\\.sh" "${acmeRunCommandLog}"
         [[ ! -d "${tmpRoot}/padm-tls" ]]
@@ -15349,7 +15424,7 @@ runInstallToolsAcmeResultFailureRegression() {
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
         HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl tail
+        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate resolveGitHubCommitRef curl tail
     )
 }
 
@@ -15403,6 +15478,7 @@ runInstallToolsAcmeCommitFailureRegression() {
         nginx() { return 0; }
         protocolSelectionSkipsNginx() { return 0; }
         protocolSelectionNeedsLocalCertificate() { return 0; }
+        resolveGitHubCommitRef() { [[ "$1" == "acmesh-official/acme.sh" && "$2" == "master" ]] && printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'; }
         curl() {
             local outputFile=
             while [[ $# -gt 0 ]]; do
@@ -15448,7 +15524,7 @@ runInstallToolsAcmeCommitFailureRegression() {
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
         HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl mv
+        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate resolveGitHubCommitRef curl mv
     )
 }
 
@@ -15496,6 +15572,7 @@ runInstallToolsAcmeDownloadBoundsRegression() {
         nginx() { return 0; }
         protocolSelectionSkipsNginx() { return 0; }
         protocolSelectionNeedsLocalCertificate() { return 0; }
+        resolveGitHubCommitRef() { [[ "$1" == "acmesh-official/acme.sh" && "$2" == "master" ]] && printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'; }
         curl() {
             local outputFile=
             printf '%s\n' "$*" >"${curlLog}"
@@ -15513,12 +15590,13 @@ runInstallToolsAcmeDownloadBoundsRegression() {
         grep -q -- '--connect-timeout 10' "${curlLog}"
         grep -q -- '--max-time 120' "${curlLog}"
         grep -q -- '--max-filesize 1048576' "${curlLog}"
+        grep -q 'raw.githubusercontent.com/acmesh-official/acme.sh/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/acme.sh' "${curlLog}"
 
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
         if [[ -n "${oldInstallLog}" ]]; then PADM_INSTALL_LOG="${oldInstallLog}"; else unset PADM_INSTALL_LOG; fi
         HOME="${oldHome}"
         selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate curl
+        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate resolveGitHubCommitRef curl
     )
 }
 
@@ -15859,7 +15937,7 @@ runAptKeyInstallFailureRegression() {
         local keyStatus=$?
         set -e
         [[ "${keyStatus}" -ne 0 ]]
-        grep -q "测试源 apt key 安装失败" "${errorLog}"
+        grep -q "测试源 apt key 下载失败" "${errorLog}"
         grep -q "https://example.invalid/key.gpg" "${curlCalls}"
         grep -q -- '--connect-timeout 10 --max-time 120 --max-filesize 1048576' "${curlCalls}"
         ! compgen -G "${TMP_DIR}/.missing-keyring.gpg.aptkey.*" >/dev/null
@@ -15870,8 +15948,33 @@ runAptKeyInstallFailureRegression() {
         printf 'old-keyring\n' >"${keyringFile}"
         : >"${errorLog}"
         curl() {
-            printf 'new-keyring\n'
+            local outputFile=
+            while [[ $# -gt 0 ]]; do
+                if [[ "$1" == "-o" ]]; then
+                    outputFile=$2
+                    break
+                fi
+                shift
+            done
+            [[ -n "${outputFile}" ]] || return 1
+            printf 'new-keyring\n' >"${outputFile}"
         }
+        sha256sum() {
+            printf '%064d  %s\n' 0 "$1"
+        }
+
+        set +e
+        (
+            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key "${keyringFile}" Nginx "${PADM_NGINX_SIGNING_KEY_SHA256}"
+        ) >/dev/null 2>&1
+        keyStatus=$?
+        set -e
+        [[ "${keyStatus}" -ne 0 ]]
+        [[ "$(<"${keyringFile}")" == "old-keyring" ]]
+        grep -q "Nginx apt key sha256 校验失败" "${errorLog}"
+        ! compgen -G "${keyRoot}/.existing-keyring.gpg.aptkey.*" >/dev/null
+
+        : >"${errorLog}"
         eval "$(declare -f commitGeneratedFile | sed '1s/^commitGeneratedFile/originalCommitGeneratedFile/')"
         commitGeneratedFile() {
             if [[ "$2" == "${keyringFile}" ]]; then
@@ -15896,7 +15999,7 @@ runAptKeyInstallFailureRegression() {
         else
             unset REGRESSION_ERROR_CARD_LOG
         fi
-        unset -f curl gpg sudo commitGeneratedFile
+        unset -f curl gpg sudo sha256sum commitGeneratedFile
     )
 }
 
@@ -15934,13 +16037,22 @@ runNginxAptRepoRefreshRollbackRegression() {
         lsb_release() { [[ "$1" == "-cs" ]] && printf 'bookworm\n'; }
         curl() {
             local url=${!#}
+            local outputFile=
             printf '%s\n' "$*" >>"${curlCalls}"
             case "${url}" in
             https://nginx.org/packages/mainline/debian/dists/bookworm/Release)
                 return 0
                 ;;
             https://nginx.org/keys/nginx_signing.key)
-                printf 'new-key\n'
+                while [[ $# -gt 0 ]]; do
+                    if [[ "$1" == "-o" ]]; then
+                        outputFile=$2
+                        break
+                    fi
+                    shift
+                done
+                [[ -n "${outputFile}" ]] || return 1
+                printf 'new-key\n' >"${outputFile}"
                 return 0
                 ;;
             *)
@@ -15952,6 +16064,7 @@ runNginxAptRepoRefreshRollbackRegression() {
             [[ "${1:-}" == "--dearmor" ]] || return 1
             cat
         }
+        sha256sum() { printf '%s  %s\n' "${PADM_NGINX_SIGNING_KEY_SHA256}" "$1"; }
         refreshAptAfterRepoChange() { return 1; }
 
         set +e
@@ -15977,7 +16090,7 @@ runNginxAptRepoRefreshRollbackRegression() {
             unset REGRESSION_ERROR_CARD_LOG
         fi
         unset PADM_NGINX_APT_KEYRING_FILE PADM_NGINX_APT_REPO_FILE PADM_NGINX_APT_PIN_FILE
-        unset -f installPackageTracked nginxServiceInstalled bootStartup lsb_release curl gpg refreshAptAfterRepoChange
+        unset -f installPackageTracked nginxServiceInstalled bootStartup lsb_release curl gpg sha256sum refreshAptAfterRepoChange
     )
 }
 
@@ -15986,22 +16099,28 @@ runNginxYumMainlineEnableFailureRegression() {
         local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
         local errorLog="${TMP_DIR}/nginx-yum-mainline-error.log"
         local rootRel="${TMP_DIR}/nginx-yum-mainline-rollback"
-        local root repoDir
+        local root repoDir rpmKeyFile
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         : >"${errorLog}"
         mkdir -p "${rootRel}"
         root=$(cd -- "${rootRel}" && pwd -P)
         repoDir="${root}/repos"
+        rpmKeyFile="${root}/rpm-gpg/RPM-GPG-KEY-nginx"
         mkdir -p "${repoDir}"
+        mkdir -p "$(dirname "${rpmKeyFile}")"
         printf 'old-yum-repo\n' >"${repoDir}/nginx.repo"
+        printf 'old-rpm-key\n' >"${rpmKeyFile}"
         release=centos
         packageManager=yum
         removeType=true
         PADM_YUM_REPOS_DIR="${repoDir}"
+        PADM_NGINX_RPM_KEY_FILE="${rpmKeyFile}"
         installPackageTracked() { return 0; }
         packageInstalled() { return 0; }
         nginxServiceInstalled() { return 0; }
         bootStartup() { return 0; }
+        downloadUrlToFileBounded() { printf 'new-rpm-key\n' >"$2"; }
+        sha256sum() { printf '%s  %s\n' "${PADM_NGINX_SIGNING_KEY_SHA256}" "$1"; }
         sudo() {
             [[ "$1" == "yum-config-manager" && "$2" == "--enable" && "$3" == "nginx-mainline" ]] && return 1
             "$@"
@@ -16016,6 +16135,7 @@ runNginxYumMainlineEnableFailureRegression() {
         [[ "${nginxStatus}" -ne 0 ]]
         grep -q "Nginx yum mainline 源启用失败" "${errorLog}"
         [[ "$(<"${repoDir}/nginx.repo")" == "old-yum-repo" ]]
+        [[ "$(<"${rpmKeyFile}")" == "old-rpm-key" ]]
         if regressionFindHasMatches "${root}" -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
@@ -16025,8 +16145,8 @@ runNginxYumMainlineEnableFailureRegression() {
         else
             unset REGRESSION_ERROR_CARD_LOG
         fi
-        unset -f installPackageTracked packageInstalled nginxServiceInstalled bootStartup sudo
-        unset PADM_YUM_REPOS_DIR
+        unset -f installPackageTracked packageInstalled nginxServiceInstalled bootStartup downloadUrlToFileBounded sha256sum sudo
+        unset PADM_YUM_REPOS_DIR PADM_NGINX_RPM_KEY_FILE
     )
 }
 
@@ -16661,7 +16781,7 @@ runInstallRefreshRestoresBackupRegression() {
     restoreFailureOutputLog="${restoreFailureDir}/refresh.log"
     restoreFailureTmpRoot="${restoreFailureDir}/tmp"
     oldTmpDir="${TMPDIR:-}"
-    mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${archiveRoot}/shell" "${archiveRoot}/documents" "${refreshTmpRoot}"
+    mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/assets" "${archiveRoot}/shell" "${archiveRoot}/documents" "${archiveRoot}/assets" "${refreshTmpRoot}"
     printf 'old-shell\n' >"${fixtureDir}/shell/marker"
     printf 'old-doc\n' >"${fixtureDir}/documents/marker"
     printf 'old-readme\n' >"${fixtureDir}/README.md"
@@ -16695,7 +16815,7 @@ runInstallRefreshRestoresBackupRegression() {
             fi
             command cp "$@"
         }
-        refreshScriptModules new-ref
+        refreshScriptModules 7777777777777777777777777777777777777777
     ) >"${outputLog}" 2>&1
     grep -q '完整安装包替换失败，已恢复旧模块' "${outputLog}"
     [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
@@ -16707,7 +16827,7 @@ runInstallRefreshRestoresBackupRegression() {
         return 1
     fi
 
-    mkdir -p "${restoreFailureDir}/shell" "${restoreFailureDir}/documents" "${restoreFailureArchiveRoot}/shell" "${restoreFailureArchiveRoot}/documents" "${restoreFailureTmpRoot}"
+    mkdir -p "${restoreFailureDir}/shell" "${restoreFailureDir}/documents" "${restoreFailureDir}/assets" "${restoreFailureArchiveRoot}/shell" "${restoreFailureArchiveRoot}/documents" "${restoreFailureArchiveRoot}/assets" "${restoreFailureTmpRoot}"
     printf 'old-shell\n' >"${restoreFailureDir}/shell/marker"
     printf 'old-doc\n' >"${restoreFailureDir}/documents/marker"
     printf 'old-readme\n' >"${restoreFailureDir}/README.md"
@@ -16747,7 +16867,7 @@ runInstallRefreshRestoresBackupRegression() {
             fi
             command mv "$@"
         }
-        refreshScriptModules new-ref
+        refreshScriptModules 7777777777777777777777777777777777777777
     ) >"${restoreFailureOutputLog}" 2>&1
     grep -q '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录' "${restoreFailureOutputLog}"
     grep -q "${restoreFailureDir}/.padm-update-backup" "${restoreFailureOutputLog}"

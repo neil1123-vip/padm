@@ -227,16 +227,12 @@ runSubscribeNginxAction() {
 rollbackSubscribeNginxInstall() {
     local backupDir=$1
     local nginxWasRunning=$2
-    local reason=$3
-    local configRestored=true
+    local nginxWasEnabled=$3
+    local reason=$4
+    local installStateRestored=true
     local serviceRestored=true
 
-    if ! checkLogBackupRestore "${backupDir}"; then
-        configRestored=false
-        padmForgetCleanupPath "${backupDir}"
-    else
-        padmRemoveCleanupPath "${backupDir}"
-    fi
+    restoreCoreStartupServiceInstall "${backupDir}" nginx "${nginxWasEnabled}" || installStateRestored=false
 
     if [[ "${nginxWasRunning}" == "true" ]]; then
         if ! nginxRunning && ! runSubscribeNginxAction start; then
@@ -246,11 +242,11 @@ rollbackSubscribeNginxInstall() {
         serviceRestored=false
     fi
 
-    if [[ "${configRestored}" == "true" && "${serviceRestored}" == "true" ]]; then
-        errorCard "${reason}，已恢复旧 Nginx 配置和运行状态"
+    if [[ "${installStateRestored}" == "true" && "${serviceRestored}" == "true" ]]; then
+        errorCard "${reason}，已恢复旧 Nginx 配置、开机自启和运行状态"
         return 0
     fi
-    if [[ "${configRestored}" != "true" ]]; then
+    if [[ "${installStateRestored}" != "true" ]]; then
         errorCard "${reason}，且回滚未完全成功" "请手动检查 Nginx 配置和服务状态；备份目录: ${backupDir}"
     else
         errorCard "${reason}，旧 Nginx 配置已恢复但运行状态恢复失败" "请手动检查 Nginx 服务状态"
@@ -272,6 +268,7 @@ installSubscribe() {
     local targetPath=
     local installBackupDir=
     local nginxWasRunning=false
+    local nginxWasEnabled=false
     if [[ -n "${AUTO_SUBSCRIBE_PORT:-}" && "${subscribePort}" != "${AUTO_SUBSCRIBE_PORT}" ]]; then
         subscribePort=
     fi
@@ -292,7 +289,7 @@ installSubscribe() {
         echoContent title "开始配置订阅，请输入订阅的端口"
 
         readSingBoxPortResult result "${AUTO_SUBSCRIBE_PORT:-${subscribePort}}" false || return 1
-        PADM_NGINX_BLOG_REINSTALL_PROMPT=false nginxBlog
+        PADM_NGINX_BLOG_REINSTALL_PROMPT=false nginxBlog || return 1
         echo
         subscribeServerName=$(resolveSubscribeServerName || true)
         if [[ -z "${subscribeServerName}" ]]; then
@@ -326,6 +323,7 @@ installSubscribe() {
         if nginxRunning; then
             nginxWasRunning=true
         fi
+        coreStartupServiceEnabled nginx && nginxWasEnabled=true
 
         if ! writeSubscribeNginxConfig <<EOF
 server {
@@ -353,19 +351,20 @@ EOF
             rollbackSubscribeNginxInstall \
                 "${installBackupDir}" \
                 "${nginxWasRunning}" \
+                "${nginxWasEnabled}" \
                 "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR:-订阅 Nginx 配置校验失败}" || true
             return 1
         fi
         if ! bootStartup nginx; then
-            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "Nginx 开机自启配置失败" || true
+            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "Nginx 开机自启配置失败" || true
             return 1
         fi
         if ! runSubscribeNginxAction stop || ! runSubscribeNginxAction start; then
-            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "订阅 Nginx 服务重载失败" || true
+            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅 Nginx 服务重载失败" || true
             return 1
         fi
         if ! installSubscriptionControlService; then
-            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "订阅控制服务安装失败" || true
+            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅控制服务安装失败" || true
             return 1
         fi
         padmRemoveCleanupPath "${installBackupDir}"
@@ -500,6 +499,7 @@ updateRemoteSubscribe() {
         local defaultFile="${tmpDir}/default"
         local singBoxFile="${tmpDir}/sing-box"
         local clashPid defaultPid singBoxPid
+        local fetchFailed=false
 
         IFS=':' read -r remoteHost remotePort serverAlias subscribeType <<<"${line}"
         remoteUrl="${remoteHost}:${remotePort}"
@@ -523,9 +523,14 @@ updateRemoteSubscribe() {
             fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/clashMeta/${emailMD5}" >"${clashFile}" & clashPid=$!
             fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/default/${emailMD5}" >"${defaultFile}" & defaultPid=$!
             fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/sing-box_profiles/${emailMD5}" >"${singBoxFile}" & singBoxPid=$!
-            wait "${clashPid}" 2>/dev/null || true
-            wait "${defaultPid}" 2>/dev/null || true
-            wait "${singBoxPid}" 2>/dev/null || true
+            wait "${clashPid}" 2>/dev/null || fetchFailed=true
+            wait "${defaultPid}" 2>/dev/null || fetchFailed=true
+            wait "${singBoxPid}" 2>/dev/null || fetchFailed=true
+            if [[ "${fetchFailed}" == "true" ]]; then
+                padmRemoveCleanupPath "${tmpDir}"
+                padmRemoveCleanupPath "${stageDir}"
+                return 1
+            fi
         fi
 
         clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed -E \

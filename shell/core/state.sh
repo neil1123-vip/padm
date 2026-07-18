@@ -29,6 +29,7 @@ acmeSafeHomeDir() {
 # 读取 TLS 证书详情
 readAcmeTLS() {
     local readAcmeDomain=
+    installedDNSAPIStatus=
     if [[ -n "${currentHost}" ]]; then
         readAcmeDomain="${currentHost}"
     fi
@@ -58,7 +59,9 @@ readCustomPort() {
 readNginxSubscribe() {
     local subscribeConfig="${nginxConfigPath}subscribe.conf"
     local -a subscribeFields
-    subscribeType="https"
+    subscribePort=
+    subscribeDomain=
+    subscribeType=
     if [[ -f "${subscribeConfig}" ]]; then
         mapfile -t subscribeFields < <(awk '
           /sing-box/ {
@@ -352,7 +355,11 @@ readInstallProtocolType() {
             singBoxSocks5Port=$(jq .inbounds[0].listen_port "${row}.json")
         fi
 
-    done < <(find ${configPath} -name "*inbounds.json" | sort)
+    done < <(
+        if [[ -n "${configPath}" && -d "${configPath}" ]]; then
+            find "${configPath}" -name "*inbounds.json" -print | sort
+        fi
+    )
 
     if [[ "${coreInstallType}" == "1" && -n "${singBoxConfigPath}" ]]; then
         if [[ -f "${singBoxConfigPath}06_hysteria2_inbounds.json" ]]; then

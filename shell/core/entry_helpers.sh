@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-PADM_THIRD_PARTY_TCP_SCRIPT_URL="https://raw.githubusercontent.com/ylx2016/Linux-NetSpeed/master/tcpx.sh"
+PADM_THIRD_PARTY_TCP_REPO="ylx2016/Linux-NetSpeed"
+PADM_THIRD_PARTY_TCP_REF="master"
+PADM_THIRD_PARTY_TCP_SCRIPT_PATH="tcpx.sh"
 
 # 初始化 Nginx 证书验证配置
 entryHelperTmpPath() {
@@ -580,11 +582,12 @@ updatePadm() {
 
     padmCreateTmpRootPath tmpDir padm-update.XXXXXX -d || { errorCard "更新入口临时目录创建失败"; return 1; }
     newInstall="${tmpDir}/install.sh"
-    if declare -F fetchRemoteRef >/dev/null 2>&1; then
-        remoteRef=$(fetchRemoteRef || true)
+    if ! declare -F fetchRemoteRef >/dev/null 2>&1 || ! remoteRef=$(fetchRemoteRef); then
+        padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
+        errorCard "更新提交解析失败，已保留旧入口"
+        return 1
     fi
-    installUrl="https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh"
-    [[ -n "${remoteRef}" ]] && installUrl="https://raw.githubusercontent.com/neil1123-vip/padm/${remoteRef}/install.sh"
+    installUrl="https://raw.githubusercontent.com/neil1123-vip/padm/${remoteRef}/install.sh"
 
     if ! downloadFile -P "${tmpDir}/" "${installUrl}"; then
         padmRemoveCleanupPath "${tmpDir}" 2>/dev/null || rm -rf "${tmpDir}"
@@ -654,7 +657,7 @@ updatePadm() {
         errorCard "新版入口执行失败，旧入口备份不存在"
     fi
     menuLine "$(uiStyle warn "请手动执行下面命令重新更新")"
-    menuLine "$(uiStyle value "wget -O /root/install.sh https://raw.githubusercontent.com/neil1123-vip/padm/main/install.sh && chmod 700 /root/install.sh && /root/install.sh")"
+    menuLine "$(uiStyle value "wget -O /root/install.sh https://raw.githubusercontent.com/neil1123-vip/padm/${remoteRef}/install.sh && chmod 700 /root/install.sh && /root/install.sh")"
     echo
     return 1
 }
@@ -923,13 +926,22 @@ runThirdPartyTcpAccelerationScript() {
 
     local tmpDir
     local scriptPath
+    local scriptRef
+    local scriptUrl
     if ! padmCreateTmpRootPath tmpDir padm-tcpx.XXXXXX -d; then
         statusCard "下载失败" "第三方脚本临时目录创建失败" "未执行任何第三方脚本"
         bbrInstall
         return
     fi
     scriptPath="${tmpDir}/tcpx.sh"
-    if ! downloadUrlToFileBounded "${PADM_THIRD_PARTY_TCP_SCRIPT_URL}" "${scriptPath}" 1048576 120 ||
+    if ! scriptRef=$(resolveGitHubCommitRef "${PADM_THIRD_PARTY_TCP_REPO}" "${PADM_THIRD_PARTY_TCP_REF}"); then
+        padmRemoveCleanupPath "${tmpDir}"
+        statusCard "下载失败" "第三方脚本最新提交解析失败" "未执行任何第三方脚本"
+        bbrInstall
+        return
+    fi
+    scriptUrl="https://raw.githubusercontent.com/${PADM_THIRD_PARTY_TCP_REPO}/${scriptRef}/${PADM_THIRD_PARTY_TCP_SCRIPT_PATH}"
+    if ! downloadUrlToFileBounded "${scriptUrl}" "${scriptPath}" 1048576 120 ||
         [[ ! -s "${scriptPath}" ]] || ! grep -q "^#!" "${scriptPath}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "下载失败" "第三方脚本为空或格式异常" "未执行任何第三方脚本"

@@ -317,7 +317,6 @@ subscriptionSyncPlan() {
     local enabledUsers
     local desiredUsers
     local plan
-    subscriptionSyncEnsureEnabledUserUUIDs || return 1
     enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
     desiredUsers=$(jq -c '[.[]? | select((.allows_main // false) == true) | {id, uuid}]' <<<"${enabledUsers}") || return 1
     plan=$(subscriptionSyncPlanFromDesiredUsers "${desiredUsers}") || return 1
@@ -329,10 +328,11 @@ subscriptionSyncRemoveAccountFromFile() {
     local accountName=$2
     local tmpFile
     [[ -f "${file}" ]] || return 0
+    jq empty "${file}" >/dev/null 2>&1 || return 1
     if ! jq -e --arg accountName "${accountName}" '
       [(.inbounds[]?.settings.clients[]?), (.inbounds[]?.users[]?)][]
       | select(('"${SUBSCRIPTION_SYNC_MANAGED_ACCOUNT_JQ}"') == $accountName)' "${file}" >/dev/null 2>&1; then
-        return
+        return 0
     fi
     padmCreateTempFileForTarget tmpFile "${file}" sync || return 1
     if ! jq --arg accountName "${accountName}" '
@@ -438,11 +438,13 @@ subscriptionSyncAppendLocalUser() {
     local singBoxConfigDir=
     local rc=0
     accountName=$(subscriptionSyncAccountName "${id}")
-    uuid=$(subscriptionActiveGroupRead -r --arg id "${id}" '.user_groups[]? | select(.id == $id) | .uuid // empty')
+    uuid=$(subscriptionActiveGroupRead -r --arg id "${id}" '.user_groups[]? | select(.id == $id) | .uuid // empty') || return 1
     if [[ -z "${uuid}" ]]; then
-        uuid=$(subscriptionSyncGenerateUUID)
+        uuid=$(subscriptionSyncGenerateUUID) || return 1
+        subscriptionSyncUUIDIsValid "${uuid}" || return 1
         subscriptionActiveGroupWrite --arg id "${id}" --arg uuid "${uuid}" '.user_groups |= map(if .id == $id then .uuid = $uuid else . end)' || return 1
     fi
+    subscriptionSyncUUIDIsValid "${uuid}" || return 1
 
     xrayConfigDir=$(subscriptionSyncSafeConfigDir) || return 1
     if [[ -n "${singBoxConfigPath:-}" ]]; then
@@ -657,41 +659,57 @@ subscriptionSyncCreateSubscribeOutputBackups() {
 subscriptionSyncCreateLocalApplyBackups() {
     local configVar=$1
     local outputVar=$2
+    local groupsVar=${3:-}
     local createdConfigBackupDir=
     local createdOutputBackupDir=
+    local createdGroupsBackupFile=
 
     SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=
-    createdConfigBackupDir=$(subscriptionSyncCreateConfigBackups) || return 1
+    if [[ -n "${groupsVar}" ]]; then
+        createdGroupsBackupFile=$(createSubscriptionGroupsBackup) || return 1
+        SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=groups
+    fi
+    createdConfigBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+        [[ -n "${createdGroupsBackupFile}" ]] && padmRemoveCleanupPath "${createdGroupsBackupFile}"
+        return 1
+    }
     SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=config
     createdOutputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
         padmRemoveCleanupPath "${createdConfigBackupDir}"
+        [[ -n "${createdGroupsBackupFile}" ]] && padmRemoveCleanupPath "${createdGroupsBackupFile}"
         return 1
     }
     SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=ready
     printf -v "${configVar}" '%s' "${createdConfigBackupDir}"
     printf -v "${outputVar}" '%s' "${createdOutputBackupDir}"
+    if [[ -n "${groupsVar}" ]]; then
+        printf -v "${groupsVar}" '%s' "${createdGroupsBackupFile}"
+    fi
+    return 0
 }
 
 subscriptionSyncReleaseLocalApplyBackups() {
     local mode=$1
     local configBackupDir=${2:-}
     local outputBackupDir=${3:-}
+    local groupsBackupFile=${4:-}
 
-    [[ -n "${configBackupDir}" ]] || return 0
-    [[ -n "${outputBackupDir}" ]] || return 0
     case "${mode}" in
     remove)
-        padmRemoveCleanupPath "${configBackupDir}"
-        padmRemoveCleanupPath "${outputBackupDir}"
+        if [[ -n "${configBackupDir}" ]]; then padmRemoveCleanupPath "${configBackupDir}"; fi
+        if [[ -n "${outputBackupDir}" ]]; then padmRemoveCleanupPath "${outputBackupDir}"; fi
+        if [[ -n "${groupsBackupFile}" ]]; then padmRemoveCleanupPath "${groupsBackupFile}"; fi
         ;;
     forget)
-        padmForgetCleanupPath "${configBackupDir}"
-        padmForgetCleanupPath "${outputBackupDir}"
+        if [[ -n "${configBackupDir}" ]]; then padmForgetCleanupPath "${configBackupDir}"; fi
+        if [[ -n "${outputBackupDir}" ]]; then padmForgetCleanupPath "${outputBackupDir}"; fi
+        if [[ -n "${groupsBackupFile}" ]]; then padmForgetCleanupPath "${groupsBackupFile}"; fi
         ;;
     *)
         return 1
         ;;
     esac
+    return 0
 }
 
 subscriptionSyncRestoreSubscribeOutputBackups() {
@@ -709,8 +727,12 @@ subscriptionSyncRollbackLocalApply() {
     local configBackupDir=$1
     local outputBackupDir=$2
     local reason=$3
+    local groupsBackupFile=${4:-}
     local configRestored=true
     local outputRestored=true
+    local groupsRestored=true
+    local restoreStatus=0
+    local groupsRestoreMessage=
 
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     if ! subscriptionSyncRestoreConfigBackups "${configBackupDir}" >/dev/null 2>&1; then
@@ -719,13 +741,26 @@ subscriptionSyncRollbackLocalApply() {
     if ! subscriptionSyncRestoreSubscribeOutputBackups "${outputBackupDir}" >/dev/null 2>&1; then
         outputRestored=false
     fi
+    if [[ -n "${groupsBackupFile}" ]] && ! restoreSubscriptionGroupsBackup "${groupsBackupFile}" >/dev/null 2>&1; then
+        groupsRestored=false
+    fi
 
     subscriptionSyncSetRestorePairFailureMessage \
         SUBSCRIPTION_SYNC_TRANSACTION_ERROR \
         "${reason}" \
         "${configRestored}" "配置" "备份目录: ${configBackupDir}" \
         "${outputRestored}" "订阅输出" "备份目录: ${outputBackupDir}" \
-        "备份目录: ${configBackupDir} 和 ${outputBackupDir}"
+        "备份目录: ${configBackupDir} 和 ${outputBackupDir}" || restoreStatus=1
+    if [[ "${groupsRestored}" != "true" ]]; then
+        subscriptionSyncSetManualCheckMessage groupsRestoreMessage "订阅状态恢复失败" " ${groupsBackupFile}"
+        if [[ -n "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" ]]; then
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}；${groupsRestoreMessage}"
+        else
+            SUBSCRIPTION_SYNC_TRANSACTION_ERROR="${reason}，且${groupsRestoreMessage}"
+        fi
+        restoreStatus=1
+    fi
+    return "${restoreStatus}"
 }
 
 subscriptionSyncSetRestorePairFailureMessage() {
@@ -1052,6 +1087,7 @@ runSubscriptionGroupSync() {
     local quotaPlan='[]'
     local configBackupDir=
     local outputBackupDir=
+    local groupsBackupFile=
     local localSyncReady=false
     local localSyncFailure=
     local remoteSyncEnabled=false
@@ -1085,37 +1121,40 @@ runSubscriptionGroupSync() {
         fi
     fi
 
-    syncPlan=$(subscriptionSyncPlan) || {
-        failures=$(jq '. + ["本机同步计划计算失败"]' <<<"${failures}")
-        subscriptionSyncMarkResult partial "${failures}" || true
-        return 1
-    }
-    subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir || {
+    subscriptionSyncCreateLocalApplyBackups configBackupDir outputBackupDir groupsBackupFile || {
         failures=$(jq '. + ["本机同步前配置备份失败"]' <<<"${failures}")
         if [[ "${SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE:-}" == "config" ]]; then
             failures=$(jq '. + ["本机同步前订阅输出备份失败"]' <<<"${failures}")
             configBackupDir=
             outputBackupDir=
+            groupsBackupFile=
         fi
         rc=1
     }
-    if [[ -n "${configBackupDir}" && -n "${outputBackupDir}" ]]; then
-        if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
+    if [[ -n "${configBackupDir}" && -n "${outputBackupDir}" && -n "${groupsBackupFile}" ]]; then
+        if ! subscriptionSyncEnsureEnabledUserUUIDs; then
+            localSyncFailure="本机同步 UUID 初始化失败"
+        elif ! syncPlan=$(subscriptionSyncPlan); then
+            localSyncFailure="本机同步计划计算失败"
+        elif ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
             localSyncFailure="本机同步计划应用失败"
-            if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}"; then
-                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+        fi
+        if [[ -n "${localSyncFailure}" ]]; then
+            if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}" "${groupsBackupFile}"; then
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
             else
-                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
                 localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
             fi
             failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
             configBackupDir=
             outputBackupDir=
+            groupsBackupFile=
             rc=1
         elif ! subscriptionSyncReconcileLocalServices "${skipSubscribeRefresh}"; then
             localSyncFailure="本机同步后服务重建失败"
-            if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}"; then
-                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+            if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}" "${groupsBackupFile}"; then
+                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
                 subscriptionSyncSetRollbackResultMessage \
                     localSyncFailure \
                     "${localSyncFailure}" \
@@ -1124,17 +1163,19 @@ runSubscriptionGroupSync() {
                     "恢复旧配置后服务重建仍失败，请检查核心服务日志" \
                     true
             else
-                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
+                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
                 localSyncFailure="${SUBSCRIPTION_SYNC_TRANSACTION_ERROR:-${localSyncFailure}}"
             fi
             failures=$(jq --arg message "${localSyncFailure}" '. + [$message]' <<<"${failures}")
             configBackupDir=
             outputBackupDir=
+            groupsBackupFile=
             rc=1
         else
-            subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
+            subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
             configBackupDir=
             outputBackupDir=
+            groupsBackupFile=
             localSyncReady=true
         fi
     else

@@ -340,10 +340,10 @@ singBoxTuicInstall() {
     fi
 
     totalProgress=5
-    installSingBox 1
+    installSingBox 1 || return 1
     selectCustomInstallType=",31,"
     initSingBoxConfig custom 2 true || return 1
-    installSingBoxService 3
+    installSingBoxService 3 || return 1
     reloadCore || return 1
     showAccounts 4
 }
@@ -357,10 +357,10 @@ singBoxHysteria2Install() {
     fi
 
     totalProgress=5
-    installSingBox 1
+    installSingBox 1 || return 1
     selectCustomInstallType=",3,"
     initSingBoxConfig custom 2 true || return 1
-    installSingBoxService 3
+    installSingBoxService 3 || return 1
     reloadCore || return 1
     showAccounts 4
 }

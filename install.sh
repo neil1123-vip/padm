@@ -22,7 +22,6 @@ SCRIPT_PATH=$(resolveScriptPath "${BASH_SOURCE[0]}") || {
 }
 SCRIPT_DIR=$(cd -- "$(dirname -- "${SCRIPT_PATH}")" && pwd -P)
 REPO_REF_URL="https://api.github.com/repos/neil1123-vip/padm/commits/main"
-REPO_ZIP_URL="https://github.com/neil1123-vip/padm/archive/refs/heads/main.tar.gz"
 REPO_ARCHIVE_DIR="padm-main"
 SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
 SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
@@ -194,7 +193,7 @@ validateRepoArchive() {
 removeScriptModuleItems() {
     local scriptDir=$1
     scriptIsSafeAbsolutePath "${scriptDir}" || return 1
-    rm -rf -- "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest"
+    rm -rf -- "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest" "${scriptDir}/.padm-ref"
 }
 
 restoreScriptModuleBackup() {
@@ -210,6 +209,7 @@ restoreScriptModuleBackup() {
     [[ -e "${backupDir}/assets" ]] && { mv "${backupDir}/assets" "${scriptDir}/assets" || restoreStatus=1; }
     [[ -e "${backupDir}/README.md" ]] && { mv "${backupDir}/README.md" "${scriptDir}/README.md" || restoreStatus=1; }
     [[ -e "${backupDir}/.padm-module-manifest" ]] && { mv "${backupDir}/.padm-module-manifest" "${scriptDir}/.padm-module-manifest" || restoreStatus=1; }
+    [[ -e "${backupDir}/.padm-ref" ]] && { mv "${backupDir}/.padm-ref" "${scriptDir}/.padm-ref" || restoreStatus=1; }
     return "${restoreStatus}"
 }
 
@@ -248,6 +248,7 @@ backupScriptModules() {
     backupScriptModuleItem "${scriptDir}/assets" "${backupDir}/assets" || return 1
     backupScriptModuleItem "${scriptDir}/README.md" "${backupDir}/README.md" || return 1
     backupScriptModuleItem "${scriptDir}/.padm-module-manifest" "${backupDir}/.padm-module-manifest" || return 1
+    backupScriptModuleItem "${scriptDir}/.padm-ref" "${backupDir}/.padm-ref" || return 1
 }
 
 failScriptModuleRefreshAfterBackup() {
@@ -268,6 +269,7 @@ failScriptModuleRefreshAfterBackup() {
 fetchRemoteRef() {
     local metadataFile
     local metadata
+    local remoteRef
     metadataFile=$(scriptCreateTempPath padm-ref.XXXXXX) || return 1
     if ! scriptDownloadUrlToFileBounded "${REPO_REF_URL}" "${metadataFile}" 1048576; then
         scriptRemovePath "${metadataFile}" || true
@@ -275,7 +277,13 @@ fetchRemoteRef() {
     fi
     metadata=$(<"${metadataFile}")
     scriptRemovePath "${metadataFile}" || true
-    printf '%s\n' "${metadata}" | grep -m 1 '"sha"' | cut -d '"' -f 4
+    remoteRef=$(printf '%s\n' "${metadata}" | grep -m 1 '"sha"' | cut -d '"' -f 4) || return 1
+    [[ "${remoteRef}" =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s\n' "${remoteRef}"
+}
+
+scriptRefIsValid() {
+    [[ "$1" =~ ^[0-9a-f]{40}$ ]]
 }
 
 downloadRepoArchive() {
@@ -336,6 +344,10 @@ resolveExtractedArchiveDir() {
 refreshScriptModules() {
     local remoteRef=$1
     local tmpDir extractDir archiveDir backupDir copyStatus archiveUrl resolvedRef downloadStatus
+    if ! scriptRefIsValid "${remoteRef}"; then
+        printf '无法解析最新脚本提交，已取消完整安装包替换\n'
+        exit 1
+    fi
     if regressionWorktreeRefreshForbidden; then
         exit 1
     fi
@@ -347,12 +359,9 @@ refreshScriptModules() {
     extractDir="${tmpDir}/extract"
     backupDir="${SCRIPT_DIR}/.padm-update-backup"
     trap 'scriptRemovePath "${tmpDir}" || true' EXIT INT TERM
-    archiveUrl="${REPO_ZIP_URL}"
-    if [[ -n "${remoteRef}" ]]; then
-        archiveUrl="https://github.com/neil1123-vip/padm/archive/${remoteRef}.tar.gz"
-    fi
+    archiveUrl="https://github.com/neil1123-vip/padm/archive/${remoteRef}.tar.gz"
     archiveDir="${extractDir}/${REPO_ARCHIVE_DIR}"
-    resolvedRef="${remoteRef:-}"
+    resolvedRef="${remoteRef}"
 
     printf '正在下载最新完整安装包\n'
     downloadRepoArchive "${archiveUrl}" "${extractDir}"
@@ -369,7 +378,8 @@ refreshScriptModules() {
         exit 1
     fi
 
-    if [[ ! -d "${archiveDir}/shell" ]]; then
+    if [[ ! -d "${archiveDir}/shell" || ! -d "${archiveDir}/documents" ||
+        ! -d "${archiveDir}/assets" || ! -f "${archiveDir}/README.md" ]]; then
         printf '完整安装包下载失败，请重新执行安装命令\n'
         scriptRemovePath "${tmpDir}" || true
         exit 1
@@ -394,15 +404,15 @@ refreshScriptModules() {
 
     cp -R "${archiveDir}/shell" "${SCRIPT_DIR}/"
     copyStatus=$?
-    if [[ ${copyStatus} -eq 0 && -d "${archiveDir}/documents" ]]; then
+    if [[ ${copyStatus} -eq 0 ]]; then
         cp -R "${archiveDir}/documents" "${SCRIPT_DIR}/"
         copyStatus=$?
     fi
-    if [[ ${copyStatus} -eq 0 && -d "${archiveDir}/assets" ]]; then
+    if [[ ${copyStatus} -eq 0 ]]; then
         cp -R "${archiveDir}/assets" "${SCRIPT_DIR}/"
         copyStatus=$?
     fi
-    if [[ ${copyStatus} -eq 0 && -f "${archiveDir}/README.md" ]]; then
+    if [[ ${copyStatus} -eq 0 ]]; then
         cp "${archiveDir}/README.md" "${SCRIPT_DIR}/README.md"
         copyStatus=$?
     fi
@@ -416,9 +426,7 @@ refreshScriptModules() {
         failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
     fi
 
-    if [[ -n "${resolvedRef}" ]]; then
-        printf '%s\n' "${resolvedRef}" >"${SCRIPT_REF_FILE}"
-    fi
+    printf '%s\n' "${resolvedRef}" >"${SCRIPT_REF_FILE}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
     scriptRemovePath "${backupDir}" || true
     scriptRemovePath "${tmpDir}" || true
     trap - EXIT INT TERM
@@ -427,8 +435,9 @@ refreshScriptModules() {
 modulePaths() {
     local bootstrapPath="${SCRIPT_DIR}/shell/core/bootstrap.sh"
     local sourcePath relativePath
-    [[ -f "${bootstrapPath}" ]] || return 1
+    [[ -f "${bootstrapPath}" && -d "${SCRIPT_DIR}/documents" && -d "${SCRIPT_DIR}/assets" && -f "${SCRIPT_DIR}/README.md" ]] || return 1
     printf 'install.sh\n'
+    printf 'README.md\n'
     printf 'shell/core/bootstrap.sh\n'
     printf 'shell/validate_install.sh\n'
     while IFS= read -r sourcePath; do
@@ -445,6 +454,11 @@ modulePaths() {
         esac
         printf '%s\n' "${relativePath}"
     done < <(grep '^source ' "${bootstrapPath}" | sed 's/^source "//; s/"$//')
+    while IFS= read -r sourcePath; do
+        relativePath=${sourcePath#"${SCRIPT_DIR}/"}
+        [[ "${relativePath}" != "${sourcePath}" ]] || return 1
+        printf '%s\n' "${relativePath}"
+    done < <(find "${SCRIPT_DIR}/documents" "${SCRIPT_DIR}/assets" -type f -print | LC_ALL=C sort)
 }
 
 scriptModuleFilesPresent() {
@@ -468,7 +482,9 @@ scriptModulesReady() {
     [[ -f "${SCRIPT_REF_FILE}" ]] || return 1
     expectedRef=$(cat "${SCRIPT_EXPECTED_REF_FILE}")
     localRef=$(cat "${SCRIPT_REF_FILE}")
-    [[ -z "${expectedRef}" || "${expectedRef}" == "${localRef}" ]]
+    scriptRefIsValid "${expectedRef}" || return 1
+    scriptRefIsValid "${localRef}" || return 1
+    [[ "${expectedRef}" == "${localRef}" ]]
 }
 
 moduleManifestReady() {
@@ -495,7 +511,7 @@ moduleManifestReady() {
             rm -f "${moduleList}"
             return 1
         }
-        [[ -n "${expectedHash}" && -f "${SCRIPT_DIR}/${requiredPath}" ]] || {
+        [[ "${expectedHash}" =~ ^[0-9a-f]{64}$ && -f "${SCRIPT_DIR}/${requiredPath}" ]] || {
             rm -f "${moduleList}"
             return 1
         }
@@ -535,10 +551,11 @@ ensureScriptModules() {
             return 1
         fi
         remoteRef="${PADM_SCRIPT_MODULE_REF:-}"
-        [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef || true)
+        [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
+        scriptRefIsValid "${remoteRef}" || return 1
         refreshScriptModules "${remoteRef}"
         if [[ -s "${SCRIPT_REF_FILE}" ]]; then
-            cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}"
+            cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}" || return 1
         fi
         return 0
     fi
@@ -552,23 +569,20 @@ ensureScriptModules() {
         expectedRef=$(cat "${SCRIPT_EXPECTED_REF_FILE}")
     fi
     if [[ "${PADM_SKIP_REMOTE_REF_CHECK:-}" == "1" ]]; then
-        if scriptModuleFilesPresent; then
-            return 0
-        fi
-        refreshScriptModules "${expectedRef}"
-        return 0
+        return 1
     fi
 
     remoteRef="${expectedRef}"
-    [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef || true)
+    [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
+    scriptRefIsValid "${remoteRef}" || return 1
     refreshScriptModules "${remoteRef}"
     if [[ -s "${SCRIPT_REF_FILE}" ]]; then
-        cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}"
+        cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}" || return 1
     fi
 }
 
 loadScriptModules() {
-    ensureScriptModules
+    ensureScriptModules || return 1
     # shellcheck source=/dev/null
     source "${SCRIPT_DIR}/shell/core/bootstrap.sh"
 }
@@ -708,7 +722,7 @@ runMainMenu() {
 }
 
 installHandleEarlyCapabilityListArgs "$@"
-loadScriptModules
+loadScriptModules || exit 1
 initScriptRuntime "$@" || exit 1
 runMainMenu "$@"
 exit $?

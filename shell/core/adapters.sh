@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+if ! declare -p PADM_NGINX_SIGNING_KEY_URL >/dev/null 2>&1; then
+    readonly PADM_NGINX_SIGNING_KEY_URL="https://nginx.org/keys/nginx_signing.key"
+fi
+if ! declare -p PADM_NGINX_SIGNING_KEY_SHA256 >/dev/null 2>&1; then
+    readonly PADM_NGINX_SIGNING_KEY_SHA256="55385da31d198fa6a5012d40ae98ecb272a6c4e8fffffba94719ffd3e87de37a"
+fi
+
 adapterTmpPath() {
     local template=$1
     padmFallbackTmpFilePath "${template}"
@@ -48,6 +55,10 @@ adapterNginxYumRepoFile() {
     printf '%s\n' "${yumReposDir%/}/nginx.repo"
 }
 
+adapterNginxRpmKeyFile() {
+    printf '%s\n' "${PADM_NGINX_RPM_KEY_FILE:-/etc/pki/rpm-gpg/RPM-GPG-KEY-nginx}"
+}
+
 PADM_PACKAGE_MANAGED_ROLLBACK_DIRS=()
 PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES=
 
@@ -63,18 +74,61 @@ installAptKeyringFromUrl() {
     local url=$1
     local targetFile=$2
     local displayName=$3
+    local expectedSha256=${4:-}
     local stagedFile
+    local downloadedFile
+    local actualSha256
 
     targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || failPackageInstallTransaction "${displayName} apt key 路径异常"
     padmCreateTempFileForTarget stagedFile "${targetFile}" aptkey || failPackageInstallTransaction "${displayName} apt key 临时文件创建失败"
-    if ! curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize 1048576 "${url}" | gpg --dearmor >"${stagedFile}" || [[ ! -s "${stagedFile}" ]]; then
+    padmCreateTmpRootPath downloadedFile padm-apt-key.XXXXXX || { padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} apt key 下载临时文件创建失败"; }
+    if ! downloadUrlToFileBounded "${url}" "${downloadedFile}" 1048576 120 || [[ ! -s "${downloadedFile}" ]]; then
+        padmRemoveCleanupPath "${downloadedFile}"
+        padmRemoveCleanupPath "${stagedFile}"
+        failPackageInstallTransaction "${displayName} apt key 下载失败"
+    fi
+    if [[ -n "${expectedSha256}" ]]; then
+        command -v sha256sum >/dev/null 2>&1 || { padmRemoveCleanupPath "${downloadedFile}"; padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} apt key 缺少 sha256sum"; }
+        actualSha256=$(sha256sum "${downloadedFile}" | awk '{print $1}') || { padmRemoveCleanupPath "${downloadedFile}"; padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} apt key 校验失败"; }
+        if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
+            padmRemoveCleanupPath "${downloadedFile}"
+            padmRemoveCleanupPath "${stagedFile}"
+            failPackageInstallTransaction "${displayName} apt key sha256 校验失败"
+        fi
+    fi
+    if ! gpg --dearmor <"${downloadedFile}" >"${stagedFile}" || [[ ! -s "${stagedFile}" ]]; then
+        padmRemoveCleanupPath "${downloadedFile}"
         padmRemoveCleanupPath "${stagedFile}"
         failPackageInstallTransaction "${displayName} apt key 安装失败"
     fi
+    padmRemoveCleanupPath "${downloadedFile}"
     commitGeneratedFile "${stagedFile}" "${targetFile}" 644 || {
         padmRemoveCleanupPath "${stagedFile}"
         failPackageInstallTransaction "${displayName} apt key 提交失败"
     }
+}
+
+installVerifiedSigningKeyFile() {
+    local url=$1
+    local targetFile=$2
+    local displayName=$3
+    local expectedSha256=$4
+    local stagedFile
+    local actualSha256
+
+    targetFile=$(padmResolveManagedAbsolutePath "${targetFile}") || failPackageInstallTransaction "${displayName} key 路径异常"
+    padmCreateTempFileForTarget stagedFile "${targetFile}" rpmkey || failPackageInstallTransaction "${displayName} key 临时文件创建失败"
+    if ! downloadUrlToFileBounded "${url}" "${stagedFile}" 1048576 120 || [[ ! -s "${stagedFile}" ]]; then
+        padmRemoveCleanupPath "${stagedFile}"
+        failPackageInstallTransaction "${displayName} key 下载失败"
+    fi
+    command -v sha256sum >/dev/null 2>&1 || { padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} key 缺少 sha256sum"; }
+    actualSha256=$(sha256sum "${stagedFile}" | awk '{print $1}') || { padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} key 校验失败"; }
+    if [[ "${actualSha256}" != "${expectedSha256}" ]]; then
+        padmRemoveCleanupPath "${stagedFile}"
+        failPackageInstallTransaction "${displayName} key sha256 校验失败"
+    fi
+    commitGeneratedFile "${stagedFile}" "${targetFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; failPackageInstallTransaction "${displayName} key 提交失败"; }
 }
 
 commitRepoFile() {
@@ -300,7 +354,7 @@ writeMissingPackages() {
     shift
     for packageName in "$@"; do
         if ! packageInstalled "${packageName}"; then
-            printf '%s\n' "${packageName}" >>"${tmpFile}"
+            printf '%s\n' "${packageName}" >>"${tmpFile}" || return 1
         fi
     done
 }
@@ -577,7 +631,7 @@ installPackageTracked() {
     installLog=$(adapterInstallLogPath) || failPackageInstallTransaction "${displayName}安装日志路径异常"
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || failPackageInstallTransaction "${displayName}安装日志目录创建失败"
     padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || failPackageInstallTransaction "${displayName}安装状态记录失败"
-    writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
+    writeMissingPackages "${missingPackagesFile}" "${packages[@]}" || { padmRemoveCleanupPath "${missingPackagesFile}"; failPackageInstallTransaction "${displayName}安装状态记录失败"; }
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
     runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}" || {
@@ -604,7 +658,7 @@ installOptionalPackageTracked() {
     installLog=$(adapterInstallLogPath) || return 1
     padmEnsureSafeDirectory "$(dirname -- "${installLog}")" || return 1
     padmCreateTempPath missingPackagesFile "$(adapterTmpPath padm-packages.XXXXXX)" || return 1
-    writeMissingPackages "${missingPackagesFile}" "${packages[@]}"
+    writeMissingPackages "${missingPackagesFile}" "${packages[@]}" || { padmRemoveCleanupPath "${missingPackagesFile}"; return 1; }
     [[ "${packageManager}" == "apt" && -s "${missingPackagesFile}" ]] && packageTimeout=900
 
     if ! runPackageCommandWithProgress "安装${displayName}" "${packageTimeout}" "${installType} ${packages[*]}" "${installLog}"; then
@@ -762,13 +816,18 @@ installTools() {
             local acmeHomeDirPath
             local acmeBackupDir
             local acmeTmpDir
+            local acmeScriptRef
+            local acmeScriptUrl
             acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
             adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
             adapterRegisterPackageManagedRollback "${acmeBackupDir}"
             padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
             acmeInstallScript="${acmeTmpDir}/acme.sh"
             padmCreateTempPath acmeDownloadScript "${acmeTmpDir}/acme.sh.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本临时文件创建失败"; }
-            if curl -fsSL --connect-timeout 10 --max-time 120 --max-filesize 1048576 -o "${acmeDownloadScript}" https://get.acme.sh && [[ -s "${acmeDownloadScript}" ]]; then
+            acmeScriptRef=$(resolveGitHubCommitRef acmesh-official/acme.sh master) || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本最新提交解析失败"; }
+            acmeScriptUrl="https://raw.githubusercontent.com/acmesh-official/acme.sh/${acmeScriptRef}/acme.sh"
+            if downloadUrlToFileBounded "${acmeScriptUrl}" "${acmeDownloadScript}" 1048576 120 &&
+                [[ -s "${acmeDownloadScript}" ]] && grep -q '^#!/usr/bin/env sh' "${acmeDownloadScript}" && sh -n "${acmeDownloadScript}"; then
                 if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then
                     padmRemoveCleanupPath "${acmeTmpDir}"
                     failPackageInstallTransaction "acme安装脚本提交失败"
@@ -778,7 +837,7 @@ installTools() {
                 padmRemoveCleanupPath "${acmeTmpDir}"
                 failPackageInstallTransaction "acme安装脚本下载失败"
             fi
-            runWithTimeout 600 "sh \"${acmeInstallScript}\" >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
+            runWithTimeout 600 "sh \"${acmeInstallScript}\" --install >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
 
             if [[ ! -d "$HOME/.acme.sh" ]] || [[ -z $(find "$HOME/.acme.sh/acme.sh") ]]; then
                 padmRemoveCleanupPath "${acmeTmpDir}"
@@ -828,7 +887,7 @@ installNginxTools() {
             nginxPinTarget=$(adapterNginxAptPinFile)
             adapterCreateManagedRollbackBackup repoBackupDir "${nginxKeyringFile}" "${nginxRepoTarget}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt 源备份失败"
             adapterRegisterPackageManagedRollback "${repoBackupDir}"
-            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key "${nginxKeyringFile}" Nginx
+            installAptKeyringFromUrl "${PADM_NGINX_SIGNING_KEY_URL}" "${nginxKeyringFile}" Nginx "${PADM_NGINX_SIGNING_KEY_SHA256}"
             local repoFile
             padmCreateTempPath repoFile "$(adapterNginxRepoTemplate)" || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/debian %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
@@ -851,7 +910,7 @@ installNginxTools() {
             nginxPinTarget=$(adapterNginxAptPinFile)
             adapterCreateManagedRollbackBackup repoBackupDir "${nginxKeyringFile}" "${nginxRepoTarget}" "${nginxPinTarget}" || failPackageInstallTransaction "Nginx apt 源备份失败"
             adapterRegisterPackageManagedRollback "${repoBackupDir}"
-            installAptKeyringFromUrl https://nginx.org/keys/nginx_signing.key "${nginxKeyringFile}" Nginx
+            installAptKeyringFromUrl "${PADM_NGINX_SIGNING_KEY_URL}" "${nginxKeyringFile}" Nginx "${PADM_NGINX_SIGNING_KEY_SHA256}"
             local repoFile
             padmCreateTempPath repoFile "$(adapterNginxRepoTemplate)" || failPackageInstallTransaction "Nginx apt 源临时文件创建失败"
             printf 'deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/mainline/ubuntu %s nginx\n' "${nginxRepoCodename}" >"${repoFile}"
@@ -866,10 +925,12 @@ installNginxTools() {
     elif [[ "${release}" == "centos" ]]; then
         installPackageTracked "yum-utils" yum-utils
         local yumReposDir=${PADM_YUM_REPOS_DIR:-/etc/yum.repos.d}
-        local repoFile repoBackupDir nginxRepoTarget
+        local repoFile repoBackupDir nginxRepoTarget nginxRpmKeyTarget
         nginxRepoTarget=$(adapterNginxYumRepoFile "${yumReposDir}")
-        adapterCreateManagedRollbackBackup repoBackupDir "${nginxRepoTarget}" || failPackageInstallTransaction "Nginx yum 源备份失败"
+        nginxRpmKeyTarget=$(adapterNginxRpmKeyFile)
+        adapterCreateManagedRollbackBackup repoBackupDir "${nginxRepoTarget}" "${nginxRpmKeyTarget}" || failPackageInstallTransaction "Nginx yum 源备份失败"
         adapterRegisterPackageManagedRollback "${repoBackupDir}"
+        installVerifiedSigningKeyFile "${PADM_NGINX_SIGNING_KEY_URL}" "${nginxRpmKeyTarget}" Nginx "${PADM_NGINX_SIGNING_KEY_SHA256}"
         padmCreateTempPath repoFile "$(adapterNginxYumRepoTemplate)" || failPackageInstallTransaction "Nginx yum 源临时文件创建失败"
         cat <<EOF >"${repoFile}"
 [nginx-stable]
@@ -877,7 +938,7 @@ name=nginx stable repo
 baseurl=https://nginx.org/packages/centos/\$releasever/\$basearch/
 gpgcheck=1
 enabled=1
-gpgkey=https://nginx.org/keys/nginx_signing.key
+gpgkey=file://${nginxRpmKeyTarget}
 module_hotfixes=true
 
 [nginx-mainline]
@@ -885,7 +946,7 @@ name=nginx mainline repo
 baseurl=https://nginx.org/packages/mainline/centos/\$releasever/\$basearch/
 gpgcheck=1
 enabled=0
-gpgkey=https://nginx.org/keys/nginx_signing.key
+gpgkey=file://${nginxRpmKeyTarget}
 module_hotfixes=true
 EOF
         mkdir -p "${yumReposDir}" || failPackageInstallTransaction "Nginx yum 源目录创建失败"

@@ -61,20 +61,32 @@ coreArchiveExpandedSizeIsSafe() {
 
 validateCoreZipArchive() {
     local archiveFile=$1
-    local entryList entry
+    local entryList detailList entry entryCount detailCount
     padmCreateTempPath entryList "$(coreTmpFilePath padm-core-zip-entries.XXXXXX)" || return 1
+    padmCreateTempPath detailList "$(coreTmpFilePath padm-core-zip-details.XXXXXX)" || { padmRemoveCleanupPath "${entryList}"; return 1; }
     if ! unzip -Z1 "${archiveFile}" >"${entryList}" 2>/dev/null; then
         padmRemoveCleanupPath "${entryList}"
+        padmRemoveCleanupPath "${detailList}"
         return 1
     fi
     while IFS= read -r entry; do
-        coreArchiveEntryIsSafe "${entry}" || { padmRemoveCleanupPath "${entryList}"; return 1; }
+        coreArchiveEntryIsSafe "${entry}" || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     done <"${entryList}"
+    if ! unzip -Z -l "${archiveFile}" >"${detailList}" 2>/dev/null; then
+        padmRemoveCleanupPath "${entryList}"
+        padmRemoveCleanupPath "${detailList}"
+        return 1
+    fi
+    entryCount=$(wc -l <"${entryList}" | tr -d '[:space:]') || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    detailCount=$(awk '$1 ~ /^[-d][rwxStTs-]{9}$/ { count++ } END { print count + 0 }' "${detailList}") || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
+    [[ "${detailCount}" == "${entryCount}" ]] || { padmRemoveCleanupPath "${entryList}"; padmRemoveCleanupPath "${detailList}"; return 1; }
     if ! coreArchiveExpandedSizeIsSafe zip "${archiveFile}" "${entryList}"; then
         padmRemoveCleanupPath "${entryList}"
+        padmRemoveCleanupPath "${detailList}"
         return 1
     fi
     padmRemoveCleanupPath "${entryList}"
+    padmRemoveCleanupPath "${detailList}"
 }
 
 validateCoreTarArchive() {
@@ -401,7 +413,8 @@ installSingBox() {
     else
         successCard "当前版本:$(getSingBoxCurrentVersion)"
 
-        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}")
+        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}") || exit 1
+        checkVersionNotEmpty "${version}"
         successCard "最新版本:${version}"
 
         if [[ -z "${lastInstallationConfig:-}" ]]; then
@@ -484,9 +497,14 @@ coreReleaseTags() {
     local repo=$1
     local prerelease=${2:-false}
     local limit=${3:-20}
-    local tags=
-    tags=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases?per_page=100" 3 | jq -r ".[] | select(.prerelease==${prerelease}) | .tag_name" | head -n "${limit}" || true)
-    printf '%s\n' "${tags}"
+    local metadata
+    [[ "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
+    [[ "${prerelease}" == "true" || "${prerelease}" == "false" ]] || return 1
+    [[ "${limit}" =~ ^[0-9]+$ && "${limit}" -gt 0 && "${limit}" -le 100 ]] || return 1
+    metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases?per_page=100" 3) || return 1
+    jq -er --argjson prerelease "${prerelease}" --argjson limit "${limit}" '
+      [.[] | select(.prerelease == $prerelease) | .tag_name | select(type == "string" and length > 0)][: $limit][]
+    ' <<<"${metadata}"
 }
 
 coreLatestReleaseTag() {
@@ -1698,20 +1716,85 @@ EOF
         return 1
     fi
 
-    commitGeneratedFile "${tmpFile}" "/etc/init.d/${serviceName}" 755
+    local serviceFile="/etc/init.d/${serviceName}"
+    if [[ "${serviceName}" == "sing-box" ]]; then
+        serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-${serviceFile}}
+    elif [[ "${serviceName}" == "xray" ]]; then
+        serviceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-${serviceFile}}
+    fi
+    commitGeneratedFile "${tmpFile}" "${serviceFile}" 755
+}
+
+coreStartupServiceEnabled() {
+    local serviceName=$1
+    if [[ "${release}" == "alpine" ]]; then
+        command -v rc-update >/dev/null 2>&1 || return 1
+        rc-update show default 2>/dev/null | awk '{print $1}' | grep -qx "${serviceName}"
+    else
+        command -v systemctl >/dev/null 2>&1 || return 1
+        systemctl is-enabled --quiet "${serviceName}.service" >/dev/null 2>&1
+    fi
+}
+
+restoreCoreStartupServiceInstall() {
+    local backupDir=$1
+    local serviceName=$2
+    local serviceWasEnabled=$3
+    local rollbackFailed=false
+
+    checkLogBackupRestore "${backupDir}" || rollbackFailed=true
+    if [[ "${release}" == "alpine" ]]; then
+        if command -v rc-update >/dev/null 2>&1; then
+            if [[ "${serviceWasEnabled}" == "true" ]]; then
+                rc-update add "${serviceName}" default >/dev/null 2>&1 || rollbackFailed=true
+            elif coreStartupServiceEnabled "${serviceName}"; then
+                rc-update del "${serviceName}" default >/dev/null 2>&1 || rollbackFailed=true
+            fi
+        elif [[ "${serviceWasEnabled}" == "true" ]]; then
+            rollbackFailed=true
+        fi
+    else
+        systemctl daemon-reload >/dev/null 2>&1 || rollbackFailed=true
+        if [[ "${serviceWasEnabled}" == "true" ]]; then
+            systemctl enable "${serviceName}.service" >/dev/null 2>&1 || rollbackFailed=true
+        elif systemctl is-enabled --quiet "${serviceName}.service" >/dev/null 2>&1; then
+            systemctl disable "${serviceName}.service" >/dev/null 2>&1 || rollbackFailed=true
+        fi
+    fi
+    if [[ "${rollbackFailed}" == "true" ]]; then
+        padmForgetCleanupPath "${backupDir}"
+        return 1
+    fi
+    padmRemoveCleanupPath "${backupDir}"
+}
+
+failCoreStartupServiceInstall() {
+    local backupDir=$1
+    local serviceName=$2
+    local serviceWasEnabled=$3
+    local reason=$4
+    if restoreCoreStartupServiceInstall "${backupDir}" "${serviceName}" "${serviceWasEnabled}"; then
+        errorCard "${reason}，已恢复安装前服务状态"
+    else
+        errorCard "${reason}，且安装前服务状态恢复失败" "请手动检查备份目录: ${backupDir}"
+    fi
+    return 1
 }
 
 
 # sing-box开机自启
 installSingBoxService() {
     progressCard "$1" "配置 sing-box 开机自启"
-    execStart='/etc/padm/sing-box/sing-box run -c /etc/padm/sing-box/conf/config.json'
+    local execStart='/etc/padm/sing-box/sing-box run -c /etc/padm/sing-box/conf/config.json'
+    local serviceFile=
+    local serviceBackupDir=
+    local serviceWasEnabled=false
 
     if [[ -n $(find /bin /usr/bin -name "systemctl") && "${release}" != "alpine" ]]; then
-        local serviceFile=/etc/systemd/system/sing-box.service
+        serviceFile=${PADM_SINGBOX_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/sing-box.service}
         local tmpFile
-        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-sing-box.service.XXXXXX)" || exit 1
-        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
+        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-sing-box.service.XXXXXX)" || return 1
+        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 [Unit]
 Description=Sing-Box Service
 Documentation=https://sing-box.sagernet.org
@@ -1735,26 +1818,33 @@ EOF
         if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -q "^ExecStart=${execStart}$" "${tmpFile}"; then
             padmRemoveCleanupPath "${tmpFile}"
             errorCard "sing-box systemd 模板生成失败"
-            exit 1
+            return 1
         fi
+        coreStartupServiceEnabled sing-box && serviceWasEnabled=true
+        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "sing-box systemd 模板备份失败"; return 1; }
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
             padmRemoveCleanupPath "${tmpFile}"
-            errorCard "sing-box systemd 模板提交失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box systemd 模板提交失败"
+            return 1
         fi
         if ! bootStartup "sing-box.service"; then
-            errorCard "sing-box 开机自启配置失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box 开机自启配置失败"
+            return 1
         fi
+        padmRemoveCleanupPath "${serviceBackupDir}"
     elif [[ "${release}" == "alpine" ]]; then
+        serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
+        coreStartupServiceEnabled sing-box && serviceWasEnabled=true
+        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "sing-box OpenRC 模板备份失败"; return 1; }
         if ! installAlpineStartup "sing-box"; then
-            errorCard "sing-box OpenRC 模板提交失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box OpenRC 模板提交失败"
+            return 1
         fi
         if ! bootStartup "sing-box"; then
-            errorCard "sing-box 开机自启配置失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box 开机自启配置失败"
+            return 1
         fi
+        padmRemoveCleanupPath "${serviceBackupDir}"
     fi
 
     successCard "配置sing-box开机启动完毕"
@@ -1764,12 +1854,15 @@ EOF
 # Xray-core 开机自启
 installXrayService() {
     progressCard "$1" "配置 Xray 开机自启"
-    execStart='/etc/padm/xray/xray run -confdir /etc/padm/xray/conf'
+    local execStart='/etc/padm/xray/xray run -confdir /etc/padm/xray/conf'
+    local serviceFile=
+    local serviceBackupDir=
+    local serviceWasEnabled=false
     if [[ -n $(find /bin /usr/bin -name "systemctl") ]]; then
-        local serviceFile=/etc/systemd/system/xray.service
+        serviceFile=${PADM_XRAY_SYSTEMD_SERVICE_FILE:-/etc/systemd/system/xray.service}
         local tmpFile
-        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-xray.service.XXXXXX)" || exit 1
-        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; exit 1; }
+        padmCreateTempPath tmpFile "$(coreTmpFilePath padm-xray.service.XXXXXX)" || return 1
+        cat <<EOF >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/xtls
@@ -1787,27 +1880,34 @@ EOF
         if ! grep -q '^\[Service\]$' "${tmpFile}" || ! grep -q "^ExecStart=${execStart}$" "${tmpFile}"; then
             padmRemoveCleanupPath "${tmpFile}"
             errorCard "Xray systemd 模板生成失败"
-            exit 1
+            return 1
         fi
+        coreStartupServiceEnabled xray && serviceWasEnabled=true
+        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { padmRemoveCleanupPath "${tmpFile}"; errorCard "Xray systemd 模板备份失败"; return 1; }
         if ! commitGeneratedFile "${tmpFile}" "${serviceFile}" 644; then
             padmRemoveCleanupPath "${tmpFile}"
-            errorCard "Xray systemd 模板提交失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray systemd 模板提交失败"
+            return 1
         fi
         if ! bootStartup "xray.service"; then
-            errorCard "Xray 开机自启配置失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray 开机自启配置失败"
+            return 1
         fi
+        padmRemoveCleanupPath "${serviceBackupDir}"
         successCard "配置Xray开机自启成功"
     elif [[ "${release}" == "alpine" ]]; then
+        serviceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
+        coreStartupServiceEnabled xray && serviceWasEnabled=true
+        checkLogBackupCreate serviceBackupDir "${serviceFile}" || { errorCard "Xray OpenRC 模板备份失败"; return 1; }
         if ! installAlpineStartup "xray"; then
-            errorCard "Xray OpenRC 模板提交失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray OpenRC 模板提交失败"
+            return 1
         fi
         if ! bootStartup "xray"; then
-            errorCard "Xray 开机自启配置失败"
-            exit 1
+            failCoreStartupServiceInstall "${serviceBackupDir}" xray "${serviceWasEnabled}" "Xray 开机自启配置失败"
+            return 1
         fi
+        padmRemoveCleanupPath "${serviceBackupDir}"
     fi
 }
 
@@ -2094,7 +2194,6 @@ installXrayReality() {
     local restoreFailed=false
     selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
-    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     totalProgress=6
     installTools 1
 
@@ -2109,14 +2208,14 @@ installXrayReality() {
     if [[ -z "${installFailure}" ]] && ! (installXray 2 false); then
         installFailure="Xray 安装失败"
     fi
-    if [[ -z "${installFailure}" ]] && ! (installXrayService 3); then
-        installFailure="Xray 服务安装失败"
-    fi
-    if [[ -z "${installFailure}" ]] && ! initXrayConfig custom 4; then
+    if [[ -z "${installFailure}" ]] && ! initXrayConfig custom 3; then
         installFailure="Xray Reality 配置初始化失败"
     fi
     if [[ -z "${installFailure}" ]] && ! cleanUp singBoxDel; then
         installFailure="旧 sing-box 配置清理失败"
+    fi
+    if [[ -z "${installFailure}" ]] && ! installXrayService 4; then
+        installFailure="Xray 服务安装失败"
     fi
     if [[ -z "${installFailure}" ]]; then
         serviceQueueRestart xray
@@ -2146,14 +2245,13 @@ installSingBoxReality() {
 
     selectCustomInstallType=",1,"
     readLastInstallationConfig || return 1
-    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     totalProgress=6
     installTools 1
 
-    installSingBox 2
-    installSingBoxService 3
-    initSingBoxConfig custom 4 || return 1
+    installSingBox 2 || return 1
+    initSingBoxConfig custom 3 || return 1
     cleanUp xrayDel || return 1
+    installSingBoxService 4 || return 1
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
     # 生成账号
@@ -2220,7 +2318,6 @@ customXrayInstall() {
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
         protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
-        unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
         # checkBTPanel
         # check1Panel
         totalProgress=12
@@ -2259,10 +2356,10 @@ customXrayInstall() {
         fi
 
         # 安装 Xray
-        installXray 7 false
-        installXrayService 8
-        initXrayConfig custom 9 || return 1
+        installXray 7 false || return 1
+        initXrayConfig custom 8 || return 1
         cleanUp singBoxDel || return 1
+        installXrayService 9 || return 1
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             installCronTLS 10
         fi
@@ -2324,7 +2421,6 @@ customSingBoxInstall() {
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
         protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
-        unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
         totalProgress=9
         installTools 1
         # 申请tls
@@ -2334,10 +2430,10 @@ customSingBoxInstall() {
             coreInstallServiceAction "Nginx 服务停止失败，已取消 sing-box 安装" handleNginx stop || return 1
         fi
 
-        installSingBox 4
-        installSingBoxService 5
-        initSingBoxConfig custom 6 || return 1
+        installSingBox 4 || return 1
+        initSingBoxConfig custom 5 || return 1
         cleanUp xrayDel || return 1
+        installSingBoxService 6 || return 1
         installCronTLS 7
         serviceQueueRestart sing-box
         serviceQueueRestart nginx
@@ -2398,7 +2494,6 @@ selectCoreInstall() {
 # Xray-core 个性化安装
 xrayCoreInstall() {
     readLastInstallationConfig || return 1
-    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     # checkBTPanel
     # check1Panel
     selectCustomInstallType=
@@ -2417,10 +2512,10 @@ xrayCoreInstall() {
     randomPathFunction 5
 
     # 安装 Xray
-    installXray 6 false
-    installXrayService 7
-    initXrayConfig all 8 || return 1
+    installXray 6 false || return 1
+    initXrayConfig all 7 || return 1
     cleanUp singBoxDel || return 1
+    installXrayService 8 || return 1
     installCronTLS 9
     if [[ -n "${btDomain}" ]]; then
         statusCard "跳过伪装网站" "检测到宝塔面板/1Panel"
@@ -2442,7 +2537,6 @@ xrayCoreInstall() {
 # sing-box 全部安装
 singBoxInstall() {
     readLastInstallationConfig || return 1
-    unInstallSubscribe || { errorCard "旧订阅 Nginx 配置清理失败"; return 1; }
     # checkBTPanel
     # check1Panel
     selectCustomInstallType=
@@ -2461,11 +2555,10 @@ singBoxInstall() {
 
     coreInstallServiceAction "Nginx 服务停止失败，已取消 sing-box 安装" handleNginx stop || return 1
 
-    installSingBox 5
-    installSingBoxService 6
-    initSingBoxConfig all 7 || return 1
-
+    installSingBox 5 || return 1
+    initSingBoxConfig all 6 || return 1
     cleanUp xrayDel || return 1
+    installSingBoxService 7 || return 1
     installCronTLS 8
 
     serviceQueueRestart sing-box

@@ -1296,6 +1296,20 @@ fetchUrlToStdout() {
     return 1
 }
 
+resolveGitHubCommitRef() {
+    local repo=$1
+    local ref=$2
+    local metadata
+    local commitRef
+
+    [[ "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
+    [[ "${ref}" =~ ^[A-Za-z0-9._/-]+$ && "${ref}" != */../* && "${ref}" != ../* && "${ref}" != */.. ]] || return 1
+    metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/commits/${ref}" 3) || return 1
+    commitRef=$(awk -F'"' '/^[[:space:]]*"sha":[[:space:]]*"/ { print $4; exit }' <<<"${metadata}") || return 1
+    [[ "${commitRef}" =~ ^[0-9a-f]{40}$ ]] || return 1
+    printf '%s\n' "${commitRef}"
+}
+
 validateGitHubReleaseTag() {
     [[ "$1" =~ ^[A-Za-z0-9._+-]{1,128}$ ]]
 }
@@ -1321,14 +1335,9 @@ downloadGitHubReleaseAsset() {
     local expectedSize=
     local actualSize=
     local releaseMetadataUrl=
-    local allowMissingDigest=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
-        --allow-missing-digest)
-            allowMissingDigest=true
-            shift
-            ;;
         -P)
             if argumentHasValue "$@"; then
                 outputDir=$2
@@ -1376,7 +1385,11 @@ downloadGitHubReleaseAsset() {
     else
         releaseMetadataUrl="https://api.github.com/repos/${repo}/releases/tags/${version}"
     fi
-    metadata=$(fetchUrlToStdout "${releaseMetadataUrl}" 3 | jq -c --arg name "${assetName}" '.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // ""), size:(.size // 0)}' | head -1) || metadata=
+    local releaseMetadata
+    releaseMetadata=$(fetchUrlToStdout "${releaseMetadataUrl}" 3) || releaseMetadata=
+    if [[ -n "${releaseMetadata}" ]]; then
+        metadata=$(jq -ce --arg name "${assetName}" 'first(.assets[]? | select(.name == $name) | {url:.browser_download_url, digest:(.digest // ""), size:(.size // 0)})' <<<"${releaseMetadata}" 2>/dev/null) || metadata=
+    fi
     if [[ -n "${metadata}" ]]; then
         downloadUrl=$(jq -r '.url // empty' <<<"${metadata}" 2>/dev/null)
         digest=$(jq -r '.digest // empty' <<<"${metadata}" 2>/dev/null)
@@ -1401,7 +1414,7 @@ downloadGitHubReleaseAsset() {
         menuClose
         return 1
     fi
-    if [[ "${digest}" != sha256:* && "${allowMissingDigest}" != "true" ]]; then
+    if [[ "${digest}" != sha256:* ]]; then
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
         menuLine "GitHub 未提供 sha256 digest，已取消下载: ${assetName}"
         menuClose
@@ -1423,16 +1436,11 @@ downloadGitHubReleaseAsset() {
         rm -f -- "${outputPath}"
         return 1
     fi
-    if [[ "${digest}" != sha256:* ]]; then
-        echoContent title "\n┌─ GitHub Release 校验 ─────────────────────────────"
-        menuLine "上游未提供 sha256 digest，已仅校验 GitHub 资产 URL 和精确大小: ${assetName}"
-        menuClose
-        return 0
-    fi
     if ! command -v sha256sum >/dev/null 2>&1; then
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"
         menuLine "缺少 sha256sum，无法校验下载文件"
         menuClose
+        rm -f -- "${outputPath}"
         return 1
     fi
     expectedSha256=${digest#sha256:}

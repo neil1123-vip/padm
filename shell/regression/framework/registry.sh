@@ -263,7 +263,7 @@ runRegisteredRegressionMain() {
         return 2
     fi
 
-    runRegressionStep "total:${selector}" runRegisteredRegressionSelector "${selector}"
+    runRegressionStep "total:${selector}" runRegisteredRegressionSelector "${selector}" || return $?
     if [[ "${PADM_REGRESSION_SUPPRESS_DONE:-}" != "1" ]]; then
         echo "subscription-groups-regression-ok:${selector}"
     fi

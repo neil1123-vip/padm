@@ -50,11 +50,14 @@ socks5InboundRoutingMenu() {
     1)
         totalProgress=1
         installSingBox 1 || return 1
-        installSingBoxService 1 || return 1
         singBoxConfigPath="${singBoxConfigPath:-/etc/padm/sing-box/conf/config/}"
         socks5RoutingBackupCreate backupDir || { errorCard "Socks5 入站配置备份失败"; return 1; }
         if ! setSocks5Inbound || ! setSocks5InboundRouting; then
             socks5RoutingRollback "${backupDir}" "Socks5 入站配置失败" false
+            return 1
+        fi
+        if ! installSingBoxService 1; then
+            socks5RoutingRollback "${backupDir}" "sing-box 服务安装失败" false
             return 1
         fi
         if ! reloadCore; then

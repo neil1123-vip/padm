@@ -9,9 +9,9 @@ subscriptionRemoteDesiredUsersBySource() {
     local sources=$1
     local sourceIds
     local enabledUsers
-    subscriptionSyncEnsureEnabledUserUUIDs || return 1
     sourceIds=$(jq -c '[.[].id]' <<<"${sources}") || return 1
     enabledUsers=$(subscriptionActiveEnabledUsersJson) || return 1
+    jq -e 'all(.[]?; (.uuid // "") | test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"))' <<<"${enabledUsers}" >/dev/null 2>&1 || return 1
     jq -c -n --argjson sourceIds "${sourceIds}" --argjson users "${enabledUsers}" '
       reduce $sourceIds[]? as $sourceId ({};
         .[$sourceId] = [
@@ -363,7 +363,7 @@ subscriptionRemoteCollectParallelResults() {
 
 subscriptionRemoteControlHealthAll() {
     local sources
-    sources=$(subscriptionRemoteControlSources)
+    sources=$(subscriptionRemoteControlSources) || return 1
     subscriptionRemoteCollectParallelResults \
         "${sources}" \
         padm-remote-health.XXXXXX \
@@ -406,7 +406,7 @@ subscriptionRemoteSyncPlanForSource() {
 subscriptionRemoteSyncPlan() {
     local sources
     local desiredUsersBySource='{}'
-    sources=$(subscriptionRemoteControlSources)
+    sources=$(subscriptionRemoteControlSources) || return 1
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
     fi
@@ -430,7 +430,7 @@ runSubscriptionRemoteSync() {
     local changed
     local plan
     local failures='[]'
-    sources=$(subscriptionRemoteControlSources)
+    sources=$(subscriptionRemoteControlSources) || return 1
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
     fi

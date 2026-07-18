@@ -1238,6 +1238,7 @@ runSubscriptionGroupSyncApplyFailureRegression() (
     local statusLog="${syncRoot}/status.log"
     local resultStatus="${syncRoot}/mark-status.log"
     local resultFailures="${syncRoot}/mark-failures.log"
+    local generatedUuidLog="${syncRoot}/generated-uuid.log"
     local originalConfig
     local syncStatus
 
@@ -1249,7 +1250,7 @@ runSubscriptionGroupSyncApplyFailureRegression() (
     export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
     TMPDIR="${syncRoot}/tmp"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
@@ -1264,10 +1265,14 @@ JSON
     readInstallType() { return 0; }
     readInstallProtocolType() { return 0; }
     readConfigHostPathUUID() { return 0; }
+    subscriptionSyncGenerateUUID() {
+        printf '99999999-9999-4999-8999-999999999999\n'
+    }
     subscriptionSyncPlan() {
         printf '{"create":["sub_team_a"],"remove":[]}'
     }
     subscriptionSyncApplyAccountPlan() {
+        jq -r '.groups[0].user_groups[0].uuid // empty' "$(subscriptionGroupsFile)" >"${generatedUuidLog}"
         SUBSCRIPTION_SYNC_TRANSACTION_ERROR="本机同步计划应用失败"
         return 1
     }
@@ -1295,6 +1300,8 @@ JSON
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
     [[ "$(<"${syncLocalFile}")" == "old-local" ]]
     [[ "$(<"${syncPublicFile}")" == "old-public" ]]
+    grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' "${generatedUuidLog}"
+    jq -e '(.groups[0].user_groups[0] | has("uuid")) | not' "$(subscriptionGroupsFile)" >/dev/null
     [[ ! -e "${remoteLog}" ]]
     [[ ! -e "${reconcileLog}" ]]
     grep -q '本机同步计划应用失败' "${resultFailures}"
