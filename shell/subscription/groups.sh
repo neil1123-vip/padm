@@ -483,9 +483,11 @@ subscriptionActiveEnabledUsersJson() {
 addUserSubscriptionState() {
     local id=$1
     local name=$2
-    subscriptionActiveGroupWrite --arg id "${id}" --arg name "${name}" '
-        if any(.user_groups[]?; .id == $id) then . else
-          .user_groups += [{"id": $id, "name": $name, "enabled": true, "allowed_sources": ["main"], "traffic_limit_gb": 0, "token": ""}]
+    local sources=${3:-'["main"]'}
+    local limit=${4:-0}
+    subscriptionActiveGroupWrite --arg id "${id}" --arg name "${name}" --argjson sources "${sources}" --argjson limit "${limit}" '
+        if any(.user_groups[]?; .id == $id) then error("user subscription already exists") else
+          .user_groups += [{"id": $id, "name": $name, "enabled": true, "allowed_sources": $sources, "traffic_limit_gb": $limit, "token": ""}]
         end
     '
 }

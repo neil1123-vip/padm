@@ -2888,6 +2888,50 @@ runCorePortFileTransactionRegression() {
     if regressionFindHasMatches "${portTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-core-port.*'; then
         return 1
     fi
+
+    (
+        local firewallLog="${TMP_DIR}/core-port-firewall-lifecycle.log"
+        local mode=add-fail
+        local rc
+        : >"${firewallLog}"
+        eval "$(declare -f addCorePort | sed '1s/^addCorePort/originalAddCorePort/')"
+        addCorePort() { return 0; }
+        autoRead() {
+            case "$1" in
+            core_port_menu) [[ "${mode}" == "delete" ]] && printf -v "$3" 3 || printf -v "$3" 2 ;;
+            extra_core_ports) printf -v "$3" '2555,2666' ;;
+            extra_core_default_port) printf -v "$3" 443 ;;
+            extra_core_delete_port) printf -v "$3" 1 ;;
+            esac
+        }
+        allowPort() {
+            PADM_LAST_ALLOW_PORT_ADDED=true
+            printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
+        }
+        denyPort() { printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"; }
+        corePortListExtra() { return 0; }
+        corePortResolveByIndex() { printf '2555\n'; }
+        corePortApplyReloadTransaction() { [[ "${mode}" == "delete" ]]; }
+        coreInstallType=1
+        customPort=
+
+        set +e
+        originalAddCorePort >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        grep -qx 'deny:2555:tcp' "${firewallLog}"
+        grep -qx 'deny:2555:udp' "${firewallLog}"
+        grep -qx 'deny:2666:tcp' "${firewallLog}"
+        grep -qx 'deny:2666:udp' "${firewallLog}"
+
+        mode=delete
+        : >"${firewallLog}"
+        originalAddCorePort >/dev/null 2>&1
+        grep -qx 'deny:2555:tcp' "${firewallLog}"
+        grep -qx 'deny:2555:udp' "${firewallLog}"
+    )
+
     rm -rf "${configPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
@@ -4458,6 +4502,7 @@ runNetworkCheckReturnFailureRegression() (
     local dnsShellRc ipShellRc portShellRc templateShellRc
 
     mkdir -p "${root}/nginx"
+    PADM_FIREWALL_STATE_FILE="${root}/firewall.state"
     eval "$(declare -f cleanAgentNginxConf | sed '1s/^cleanAgentNginxConf/originalCleanAgentNginxConf/')"
 
     if allowPort 0 || allowPort 65536 || allowPort 2000:1000 || allowPort 443 sctp; then
@@ -4485,7 +4530,12 @@ runNetworkCheckReturnFailureRegression() (
             [[ "$2" == "443/udp" ]] && ufwUdpAdded=true
             return 0
             ;;
-        delete) return 0 ;;
+        delete)
+            printf 'ufw:delete:%s\n' "$3" >>"${firewallLog}"
+            [[ "$3" == "443/tcp" ]] && ufwTcpAdded=false
+            [[ "$3" == "443/udp" ]] && ufwUdpAdded=false
+            return 0
+            ;;
         *) return 1 ;;
         esac
     }
@@ -4498,6 +4548,24 @@ runNetworkCheckReturnFailureRegression() (
     allowPort 443
     allowPort 443 udp
     [[ ! -s "${firewallLog}" ]]
+    grep -qx 'port:ufw:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
+    grep -qx 'port:ufw:udp:443' "${PADM_FIREWALL_STATE_FILE}"
+    denyPort 443
+    denyPort 443 udp
+    grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
+    grep -qx 'ufw:delete:443/udp' "${firewallLog}"
+    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+    : >"${firewallLog}"
+    allowPort 1443
+    denyPort 1443
+    [[ ! -s "${firewallLog}" ]]
+    allowPort 443
+    allowPort 443 udp
+    : >"${firewallLog}"
+    cleanupPadmFirewallRules
+    grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
+    grep -qx 'ufw:delete:443/udp' "${firewallLog}"
+    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
     unset -f dpkg ufw sudo
 
     local firewalldTcpAdded=false
@@ -4514,8 +4582,16 @@ runNetworkCheckReturnFailureRegression() (
             printf '\n'
             ;;
         --zone=public)
-            printf 'firewalld:add:%s\n' "$2" >>"${firewallLog}"
-            firewalldTcpAdded=true
+            case "$2" in
+            --add-port=*)
+                printf 'firewalld:add:%s\n' "$2" >>"${firewallLog}"
+                firewalldTcpAdded=true
+                ;;
+            --remove-port=*)
+                printf 'firewalld:remove:%s\n' "$2" >>"${firewallLog}"
+                firewalldTcpAdded=false
+                ;;
+            esac
             ;;
         --reload) return 0 ;;
         *) return 1 ;;
@@ -4523,9 +4599,14 @@ runNetworkCheckReturnFailureRegression() (
     }
     allowPort 443
     grep -qx 'firewalld:add:--add-port=443/tcp' "${firewallLog}"
+    grep -qx 'port:firewalld:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
+    denyPort 443
+    grep -qx 'firewalld:remove:--remove-port=443/tcp' "${firewallLog}"
+    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
     unset -f dpkg systemctl firewall-cmd
 
     : >"${firewallLog}"
+    local iptablesTcpAdded=false
     dpkg() { return 1; }
     systemctl() {
         [[ "$*" == "is-active --quiet netfilter-persistent" ]]
@@ -4535,13 +4616,22 @@ runNetworkCheckReturnFailureRegression() (
     iptables() {
         if [[ "$1" == "-L" ]]; then
             printf 'ACCEPT tcp -- anywhere anywhere /* allow 1443/tcp(neil1123-vip) */\n'
+            [[ "${iptablesTcpAdded}" == "true" ]] && printf 'ACCEPT tcp -- anywhere anywhere /* allow 443/tcp(neil1123-vip) */\n'
         elif [[ "$1" == "-I" ]]; then
             printf 'iptables:add:%s\n' "$*" >>"${firewallLog}"
+            iptablesTcpAdded=true
+        elif [[ "$1" == "-D" ]]; then
+            printf 'iptables:delete:%s\n' "$*" >>"${firewallLog}"
+            iptablesTcpAdded=false
         fi
     }
     netfilter-persistent() { return 0; }
     allowPort 443
     grep -q '^iptables:add:-I INPUT -p tcp --dport 443 ' "${firewallLog}"
+    grep -qx 'port:iptables:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
+    denyPort 443
+    grep -q '^iptables:delete:-D INPUT -p tcp --dport 443 ' "${firewallLog}"
+    [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
     unset -f dpkg systemctl rc-update dpkg-query iptables netfilter-persistent
 
     errorCard() { return 0; }
@@ -7213,6 +7303,20 @@ runUninstallNginxCleanupRegression() {
     for name in sing_box_VMess_HTTPUpgrade.conf subscribe.conf padm-control-wg.conf; do
         [[ ! -e "${actualDir}${name}" ]]
     done
+
+    local installedCrontab=
+    readUserCrontabContent() {
+        printf '%s\n' \
+            '30 1 * * * /bin/bash /etc/padm/install.sh RenewTLS >> /etc/padm/crontab_tls.log 2>&1' \
+            '35 1 * * * /bin/bash /etc/padm/install.sh UpdateGeo >> /etc/padm/crontab_tls.log 2>&1' \
+            '* * * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups' \
+            '5 5 * * * /usr/local/bin/keep'
+    }
+    installUserCrontabContent() { installedCrontab=$1; }
+    crontab() { return 0; }
+    cleanupPadmCronJobsOnUninstall
+    [[ "${installedCrontab}" == '5 5 * * * /usr/local/bin/keep' ]]
+
     nginxConfigPath="${oldNginxConfigPath}"
     PADM_NGINX_CONF_FALLBACK_DIR="${oldFallbackDir}"
 }
@@ -10402,6 +10506,8 @@ runUserSubscriptionMenuMutationFailureRegression() (
         local key=$1
         local targetVar=$3
         case "${key}" in
+        user_subscription_id) printf -v "${targetVar}" 'team-new' ;;
+        user_subscription_name) printf -v "${targetVar}" 'Team New' ;;
         user_subscription_sources)
             if [[ "${mode}" == "empty-sources" ]]; then
                 printf -v "${targetVar}" ', ,'
@@ -10437,6 +10543,13 @@ runUserSubscriptionMenuMutationFailureRegression() (
     subscribe() {
         printf 'subscribe:%s|%s|%s|%s\n' "${1:-}" "${2:-}" "${3:-}" "${4:-}" >>"${callLog}"
         [[ "${mode}" != "subscribe-fail" ]]
+    }
+    ensureSubscriptionServiceForSharedLinks() {
+        [[ "${mode}" != "service-install-fail" ]] || return 2
+    }
+    addUserSubscriptionState() {
+        printf 'create:%s:%s:%s:%s\n' "$1" "$2" "$3" "$4" >>"${callLog}"
+        [[ "${mode}" != "create-state-fail" ]]
     }
     setUserSubscriptionSources() {
         printf 'sources:%s:%s\n' "$1" "$2" >>"${callLog}"
@@ -10503,6 +10616,27 @@ runUserSubscriptionMenuMutationFailureRegression() (
     ! grep -q '^sync:' "${callLog}"
     grep -q '等待手动/定时同步' "${statusLog}"
     subscriptionEventSyncEnabled() { [[ "${mode}" != "event-disabled" ]]; }
+
+    mode=service-install-fail
+    resetLogs
+    set +e
+    createAndSyncUserSubscriptionWizard >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    ! grep -q '^create:' "${callLog}"
+
+    mode=create-state-fail
+    resetLogs
+    set +e
+    createAndSyncUserSubscriptionWizard >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qxF 'create:team-new:Team New:["main","remote-a"]:100' "${callLog}"
+    grep -q '分享订阅创建失败' "${errorLog}"
+    ! grep -q '分享订阅已创建' "${statusLog}"
+    ! grep -q '^sync:' "${callLog}"
 
     mode=success
     resetLogs

@@ -1154,6 +1154,15 @@ EOF
     commitGeneratedJsonFile "${tmpFile}" "${fileName}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
+corePortRollbackFirewallRules() {
+    local rule
+    local status=0
+    for rule in "$@"; do
+        denyPort "${rule%%|*}" "${rule##*|}" || status=1
+    done
+    return "${status}"
+}
+
 addCorePort() {
 
     if [[ "${coreInstallType}" == "2" ]]; then
@@ -1181,6 +1190,7 @@ addCorePort() {
         if [[ -n "${newPort}" ]]; then
             local parsedPorts=
             local settingsPort=443
+            local -a openedFirewallRules=()
             parsedPorts=$(corePortParseList "${newPort}") || {
                 errorCard "端口格式错误"
                 return 1
@@ -1189,10 +1199,19 @@ addCorePort() {
                 settingsPort=${customPort}
             fi
             while read -r port; do
-                allowPort "${port}" || return 1
-                allowPort "${port}" "udp" || return 1
+                if ! allowPort "${port}"; then
+                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" >/dev/null 2>&1 || true
+                    return 1
+                fi
+                [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && openedFirewallRules+=("${port}|tcp")
+                if ! allowPort "${port}" "udp"; then
+                    corePortRollbackFirewallRules "${openedFirewallRules[@]}" >/dev/null 2>&1 || true
+                    return 1
+                fi
+                [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && openedFirewallRules+=("${port}|udp")
             done <<<"${parsedPorts}"
             if ! corePortApplyReloadTransaction corePortWriteAddFiles "${parsedPorts}" "${defaultPort}" "${settingsPort}"; then
+                corePortRollbackFirewallRules "${openedFirewallRules[@]}" >/dev/null 2>&1 || true
                 errorCard "入口端口配置写入或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
                 return 1
             fi
@@ -1208,6 +1227,10 @@ addCorePort() {
         if [[ -n "${port}" ]]; then
             if ! corePortApplyReloadTransaction corePortRemove "${port}"; then
                 errorCard "入口端口删除或重载失败，已尝试恢复旧配置；如上方提示回滚失败，请检查备份目录"
+                return 1
+            fi
+            if ! denyPort "${port}" || ! denyPort "${port}" udp; then
+                errorCard "入口端口配置已删除，但防火墙规则回收失败，请检查防火墙状态"
                 return 1
             fi
 
@@ -1342,6 +1365,19 @@ uninstallReloadSystemdUnits() {
     fi
 }
 
+cleanupPadmCronJobsOnUninstall() {
+    local currentCrontab cleanedCrontab
+    command -v crontab >/dev/null 2>&1 || return 0
+    currentCrontab=$(readUserCrontabContent) || return 1
+    cleanedCrontab=$(sed \
+        -e '\|/etc/padm/install.sh RenewTLS|d' \
+        -e '\|/etc/padm/install.sh UpdateGeo|d' \
+        -e '\|/etc/padm/install.sh SyncSubscriptionGroups|d' \
+        <<<"${currentCrontab}") || return 1
+    [[ "${cleanedCrontab}" == "${currentCrontab}" ]] && return 0
+    installUserCrontabContent "${cleanedCrontab}"
+}
+
 cleanupPadmManagedRootOnUninstall() {
     local installRoot="${PADM_INSTALL_DIR:-/etc/padm}"
     local resolvedRoot
@@ -1375,10 +1411,12 @@ cleanupPadmManagedRootOnUninstall() {
         "${installRoot%/}/vless_encryption.json"
         "${installRoot%/}/alone_backup.conf"
         "${installRoot%/}/padm-bbr.state"
+        "${installRoot%/}/firewall.state"
         "${installRoot%/}/install.log"
         "${installRoot%/}/install.log.dpkg-recover"
         "${installRoot%/}/nginx_error.log"
         "${installRoot%/}/crontab_tls.log"
+        "${installRoot%/}/crontab_subscription_groups.log"
     )
 
     if ! padmIsSafeAbsolutePath "${installRoot%/}"; then
@@ -1511,6 +1549,14 @@ unInstall() {
         fi
     fi
 
+    if ! cleanupPadmCronJobsOnUninstall; then
+        errorCard "PADM 定时任务清理失败，已取消后续删除"
+        return 1
+    fi
+    if ! cleanupPadmFirewallRules; then
+        errorCard "PADM 防火墙规则清理失败，已取消后续删除"
+        return 1
+    fi
     if ! cleanupSubscriptionWireGuardControlOnUninstall; then
         errorCard "WireGuard 控制面清理失败，已取消后续删除"
         return 1

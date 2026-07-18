@@ -1265,7 +1265,8 @@ subscriptionGroupSyncCronCommand() {
     local interval
     interval=$(subscriptionActiveGroupRead -r '(.sync.interval_minutes // 10) | tonumber? // 10') || return 1
     subscriptionGroupSyncIntervalValid "${interval}" || interval=10
-    printf '*/%s * * * * /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> %s 2>&1\n' \
+    printf '* * * * * padm_minute=$(( $(date +\\%%s) / 60 )); [ $((padm_minute / %s * %s)) -eq "$padm_minute" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> %s 2>&1\n' \
+        "${interval}" \
         "${interval}" \
         "$(subscriptionGroupSyncCronFile)"
 }

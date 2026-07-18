@@ -79,6 +79,13 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
     addSubscriptionSourceState ip-edge "IP Edge" 203.0.113.10 39778
     jq -e '.groups[0].sources[] | select(.id == "ip-edge" and .scheme == "wireguard" and .transport == "wireguard" and .host == "203.0.113.10" and .port == 39778)' "$(subscriptionGroupsFile)" >/dev/null
     removeSubscriptionSourceState ip-edge
+
+    addUserSubscriptionState team-a "Team A" '["main"]' 7
+    jq -e '.groups[0].user_groups == [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":7,"token":""}]' "$(subscriptionGroupsFile)" >/dev/null
+    if addUserSubscriptionState team-a Replacement '["*"]' 99 >/dev/null 2>&1; then
+        return 1
+    fi
+    jq -e '.groups[0].user_groups == [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":7,"token":""}]' "$(subscriptionGroupsFile)" >/dev/null
 }
 
 runSubscriptionGroupStateStructureFoundationCredentialRegression() {
@@ -346,8 +353,12 @@ runSubscriptionGroupStateStructureSyncCronRegression() {
         }
         installSubscriptionGroupSyncCron
         grep -qx '5 0 \* \* \* /bin/bash /etc/padm/install.sh RenewTLS' "${crontabLog}" || return 1
-        grep -qx '*/17 \* \* \* \* /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> /etc/padm/crontab_subscription_groups.log 2>&1' "${crontabLog}" || return 1
+        grep -qxF '* * * * * padm_minute=$(( $(date +\%s) / 60 )); [ $((padm_minute / 17 * 17)) -eq "$padm_minute" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> /etc/padm/crontab_subscription_groups.log 2>&1' "${crontabLog}" || return 1
         [[ "$(grep -c 'SyncSubscriptionGroups' "${crontabLog}")" == "1" ]] || return 1
+
+        setSubscriptionGroupSyncInterval 59
+        [[ "$(subscriptionGroupSyncCronCommand)" == '* * * * * padm_minute=$(( $(date +\%s) / 60 )); [ $((padm_minute / 59 * 59)) -eq "$padm_minute" ] && /bin/bash /etc/padm/install.sh SyncSubscriptionGroups >> /etc/padm/crontab_subscription_groups.log 2>&1' ]]
+        setSubscriptionGroupSyncInterval 17
 
         setSubscriptionGroupSyncEnabled false
         refreshSubscriptionGroupSyncCron

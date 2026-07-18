@@ -284,6 +284,16 @@ addPortHopping() {
                     protocolPortHoppingStatusCard "端口跳跃开放端口失败，已尝试回滚本次 firewalld 规则"
                     exit 1
                 fi
+                if [[ "${addedMasquerade}" == "true" ]] && ! padmFirewallStateAdd masquerade:firewalld; then
+                    for port in $(seq "${portStart}" "${portEnd}"); do
+                        sudo firewall-cmd --permanent --remove-forward-port=port="${port}":proto=udp:toport="${targetPort}" >/dev/null 2>&1 || true
+                    done
+                    denyPort "${portStart}:${portEnd}" udp >/dev/null 2>&1 || true
+                    sudo firewall-cmd --permanent --remove-masquerade >/dev/null 2>&1 || true
+                    sudo firewall-cmd --reload >/dev/null 2>&1 || true
+                    protocolPortHoppingStatusCard "端口跳跃状态记录失败，已尝试回滚本次 firewalld 规则"
+                    exit 1
+                fi
             else
                 if ! iptables -t nat -A PREROUTING -p udp --dport "${portStart}:${portEnd}" -m comment --comment "neil1123-vip_${type}_portHopping" -j DNAT --to-destination ":${targetPort}"; then
                     rollbackPortHoppingIptablesRule "${type}" "${portStart}" "${portEnd}" "${targetPort}" || true
@@ -398,6 +408,21 @@ deletePortHoppingRules() {
             status=1
         elif grep -q "neil1123-vip_${type}_portHopping" <<<"${savedRules}"; then
             status=1
+        fi
+    fi
+    if [[ "${status}" == "0" ]] && ! denyPort "${start}:${end}" udp; then
+        status=1
+    fi
+    if [[ "${status}" == "0" && "${rhelLike:-}" == "true" ]] && padmFirewallStateHas masquerade:firewalld; then
+        local remainingForwardPorts
+        if ! remainingForwardPorts=$(sudo firewall-cmd --list-forward-ports); then
+            status=1
+        elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
+            if sudo firewall-cmd --permanent --remove-masquerade && sudo firewall-cmd --reload; then
+                padmFirewallStateRemove masquerade:firewalld || status=1
+            else
+                status=1
+            fi
         fi
     fi
     return "${status}"

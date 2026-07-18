@@ -555,6 +555,7 @@ createAndSyncUserSubscriptionWizard() {
     local enableSync=
     local canShowLinks=true
     local eventSyncEnabled=false
+    local subscriptionServiceStatus=0
     autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
     autoRead user_subscription_name "请输入显示名称[例 家人A/团队A]:" name
     if [[ -z "${id}" || -z "${name}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
@@ -562,8 +563,11 @@ createAndSyncUserSubscriptionWizard() {
         return 1
     fi
 
-    if ! ensureSubscriptionServiceForSharedLinks; then
-        if [[ "$?" == "2" ]]; then
+    if ensureSubscriptionServiceForSharedLinks; then
+        :
+    else
+        subscriptionServiceStatus=$?
+        if [[ "${subscriptionServiceStatus}" == "2" ]]; then
             return 1
         fi
         canShowLinks=false
@@ -592,9 +596,10 @@ createAndSyncUserSubscriptionWizard() {
         return 1
     fi
 
-    addUserSubscriptionState "${id}" "${name}"
-    setUserSubscriptionSources "${id}" "${sourceJson}"
-    setUserSubscriptionTrafficLimit "${id}" "${limit}"
+    if ! addUserSubscriptionState "${id}" "${name}" "${sourceJson}" "${limit}"; then
+        errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
+        return 1
+    fi
     statusCard "分享订阅已创建" "订阅ID：${id}" "显示名称：${name}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 主控维护与排障 -> 用量与限额 执行"
 
     if ! subscriptionGroupSyncEnabled; then

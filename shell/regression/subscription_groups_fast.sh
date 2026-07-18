@@ -1114,6 +1114,7 @@ runPortHoppingWithoutPersistentRegression() (
 
     local natStateFile="${TMP_DIR}/port-hopping-nat.state"
     local allowCalls=0
+    local denyCalls=0
     local allowPortShouldFail=false
     local downloadCount=0
     local inputCount=0
@@ -1179,6 +1180,10 @@ runPortHoppingWithoutPersistentRegression() (
         printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${warnLog}"
         allowCalls=$((allowCalls + 1))
         [[ "${allowPortShouldFail}" != "true" ]]
+    }
+    denyPort() {
+        printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${warnLog}"
+        denyCalls=$((denyCalls + 1))
     }
     readSingBoxConfig() {
         hysteriaPort=
@@ -1288,6 +1293,7 @@ EOF
     deletePortHoppingRules hysteria2 33000 33005 16295
     grep -q 'keep-other-rule' "${natStateFile}"
     ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+    grep -qx 'deny:33000:33005:udp' "${warnLog}"
 
     : >"${natStateFile}"
     hysteria2PortHoppingStart=33000
@@ -1334,6 +1340,61 @@ EOF
     iptablesDeleteShouldFail=false
     [[ "${rc}" == "1" ]]
     grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+    [[ "${denyCalls}" == "1" ]]
+
+    (
+        local firewalldLog="${TMP_DIR}/port-hopping-firewalld.log"
+        local forwardCount=0
+        local masquerade=false
+        PADM_FIREWALL_STATE_FILE="${TMP_DIR}/port-hopping-firewall.state"
+        rm -f "${PADM_FIREWALL_STATE_FILE}"
+        : >"${firewalldLog}"
+        rhelLike=true
+        inputCount=1
+        hysteria2PortHoppingStart=
+        hysteria2PortHoppingEnd=
+        systemctl() {
+            if [[ "$*" == "status firewalld" ]]; then
+                printf 'Active: active (running)\n'
+            fi
+            return 0
+        }
+        sudo() { "$@"; }
+        firewall-cmd() {
+            case "$1" in
+            --query-masquerade) [[ "${masquerade}" == "true" ]] ;;
+            --reload) return 0 ;;
+            --list-forward-ports)
+                ((forwardCount == 0)) || printf 'port=33000:proto=udp:toport=16295\n'
+                ;;
+            --permanent)
+                case "$2" in
+                --add-masquerade)
+                    masquerade=true
+                    printf 'masquerade:add\n' >>"${firewalldLog}"
+                    ;;
+                --remove-masquerade)
+                    masquerade=false
+                    printf 'masquerade:remove\n' >>"${firewalldLog}"
+                    ;;
+                --add-forward-port=*) forwardCount=$((forwardCount + 1)) ;;
+                --remove-forward-port=*) forwardCount=$((forwardCount - 1)) ;;
+                esac
+                ;;
+            esac
+        }
+        allowPort() { return 0; }
+        denyPort() { printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewalldLog}"; }
+
+        addPortHopping hysteria2 16295
+        padmFirewallStateHas masquerade:firewalld
+        deletePortHoppingRules hysteria2 33000 33005 16295
+        grep -qx 'masquerade:add' "${firewalldLog}"
+        grep -qx 'masquerade:remove' "${firewalldLog}"
+        grep -qx 'deny:33000:33005:udp' "${firewalldLog}"
+        [[ "${masquerade}" == "false" ]]
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+    )
 )
 
 runPortHoppingMenuUsesCommandLookupRegression() (
@@ -3460,6 +3521,20 @@ runInstallMenuRecommendedIdsRegression() {
 
 runValidateInstallLoadsRuntimeRegression() {
     grep -q 'shell/core/runtime\.sh' "${PROJECT_ROOT}/shell/validate_install.sh"
+    (
+        eval "$(awk '/^check_service_manager\(\)/,/^}/' "${PROJECT_ROOT}/shell/validate_install.sh")"
+        command() {
+            if [[ "$1" == "-v" && "$2" == "systemctl" ]]; then
+                return 1
+            fi
+            if [[ "$1" == "-v" && "$2" == "rc-service" ]]; then
+                return 0
+            fi
+            builtin command "$@"
+        }
+        check_command() { printf '%s\n' "$1"; }
+        [[ "$(check_service_manager)" == "rc-service" ]]
+    )
 }
 
 runValidateInstallTempRootStaysInParentShellRegression() {

@@ -10,12 +10,145 @@ firewalldRulePresent() {
     firewall-cmd --list-ports --permanent | tr ' ' '\n' | grep -Fxq "${rule}"
 }
 
+padmFirewallStateFile() {
+    local installRoot=${PADM_INSTALL_DIR:-/etc/padm}
+    padmRequireSafeAbsolutePath "${PADM_FIREWALL_STATE_FILE:-${installRoot%/}/firewall.state}"
+}
+
+padmFirewallStateHas() {
+    local key=$1
+    local stateFile
+    stateFile=$(padmFirewallStateFile) || return 1
+    [[ -f "${stateFile}" ]] && grep -Fxq -- "${key}" "${stateFile}"
+}
+
+padmFirewallStateAdd() {
+    local key=$1
+    local stateFile tmpFile
+    stateFile=$(padmFirewallStateFile) || return 1
+    padmFirewallStateHas "${key}" && return 0
+    padmCreateTempFileForTarget tmpFile "${stateFile}" firewall || return 1
+    if [[ -f "${stateFile}" ]]; then
+        cat "${stateFile}" >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    fi
+    printf '%s\n' "${key}" >>"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    commitGeneratedFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+}
+
+padmFirewallStateRemove() {
+    local key=$1
+    local stateFile tmpFile
+    stateFile=$(padmFirewallStateFile) || return 1
+    [[ -f "${stateFile}" ]] || return 0
+    padmCreateTempFileForTarget tmpFile "${stateFile}" firewall || return 1
+    awk -v key="${key}" '$0 != key' "${stateFile}" >"${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    if [[ -s "${tmpFile}" ]]; then
+        commitGeneratedFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
+    else
+        padmRemoveCleanupPath "${tmpFile}"
+        removeManagedFileIfPresent "${stateFile}"
+    fi
+}
+
+removeFirewallPortRule() {
+    local backend=$1
+    local requestedPort=$2
+    local type=$3
+    local firewallPort=${requestedPort}
+    if [[ "${requestedPort}" == *:* ]]; then
+        firewallPort="${requestedPort/:/-}"
+    fi
+    case "${backend}" in
+    ufw)
+        command -v ufw >/dev/null 2>&1 || return 1
+        ufw status >/dev/null 2>&1 || return 1
+        if ufwRulePresent "${requestedPort}" "${type}"; then
+            sudo ufw delete allow "${requestedPort}/${type}" || return 1
+        fi
+        ;;
+    firewalld)
+        command -v firewall-cmd >/dev/null 2>&1 || return 1
+        firewall-cmd --list-ports --permanent >/dev/null 2>&1 || return 1
+        if firewalldRulePresent "${firewallPort}" "${type}"; then
+            firewall-cmd --zone=public --remove-port="${firewallPort}/${type}" --permanent || return 1
+            firewall-cmd --reload || return 1
+        fi
+        ;;
+    iptables)
+        command -v iptables >/dev/null 2>&1 || return 1
+        iptables -L >/dev/null 2>&1 || return 1
+        if iptables -L | grep -Fq "allow ${requestedPort}/${type}(neil1123-vip)"; then
+            iptables -D INPUT -p "${type}" --dport "${requestedPort}" -m comment --comment "allow ${requestedPort}/${type}(neil1123-vip)" -j ACCEPT || return 1
+            netfilter-persistent save || return 1
+        fi
+        ;;
+    *) return 1 ;;
+    esac
+}
+
+denyPort() {
+    local requestedPort=$1
+    local type=${2:-tcp}
+    local backend key
+    local status=0
+    [[ "${type}" == "tcp" || "${type}" == "udp" ]] || return 1
+    if [[ "${requestedPort}" == *:* ]]; then
+        local portStart=${requestedPort%%:*}
+        local portEnd=${requestedPort#*:}
+        validPortNumber "${portStart}" && validPortNumber "${portEnd}" && ((10#${portStart} <= 10#${portEnd})) || return 1
+    else
+        validPortNumber "${requestedPort}" || return 1
+    fi
+    for backend in ufw firewalld iptables; do
+        key="port:${backend}:${type}:${requestedPort}"
+        if padmFirewallStateHas "${key}"; then
+            if removeFirewallPortRule "${backend}" "${requestedPort}" "${type}"; then
+                padmFirewallStateRemove "${key}" || status=1
+            else
+                status=1
+            fi
+        fi
+    done
+    return "${status}"
+}
+
+cleanupPadmFirewallRules() {
+    local stateFile key rest type requestedPort
+    local remainingForwardPorts=
+    local status=0
+    local -a keys=()
+    stateFile=$(padmFirewallStateFile) || return 1
+    [[ -f "${stateFile}" ]] || return 0
+    mapfile -t keys <"${stateFile}" || return 1
+    for key in "${keys[@]}"; do
+        [[ "${key}" == port:* ]] || continue
+        rest=${key#port:}
+        rest=${rest#*:}
+        type=${rest%%:*}
+        requestedPort=${rest#*:}
+        denyPort "${requestedPort}" "${type}" || status=1
+    done
+    if [[ "${status}" == "0" ]] && padmFirewallStateHas masquerade:firewalld; then
+        if ! remainingForwardPorts=$(firewall-cmd --list-forward-ports); then
+            status=1
+        elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
+            firewall-cmd --permanent --remove-masquerade && firewall-cmd --reload || status=1
+        fi
+        [[ "${status}" != "0" ]] || padmFirewallStateRemove masquerade:firewalld || status=1
+    fi
+    [[ "${status}" != "0" || ! -f "${stateFile}" ]] || status=1
+    return "${status}"
+}
+
 # 开放防火墙端口
 allowPort() {
     local requestedPort=$1
     local type=${2:-tcp}
     local firewallPort=${requestedPort}
     local portStart portEnd
+    local backend=
+    local added=false
+    PADM_LAST_ALLOW_PORT_ADDED=false
     [[ "${type}" == "tcp" || "${type}" == "udp" ]] || return 1
     if [[ "${requestedPort}" == *:* ]]; then
         portStart=${requestedPort%%:*}
@@ -34,6 +167,8 @@ allowPort() {
                     errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
                     return 1
                 fi
+                backend=ufw
+                added=true
             fi
         fi
     elif systemctl status firewalld 2>/dev/null | grep -q "active (running)"; then
@@ -44,6 +179,8 @@ allowPort() {
                 errorCard "${requestedPort}端口开放失败，已尝试回滚本次 firewalld 规则"
                 return 1
             fi
+            backend=firewalld
+            added=true
         fi
     elif rc-update show 2>/dev/null | grep -q ufw; then
         if ufw status | grep -q "Status: active"; then
@@ -53,6 +190,8 @@ allowPort() {
                     errorCard "${requestedPort}端口开放失败，已尝试回滚本次 ufw 规则"
                     return 1
                 fi
+                backend=ufw
+                added=true
             fi
         fi
     elif dpkg-query -W -f='${db:Status-Abbrev}' netfilter-persistent 2>/dev/null | grep -q '^ii' && systemctl is-active --quiet netfilter-persistent; then
@@ -63,7 +202,17 @@ allowPort() {
                 errorCard "${requestedPort}端口开放失败，已尝试回滚本次 iptables 规则"
                 return 1
             fi
+            backend=iptables
+            added=true
         fi
+    fi
+    if [[ "${added}" == "true" ]]; then
+        if ! padmFirewallStateAdd "port:${backend}:${type}:${requestedPort}"; then
+            removeFirewallPortRule "${backend}" "${requestedPort}" "${type}" >/dev/null 2>&1 || true
+            errorCard "${requestedPort}端口状态记录失败，已尝试回滚本次防火墙规则"
+            return 1
+        fi
+        PADM_LAST_ALLOW_PORT_ADDED=true
     fi
 }
 

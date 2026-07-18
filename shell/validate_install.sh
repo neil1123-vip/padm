@@ -71,6 +71,14 @@ check_command() {
     fi
 }
 
+check_service_manager() {
+    if command -v systemctl >/dev/null 2>&1; then
+        check_command systemctl
+    else
+        check_command rc-service
+    fi
+}
+
 check_file() {
     if [[ -f "$1" ]]; then
         pass "文件存在：$1"
@@ -637,7 +645,7 @@ main() {
     check_command curl
     check_command jq
     check_command lsof
-    check_command systemctl
+    check_service_manager
     check_nginx_repo
     check_warp
 
