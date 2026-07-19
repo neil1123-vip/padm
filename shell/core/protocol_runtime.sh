@@ -747,7 +747,7 @@ collectRealityProfile() {
     local targetInput=
     local selectRealityTargetMode=
 
-    collectEntryProfile
+    collectEntryProfile || return 1
 
     if [[ -n "${AUTO_REALITY_TARGET:-}" ]]; then
         parseRealityTargetInput "${AUTO_REALITY_TARGET}" || return 1

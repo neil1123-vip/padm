@@ -3319,6 +3319,14 @@ runRealityProfileFailureRegression() (
     initRealityProfile
     [[ "$(<"${entryHostFile}")" == "node.example.com" ]]
     rm -f "${entryHostFile}"
+    AUTO_ENTRY_HOST='bad entry host'
+    realityEntryHost=
+    if initRealityProfile 2>/dev/null; then
+        return 1
+    fi
+    [[ ! -e "${entryHostFile}" ]]
+
+    AUTO_ENTRY_HOST=node.example.com
     AUTO_REALITY_TARGET=bad.example.com:70000
     realityTargetHost=
     realityTargetPort=
