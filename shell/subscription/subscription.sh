@@ -102,12 +102,12 @@ subscriptionRemoteSubscribeSourcesForAccount() {
     local outputVar=${2:-}
     local user
     local allowedSources
-    local sourceLines
+    local resolvedSources
     user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 2
     [[ -n "${user}" ]] || return 2
     allowedSources=$(jq -c '.allowed_sources // []' <<<"${user}") || return 1
     [[ -n "${allowedSources}" ]] || return 1
-    sourceLines=$(subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" '
+    resolvedSources=$(subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" '
       . as $group |
       if ($allowed | length) == 0 then
         empty
@@ -117,9 +117,9 @@ subscriptionRemoteSubscribeSourcesForAccount() {
         $group.sources[]? | select(.role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid))) | "\(.host):\(.port):\(.id):\(.scheme)"
       end') || return 1
     if [[ -n "${outputVar}" ]]; then
-        printf -v "${outputVar}" '%s' "${sourceLines}"
+        printf -v "${outputVar}" '%s' "${resolvedSources}"
     else
-        printf '%s\n' "${sourceLines}"
+        printf '%s\n' "${resolvedSources}"
     fi
 }
 
