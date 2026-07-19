@@ -499,7 +499,10 @@ configureRealityStreamSplit() {
         menuLine "$(uiStyle warn "未检测到 Nginx，443 共存分流需要 Nginx stream")"
         autoRead reality_stream_install_nginx "是否安装 Nginx？[y/n]:" installNginxStatus
         if [[ "${installNginxStatus}" == "y" ]]; then
-            installNginxTools
+            if ! (installNginxTools) || ! command -v nginx >/dev/null 2>&1; then
+                errorCard "Nginx 安装失败，已取消 Reality 443 共存配置"
+                return 1
+            fi
         else
             errorCard "已取消配置"
             return 1

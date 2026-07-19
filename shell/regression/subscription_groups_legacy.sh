@@ -11945,6 +11945,28 @@ SH
     : >"${serviceLog}"
     : >"${errorLog}"
 
+    local nginxInstallMarker="${streamDir}/nginx-install.marker"
+    (
+        command() {
+            if [[ "${1:-}" == "-v" && "${2:-}" == "nginx" ]]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        nginx() { return 127; }
+        installNginxTools() {
+            : >"${nginxInstallMarker}"
+            exit 17
+        }
+        rm -f "${nginxInstallMarker}"
+        set +e
+        configureRealityStreamSplit >/dev/null 2>&1
+        local installStatus=$?
+        set -e
+        [[ "${installStatus}" == "1" ]]
+        [[ -e "${nginxInstallMarker}" ]]
+    )
+
     reloadCore() {
         printf 'reload:%s\n' "${serviceMode}" >>"${serviceLog}"
         [[ "${serviceMode}" == "reload-fail" ]] && return 1
