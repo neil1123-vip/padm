@@ -222,8 +222,9 @@ padmRemoveCleanupPath() {
     local path=$1
     local resolvedPath=
     resolvedPath=$(padmResolveCleanupPath "${path}" 2>/dev/null || true)
-    rm -rf -- "${resolvedPath:-${path}}" >/dev/null 2>&1 || true
-    padmUnregisterCleanupPath "${resolvedPath:-${path}}"
+    if rm -rf -- "${resolvedPath:-${path}}" >/dev/null 2>&1; then
+        padmUnregisterCleanupPath "${resolvedPath:-${path}}"
+    fi
 }
 
 padmCommitTargetIsFileLike() {

@@ -96,6 +96,21 @@ runCleanupTrapRegression() {
     [[ ${termStatus} -eq 143 ]]
     [[ ! -e "${intProbe}" ]]
     [[ ! -e "${termProbe}" ]]
+
+    (
+        local retainedPath="${tmpDir}/retained"
+        printf 'keep\n' >"${retainedPath}"
+        PADM_CLEANUP_PATHS=()
+        padmRegisterCleanupPath "${retainedPath}"
+        rm() { return 1; }
+        padmRemoveCleanupPath "${retainedPath}"
+        [[ -e "${retainedPath}" ]]
+        [[ "${PADM_CLEANUP_PATHS[*]}" == *"${retainedPath}"* ]]
+        unset -f rm
+        padmRemoveCleanupPath "${retainedPath}"
+        [[ ! -e "${retainedPath}" ]]
+        [[ -z "${PADM_CLEANUP_PATHS[*]}" ]]
+    )
     rm -rf "${tmpDir}"
 }
 
