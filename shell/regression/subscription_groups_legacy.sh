@@ -11309,10 +11309,11 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         printf '{"version":2,"active_group":"default","groups":[{"id":"default","user_groups":[{"id":"team-a","enabled":true}]}]}\n'
     }
     subscriptionSyncCreateConfigBackups() {
+        local resultVar=$1
         printf 'backup-create\n' >>"${callLog}"
         [[ "${mode}" != "backup-fail" ]] || return 1
         mkdir -p "${backupDir}"
-        printf '%s\n' "${backupDir}"
+        printf -v "${resultVar}" '%s' "${backupDir}"
     }
     subscriptionSyncAccountName() {
         printf 'sub_%s\n' "$1"

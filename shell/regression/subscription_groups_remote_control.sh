@@ -795,18 +795,20 @@ runRemoteControlServerRefreshRegression() (
 
     useLightweightSyncBackups() {
         subscriptionSyncCreateConfigBackups() {
+            local resultVar=$1
             local backupDir
             printf -v backupDir '%s/config-%02d' "${lightweightBackupRoot}" "${lightweightConfigIndex}"
             lightweightConfigIndex=$((lightweightConfigIndex + 1))
             mkdir -p "${backupDir}" || return 1
-            printf '%s\n' "${backupDir}"
+            printf -v "${resultVar}" '%s' "${backupDir}"
         }
         subscriptionSyncCreateSubscribeOutputBackups() {
+            local resultVar=$1
             local backupDir
             printf -v backupDir '%s/output-%02d' "${lightweightBackupRoot}" "${lightweightOutputIndex}"
             lightweightOutputIndex=$((lightweightOutputIndex + 1))
             mkdir -p "${backupDir}" || return 1
-            printf '%s\n' "${backupDir}"
+            printf -v "${resultVar}" '%s' "${backupDir}"
         }
         subscriptionSyncRestoreConfigBackups() {
             return 0
@@ -1090,9 +1092,10 @@ JSON
                         return 97
                     }
                     subscriptionSyncCreateConfigBackups() {
+                        local resultVar=$1
                         local backupPath="${expectedBackupDir}"
                         mkdir -p "${backupPath}" || return 1
-                        printf '%s\n' "${backupPath}"
+                        printf -v "${resultVar}" '%s' "${backupPath}"
                     }
                     subscriptionSyncCreateSubscribeOutputBackups() {
                         return 1

@@ -850,6 +850,8 @@ runSubscriptionSyncTempDirRegression() (
     local publicDir="${TMP_DIR}/subscription-sync-tempdir-public"
     local backupDir
     local outputBackupDir
+    local backupRegistered
+    local cleanupPath
 
     mkdir -p "${tmpRoot}" "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box" "${localDir}/default" "${publicDir}/default"
     TMPDIR="${tmpRoot}"
@@ -859,16 +861,21 @@ runSubscriptionSyncTempDirRegression() (
 {"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"}]}}]}
 JSON
 
-    backupDir=$(subscriptionSyncCreateConfigBackups)
+    subscriptionSyncCreateConfigBackups backupDir
     [[ "${backupDir}" == "${tmpRoot}"/padm-subscription-sync-backup.* ]]
     [[ -f "${backupDir}/manifest" ]]
+    backupRegistered=
+    for cleanupPath in "${PADM_CLEANUP_PATHS[@]}"; do
+        [[ "${cleanupPath}" == "${backupDir}" ]] && backupRegistered=true
+    done
+    [[ "${backupRegistered}" == "true" ]]
     padmRemoveCleanupPath "${backupDir}"
 
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     export PADM_SUBSCRIBE_DIR="${publicDir}"
     printf 'local\n' >"${localDir}/default/user"
     printf 'public\n' >"${publicDir}/default/user"
-    outputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups)
+    subscriptionSyncCreateSubscribeOutputBackups outputBackupDir
     [[ "${outputBackupDir}" == "${tmpRoot}"/padm-subscription-output-backup.* ]]
     [[ -f "${outputBackupDir}/local.exists" && -f "${outputBackupDir}/public.exists" ]]
     padmRemoveCleanupPath "${outputBackupDir}"

@@ -507,23 +507,24 @@ subscriptionSyncRestoreConfigBackups() {
 }
 
 subscriptionSyncCreateConfigBackups() {
-    local backupDir
+    local resultVar=$1
+    local createdBackupDir
     local file
     local backupIndex=0
     local -a backupArgs=()
 
     subscriptionSyncRequireSafeConfigDirs || return 1
-    padmCreateTmpRootPath backupDir padm-subscription-sync-backup.XXXXXX -d || return 1
+    padmCreateTmpRootPath createdBackupDir padm-subscription-sync-backup.XXXXXX -d || return 1
     while IFS= read -r file; do
         [[ -f "${file}" ]] || continue
         backupArgs+=("$(printf '%06d.json' "${backupIndex}")" "${file}")
         backupIndex=$((backupIndex + 1))
     done < <(subscriptionSyncConfigFiles)
-    if ! padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"; then
-        padmRemoveCleanupPath "${backupDir}"
+    if ! padmWriteManagedFileBackupManifest "${createdBackupDir}" "${backupArgs[@]}"; then
+        padmRemoveCleanupPath "${createdBackupDir}"
         return 1
     fi
-    printf '%s\n' "${backupDir}"
+    printf -v "${resultVar}" '%s' "${createdBackupDir}"
 }
 
 subscriptionSyncBackupPath() {
@@ -645,16 +646,17 @@ subscriptionSyncRestoreBackupPath() {
 }
 
 subscriptionSyncCreateSubscribeOutputBackups() {
-    local backupDir
+    local resultVar=$1
+    local createdBackupDir
     local localBase
     local publicBase
 
-    padmCreateTmpRootPath backupDir padm-subscription-output-backup.XXXXXX -d || return 1
+    padmCreateTmpRootPath createdBackupDir padm-subscription-output-backup.XXXXXX -d || return 1
     localBase=$(subscribeLocalBaseDir)
     publicBase=$(subscribePublicBaseDir)
-    subscriptionSyncBackupPath "${localBase}" "${backupDir}" local || { padmRemoveCleanupPath "${backupDir}"; return 1; }
-    subscriptionSyncBackupPath "${publicBase}" "${backupDir}" public || { padmRemoveCleanupPath "${backupDir}"; return 1; }
-    printf '%s\n' "${backupDir}"
+    subscriptionSyncBackupPath "${localBase}" "${createdBackupDir}" local || { padmRemoveCleanupPath "${createdBackupDir}"; return 1; }
+    subscriptionSyncBackupPath "${publicBase}" "${createdBackupDir}" public || { padmRemoveCleanupPath "${createdBackupDir}"; return 1; }
+    printf -v "${resultVar}" '%s' "${createdBackupDir}"
 }
 
 subscriptionSyncCreateLocalApplyBackups() {
@@ -670,12 +672,12 @@ subscriptionSyncCreateLocalApplyBackups() {
         createdGroupsBackupFile=$(createSubscriptionGroupsBackup) || return 1
         SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=groups
     fi
-    createdConfigBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+    subscriptionSyncCreateConfigBackups createdConfigBackupDir || {
         [[ -n "${createdGroupsBackupFile}" ]] && padmRemoveCleanupPath "${createdGroupsBackupFile}"
         return 1
     }
     SUBSCRIPTION_SYNC_LOCAL_APPLY_BACKUP_STAGE=config
-    createdOutputBackupDir=$(subscriptionSyncCreateSubscribeOutputBackups) || {
+    subscriptionSyncCreateSubscribeOutputBackups createdOutputBackupDir || {
         padmRemoveCleanupPath "${createdConfigBackupDir}"
         [[ -n "${createdGroupsBackupFile}" ]] && padmRemoveCleanupPath "${createdGroupsBackupFile}"
         return 1
@@ -895,7 +897,7 @@ subscriptionSyncApplyAccountPlanTransaction() {
     local applyStatus=0
     SUBSCRIPTION_SYNC_TRANSACTION_ERROR=
     subscriptionSyncValidateAccountPlan "${syncPlan}" || return 1
-    backupDir=$(subscriptionSyncCreateConfigBackups) || return 1
+    subscriptionSyncCreateConfigBackups backupDir || return 1
     if ! subscriptionSyncApplyAccountPlan "${syncPlan}"; then
         applyStatus=1
     fi

@@ -2705,7 +2705,7 @@ subscribeUnlocked() {
         localBase=$(subscribeLocalBaseDir)
         subscribeSaltFile="${localBase}/subscribeSalt"
         previousSubscribeSalt=$(readSubscribeSalt "${subscribeSaltFile}")
-        if ! backupDir=$(subscriptionSyncCreateSubscribeOutputBackups); then
+        if ! subscriptionSyncCreateSubscribeOutputBackups backupDir; then
             errorCard "订阅生成失败：备份旧订阅输出失败"
             return 1
         fi

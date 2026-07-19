@@ -709,7 +709,7 @@ removeUserSubscriptionMenu() {
         errorCard "${manualCheckMessage}"
         return 1
     }
-    configBackupDir=$(subscriptionSyncCreateConfigBackups) || {
+    subscriptionSyncCreateConfigBackups configBackupDir || {
         subscriptionSyncSetManualCheckMessage manualCheckMessage "删除订阅前托管账号配置备份失败" "本机配置"
         errorCard "${manualCheckMessage}"
         return 1

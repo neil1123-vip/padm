@@ -4222,7 +4222,7 @@ runSubscriptionSyncPathSafetyRegression() {
             configPath="relative-config/"
             singBoxConfigPath=
             originalRelativeConfig=$(<"${root}/relative-config/02_VLESS_TCP_inbounds.json")
-            configBackupDir=$(subscriptionSyncCreateConfigBackups)
+            subscriptionSyncCreateConfigBackups configBackupDir
             [[ -f "${configBackupDir}/manifest" ]]
             grep -q $'\t'"${root}/relative-config/02_VLESS_TCP_inbounds.json" "${configBackupDir}/manifest"
             padmCreateTempPath restoreConfigBackupDir -d "${tmpRootAbs}/subscription-sync-config-restore-backup.XXXXXX"
@@ -4240,7 +4240,7 @@ runSubscriptionSyncPathSafetyRegression() {
 
         PADM_SUBSCRIBE_LOCAL_DIR="${safeLocal}"
         PADM_SUBSCRIBE_DIR="${safePublic}"
-        backupDir=$(subscriptionSyncCreateSubscribeOutputBackups)
+        subscriptionSyncCreateSubscribeOutputBackups backupDir
         [[ -d "${backupDir}" ]]
         padmRemoveCleanupPath "${backupDir}"
     )
@@ -4288,8 +4288,9 @@ runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression() {
 
         mkdir -p "${root}"
         subscriptionSyncCreateConfigBackups() {
+            local resultVar=$1
             mkdir -p "${expectedConfigBackup}" || return 1
-            printf '%s\n' "${expectedConfigBackup}"
+            printf -v "${resultVar}" '%s' "${expectedConfigBackup}"
         }
         subscriptionSyncCreateSubscribeOutputBackups() {
             return 1
