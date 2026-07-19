@@ -1525,6 +1525,20 @@ runPortHoppingMenuUsesCommandLookupRegression() (
     [[ ! -s "${findLog}" ]]
     [[ ! -s "${exitLog}" ]]
     grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
+
+    : >"${actionLog}"
+    : >"${exitLog}"
+    command() {
+        if [[ "${1:-}" == "-v" && "${2:-}" == "iptables" ]]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+    rhelLike=true
+    systemctl() { [[ "$*" == "is-active --quiet firewalld" ]]; }
+    portHoppingMenu hysteria2
+    [[ ! -s "${exitLog}" ]]
+    grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
 )
 
 runXrayTrafficStatsJqCompatibilityRegression() (

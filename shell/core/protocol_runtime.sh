@@ -476,8 +476,9 @@ deletePortHoppingRules() {
 # 端口跳跃管理
 portHoppingMenu() {
     local type=$1
-    # 判断iptables是否存在
-    if ! command -v iptables >/dev/null 2>&1; then
+    # 非 firewalld 后端需要 iptables
+    if { [[ "${rhelLike:-}" != "true" ]] || ! systemctl is-active --quiet firewalld 2>/dev/null; } &&
+        ! command -v iptables >/dev/null 2>&1; then
         protocolPortHoppingStatusCard "无法识别 iptables 工具，无法使用端口跳跃，退出安装"
         exit 0
     fi
