@@ -587,38 +587,46 @@ manageTLSCertificates() {
 }
 
 restoreServicesAfterTLSRenewal() {
+    local nginxWasRunning=$1
+    local xrayWasRunning=$2
+    local singBoxWasRunning=$3
     local status=0
-    reloadCore || status=1
-    runCoreServiceActionAllowFailure handleNginx start || status=1
+
+    checkPortOpenRestoreCoreServiceState "${xrayWasRunning}" xrayRunning handleXray || status=1
+    checkPortOpenRestoreCoreServiceState "${singBoxWasRunning}" singBoxRunning handleSingBox || status=1
+    checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx || status=1
     return "${status}"
 }
 
 failTlsRenewalBeforeInstall() {
     local reason=$1
+    shift
 
     errorCard "${reason}，正在尝试恢复服务"
-    restoreServicesAfterTLSRenewal || errorCard "${reason}，且服务恢复失败"
+    restoreServicesAfterTLSRenewal "$@" || errorCard "${reason}，且服务恢复失败"
     return 1
 }
 
 stopServicesForTLSRenewal() {
-    if ! runCoreServiceActionAllowFailure handleNginx stop; then
+    local nginxWasRunning=$1
+    local xrayWasRunning=$2
+    local singBoxWasRunning=$3
+
+    if [[ "${nginxWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleNginx stop; then
         errorCard "Nginx 服务停止失败，已取消 TLS 续期"
+        restoreServicesAfterTLSRenewal "$@" || errorCard "TLS 续期取消后服务恢复失败"
         return 1
     fi
 
-    if [[ "${coreInstallType}" == "1" ]]; then
-        if ! runCoreServiceActionAllowFailure handleXray stop; then
-            errorCard "Xray 服务停止失败，已取消 TLS 续期"
-            runCoreServiceActionAllowFailure handleNginx start >/dev/null 2>&1 || true
-            return 1
-        fi
-    elif [[ "${coreInstallType}" == "2" ]]; then
-        if ! runCoreServiceActionAllowFailure handleSingBox stop; then
-            errorCard "sing-box 服务停止失败，已取消 TLS 续期"
-            runCoreServiceActionAllowFailure handleNginx start >/dev/null 2>&1 || true
-            return 1
-        fi
+    if [[ "${xrayWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleXray stop; then
+        errorCard "Xray 服务停止失败，已取消 TLS 续期"
+        restoreServicesAfterTLSRenewal "$@" || errorCard "TLS 续期取消后服务恢复失败"
+        return 1
+    fi
+    if [[ "${singBoxWasRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleSingBox stop; then
+        errorCard "sing-box 服务停止失败，已取消 TLS 续期"
+        restoreServicesAfterTLSRenewal "$@" || errorCard "TLS 续期取消后服务恢复失败"
+        return 1
     fi
 }
 
@@ -689,27 +697,33 @@ renewalTLS() {
             local installDomain="${domain}"
             local crtFile="${tlsDir}/${domain}.crt"
             local keyFile="${tlsDir}/${domain}.key"
+            local nginxWasRunning=false
+            local xrayWasRunning=false
+            local singBoxWasRunning=false
             tlsCertificateCard "重新生成证书"
-            stopServicesForTLSRenewal || return 1
+            nginxRunning && nginxWasRunning=true
+            xrayRunning && xrayWasRunning=true
+            singBoxRunning && singBoxWasRunning=true
+            stopServicesForTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || return 1
 
             if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
                 installDomain="*.${dnsTLSDomain}"
             fi
             local backupDir backupCrt backupKey restoreStatus=0
             padmCreateTmpRootPath backupDir padm-tls-renew.XXXXXX -d || {
-                failTlsRenewalBeforeInstall "TLS 旧证书备份目录创建失败"
+                failTlsRenewalBeforeInstall "TLS 旧证书备份目录创建失败" "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"
                 return 1
             }
             backupCrt="${backupDir}/$(basename -- "${crtFile}")"
             backupKey="${backupDir}/$(basename -- "${keyFile}")"
             cp -p "${crtFile}" "${backupCrt}" || {
                 padmRemoveCleanupPath "${backupDir}"
-                failTlsRenewalBeforeInstall "TLS 旧证书备份失败"
+                failTlsRenewalBeforeInstall "TLS 旧证书备份失败" "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"
                 return 1
             }
             cp -p "${keyFile}" "${backupKey}" || {
                 padmRemoveCleanupPath "${backupDir}"
-                failTlsRenewalBeforeInstall "TLS 旧证书备份失败"
+                failTlsRenewalBeforeInstall "TLS 旧证书备份失败" "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"
                 return 1
             }
             if sudo "${acmeBin}" --cron --home "${acmeDir}"; then
@@ -725,7 +739,7 @@ renewalTLS() {
                     padmForgetCleanupPath "${backupDir}"
                     errorCard "TLS 证书恢复失败，请手动检查备份目录: ${backupDir}"
                 fi
-                restoreServicesAfterTLSRenewal || errorCard "TLS 证书续签失败，且服务恢复失败"
+                restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || errorCard "TLS 证书续签失败，且服务恢复失败"
                 return "${renewStatus}"
             fi
             sudo "${acmeBin}" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || {
@@ -739,11 +753,11 @@ renewalTLS() {
                     padmForgetCleanupPath "${backupDir}"
                     errorCard "TLS 证书恢复失败，请手动检查备份目录: ${backupDir}"
                 fi
-                restoreServicesAfterTLSRenewal || errorCard "TLS 证书安装失败，且服务恢复失败"
+                restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || errorCard "TLS 证书安装失败，且服务恢复失败"
                 return "${installStatus}"
             }
             padmRemoveCleanupPath "${backupDir}"
-            if ! restoreServicesAfterTLSRenewal; then
+            if ! restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"; then
                 errorCard "TLS 证书已安装，但服务恢复失败"
                 return 1
             fi

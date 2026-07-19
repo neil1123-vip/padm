@@ -18510,6 +18510,7 @@ runTlsRenewalFailurePropagationRegression() (
     local errorLog="${root}/error.log"
     local statusJson
     local mode rc tlsRegressionStatMode=
+    local nginxState xrayState singBoxState
 
     mkdir -p "${tlsDir}" "${homeDir}"
     HOME="${homeDir}"
@@ -18527,24 +18528,42 @@ runTlsRenewalFailurePropagationRegression() (
 
     statusCard() { printf '%s\n' "$*" >>"${statusLog}"; }
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+    nginxRunning() { [[ "${nginxState}" == "true" ]]; }
+    xrayRunning() { [[ "${xrayState}" == "true" ]]; }
+    singBoxRunning() { [[ "${singBoxState}" == "true" ]]; }
     handleNginx() {
+        if [[ "$1" == "stop" && "${nginxState}" != "true" ]] || [[ "$1" == "start" && "${nginxState}" == "true" ]]; then
+            return 0
+        fi
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
+        [[ "$1" == "start" ]] && nginxState=true || nginxState=false
         return 0
     }
     handleXray() {
+        if [[ "$1" == "stop" && "${xrayState}" != "true" ]] || [[ "$1" == "start" && "${xrayState}" == "true" ]]; then
+            return 0
+        fi
         printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
+        [[ "${mode}" == "xray-start-fail" && "$1" == "start" ]] && return 1
+        [[ "$1" == "start" ]] && xrayState=true || xrayState=false
         return 0
     }
     handleSingBox() {
+        if [[ "$1" == "stop" && "${singBoxState}" != "true" ]] || [[ "$1" == "start" && "${singBoxState}" == "true" ]]; then
+            return 0
+        fi
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "start" ]] && singBoxState=true || singBoxState=false
         return 0
     }
     reloadCore() {
         printf 'reload\n' >>"${serviceLog}"
         [[ "${mode}" == "reload-fail" ]] && return 1
+        xrayState=true
+        singBoxState=true
         return 0
     }
     stat() {
@@ -18578,6 +18597,15 @@ runTlsRenewalFailurePropagationRegression() (
         : >"${statusLog}"
         : >"${errorLog}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
+        nginxState=true
+        xrayState=true
+        singBoxState=false
+        if [[ "${mode}" == "stopped-services" ]]; then
+            nginxState=false
+            xrayState=false
+        elif [[ "${mode}" == "dual-core-running" ]]; then
+            singBoxState=true
+        fi
     }
     runRenewalCase() {
         mode=$1
@@ -18652,33 +18680,53 @@ runTlsRenewalFailurePropagationRegression() (
     [[ "${rc}" == "1" ]]
     grep -q '^sudo:.*--cron --home ' "${commandLog}"
     ! grep -q '^sudo:.*--installcert ' "${commandLog}"
-    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    ! grep -qx 'reload' "${serviceLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     runRenewalCase install-fail
     [[ "${rc}" == "1" ]]
     grep -qx 'nginx:stop:true' "${serviceLog}"
     grep -qx 'xray:stop:true' "${serviceLog}"
-    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    ! grep -qx 'reload' "${serviceLog}"
     grep -q '^sudo:.*--cron --home ' "${commandLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
-    runRenewalCase reload-fail
+    runRenewalCase xray-start-fail
     [[ "${rc}" == "1" ]]
-    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    ! grep -qx 'reload' "${serviceLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     runRenewalCase nginx-start-fail
     [[ "${rc}" == "1" ]]
-    grep -qx 'reload' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    ! grep -qx 'reload' "${serviceLog}"
     grep -q '^sudo:.*--installcert -d renew.example.com' "${commandLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    runRenewalCase stopped-services
+    [[ "${rc}" == "0" ]]
+    [[ ! -s "${serviceLog}" ]]
+    [[ "${nginxState}" == "false" && "${xrayState}" == "false" && "${singBoxState}" == "false" ]]
+
+    runRenewalCase dual-core-running
+    [[ "${rc}" == "0" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'xray:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'xray:start:true' "${serviceLog}"
+    grep -qx 'sing-box:start:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}"
+    ! grep -qx 'reload' "${serviceLog}"
+    [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "true" ]]
 
     eval "$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")"
     renewalTLS() { return 37; }
