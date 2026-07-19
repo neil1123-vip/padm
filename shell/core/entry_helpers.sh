@@ -1027,6 +1027,7 @@ updateRealityShowConfig() {
 
 checkLogBackupCreate() {
     local resultVar=$1
+    local -n resultRef="${resultVar}"
     shift
     local createdBackupDir
     local targetPath
@@ -1047,7 +1048,7 @@ checkLogBackupCreate() {
         padmRemoveCleanupPath "${createdBackupDir}"
         return 1
     fi
-    printf -v "${resultVar}" '%s' "${createdBackupDir}"
+    resultRef="${createdBackupDir}"
 }
 
 checkLogBackupRestore() {

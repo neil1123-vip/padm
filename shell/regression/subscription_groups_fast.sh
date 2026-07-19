@@ -4358,6 +4358,22 @@ runReadInstallTypeKeepsSingBoxShardsRegression() {
     )
 }
 
+runCheckLogBackupOutputVariableRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        local root="${TMP_DIR}/check-log-backup-output-variable"
+        local backupDir=
+
+        mkdir -p "${root}"
+        printf 'old\n' >"${root}/target"
+        checkLogBackupCreate backupDir "${root}/target"
+        [[ -n "${backupDir}" && -d "${backupDir}" ]]
+        padmRemoveCleanupPath "${backupDir}"
+    )
+}
+
 runSuppressedRegressionFailurePropagationRegression() {
     (
         set -euo pipefail
@@ -5822,6 +5838,7 @@ runRegressionFastOnlySafety() {
         runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression &&
         runRegressionStep state-readers-clear-stale-values runStateReadersClearStaleValuesRegression &&
         runRegressionStep read-install-type-keeps-sing-box-shards runReadInstallTypeKeepsSingBoxShardsRegression &&
+        runRegressionStep check-log-backup-output-variable runCheckLogBackupOutputVariableRegression &&
         runRegressionStep suppressed-regression-failure-propagation runSuppressedRegressionFailurePropagationRegression &&
         runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression &&
         runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
