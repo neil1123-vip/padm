@@ -12152,6 +12152,10 @@ EOF
     configureRealityStreamSplit
     jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443' "${visionFile}" >/dev/null
     jq -e '.enabled == true and .default_protocol == "vision" and .protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2443' "${stateFile}" >/dev/null
+    selectCustomInstallType=1
+    nginxConfigPath="${streamDir}/no-subscription/"
+    subscriptionWireGuardControlEnabled() { return 1; }
+    nginxRuntimeRequired
     grep -q 'site.example.com padm_website;' "${streamConf}"
     grep -q 'padm stream include start' "${nginxMainConf}"
     grep -Fq "include ${streamDir}/*.conf;" "${nginxMainConf}"

@@ -169,6 +169,9 @@ nginxRuntimeRequired() {
     if ! protocolSelectionSkipsNginx "${selectCustomInstallType:-}"; then
         return 0
     fi
+    if declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled; then
+        return 0
+    fi
     if declare -F subscriptionWireGuardControlEnabled >/dev/null 2>&1 &&
         subscriptionWireGuardControlEnabled >/dev/null 2>&1; then
         return 0
