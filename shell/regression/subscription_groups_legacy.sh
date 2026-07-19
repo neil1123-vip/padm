@@ -7533,6 +7533,8 @@ SH
     export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
     export PADM_FAKE_SYSTEMCTL_ACTIONS="${serviceTmp}/systemctl-actions"
     export PADM_FAKE_SYSTEMCTL_RETRY_MARKER="${serviceTmp}/selinux-retry"
+    export PADM_FAKE_NGINX_FORCE_KILL_LOG="${serviceTmp}/nginx-force-kill"
+    xargs() { printf '%s\n' "$*" >>"${PADM_FAKE_NGINX_FORCE_KILL_LOG}"; }
 
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
@@ -7543,6 +7545,14 @@ SH
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=false handleNginx stop >/dev/null 2>&1
+
+    : >"${PADM_FAKE_NGINX_FORCE_KILL_LOG}"
+    printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    if PADM_FAKE_SYSTEMCTL_STOP_RC=1 handleNginx stop >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
+    [[ ! -s "${PADM_FAKE_NGINX_FORCE_KILL_LOG}" ]]
 
     mkdir -p "${serviceTmp}/nginx"
     nginxConfigPath="${serviceTmp}/nginx/"

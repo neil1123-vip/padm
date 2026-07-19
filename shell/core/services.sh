@@ -221,10 +221,6 @@ handleNginx() {
         fi
         sleep 0.5
 
-        if [[ -z ${btDomain} ]] && nginxRunning; then
-            pgrep -x nginx | xargs -r kill -9
-            sleep 0.5
-        fi
         if nginxRunning; then
             errorCard "Nginx关闭失败"
             [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "true" ]] && return 1
