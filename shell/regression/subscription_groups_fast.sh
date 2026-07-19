@@ -37,9 +37,6 @@ regressionEnsureScriptModules() {
         [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
         regressionScriptRefIsValid "${remoteRef}" || return 1
         refreshScriptModules "${remoteRef}" || return 1
-        if [[ -s "${SCRIPT_REF_FILE}" ]]; then
-            cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}" || return 1
-        fi
         return 0
     fi
     if regressionScriptModulesReady; then
@@ -56,9 +53,6 @@ regressionEnsureScriptModules() {
     [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
     regressionScriptRefIsValid "${remoteRef}" || return 1
     refreshScriptModules "${remoteRef}" || return 1
-    if [[ -s "${SCRIPT_REF_FILE}" ]]; then
-        cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}" || return 1
-    fi
 }
 
 runRegressionBootstrapLocalEnvFallbackRegression() {
@@ -2739,6 +2733,7 @@ runInstallRefreshRestoresBackupRegression() {
     printf 'old-shell\n' >"${fixtureDir}/shell/marker"
     printf 'old-doc\n' >"${fixtureDir}/documents/marker"
     printf 'old-readme\n' >"${fixtureDir}/README.md"
+    command cp "${fixtureDir}/install.sh" "${archiveRoot}/install.sh"
     printf 'new-shell\n' >"${archiveRoot}/shell/marker"
     printf 'new-doc\n' >"${archiveRoot}/documents/marker"
     printf 'new-readme\n' >"${archiveRoot}/README.md"
@@ -2783,6 +2778,7 @@ runInstallRefreshRestoresBackupRegression() {
     printf 'old-shell\n' >"${restoreFailureDir}/shell/marker"
     printf 'old-doc\n' >"${restoreFailureDir}/documents/marker"
     printf 'old-readme\n' >"${restoreFailureDir}/README.md"
+    command cp "${restoreFailureDir}/install.sh" "${restoreFailureArchiveRoot}/install.sh"
     printf 'new-shell\n' >"${restoreFailureArchiveRoot}/shell/marker"
     printf 'new-doc\n' >"${restoreFailureArchiveRoot}/documents/marker"
     printf 'new-readme\n' >"${restoreFailureArchiveRoot}/README.md"
@@ -2844,6 +2840,7 @@ runInstallRefreshSignalRestoresAndExitsRegression() (
     printf 'old-docs\n' >"${fixtureDir}/documents/marker"
     printf 'old-assets\n' >"${fixtureDir}/assets/marker"
     printf 'old-readme\n' >"${fixtureDir}/README.md"
+    command cp "${fixtureDir}/install.sh" "${archiveRoot}/install.sh"
     printf 'new-shell\n' >"${archiveRoot}/shell/marker"
     printf 'new-docs\n' >"${archiveRoot}/documents/marker"
     printf 'new-assets\n' >"${archiveRoot}/assets/marker"
@@ -2928,6 +2925,112 @@ runInstallModuleLockSerializesLoadRegression() (
     wait "${firstPid}"
     wait "${secondPid}"
     [[ -e "${secondReady}" && ! -e "${SCRIPT_MODULE_LOCK_DIR}" ]]
+)
+
+runInstallRefreshRejectsEntryMismatchRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/install-refresh-entry-mismatch"
+    local fixtureDir="${root}/target"
+    local archiveRoot="${root}/archive/padm-main"
+    local oldTmpDir="${TMPDIR:-}"
+
+    mkdir -p \
+        "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/assets" "${root}/tmp" \
+        "${archiveRoot}/shell" "${archiveRoot}/documents" "${archiveRoot}/assets"
+    printf '#!/usr/bin/env bash\nprintf old\n' >"${fixtureDir}/install.sh"
+    printf 'old-shell\n' >"${fixtureDir}/shell/marker"
+    printf 'old-readme\n' >"${fixtureDir}/README.md"
+    printf '#!/usr/bin/env bash\nprintf new\n' >"${archiveRoot}/install.sh"
+    printf 'new-shell\n' >"${archiveRoot}/shell/marker"
+    printf 'new-readme\n' >"${archiveRoot}/README.md"
+
+    set +e
+    (
+        TMPDIR="${root}/tmp"
+        eval "$(awk '
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_PATH="${fixtureDir}/install.sh"
+        SCRIPT_DIR="${fixtureDir}"
+        REPO_ARCHIVE_DIR=padm-main
+        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        scriptIsSafeAbsolutePath() { return 0; }
+        downloadRepoArchive() { command cp -R "${archiveRoot}" "$2/padm-main"; }
+        refreshScriptModules 8888888888888888888888888888888888888888
+    ) >"${root}/output.log" 2>&1
+    local status=$?
+    set -e
+
+    [[ "${status}" -ne 0 ]]
+    grep -q '入口脚本与完整安装包版本不一致' "${root}/output.log"
+    [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+    [[ ! -e "${fixtureDir}/.padm-ref" && ! -e "${fixtureDir}/.padm-entry-ref" ]]
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
+runInstallRefreshRefCommitRollbackRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/install-refresh-ref-rollback"
+    local fixtureDir="${root}/target"
+    local archiveRoot="${root}/archive/padm-main"
+    local oldTmpDir="${TMPDIR:-}"
+    local newRef=9999999999999999999999999999999999999999
+
+    mkdir -p \
+        "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/assets" "${root}/tmp" \
+        "${archiveRoot}/shell" "${archiveRoot}/documents" "${archiveRoot}/assets"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
+    command cp "${fixtureDir}/install.sh" "${archiveRoot}/install.sh"
+    printf 'old-shell\n' >"${fixtureDir}/shell/marker"
+    printf 'old-readme\n' >"${fixtureDir}/README.md"
+    printf 'old-manifest\n' >"${fixtureDir}/.padm-module-manifest"
+    printf '1111111111111111111111111111111111111111\n' >"${fixtureDir}/.padm-ref"
+    printf '1111111111111111111111111111111111111111\n' >"${fixtureDir}/.padm-entry-ref"
+    printf 'new-shell\n' >"${archiveRoot}/shell/marker"
+    printf 'new-readme\n' >"${archiveRoot}/README.md"
+
+    set +e
+    (
+        TMPDIR="${root}/tmp"
+        eval "$(awk '
+            /^scriptTmpPath\(\)/ { capture = 1 }
+            /^ensureScriptModules\(\)/ { capture = 0 }
+            capture { print }
+        ' "${PROJECT_ROOT}/install.sh")"
+        SCRIPT_DIR="${fixtureDir}"
+        REPO_ARCHIVE_DIR=padm-main
+        SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+        SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+        SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+        scriptIsSafeAbsolutePath() { return 0; }
+        downloadRepoArchive() { command cp -R "${archiveRoot}" "$2/padm-main"; }
+        writeModuleManifest() { printf 'new-manifest\n' >"$1"; }
+
+        writeScriptModuleRefs "${newRef}"
+        [[ "$(<"${SCRIPT_REF_FILE}")" == "${newRef}" ]]
+        [[ "$(<"${SCRIPT_EXPECTED_REF_FILE}")" == "${newRef}" ]]
+        printf '1111111111111111111111111111111111111111\n' >"${SCRIPT_REF_FILE}"
+        printf '1111111111111111111111111111111111111111\n' >"${SCRIPT_EXPECTED_REF_FILE}"
+        writeScriptModuleRefs() { printf '%s\n' "$1" >"${SCRIPT_REF_FILE}"; return 1; }
+
+        refreshScriptModules "${newRef}"
+    ) >"${root}/output.log" 2>&1
+    local status=$?
+    set -e
+
+    [[ "${status}" -ne 0 ]]
+    grep -q '完整安装包替换失败，已恢复旧模块' "${root}/output.log"
+    [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+    [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
+    [[ "$(<"${fixtureDir}/.padm-module-manifest")" == "old-manifest" ]]
+    [[ "$(<"${fixtureDir}/.padm-ref")" == "1111111111111111111111111111111111111111" ]]
+    [[ "$(<"${fixtureDir}/.padm-entry-ref")" == "1111111111111111111111111111111111111111" ]]
+    [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
 runInstallRefreshSingleArchiveGuardRegression() {
@@ -3305,6 +3408,7 @@ runInstallEnsureModulesRegression() {
     refreshScriptModules() {
         printf '%s\n' "$1" >"${marker}"
         printf '%s\n' "$1" >"${SCRIPT_REF_FILE}"
+        printf '%s\n' "$1" >"${SCRIPT_EXPECTED_REF_FILE}"
         mkdir -p "${SCRIPT_DIR}/shell/core"
         touch "${SCRIPT_DIR}/shell/core/bootstrap.sh"
     }
@@ -5543,6 +5647,8 @@ runRegressionPlatformRefresh() {
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-refresh-signal-restores-and-exits runInstallRefreshSignalRestoresAndExitsRegression &&
         runRegressionStep install-module-lock-serializes-load runInstallModuleLockSerializesLoadRegression &&
+        runRegressionStep install-refresh-rejects-entry-mismatch runInstallRefreshRejectsEntryMismatchRegression &&
+        runRegressionStep install-refresh-ref-commit-rollback runInstallRefreshRefCommitRollbackRegression &&
         runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression
 }
 

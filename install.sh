@@ -232,7 +232,7 @@ validateRepoArchive() {
 removeScriptModuleItems() {
     local scriptDir=$1
     scriptIsSafeAbsolutePath "${scriptDir}" || return 1
-    rm -rf -- "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest" "${scriptDir}/.padm-ref"
+    rm -rf -- "${scriptDir}/shell" "${scriptDir}/documents" "${scriptDir}/assets" "${scriptDir}/README.md" "${scriptDir}/.padm-module-manifest" "${scriptDir}/.padm-ref" "${scriptDir}/.padm-entry-ref"
 }
 
 restoreScriptModuleBackup() {
@@ -249,6 +249,7 @@ restoreScriptModuleBackup() {
     [[ -e "${backupDir}/README.md" ]] && { mv "${backupDir}/README.md" "${scriptDir}/README.md" || restoreStatus=1; }
     [[ -e "${backupDir}/.padm-module-manifest" ]] && { mv "${backupDir}/.padm-module-manifest" "${scriptDir}/.padm-module-manifest" || restoreStatus=1; }
     [[ -e "${backupDir}/.padm-ref" ]] && { mv "${backupDir}/.padm-ref" "${scriptDir}/.padm-ref" || restoreStatus=1; }
+    [[ -e "${backupDir}/.padm-entry-ref" ]] && { mv "${backupDir}/.padm-entry-ref" "${scriptDir}/.padm-entry-ref" || restoreStatus=1; }
     return "${restoreStatus}"
 }
 
@@ -304,6 +305,7 @@ backupScriptModules() {
     backupScriptModuleItem "${scriptDir}/README.md" "${backupDir}/README.md" || return 1
     backupScriptModuleItem "${scriptDir}/.padm-module-manifest" "${backupDir}/.padm-module-manifest" || return 1
     backupScriptModuleItem "${scriptDir}/.padm-ref" "${backupDir}/.padm-ref" || return 1
+    backupScriptModuleItem "${scriptDir}/.padm-entry-ref" "${backupDir}/.padm-entry-ref" || return 1
 }
 
 failScriptModuleRefreshAfterBackup() {
@@ -319,6 +321,12 @@ failScriptModuleRefreshAfterBackup() {
     scriptRemovePath "${tmpDir}" || true
     trap - EXIT INT TERM
     exit 1
+}
+
+writeScriptModuleRefs() {
+    local ref=$1
+    printf '%s\n' "${ref}" >"${SCRIPT_REF_FILE}" || return 1
+    printf '%s\n' "${ref}" >"${SCRIPT_EXPECTED_REF_FILE}"
 }
 
 fetchRemoteRef() {
@@ -436,8 +444,13 @@ refreshScriptModules() {
     fi
 
     if [[ ! -d "${archiveDir}/shell" || ! -d "${archiveDir}/documents" ||
-        ! -d "${archiveDir}/assets" || ! -f "${archiveDir}/README.md" ]]; then
+        ! -d "${archiveDir}/assets" || ! -f "${archiveDir}/README.md" || ! -f "${archiveDir}/install.sh" ]]; then
         printf '完整安装包下载失败，请重新执行安装命令\n'
+        scriptRemovePath "${tmpDir}" || true
+        exit 1
+    fi
+    if ! cmp -s "${SCRIPT_DIR}/install.sh" "${archiveDir}/install.sh"; then
+        printf '入口脚本与完整安装包版本不一致，请重新下载安装入口\n'
         scriptRemovePath "${tmpDir}" || true
         exit 1
     fi
@@ -485,7 +498,7 @@ refreshScriptModules() {
         failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
     fi
 
-    printf '%s\n' "${resolvedRef}" >"${SCRIPT_REF_FILE}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
+    writeScriptModuleRefs "${resolvedRef}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
     scriptRemovePath "${backupDir}" || true
     scriptRemovePath "${tmpDir}" || true
     trap - EXIT INT TERM
@@ -613,9 +626,6 @@ ensureScriptModules() {
         [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
         scriptRefIsValid "${remoteRef}" || return 1
         refreshScriptModules "${remoteRef}"
-        if [[ -s "${SCRIPT_REF_FILE}" ]]; then
-            cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}" || return 1
-        fi
         return 0
     fi
     if scriptModulesReady; then
@@ -635,9 +645,6 @@ ensureScriptModules() {
     [[ -n "${remoteRef}" ]] || remoteRef=$(fetchRemoteRef) || return 1
     scriptRefIsValid "${remoteRef}" || return 1
     refreshScriptModules "${remoteRef}"
-    if [[ -s "${SCRIPT_REF_FILE}" ]]; then
-        cp "${SCRIPT_REF_FILE}" "${SCRIPT_EXPECTED_REF_FILE}" || return 1
-    fi
 }
 
 loadScriptModules() {
