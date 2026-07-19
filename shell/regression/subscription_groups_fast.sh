@@ -4364,13 +4364,13 @@ runCheckLogBackupOutputVariableRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
         local root="${TMP_DIR}/check-log-backup-output-variable"
-        local backupDir=
+        local createdBackupDir=
 
         mkdir -p "${root}"
         printf 'old\n' >"${root}/target"
-        checkLogBackupCreate backupDir "${root}/target"
-        [[ -n "${backupDir}" && -d "${backupDir}" ]]
-        padmRemoveCleanupPath "${backupDir}"
+        checkLogBackupCreate createdBackupDir "${root}/target"
+        [[ -n "${createdBackupDir}" && -d "${createdBackupDir}" ]]
+        padmRemoveCleanupPath "${createdBackupDir}"
     )
 }
 

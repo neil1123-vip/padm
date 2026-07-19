@@ -1029,26 +1029,26 @@ checkLogBackupCreate() {
     local resultVar=$1
     local -n resultRef="${resultVar}"
     shift
-    local createdBackupDir
+    local backupPathRoot
     local targetPath
     local backupIndex=0
     local -a backupArgs=()
 
-    padmCreateTmpRootPath createdBackupDir padm-check-log-backup.XXXXXX -d || return 1
+    padmCreateTmpRootPath backupPathRoot padm-check-log-backup.XXXXXX -d || return 1
     for targetPath in "$@"; do
         [[ -n "${targetPath}" ]] || continue
         targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || {
-            padmRemoveCleanupPath "${createdBackupDir}"
+            padmRemoveCleanupPath "${backupPathRoot}"
             return 1
         }
         backupArgs+=("$(printf '%06d.json' "${backupIndex}")" "${targetPath}")
         backupIndex=$((backupIndex + 1))
     done
-    if ! padmWriteManagedFileBackupManifest "${createdBackupDir}" "${backupArgs[@]}"; then
-        padmRemoveCleanupPath "${createdBackupDir}"
+    if ! padmWriteManagedFileBackupManifest "${backupPathRoot}" "${backupArgs[@]}"; then
+        padmRemoveCleanupPath "${backupPathRoot}"
         return 1
     fi
-    resultRef="${createdBackupDir}"
+    resultRef="${backupPathRoot}"
 }
 
 checkLogBackupRestore() {
