@@ -3393,7 +3393,7 @@ runCoreTemplateReturnFailureRegression() (
     singBoxTemplateConfigDir() { printf '%s\n' "${singBoxRoot}"; }
     initXrayClients() { printf '[]\n'; }
     initSingBoxClients() { printf '[]\n'; }
-    addXrayOutbound() { return 0; }
+    addXrayOutbound() { [[ "${mode}" != "xray-outbound" ]]; }
     checkDNSIP() { return 0; }
     removeNginxDefaultConf() { return 0; }
     randomPathFunction() { currentPath=template-path; }
@@ -3448,6 +3448,14 @@ runCoreTemplateReturnFailureRegression() (
     [[ "$(<"${xrayRoot}/00_log.json")" == 'old-xray-log' ]]
     [[ ! -e "${xrayRoot}/12_policy.json" ]]
     [[ ! -e "${xrayRoot}/11_dns.json" ]]
+
+    mode=xray-outbound
+    set +e
+    initXrayConfig custom 1 true 2>/dev/null
+    xrayRc=$?
+    set -e
+    [[ "${xrayRc}" != "0" ]]
+    [[ ! -e "${xrayRoot}/09_routing.json" ]]
 
     mode=stop-fail
     selectCustomInstallType=",27,"

@@ -252,7 +252,7 @@ EOF
 EOF
     fi
 
-    addXrayOutbound "z_direct_outbound"
+    addXrayOutbound "z_direct_outbound" || return 1
     # dns
     if [[ ! -f "/etc/padm/xray/conf/11_dns.json" ]]; then
         writeGeneratedJsonFile /etc/padm/xray/conf/11_dns.json padm-xray-dns <<EOF || { errorCard "Xray DNS 配置模板提交失败"; return 1; }
