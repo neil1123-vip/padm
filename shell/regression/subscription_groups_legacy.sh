@@ -8023,6 +8023,27 @@ runWarpConfigFileCleanupRegression() (
     grep -qxF "rm:-f -- ${root}/warp/config" "${rmLog}"
     ! grep -q "rm:-rf ${root}/warp/config" "${rmLog}"
     [[ ! -e "${root}/warp/config" ]]
+
+    printf 'config\n' >"${root}/warp/config"
+    mkdir -p "${root}/sing-box"
+    printf '{}\n' >"${root}/sing-box/wireguard_endpoints_IPv4.json"
+    printf '{}\n' >"${root}/sing-box/wireguard_endpoints_IPv6.json"
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        PADM_WARP_DIR="${root}/warp"
+        coreInstallType=2
+        configPath=
+        singBoxConfigPath="${root}/sing-box/"
+        removeSingBoxRouteRule() { return 0; }
+        removeSingBoxConfig() { rm -f -- "${singBoxConfigPath}$1.json"; }
+        addSingBoxOutbound() { return 0; }
+
+        removeWireGuardRoutingConfig IPv4
+        [[ -f "${PADM_WARP_DIR}/config" ]]
+        [[ -f "${singBoxConfigPath}wireguard_endpoints_IPv6.json" ]]
+        removeWireGuardRoutingConfig IPv6
+        [[ ! -e "${PADM_WARP_DIR}/config" ]]
+    )
 )
 
 runUninstallNginxCleanupRegression() {

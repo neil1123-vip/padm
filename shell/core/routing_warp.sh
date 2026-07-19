@@ -146,32 +146,23 @@ addWireGuardRoute() {
 
 # 卸载 WireGuard
 unInstallWireGuard() {
-    local type=$1
     local warpDir
     local warpConfig
     warpDir=$(warpConfigSafeDir) || return 1
     warpConfig="${warpDir}/config"
-    if [[ "${coreInstallType}" == "1" ]]; then
-
-        if [[ "${type}" == "IPv4" ]]; then
-            if [[ ! -f "${configPath}wireguard_out_IPv6.json" ]]; then
-                rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
-            fi
-        elif [[ "${type}" == "IPv6" ]]; then
-            if [[ ! -f "${configPath}wireguard_out_IPv4.json" ]]; then
-                rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
-            fi
-        fi
+    if [[ -n "${configPath:-}" ]] &&
+        { [[ -f "${configPath}wireguard_out_IPv4.json" ]] || [[ -f "${configPath}wireguard_out_IPv6.json" ]]; }; then
+        return 0
     fi
-
     if [[ -n "${singBoxConfigPath}" ]]; then
-        if [[ ! -f "${singBoxConfigPath}wireguard_endpoints_IPv6_route.json" && ! -f "${singBoxConfigPath}wireguard_endpoints_IPv4_route.json" ]]; then
-            local wireguardOutboundFile
-            wireguardOutboundFile=$(padmManagedFilePath "${singBoxConfigPath}" "wireguard_outbound.json") || return 1
-            removeManagedFileIfPresent "${wireguardOutboundFile}" || return 1
-            rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
+        if [[ -f "${singBoxConfigPath}wireguard_endpoints_IPv4.json" || -f "${singBoxConfigPath}wireguard_endpoints_IPv6.json" ]]; then
+            return 0
         fi
+        local wireguardOutboundFile
+        wireguardOutboundFile=$(padmManagedFilePath "${singBoxConfigPath}" "wireguard_outbound.json") || return 1
+        removeManagedFileIfPresent "${wireguardOutboundFile}" || return 1
     fi
+    rm -f -- "${warpConfig}" >/dev/null 2>&1 || return 1
 }
 # 移除 WARP 分流规则
 removeWireGuardRoute() {
@@ -190,7 +181,6 @@ removeWireGuardRoute() {
         removeSingBoxRouteRule "wireguard_endpoints_${type}" || return 1
     fi
 
-    unInstallWireGuard "${type}" || return 1
 }
 # WARP 第三方分流管理
 warpRoutingAddress() {
@@ -246,6 +236,7 @@ removeWireGuardRoutingConfig() {
         removeSingBoxConfig "wireguard_endpoints_${type}" || return 1
         addSingBoxOutbound "01_direct_outbound" || return 1
     fi
+    unInstallWireGuard "${type}" || return 1
 }
 
 warpRoutingReg() {
