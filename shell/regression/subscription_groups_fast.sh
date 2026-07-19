@@ -1552,6 +1552,25 @@ runPortHoppingMenuUsesCommandLookupRegression() (
     portHoppingMenu hysteria2
     [[ ! -s "${exitLog}" ]]
     grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
+
+    local menuReadCount=0
+    : >"${actionLog}"
+    autoRead() {
+        menuReadCount=$((menuReadCount + 1))
+        if [[ "${menuReadCount}" == "1" ]]; then
+            printf -v "$3" '%s' 'invalid'
+        else
+            printf -v "$3" '%s' '3'
+        fi
+    }
+    readPortHopping() {
+        [[ "$1" == "hysteria2" ]]
+        hysteria2PortHoppingStart=33000
+        hysteria2PortHoppingEnd=33005
+    }
+    portHoppingMenu hysteria2
+    [[ "${menuReadCount}" == "2" ]]
+    grep -q '当前端口跳跃范围为: 33000-33005' "${actionLog}"
 )
 
 runXrayTrafficStatsJqCompatibilityRegression() (

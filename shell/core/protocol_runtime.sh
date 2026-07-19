@@ -524,7 +524,7 @@ portHoppingMenu() {
             protocolPortHoppingStatusCard "未设置端口跳跃"
         fi
     else
-        portHoppingMenu
+        portHoppingMenu "${type}"
     fi
 }
 
