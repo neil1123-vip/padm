@@ -5858,6 +5858,7 @@ runCoreInstallServiceActionFailureRegression() (
     updateRedirectNginxConf() {
         printf 'redirect\n' >>"${callLog}"
         [[ "${mode}" == "redirect-fail" ]] && return 1
+        nginxRuntimeState=false
         return 0
     }
     installXray() {
@@ -5908,13 +5909,16 @@ $1:restart"
         SERVICE_ACTIONS=
         return 0
     }
-    checkGFWStatue() { printf 'reached\n' >"${reachedFile}"; return 0; }
+    checkGFWStatue() {
+        printf 'reached\n' >"${reachedFile}"
+        [[ "${mode}" != "check-gfw-fail" ]]
+    }
     showAccounts() { printf 'reached\n' >"${reachedFile}"; return 0; }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
-        [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
+        [[ "${mode}" == "nginx-start-fail" && "$1" == "start" && "${2:-}" != "restore" ]] && return 1
         [[ "$1" == "stop" ]] && nginxRuntimeState=false
         [[ "$1" == "start" ]] && nginxRuntimeState=true
         return 0
@@ -6039,6 +6043,17 @@ $1:restart"
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     done
 
+    resetInstallServiceFixture check-gfw-fail
+    set +e
+    installXrayReality >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+    [[ "${nginxRuntimeState}" == "true" ]] || return 1
+
     resetInstallServiceFixture nginx-start-fail
     set +e
     customXrayInstall 21 >/dev/null 2>&1
@@ -6046,6 +6061,8 @@ $1:restart"
     set -e
     [[ "${rc}" == "1" ]]
     grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+    [[ "${nginxRuntimeState}" == "true" ]] || return 1
     ! grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
@@ -6092,6 +6109,9 @@ $1:restart"
     [[ "${rc}" == "1" ]]
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+    [[ "${nginxRuntimeState}" == "true" ]] || return 1
     grep -q '^installXray:' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
@@ -6134,6 +6154,10 @@ $1:restart"
     set -e
     [[ "${rc}" == "1" ]]
     grep -qx 'cron:8' "${callLog}"
+    grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+    [[ "${nginxRuntimeState}" == "true" ]] || return 1
     ! grep -q '^queueApply$' "${callLog}"
 )
 

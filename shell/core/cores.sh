@@ -1332,6 +1332,22 @@ runCoreServiceActionAllowFailure() {
     return "${rc}"
 }
 
+runCoreInstallRestoringNginxOnFailure() {
+    local operation=$1
+    shift
+    local nginxWasRunning=false
+    local installStatus=0
+    nginxRunning && nginxWasRunning=true
+    "${operation}" "$@" || installStatus=$?
+    if [[ "${installStatus}" != "0" && "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
+        if ! runCoreServiceActionAllowFailure handleNginx start restore; then
+            errorCard "核心安装失败，且 Nginx 原运行状态恢复失败，请手动检查 Nginx 服务"
+            return 1
+        fi
+    fi
+    return "${installStatus}"
+}
+
 coreInstallServiceAction() {
     local failureMessage=$1
     shift
@@ -2249,7 +2265,7 @@ installXrayRealityApply() {
 }
 
 installXrayReality() {
-    padmRunPortAllowTransaction installXrayRealityApply "$@"
+    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction installXrayRealityApply "$@"
 }
 
 # 安装 sing-box Reality
@@ -2272,7 +2288,7 @@ installSingBoxRealityApply() {
 }
 
 installSingBoxReality() {
-    padmRunPortAllowTransaction installSingBoxRealityApply "$@"
+    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction installSingBoxRealityApply "$@"
 }
 
 # Xray-core个性化安装
@@ -2401,7 +2417,7 @@ customXrayInstallApply() {
 }
 
 customXrayInstall() {
-    padmRunPortAllowTransaction customXrayInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction customXrayInstallApply "$@"
 }
 
 
@@ -2477,7 +2493,7 @@ customSingBoxInstallApply() {
 }
 
 customSingBoxInstall() {
-    padmRunPortAllowTransaction customSingBoxInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction customSingBoxInstallApply "$@"
 }
 
 
@@ -2558,7 +2574,7 @@ xrayCoreInstallApply() {
 }
 
 xrayCoreInstall() {
-    padmRunPortAllowTransaction xrayCoreInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction xrayCoreInstallApply "$@"
 }
 
 
@@ -2597,7 +2613,7 @@ singBoxInstallApply() {
 }
 
 singBoxInstall() {
-    padmRunPortAllowTransaction singBoxInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction singBoxInstallApply "$@"
 }
 
 
