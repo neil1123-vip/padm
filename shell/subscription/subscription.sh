@@ -99,13 +99,15 @@ resolveSubscribeNginxAccessLogFile() {
 
 subscriptionRemoteSubscribeSourcesForAccount() {
     local accountName=$1
+    local outputVar=${2:-}
     local user
     local allowedSources
-    user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 0
-    [[ -n "${user}" ]] || return 0
-    allowedSources=$(jq -c '.allowed_sources // []' <<<"${user}") || return 0
-    [[ -n "${allowedSources}" ]] || return 0
-    subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" '
+    local sourceLines
+    user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 2
+    [[ -n "${user}" ]] || return 2
+    allowedSources=$(jq -c '.allowed_sources // []' <<<"${user}") || return 1
+    [[ -n "${allowedSources}" ]] || return 1
+    sourceLines=$(subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" '
       . as $group |
       if ($allowed | length) == 0 then
         empty
@@ -113,7 +115,12 @@ subscriptionRemoteSubscribeSourcesForAccount() {
         $group.sources[]? | select(.role != "main" and .enabled == true) | "\(.host):\(.port):\(.id):\(.scheme)"
       else
         $group.sources[]? | select(.role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid))) | "\(.host):\(.port):\(.id):\(.scheme)"
-      end'
+      end') || return 1
+    if [[ -n "${outputVar}" ]]; then
+        printf -v "${outputVar}" '%s' "${sourceLines}"
+    else
+        printf '%s\n' "${sourceLines}"
+    fi
 }
 
 subscriptionPublishHasRemoteSources() {
@@ -451,6 +458,7 @@ updateRemoteSubscribe() {
     local line=
     local source=
     local sourceLines=
+    local sourceStatus=0
     local escapedEmail=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
     local commitFailed=false
@@ -481,12 +489,14 @@ updateRemoteSubscribe() {
         printf '[]\n' >"${singBoxTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     fi
 
-    sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount "${email}" 2>/dev/null) || sourceLines=
-    if [[ -z "${sourceLines}" ]]; then
+    subscriptionRemoteSubscribeSourcesForAccount "${email}" sourceLines || sourceStatus=$?
+    if [[ "${sourceStatus}" == "2" ]]; then
         sourceLines=$(subscriptionActiveGroupRead -r '
           .sources[]?
           | select(.role != "main" and .enabled == true and .transport != "wireguard")
           | "\(.host):\(.port):\(.id):\(.scheme)"')
+    elif [[ "${sourceStatus}" != "0" ]]; then
+        return 1
     fi
     escapedEmail=$(printf '%s\n' "${email}" | sed 's/[][\/.^$*+?(){}|]/\\&/g')
 

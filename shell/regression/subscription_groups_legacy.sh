@@ -13221,6 +13221,13 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
     sourceLines=$(subscriptionRemoteSubscribeSourcesForAccount sub_team_a)
     [[ "${sourceLines}" == "example.com:443:edge:https" ]]
     grep -qx 'sub_team_a' "${helperAccountFile}"
+
+    subscriptionActiveGroupRead() {
+        return 0
+    }
+    sourceLines=unexpected
+    subscriptionRemoteSubscribeSourcesForAccount sub_team_a sourceLines
+    [[ -z "${sourceLines}" ]]
 )
 
 (
