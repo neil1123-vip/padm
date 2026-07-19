@@ -14964,10 +14964,36 @@ enable"
 
 runSubscriptionWireGuardMenuFlowBootstrapRegression() {
     local validPublicKey
+    local peerPublicKey
+    local newPeerPublicKey
+    local duplicateAddressState
+    local duplicateKeyState
+    local outsideNetworkState
+    local validState
     validPublicKey=$(printf '01234567890123456789012345678901' | base64 -w 0)
+    peerPublicKey=$(printf 'abcdefghijklmnopqrstuvwxyz123456' | base64 -w 0)
+    newPeerPublicKey=$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456' | base64 -w 0)
     subscriptionWireGuardValidPublicKeyValue "${validPublicKey}"
     ! subscriptionWireGuardValidPublicKeyValue 'not-a-wireguard-key'
     ! subscriptionWireGuardValidPublicKeyValue 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    validState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.77.0.2/24",public_key:$peerPublicKey,enabled:true}]}')
+    subscriptionWireGuardValidateStateForConfig "${validState}" || return 1
+    subscriptionWireGuardPeerIdentityAvailable "${validState}" "b" "10.77.0.3/24" "${newPeerPublicKey}" || return 1
+    if subscriptionWireGuardPeerIdentityAvailable "${validState}" "b" "10.77.0.2/24" "${newPeerPublicKey}"; then
+        return 1
+    fi
+    duplicateAddressState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" --arg newPeerPublicKey "${newPeerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.77.0.2/24",public_key:$peerPublicKey,enabled:true},{id:"b",address:"10.77.0.2/32",public_key:$newPeerPublicKey,enabled:true}]}')
+    if subscriptionWireGuardValidateStateForConfig "${duplicateAddressState}" >/dev/null 2>&1; then
+        return 1
+    fi
+    duplicateKeyState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.77.0.2/24",public_key:$peerPublicKey,enabled:true},{id:"b",address:"10.77.0.3/24",public_key:$peerPublicKey,enabled:true}]}')
+    if subscriptionWireGuardValidateStateForConfig "${duplicateKeyState}" >/dev/null 2>&1; then
+        return 1
+    fi
+    outsideNetworkState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.78.0.2/24",public_key:$peerPublicKey,enabled:true}]}')
+    if subscriptionWireGuardValidateStateForConfig "${outsideNetworkState}" >/dev/null 2>&1; then
+        return 1
+    fi
     runSubscriptionWireGuardMenuFlowRegression bootstrap
 }
 

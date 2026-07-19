@@ -91,6 +91,30 @@ subscriptionWireGuardValidIPv4Cidr() {
     done
 }
 
+subscriptionWireGuardIPv4HostValue() {
+    local host=$1
+    local a b c d
+    local IFS=.
+    read -r a b c d <<<"${host}"
+    printf '%u\n' "$(( (10#${a} << 24) + (10#${b} << 16) + (10#${c} << 8) + 10#${d} ))"
+}
+
+subscriptionWireGuardIPv4CidrContains() {
+    local network=$1
+    local address=$2
+    local networkHost=${network%/*}
+    local prefix=${network#*/}
+    local networkValue addressValue mask
+
+    subscriptionWireGuardValidIPv4Cidr "${network}" || return 1
+    subscriptionWireGuardValidIPv4Cidr "${address}" || return 1
+    networkValue=$(subscriptionWireGuardIPv4HostValue "${networkHost}") || return 1
+    addressValue=$(subscriptionWireGuardIPv4HostValue "${address%%/*}") || return 1
+    ((10#${prefix} == 0)) && return 0
+    mask=$(( (0xffffffff << (32 - 10#${prefix})) & 0xffffffff ))
+    (( (networkValue & mask) == (addressValue & mask) ))
+}
+
 subscriptionWireGuardValidEndpointHost() {
     local host=$1
     [[ -n "${host}" && "${host}" != "null" && "${host}" != */* && "${host}" != *:* && ! "${host}" =~ [[:space:]] ]] &&
@@ -120,21 +144,60 @@ subscriptionWireGuardValidEndpointValue() {
 
 subscriptionWireGuardValidateStateForConfig() {
     local state=$1
-    local address listenPort peer peerAddress peerPublicKey peerEndpoint
+    local address network listenPort peer peerAddress peerPublicKey peerEndpoint peerHost publicKey
+    local -A seenAddresses=()
+    local -A seenPublicKeys=()
     address=$(jq -r '.address // empty' <<<"${state}") || return 1
+    network=$(jq -r '.network // empty' <<<"${state}") || return 1
     listenPort=$(jq -r '.listen_port // empty' <<<"${state}") || return 1
-    subscriptionWireGuardValidIPv4Cidr "${address}" &&
+    subscriptionWireGuardValidIPv4Cidr "${network}" &&
+        subscriptionWireGuardValidIPv4Cidr "${address}" &&
+        subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
         subscriptionWireGuardValidPort "${listenPort}" || return 1
+    peerHost=$(subscriptionWireGuardAddressHost "${address}")
+    seenAddresses["${peerHost}"]=1
+    publicKey=$(jq -r '.public_key // empty' <<<"${state}") || return 1
+    if [[ -n "${publicKey}" ]]; then
+        seenPublicKeys["${publicKey}"]=1
+    fi
     while IFS= read -r peer; do
         [[ -n "${peer}" ]] || continue
         peerAddress=$(jq -r '.address // empty' <<<"${peer}") || return 1
         peerPublicKey=$(jq -r '.public_key // empty' <<<"${peer}") || return 1
         peerEndpoint=$(jq -r '.endpoint // empty' <<<"${peer}") || return 1
         subscriptionWireGuardValidIPv4Cidr "${peerAddress}" &&
+            subscriptionWireGuardIPv4CidrContains "${network}" "${peerAddress}" &&
             subscriptionWireGuardValidPublicKeyValue "${peerPublicKey}" || return 1
+        peerHost=$(subscriptionWireGuardAddressHost "${peerAddress}")
+        [[ -z "${seenAddresses[${peerHost}]+x}" && -z "${seenPublicKeys[${peerPublicKey}]+x}" ]] || return 1
+        seenAddresses["${peerHost}"]=1
+        seenPublicKeys["${peerPublicKey}"]=1
         [[ -z "${peerEndpoint}" || "${peerEndpoint}" == "null" ]] ||
             subscriptionWireGuardValidEndpointValue "${peerEndpoint}" || return 1
     done < <(jq -c '.peers[]? | select(.enabled == true)' <<<"${state}")
+}
+
+subscriptionWireGuardPeerIdentityAvailable() {
+    local state=$1
+    local id=$2
+    local address=$3
+    local publicKey=$4
+    local network localAddress localPublicKey peer peerId peerAddress peerPublicKey
+    network=$(jq -r '.network // empty' <<<"${state}") || return 1
+    localAddress=$(jq -r '.address // empty' <<<"${state}") || return 1
+    localPublicKey=$(jq -r '.public_key // empty' <<<"${state}") || return 1
+    subscriptionWireGuardIPv4CidrContains "${network}" "${address}" || return 1
+    [[ "$(subscriptionWireGuardAddressHost "${address}")" != "$(subscriptionWireGuardAddressHost "${localAddress}")" ]] || return 1
+    [[ -z "${localPublicKey}" || "${publicKey}" != "${localPublicKey}" ]] || return 1
+    while IFS= read -r peer; do
+        [[ -n "${peer}" ]] || continue
+        peerId=$(jq -r '.id // empty' <<<"${peer}") || return 1
+        [[ "${peerId}" == "${id}" ]] && continue
+        peerAddress=$(jq -r '.address // empty' <<<"${peer}") || return 1
+        peerPublicKey=$(jq -r '.public_key // empty' <<<"${peer}") || return 1
+        [[ "$(subscriptionWireGuardAddressHost "${address}")" != "$(subscriptionWireGuardAddressHost "${peerAddress}")" &&
+            "${publicKey}" != "${peerPublicKey}" ]] || return 1
+    done < <(jq -c '.peers[]?' <<<"${state}")
 }
 
 subscriptionWireGuardValidNginxLogPath() {
@@ -978,6 +1041,10 @@ subscriptionWireGuardAddPeerFromCredential() {
     controlPort=$(jq -r '.control_port' <<<"${credentialJson}")
     token=$(jq -r '.token' <<<"${credentialJson}")
     subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "" "订阅组状态读取失败" || return 1
+    subscriptionWireGuardPeerIdentityAvailable "${previousState}" "${alias}" "${address}" "${publicKey}" || {
+        errorCard "WireGuard 被控地址或公钥与现有 Peer 冲突"
+        return 1
+    }
     subscriptionWireGuardWriteState \
       --arg id "${alias}" \
       --arg address "${address}" \
@@ -1002,11 +1069,14 @@ subscriptionWireGuardUpdatePeerFromCredential() {
     local credentialJson=$2
     local address
     local publicKey
+    local previousState
     [[ -n "${id}" ]] || return 1
     [[ "$(jq -r '.kind' <<<"${credentialJson}")" == "controlled" ]] || return 1
     subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || return 1
     address=$(jq -r '.address' <<<"${credentialJson}")
     publicKey=$(jq -r '.public_key' <<<"${credentialJson}")
+    previousState=$(subscriptionWireGuardReadState) || return 1
+    subscriptionWireGuardPeerIdentityAvailable "${previousState}" "${id}" "${address}" "${publicKey}" || return 1
     subscriptionWireGuardWriteState \
       --arg id "${id}" \
       --arg address "${address}" \
