@@ -1321,6 +1321,18 @@ githubReleaseAssetDirectUrl() {
     printf 'https://github.com/%s/releases/download/%s/%s\n' "${repo}" "${version}" "${assetName}"
 }
 
+githubReleaseAssetPinnedDigest() {
+    case "$1:$2:$3" in
+    badafans/warp-reg:v1.0:main-linux-amd64)
+        printf '%s\n' 'sha256:95e97d92bda8f343e0ba0b7a7402c5947fb4204fdb0d368fd53dbddb664de895'
+        ;;
+    badafans/warp-reg:v1.0:main-linux-arm64)
+        printf '%s\n' 'sha256:eb7a29853466f805755caddcebeedfbfb36cccd73a4eb950a1eb82915fa17f9b'
+        ;;
+    *) return 1 ;;
+    esac
+}
+
 downloadGitHubReleaseAsset() {
     local outputDir=
     local repo=
@@ -1413,6 +1425,9 @@ downloadGitHubReleaseAsset() {
         menuLine "Release 资产 URL 或大小异常，已取消下载: ${assetName}"
         menuClose
         return 1
+    fi
+    if [[ "${digest}" != sha256:* ]]; then
+        digest=$(githubReleaseAssetPinnedDigest "${repo}" "${version}" "${assetName}" 2>/dev/null || true)
     fi
     if [[ "${digest}" != sha256:* ]]; then
         echoContent title "\n┌─ GitHub Release 校验 ──────────────────────────────"

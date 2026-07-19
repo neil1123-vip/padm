@@ -175,6 +175,9 @@ runGitHubReleaseAssetDirectFallbackRegression() {
         mkdir -p "${outputDir}"
         expectedAssetSha256=$(printf 'asset-content\n' | sha256sum | awk '{print $1}')
         expectedAssetSize=$(printf 'asset-content\n' | wc -c | tr -d ' ')
+        [[ "$(githubReleaseAssetPinnedDigest badafans/warp-reg v1.0 main-linux-amd64)" == 'sha256:95e97d92bda8f343e0ba0b7a7402c5947fb4204fdb0d368fd53dbddb664de895' ]]
+        [[ "$(githubReleaseAssetPinnedDigest badafans/warp-reg v1.0 main-linux-arm64)" == 'sha256:eb7a29853466f805755caddcebeedfbfb36cccd73a4eb950a1eb82915fa17f9b' ]]
+        ! githubReleaseAssetPinnedDigest example/repo v1.2.4 asset.tar.gz
         fetchUrlToStdout() {
             case "$1" in
             */v1.2.3)
@@ -214,6 +217,12 @@ runGitHubReleaseAssetDirectFallbackRegression() {
             return 1
         fi
         [[ ! -e "${downloadLog}" ]] || return 1
+        githubReleaseAssetPinnedDigest() {
+            [[ "$1:$2:$3" == 'example/repo:v1.2.4:asset.tar.gz' ]] || return 1
+            printf 'sha256:%s\n' "${expectedAssetSha256}"
+        }
+        downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.4 asset.tar.gz || return 1
+        unset -f githubReleaseAssetPinnedDigest
         downloadGitHubReleaseAsset -P "${outputDir}" example/repo v1.2.5 asset.tar.gz || return 1
         [[ "$(<"${outputDir}/asset.tar.gz")" == "asset-content" ]] || return 1
         grep -qxF 'https://github.com/example/repo/releases/download/v1.2.5/asset.tar.gz' "${downloadLog}" || return 1

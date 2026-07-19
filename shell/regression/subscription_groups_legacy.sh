@@ -7848,12 +7848,12 @@ runWarpConfigSafeDirRegression() (
         autoRead() { printf -v "$3" y; }
         errorCard() { return 1; }
         downloadGitHubReleaseAsset() {
-            [[ "$1" == "-P" && "$3" == "badafans/warp-reg" && "$4" == "latest" && "$5" == "${warpRegCoreCPUVendor}" ]] || return 1
+            [[ "$1" == "-P" && "$3" == "badafans/warp-reg" && "$4" == "v1.0" && "$5" == "${warpRegCoreCPUVendor}" ]] || return 1
             printf '%s\n' "$4" >"${versionLog}"
             printf '#!/usr/bin/env sh\n' >"${2%/}/$5"
         }
         installWarpReg >/dev/null 2>&1
-        [[ "$(<"${versionLog}")" == "latest" ]]
+        [[ "$(<"${versionLog}")" == "v1.0" ]]
         [[ -s "${PADM_WARP_DIR}/warp-reg" ]]
         [[ "$(stat -c '%a' "${PADM_WARP_DIR}/warp-reg")" == "755" ]]
     )

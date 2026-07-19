@@ -68,7 +68,7 @@ installWarpReg() {
         if [[ "${installWarpRegStatus}" == "y" ]]; then
 
             mkdir -p "${warpDir}" || return 1
-            if ! downloadGitHubReleaseAsset -P "${warpDir}/" badafans/warp-reg latest "${warpRegCoreCPUVendor}"; then
+            if ! downloadGitHubReleaseAsset -P "${warpDir}/" badafans/warp-reg v1.0 "${warpRegCoreCPUVendor}"; then
                 errorCard "warp-reg下载失败"
                 return 1
             fi
