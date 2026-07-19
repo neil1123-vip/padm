@@ -113,39 +113,43 @@ readInstallType() {
     configPath=
     singBoxConfigPath=
     local configFile
+    local xrayBinary="${PADM_XRAY_BINARY:-/etc/padm/xray/xray}"
+    local xrayConfigDir="${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}"
+    local singBoxBinary="${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}"
+    local singBoxConfigDir="${PADM_SINGBOX_CONFIG_DIR:-/etc/padm/sing-box/conf/config}"
+    local singBoxMergedFile="$(dirname -- "${singBoxConfigDir%/}")/config.json"
 
-    if [[ -d "/etc/padm" ]]; then
-        if [[ -f "/etc/padm/xray/xray" ]]; then
-            # 检测 Xray-core
-            if [[ -d "/etc/padm/xray/conf" ]]; then
-                for configFile in $(protocolCapabilityIdsByProjectCore xray | tr ',' ' '); do
-                    configFile=$(protocolCapabilityMeta "${configFile}" config_file 2>/dev/null || true)
-                    [[ -n "${configFile}" && -f "/etc/padm/xray/conf/${configFile}" ]] || continue
-                    coreInstallType=1
-                    break
-                done
-            fi
-            if [[ "${coreInstallType}" == "1" ]]; then
-                configPath=/etc/padm/xray/conf/
-                ctlPath=/etc/padm/xray/xray
+    if [[ -f "${xrayBinary}" && -d "${xrayConfigDir}" ]]; then
+        # 检测 Xray-core
+        for configFile in $(protocolCapabilityIdsByProjectCore xray | tr ',' ' '); do
+            configFile=$(protocolCapabilityMeta "${configFile}" config_file 2>/dev/null || true)
+            [[ -n "${configFile}" && -f "${xrayConfigDir%/}/${configFile}" ]] || continue
+            coreInstallType=1
+            break
+        done
+        if [[ "${coreInstallType}" == "1" ]]; then
+            configPath=${xrayConfigDir%/}/
+            ctlPath=${xrayBinary}
 
-                if [[ -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
-                    realityStatus=7
-                fi
-                if [[ -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
-                    realityStatus=12
-                fi
-                if [[ -f "/etc/padm/sing-box/sing-box" ]] && compgen -G "/etc/padm/sing-box/conf/config/*inbounds.json" >/dev/null; then
-                    singBoxConfigPath=/etc/padm/sing-box/conf/config/
-                fi
+            if [[ -f "${configPath}07_VLESS_vision_reality_inbounds.json" ]]; then
+                realityStatus=7
             fi
-        elif [[ -f "/etc/padm/sing-box/sing-box" && -f "/etc/padm/sing-box/conf/config.json" ]]; then
-            # 检测 sing-box
-            ctlPath=/etc/padm/sing-box/sing-box
-            coreInstallType=2
-            configPath=/etc/padm/sing-box/conf/config/
-            singBoxConfigPath=/etc/padm/sing-box/conf/config/
+            if [[ -f "${configPath}12_VLESS_XHTTP_inbounds.json" ]]; then
+                realityStatus=12
+            fi
+            if [[ -f "${singBoxBinary}" ]] && compgen -G "${singBoxConfigDir%/}/*inbounds.json" >/dev/null; then
+                singBoxConfigPath=${singBoxConfigDir%/}/
+            fi
         fi
+    fi
+    if [[ "${coreInstallType}" != "1" ]] &&
+        [[ -f "${singBoxBinary}" ]] &&
+        { [[ -f "${singBoxMergedFile}" ]] || compgen -G "${singBoxConfigDir%/}/*.json" >/dev/null; }; then
+        # 检测 sing-box；分片配置仍然有效，即使合并文件暂时不存在。
+        ctlPath=${singBoxBinary}
+        coreInstallType=2
+        configPath=${singBoxConfigDir%/}/
+        singBoxConfigPath=${singBoxConfigDir%/}/
     fi
 }
 

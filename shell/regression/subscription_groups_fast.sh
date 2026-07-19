@@ -4323,6 +4323,41 @@ JSON
     )
 }
 
+runReadInstallTypeKeepsSingBoxShardsRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/state.sh"
+        local root="${TMP_DIR}/read-install-type-sing-box-shards"
+        local xrayBinary="${root}/xray/xray"
+        local xrayConfigDir="${root}/xray/conf"
+        local singBoxBinary="${root}/sing-box/sing-box"
+        local singBoxConfigDir="${root}/sing-box/conf/config"
+
+        mkdir -p "${xrayConfigDir}" "${singBoxConfigDir}"
+        : >"${xrayBinary}"
+        : >"${singBoxBinary}"
+        printf '{"inbounds":[]}\n' >"${singBoxConfigDir}/02_other_inbounds.json"
+        export PADM_XRAY_BINARY="${xrayBinary}"
+        export PADM_XRAY_CONF_DIR="${xrayConfigDir}"
+        export PADM_SINGBOX_BINARY="${singBoxBinary}"
+        export PADM_SINGBOX_CONFIG_DIR="${singBoxConfigDir}"
+
+        readInstallType
+        [[ "${coreInstallType}" == "2" ]]
+        [[ "${singBoxConfigPath}" == "${singBoxConfigDir}/" ]]
+
+        : >"${singBoxConfigDir}/config.json"
+        rm -f "${singBoxConfigDir}/02_other_inbounds.json"
+        printf '{"inbounds":[]}\n' >"${singBoxConfigDir}/09_tuic_inbounds.json"
+        readInstallType
+        [[ "${coreInstallType}" == "2" ]]
+        [[ "${singBoxConfigPath}" == "${singBoxConfigDir}/" ]]
+    )
+}
+
 runSuppressedRegressionFailurePropagationRegression() {
     (
         set -euo pipefail
@@ -5786,6 +5821,7 @@ runRegressionFastOnlySafety() {
         runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&
         runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression &&
         runRegressionStep state-readers-clear-stale-values runStateReadersClearStaleValuesRegression &&
+        runRegressionStep read-install-type-keeps-sing-box-shards runReadInstallTypeKeepsSingBoxShardsRegression &&
         runRegressionStep suppressed-regression-failure-propagation runSuppressedRegressionFailurePropagationRegression &&
         runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression &&
         runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
