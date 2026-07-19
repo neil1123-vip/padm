@@ -194,10 +194,15 @@ denyPort() {
     else
         validPortNumber "${requestedPort}" || return 1
     fi
-    if [[ "${type}" == "tcp" ]] &&
-        command -v lsof >/dev/null 2>&1 &&
-        lsof -nP -iTCP:"${requestedPort}" -sTCP:LISTEN >/dev/null 2>&1; then
-        return 0
+    if command -v lsof >/dev/null 2>&1; then
+        if [[ "${type}" == "tcp" ]] &&
+            lsof -nP -iTCP:"${requestedPort}" -sTCP:LISTEN >/dev/null 2>&1; then
+            return 0
+        fi
+        if [[ "${type}" == "udp" && "${requestedPort}" != *:* ]] &&
+            lsof -nP -iUDP:"${requestedPort}" >/dev/null 2>&1; then
+            return 0
+        fi
     fi
     for backend in ufw firewalld iptables; do
         key="port:${backend}:${type}:${requestedPort}"

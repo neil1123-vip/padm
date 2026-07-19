@@ -4864,18 +4864,28 @@ runNetworkCheckReturnFailureRegression() (
     grep -qx 'port:ufw:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
     grep -qx 'port:ufw:udp:443' "${PADM_FIREWALL_STATE_FILE}"
     lsof() {
-        [[ "$*" == "-nP -iTCP:443 -sTCP:LISTEN" && "${tcpListenerPresent:-false}" == "true" ]] || return 1
-        printf 'nginx 123 root 6u IPv4 TCP *:443 (LISTEN)\n'
+        if [[ "$*" == "-nP -iTCP:443 -sTCP:LISTEN" && "${tcpListenerPresent:-false}" == "true" ]]; then
+            printf 'nginx 123 root 6u IPv4 TCP *:443 (LISTEN)\n'
+            return 0
+        fi
+        if [[ "$*" == "-nP -iUDP:443" && "${udpListenerPresent:-false}" == "true" ]]; then
+            printf 'wireguard 123 root 6u IPv4 UDP *:443\n'
+            return 0
+        fi
+        return 1
     }
     local tcpListenerPresent=true
+    local udpListenerPresent=true
     denyPort 443
     denyPort 443 udp
     ! grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
-    grep -qx 'ufw:delete:443/udp' "${firewallLog}"
+    ! grep -qx 'ufw:delete:443/udp' "${firewallLog}" || return 1
     grep -qx 'port:ufw:tcp:443' "${PADM_FIREWALL_STATE_FILE}"
-    ! grep -qx 'port:ufw:udp:443' "${PADM_FIREWALL_STATE_FILE}"
+    grep -qx 'port:ufw:udp:443' "${PADM_FIREWALL_STATE_FILE}" || return 1
     tcpListenerPresent=false
+    udpListenerPresent=false
     denyPort 443
+    denyPort 443 udp
     grep -qx 'ufw:delete:443/tcp' "${firewallLog}"
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
