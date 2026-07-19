@@ -258,7 +258,7 @@ subscriptionWireGuardReadState() {
           --arg network "10.77.0.0/24" \
           --argjson listenPort "$(subscriptionWireGuardDefaultListenPort)" \
           --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
-          '{enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, address:"", endpoint_host:"", public_key:"", peers:[]}'
+          '{enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, firewall_owned:false, address:"", endpoint_host:"", public_key:"", peers:[]}'
         return 0
     fi
     if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
@@ -269,7 +269,7 @@ subscriptionWireGuardReadState() {
       --arg network "10.77.0.0/24" \
       --argjson listenPort "$(subscriptionWireGuardDefaultListenPort)" \
       --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
-      '({enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, address:"", endpoint_host:"", public_key:"", peers:[]} + .) |
+      '({enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, firewall_owned:false, address:"", endpoint_host:"", public_key:"", peers:[]} + .) |
        .peers = ((.peers // []) | map({id:(.id // ""), name:(.name // .id // ""), address:(.address // ""), public_key:(.public_key // ""), endpoint:(.endpoint // ""), enabled:(if .enabled == false then false else true end)}) | map(select(.id != "" and .address != "" and .public_key != "")))' \
       "${stateFile}"
 }
@@ -779,13 +779,14 @@ subscriptionWireGuardCredentialDecode() {
     printf '%s\n' "${payload}"
 }
 
-initSubscriptionWireGuardMain() {
+initSubscriptionWireGuardMainApply() {
     local endpointHost=
     local listenPort
     local controlPort
     local address
     local publicKey
     local previousState
+    local firewallOwned=false
     if [[ "$(subscriptionWireGuardRole)" == "controlled" ]]; then
         errorCard "当前机器已初始化为被控" "第一版只支持星型拓扑，被控不能再作为主控"
         return 1
@@ -810,13 +811,22 @@ initSubscriptionWireGuardMain() {
         errorCard "WireGuard 公钥无效"
         return 1
     }
+    firewallOwned=$(jq -r '.firewall_owned == true' <<<"${previousState}") || return 1
+    allowPort "${listenPort}" udp || {
+        errorCard "WireGuard 公网监听端口开放失败"
+        return 1
+    }
+    if [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]]; then
+        firewallOwned=true
+    fi
     subscriptionWireGuardWriteState \
       --arg endpointHost "${endpointHost}" \
       --arg address "${address}" \
       --arg publicKey "${publicKey}" \
       --argjson listenPort "${listenPort}" \
       --argjson controlPort "${controlPort}" \
-      '.enabled = true | .role = "main" | .address = $address | .endpoint_host = $endpointHost | .public_key = $publicKey | .listen_port = $listenPort | .control_port = $controlPort' || {
+      --argjson firewallOwned "${firewallOwned}" \
+      '.enabled = true | .role = "main" | .address = $address | .endpoint_host = $endpointHost | .public_key = $publicKey | .listen_port = $listenPort | .control_port = $controlPort | .firewall_owned = $firewallOwned' || {
         errorCard "WireGuard 主控状态写入失败"
         return 1
       }
@@ -830,6 +840,10 @@ initSubscriptionWireGuardMain() {
         return 1
     }
     successCard "WireGuard 主控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "监听端口：${listenPort}/udp"
+}
+
+initSubscriptionWireGuardMain() {
+    padmRunPortAllowTransaction initSubscriptionWireGuardMainApply "$@"
 }
 
 initSubscriptionWireGuardControlled() {
@@ -1137,14 +1151,30 @@ showSubscriptionWireGuardPeers() {
     subscriptionWireGuardReadState | jq -r '.peers[]? | "ID:\(.id)\n名称:\(.name)\n内网地址:\(.address)\n启用:\(.enabled)\n---"'
 }
 
-restartSubscriptionWireGuardControl() {
+restartSubscriptionWireGuardControlApply() {
     local previousState
+    local role
+    local listenPort
+    local firewallOwned=false
     local nginxTarget
     local nginxBackupDir=
     local nginxWasRunning=false
     local previousServiceActions
 
     subscriptionWireGuardReadPreviousState previousState "WireGuard 控制面状态读取失败" || return 1
+    role=$(jq -r '.role' <<<"${previousState}") || return 1
+    firewallOwned=$(jq -r '.firewall_owned == true' <<<"${previousState}") || return 1
+    if [[ "${role}" == "main" ]]; then
+        listenPort=$(jq -r '.listen_port' <<<"${previousState}")
+        subscriptionWireGuardValidPort "${listenPort}" || return 1
+        allowPort "${listenPort}" udp || {
+            errorCard "WireGuard 公网监听端口开放失败"
+            return 1
+        }
+        if [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]]; then
+            firewallOwned=true
+        fi
+    fi
     nginxTarget=$(subscriptionWireGuardNginxConfigFile) || {
         errorCard "WireGuard Nginx 控制面配置路径异常"
         return 1
@@ -1156,7 +1186,7 @@ restartSubscriptionWireGuardControl() {
     nginxRunning && nginxWasRunning=true
     previousServiceActions="${SERVICE_ACTIONS:-}"
 
-    subscriptionWireGuardWriteState '.enabled = true' || {
+    subscriptionWireGuardWriteState --argjson firewallOwned "${firewallOwned}" '.enabled = true | .firewall_owned = $firewallOwned' || {
         padmRemoveCleanupPath "${nginxBackupDir}"
         errorCard "WireGuard 控制面启用状态写入失败"
         return 1
@@ -1191,17 +1221,36 @@ restartSubscriptionWireGuardControl() {
     successCard "WireGuard 控制面已修复/重启"
 }
 
+restartSubscriptionWireGuardControl() {
+    padmRunPortAllowTransaction restartSubscriptionWireGuardControlApply "$@"
+}
+
 disableSubscriptionWireGuardControl() {
     local previousState
+    local role
+    local listenPort
+    local firewallOwned=false
     subscriptionWireGuardReadPreviousState previousState "WireGuard 控制面状态读取失败" || return 1
+    role=$(jq -r '.role' <<<"${previousState}") || return 1
+    firewallOwned=$(jq -r '.firewall_owned == true' <<<"${previousState}") || return 1
+    if [[ "${role}" == "main" ]]; then
+        listenPort=$(jq -r '.listen_port' <<<"${previousState}")
+        subscriptionWireGuardValidPort "${listenPort}" || return 1
+    fi
     if ! stopSubscriptionWireGuardControlService; then
         errorCard "WireGuard 控制面停用失败"
         return 1
     fi
-    subscriptionWireGuardWriteState '.enabled = false' || {
+    subscriptionWireGuardWriteState '.enabled = false | .firewall_owned = false' || {
         subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 控制面关闭状态写入失败" || return 1
         errorCard "WireGuard 控制面状态写入失败"
         return 1
     }
+    if [[ "${role}" == "main" && "${firewallOwned}" == "true" ]] &&
+        ! denyPort "${listenPort}" udp; then
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 公网监听端口回收失败" || return 1
+        errorCard "WireGuard 公网监听端口回收失败"
+        return 1
+    fi
     successCard "WireGuard 控制面已关闭"
 }

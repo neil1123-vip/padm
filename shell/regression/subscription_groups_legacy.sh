@@ -14817,7 +14817,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         if [[ "${restoreStateWriteShouldFail}" == "true" && "${*: -1}" == '$previousState' ]]; then
             return 1
         fi
-        if [[ "${disableStateWriteShouldFail}" == "true" && "${*: -1}" == ".enabled = false" ]]; then
+        if [[ "${disableStateWriteShouldFail}" == "true" && "${*: -1}" == ".enabled = false | .firewall_owned = false" ]]; then
             return 1
         fi
         originalSubscriptionWireGuardWriteState "$@"

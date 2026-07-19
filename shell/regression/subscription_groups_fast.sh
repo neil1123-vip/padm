@@ -569,6 +569,91 @@ runWriteWireGuardControlNginxPathSafetyRegression() {
     )
 }
 
+runSubscriptionWireGuardFirewallLifecycleRegression() (
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+    local root="${TMP_DIR}/wireguard-firewall-lifecycle"
+    local actions=
+    local allowAdds=true
+    local applyFail=true
+    local status
+    mkdir -p "${root}/wireguard" "${root}/nginx"
+    export PADM_WIREGUARD_CONTROL_DIR="${root}/wireguard"
+    nginxConfigPath="${root}/nginx/"
+
+    subscriptionWireGuardConfigFile() { printf '%s\n' "${root}/wg-padm.conf"; }
+    autoRead() { printf -v "$3" '%s' main.example.com; }
+    installSubscriptionWireGuardTools() { return 0; }
+    subscriptionWireGuardEnsureKeys() {
+        printf 'private-key\n' >"$(subscriptionWireGuardPrivateKeyFile)"
+        printf 'public-key\n' >"$(subscriptionWireGuardPublicKeyFile)"
+    }
+    subscriptionWireGuardPublicKey() { printf '%s\n' 'MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE='; }
+    allowPort() {
+        actions+="allow:$1:${2:-tcp}"$'\n'
+        PADM_LAST_ALLOW_PORT_ADDED=false
+        [[ "${allowAdds}" == "true" ]] || return 0
+        PADM_LAST_ALLOW_PORT_ADDED=true
+        padmTrackPortAllowTransactionKey "port:ufw:${2:-tcp}:$1"
+    }
+    padmRollbackPortAllowTransaction() {
+        actions+="rollback"$'\n'
+        PADM_PORT_ALLOW_TRANSACTION_KEYS=
+    }
+    applySubscriptionWireGuardService() {
+        [[ "${applyFail}" != "true" ]] || return 1
+        printf 'wireguard\n' >"$(subscriptionWireGuardConfigFile)"
+    }
+    stopSubscriptionWireGuardControlService() {
+        actions+="stop"$'\n'
+    }
+    refreshSubscriptionWireGuardNginxControl() { actions+="refresh"$'\n'; }
+    serviceQueueApply() { actions+="queue-apply"$'\n'; }
+    installSubscriptionControlService() { actions+="install-control"$'\n'; }
+    nginxRunning() { return 1; }
+    denyPort() {
+        actions+="deny:$1:${2:-tcp}"$'\n'
+    }
+
+    set +e
+    initSubscriptionWireGuardMain >/dev/null 2>&1
+    status=$?
+    set -e
+    [[ "${status}" -ne 0 ]]
+    grep -qx 'allow:51820:udp' <<<"${actions}"
+    grep -qx 'rollback' <<<"${actions}"
+    subscriptionWireGuardReadState | jq -e '.enabled == false and .firewall_owned == false' >/dev/null
+
+    actions=
+    applyFail=false
+    initSubscriptionWireGuardMain >/dev/null
+    grep -qx 'allow:51820:udp' <<<"${actions}"
+    subscriptionWireGuardReadState | jq -e '.enabled == true and .role == "main" and .firewall_owned == true' >/dev/null
+
+    actions=
+    disableSubscriptionWireGuardControl >/dev/null
+    grep -qx 'stop' <<<"${actions}"
+    grep -qx 'deny:51820:udp' <<<"${actions}"
+    subscriptionWireGuardReadState | jq -e '.enabled == false and .firewall_owned == false' >/dev/null
+
+    actions=
+    restartSubscriptionWireGuardControl >/dev/null
+    grep -qx 'allow:51820:udp' <<<"${actions}"
+    subscriptionWireGuardReadState | jq -e '.enabled == true and .role == "main" and .firewall_owned == true' >/dev/null
+
+    disableSubscriptionWireGuardControl >/dev/null
+    actions=
+    allowAdds=false
+    initSubscriptionWireGuardMain >/dev/null
+    subscriptionWireGuardReadState | jq -e '.enabled == true and .role == "main" and .firewall_owned == false' >/dev/null
+
+    actions=
+    disableSubscriptionWireGuardControl >/dev/null
+    ! grep -q '^deny:' <<<"${actions}"
+)
+
 runWriteAloneNginxPathSafetyRegression() {
     (
         set -euo pipefail
@@ -5857,6 +5942,7 @@ runRegressionFastOnlySafety() {
         runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression &&
         runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression &&
         runRegressionStep write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression &&
+        runRegressionStep wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression &&
         runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
         runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
         runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression &&
