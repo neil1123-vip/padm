@@ -1462,6 +1462,7 @@ cleanupFail2banManagedFilesOnUninstall() {
     local failed=false
     removeInstallPath "$(fail2banManagedJailFile)" "Fail2ban jail 配置" || failed=true
     removeInstallPath "$(fail2banManagedFilterFile)" "Fail2ban filter 配置" || failed=true
+    removeInstallPath "$(fail2banManagedNginxScanFilterFile)" "Fail2ban Nginx 扫描 filter 配置" || failed=true
     removeInstallPath "$(fail2banPadmControlLogFile)" "Fail2ban 控制面日志" || failed=true
     if declare -F fail2banReloadServiceIfRunning >/dev/null 2>&1; then
         fail2banReloadServiceIfRunning || failed=true

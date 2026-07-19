@@ -629,7 +629,7 @@ fail2banApplyProfile() {
 
     if [[ "${profile}" == "disabled" ]]; then
         local disabledBackupDir=
-        if ! checkLogBackupCreate disabledBackupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)"; then
+        if ! checkLogBackupCreate disabledBackupDir "$(fail2banManagedJailFile)" "$(fail2banManagedFilterFile)" "$(fail2banManagedNginxScanFilterFile)" "$(fail2banPadmControlLogFile)"; then
             errorCard "Fail2ban 防护停用前备份失败"
             return 1
         fi

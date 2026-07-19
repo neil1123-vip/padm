@@ -1058,22 +1058,56 @@ showSubscriptionWireGuardPeers() {
 }
 
 restartSubscriptionWireGuardControl() {
-    installSubscriptionControlService || {
-        errorCard "订阅控制服务安装失败"
+    local previousState
+    local nginxTarget
+    local nginxBackupDir=
+    local nginxWasRunning=false
+    local previousServiceActions
+
+    subscriptionWireGuardReadPreviousState previousState "WireGuard 控制面状态读取失败" || return 1
+    nginxTarget=$(subscriptionWireGuardNginxConfigFile) || {
+        errorCard "WireGuard Nginx 控制面配置路径异常"
         return 1
     }
+    checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
+        errorCard "WireGuard Nginx 控制面配置备份失败"
+        return 1
+    }
+    nginxRunning && nginxWasRunning=true
+    previousServiceActions="${SERVICE_ACTIONS:-}"
+
+    subscriptionWireGuardWriteState '.enabled = true' || {
+        padmRemoveCleanupPath "${nginxBackupDir}"
+        errorCard "WireGuard 控制面启用状态写入失败"
+        return 1
+    }
+
     applySubscriptionWireGuardService || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 服务重启失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard 服务重启失败"
         return 1
     }
     refreshSubscriptionWireGuardNginxControl || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard Nginx 控制面配置失败"
         return 1
     }
     serviceQueueApply || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard Nginx 控制面重载失败"
         return 1
     }
+    installSubscriptionControlService || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "订阅控制服务安装失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+        errorCard "订阅控制服务安装失败"
+        return 1
+    }
+
+    padmRemoveCleanupPath "${nginxBackupDir}"
     successCard "WireGuard 控制面已修复/重启"
 }
 

@@ -26,9 +26,7 @@ readConfigWarpReg() {
 
     if ! warpRegConfigLooksValid "${configFile}"; then
         mkdir -p "${warpDir}" || return 1
-        if [[ ! -x "${warpBinary}" ]]; then
-            installWarpReg || return 1
-        fi
+        installWarpReg || return 1
         padmCreateTempPathCompat tmpFile "${warpDir}/.config.XXXXXX" || return 1
         if ! "${warpBinary}" >"${tmpFile}" 2>&1; then
             rm -f "${tmpFile}" "${configFile}" >/dev/null 2>&1 || true
@@ -58,7 +56,7 @@ installWarpReg() {
     local warpDir warpBinary
     warpDir=$(warpConfigSafeDir) || return 1
     warpBinary="${warpDir}/warp-reg"
-    if [[ ! -f "${warpBinary}" ]]; then
+    if [[ ! -f "${warpBinary}" || ! -s "${warpBinary}" || ! -x "${warpBinary}" ]]; then
         echo
         echoContent title "\n┌─ warp-reg 第三方工具 ──────────────────────────────"
         menuLine "依赖第三方程序，请熟知其中风险"
@@ -72,18 +70,24 @@ installWarpReg() {
             mkdir -p "${warpDir}" || return 1
             if ! downloadGitHubReleaseAsset -P "${warpDir}/" badafans/warp-reg latest "${warpRegCoreCPUVendor}"; then
                 errorCard "warp-reg下载失败"
-                exit 1
+                return 1
             fi
             if [[ ! -s "${warpDir}/${warpRegCoreCPUVendor}" ]]; then
                 errorCard "warp-reg文件异常"
-                exit 1
+                return 1
             fi
-            mv "${warpDir}/${warpRegCoreCPUVendor}" "${warpBinary}"
-            chmod 755 "${warpBinary}"
+            mv "${warpDir}/${warpRegCoreCPUVendor}" "${warpBinary}" || {
+                errorCard "warp-reg文件安装失败"
+                return 1
+            }
+            chmod 755 "${warpBinary}" || {
+                errorCard "warp-reg权限设置失败"
+                return 1
+            }
 
         else
             coreCancelledStatusCard "放弃安装"
-            exit 0
+            return 1
         fi
     fi
 }

@@ -659,7 +659,10 @@ cleanLastInstallationConfig() {
             errorCard "静态站点目录异常，已取消清空上次安装配置"
             return 1
         fi
-        rm -rf -- "${staticPath}" >/dev/null 2>&1
+        if ! rm -rf -- "${staticPath}" >/dev/null 2>&1; then
+            errorCard "静态站点清理失败，已取消清空上次安装配置"
+            return 1
+        fi
     fi
 
     currentPath=

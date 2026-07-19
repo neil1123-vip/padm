@@ -7610,6 +7610,69 @@ runWarpConfigSafeDirRegression() (
 
     (
         source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        PADM_WARP_DIR="${root}/warp-stale"
+        warpRegCoreCPUVendor="warp-reg-linux-amd64"
+        local downloadMarker="${root}/warp-stale-download"
+        mkdir -p "${PADM_WARP_DIR}"
+        printf 'stale\n' >"${PADM_WARP_DIR}/warp-reg"
+        chmod 644 "${PADM_WARP_DIR}/warp-reg"
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        autoRead() { printf -v "$3" y; }
+        errorCard() { :; }
+        downloadGitHubReleaseAsset() {
+            : >"${downloadMarker}"
+            printf '#!/usr/bin/env sh\n' >"${2%/}/$5"
+        }
+        installWarpReg
+        [[ -s "${downloadMarker}" ]]
+        [[ -x "${PADM_WARP_DIR}/warp-reg" ]]
+    )
+
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        PADM_WARP_DIR="${root}/warp-download-fail"
+        warpRegCoreCPUVendor="warp-reg-linux-amd64"
+        local callerMarker="${root}/warp-caller-reached"
+        mkdir -p "${PADM_WARP_DIR}"
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        autoRead() { printf -v "$3" y; }
+        errorCard() { :; }
+        downloadGitHubReleaseAsset() { return 1; }
+        set +e
+        installWarpReg >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        : >"${callerMarker}"
+        [[ -f "${callerMarker}" ]]
+    )
+
+    local cancelMarker="${root}/warp-cancel-caller-reached"
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
+        PADM_WARP_DIR="${root}/warp-cancel"
+        warpRegCoreCPUVendor="warp-reg-linux-amd64"
+        mkdir -p "${PADM_WARP_DIR}"
+        echoContent() { :; }
+        menuLine() { :; }
+        menuClose() { :; }
+        autoRead() { printf -v "$3" n; }
+        coreCancelledStatusCard() { :; }
+        set +e
+        installWarpReg >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        : >"${cancelMarker}"
+    )
+    [[ -f "${cancelMarker}" ]]
+
+    (
+        source "${PROJECT_ROOT}/shell/core/routing_warp.sh"
         PADM_WARP_DIR="${root}/warp-latest"
         warpRegCoreCPUVendor="warp-reg-linux-amd64"
         local versionLog="${root}/warp-download-version.log"
@@ -7941,6 +8004,22 @@ runFail2banManagedCleanupRegression() (
     [[ "$(<"${PADM_FAIL2BAN_FILTER_FILE}")" == "filter-again" ]]
     [[ "$(<"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}")" == "scan-again" ]]
     [[ "$(<"${PADM_FAIL2BAN_CONTROL_LOG_FILE}")" == "log-again" ]]
+
+    PADM_FAIL2BAN_JAIL_FILE="${root}/jail.d/padm.local"
+    PADM_FAIL2BAN_FILTER_FILE="${root}/filter.d/padm-control.conf"
+    PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE="${root}/filter.d/padm-nginx-scan-basic.conf"
+    PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/log/padm-control-access.log"
+    printf 'jail-uninstall\n' >"${PADM_FAIL2BAN_JAIL_FILE}"
+    printf 'filter-uninstall\n' >"${PADM_FAIL2BAN_FILTER_FILE}"
+    printf 'scan-uninstall\n' >"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+    printf 'log-uninstall\n' >"${PADM_FAIL2BAN_CONTROL_LOG_FILE}"
+    fail2banReloadServiceIfRunning() { return 0; }
+
+    cleanupFail2banManagedFilesOnUninstall
+    [[ ! -e "${PADM_FAIL2BAN_JAIL_FILE}" ]]
+    [[ ! -e "${PADM_FAIL2BAN_FILTER_FILE}" ]]
+    [[ ! -e "${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}" ]]
+    [[ ! -e "${PADM_FAIL2BAN_CONTROL_LOG_FILE}" ]]
 )
 
 runFail2banApplyTransactionRegression() (
@@ -7958,12 +8037,15 @@ runFail2banApplyTransactionRegression() (
     export PADM_FAIL2BAN_JAIL_FILE="${root}/fail2ban/jail.d/padm.local"
     export PADM_FAIL2BAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-control.conf"
     export PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE="${root}/fail2ban/filter.d/padm-nginx-scan-basic.conf"
+    export PADM_FAIL2BAN_CONTROL_LOG_FILE="${root}/fail2ban/log/padm-control-access.log"
     export PADM_FAIL2BAN_VALIDATE_LOG="${root}/fail2ban/validate.log"
     : >"${errorLog}"
 
+    mkdir -p "$(dirname "${PADM_FAIL2BAN_CONTROL_LOG_FILE}")"
     printf 'legacy jail\n' >"${PADM_FAIL2BAN_JAIL_FILE}"
     printf 'legacy filter\n' >"${PADM_FAIL2BAN_FILTER_FILE}"
     printf 'legacy scan\n' >"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}"
+    printf 'legacy control log\n' >"${PADM_FAIL2BAN_CONTROL_LOG_FILE}"
 
     fail2banServiceActive() { return 1; }
     fail2banServiceEnabled() { return 1; }
@@ -7997,6 +8079,17 @@ runFail2banApplyTransactionRegression() (
     if regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
         return 1
     fi
+
+    fail2banReloadServiceIfRunning() { return 1; }
+    set +e
+    fail2banApplyProfile disabled false >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "$(<"${PADM_FAIL2BAN_JAIL_FILE}")" == "legacy jail" ]]
+    [[ "$(<"${PADM_FAIL2BAN_FILTER_FILE}")" == "legacy filter" ]]
+    [[ "$(<"${PADM_FAIL2BAN_NGINX_SCAN_FILTER_FILE}")" == "legacy scan" ]]
+    [[ "$(<"${PADM_FAIL2BAN_CONTROL_LOG_FILE}")" == "legacy control log" ]]
 
     commitGeneratedFile() {
         originalCommitGeneratedFile "$@"
@@ -8265,6 +8358,7 @@ runCleanLastInstallationConfigFailureRegression() (
     local mode rc
 
     mkdir -p "${root}/nginx" "${root}/static"
+    printf 'managed-static\n' >"${root}/static/check"
     : >"${serviceLog}"
     : >"${cleanupLog}"
     : >"${errorLog}"
@@ -8326,6 +8420,7 @@ runCleanLastInstallationConfigFailureRegression() (
     rm() {
         printf 'rm:%s\n' "$*" >>"${cleanupLog}"
         [[ "${mode}" == "rm-warp-fail" && "$*" == "-f -- /etc/padm/warp/config" ]] && return 1
+        [[ "${mode}" == "rm-static-fail" && "$1" == "-rf" && "$2" == "--" && "$3" == "${root}/static/" ]] && return 1
         return 0
     }
     unInstallSubscribe() { printf 'uninstall-subscribe\n' >>"${installLog}"; return 0; }
@@ -8432,6 +8527,11 @@ runCleanLastInstallationConfigFailureRegression() (
     runCleanupStepFailureCase daemon-reload-fail \
         'systemd 配置重载失败，已取消清空上次安装配置' \
         'systemctl:daemon-reload' \
+        'read-install-type'
+
+    runCleanupStepFailureCase rm-static-fail \
+        '静态站点清理失败，已取消清空上次安装配置' \
+        "rm:-rf -- ${root}/static/" \
         'read-install-type'
 
     local xrayOpenRcServiceFile="${root}/init.d/xray"
@@ -14343,6 +14443,9 @@ runSubscriptionWireGuardMenuFlowRegression() (
     refreshSubscriptionWireGuardNginxControl() {
         recordMenuAction refreshSubscriptionWireGuardNginxControl
         [[ "${refreshControlShouldFail}" == "true" ]] && return 1
+        if [[ "${refreshWritesNewConfig}" == "true" ]]; then
+            printf 'new-nginx-control\n' >"$(subscriptionWireGuardNginxConfigFile)"
+        fi
         return 0
     }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
@@ -14382,6 +14485,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         wireGuardApplyShouldFail=
         installControlShouldFail=
         refreshControlShouldFail=
+        refreshWritesNewConfig=
         serviceQueueShouldFail=
         addSourceShouldFail=
         setCredentialShouldFail=
@@ -14650,6 +14754,13 @@ enable"
     if wireGuardMenuPartSelected control-restore; then
         wireGuardMenuInitializeMain
 
+        subscriptionWireGuardWriteState '.enabled = false'
+        resetMenuActions
+        restartSubscriptionWireGuardControl >/dev/null 2>&1
+        subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
+        assertMenuAction installSubscriptionControlService
+        assertMenuAction applySubscriptionWireGuardService
+
         installControlShouldFail=true
         if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
             installControlShouldFail=
@@ -14668,12 +14779,18 @@ enable"
             return 1
         fi
         refreshControlShouldFail=
+        nginxTarget=$(subscriptionWireGuardNginxConfigFile)
+        printf 'old-nginx-control\n' >"${nginxTarget}"
+        refreshWritesNewConfig=true
         serviceQueueShouldFail=true
         if restartSubscriptionWireGuardControl >/dev/null 2>&1; then
+            refreshWritesNewConfig=
             serviceQueueShouldFail=
             return 1
         fi
+        refreshWritesNewConfig=
         serviceQueueShouldFail=
+        grep -qxF 'old-nginx-control' "${nginxTarget}"
 
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"5
