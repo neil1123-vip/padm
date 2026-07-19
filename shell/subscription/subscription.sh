@@ -382,7 +382,7 @@ EOF
             return 1
         fi
     fi
-    if [[ -z $(pgrep -f "nginx") ]]; then
+    if ! nginxRunning; then
         if ! runSubscribeNginxAction start; then
             if [[ -n "${installBackupDir}" ]]; then
                 rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅 Nginx 服务启动失败" || true

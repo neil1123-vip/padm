@@ -9647,6 +9647,7 @@ SH
         controlCalls=$((controlCalls + 1))
         printf '%s:control\n' "${mode}" >>"${serviceLog}"
         [[ "${mode}" == "control-fail" ]] && return 1
+        [[ "${mode}" == "final-start-fail" ]] && runtimeRunning=false
         return 0
     }
     bootStartup() {
@@ -9681,7 +9682,7 @@ SH
         return 0
     }
     pgrep() {
-        [[ "${mode}" == "existing-port" || "${mode}" == "final-start-fail" ]] && return 1
+        [[ "${mode}" == "final-start-fail" ]] && return 1
         return 0
     }
 
