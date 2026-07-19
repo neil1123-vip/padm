@@ -2828,6 +2828,68 @@ runInstallRefreshRestoresBackupRegression() {
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
+runInstallRefreshSignalRestoresAndExitsRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/install-refresh-signal"
+    local fixtureDir="${root}/target"
+    local archiveRoot="${root}/archive/padm-main"
+    local oldTmpDir="${TMPDIR:-}"
+    local status
+
+    mkdir -p \
+        "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/assets" "${root}/tmp" \
+        "${archiveRoot}/shell" "${archiveRoot}/documents" "${archiveRoot}/assets"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
+    printf 'old-shell\n' >"${fixtureDir}/shell/marker"
+    printf 'old-docs\n' >"${fixtureDir}/documents/marker"
+    printf 'old-assets\n' >"${fixtureDir}/assets/marker"
+    printf 'old-readme\n' >"${fixtureDir}/README.md"
+    printf 'new-shell\n' >"${archiveRoot}/shell/marker"
+    printf 'new-docs\n' >"${archiveRoot}/documents/marker"
+    printf 'new-assets\n' >"${archiveRoot}/assets/marker"
+    printf 'new-readme\n' >"${archiveRoot}/README.md"
+
+    TMPDIR="${root}/tmp"
+    eval "$(awk '
+        /^scriptTmpPath\(\)/ { capture = 1 }
+        /^ensureScriptModules\(\)/ { capture = 0 }
+        capture { print }
+    ' "${PROJECT_ROOT}/install.sh")"
+    SCRIPT_DIR="${fixtureDir}"
+    REPO_ARCHIVE_DIR=padm-main
+    SCRIPT_REF_FILE="${fixtureDir}/.padm-ref"
+    SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
+    SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
+    scriptIsSafeAbsolutePath() { return 0; }
+    downloadRepoArchive() {
+        local _url=$1
+        local extractDir=$2
+        mkdir -p "${extractDir}"
+        command cp -R "${archiveRoot}" "${extractDir}/padm-main"
+    }
+    cp() {
+        if [[ "${1:-}" == "-R" && "${2:-}" == */extract/padm-main/shell ]]; then
+            kill -TERM "${BASHPID:-$$}"
+            printf 'continued\n' >"${root}/continued"
+        fi
+        command cp "$@"
+    }
+
+    set +e
+    ( refreshScriptModules 7777777777777777777777777777777777777777 ) >"${root}/output.log" 2>&1
+    status=$?
+    set -e
+
+    [[ "${status}" == "143" ]]
+    [[ ! -e "${root}/continued" ]]
+    [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
+    [[ "$(<"${fixtureDir}/documents/marker")" == "old-docs" ]]
+    [[ "$(<"${fixtureDir}/assets/marker")" == "old-assets" ]]
+    [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
+    [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
+    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
+)
+
 runInstallRefreshSingleArchiveGuardRegression() {
     local archiveGuard
     archiveGuard=$(awk '
@@ -5439,6 +5501,7 @@ runRegressionPlatformRefresh() {
         runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
         runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
+        runRegressionStep install-refresh-signal-restores-and-exits runInstallRefreshSignalRestoresAndExitsRegression &&
         runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression
 }
 

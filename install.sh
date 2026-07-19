@@ -200,7 +200,7 @@ restoreScriptModuleBackup() {
     local backupDir=$1
     local scriptDir=$2
     local restoreStatus=0
-    [[ -d "${backupDir}" ]] || return 0
+    [[ -d "${backupDir}" ]] || return 1
     scriptIsSafeAbsolutePath "${scriptDir}" || return 1
     scriptIsSafeAbsolutePath "${backupDir}" || return 1
     removeScriptModuleItems "${scriptDir}" || return 1
@@ -211,6 +211,21 @@ restoreScriptModuleBackup() {
     [[ -e "${backupDir}/.padm-module-manifest" ]] && { mv "${backupDir}/.padm-module-manifest" "${scriptDir}/.padm-module-manifest" || restoreStatus=1; }
     [[ -e "${backupDir}/.padm-ref" ]] && { mv "${backupDir}/.padm-ref" "${scriptDir}/.padm-ref" || restoreStatus=1; }
     return "${restoreStatus}"
+}
+
+abortScriptModuleRefresh() {
+    local status=$1
+    local backupDir=$2
+    local scriptDir=$3
+    local tmpDir=$4
+
+    trap - EXIT INT TERM
+    if [[ -n "${backupDir}" ]]; then
+        cleanupScriptModuleRefresh "${backupDir}" "${scriptDir}" "${tmpDir}"
+    else
+        scriptRemovePath "${tmpDir}" || true
+    fi
+    exit "${status}"
 }
 
 cleanupScriptModuleRefresh() {
@@ -358,7 +373,9 @@ refreshScriptModules() {
     tmpDir=$(scriptCreateTempDir padm.XXXXXX) || exit 1
     extractDir="${tmpDir}/extract"
     backupDir="${SCRIPT_DIR}/.padm-update-backup"
-    trap 'scriptRemovePath "${tmpDir}" || true' EXIT INT TERM
+    trap 'scriptRemovePath "${tmpDir}" || true' EXIT
+    trap 'abortScriptModuleRefresh 130 "" "${SCRIPT_DIR}" "${tmpDir}"' INT
+    trap 'abortScriptModuleRefresh 143 "" "${SCRIPT_DIR}" "${tmpDir}"' TERM
     archiveUrl="https://github.com/neil1123-vip/padm/archive/${remoteRef}.tar.gz"
     archiveDir="${extractDir}/${REPO_ARCHIVE_DIR}"
     resolvedRef="${remoteRef}"
@@ -399,7 +416,9 @@ refreshScriptModules() {
         trap - EXIT INT TERM
         exit 1
     fi
-    trap 'cleanupScriptModuleRefresh "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' EXIT INT TERM
+    trap 'cleanupScriptModuleRefresh "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' EXIT
+    trap 'abortScriptModuleRefresh 130 "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' INT
+    trap 'abortScriptModuleRefresh 143 "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' TERM
     removeScriptModuleItems "${SCRIPT_DIR}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
 
     cp -R "${archiveDir}/shell" "${SCRIPT_DIR}/"
