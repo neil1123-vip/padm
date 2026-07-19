@@ -227,7 +227,7 @@ customPortFunction() {
                 statusCard "TLS 入口端口" "${port}"
                 if [[ -z "${btDomain}" ]]; then
                     checkDNSIP "${domain}" || return 1
-                    removeNginxDefaultConf
+                    removeNginxDefaultConf || return 1
                     checkPortOpen "${port}" "${domain}" || return 1
                 fi
             else

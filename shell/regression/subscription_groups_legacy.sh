@@ -9111,6 +9111,40 @@ JSON
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
+    (
+        local checkPortMarker="${TMP_DIR}/entry-helper-port-nginx-cleanup-check"
+        local errorLog="${TMP_DIR}/entry-helper-port-nginx-cleanup-error.log"
+        local rc
+        : >"${errorLog}"
+        rm -f "${checkPortMarker}"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        btDomain=
+        currentPort=
+        customPort=
+        xrayVLESSRealityPort=
+        domain=port.example.com
+        autoRead() {
+            printf -v "$3" '443'
+        }
+        allowPort() { return 0; }
+        checkDNSIP() { return 0; }
+        removeNginxDefaultConf() { return 1; }
+        checkPortOpen() {
+            : >"${checkPortMarker}"
+            return 0
+        }
+        errorCard() {
+            printf '%s\n' "$*" >>"${errorLog}"
+        }
+        set +e
+        customPortFunction >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ ! -e "${checkPortMarker}" ]]
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    )
+
     PATH="${oldPath}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     eval "${protocolSelectionIncludesDef}"
