@@ -936,6 +936,11 @@ checkPortOpen() {
             return 1
         fi
     fi
+    if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning &&
+        ! runCoreServiceActionAllowFailure handleNginx start restore; then
+        checkPortOpenAbort "${backupDir}" "${singBoxWasRunning}" "${xrayWasRunning}" "${nginxWasRunning}" "${nginxConfigChanged}" "端口检测后 Nginx 原运行状态恢复失败"
+        return 1
+    fi
     padmRemoveCleanupPath "${backupDir}"
     return 0
 }

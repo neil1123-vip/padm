@@ -5392,7 +5392,8 @@ EOF
     [[ ! -e "${root}/nginx/alone.conf" ]]
     [[ ! -e "${realityConf}" && ! -e "${realityState}" ]]
     ! grep -q 'padm stream include start' "${nginxMainConf}"
-    [[ "${singBoxState}" == "false" && "${xrayState}" == "false" && "${nginxState}" == "false" ]]
+    [[ "${singBoxState}" == "false" && "${xrayState}" == "false" && "${nginxState}" == "true" ]] || return 1
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     if regressionFindHasMatches "${TMP_DIR}" -mindepth 1 -maxdepth 1 -name 'padm-check-port-open.*'; then
         return 1
     fi
