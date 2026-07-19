@@ -250,9 +250,18 @@ EOF
 }
 
 # 添加 Xray DNS 配置
+dnsRoutingValidateDomainList() {
+    local domainList=${1:-}
+    if [[ ! "${domainList}" =~ [^[:space:],] ]]; then
+        errorCard "DNS 域名规则不能为空"
+        return 1
+    fi
+}
+
 addXrayDNSConfig() {
     local ip=$1
     local domainList=$2
+    dnsRoutingValidateDomainList "${domainList}" || return 1
     local domains=[]
     while read -r line; do
         local matchedRuleValue
@@ -288,6 +297,7 @@ addSingBoxDNSConfig() {
     local ip=$1
     local domainList=$2
     local actionType=${3:-}
+    dnsRoutingValidateDomainList "${domainList}" || return 1
 
     local rules=
     rules=$(initSingBoxRules "${domainList}" "dns") || { errorCard "sing-box DNS 规则生成失败，已保留旧配置"; return 1; }

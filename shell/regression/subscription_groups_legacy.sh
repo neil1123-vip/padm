@@ -1940,6 +1940,24 @@ runDNSRoutingFailureReturnRegression() (
     }
 
     (
+        mkdir -p "${rootRel}/dns-empty-rules"
+        configPath="${root}/dns-empty-rules/"
+        singBoxConfigPath="${root}/dns-empty-rules/"
+        coreInstallType=1
+        printf '{"dns":{"servers":["old"]}}\n' >"${configPath}11_dns.json"
+        printf '{"dns":{"servers":["old"]}}\n' >"${singBoxConfigPath}dns.json"
+        getDLCMatchedRuleValue() { return 99; }
+        if addXrayDNSConfig "1.1.1.1" ' ,  ' >/dev/null 2>&1; then
+            return 1
+        fi
+        if addSingBoxDNSConfig "1.1.1.1" ',,' >/dev/null 2>&1; then
+            return 1
+        fi
+        jq -e '.dns.servers == ["old"]' "${configPath}11_dns.json" >/dev/null
+        jq -e '.dns.servers == ["old"]' "${singBoxConfigPath}dns.json" >/dev/null
+    )
+
+    (
         mkdir -p "${rootRel}/dns-sing-box-helper"
         configPath=
         singBoxConfigPath="${root}/dns-sing-box-helper/"
