@@ -3673,10 +3673,12 @@ runValidateInstallTempRootStaysInParentShellRegression() {
 }
 
 runAliasInstallMetadataCopyRegression() {
-    local sourceDir targetDir chmodLog oldScriptDir oldPadmInstallDir oldHome
+    local sourceDir targetDir chmodLog shortcutLog shortcutOutput oldScriptDir oldPadmInstallDir oldHome
     sourceDir="${TMP_DIR}/alias-install-source"
     targetDir="${TMP_DIR}/alias-install-target"
     chmodLog="${TMP_DIR}/alias-install-chmod.log"
+    shortcutLog="${TMP_DIR}/alias-install-shortcut.log"
+    shortcutOutput="${TMP_DIR}/alias-install-shortcut.out"
     mkdir -p "${sourceDir}/shell" "${sourceDir}/documents" "${sourceDir}/assets" "${targetDir}"
     cat >"${sourceDir}/install.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -3742,6 +3744,20 @@ EOF
     [[ "$(<"${targetDir}/.padm-entry-ref")" == "old-entry-ref" ]]
     [[ "$(<"${targetDir}/install.sh")" == "old-install" ]]
     grep -Fqx "700 ${targetDir}/install.sh" "${chmodLog}"
+
+    : >"${shortcutLog}"
+    if (
+        ln() {
+            printf '%s\n' "$*" >>"${shortcutLog}"
+            return 71
+        }
+        chmod() { :; }
+        aliasInstall
+    ) >"${shortcutOutput}" 2>&1; then
+        return 1
+    fi
+    grep -Fqx -- "-s ${targetDir}/install.sh /usr/bin/padm" "${shortcutLog}"
+    ! grep -q '快捷方式创建成功' "${shortcutOutput}"
 
     SCRIPT_DIR="${oldScriptDir}"
     HOME="${oldHome}"

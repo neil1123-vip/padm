@@ -1357,14 +1357,16 @@ aliasInstall() {
         local shortcutCreated=
         if [[ -d "/usr/bin/" ]]; then
             if [[ ! -f "/usr/bin/padm" ]]; then
-                ln -s "${targetDir}/install.sh" /usr/bin/padm
-                chmod 700 /usr/bin/padm
+                if ! ln -s "${targetDir}/install.sh" /usr/bin/padm; then
+                    return 1
+                fi
                 shortcutCreated=true
             fi
         elif [[ -d "/usr/sbin" ]]; then
             if [[ ! -f "/usr/sbin/padm" ]]; then
-                ln -s "${targetDir}/install.sh" /usr/sbin/padm
-                chmod 700 /usr/sbin/padm
+                if ! ln -s "${targetDir}/install.sh" /usr/sbin/padm; then
+                    return 1
+                fi
                 shortcutCreated=true
             fi
         fi
