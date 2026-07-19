@@ -41,6 +41,14 @@ removeSingBoxTemplateConfigFiles() {
     return "${status}"
 }
 
+coreTemplateValidateManualAccountName() {
+    local accountName=$1
+    if [[ "${accountName}" == sub_* ]]; then
+        errorCard "用户名不能使用 sub_ 开头，该前缀由订阅同步保留"
+        return 1
+    fi
+}
+
 coreTemplateConfigBackupCreate() {
     local resultVar=$1
     local core=$2
@@ -201,6 +209,7 @@ initXrayConfigApply() {
         if [[ -z ${customEmail} ]]; then
             customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
         fi
+        coreTemplateValidateManualAccountName "${customEmail}" || return 1
     fi
 
     if [[ -z "${addClientsStatus}" && -z "${uuid}" ]]; then
@@ -796,6 +805,7 @@ initSingBoxConfigApply() {
         if [[ -z ${customEmail} ]]; then
             customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
         fi
+        coreTemplateValidateManualAccountName "${customEmail}" || return 1
     fi
 
     if [[ -z "${addClientsStatus}" && -z "${uuid}" ]]; then

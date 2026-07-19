@@ -3527,6 +3527,34 @@ runCoreTemplateReturnFailureRegression() (
     ! grep -q ':udp$' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
 
+    autoRead() {
+        case "$1" in
+        core_init_uuid) printf -v "$3" '%s' '11111111-1111-1111-1111-111111111111' ;;
+        core_init_username) printf -v "$3" '%s' 'sub_manual' ;;
+        *) return 1 ;;
+        esac
+    }
+    collectTLSProfile() { tlsCertDomain=tls.example.com; }
+    currentUUID=
+    lastInstallationConfig=
+    writeCalls=0
+    set +e
+    initXrayConfigApply custom 1 true 2>/dev/null
+    xrayRc=$?
+    set -e
+    [[ "${xrayRc}" != "0" ]]
+    [[ "${writeCalls}" == "0" ]]
+
+    selectCustomInstallType=",27,"
+    set +e
+    initSingBoxConfigApply custom 1 true 2>/dev/null
+    singBoxRc=$?
+    set -e
+    [[ "${singBoxRc}" != "0" ]]
+    [[ "${writeCalls}" == "0" ]]
+    currentUUID=existing-user
+    lastInstallationConfig=true
+
     mode=template
     initRealityProfile() { return 0; }
     initXrayRealityPort() { return 0; }
