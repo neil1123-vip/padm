@@ -1839,7 +1839,10 @@ setCDNEntryAddress() {
         coreCancelledStatusCard "未修改 CDN 入口地址"
         return 0
     fi
-    cdnWriteAddress "${input}"
+    if ! cdnWriteAddress "${input}"; then
+        errorCard "CDN 入口地址写入失败，未刷新订阅"
+        return 1
+    fi
     statusCard "CDN 入口" "已更新为 ${input}"
     cdnRefreshSubscriptionsOrRollback "${previousAddress}"
 }
@@ -1849,7 +1852,10 @@ clearCDNEntryAddress() {
     if [[ -f "$(cdnAddressFile)" ]]; then
         previousAddress=$(head -1 "$(cdnAddressFile)")
     fi
-    cdnClearAddress
+    if ! cdnClearAddress; then
+        errorCard "CDN 入口地址清空失败，未刷新订阅"
+        return 1
+    fi
     statusCard "CDN 入口" "已清空，订阅将使用安装入口地址"
     cdnRefreshSubscriptionsOrRollback "${previousAddress}"
 }

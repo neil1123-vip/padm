@@ -9441,6 +9441,29 @@ runCdnAddressTransactionRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
+
+    local refreshCalls=0
+    subscribe() {
+        refreshCalls=$((refreshCalls + 1))
+        return 0
+    }
+    cdnWriteAddress() { return 1; }
+    set +e
+    setCDNEntryAddress <<<"new-cdn.example.com"
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${refreshCalls}" == "0" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
+
+    cdnClearAddress() { return 1; }
+    set +e
+    clearCDNEntryAddress
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${refreshCalls}" == "0" ]]
+    [[ "$(<"${cdnFile}")" == "old-cdn.example.com" ]]
 )
 
 runSingBoxSubscribeWriteRegression() {
