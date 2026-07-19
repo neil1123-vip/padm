@@ -1623,6 +1623,24 @@ unInstall() {
         menu
         exit 0
     fi
+    local nginxWasRunning=false
+    local uninstallStatus=0
+    nginxRunning && nginxWasRunning=true
+    unInstallApply "$@" || uninstallStatus=$?
+    if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
+        local restoreErrorLog
+        restoreErrorLog=$(padmFallbackTmpFilePath padm-nginx-uninstall-restore.log)
+        if ! PADM_NGINX_ERROR_LOG="${restoreErrorLog}" runCoreServiceActionAllowFailure handleNginx start restore; then
+            rm -f -- "${restoreErrorLog}" >/dev/null 2>&1 || true
+            errorCard "卸载后 Nginx 原运行状态恢复失败，请手动检查 Nginx 服务"
+            return 1
+        fi
+        rm -f -- "${restoreErrorLog}" >/dev/null 2>&1 || true
+    fi
+    return "${uninstallStatus}"
+}
+
+unInstallApply() {
     # checkBTPanel
     statusCard "卸载提示" "脚本不会删除 acme 相关配置" "如需删除请手动执行：rm -rf ${HOME:-/root}/.acme.sh"
     local uninstallFailed=false

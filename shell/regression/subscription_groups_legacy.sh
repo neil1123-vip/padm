@@ -8373,7 +8373,8 @@ runUninstallServiceStopFailureRegression() (
     local actionLog="${root}/actions.log"
     local errorLog="${root}/errors.log"
     local rcFile="${root}/uninstall.rc"
-    local mode shellRc
+    local mode shellRc rc
+    local nginxState=false
 
     mkdir -p "${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
@@ -8381,7 +8382,7 @@ runUninstallServiceStopFailureRegression() (
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     menu() { return 0; }
     pgrep() { return 1; }
-    nginxRunning() { return 1; }
+    nginxRunning() { [[ "${nginxState}" == "true" ]]; }
     xrayRunning() {
         [[ "${mode:-}" == "xray-still-running" ]]
     }
@@ -8419,10 +8420,13 @@ runUninstallServiceStopFailureRegression() (
     }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         if [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]]; then
             [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
             exit 0
         fi
+        [[ "$1" == "stop" ]] && nginxState=false
+        [[ "$1" == "start" ]] && nginxState=true
         return 0
     }
     handleXray() {
@@ -8575,6 +8579,30 @@ runUninstallServiceStopFailureRegression() (
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     }
 
+    runUninstallRestoresNginxCase() {
+        mode=success
+        nginxState=true
+        : >"${serviceLog}"
+        : >"${actionLog}"
+        : >"${errorLog}"
+        release=centos
+        coreInstallType=1
+        currentInstallProtocolType=",27,"
+        singBoxConfigPath="${root}/sing-box-conf/"
+        nginxStaticPath="${root}/static"
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        set +e
+        unInstall >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "0" ]]
+        [[ "${nginxState}" == "true" ]] || return 1
+        grep -qx 'nginx:stop:true' "${serviceLog}"
+        grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+        grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    }
+
     runUninstallStopFailureCase nginx-stop-fail
     runUninstallStopFailureCase xray-stop-fail
     runUninstallStopFailureCase sing-box-stop-fail
@@ -8582,6 +8610,7 @@ runUninstallServiceStopFailureRegression() (
     runUninstallStillRunningCase sing-box-still-running
     runUninstallNoNginxProtocolCase
     runUninstallWireGuardCleanupFailureCase
+    runUninstallRestoresNginxCase
 )
 
 runCleanLastInstallationConfigFailureRegression() (
