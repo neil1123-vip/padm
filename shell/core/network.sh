@@ -16,7 +16,7 @@ ufwConfiguredRulePresent() {
 
 firewalldRulePresent() {
     local rule="$1/${2:-tcp}"
-    firewall-cmd --zone=public --permanent --list-ports | tr ' ' '\n' | grep -Fxq "${rule}"
+    padmFirewalldPermanentCommand --list-ports | tr ' ' '\n' | grep -Fxq "${rule}"
 }
 
 padmFirewallStateFile() {
@@ -83,12 +83,12 @@ removeFirewallPortRule() {
         fi
         ;;
     firewalld)
-        command -v firewall-cmd >/dev/null 2>&1 || return 1
-        firewall-cmd --zone=public --permanent --list-ports >/dev/null 2>&1 || return 1
+        command -v firewall-cmd >/dev/null 2>&1 || command -v firewall-offline-cmd >/dev/null 2>&1 || return 1
+        padmFirewalldPermanentCommand --list-ports >/dev/null 2>&1 || return 1
         if firewalldRulePresent "${firewallPort}" "${type}"; then
-            firewall-cmd --zone=public --permanent --remove-port="${firewallPort}/${type}" || return 1
+            padmFirewalldPermanentCommand --remove-port="${firewallPort}/${type}" || return 1
         fi
-        firewall-cmd --reload || return 1
+        padmReloadFirewalldIfActive || return 1
         ;;
     iptables)
         command -v iptables >/dev/null 2>&1 || return 1
@@ -204,7 +204,12 @@ padmRunPortAllowTransaction() {
 }
 
 padmFirewalldForwardStateKey() {
-    printf 'forward:firewalld:udp:%s:%s:%s' "$1" "$2" "$3"
+    local ownedPorts=${4:-}
+    if (($# >= 4)); then
+        printf 'forward:firewalld:udp:%s:%s:%s:owned=%s' "$1" "$2" "$3" "${ownedPorts:--}"
+    else
+        printf 'forward:firewalld:udp:%s:%s:%s' "$1" "$2" "$3"
+    fi
 }
 
 padmFirewalldForwardStateKeyForTarget() {
@@ -214,13 +219,32 @@ padmFirewalldForwardStateKeyForTarget() {
     stateFile=$(padmFirewallStateFile) || return 1
     [[ -f "${stateFile}" ]] || return 1
     awk -F: -v targetPort="${targetPort}" '
-        NF == 6 && $1 == "forward" && $2 == "firewalld" && $3 == "udp" && $6 == targetPort {
+        (NF == 6 || (NF == 7 && $7 ~ /^owned=/)) && $1 == "forward" && $2 == "firewalld" && $3 == "udp" && $6 == targetPort {
             print
             found = 1
             exit
         }
         END { exit !found }
     ' "${stateFile}"
+}
+
+padmFirewalldPermanentCommand() {
+    if command -v firewall-cmd >/dev/null 2>&1 &&
+        { ! command -v systemctl >/dev/null 2>&1 || systemctl is-active --quiet firewalld; }; then
+        firewall-cmd --zone=public --permanent "$@"
+    elif command -v firewall-offline-cmd >/dev/null 2>&1; then
+        firewall-offline-cmd --zone=public "$@"
+    else
+        return 1
+    fi
+}
+
+padmReloadFirewalldIfActive() {
+    if command -v systemctl >/dev/null 2>&1 && ! systemctl is-active --quiet firewalld; then
+        return 0
+    fi
+    command -v firewall-cmd >/dev/null 2>&1 || return 1
+    firewall-cmd --reload
 }
 
 padmIptablesForwardStateKey() {
@@ -249,38 +273,52 @@ removeFirewalldForwardPortRange() {
     local start=$1
     local end=$2
     local targetPort=$3
+    local ownership=${4:-}
     local permanentRules
     local port rule listedRule
+    local -a ports=()
     local -a listedRules=()
     local -A existingRules=()
     local status=0
     validPortNumber "${start}" && validPortNumber "${end}" && validPortNumber "${targetPort}" && ((10#${start} <= 10#${end})) || return 1
-    command -v firewall-cmd >/dev/null 2>&1 || return 1
-    permanentRules=$(firewall-cmd --zone=public --permanent --list-forward-ports) || return 1
+    if [[ -z "${ownership}" ]]; then
+        for ((port = 10#${start}; port <= 10#${end}; port++)); do
+            ports+=("${port}")
+        done
+    elif [[ "${ownership}" == "owned=-" ]]; then
+        return 0
+    elif [[ "${ownership}" == owned=* ]]; then
+        IFS=, read -r -a ports <<<"${ownership#owned=}"
+        for port in "${ports[@]}"; do
+            validPortNumber "${port}" && ((10#${port} >= 10#${start} && 10#${port} <= 10#${end})) || return 1
+        done
+    else
+        return 1
+    fi
+    permanentRules=$(padmFirewalldPermanentCommand --list-forward-ports) || return 1
     read -r -a listedRules <<<"${permanentRules//$'\n'/ }"
     for listedRule in "${listedRules[@]}"; do
         existingRules["${listedRule}"]=1
     done
-    for ((port = 10#${start}; port <= 10#${end}; port++)); do
+    for port in "${ports[@]}"; do
         rule="port=${port}:proto=udp:toport=${targetPort}"
         if [[ -n "${existingRules[${rule}]:-}" ]]; then
-            firewall-cmd --zone=public --permanent --remove-forward-port="${rule}" || status=1
+            padmFirewalldPermanentCommand --remove-forward-port="${rule}" || status=1
         fi
     done
-    firewall-cmd --reload || status=1
+    padmReloadFirewalldIfActive || status=1
     return "${status}"
 }
 
 removeFirewalldMasqueradeRule() {
     local queryStatus
-    command -v firewall-cmd >/dev/null 2>&1 || return 1
-    if firewall-cmd --zone=public --permanent --query-masquerade >/dev/null 2>&1; then
-        firewall-cmd --zone=public --permanent --remove-masquerade || return 1
+    if padmFirewalldPermanentCommand --query-masquerade >/dev/null 2>&1; then
+        padmFirewalldPermanentCommand --remove-masquerade || return 1
     else
         queryStatus=$?
         [[ "${queryStatus}" == "1" ]] || return 1
     fi
-    firewall-cmd --reload
+    padmReloadFirewalldIfActive
 }
 
 removeIptablesPortHoppingRules() {
@@ -310,7 +348,7 @@ removeIptablesPortHoppingRules() {
 
 cleanupPadmFirewallRules() {
     local stateFile key rest type requestedPort
-    local kind backend ruleType start end targetPort extra
+    local kind backend ruleType start end targetPort ownership extra
     local hopType savedRules
     local remainingForwardPorts=
     local status=0
@@ -337,19 +375,19 @@ cleanupPadmFirewallRules() {
             requestedPort=${rest#*:}
             denyPort "${requestedPort}" "${type}" || status=1
         elif [[ "${key}" == forward:* ]]; then
-            IFS=: read -r kind backend ruleType start end targetPort extra <<<"${key}"
+            IFS=: read -r kind backend ruleType start end targetPort ownership extra <<<"${key}"
             case "${backend}" in
             firewalld)
                 if [[ "${kind}" != "forward" || "${ruleType}" != "udp" || -n "${extra}" ]]; then
                     status=1
-                elif removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}"; then
+                elif removeFirewalldForwardPortRange "${start}" "${end}" "${targetPort}" "${ownership}"; then
                     padmFirewallStateRemove "${key}" || status=1
                 else
                     status=1
                 fi
                 ;;
             iptables)
-                if [[ "${kind}" != "forward" || ( "${ruleType}" != "hysteria2" && "${ruleType}" != "tuic" ) || -n "${extra}" ]]; then
+                if [[ "${kind}" != "forward" || ( "${ruleType}" != "hysteria2" && "${ruleType}" != "tuic" ) || -n "${ownership}" || -n "${extra}" ]]; then
                     status=1
                 elif removeIptablesPortHoppingRules "${ruleType}"; then
                     padmFirewallStateRemove "${key}" || status=1
@@ -362,7 +400,7 @@ cleanupPadmFirewallRules() {
         fi
     done
     if [[ "${status}" == "0" ]] && padmFirewallStateHas masquerade:firewalld; then
-        if ! remainingForwardPorts=$(firewall-cmd --zone=public --permanent --list-forward-ports); then
+        if ! remainingForwardPorts=$(padmFirewalldPermanentCommand --list-forward-ports); then
             status=1
         elif [[ -z "${remainingForwardPorts//[[:space:]]/}" ]]; then
             removeFirewalldMasqueradeRule || status=1

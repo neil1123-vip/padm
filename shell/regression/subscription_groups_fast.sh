@@ -1351,6 +1351,7 @@ EOF
     (
         local firewalldLog="${TMP_DIR}/port-hopping-firewalld.log"
         local masquerade=false
+        local firewalldActive=true
         local removeFailurePort=
         local rc
         local port spec
@@ -1363,10 +1364,10 @@ EOF
         hysteria2PortHoppingStart=
         hysteria2PortHoppingEnd=
         systemctl() {
-            if [[ "$*" == "status firewalld" ]]; then
+            if [[ "$*" == "status firewalld" && "${firewalldActive}" == "true" ]]; then
                 printf 'Active: active (running)\n'
             fi
-            return 0
+            [[ "${firewalldActive}" == "true" ]]
         }
         sudo() { "$@"; }
         firewall-cmd() {
@@ -1382,6 +1383,11 @@ EOF
             set -- "${filteredArgs[@]}"
             case "$1" in
             --query-masquerade) [[ "${masquerade}" == "true" ]] ;;
+            --query-forward-port=*)
+                spec=${1#--query-forward-port=port=}
+                port=${spec%%:*}
+                [[ -n "${forwardPorts[${port}]:-}" ]]
+                ;;
             --reload) return 0 ;;
             --list-forward-ports)
                 for port in "${!forwardPorts[@]}"; do
@@ -1410,6 +1416,10 @@ EOF
                 ;;
             esac
         }
+        firewall-offline-cmd() {
+            printf 'offline:%s\n' "$*" >>"${firewalldLog}"
+            firewall-cmd "$@"
+        }
         allowPort() { padmFirewallStateAdd 'port:firewalld:udp:33000:33005'; }
         denyPort() {
             printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewalldLog}"
@@ -1418,13 +1428,34 @@ EOF
 
         addPortHopping hysteria2 16295
         padmFirewallStateHas masquerade:firewalld
-        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295'
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295:owned=33000,33001,33002,33003,33004,33005'
         deletePortHoppingRules hysteria2 33000 33005 16295
         grep -qx 'masquerade:add' "${firewalldLog}"
         grep -qx 'masquerade:remove' "${firewalldLog}"
         grep -qx 'deny:33000:33005:udp' "${firewalldLog}"
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+
+        forwardPorts[33002]=1
+        masquerade=true
+        inputCount=1
+        addPortHopping hysteria2 16295
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295:owned=33000,33001,33003,33004,33005'
+        deletePortHoppingRules hysteria2 33000 33005 16295
+        [[ -n "${forwardPorts[33002]:-}" ]]
+        [[ "${#forwardPorts[@]}" == "1" ]]
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        unset 'forwardPorts[33002]'
+        masquerade=false
+
+        inputCount=1
+        addPortHopping hysteria2 16295
+        firewalldActive=false
+        deletePortHoppingRules hysteria2 33000 33005 16295
+        [[ "${#forwardPorts[@]}" == "0" ]]
+        grep -q '^offline:' "${firewalldLog}"
+        [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
+        firewalldActive=true
 
         inputCount=1
         addPortHopping hysteria2 16295
@@ -1434,7 +1465,7 @@ EOF
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
-        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295'
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295:owned=33000,33001,33002,33003,33004,33005'
         deletePortHoppingRules hysteria2 33003 33003 16295
         [[ "${#forwardPorts[@]}" == "0" ]]
         grep -qx 'deny:33000:33005:udp' "${firewalldLog}"
