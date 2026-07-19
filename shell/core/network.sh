@@ -894,7 +894,7 @@ checkPort() {
     else
         autoRead stop_port_process_confirm "是否停止占用${port}端口的进程并继续安装？[y/n]:" stopPortProcessStatus
         if [[ "${stopPortProcessStatus}" == "y" ]]; then
-            lsof -ti "tcp:${port}" | xargs -r kill
+            lsof -t -a -i "tcp:${port}" -sTCP:LISTEN | xargs -r kill
             sleep 1
         else
             errorCard "已取消安装，请手动处理${port}端口占用后重新执行"

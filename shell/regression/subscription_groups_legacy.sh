@@ -4674,6 +4674,7 @@ runNetworkCheckReturnFailureRegression() (
     local serviceLog="${root}/port-services.log"
     local cleanLog="${root}/port-clean.log"
     local writeLog="${root}/port-write.log"
+    local listenerKillLog="${root}/listener-kill.log"
     local publicIpCurlLog="${root}/public-ip-curl.log"
     local firewallLog="${root}/firewall.log"
     local mode=
@@ -5082,15 +5083,22 @@ runNetworkCheckReturnFailureRegression() (
 
     portProcessKind=padm
     lsof() {
+        if [[ -s "${listenerKillLog}" && "$*" != "-t -a -i tcp:8443 -sTCP:LISTEN" ]]; then
+            return 1
+        fi
         case "$*" in
         "-i tcp:8443"|"-nP -i tcp:8443")
             case "${portProcessKind}" in
             padm) printf 'xray 123 root 3u IPv4 TCP *:8443 (LISTEN)\n' ;;
             nginx) printf 'nginx 123 root 3u IPv4 TCP *:8443 (LISTEN)\n' ;;
+            other)
+                printf 'listener 123 root 3u IPv4 TCP *:8443 (LISTEN)\n'
+                printf 'client 456 root 4u IPv4 TCP 10.0.0.2:50000->198.51.100.10:8443 (ESTABLISHED)\n'
+                ;;
             none) return 1 ;;
             esac
             ;;
-        "-ti tcp:8443")
+        "-t -a -i tcp:8443 -sTCP:LISTEN")
             printf '123\n'
             ;;
         *)
@@ -5132,6 +5140,17 @@ runNetworkCheckReturnFailureRegression() (
     runCheckPortStopFailureCase nginx-stop-fail nginx
     grep -qx 'nginx:stop:true' "${serviceLog}"
     ! grep -q '^systemctl:' "${serviceLog}"
+
+    xargs() {
+        [[ "$1" == "-r" && "$2" == "kill" ]] || return 1
+        cat >"${listenerKillLog}"
+    }
+    portProcessKind=other
+    : >"${listenerKillLog}"
+    checkPort 8443 >/dev/null 2>&1
+    grep -qx '123' "${listenerKillLog}"
+    ! grep -q '456' "${listenerKillLog}"
+    unset -f xargs
 
     local singBoxState=true
     local xrayState=true
