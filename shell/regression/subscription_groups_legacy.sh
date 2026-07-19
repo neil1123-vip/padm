@@ -11741,6 +11741,7 @@ runRealityStreamDisableRegression() {
     local serviceMode=success
     local refreshMode=success
     local serviceLog="${TMP_DIR}/reality-stream-disable-services.log"
+    local firewallLog="${TMP_DIR}/reality-stream-disable-firewall.log"
     local errorLog="${TMP_DIR}/reality-stream-disable-errors.log"
     local originalVision originalXHTTP originalState originalStreamConf originalNginxConf
     mkdir -p "${fakeBin}" "${streamDir}" "${streamTmpRoot}"
@@ -11765,6 +11766,7 @@ SH
     export PADM_REALITY_STREAM_VISION_CONFIG_FILE="${visionFile}"
     export PADM_REALITY_STREAM_XHTTP_CONFIG_FILE="${xhttpFile}"
     : >"${serviceLog}"
+    : >"${firewallLog}"
     : >"${errorLog}"
 
     reloadCore() {
@@ -11787,6 +11789,10 @@ SH
     realityStreamRefreshSubscribeIfInstalled() {
         printf 'refresh\n' >>"${serviceLog}"
         [[ "${refreshMode}" == "success" ]]
+    }
+
+    denyPort() {
+        printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
     }
 
     errorCard() {
@@ -11816,6 +11822,7 @@ EOF
         originalState=$(<"${stateFile}")
         originalStreamConf=$(<"${streamConf}")
         originalNginxConf=$(<"${nginxMainConf}")
+        : >"${firewallLog}"
     }
 
     writeRealityStreamFixture
@@ -11894,17 +11901,21 @@ EOF
     [[ ! -e "${stateFile}" && ! -e "${streamConf}" ]]
     grep -qx 'refresh' "${serviceLog}"
     grep -q 'Reality 443 共存分流已关闭，但订阅刷新失败' "${errorLog}"
+    [[ ! -s "${firewallLog}" ]]
 
     writeRealityStreamFixture
+    jq '.firewall_owned = true | .protocols.vision.restore_port = 8443 | .protocols.xhttp.restore_port = 9443' "${stateFile}" >"${stateFile}.tmp"
+    mv "${stateFile}.tmp" "${stateFile}"
     serviceMode=success
     refreshMode=success
     : >"${serviceLog}"
     export PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE=success
     disableRealityStreamSplit
-    jq -e '(.inbounds[0].listen | not) and .inbounds[0].port == 443' "${visionFile}" >/dev/null
-    jq -e '.inbounds[0].listen == "0.0.0.0" and .inbounds[0].port == 443' "${xhttpFile}" >/dev/null
+    jq -e '(.inbounds[0].listen | not) and .inbounds[0].port == 8443' "${visionFile}" >/dev/null
+    jq -e '.inbounds[0].listen == "0.0.0.0" and .inbounds[0].port == 9443' "${xhttpFile}" >/dev/null
     [[ ! -e "${stateFile}" ]]
     [[ ! -e "${streamConf}" ]]
+    grep -qx 'deny:443:tcp' "${firewallLog}"
     ! grep -q 'padm stream include start' "${nginxMainConf}"
     if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
@@ -11928,7 +11939,9 @@ runRealityStreamEnableRegression() {
     local streamConf="${streamDir}/padm-reality.conf"
     local nginxMainConf="${streamDir}/nginx.conf"
     local serviceMode=success
+    local refreshMode=success
     local serviceLog="${TMP_DIR}/reality-stream-enable-services.log"
+    local firewallLog="${TMP_DIR}/reality-stream-enable-firewall.log"
     local errorLog="${TMP_DIR}/reality-stream-enable-errors.log"
     local keptBackup
     local originalVision originalXHTTP originalNginxConf
@@ -11984,6 +11997,7 @@ SH
     AUTO_REALITY_STREAM_WEBSITE_PORT=8443
     AUTO_REALITY_STREAM_VISION_PORT=2443
     : >"${serviceLog}"
+    : >"${firewallLog}"
     : >"${errorLog}"
 
     local nginxInstallMarker="${streamDir}/nginx-install.marker"
@@ -12025,9 +12039,20 @@ SH
         return 0
     }
 
+    allowPort() {
+        printf 'allow:%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"
+        PADM_LAST_ALLOW_PORT_ADDED=true
+        padmTrackPortAllowTransactionKey "port:ufw:${2:-tcp}:$1"
+    }
+
+    padmRollbackPortAllowTransaction() {
+        printf 'rollback\n' >>"${firewallLog}"
+        PADM_PORT_ALLOW_TRANSACTION_KEYS=
+    }
+
     realityStreamRefreshSubscribeIfInstalled() {
         printf 'refresh\n' >>"${serviceLog}"
-        return 0
+        [[ "${refreshMode}" == "success" ]]
     }
 
     errorCard() {
@@ -12058,6 +12083,7 @@ events {}
 http {}
 EOF
         rm -f "${stateFile}" "${streamConf}"
+        : >"${firewallLog}"
         originalVision=$(<"${visionFile}")
         originalXHTTP=$(<"${xhttpFile}")
         originalNginxConf=$(<"${nginxMainConf}")
@@ -12078,6 +12104,8 @@ EOF
     [[ ! -e "${stateFile}" ]]
     [[ ! -e "${streamConf}" ]]
     [[ ! -e "${streamConf}.tmp" ]]
+    grep -qx 'allow:443:tcp' "${firewallLog}"
+    grep -qx 'rollback' "${firewallLog}"
 
     writeRealityStreamEnableFixture
     export PADM_FAKE_REALITY_STREAM_NGINX_VALIDATE_MODE=success
@@ -12137,6 +12165,8 @@ EOF
     [[ ! -e "${streamConf}" ]]
     grep -q '^restart:nginx:service-fail$' "${serviceLog}"
     ! grep -q '^refresh$' "${serviceLog}"
+    grep -qx 'allow:443:tcp' "${firewallLog}"
+    grep -qx 'rollback' "${firewallLog}"
     if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
         return 1
     fi
@@ -12167,12 +12197,30 @@ EOF
 
     writeRealityStreamEnableFixture
     serviceMode=success
+    refreshMode=fail
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    set +e
+    configureRealityStreamSplit >/dev/null 2>&1
+    enableStatus=$?
+    set -e
+    [[ "${enableStatus}" == "1" ]]
+    [[ -f "${stateFile}" && -f "${streamConf}" ]]
+    grep -qx 'allow:443:tcp' "${firewallLog}"
+    ! grep -qx 'rollback' "${firewallLog}"
+    grep -q 'Reality 443 共存分流已生效，但订阅刷新失败' "${errorLog}"
+
+    writeRealityStreamEnableFixture
+    serviceMode=success
+    refreshMode=success
     : >"${serviceLog}"
     : >"${errorLog}"
     export PADM_FAKE_REALITY_STREAM_XRAY_VALIDATE_MODE=success
     configureRealityStreamSplit
     jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443' "${visionFile}" >/dev/null
-    jq -e '.enabled == true and .default_protocol == "vision" and .protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2443' "${stateFile}" >/dev/null
+    jq -e '.enabled == true and .firewall_owned == true and .default_protocol == "vision" and .protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2443' "${stateFile}" >/dev/null
+    grep -qx 'allow:443:tcp' "${firewallLog}"
+    ! grep -qx 'rollback' "${firewallLog}"
     selectCustomInstallType=1
     nginxConfigPath="${streamDir}/no-subscription/"
     subscriptionWireGuardControlEnabled() { return 1; }

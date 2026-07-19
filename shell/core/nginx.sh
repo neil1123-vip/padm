@@ -486,7 +486,7 @@ showRealityStreamSplitStatus() {
 }
 
 
-configureRealityStreamSplit() {
+configureRealityStreamSplitApply() {
     if [[ "${coreInstallType}" != "1" ]]; then
         statusCard "Reality 443 共存不可用" "443 共存分流当前仅支持 Xray Reality Vision/XHTTP"
         return 1
@@ -531,8 +531,9 @@ configureRealityStreamSplit() {
         return 1
     fi
 
-    local websitePort visionInternalPort= xhttpInternalPort= currentVisionPort currentXHTTPPort stateFile publicPort defaultProtocol defaultInternalPort backupDir
+    local websitePort visionInternalPort= xhttpInternalPort= currentVisionPort currentXHTTPPort stateFile publicPort defaultProtocol defaultInternalPort backupDir firewallOwned=false
     publicPort=443
+    stateFile=$(realityStreamSplitStateFile) || return 1
     currentVisionPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamVisionConfigFile)" 2>/dev/null)
     currentXHTTPPort=$(jq -r '.inbounds[0].port // empty' "$(realityStreamXHTTPConfigFile)" 2>/dev/null)
     padmCreateTempPath backupDir -d "$(realityStreamEnableBackupTemplate)" || return 1
@@ -541,6 +542,15 @@ configureRealityStreamSplit() {
         errorCard "无法创建 Reality 443 共存分流配置备份"
         return 1
     fi
+    if jq -e '.firewall_owned == true' "${stateFile}" >/dev/null 2>&1; then
+        firewallOwned=true
+    fi
+    if ! allowPort "${publicPort}"; then
+        removeRealityStreamBackup "${backupDir}"
+        errorCard "无法开放 Reality 443 共存分流端口"
+        return 1
+    fi
+    [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && firewallOwned=true
 
     if currentProtocolHas 1 && currentProtocolHas 2; then
         echoContent title "\n┌─ 默认 Reality 后端 ───────────────────────────────"
@@ -614,9 +624,9 @@ configureRealityStreamSplit() {
         return 1
     fi
 
-    stateFile=$(realityStreamSplitStateFile)
     if ! jq -n \
         --argjson enabled true \
+        --argjson firewallOwned "${firewallOwned}" \
         --arg publicPort "${publicPort}" \
         --arg websitePort "${websitePort}" \
         --arg defaultProtocol "${defaultProtocol}" \
@@ -627,6 +637,7 @@ configureRealityStreamSplit() {
         --arg domains "${websiteDomains}" '
         {
             enabled: $enabled,
+            firewall_owned: $firewallOwned,
             public_port: ($publicPort | tonumber),
             website_backend_port: ($websitePort | tonumber),
             default_protocol: $defaultProtocol,
@@ -649,6 +660,10 @@ configureRealityStreamSplit() {
         return 1
     fi
     realityStreamApplyServicesOrRollback "${backupDir}" "Reality 443 共存分流服务应用失败" || return 1
+}
+
+configureRealityStreamSplit() {
+    padmRunPortAllowTransaction configureRealityStreamSplitApply "$@" || return $?
     if ! realityStreamRefreshSubscribeIfInstalled; then
         errorCard "Reality 443 共存分流已生效，但订阅刷新失败"
         return 1
@@ -657,12 +672,15 @@ configureRealityStreamSplit() {
 }
 
 disableRealityStreamSplit() {
-    local stateFile confFile visionPublicPort xhttpPublicPort backupDir
+    local stateFile confFile visionPublicPort xhttpPublicPort backupDir firewallOwned=false
     stateFile=$(realityStreamSplitStateFile)
     confFile=$(realityStreamSplitConfFile)
     if ! realityStreamSplitEnabled; then
         statusCard "Reality 443 共存" "分流未启用"
         return
+    fi
+    if jq -e '.firewall_owned == true' "${stateFile}" >/dev/null 2>&1; then
+        firewallOwned=true
     fi
 
     padmCreateTempPath backupDir -d "$(realityStreamDisableBackupTemplate)" || return 1
@@ -700,6 +718,10 @@ disableRealityStreamSplit() {
         return 1
     fi
     realityStreamApplyServicesOrRollback "${backupDir}" "关闭 Reality 443 共存分流服务应用失败" || return 1
+    if [[ "${firewallOwned}" == "true" && "${visionPublicPort}" != "443" && "${xhttpPublicPort}" != "443" ]] && ! denyPort 443; then
+        errorCard "Reality 443 共存分流已关闭，但 443 防火墙规则回收失败"
+        return 1
+    fi
     if ! realityStreamRefreshSubscribeIfInstalled; then
         errorCard "Reality 443 共存分流已关闭，但订阅刷新失败"
         return 1
