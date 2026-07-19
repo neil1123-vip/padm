@@ -1168,7 +1168,7 @@ subscriptionControlRestoreAppliedPlan() {
     fi
 }
 
-subscriptionControlApplySync() {
+subscriptionControlApplySyncUnlocked() {
     local payload=$1
     local dryRun
     local desiredUsers
@@ -1300,6 +1300,10 @@ subscriptionControlApplySync() {
     fi
     subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
     jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
+}
+
+subscriptionControlApplySync() {
+    subscriptionGroupsWithLock subscriptionControlApplySyncUnlocked "$@"
 }
 
 handleSubscriptionControl() {

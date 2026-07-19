@@ -1024,7 +1024,7 @@ applySubscriptionQuotaPlanAccounts() {
     return "${rc}"
 }
 
-applySubscriptionQuotaPlanTransaction() {
+applySubscriptionQuotaPlanTransactionUnlocked() {
     local quotaPlan=$1
     local backupFile
     local quotaError=
@@ -1065,6 +1065,10 @@ applySubscriptionQuotaPlanTransaction() {
         "订阅状态" \
         "备份文件: ${backupFile}"
     return 1
+}
+
+applySubscriptionQuotaPlanTransaction() {
+    subscriptionGroupsWithLock applySubscriptionQuotaPlanTransactionUnlocked "$@"
 }
 
 executeSubscriptionQuotaPlanMenu() {

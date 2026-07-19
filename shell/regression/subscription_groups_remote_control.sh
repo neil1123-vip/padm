@@ -625,6 +625,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     local healthResponse
     local syncResponse
     local subscribeResponse
+    local syncLockMarker="${controlRoot}/sync-lock-observed"
 
     mkdir -p "${controlRoot}/state"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/state"
@@ -648,6 +649,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     }
     eval "$(declare -f subscriptionSyncPlanFromDesiredUsers | sed '1s/^subscriptionSyncPlanFromDesiredUsers/originalSubscriptionSyncPlanFromDesiredUsers/')"
     subscriptionSyncPlanFromDesiredUsers() {
+        [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] && : >"${syncLockMarker}"
         printf '{"create":[],"remove":[]}'
     }
     subscriptionControlRenderSubscribeAccount() {
@@ -660,6 +662,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' | jq -c .)
     [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":false'* ]]
     [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
+    [[ -e "${syncLockMarker}" ]]
 
     subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}' | jq -c .)
     [[ "${subscribeResponse}" == *'"ok":true'*'"account":"team_a"'* ]]

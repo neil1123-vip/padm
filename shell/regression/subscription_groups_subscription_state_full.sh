@@ -505,6 +505,7 @@ runSubscriptionGroupStateQuotaTransactionRollbackRegression() {
         local quotaTxStatus
         local quotaTxStateFile
         local quotaTxBackupDir
+        local quotaTxLockMarker="${quotaTxRoot}/lock-observed"
         mkdir -p "${quotaTxRoot}/groups"
         export PADM_SUBSCRIPTION_GROUPS_DIR="${quotaTxRoot}/groups"
         quotaTxStateFile=$(subscriptionGroupsFile)
@@ -515,6 +516,7 @@ JSON
         quotaTxPlan=$(subscriptionQuotaDryRunPlan)
         createSubscriptionGroupsBackup() {
             local backupFile="${quotaTxBackupDir}/groups-current.json"
+            [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] && : >"${quotaTxLockMarker}"
             mkdir -p "${quotaTxBackupDir}" || return 1
             cp "${quotaTxStateFile}" "${backupFile}" || return 1
             printf '%s\n' "${backupFile}"
@@ -532,6 +534,7 @@ JSON
         quotaTxStatus=$?
         set -e
         [[ "${quotaTxStatus}" == "1" ]]
+        [[ -e "${quotaTxLockMarker}" ]]
         jq -e '.groups[0].user_groups[] | select(.id == "team-a" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
         [[ "${SUBSCRIPTION_SYNC_TRANSACTION_ERROR}" == *"已恢复旧订阅状态"* ]]
         if regressionFindHasMatches "${quotaTxRoot}/groups/backups" -maxdepth 1 -type f -name 'groups-*.json'; then
