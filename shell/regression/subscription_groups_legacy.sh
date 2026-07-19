@@ -10042,7 +10042,7 @@ runSingBoxPortFailureRegression() (
 
     : >"${allowLog}"
     allowPort() {
-        printf '%s\n' "$1" >>"${allowLog}"
+        printf '%s:%s\n' "$1" "${2:-tcp}" >>"${allowLog}"
         return 0
     }
 
@@ -10056,6 +10056,11 @@ runSingBoxPortFailureRegression() (
         return 1
     fi
     [[ "${#result[@]}" == "0" ]]
+
+    : >"${allowLog}"
+    readSingBoxPortResult result 39778 false tcp
+    [[ "${result[-1]}" == "39778" ]]
+    [[ "$(<"${allowLog}")" == "39778:tcp" ]]
 
     mkdir -p "${subscribeRoot}/fake-bin" "${subscribeRoot}/nginx" "${subscribeRoot}/tls" "${subscribeRoot}/static"
     cat >"${subscribeRoot}/fake-bin/nginx" <<'SH'

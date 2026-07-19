@@ -302,7 +302,7 @@ installSubscribeApply() {
         fi
         echoContent title "开始配置订阅，请输入订阅的端口"
 
-        readSingBoxPortResult result "${AUTO_SUBSCRIBE_PORT:-${subscribePort}}" false || return 1
+        readSingBoxPortResult result "${AUTO_SUBSCRIBE_PORT:-${subscribePort}}" false tcp || return 1
         PADM_NGINX_BLOG_REINSTALL_PROMPT=false nginxBlog || return 1
         echo
         subscribeServerName=$(resolveSubscribeServerName || true)

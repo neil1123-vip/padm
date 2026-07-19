@@ -444,10 +444,21 @@ singBoxMergeConfig() {
 initSingBoxPort() {
     local port=$1
     local promptHistory=${2:-true}
+    local transport=${3:-tcp+udp}
     local historyPort=
+    case "${transport}" in
+    tcp | udp | tcp+udp) ;;
+    *) return 1 ;;
+    esac
     if [[ -n "${port}" && "${promptHistory}" != "true" ]]; then
         if validPortNumber "${port}"; then
-            allowPortTcpAndUdp "${port}" || return 1
+            if [[ "${transport}" == "tcp+udp" ]]; then
+                allowPortTcpAndUdp "${port}" || return 1
+            elif [[ "${transport}" == "tcp" ]]; then
+                allowPort "${port}" || return 1
+            else
+                allowPort "${port}" udp || return 1
+            fi
             echo "${port}"
             return
         else
@@ -473,7 +484,13 @@ initSingBoxPort() {
             port=$((RANDOM % 50001 + 10000))
         fi
         if validPortNumber "${port}"; then
-            allowPortTcpAndUdp "${port}" || return 1
+            if [[ "${transport}" == "tcp+udp" ]]; then
+                allowPortTcpAndUdp "${port}" || return 1
+            elif [[ "${transport}" == "tcp" ]]; then
+                allowPort "${port}" || return 1
+            else
+                allowPort "${port}" udp || return 1
+            fi
             echo "${port}"
         else
             corePortInputErrorCard
@@ -486,6 +503,7 @@ readSingBoxPortResult() {
     local -n resultRef=$1
     local port=${2:-}
     local promptHistory=${3:-true}
+    local transport=${4:-tcp+udp}
     local outputFile stateFile beforeState key backend type
 
     resultRef=()
@@ -494,7 +512,7 @@ readSingBoxPortResult() {
         beforeState=$(<"${stateFile}")
     fi
     padmCreateTmpRootPath outputFile padm-sing-box-port.XXXXXX || return 1
-    if ! initSingBoxPort "${port}" "${promptHistory}" >"${outputFile}"; then
+    if ! initSingBoxPort "${port}" "${promptHistory}" "${transport}" >"${outputFile}"; then
         padmRemoveCleanupPath "${outputFile}"
         return 1
     fi
