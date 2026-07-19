@@ -539,6 +539,24 @@ showLastInstallationConfig() {
 
 # 清空上次安装配置
 cleanLastInstallationConfig() {
+    local nginxWasRunning=false
+    local cleanStatus=0
+    nginxRunning && nginxWasRunning=true
+    cleanLastInstallationConfigApply "$@" || cleanStatus=$?
+    if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
+        local restoreErrorLog
+        restoreErrorLog=$(padmFallbackTmpFilePath padm-nginx-clean-restore.log)
+        if ! PADM_NGINX_ERROR_LOG="${restoreErrorLog}" runCoreServiceActionAllowFailure handleNginx start restore; then
+            rm -f -- "${restoreErrorLog}" >/dev/null 2>&1 || true
+            errorCard "清空配置后 Nginx 原运行状态恢复失败，请手动检查 Nginx 服务"
+            return 1
+        fi
+        rm -f -- "${restoreErrorLog}" >/dev/null 2>&1 || true
+    fi
+    return "${cleanStatus}"
+}
+
+cleanLastInstallationConfigApply() {
     local oldPorts
     local xrayOpenRcServiceFile=${PADM_XRAY_OPENRC_SERVICE_FILE:-/etc/init.d/xray}
     local singBoxOpenRcServiceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}

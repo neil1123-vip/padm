@@ -8620,6 +8620,7 @@ runCleanLastInstallationConfigFailureRegression() (
     local errorLog="${root}/error.log"
     local installLog="${root}/install.log"
     local mode rc
+    local nginxState=true
 
     mkdir -p "${root}/nginx" "${root}/static"
     printf 'managed-static\n' >"${root}/static/check"
@@ -8658,9 +8659,13 @@ runCleanLastInstallationConfigFailureRegression() (
     }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" ]] && return 1
+        [[ "$1" == "stop" ]] && nginxState=false
+        [[ "$1" == "start" ]] && nginxState=true
         return 0
     }
+    nginxRunning() { [[ "${nginxState}" == "true" ]]; }
     cleanAgentNginxConf() {
         printf 'clean-agent\n' >>"${cleanupLog}"
         [[ "${mode}" != "clean-fail" ]]
@@ -8747,6 +8752,9 @@ runCleanLastInstallationConfigFailureRegression() (
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'sing-box:stop:true' "${serviceLog}"
     grep -qx 'nginx:stop:true' "${serviceLog}"
+    grep -qx 'nginx:start:true' "${serviceLog}" || return 1
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+    [[ "${nginxState}" == "true" ]] || return 1
     grep -qx 'clean-agent' "${cleanupLog}"
     ! grep -q '^clean-dir:' "${cleanupLog}"
     ! grep -q '^read-install-type$' "${cleanupLog}"
