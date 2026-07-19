@@ -94,7 +94,7 @@ serviceQueueRestart() {
 }
 
 serviceQueueApply() {
-    local entry serviceName action
+    local entry serviceName action nginxWasRunning
     local status=0
     local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
     SERVICE_QUEUE_ALLOW_FAILURE=true
@@ -105,8 +105,14 @@ serviceQueueApply() {
         case "${serviceName}" in
         nginx)
             if [[ "${action}" == "restart" ]]; then
+                nginxWasRunning=false
+                nginxRunning && nginxWasRunning=true
                 handleNginx stop || status=1
-                handleNginx start || status=1
+                if [[ "${nginxWasRunning}" == "true" ]]; then
+                    handleNginx start restore || status=1
+                else
+                    handleNginx start || status=1
+                fi
             else
                 handleNginx "${action}" || status=1
             fi
@@ -184,7 +190,7 @@ handleNginx() {
     local nginxErrorLog="${PADM_NGINX_ERROR_LOG:-/etc/padm/nginx_error.log}"
     local selinuxRetryDone=false
 
-    if [[ "$1" == "start" ]] && nginxRuntimeRequired && ! nginxRunning; then
+    if [[ "$1" == "start" ]] && { [[ "${2:-}" == "restore" ]] || nginxRuntimeRequired; } && ! nginxRunning; then
         while true; do
             if [[ "${release}" == "alpine" ]]; then
                 rc-service nginx start 2>"${nginxErrorLog}"

@@ -337,7 +337,7 @@ subscriptionWireGuardRestoreStateAndConfig() {
             if nginxRunning && ! runCoreServiceActionAllowFailure handleNginx stop; then
                 restoreFailed=true
             fi
-            if ! nginxRunning && ! runCoreServiceActionAllowFailure handleNginx start; then
+            if ! nginxRunning && ! runCoreServiceActionAllowFailure handleNginx start restore; then
                 restoreFailed=true
             fi
         elif nginxRunning; then

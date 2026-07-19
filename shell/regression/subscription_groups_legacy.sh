@@ -5352,6 +5352,7 @@ EOF
     }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         [[ "$1" == "stop" ]] && nginxState=false
         [[ "$1" == "start" ]] && nginxState=true
         return 0
@@ -5376,6 +5377,7 @@ EOF
     grep -qx 'sing-box:start:true' "${serviceLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
 
     mode=success
     singBoxState=true
@@ -5909,6 +5911,7 @@ $1:restart"
     showAccounts() { printf 'reached\n' >"${reachedFile}"; return 0; }
     handleNginx() {
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
         [[ "$1" == "stop" ]] && nginxRuntimeState=false
@@ -5989,6 +5992,7 @@ $1:restart"
     [[ "${rc}" == "1" ]]
     grep -qx 'nginx:stop:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     grep -qx 'wg-refresh' "${callLog}"
     ! grep -q '^installXray:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
@@ -7562,6 +7566,9 @@ SH
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     handleNginx start >/dev/null 2>&1
     [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "false" ]]
+    handleNginx start restore >/dev/null 2>&1
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]] || return 1
+    handleNginx stop >/dev/null 2>&1
     : >"${nginxConfigPath}subscribe.conf"
     handleNginx start >/dev/null 2>&1
     [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
@@ -7575,6 +7582,11 @@ SH
     subscriptionWireGuardControlEnabled() { return 0; }
     handleNginx start >/dev/null 2>&1
     [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
+    subscriptionWireGuardControlEnabled() { return 1; }
+    SERVICE_ACTIONS=
+    serviceQueueRestart nginx
+    serviceQueueApply >/dev/null 2>&1
+    [[ "$(<"${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]] || return 1
     protocolSelectionSkipsNginx() { return 1; }
     subscriptionWireGuardControlEnabled() { return 1; }
 
@@ -7737,6 +7749,7 @@ runUninstallWireGuardCleanupRegression() (
     nginxRunning() { [[ "${nginxRuntimeState}" == "true" ]]; }
     handleNginx() {
         actions+="nginx:$1:${SERVICE_QUEUE_ALLOW_FAILURE:-}"$'\n'
+        [[ -n "${2:-}" ]] && actions+="nginx-mode:$*"$'\n'
         [[ "$1" == "start" ]] && nginxRuntimeState=true
         [[ "$1" == "stop" ]] && nginxRuntimeState=false
         return 0
@@ -7749,6 +7762,7 @@ runUninstallWireGuardCleanupRegression() (
     [[ "${nginxRuntimeState}" == "true" ]]
     grep -qx 'nginx:stop:true' <<<"${actions}"
     grep -qx 'nginx:start:true' <<<"${actions}"
+    grep -qx 'nginx-mode:start restore' <<<"${actions}" || return 1
     [[ ! -e "${nginxBackupDir}" ]]
 
     printf 'old-nginx-after-state-failure\n' >"${nginxTarget}"
@@ -9836,6 +9850,7 @@ SH
     nginxRunning() { [[ "${runtimeRunning}" == "true" ]]; }
     handleNginx() {
         printf '%s:%s:%s\n' "${mode}" "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ -n "${2:-}" ]] && printf '%s:nginx-mode:%s\n' "${mode}" "$*" >>"${serviceLog}"
         if [[ "$1" == "stop" ]]; then
             runtimeRunning=false
             return 0
@@ -9907,6 +9922,7 @@ SH
     [[ "${bootCalls}" == "1" ]]
     grep -qx 'reload:stop:true' "${serviceLog}"
     grep -qx 'reload:start:true' "${serviceLog}"
+    grep -qx 'reload:nginx-mode:start restore' "${serviceLog}" || return 1
     grep -q '订阅 Nginx 服务重载失败' "${errorLog}"
     grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
     [[ "${runtimeRunning}" == "true" ]]
@@ -18625,6 +18641,7 @@ runTlsRenewalFailurePropagationRegression() (
             return 0
         fi
         printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ -n "${2:-}" ]] && printf 'nginx-mode:%s\n' "$*" >>"${serviceLog}"
         [[ "${mode}" == "nginx-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "nginx-start-fail" && "$1" == "start" ]] && return 1
         [[ "$1" == "start" ]] && nginxState=true || nginxState=false
@@ -18771,6 +18788,7 @@ runTlsRenewalFailurePropagationRegression() (
     ! grep -q '^sudo:.*--installcert ' "${commandLog}"
     grep -qx 'xray:start:true' "${serviceLog}"
     grep -qx 'nginx:start:true' "${serviceLog}"
+    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
     ! grep -qx 'reload' "${serviceLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 

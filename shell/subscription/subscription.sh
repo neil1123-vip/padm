@@ -223,9 +223,10 @@ resolveSubscribeServerName() {
 
 runSubscribeNginxAction() {
     local action=$1
+    shift
     local previousAllowFailure="${SERVICE_QUEUE_ALLOW_FAILURE:-}"
     SERVICE_QUEUE_ALLOW_FAILURE=true
-    handleNginx "${action}"
+    handleNginx "${action}" "$@"
     local rc=$?
     SERVICE_QUEUE_ALLOW_FAILURE="${previousAllowFailure}"
     return "${rc}"
@@ -242,7 +243,7 @@ rollbackSubscribeNginxInstall() {
     restoreCoreStartupServiceInstall "${backupDir}" nginx "${nginxWasEnabled}" || installStateRestored=false
 
     if [[ "${nginxWasRunning}" == "true" ]]; then
-        if ! nginxRunning && ! runSubscribeNginxAction start; then
+        if ! nginxRunning && ! runSubscribeNginxAction start restore; then
             serviceRestored=false
         fi
     elif nginxRunning && ! runSubscribeNginxAction stop; then

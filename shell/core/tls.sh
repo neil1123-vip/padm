@@ -594,7 +594,7 @@ restoreServicesAfterTLSRenewal() {
 
     checkPortOpenRestoreCoreServiceState "${xrayWasRunning}" xrayRunning handleXray || status=1
     checkPortOpenRestoreCoreServiceState "${singBoxWasRunning}" singBoxRunning handleSingBox || status=1
-    checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx || status=1
+    checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx restore || status=1
     return "${status}"
 }
 

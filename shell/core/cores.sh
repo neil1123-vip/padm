@@ -2232,7 +2232,7 @@ installXrayRealityApply() {
     if [[ -n "${installFailure}" ]]; then
         SERVICE_ACTIONS="${previousServiceActions}"
         if [[ "${nginxWasRunning}" == "true" ]]; then
-            nginxRunning || runCoreServiceActionAllowFailure handleNginx start || restoreFailed=true
+            nginxRunning || runCoreServiceActionAllowFailure handleNginx start restore || restoreFailed=true
         elif nginxRunning; then
             runCoreServiceActionAllowFailure handleNginx stop || restoreFailed=true
         fi

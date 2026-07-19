@@ -804,8 +804,9 @@ checkPortOpenRestoreCoreServiceState() {
     local wasRunning=$1
     local runningFn=$2
     local actionFn=$3
+    shift 3
     if [[ "${wasRunning}" == "true" ]]; then
-        "${runningFn}" || runCoreServiceActionAllowFailure "${actionFn}" start
+        "${runningFn}" || runCoreServiceActionAllowFailure "${actionFn}" start "$@"
     elif "${runningFn}"; then
         runCoreServiceActionAllowFailure "${actionFn}" stop
     fi
@@ -828,10 +829,10 @@ checkPortOpenAbort() {
             runCoreServiceActionAllowFailure handleNginx stop || status=1
         fi
         if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
-            runCoreServiceActionAllowFailure handleNginx start || status=1
+            runCoreServiceActionAllowFailure handleNginx start restore || status=1
         fi
     else
-        checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx || status=1
+        checkPortOpenRestoreCoreServiceState "${nginxWasRunning}" nginxRunning handleNginx restore || status=1
     fi
     if [[ "${status}" -eq 0 ]]; then
         padmRemoveCleanupPath "${backupDir}"

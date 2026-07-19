@@ -681,7 +681,8 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
     serviceQueueApply() {
         actions+="queue-apply"$'\n'
         nginxRuntimeState=false
-        [[ "${queueFail}" != "true" ]]
+        [[ "${queueFail}" != "true" ]] || return 1
+        nginxRuntimeState=true
     }
     handleNginx() {
         actions+="nginx:$1"$'\n'
@@ -701,7 +702,7 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
     disableSubscriptionWireGuardControl >/dev/null
     subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
     [[ ! -e "${nginxTarget}" ]]
-    [[ "${nginxRuntimeState}" == "false" ]]
+    [[ "${nginxRuntimeState}" == "true" ]]
     grep -qx 'stop-wireguard' <<<"${actions}"
     grep -qx 'queue:nginx:restart' <<<"${actions}"
     grep -qx 'queue-apply' <<<"${actions}"
