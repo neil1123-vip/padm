@@ -1118,6 +1118,7 @@ runPortHoppingWithoutPersistentRegression() (
     local allowPortShouldFail=false
     local downloadCount=0
     local inputCount=0
+    local rangeMode=invalid-hyphen
     local iptablesDeleteShouldFail=false
     local iptablesSaveShouldFail=false
     local rc
@@ -1149,7 +1150,9 @@ runPortHoppingWithoutPersistentRegression() (
             ;;
         port_hopping_range)
             inputCount=$((inputCount + 1))
-            if [[ "${inputCount}" == "1" ]]; then
+            if [[ "${rangeMode}" == "single" && "${inputCount}" == "1" ]]; then
+                printf -v "$3" '%s' '33001'
+            elif [[ "${inputCount}" == "1" ]]; then
                 printf -v "$3" '%s' '33000-33005x'
             else
                 printf -v "$3" '%s' '33000-33005'
@@ -1286,6 +1289,16 @@ EOF
     grep -q '范围不合法' "${warnLog}"
     [[ "${allowCalls}" == "5" ]]
     grep -Eq '端口跳跃持久化|未检测到 netfilter-persistent' "${warnLog}"
+
+    rangeMode=single
+    inputCount=0
+    hysteria2PortHoppingStart=
+    hysteria2PortHoppingEnd=
+    : >"${natStateFile}"
+    addPortHopping hysteria2 16295
+    grep -q '范围不合法' "${warnLog}"
+    grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
+    rangeMode=invalid-hyphen
 
     readPortHopping hysteria2 16295
     [[ "${hysteria2PortHoppingStart}" == "33000" ]]

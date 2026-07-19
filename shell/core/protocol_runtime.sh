@@ -353,6 +353,9 @@ addPortHopping() {
             fi
             protocolPortHoppingStatusCard "端口跳跃添加成功"
         fi
+    else
+        protocolPortHoppingRangeStatusCard "范围不合法"
+        addPortHopping "${type}" "${targetPort}"
     fi
 }
 
