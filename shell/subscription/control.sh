@@ -429,6 +429,7 @@ runSubscriptionRemoteSync() {
     local errorMessage
     local changed
     local plan
+    local stateWriteFailed
     local failures='[]'
     sources=$(subscriptionRemoteControlSources) || return 1
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
@@ -445,41 +446,45 @@ runSubscriptionRemoteSync() {
         sourceId=$(jq -r '.source_id // empty' <<<"${sourceResult}") || return 1
         [[ -n "${sourceId}" ]] || return 1
         status=$(jq -r '.status // empty' <<<"${sourceResult}") || return 1
+        stateWriteFailed=false
         case "${status}" in
         self_reference)
             errorMessage=$(jq -r '.error_detail.message // "服务器源指向当前订阅服务，已跳过以避免递归同步"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" self_reference "服务器源指向当前订阅服务，已跳过以避免递归同步"
+            setSubscriptionSourceSyncFailure "${sourceId}" self_reference "服务器源指向当前订阅服务，已跳过以避免递归同步" || stateWriteFailed=true
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 指向当前订阅服务，已跳过"]' <<<"${failures}")
             ;;
         missing_token)
             errorMessage=$(jq -r '.error_detail.message // "未配置控制 token"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" missing_token "${errorMessage}"
+            setSubscriptionSourceSyncFailure "${sourceId}" missing_token "${errorMessage}" || stateWriteFailed=true
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 未配置控制 token"]' <<<"${failures}")
             ;;
         success)
             changed=$(jq -r 'if (.response | has("changed")) then .response.changed else true end' <<<"${sourceResult}") || return 1
             plan=$(jq -c '.response.plan // {create: [], remove: []}' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncStatus "${sourceId}" success "${changed}" "${plan}"
+            setSubscriptionSourceSyncStatus "${sourceId}" success "${changed}" "${plan}" || stateWriteFailed=true
             ;;
         remote_error)
             errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" remote_error "${errorMessage}"
+            setSubscriptionSourceSyncFailure "${sourceId}" remote_error "${errorMessage}" || stateWriteFailed=true
             failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 拒绝同步: " + $errorMessage]' <<<"${failures}")
             ;;
         unreachable)
             errorMessage=$(jq -r '.error_detail.message // "不可达或同步请求失败"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" unreachable "${errorMessage}"
+            setSubscriptionSourceSyncFailure "${sourceId}" unreachable "${errorMessage}" || stateWriteFailed=true
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 不可达或同步请求失败"]' <<<"${failures}")
             ;;
         internal_error)
             errorMessage=$(jq -r '.error_detail.message // "远程同步结果生成失败"' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncFailure "${sourceId}" internal_error "${errorMessage}"
+            setSubscriptionSourceSyncFailure "${sourceId}" internal_error "${errorMessage}" || stateWriteFailed=true
             failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" '. + ["远程服务器源 " + $sourceId + " 同步结果生成失败: " + $errorMessage]' <<<"${failures}")
             ;;
         *)
             return 1
             ;;
         esac
+        if [[ "${stateWriteFailed}" == "true" ]]; then
+            failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 同步状态写入失败"]' <<<"${failures}") || return 1
+        fi
     done < <(jq -c '.[]' <<<"${syncResults}")
     echo "${failures}"
 }

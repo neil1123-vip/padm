@@ -558,6 +558,13 @@ runRemoteControlInlineSyncRunnerRegression() (
     [[ -f "${statusLog}" ]] || return 1
     grep -Fqx $'status\tedge-remote\tsuccess\tfalse\t{"create":[],"remove":[]}' "${statusLog}" || return 1
     ! grep -q '^failure	' "${statusLog}" || return 1
+
+    setSubscriptionSourceSyncStatus() {
+        return 71
+    }
+    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null) || return 1
+    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
+    jq -e 'length == 1 and .[0] == "远程服务器源 edge-remote 同步状态写入失败"' <<<"${syncFailures}" >/dev/null
 )
 
 runRemoteControlInlineSyncParallelRunnerRegression() (
