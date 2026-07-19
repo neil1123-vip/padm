@@ -1431,14 +1431,23 @@ removePadmNginxConfigFragments() {
 }
 
 cleanupSubscriptionWireGuardControlOnUninstall() {
+    local wireGuardDir
     local wireGuardConfigFile
     local wireGuardStateFile
+    local wireGuardPrivateKeyFile
+    local wireGuardPublicKeyFile
     local controlServiceFile
+    wireGuardDir=$(subscriptionWireGuardSafeDir) || return 1
     wireGuardConfigFile=$(subscriptionWireGuardConfigFile) || return 1
     wireGuardStateFile=$(subscriptionWireGuardStateFile) || return 1
+    wireGuardPrivateKeyFile=$(subscriptionWireGuardPrivateKeyFile) || return 1
+    wireGuardPublicKeyFile=$(subscriptionWireGuardPublicKeyFile) || return 1
     controlServiceFile=$(subscriptionControlServiceFile) || return 1
 
-    if [[ -e "${wireGuardConfigFile}" || -L "${wireGuardConfigFile}" || -e "${wireGuardStateFile}" || -L "${wireGuardStateFile}" ]]; then
+    if [[ -e "${wireGuardConfigFile}" || -L "${wireGuardConfigFile}" ||
+        -e "${wireGuardStateFile}" || -L "${wireGuardStateFile}" ||
+        -e "${wireGuardPrivateKeyFile}" || -L "${wireGuardPrivateKeyFile}" ||
+        -e "${wireGuardPublicKeyFile}" || -L "${wireGuardPublicKeyFile}" ]]; then
         if ! stopSubscriptionWireGuardControlService; then
             errorCard "WireGuard 控制面停止失败，已取消删除控制面文件"
             return 1
@@ -1455,7 +1464,14 @@ cleanupSubscriptionWireGuardControlOnUninstall() {
         fi
     fi
     removeInstallPath "${wireGuardConfigFile}" "WireGuard控制面配置" || return 1
+    removeInstallPath "${wireGuardStateFile}" "WireGuard控制面状态" || return 1
+    removeInstallPath "${wireGuardPrivateKeyFile}" "WireGuard控制面私钥" || return 1
+    removeInstallPath "${wireGuardPublicKeyFile}" "WireGuard控制面公钥" || return 1
     removeInstallPath "${controlServiceFile}" "订阅控制面systemd服务" || return 1
+    if [[ -d "${wireGuardDir}" && ! -L "${wireGuardDir}" ]] &&
+        [[ -z "$(find "${wireGuardDir}" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+        rmdir -- "${wireGuardDir}" >/dev/null 2>&1 || return 1
+    fi
 }
 
 cleanupFail2banManagedFilesOnUninstall() {

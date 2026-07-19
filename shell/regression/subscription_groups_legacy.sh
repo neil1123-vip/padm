@@ -7638,6 +7638,9 @@ runUninstallWireGuardCleanupRegression() (
     PADM_WIREGUARD_CONTROL_DIR="${targetDir}/state"
     mkdir -p "${PADM_WIREGUARD_CONTROL_DIR}" "${targetDir}/etc-wireguard" "${targetDir}/systemd"
     subscriptionWireGuardWriteState '.enabled = true'
+    printf 'private\n' >"$(subscriptionWireGuardPrivateKeyFile)"
+    printf 'public\n' >"$(subscriptionWireGuardPublicKeyFile)"
+    printf 'keep\n' >"${PADM_WIREGUARD_CONTROL_DIR}/unmanaged"
     removeInstallPath() { actions+="remove:$1:$2"$'\n'; rm -rf "$1"; }
     systemctl() {
         actions+="systemctl:$*"$'\n'
@@ -7668,6 +7671,9 @@ runUninstallWireGuardCleanupRegression() (
         set -e
         [[ "${rc}" == "1" ]]
         [[ -e "$(subscriptionWireGuardConfigFile)" ]]
+        [[ -e "$(subscriptionWireGuardStateFile)" ]]
+        [[ -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
+        [[ -e "$(subscriptionWireGuardPublicKeyFile)" ]]
         [[ -e "$(subscriptionControlServiceFile)" ]]
     done
 
@@ -7677,7 +7683,11 @@ runUninstallWireGuardCleanupRegression() (
     grep -qxF 'systemctl:disable --now wg-quick@wg-padm' <<<"${actions}"
     grep -qxF 'systemctl:disable --now padm-subscription-control.service' <<<"${actions}"
     [[ ! -e "$(subscriptionWireGuardConfigFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardStateFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardPrivateKeyFile)" ]]
+    [[ ! -e "$(subscriptionWireGuardPublicKeyFile)" ]]
     [[ ! -e "$(subscriptionControlServiceFile)" ]]
+    [[ -e "${PADM_WIREGUARD_CONTROL_DIR}/unmanaged" ]]
 
     local nginxTarget="${targetDir}/nginx/padm-control-wg.conf"
     local nginxBackupDir=
