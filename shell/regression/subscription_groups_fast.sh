@@ -3684,6 +3684,7 @@ EOF
     printf 'shell\n' >"${sourceDir}/shell/marker"
     printf 'docs\n' >"${sourceDir}/documents/marker"
     printf 'assets\n' >"${sourceDir}/assets/marker"
+    printf 'readme\n' >"${sourceDir}/README.md"
     printf 'manifest\n' >"${sourceDir}/.padm-module-manifest"
     printf 'local-ref\n' >"${sourceDir}/.padm-ref"
     printf 'expected-ref\n' >"${sourceDir}/.padm-entry-ref"
@@ -3703,6 +3704,7 @@ EOF
     )
 
     cmp -s "${sourceDir}/.padm-module-manifest" "${targetDir}/.padm-module-manifest"
+    cmp -s "${sourceDir}/README.md" "${targetDir}/README.md"
     cmp -s "${sourceDir}/.padm-ref" "${targetDir}/.padm-ref"
     cmp -s "${sourceDir}/.padm-entry-ref" "${targetDir}/.padm-entry-ref"
 

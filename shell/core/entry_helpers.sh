@@ -1317,6 +1317,7 @@ aliasInstall() {
         syncInstallDirectoryTree "${SCRIPT_DIR}/shell" "${targetDir}/shell" || return 1
         syncInstallDirectoryTree "${SCRIPT_DIR}/documents" "${targetDir}/documents" || return 1
         syncInstallDirectoryTree "${SCRIPT_DIR}/assets" "${targetDir}/assets" || return 1
+        syncInstallMetadataFile "${SCRIPT_DIR}/README.md" "${targetDir}/README.md" || return 1
         syncInstallMetadataFile "${SCRIPT_DIR}/.padm-module-manifest" "${targetDir}/.padm-module-manifest" || return 1
         syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref" || return 1
         syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref" || return 1
