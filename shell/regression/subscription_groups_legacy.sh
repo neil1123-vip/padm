@@ -4503,6 +4503,7 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     root=$(cd -- "${rootRel}" && pwd -P)
     xrayDir="${root}/xray"
     singBoxDir="${root}/sing-box"
+    printf 'old-cronet\n' >"${singBoxDir}/libcronet.so"
     errorLog="${root}/error.log"
     copyLog="${root}/copy.log"
     rmLog="${root}/rm.log"
@@ -4601,10 +4602,20 @@ runCoreFirstInstallCommitFailureRollbackRegression() (
     [[ "${singBoxRc}" == "1" ]]
     [[ ! -e "${xrayDir}/xray" ]]
     [[ ! -e "${singBoxDir}/sing-box" ]]
-    [[ ! -e "${singBoxDir}/libcronet.so" ]]
+    [[ -e "${singBoxDir}/libcronet.so" ]] || return 1
+    [[ "$(<"${singBoxDir}/libcronet.so")" == 'old-cronet' ]] || return 1
     grep -qxF "rm:${xrayDir}/xray" "${rmLog}"
     grep -q 'sing-box安装失败' "${errorLog}"
     ! grep -q 'cronet依赖回滚失败' "${errorLog}"
+
+    rm -f "${singBoxDir}/libcronet.so"
+    set +e
+    ( installSingBox 1 >/dev/null 2>&1 )
+    singBoxRc=$?
+    set -e
+    [[ "${singBoxRc}" == "1" ]]
+    [[ ! -e "${singBoxDir}/sing-box" ]]
+    [[ ! -e "${singBoxDir}/libcronet.so" ]] || return 1
 )
 
 runCoreInstallRejectsUnsafeBinaryPathRegression() (

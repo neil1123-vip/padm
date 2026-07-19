@@ -399,12 +399,12 @@ installSingBoxApply() {
             exit 1
         fi
         if ! commitStagedCoreInstallFile "${extractedDir}/sing-box" "${targetBinary}" 655; then
-            padmRemoveCleanupPath "${tmpDir}"
             if ! restoreCoreOptionalFileBackup "${cronetBackup}" "${targetCronet}" 644; then
-                errorCard "sing-box安装失败，cronet依赖回滚失败"
+                padmForgetCleanupPath "${tmpDir}"
+                errorCard "sing-box安装失败，cronet依赖回滚失败，请手动检查临时备份: ${tmpDir}"
                 exit 1
             fi
-            [[ -n "${cronetBackup}" && -e "${cronetBackup}" ]] && removeManagedFilesIfPresentIgnoreFailure "${cronetBackup}"
+            padmRemoveCleanupPath "${tmpDir}"
             errorCard "sing-box安装失败"
             exit 1
         fi
