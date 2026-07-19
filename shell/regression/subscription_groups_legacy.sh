@@ -9574,6 +9574,7 @@ runSubscribeNginxServiceFailureRegression() (
     local firewallState="${root}/firewall.state"
     local firewallLog="${root}/firewall.log"
     local errorLog="${root}/error.log"
+    local installMarker="${root}/install.marker"
     local mode=reload
     local rc writeCalls controlCalls bootCalls
     local runtimeRunning=true
@@ -9592,6 +9593,15 @@ exit 0
 SH
     chmod +x "${root}/fake-bin/nginx"
     PATH="${root}/fake-bin:${PATH}"
+    nginx() {
+        [[ "${mode}" != "install-fail" ]] || return 127
+        command nginx "$@"
+    }
+    autoConfirm() { printf -v "$4" '%s' y; }
+    installNginxTools() {
+        : >"${installMarker}"
+        exit 17
+    }
     nginxConfigPath="${root}/nginx/"
     nginxStaticPath="${root}/static"
     export PADM_TLS_DIR="${root}/tls"
@@ -9674,6 +9684,24 @@ SH
         [[ "${mode}" == "existing-port" || "${mode}" == "final-start-fail" ]] && return 1
         return 0
     }
+
+    writeCalls=0
+    controlCalls=0
+    bootCalls=0
+    mode=install-fail
+    rm -f "${installMarker}" "${firewallState}"
+    : >"${firewallLog}"
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ -e "${installMarker}" ]]
+    [[ "${writeCalls}" == "0" ]]
+    [[ "${controlCalls}" == "0" ]]
+    [[ "${bootCalls}" == "0" ]]
+    [[ ! -s "${firewallLog}" ]]
+    [[ ! -e "${firewallState}" ]]
 
     writeCalls=0
     controlCalls=0

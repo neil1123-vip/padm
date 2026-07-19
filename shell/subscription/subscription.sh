@@ -281,13 +281,20 @@ installSubscribeApply() {
     fi
     if [[ -z "${subscribePort}" ]]; then
 
-        nginxVersion=$(nginx -v 2>&1)
+        nginxVersion=$(nginx -v 2>&1 || true)
 
         if echo "${nginxVersion}" | grep -q "not found" || [[ -z "${nginxVersion}" ]]; then
             menuLine "$(uiStyle warn "未检测到 nginx，无法使用订阅服务")"
             autoConfirm install_nginx "未检测到 nginx，是否安装？" n installNginxStatus
             if [[ "${installNginxStatus}" == "y" ]]; then
-                installNginxTools
+                if ! (installNginxTools); then
+                    errorCard "Nginx 安装失败，已取消订阅配置"
+                    return 1
+                fi
+                nginxVersion=$(nginx -v 2>&1) || {
+                    errorCard "Nginx 安装后仍不可用，已取消订阅配置"
+                    return 1
+                }
             else
                 errorCard "放弃安装nginx\n"
                 exit 0
