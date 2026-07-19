@@ -87,14 +87,25 @@ restoreLocalSubscribeOutputs() {
     local reason=$3
     local restoreMessage
     local previousSubscribeSalt=
+    local restoreAll=${5:-false}
+    local restoredMessage="已恢复旧本地订阅"
+    local failedLabel="旧本地订阅"
+    local restoreStatus=0
 
     if [[ $# -ge 4 ]]; then
         previousSubscribeSalt=$4
     fi
 
-    if ! subscriptionSyncRestoreBackupPath "${localBase}" "${backupDir}" local; then
+    if [[ "${restoreAll}" == "true" ]]; then
+        restoredMessage="已恢复旧订阅输出"
+        failedLabel="旧订阅输出"
+        subscriptionSyncRestoreSubscribeOutputBackups "${backupDir}" || restoreStatus=1
+    else
+        subscriptionSyncRestoreBackupPath "${localBase}" "${backupDir}" local || restoreStatus=1
+    fi
+    if [[ "${restoreStatus}" -ne 0 ]]; then
         padmForgetCleanupPath "${backupDir}"
-        subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${reason}" false "" "旧本地订阅" "备份目录：${backupDir}" || true
+        subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${reason}" false "" "${failedLabel}" "备份目录：${backupDir}" || true
         errorCard "${restoreMessage}"
         return 1
     fi
@@ -102,7 +113,7 @@ restoreLocalSubscribeOutputs() {
     if [[ $# -ge 4 ]]; then
         subscribeSalt=${previousSubscribeSalt}
     fi
-    subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${reason}" true "已恢复旧本地订阅" "旧本地订阅" "备份目录：${backupDir}"
+    subscriptionSyncSetSingleRestoreResultMessage restoreMessage "${reason}" true "${restoredMessage}" "${failedLabel}" "备份目录：${backupDir}"
     errorCard "${restoreMessage}"
     return 1
 }
@@ -2694,32 +2705,27 @@ subscribe() {
         localBase=$(subscribeLocalBaseDir)
         subscribeSaltFile="${localBase}/subscribeSalt"
         previousSubscribeSalt=$(readSubscribeSalt "${subscribeSaltFile}")
-        padmCreateTmpRootPath backupDir padm-subscribe-local-backup.XXXXXX -d || {
-            errorCard "订阅生成失败：创建本地订阅备份目录失败"
-            return 1
-        }
-        if ! subscriptionSyncBackupPath "${localBase}" "${backupDir}" local; then
-            padmRemoveCleanupPath "${backupDir}"
-            errorCard "订阅生成失败：备份旧本地订阅失败"
+        if ! backupDir=$(subscriptionSyncCreateSubscribeOutputBackups); then
+            errorCard "订阅生成失败：备份旧订阅输出失败"
             return 1
         fi
         if ! resolveSubscribeSalt "${subscribeSaltFile}" "${renewSalt}"; then
-            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅 Salt 初始化失败" "${previousSubscribeSalt}"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅 Salt 初始化失败" "${previousSubscribeSalt}" true
             return 1
         fi
         statusCard "订阅 Salt" "${subscribeSalt}"
         if ! cleanDirectoryContent "${localBase}/default" ||
             ! cleanDirectoryContent "${localBase}/clashMeta" ||
             ! cleanDirectoryContent "${localBase}/sing-box"; then
-            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：清理本地订阅目录失败" "${previousSubscribeSalt}"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：清理本地订阅目录失败" "${previousSubscribeSalt}" true
             return 1
         fi
         if ! showAccounts >/dev/null; then
-            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}" true
             return 1
         fi
         if ! renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" "${publishAccountsOverride}" "${skipCleanup}"; then
-            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：生成订阅输出失败" "${previousSubscribeSalt}"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：生成订阅输出失败" "${previousSubscribeSalt}" true
             return 1
         fi
         padmRemoveCleanupPath "${backupDir}"

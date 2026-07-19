@@ -10838,7 +10838,9 @@ runSubscribeUserOutputTransactionRegression() {
 
 runSubscribeReturnFailureRegression() (
     local localDir="${TMP_DIR}/subscribe-return-local"
+    local publicDir="${TMP_DIR}/subscribe-return-public"
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
     local installCalls=0
     local renderCalls=0
     local showAccountsCalls=0
@@ -10846,7 +10848,9 @@ runSubscribeReturnFailureRegression() (
     # Re-source manage.sh because the regression bootstrap replaces subscribe with a menu-safe no-op.
     source "${PROJECT_ROOT}/shell/core/manage.sh"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    export PADM_SUBSCRIBE_DIR="${publicDir}"
     mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+    mkdir -p "${publicDir}"
     printf 'existing-salt\n' >"${localDir}/subscribeSalt"
 
     readInstallProtocolType() { return 0; }
@@ -10896,12 +10900,14 @@ runSubscribeReturnFailureRegression() (
     [[ "${renderCalls}" == "1" ]]
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
 )
 
 runSubscribeLocalRollbackRegression() (
     local rootRel="${TMP_DIR}/subscribe-local-rollback"
-    local root localDir errorLog callLog beforeSnapshot
+    local root localDir publicDir errorLog callLog beforeSnapshot beforePublicSnapshot
     local oldLocalDir="${PADM_SUBSCRIBE_LOCAL_DIR:-}"
+    local oldPublicDir="${PADM_SUBSCRIBE_DIR:-}"
     local oldTmpDir="${TMPDIR:-}"
     local oldSubscribeSalt="${subscribeSalt:-}"
     local renderCalls=0
@@ -10911,24 +10917,33 @@ runSubscribeLocalRollbackRegression() (
     captureSubscribeLocalSnapshot() {
         find "${localDir}" -type f -printf '%P\t' -exec cat {} \; | sort
     }
+    captureSubscribePublicSnapshot() {
+        find "${publicDir}" -type f -printf '%P\t' -exec cat {} \; | sort
+    }
 
     mkdir -p "${rootRel}"
     root=$(cd -- "${rootRel}" && pwd -P)
     localDir="${root}/subscribe_local"
+    publicDir="${root}/subscribe_public"
     errorLog="${root}/error.log"
     callLog="${root}/calls.log"
     beforeSnapshot="${root}/before.txt"
+    beforePublicSnapshot="${root}/before-public.txt"
     source "${PROJECT_ROOT}/shell/core/manage.sh"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
+    export PADM_SUBSCRIBE_DIR="${publicDir}"
     TMPDIR="${root}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
+    mkdir -p "${publicDir}/default" "${publicDir}/clashMeta" "${publicDir}/clashMetaProfiles" "${publicDir}/sing-box" "${publicDir}/sing-box_profiles"
     printf 'existing-salt\n' >"${localDir}/subscribeSalt"
     printf 'old default\n' >"${localDir}/default/existing"
     printf 'old clash\n' >"${localDir}/clashMeta/existing"
     printf '[{"tag":"old-local"}]\n' >"${localDir}/sing-box/existing"
+    printf 'old public\n' >"${publicDir}/default/existing"
     subscribeSalt=existing-salt
     captureSubscribeLocalSnapshot >"${beforeSnapshot}"
+    captureSubscribePublicSnapshot >"${beforePublicSnapshot}"
 
     readInstallProtocolType() { return 0; }
     readNginxSubscribe() { return 0; }
@@ -10963,8 +10978,8 @@ runSubscribeLocalRollbackRegression() (
     [[ "${subscribeSalt}" == "existing-salt" ]]
     [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
     diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
-    grep -q '订阅 Salt 初始化失败，已恢复旧本地订阅' "${errorLog}"
-    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
+    grep -q '订阅 Salt 初始化失败，已恢复旧订阅输出' "${errorLog}"
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -10993,9 +11008,9 @@ runSubscribeLocalRollbackRegression() (
     [[ "${subscribeSalt}" == "existing-salt" ]]
     [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
     diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
-    grep -q '订阅生成失败：重建本地订阅失败，已恢复旧本地订阅' "${errorLog}"
+    grep -q '订阅生成失败：重建本地订阅失败，已恢复旧订阅输出' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
-    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
 
     : >"${errorLog}"
     : >"${callLog}"
@@ -11017,6 +11032,8 @@ runSubscribeLocalRollbackRegression() (
     renderAllSubscribeUserOutputs() {
         renderCalls=$((renderCalls + 1))
         printf 'render\n' >>"${callLog}"
+        printf 'new public\n' >"${publicDir}/default/existing"
+        printf 'first account published\n' >"${publicDir}/default/first-account"
         return 1
     }
     set +e
@@ -11029,12 +11046,15 @@ runSubscribeLocalRollbackRegression() (
     [[ "${subscribeSalt}" == "existing-salt" ]]
     [[ "$(<"${localDir}/subscribeSalt")" == "existing-salt" ]]
     diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
-    grep -q '订阅生成失败：生成订阅输出失败，已恢复旧本地订阅' "${errorLog}"
+    diff -u "${beforePublicSnapshot}" <(captureSubscribePublicSnapshot)
+    [[ ! -e "${publicDir}/default/first-account" ]]
+    grep -q '订阅生成失败：生成订阅输出失败，已恢复旧订阅输出' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
     grep -qx 'render' "${callLog}"
-    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscribe-local-backup.*'
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
+    if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     if [[ -n "${oldSubscribeSalt}" ]]; then subscribeSalt="${oldSubscribeSalt}"; else unset subscribeSalt; fi
 )
