@@ -1314,15 +1314,46 @@ aliasInstall() {
     fi
 
     if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
-        syncInstallDirectoryTree "${SCRIPT_DIR}/shell" "${targetDir}/shell" || return 1
-        syncInstallDirectoryTree "${SCRIPT_DIR}/documents" "${targetDir}/documents" || return 1
-        syncInstallDirectoryTree "${SCRIPT_DIR}/assets" "${targetDir}/assets" || return 1
-        syncInstallMetadataFile "${SCRIPT_DIR}/README.md" "${targetDir}/README.md" || return 1
-        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-module-manifest" "${targetDir}/.padm-module-manifest" || return 1
-        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref" || return 1
-        syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref" || return 1
-        rm -f "${targetDir}/xray/README.md"
-        syncInstallManagedFile "${sourceInstall}" "${targetDir}/install.sh" 700 || return 1
+        local rollbackBackupDir=
+        local rollbackStatus=0
+        local -a rollbackPaths=(
+            "${targetDir}/shell"
+            "${targetDir}/documents"
+            "${targetDir}/assets"
+            "${targetDir}/README.md"
+            "${targetDir}/.padm-module-manifest"
+            "${targetDir}/.padm-ref"
+            "${targetDir}/.padm-entry-ref"
+            "${targetDir}/xray/README.md"
+            "${targetDir}/install.sh"
+        )
+        if ! adapterCreateManagedRollbackBackup rollbackBackupDir "${rollbackPaths[@]}"; then
+            errorCard "脚本安装失败：创建回滚备份失败"
+            return 1
+        fi
+
+        if ! syncInstallDirectoryTree "${SCRIPT_DIR}/shell" "${targetDir}/shell" ||
+            ! syncInstallDirectoryTree "${SCRIPT_DIR}/documents" "${targetDir}/documents" ||
+            ! syncInstallDirectoryTree "${SCRIPT_DIR}/assets" "${targetDir}/assets" ||
+            ! syncInstallMetadataFile "${SCRIPT_DIR}/README.md" "${targetDir}/README.md" ||
+            ! syncInstallMetadataFile "${SCRIPT_DIR}/.padm-module-manifest" "${targetDir}/.padm-module-manifest" ||
+            ! syncInstallMetadataFile "${SCRIPT_DIR}/.padm-ref" "${targetDir}/.padm-ref" ||
+            ! syncInstallMetadataFile "${SCRIPT_DIR}/.padm-entry-ref" "${targetDir}/.padm-entry-ref" ||
+            ! rm -f "${targetDir}/xray/README.md" ||
+            ! syncInstallManagedFile "${sourceInstall}" "${targetDir}/install.sh" 700; then
+            adapterRestoreManagedRollbackBackup "${rollbackBackupDir}" || rollbackStatus=1
+            if [[ -f "${targetDir}/install.sh" ]] && ! chmod 700 "${targetDir}/install.sh"; then
+                rollbackStatus=1
+            fi
+            if [[ "${rollbackStatus}" -eq 0 ]]; then
+                padmRemoveCleanupPath "${rollbackBackupDir}"
+            else
+                padmForgetCleanupPath "${rollbackBackupDir}"
+                errorCard "脚本安装失败且回滚失败，请手动恢复备份：${rollbackBackupDir}"
+            fi
+            return 1
+        fi
+        padmRemoveCleanupPath "${rollbackBackupDir}"
         local shortcutCreated=
         if [[ -d "/usr/bin/" ]]; then
             if [[ ! -f "/usr/bin/padm" ]]; then

@@ -3673,9 +3673,10 @@ runValidateInstallTempRootStaysInParentShellRegression() {
 }
 
 runAliasInstallMetadataCopyRegression() {
-    local sourceDir targetDir oldScriptDir oldPadmInstallDir oldHome
+    local sourceDir targetDir chmodLog oldScriptDir oldPadmInstallDir oldHome
     sourceDir="${TMP_DIR}/alias-install-source"
     targetDir="${TMP_DIR}/alias-install-target"
+    chmodLog="${TMP_DIR}/alias-install-chmod.log"
     mkdir -p "${sourceDir}/shell" "${sourceDir}/documents" "${sourceDir}/assets" "${targetDir}"
     cat >"${sourceDir}/install.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -3707,6 +3708,40 @@ EOF
     cmp -s "${sourceDir}/README.md" "${targetDir}/README.md"
     cmp -s "${sourceDir}/.padm-ref" "${targetDir}/.padm-ref"
     cmp -s "${sourceDir}/.padm-entry-ref" "${targetDir}/.padm-entry-ref"
+
+    printf 'old-shell\n' >"${targetDir}/shell/marker"
+    printf 'old-docs\n' >"${targetDir}/documents/marker"
+    printf 'old-assets\n' >"${targetDir}/assets/marker"
+    printf 'old-readme\n' >"${targetDir}/README.md"
+    printf 'old-manifest\n' >"${targetDir}/.padm-module-manifest"
+    printf 'old-ref\n' >"${targetDir}/.padm-ref"
+    printf 'old-entry-ref\n' >"${targetDir}/.padm-entry-ref"
+    printf 'old-install\n' >"${targetDir}/install.sh"
+    chmod 700 "${targetDir}/install.sh"
+
+    (
+        eval "$(declare -f syncInstallDirectoryTree | sed '1s/^syncInstallDirectoryTree/originalSyncInstallDirectoryTree/')"
+        chmod() {
+            printf '%s\n' "$*" >>"${chmodLog}"
+        }
+        syncInstallDirectoryTree() {
+            if [[ "${2}" == "${targetDir}/documents" ]]; then
+                return 71
+            fi
+            originalSyncInstallDirectoryTree "$@"
+        }
+        ! aliasInstall
+    )
+
+    [[ "$(<"${targetDir}/shell/marker")" == "old-shell" ]]
+    [[ "$(<"${targetDir}/documents/marker")" == "old-docs" ]]
+    [[ "$(<"${targetDir}/assets/marker")" == "old-assets" ]]
+    [[ "$(<"${targetDir}/README.md")" == "old-readme" ]]
+    [[ "$(<"${targetDir}/.padm-module-manifest")" == "old-manifest" ]]
+    [[ "$(<"${targetDir}/.padm-ref")" == "old-ref" ]]
+    [[ "$(<"${targetDir}/.padm-entry-ref")" == "old-entry-ref" ]]
+    [[ "$(<"${targetDir}/install.sh")" == "old-install" ]]
+    grep -Fqx "700 ${targetDir}/install.sh" "${chmodLog}"
 
     SCRIPT_DIR="${oldScriptDir}"
     HOME="${oldHome}"
