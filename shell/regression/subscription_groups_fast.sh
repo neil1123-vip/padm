@@ -2890,6 +2890,46 @@ runInstallRefreshSignalRestoresAndExitsRegression() (
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
+runInstallModuleLockSerializesLoadRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/install-module-lock"
+    local firstReady="${root}/first-ready"
+    local releaseFirst="${root}/release-first"
+    local secondReady="${root}/second-ready"
+    local firstPid secondPid
+
+    mkdir -p "${root}"
+    eval "$(awk '
+        /^scriptTmpPath\(\)/ { capture = 1 }
+        /^scriptDownloadUrlToFileBounded\(\)/ { capture = 0 }
+        capture { print }
+    ' "${PROJECT_ROOT}/install.sh")"
+    SCRIPT_MODULE_LOCK_DIR="${root}/lock"
+    scriptIsSafeAbsolutePath() { return 0; }
+
+    (
+        scriptModuleLockAcquire
+        : >"${firstReady}"
+        while [[ ! -e "${releaseFirst}" ]]; do sleep 0.05; done
+        scriptModuleLockRelease
+    ) &
+    firstPid=$!
+    while [[ ! -e "${firstReady}" ]]; do sleep 0.05; done
+
+    (
+        scriptModuleLockAcquire
+        : >"${secondReady}"
+        scriptModuleLockRelease
+    ) &
+    secondPid=$!
+    sleep 0.2
+    [[ ! -e "${secondReady}" ]]
+    : >"${releaseFirst}"
+    wait "${firstPid}"
+    wait "${secondPid}"
+    [[ -e "${secondReady}" && ! -e "${SCRIPT_MODULE_LOCK_DIR}" ]]
+)
+
 runInstallRefreshSingleArchiveGuardRegression() {
     local archiveGuard
     archiveGuard=$(awk '
@@ -5502,6 +5542,7 @@ runRegressionPlatformRefresh() {
         runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
         runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
         runRegressionStep install-refresh-signal-restores-and-exits runInstallRefreshSignalRestoresAndExitsRegression &&
+        runRegressionStep install-module-lock-serializes-load runInstallModuleLockSerializesLoadRegression &&
         runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression
 }
 

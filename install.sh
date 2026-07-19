@@ -26,6 +26,7 @@ REPO_ARCHIVE_DIR="padm-main"
 SCRIPT_REF_FILE="${SCRIPT_DIR}/.padm-ref"
 SCRIPT_EXPECTED_REF_FILE="${SCRIPT_DIR}/.padm-entry-ref"
 SCRIPT_MANIFEST_FILE="${SCRIPT_DIR}/.padm-module-manifest"
+SCRIPT_MODULE_LOCK_DIR="${SCRIPT_DIR}/.padm-module-lock"
 
 scriptTmpPath() {
     local template=$1
@@ -61,6 +62,44 @@ scriptCreateTempDir() {
     tempPath=$(mktemp -d "$(scriptTmpPath "$1")") || return 1
     scriptIsSafeAbsolutePath "${tempPath}" || return 1
     printf '%s\n' "${tempPath}"
+}
+
+scriptModuleLockRelease() {
+    local lockDir=${SCRIPT_MODULE_LOCK_DIR:-}
+    local ownerPid
+    [[ -n "${lockDir}" && -d "${lockDir}" ]] || return 0
+    ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
+    [[ "${ownerPid}" == "${BASHPID:-$$}" ]] || return 0
+    rm -f -- "${lockDir}/pid" 2>/dev/null || return 1
+    rmdir -- "${lockDir}" 2>/dev/null
+}
+
+scriptModuleLockAcquire() {
+    local lockDir=${SCRIPT_MODULE_LOCK_DIR:-}
+    local timeout=${PADM_SCRIPT_MODULE_LOCK_TIMEOUT:-30}
+    local deadline ownerPid lockMtime now
+    [[ -n "${lockDir}" && "${timeout}" =~ ^[0-9]+$ ]] || return 1
+    scriptIsSafeAbsolutePath "${lockDir}" || return 1
+    deadline=$((SECONDS + timeout))
+    while ! mkdir -- "${lockDir}" 2>/dev/null; do
+        ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
+        if [[ "${ownerPid}" =~ ^[0-9]+$ ]] && ! kill -0 "${ownerPid}" 2>/dev/null; then
+            rm -f -- "${lockDir}/pid" 2>/dev/null || true
+            rmdir -- "${lockDir}" 2>/dev/null || true
+            continue
+        fi
+        if [[ -z "${ownerPid}" ]]; then
+            now=$(date +%s)
+            lockMtime=$(stat --format=%Y -- "${lockDir}" 2>/dev/null || printf '%s\n' "${now}")
+            if ((now - lockMtime > 5)); then
+                rmdir -- "${lockDir}" 2>/dev/null || true
+                continue
+            fi
+        fi
+        ((SECONDS < deadline)) || return 1
+        sleep 0.1
+    done
+    printf '%s\n' "${BASHPID:-$$}" >"${lockDir}/pid" || { rmdir -- "${lockDir}" 2>/dev/null || true; return 1; }
 }
 
 scriptDownloadUrlToFileBounded() {
@@ -225,6 +264,7 @@ abortScriptModuleRefresh() {
     else
         scriptRemovePath "${tmpDir}" || true
     fi
+    scriptModuleLockRelease || true
     exit "${status}"
 }
 
@@ -373,7 +413,7 @@ refreshScriptModules() {
     tmpDir=$(scriptCreateTempDir padm.XXXXXX) || exit 1
     extractDir="${tmpDir}/extract"
     backupDir="${SCRIPT_DIR}/.padm-update-backup"
-    trap 'scriptRemovePath "${tmpDir}" || true' EXIT
+    trap 'scriptRemovePath "${tmpDir}" || true; scriptModuleLockRelease || true' EXIT
     trap 'abortScriptModuleRefresh 130 "" "${SCRIPT_DIR}" "${tmpDir}"' INT
     trap 'abortScriptModuleRefresh 143 "" "${SCRIPT_DIR}" "${tmpDir}"' TERM
     archiveUrl="https://github.com/neil1123-vip/padm/archive/${remoteRef}.tar.gz"
@@ -416,7 +456,7 @@ refreshScriptModules() {
         trap - EXIT INT TERM
         exit 1
     fi
-    trap 'cleanupScriptModuleRefresh "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' EXIT
+    trap 'cleanupScriptModuleRefresh "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"; scriptModuleLockRelease || true' EXIT
     trap 'abortScriptModuleRefresh 130 "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' INT
     trap 'abortScriptModuleRefresh 143 "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"' TERM
     removeScriptModuleItems "${SCRIPT_DIR}" || failScriptModuleRefreshAfterBackup "${backupDir}" "${SCRIPT_DIR}" "${tmpDir}"
@@ -601,9 +641,17 @@ ensureScriptModules() {
 }
 
 loadScriptModules() {
-    ensureScriptModules || return 1
+    scriptModuleLockAcquire || { printf '另一个 padm 进程正在更新模块，请稍后重试\n' >&2; return 1; }
+    if ! ensureScriptModules; then
+        scriptModuleLockRelease || true
+        return 1
+    fi
     # shellcheck source=/dev/null
-    source "${SCRIPT_DIR}/shell/core/bootstrap.sh"
+    if ! source "${SCRIPT_DIR}/shell/core/bootstrap.sh"; then
+        scriptModuleLockRelease || true
+        return 1
+    fi
+    scriptModuleLockRelease
 }
 
 installEarlyCapabilityRegistry() {
