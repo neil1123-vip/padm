@@ -24,6 +24,77 @@ padmFirewallStateFile() {
     padmRequireSafeAbsolutePath "${PADM_FIREWALL_STATE_FILE:-${installRoot%/}/firewall.state}"
 }
 
+padmFirewallStateWithLock() {
+    local operation=$1
+    shift
+    declare -F "${operation}" >/dev/null 2>&1 || return 1
+    if [[ "${PADM_FIREWALL_STATE_LOCK_HELD:-}" == "true" ]]; then
+        "${operation}" "$@"
+        return $?
+    fi
+
+    local stateFile lockFile lockTimeout lockFd status
+    stateFile=$(padmFirewallStateFile) || return 1
+    lockFile=$(padmRequireSafeAbsolutePath "${stateFile}.lock") || return 1
+    padmEnsureSafeDirectory "$(dirname -- "${stateFile}")" || return 1
+    lockTimeout=${PADM_FIREWALL_STATE_LOCK_TIMEOUT:-30}
+    [[ "${lockTimeout}" =~ ^[0-9]+$ ]] || lockTimeout=30
+
+    if command -v flock >/dev/null 2>&1; then
+        exec {lockFd}>"${lockFile}" || return 1
+        chmod 600 "${lockFile}" 2>/dev/null || { exec {lockFd}>&-; return 1; }
+        if ! flock -w "${lockTimeout}" "${lockFd}"; then
+            exec {lockFd}>&-
+            return 1
+        fi
+        local PADM_FIREWALL_STATE_LOCK_HELD=true
+        if "${operation}" "$@"; then
+            status=0
+        else
+            status=$?
+        fi
+        flock -u "${lockFd}" >/dev/null 2>&1 || true
+        exec {lockFd}>&-
+        return "${status}"
+    fi
+
+    local lockDir="${lockFile}.d"
+    local deadline=$((SECONDS + lockTimeout))
+    local ownerPid lockMtime now
+    while ! mkdir -- "${lockDir}" 2>/dev/null; do
+        ownerPid=$(cat "${lockDir}/pid" 2>/dev/null || true)
+        if [[ "${ownerPid}" =~ ^[0-9]+$ ]] && ! kill -0 "${ownerPid}" 2>/dev/null; then
+            rm -f -- "${lockDir}/pid" 2>/dev/null || true
+            rmdir -- "${lockDir}" 2>/dev/null || true
+            continue
+        fi
+        if [[ -z "${ownerPid}" ]]; then
+            now=$(date +%s)
+            lockMtime=$(stat --format=%Y -- "${lockDir}" 2>/dev/null || printf '%s\n' "${now}")
+            if ((now - lockMtime > 5)); then
+                rmdir -- "${lockDir}" 2>/dev/null || true
+                continue
+            fi
+        fi
+        ((SECONDS < deadline)) || return 1
+        sleep 0.1
+    done
+    printf '%s\n' "${BASHPID:-$$}" >"${lockDir}/pid" || {
+        rmdir -- "${lockDir}" 2>/dev/null || true
+        return 1
+    }
+
+    local PADM_FIREWALL_STATE_LOCK_HELD=true
+    if "${operation}" "$@"; then
+        status=0
+    else
+        status=$?
+    fi
+    rm -f -- "${lockDir}/pid" 2>/dev/null || true
+    rmdir -- "${lockDir}" 2>/dev/null || true
+    return "${status}"
+}
+
 padmFirewallStateHas() {
     local key=$1
     local stateFile
@@ -31,7 +102,7 @@ padmFirewallStateHas() {
     [[ -f "${stateFile}" ]] && grep -Fxq -- "${key}" "${stateFile}"
 }
 
-padmFirewallStateAdd() {
+padmFirewallStateAddUnlocked() {
     local key=$1
     local stateFile tmpFile
     stateFile=$(padmFirewallStateFile) || return 1
@@ -44,7 +115,11 @@ padmFirewallStateAdd() {
     commitGeneratedFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
 }
 
-padmFirewallStateRemove() {
+padmFirewallStateAdd() {
+    padmFirewallStateWithLock padmFirewallStateAddUnlocked "$@"
+}
+
+padmFirewallStateRemoveUnlocked() {
     local key=$1
     local stateFile tmpFile
     stateFile=$(padmFirewallStateFile) || return 1
@@ -57,6 +132,10 @@ padmFirewallStateRemove() {
         padmRemoveCleanupPath "${tmpFile}"
         removeManagedFileIfPresent "${stateFile}"
     fi
+}
+
+padmFirewallStateRemove() {
+    padmFirewallStateWithLock padmFirewallStateRemoveUnlocked "$@"
 }
 
 padmTrackPortAllowTransactionKey() {

@@ -4854,6 +4854,37 @@ runNetworkCheckReturnFailureRegression() (
     grep -qx 'ufw:delete:443/udp' "${firewallLog}"
     [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
+    (
+        local concurrentState="${root}/concurrent-firewall.state"
+        local firstPid secondPid firstRc secondRc
+        PADM_FIREWALL_STATE_FILE="${concurrentState}"
+        PADM_FIREWALL_STATE_LOCK_TIMEOUT=5
+        rm -f "${concurrentState}" "${concurrentState}.lock"
+        commitGeneratedFile() {
+            local tmpFile=$1
+            local targetFile=$2
+            local mode=${3:-}
+            [[ -z "${mode}" ]] || chmod "${mode}" "${tmpFile}"
+            sleep 0.1
+            mv -f -- "${tmpFile}" "${targetFile}" || return 1
+            padmForgetCleanupPath "${tmpFile}"
+        }
+        padmFirewallStateAdd 'port:ufw:tcp:30001' &
+        firstPid=$!
+        padmFirewallStateAdd 'port:ufw:tcp:30002' &
+        secondPid=$!
+        set +e
+        wait "${firstPid}"
+        firstRc=$?
+        wait "${secondPid}"
+        secondRc=$?
+        set -e
+        [[ "${firstRc}" == "0" ]]
+        [[ "${secondRc}" == "0" ]]
+        grep -qx 'port:ufw:tcp:30001' "${concurrentState}"
+        grep -qx 'port:ufw:tcp:30002' "${concurrentState}"
+    )
+
     padmFirewallStateAdd 'port:ufw:tcp:443'
     : >"${firewallLog}"
     failAfterPortAllow() {
