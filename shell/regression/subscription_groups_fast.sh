@@ -654,6 +654,72 @@ runSubscriptionWireGuardFirewallLifecycleRegression() (
     ! grep -q '^deny:' <<<"${actions}"
 )
 
+runSubscriptionWireGuardNginxDisableLifecycleRegression() (
+    set -euo pipefail
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+    local root="${TMP_DIR}/wireguard-nginx-disable-lifecycle"
+    local actions=
+    local nginxRuntimeState=true
+    local queueFail=false
+    local status
+    local nginxTarget
+    mkdir -p "${root}/wireguard" "${root}/nginx"
+    export PADM_WIREGUARD_CONTROL_DIR="${root}/wireguard"
+    nginxConfigPath="${root}/nginx/"
+    nginxTarget="${nginxConfigPath}padm-control-wg.conf"
+
+    subscriptionWireGuardConfigFile() { printf '%s\n' "${root}/wg-padm.conf"; }
+    stopSubscriptionWireGuardControlService() { actions+="stop-wireguard"$'\n'; }
+    applySubscriptionWireGuardService() {
+        actions+="restore-wireguard"$'\n'
+        printf 'restored-wireguard\n' >"$(subscriptionWireGuardConfigFile)"
+    }
+    nginxRunning() { [[ "${nginxRuntimeState}" == "true" ]]; }
+    serviceQueueRestart() { actions+="queue:$1:restart"$'\n'; }
+    serviceQueueApply() {
+        actions+="queue-apply"$'\n'
+        nginxRuntimeState=false
+        [[ "${queueFail}" != "true" ]]
+    }
+    handleNginx() {
+        actions+="nginx:$1"$'\n'
+        [[ "$1" == "start" ]] && nginxRuntimeState=true
+        [[ "$1" == "stop" ]] && nginxRuntimeState=false
+    }
+
+    resetWireGuardNginxDisableFixture() {
+        actions=
+        nginxRuntimeState=true
+        subscriptionWireGuardWriteState '.enabled = true | .role = "controlled" | .address = "10.77.0.2/24"' >/dev/null
+        printf 'old-wireguard\n' >"$(subscriptionWireGuardConfigFile)"
+        printf 'old-nginx\n' >"${nginxTarget}"
+    }
+
+    resetWireGuardNginxDisableFixture
+    disableSubscriptionWireGuardControl >/dev/null
+    subscriptionWireGuardReadState | jq -e '.enabled == false' >/dev/null
+    [[ ! -e "${nginxTarget}" ]]
+    [[ "${nginxRuntimeState}" == "false" ]]
+    grep -qx 'stop-wireguard' <<<"${actions}"
+    grep -qx 'queue:nginx:restart' <<<"${actions}"
+    grep -qx 'queue-apply' <<<"${actions}"
+
+    resetWireGuardNginxDisableFixture
+    queueFail=true
+    set +e
+    disableSubscriptionWireGuardControl >/dev/null 2>&1
+    status=$?
+    set -e
+    [[ "${status}" -ne 0 ]]
+    subscriptionWireGuardReadState | jq -e '.enabled == true and .role == "controlled"' >/dev/null
+    grep -qx 'restored-wireguard' "$(subscriptionWireGuardConfigFile)"
+    grep -qx 'old-nginx' "${nginxTarget}"
+    [[ "${nginxRuntimeState}" == "true" ]]
+    grep -qx 'nginx:start' <<<"${actions}"
+)
+
 runWriteAloneNginxPathSafetyRegression() {
     (
         set -euo pipefail
@@ -5943,6 +6009,7 @@ runRegressionFastOnlySafety() {
         runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression &&
         runRegressionStep write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression &&
         runRegressionStep wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression &&
+        runRegressionStep wireguard-nginx-disable-lifecycle runSubscriptionWireGuardNginxDisableLifecycleRegression &&
         runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
         runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
         runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression &&

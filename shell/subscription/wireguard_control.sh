@@ -1230,6 +1230,10 @@ disableSubscriptionWireGuardControl() {
     local role
     local listenPort
     local firewallOwned=false
+    local nginxTarget
+    local nginxBackupDir=
+    local nginxWasRunning=false
+    local previousServiceActions
     subscriptionWireGuardReadPreviousState previousState "WireGuard 控制面状态读取失败" || return 1
     role=$(jq -r '.role' <<<"${previousState}") || return 1
     firewallOwned=$(jq -r '.firewall_owned == true' <<<"${previousState}") || return 1
@@ -1237,20 +1241,53 @@ disableSubscriptionWireGuardControl() {
         listenPort=$(jq -r '.listen_port' <<<"${previousState}")
         subscriptionWireGuardValidPort "${listenPort}" || return 1
     fi
+    nginxTarget=$(subscriptionWireGuardNginxConfigFile) || {
+        errorCard "WireGuard Nginx 控制面配置路径异常"
+        return 1
+    }
+    if [[ -e "${nginxTarget}" || -L "${nginxTarget}" ]]; then
+        checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
+            errorCard "WireGuard Nginx 控制面配置备份失败"
+            return 1
+        }
+        nginxRunning && nginxWasRunning=true
+    fi
+    previousServiceActions="${SERVICE_ACTIONS:-}"
     if ! stopSubscriptionWireGuardControlService; then
+        [[ -n "${nginxBackupDir}" ]] && padmRemoveCleanupPath "${nginxBackupDir}"
         errorCard "WireGuard 控制面停用失败"
         return 1
     fi
     subscriptionWireGuardWriteState '.enabled = false | .firewall_owned = false' || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 控制面关闭状态写入失败" || return 1
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 控制面关闭状态写入失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard 控制面状态写入失败"
         return 1
     }
+    if [[ -n "${nginxBackupDir}" ]]; then
+        removeSubscriptionWireGuardNginxConfig || {
+            SERVICE_ACTIONS="${previousServiceActions}"
+            subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置移除失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+            errorCard "WireGuard Nginx 控制面配置移除失败"
+            return 1
+        }
+        if [[ "${nginxWasRunning}" == "true" ]]; then
+            serviceQueueRestart nginx
+            serviceQueueApply || {
+                SERVICE_ACTIONS="${previousServiceActions}"
+                subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+                errorCard "WireGuard Nginx 控制面重载失败"
+                return 1
+            }
+        fi
+    fi
     if [[ "${role}" == "main" && "${firewallOwned}" == "true" ]] &&
         ! denyPort "${listenPort}" udp; then
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 公网监听端口回收失败" || return 1
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 公网监听端口回收失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
         errorCard "WireGuard 公网监听端口回收失败"
         return 1
     fi
+    [[ -n "${nginxBackupDir}" ]] && padmRemoveCleanupPath "${nginxBackupDir}"
     successCard "WireGuard 控制面已关闭"
 }
