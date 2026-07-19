@@ -700,12 +700,14 @@ JSON
         return 1
     fi
     cat >"${configPath}09_routing.json" <<'JSON'
-{"routing":{"rules":[{"outboundTag":"blackhole_out","domain":["geosite:cn"]},{"outboundTag":"blackhole_ip_out","ip":["geoip:cn"]},{"outboundTag":"keep_out","domain":["domain:keep.example"]}]}}
+{"routing":{"rules":[{"outboundTag":"blackhole_out","domain":["geosite:cn","domain:custom.example"]},{"outboundTag":"blackhole_ip_out","ip":["geoip:cn","203.0.113.0/24"]},{"outboundTag":"keep_out","domain":["domain:keep.example"]}]}}
 JSON
     removeXrayRegionalRules
     jq -e '
-      (.routing.rules | length) == 1 and
-      .routing.rules[0].outboundTag == "keep_out"
+      (.routing.rules | length) == 3 and
+      ([.routing.rules[] | select(.outboundTag == "blackhole_out") | .domain[]] | . == ["domain:custom.example"]) and
+      ([.routing.rules[] | select(.outboundTag == "blackhole_ip_out") | .ip[]] | . == ["203.0.113.0/24"]) and
+      .routing.rules[2].outboundTag == "keep_out"
     ' "${configPath}09_routing.json" >/dev/null
     addXrayBTBlockRule
     jq -e '.routing.rules[] | select(.outboundTag == "blackhole_out" and (.protocol | index("bittorrent")))' "${configPath}09_routing.json" >/dev/null

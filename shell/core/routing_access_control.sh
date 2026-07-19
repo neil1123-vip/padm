@@ -325,8 +325,8 @@ removeAccessControlByKind() {
 removeXrayRegionalRules() {
     if [[ -f "${configPath}09_routing.json" ]]; then
         updateRoutingJsonConfig "${configPath}09_routing.json" '
-            del(.routing.rules[] | select((.outboundTag == "blackhole_out") and ((.domain // []) | index("geosite:cn")))) |
-            del(.routing.rules[] | select((.outboundTag == "blackhole_ip_out") and ((.ip // []) | index("geoip:cn"))))
+            del(.routing.rules[] | select(.outboundTag == "blackhole_out") | .domain[] | select(. == "geosite:cn")) |
+            del(.routing.rules[] | select(.outboundTag == "blackhole_ip_out") | .ip[] | select(. == "geoip:cn"))
         ' || return 1
     fi
 }
