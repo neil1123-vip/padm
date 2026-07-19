@@ -1100,7 +1100,7 @@ executeSubscriptionQuotaPlanMenu() {
     return "${rc}"
 }
 
-runSubscriptionGroupSync() {
+runSubscriptionGroupSyncUnlocked() {
     local skipSubscribeRefresh=${1:-}
     local id
     local accountName
@@ -1273,6 +1273,10 @@ runSubscriptionGroupSync() {
         fi
     fi
     return "${rc}"
+}
+
+runSubscriptionGroupSync() {
+    subscriptionGroupsWithLock runSubscriptionGroupSyncUnlocked "$@"
 }
 
 runSubscriptionGroupSyncCron() {

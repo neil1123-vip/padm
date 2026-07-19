@@ -2133,6 +2133,33 @@ runRegressionSubscriptionGroupSyncRemoteFailure() {
     runRegressionStep subscription-group-sync-remote-failure runSubscriptionGroupSyncRemoteFailureRegression
 }
 
+runSubscriptionGroupSyncUsesStateLockRegression() (
+    set -euo pipefail
+    local callLog="${TMP_DIR}/subscription-group-sync-state-lock.log"
+
+    subscriptionGroupsWithLock() {
+        printf 'lock:%s\n' "$*" >>"${callLog}"
+        "$@"
+    }
+    runSubscriptionGroupSyncUnlocked() {
+        printf 'sync:%s\n' "$*" >>"${callLog}"
+        return 17
+    }
+
+    set +e
+    runSubscriptionGroupSync skip-subscribe-refresh
+    local status=$?
+    set -e
+
+    [[ "${status}" == "17" ]]
+    grep -qx 'lock:runSubscriptionGroupSyncUnlocked skip-subscribe-refresh' "${callLog}"
+    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+)
+
+runRegressionSubscriptionGroupSyncUsesStateLock() {
+    runRegressionStep subscription-group-sync-state-lock runSubscriptionGroupSyncUsesStateLockRegression
+}
+
 runRegressionSubscriptionSyncReconcileEarlyExit() {
     runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
 }
