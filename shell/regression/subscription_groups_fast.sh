@@ -415,6 +415,7 @@ runUninstallSubscribeNginxPathSafetyRegression() {
         local root="${TMP_DIR}/uninstall-subscribe-nginx-path-safety"
         local unsafeRoot="${root}/unsafe"
         local nginxRoot="${root}/nginx conf.d"
+        local firewallLog="${root}/firewall.log"
         mkdir -p "${unsafeRoot}" "${nginxRoot}"
 
         printf 'subscribe\n' >"${unsafeRoot}/subscribe.conf"
@@ -425,10 +426,14 @@ runUninstallSubscribeNginxPathSafetyRegression() {
             [[ -f subscribe.conf ]]
         )
 
-        printf 'subscribe\n' >"${nginxRoot}/subscribe.conf"
+        printf 'server {\n    listen 39778 ssl;\n}\n' >"${nginxRoot}/subscribe.conf"
         nginxConfigPath="${nginxRoot}/"
+        denyPort() { printf '%s:%s\n' "$1" "${2:-tcp}" >>"${firewallLog}"; }
+        : >"${firewallLog}"
         unInstallSubscribe
         [[ ! -e "${nginxRoot}/subscribe.conf" ]]
+        grep -qx '39778:tcp' "${firewallLog}"
+        grep -qx '39778:udp' "${firewallLog}"
     )
 }
 

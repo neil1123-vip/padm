@@ -402,6 +402,8 @@ installSubscribe() {
 # 卸载订阅服务
 unInstallSubscribe() {
     local targetPath
+    local subscribePort
+    local firewallStatus=0
     if ! targetPath=$(nginxConfigFilePath subscribe.conf); then
         padmShowUnsafePathError "卸载订阅 Nginx 配置"
         return 1
@@ -409,7 +411,33 @@ unInstallSubscribe() {
     if [[ ! -e "${targetPath}" && ! -L "${targetPath}" ]]; then
         return 0
     fi
-    rm -f -- "${targetPath}" >/dev/null 2>&1
+    subscribePort=$(awk '
+        /^[[:space:]]*listen[[:space:]]/ {
+            for (i = 2; i <= NF; i++) {
+                value = $i
+                gsub(/[;].*/, "", value)
+                if (value ~ /^[0-9]+$/) {
+                    print value
+                    exit
+                }
+                if (value ~ /:[0-9]+$/) {
+                    sub(/^.*:/, "", value)
+                    print value
+                    exit
+                }
+            }
+        }
+    ' "${targetPath}" 2>/dev/null || true)
+    removeManagedFileIfPresent "${targetPath}" || return 1
+    if [[ -n "${subscribePort}" ]] && validPortNumber "${subscribePort}"; then
+        denyPort "${subscribePort}" || firewallStatus=1
+        denyPort "${subscribePort}" udp || firewallStatus=1
+    fi
+    if [[ "${firewallStatus}" != "0" ]]; then
+        errorCard "订阅 Nginx 配置已删除，但防火墙端口回收失败，请检查防火墙状态"
+        return 1
+    fi
+    return 0
 }
 
 
