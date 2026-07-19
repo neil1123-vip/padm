@@ -917,6 +917,10 @@ addOtherSubscribe() {
         errorCard "别名只能使用英文、数字、短横线或下划线"
         return 1
     fi
+    if [[ "${alias,,}" == "main" ]]; then
+        errorCard "main 是保留源 ID，不能作为被控服务器别名"
+        return 1
+    fi
     if subscriptionRemoteSourceSelfReference "$(jq -n --arg host "${host}" '{host:$host}')"; then
         errorCard "被控服务器指向当前主控 WireGuard 地址，已拒绝添加，避免递归同步"
         return 1

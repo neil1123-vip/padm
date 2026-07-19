@@ -1033,6 +1033,10 @@ subscriptionWireGuardAddPeerFromCredential() {
         return 1
     fi
     [[ -n "${alias}" && "${alias}" =~ ^[a-zA-Z0-9_-]+$ ]] || return 1
+    [[ "${alias,,}" != "main" ]] || {
+        errorCard "main 是保留源 ID，不能作为被控服务器别名"
+        return 1
+    }
     [[ "$(jq -r '.kind' <<<"${credentialJson}")" == "controlled" ]] || return 1
     subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || return 1
     address=$(jq -r '.address' <<<"${credentialJson}")

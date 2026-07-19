@@ -14600,6 +14600,22 @@ main.example.com
     }
 
     wireGuardMenuAddEdgePeer() {
+        local reservedCredentialJson
+        local reservedCredential
+        reservedCredentialJson=$(jq -n --arg publicKey "$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456' | base64 -w 0)" '{address:"10.77.0.2/24",public_key:$publicKey,control_port:39778,token:"token-main",kind:"controlled"}')
+        reservedCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -c 'del(.kind)' <<<"${reservedCredentialJson}")")
+        resetMenuActions
+        manageSubscriptionMultiServer <<<"2
+1
+${reservedCredential}
+main
+3
+5"
+        assertMenuAction 'errorCard:main 是保留源 ID，不能作为被控服务器别名'
+        if subscriptionWireGuardAddPeerFromCredential main "${reservedCredentialJson}" >/dev/null 2>&1; then
+            return 1
+        fi
+        subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "main") | not' >/dev/null
         controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
         resetMenuActions
         manageSubscriptionMultiServer <<<"2
