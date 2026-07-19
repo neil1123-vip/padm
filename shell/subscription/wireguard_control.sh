@@ -318,12 +318,18 @@ subscriptionWireGuardRestoreStateAndConfig() {
     elif [[ "${previousEnabled}" == "true" && -n "${previousAddress}" ]]; then
         applySubscriptionWireGuardService >/dev/null 2>&1 || restoreFailed=true
     elif [[ -n "${previousAddress}" ]]; then
-        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || restoreFailed=true
-        writeSubscriptionWireGuardConfig >/dev/null 2>&1 || restoreFailed=true
+        if stopSubscriptionWireGuardControlService true >/dev/null 2>&1; then
+            writeSubscriptionWireGuardConfig >/dev/null 2>&1 || restoreFailed=true
+        else
+            restoreFailed=true
+        fi
     else
-        stopSubscriptionWireGuardControlService true >/dev/null 2>&1 || restoreFailed=true
-        removeSubscriptionWireGuardNginxConfig >/dev/null 2>&1 || restoreFailed=true
-        rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || restoreFailed=true
+        if stopSubscriptionWireGuardControlService true >/dev/null 2>&1; then
+            removeSubscriptionWireGuardNginxConfig >/dev/null 2>&1 || restoreFailed=true
+            rm -f "$(subscriptionWireGuardConfigFile)" >/dev/null 2>&1 || restoreFailed=true
+        else
+            restoreFailed=true
+        fi
     fi
     if [[ -n "${nginxBackupDir}" ]]; then
         checkLogBackupRestore "${nginxBackupDir}" >/dev/null 2>&1 || restoreFailed=true
