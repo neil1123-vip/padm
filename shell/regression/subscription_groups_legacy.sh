@@ -3356,13 +3356,20 @@ runRealityProfileFailureRegression() (
 
 runCoreTemplateReturnFailureRegression() (
     local root="${TMP_DIR}/core-template-return"
+    local xrayRoot="${root}/xray"
+    local singBoxRoot="${root}/sing-box"
+    local nginxRoot="${root}/nginx"
     local firewallState="${root}/firewall.state"
     local firewallLog="${root}/firewall.log"
     local mode=xray
     local xrayRc singBoxRc
     local stopRc writeCalls=0 serviceLog="${TMP_DIR}/core-template-service.log"
+    local singBoxServiceRunning=true
 
-    mkdir -p "${root}"
+    mkdir -p "${xrayRoot}" "${singBoxRoot}" "${nginxRoot}"
+    configPath="${xrayRoot}/"
+    singBoxConfigPath="${singBoxRoot}/"
+    nginxConfigPath="${nginxRoot}/"
     PADM_FIREWALL_STATE_FILE="${firewallState}"
     : >"${firewallLog}"
     currentUUID=existing-user
@@ -3372,15 +3379,25 @@ runCoreTemplateReturnFailureRegression() (
     lastInstallationConfig=true
     selectCustomInstallType=",1,"
     singBoxVLESSVisionPort=10890
+    singBoxVLESSWSPort=10891
 
+    xrayTemplateConfigDir() { printf '%s\n' "${xrayRoot}"; }
+    singBoxTemplateConfigDir() { printf '%s\n' "${singBoxRoot}"; }
     initXrayClients() { printf '[]\n'; }
     initSingBoxClients() { printf '[]\n'; }
     addXrayOutbound() { return 0; }
     checkDNSIP() { return 0; }
     removeNginxDefaultConf() { return 0; }
+    randomPathFunction() { currentPath=template-path; }
+    singBoxRunning() { [[ "${singBoxServiceRunning}" == "true" ]]; }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
-        [[ "${mode}" != "stop-fail" ]]
+        if [[ "$1" == "stop" ]]; then
+            [[ "${mode}" != "stop-fail" ]] || return 1
+            singBoxServiceRunning=false
+        elif [[ "$1" == "start" ]]; then
+            singBoxServiceRunning=true
+        fi
     }
     checkPortOpen() { return 0; }
     initSingBoxPort() {
@@ -3398,22 +3415,31 @@ runCoreTemplateReturnFailureRegression() (
     }
     writeGeneratedJsonFile() {
         local targetFile=$1
+        local mappedTarget=${targetFile}
         shift 2
         writeCalls=$((writeCalls + 1))
         if [[ "${mode}" == "xray" && "${targetFile}" == "/etc/padm/xray/conf/09_routing.json" ]]; then
             return 1
         fi
-        if [[ "${mode}" == "sing-box" && "${targetFile}" == "/etc/padm/sing-box/conf/config/02_VLESS_TCP_inbounds.json" ]]; then
+        if [[ "${mode}" == "sing-box" && "${targetFile}" == "/etc/padm/sing-box/conf/config/03_VLESS_WS_inbounds.json" ]]; then
             return 1
         fi
-        cat >/dev/null
+        case "${targetFile}" in
+        /etc/padm/xray/conf/*) mappedTarget="${xrayRoot}/${targetFile##*/}" ;;
+        /etc/padm/sing-box/conf/config/*) mappedTarget="${singBoxRoot}/${targetFile##*/}" ;;
+        esac
+        cat >"${mappedTarget}"
     }
 
+    printf '%s\n' 'old-xray-log' >"${xrayRoot}/00_log.json"
     set +e
     initXrayConfig custom 1 true 2>/dev/null
     xrayRc=$?
     set -e
     [[ "${xrayRc}" != "0" ]]
+    [[ "$(<"${xrayRoot}/00_log.json")" == 'old-xray-log' ]]
+    [[ ! -e "${xrayRoot}/12_policy.json" ]]
+    [[ ! -e "${xrayRoot}/11_dns.json" ]]
 
     mode=stop-fail
     selectCustomInstallType=",27,"
@@ -3435,8 +3461,10 @@ runCoreTemplateReturnFailureRegression() (
     [[ ! -e "${firewallState}" ]]
 
     mode=sing-box
-    selectCustomInstallType=",27,"
+    selectCustomInstallType=",27,21,"
     writeCalls=0
+    printf '%s\n' 'old-sing-box-inbound' >"${singBoxRoot}/02_VLESS_TCP_inbounds.json"
+    : >"${serviceLog}"
     rm -f "${firewallState}"
     : >"${firewallLog}"
     set +e
@@ -3445,6 +3473,10 @@ runCoreTemplateReturnFailureRegression() (
     set -e
     [[ "${singBoxRc}" != "0" ]]
     [[ "${writeCalls}" != "0" ]]
+    [[ "$(<"${singBoxRoot}/02_VLESS_TCP_inbounds.json")" == 'old-sing-box-inbound' ]]
+    [[ ! -e "${singBoxRoot}/03_VLESS_WS_inbounds.json" ]]
+    [[ "${singBoxServiceRunning}" == "true" ]]
+    grep -qx 'sing-box:start:true' "${serviceLog}"
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     grep -qx 'ufw:10890:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 
 # core template managed config helpers
+xrayTemplateConfigDir() {
+    printf '%s\n' "/etc/padm/xray/conf"
+}
+
 xrayTemplateConfigFile() {
-    padmManagedFilePath "/etc/padm/xray/conf" "$1"
+    padmManagedFilePath "$(xrayTemplateConfigDir)" "$1"
 }
 
 removeXrayTemplateConfigFiles() {
@@ -17,8 +21,12 @@ removeXrayTemplateConfigFiles() {
     return "${status}"
 }
 
+singBoxTemplateConfigDir() {
+    printf '%s\n' "/etc/padm/sing-box/conf/config"
+}
+
 singBoxTemplateConfigFile() {
-    padmManagedFilePath "/etc/padm/sing-box/conf/config" "$1"
+    padmManagedFilePath "$(singBoxTemplateConfigDir)" "$1"
 }
 
 removeSingBoxTemplateConfigFiles() {
@@ -33,9 +41,137 @@ removeSingBoxTemplateConfigFiles() {
     return "${status}"
 }
 
+coreTemplateConfigBackupCreate() {
+    local resultVar=$1
+    local core=$2
+    local configDir fileName targetPath
+    local -a fileNames=()
+    local -a existingTargets=()
+    local -a targets=()
+    local -A seenTargets=()
+
+    case "${core}" in
+    xray)
+        configDir=$(xrayTemplateConfigDir)
+        fileNames=(
+            00_log.json 02_VLESS_TCP_inbounds.json 03_VLESS_WS_inbounds.json
+            04_trojan_GRPc_inbounds.json 04_trojan_TCP_inbounds.json 05_VMess_WS_inbounds.json
+            06_VLESS_GRPc_inbounds.json 07_VLESS_vision_reality_inbounds.json
+            08_VLESS_vision_gRPC_inbounds.json 09_routing.json 11_dns.json
+            11_VMess_HTTPUpgrade_inbounds.json 12_policy.json 12_VLESS_XHTTP_inbounds.json
+            28_trojan_TCP_direct_inbounds.json z_direct_outbound.json blackhole_out.json
+            wireguard_out_IPv4_route.json wireguard_out_IPv6_route.json wireguard_outbound.json
+            IPv4_out.json IPv6_out.json socks5_outbound.json wireguard_out_IPv6.json
+            wireguard_out_IPv4.json
+        )
+        ;;
+    sing-box)
+        configDir=$(singBoxTemplateConfigDir)
+        fileNames=(
+            02_VLESS_TCP_inbounds.json 03_VLESS_WS_inbounds.json 05_VMess_WS_inbounds.json
+            06_hysteria2_inbounds.json 07_VLESS_vision_reality_inbounds.json
+            08_VLESS_vision_gRPC_inbounds.json 09_tuic_inbounds.json 10_naive_inbounds.json
+            11_VMess_HTTPUpgrade_inbounds.json 13_anytls_inbounds.json
+            28_trojan_TCP_direct_inbounds.json 30_shadowsocks_inbounds.json sniff.json
+            wireguard_endpoints_IPv4_route.json wireguard_endpoints_IPv6_route.json
+            wireguard_endpoints_IPv4.json wireguard_endpoints_IPv6.json IPv4_out.json
+            IPv6_out.json IPv6_route.json block.json cn_block_outbound.json cn_block_route.json
+            01_direct_outbound.json socks5_outbound.json block_domain_outbound.json dns.json
+        )
+        ;;
+    *) return 1 ;;
+    esac
+
+    configDir=$(padmRequireSafeAbsolutePath "${configDir%/}") || return 1
+    if [[ -d "${configDir}" ]]; then
+        existingTargets=("${configDir}"/*.json)
+        for targetPath in "${existingTargets[@]}"; do
+            [[ -f "${targetPath}" || -L "${targetPath}" ]] || continue
+            if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
+                targets+=("${targetPath}")
+                seenTargets["${targetPath}"]=1
+            fi
+        done
+    fi
+    for fileName in "${fileNames[@]}"; do
+        targetPath=$(padmManagedFilePath "${configDir}" "${fileName}") || return 1
+        if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
+            targets+=("${targetPath}")
+            seenTargets["${targetPath}"]=1
+        fi
+    done
+
+    if [[ "${core}" == "sing-box" && -n "${nginxConfigPath:-}" ]]; then
+        for fileName in default.conf sing_box_VMess_HTTPUpgrade.conf; do
+            targetPath=$(nginxConfigFilePath "${fileName}") || return 1
+            if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
+                targets+=("${targetPath}")
+                seenTargets["${targetPath}"]=1
+            fi
+        done
+    fi
+
+    checkLogBackupCreate "${resultVar}" "${targets[@]}"
+}
+
+coreTemplateConfigTransaction() {
+    local core=$1
+    local operation=$2
+    shift 2
+    if [[ "${PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE:-}" == "true" ]]; then
+        "${operation}" "$@"
+        return $?
+    fi
+
+    local backupDir=
+    local rc=0
+    local serviceWasRunning=false
+    local configRestored=true
+    local serviceRestored=true
+    local title="Xray 配置初始化"
+    [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
+
+    coreTemplateConfigBackupCreate backupDir "${core}" || {
+        errorCard "${title}备份失败，已取消修改"
+        return 1
+    }
+    if [[ "${core}" == "sing-box" ]] && singBoxRunning; then
+        serviceWasRunning=true
+    fi
+
+    local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=true
+    "${operation}" "$@" || rc=$?
+    if [[ "${rc}" == "0" ]]; then
+        padmRemoveCleanupPath "${backupDir}"
+        return 0
+    fi
+
+    if checkLogBackupRestore "${backupDir}"; then
+        padmRemoveCleanupPath "${backupDir}"
+    else
+        configRestored=false
+        padmForgetCleanupPath "${backupDir}"
+    fi
+    if [[ "${core}" == "sing-box" && "${serviceWasRunning}" == "true" && "${configRestored}" == "true" ]] &&
+        ! singBoxRunning && ! runCoreServiceActionAllowFailure handleSingBox start; then
+        serviceRestored=false
+    fi
+
+    if [[ "${configRestored}" != "true" ]]; then
+        errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+    elif [[ "${serviceRestored}" != "true" ]]; then
+        errorCard "${title}失败，旧配置已恢复，但 sing-box 服务运行状态恢复失败"
+    else
+        errorCard "${title}失败，已恢复旧配置"
+    fi
+    return "${rc}"
+}
+
 # 初始化 Xray 配置文件
-initXrayConfig() {
+initXrayConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
+    local configPath
+    configPath="$(xrayTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 Xray 配置"
     echo
     local uuid=
@@ -613,6 +749,10 @@ EOF
     fi
 }
 
+initXrayConfig() {
+    coreTemplateConfigTransaction xray initXrayConfigApply "$@"
+}
+
 
 # 初始化 sing-box 配置文件
 stopSingBoxBeforeTemplateWrite() {
@@ -621,6 +761,8 @@ stopSingBoxBeforeTemplateWrite() {
 
 initSingBoxConfigApply() {
     set -- "${1:-}" "${2:-}" "${3:-}"
+    local singBoxConfigPath
+    singBoxConfigPath="$(singBoxTemplateConfigDir)/" || return 1
     progressCard "$2" "初始化 sing-box 配置"
 
     echo
@@ -1137,6 +1279,10 @@ EOF
     setSniffRouting || return 1
 }
 
+initSingBoxConfigTransaction() {
+    coreTemplateConfigTransaction sing-box initSingBoxConfigApply "$@"
+}
+
 initSingBoxConfig() {
-    padmRunPortAllowTransaction initSingBoxConfigApply "$@"
+    padmRunPortAllowTransaction initSingBoxConfigTransaction "$@"
 }
