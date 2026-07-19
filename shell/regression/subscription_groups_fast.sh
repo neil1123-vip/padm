@@ -1763,9 +1763,14 @@ runRemoveManagedPathIgnoreFailureRegression() (
 
 runCheckLogBackupMissingRestoreRegression() (
     local root="${TMP_DIR}/check-log-backup-restore"
+    local backupDir
     local restoreBackupDir
     mkdir -p "${root}"
     printf 'old-policy\n' >"${root}/policy.json"
+
+    checkLogBackupCreate backupDir "${root}/policy.json"
+    [[ -n "${backupDir}" && -d "${backupDir}" ]]
+    padmRemoveCleanupPath "${backupDir}"
 
     checkLogBackupCreate restoreBackupDir "${root}/stats.json" "${root}/policy.json"
     printf 'new-stats\n' >"${root}/stats.json"

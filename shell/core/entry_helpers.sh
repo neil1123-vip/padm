@@ -1028,26 +1028,26 @@ updateRealityShowConfig() {
 checkLogBackupCreate() {
     local resultVar=$1
     shift
-    local backupDir
+    local createdBackupDir
     local targetPath
     local backupIndex=0
     local -a backupArgs=()
 
-    padmCreateTmpRootPath backupDir padm-check-log-backup.XXXXXX -d || return 1
+    padmCreateTmpRootPath createdBackupDir padm-check-log-backup.XXXXXX -d || return 1
     for targetPath in "$@"; do
         [[ -n "${targetPath}" ]] || continue
         targetPath=$(padmRequireSafeAbsolutePath "${targetPath}") || {
-            padmRemoveCleanupPath "${backupDir}"
+            padmRemoveCleanupPath "${createdBackupDir}"
             return 1
         }
         backupArgs+=("$(printf '%06d.json' "${backupIndex}")" "${targetPath}")
         backupIndex=$((backupIndex + 1))
     done
-    if ! padmWriteManagedFileBackupManifest "${backupDir}" "${backupArgs[@]}"; then
-        padmRemoveCleanupPath "${backupDir}"
+    if ! padmWriteManagedFileBackupManifest "${createdBackupDir}" "${backupArgs[@]}"; then
+        padmRemoveCleanupPath "${createdBackupDir}"
         return 1
     fi
-    printf -v "${resultVar}" '%s' "${backupDir}"
+    printf -v "${resultVar}" '%s' "${createdBackupDir}"
 }
 
 checkLogBackupRestore() {
