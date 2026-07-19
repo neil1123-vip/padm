@@ -1815,6 +1815,7 @@ runSocks5RoutingFailureReturnRegression() (
     autoRead() {
         case "$1" in
         socks5_inbound_menu) printf -v "$3" '1' ;;
+        socks5_uninstall_menu) printf -v "$3" "${uninstallChoice}" ;;
         socks5_inbound_uuid) printf -v "$3" 'inbound-user' ;;
         socks5_inbound_ip_type) printf -v "$3" 'invalid' ;;
         *) printf -v "$3" '' ;;
@@ -1828,6 +1829,18 @@ runSocks5RoutingFailureReturnRegression() (
     grep -qx 'ufw:10891:tcp' "${inboundFirewallLog}"
     grep -qx 'ufw:10891:udp' "${inboundFirewallLog}"
     [[ ! -e "${inboundFirewallState}" ]]
+
+    mode=success
+    uninstallChoice=2
+    writeSocks5InboundConfig "${singBoxConfigPath}20_socks5_inbounds.json" 10891 inbound-user
+    padmFirewallStateAdd "port:ufw:tcp:10891"
+    padmFirewallStateAdd "port:ufw:udp:10891"
+    : >"${inboundFirewallLog}"
+    removeSocks5Routing >/dev/null 2>&1
+    grep -qx 'ufw:10891:tcp' "${inboundFirewallLog}"
+    grep -qx 'ufw:10891:udp' "${inboundFirewallLog}"
+    [[ ! -e "${inboundFirewallState}" ]]
+    [[ ! -e "${singBoxConfigPath}20_socks5_inbounds.json" ]]
 )
 
 runSocks5UdpAssociateRegression() (

@@ -328,6 +328,8 @@ socks5RoutingRollback() {
 # 卸载 Socks5 分流
 removeSocks5Routing() {
     local backupDir=
+    local socks5InboundPort=
+    local socks5InboundConfig=
     echoContent title "\n┌─ 卸载 Socks5 分流 ─────────────────────────────────"
     menuItem 1 "卸载 Socks5 出站" "移除出站转发配置"
     menuItem 2 "卸载 Socks5 入站" "移除入站监听配置"
@@ -340,6 +342,22 @@ removeSocks5Routing() {
         socks5RoutingBackupCreate backupDir || { errorCard "Socks5 卸载配置备份失败"; return 1; }
         ;;
     esac
+    if [[ "${unInstallSocks5RoutingStatus}" == "2" || "${unInstallSocks5RoutingStatus}" == "3" ]] && [[ -n "${singBoxConfigPath}" ]]; then
+        socks5InboundConfig=$(padmManagedFilePath "${singBoxConfigPath}" 20_socks5_inbounds.json) || {
+            socks5RoutingRollback "${backupDir}" "Socks5 入站端口读取失败" false
+            return 1
+        }
+        if [[ -f "${socks5InboundConfig}" ]]; then
+            socks5InboundPort=$(jq -r '.inbounds[0].listen_port // empty' "${socks5InboundConfig}") || {
+                socks5RoutingRollback "${backupDir}" "Socks5 入站端口读取失败" false
+                return 1
+            }
+            if ! validPortNumber "${socks5InboundPort}"; then
+                socks5RoutingRollback "${backupDir}" "Socks5 入站端口无效" false
+                return 1
+            fi
+        fi
+    fi
     if [[ "${unInstallSocks5RoutingStatus}" == "1" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
             unInstallRouting socks5_outbound outboundTag || { socks5RoutingRollback "${backupDir}" "Socks5 出站卸载失败" false; return 1; }
@@ -397,6 +415,15 @@ removeSocks5Routing() {
         return 1
     fi
     padmRemoveCleanupPath "${backupDir}"
+    if [[ -n "${socks5InboundPort}" ]]; then
+        local firewallStatus=0
+        denyPort "${socks5InboundPort}" || firewallStatus=1
+        denyPort "${socks5InboundPort}" udp || firewallStatus=1
+        if [[ "${firewallStatus}" != "0" ]]; then
+            errorCard "Socks5 入站已卸载，但防火墙规则回收失败，请检查防火墙状态"
+            return 1
+        fi
+    fi
     successCard "卸载完毕"
 }
 # 写入 Socks5 入站配置
