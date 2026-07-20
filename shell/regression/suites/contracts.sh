@@ -2714,6 +2714,7 @@ runFastOnlySafetyChildStepsContract() {
         restore-managed-file-directory-target \
         github-release-direct-fallback \
         download-arg-missing-value \
+        fetch-url-wget-hard-limit \
         github-release-arg-missing-value \
         remove-install-path-retry \
         remove-install-path-file-mode \
@@ -2725,6 +2726,8 @@ runFastOnlySafetyChildStepsContract() {
         check-port-open-nginx-path-safety \
         write-subscribe-nginx-path-safety \
         write-wireguard-control-nginx-path-safety \
+        wireguard-firewall-lifecycle \
+        wireguard-nginx-disable-lifecycle \
         write-alone-nginx-path-safety \
         clean-last-installation-nginx-safety \
         install-nginx-alpine-default-path-safety \
@@ -2734,6 +2737,10 @@ runFastOnlySafetyChildStepsContract() {
         subscription-sync-path-safety \
         subscription-sync-config-directory-target \
         subscription-sync-create-local-apply-backups-rollback \
+        state-readers-clear-stale-values \
+        read-install-type-keeps-sing-box-shards \
+        check-log-backup-output-variable \
+        suppressed-regression-failure-propagation \
         subscription-sync-config-unmanaged-target \
         subscription-sync-missing-restore-scope \
         no-third-party-qr-service \
