@@ -5060,6 +5060,7 @@ runNetworkCheckReturnFailureRegression() (
         if [[ "$1" == "-L" ]]; then
             printf 'ACCEPT tcp -- anywhere anywhere /* allow 1443/tcp(neil1123-vip) */\n'
             [[ "${iptablesTcpAdded}" == "true" ]] && printf 'ACCEPT tcp -- anywhere anywhere /* allow 443/tcp(neil1123-vip) */\n'
+            return 0
         elif [[ "$1" == "-I" ]]; then
             printf 'iptables:add:%s\n' "$*" >>"${firewallLog}"
             iptablesTcpAdded=true
