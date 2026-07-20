@@ -1476,11 +1476,13 @@ downloadGitHubReleaseAsset() {
 # 初始化安装目录
 mkdirTools() {
     local dir status=0
-    local subscribeLocalDirs=(
+    local privateDirs=(
         /etc/padm/subscribe_local
         /etc/padm/subscribe_local/default
         /etc/padm/subscribe_local/clashMeta
         /etc/padm/subscribe_local/sing-box
+        /etc/padm/xray/conf
+        /etc/padm/sing-box/conf
     )
     local dirs=(
         /etc/padm/tls
@@ -1507,7 +1509,7 @@ mkdirTools() {
         mkdir -p "${dir}" || status=1
     done
     if [[ "${status}" -eq 0 ]]; then
-        chmod 700 "${subscribeLocalDirs[@]}" || status=1
+        chmod 700 "${privateDirs[@]}" || status=1
     fi
     return "${status}"
 }
@@ -1518,6 +1520,13 @@ checkRoot() {
         echoContent red "\n请使用 Root 用户执行脚本"
         exit 1
     fi
+    local configDir
+    for configDir in /etc/padm/xray/conf /etc/padm/sing-box/conf; do
+        [[ ! -e "${configDir}" ]] || chmod 700 "${configDir}" || {
+            errorCard "核心配置目录权限收紧失败" "${configDir}"
+            exit 1
+        }
+    done
 }
 
 # 安全执行命令并限制超时

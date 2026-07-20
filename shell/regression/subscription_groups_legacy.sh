@@ -2448,6 +2448,8 @@ runRuntimeTempDirRegression() (
         mkdirTools
     )
     grep -q -- 'chmod:700 .*subscribe_local' "${mkdirToolsLog}"
+    grep -q -- 'chmod:700 .* /etc/padm/xray/conf' "${mkdirToolsLog}"
+    grep -q -- 'chmod:700 .* /etc/padm/sing-box/conf' "${mkdirToolsLog}"
     grep -q -- 'chmod:700 .*subscribe_local/default' "${mkdirToolsLog}"
     grep -q -- 'chmod:700 .*subscribe_local/clashMeta' "${mkdirToolsLog}"
     grep -q -- 'chmod:700 .*subscribe_local/sing-box' "${mkdirToolsLog}"
