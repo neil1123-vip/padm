@@ -4043,6 +4043,8 @@ runInstallMenuRecommendedIdsRegression() {
     grep -q 'customXrayInstall 1 domain' "${PROJECT_ROOT}/shell/core/menu.sh"
     grep -q 'customXrayInstall 2' "${PROJECT_ROOT}/shell/core/menu.sh"
     grep -q 'customSingBoxInstall 5' "${PROJECT_ROOT}/shell/core/menu.sh"
+    grep -q 'selectCoreType=1' "${PROJECT_ROOT}/shell/core/menu.sh"
+    grep -q 'selectCoreType=2' "${PROJECT_ROOT}/shell/core/menu.sh"
     ! grep -q 'customXrayInstall 7 domain' "${PROJECT_ROOT}/shell/core/menu.sh"
     ! grep -q 'customXrayInstall 12' "${PROJECT_ROOT}/shell/core/menu.sh"
     ! grep -q 'customSingBoxInstall 10' "${PROJECT_ROOT}/shell/core/menu.sh"

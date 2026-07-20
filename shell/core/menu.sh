@@ -22,10 +22,12 @@ installMenu() {
     case ${selectInstallType} in
     1)
         selectInstallType=2
+        selectCoreType=1
         customXrayInstall 1 domain
         ;;
     2)
         selectInstallType=2
+        selectCoreType=1
         customXrayInstall 2
         ;;
     3)
@@ -34,6 +36,7 @@ installMenu() {
         ;;
     4)
         selectInstallType=2
+        selectCoreType=2
         customSingBoxInstall 5
         ;;
     5)
