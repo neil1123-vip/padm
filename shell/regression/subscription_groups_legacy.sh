@@ -14891,6 +14891,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldPath="${PATH}"
     local controlledCredential updatedCredential failingCredential failingCredentialJson
+    local mainPublicKey controlledPublicKey updatedPublicKey failingPublicKey
     local nginxFakeBin nginxTarget
     local mainStateSnapshot
     local wireGuardApplyShouldFail= installControlShouldFail= refreshControlShouldFail= serviceQueueShouldFail=
@@ -14908,6 +14909,15 @@ runSubscriptionWireGuardMenuFlowRegression() (
     source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/subscription/menu.sh"
+
+    mainPublicKey=$(printf '0123456789abcdefghijklmnopqrstuv' | base64 -w 0)
+    controlledPublicKey=$(printf 'abcdefghijklmnopqrstuvwxyz123456' | base64 -w 0)
+    updatedPublicKey=$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456' | base64 -w 0)
+    failingPublicKey=$(printf '01234567890123456789012345678901' | base64 -w 0)
+    controlledCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -cn --arg publicKey "${controlledPublicKey}" '{address:"10.77.0.2/24",public_key:$publicKey,control_port:39778,token:"token-a"}')")
+    updatedCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -cn --arg publicKey "${updatedPublicKey}" '{address:"10.77.0.3/24",public_key:$publicKey,control_port:48779,token:"token-b"}')")
+    failingCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -cn --arg publicKey "${failingPublicKey}" '{address:"10.77.0.4/24",public_key:$publicKey,control_port:39778,token:"token-fail"}')")
+    failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
 
     recordMenuAction() {
         actions+="$1"$'\n'
@@ -14948,7 +14958,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         recordMenuAction initSubscriptionWireGuardMain
         local endpointHost=
         autoRead wg_main_endpoint_host "请输入主控公网地址或域名[用于被控连接 WireGuard]:" endpointHost
-        subscriptionWireGuardWriteState --arg endpointHost "${endpointHost}" '.enabled = true | .role = "main" | .address = "10.77.0.1/24" | .endpoint_host = $endpointHost | .public_key = "public-key" | .listen_port = 51820 | .control_port = 39778'
+        subscriptionWireGuardWriteState --arg endpointHost "${endpointHost}" --arg publicKey "${mainPublicKey}" '.enabled = true | .role = "main" | .address = "10.77.0.1/24" | .endpoint_host = $endpointHost | .public_key = $publicKey | .listen_port = 51820 | .control_port = 39778'
         applySubscriptionWireGuardService
     }
     eval "$(declare -f disableSubscriptionWireGuardControl | sed '1s/^disableSubscriptionWireGuardControl/originalDisableSubscriptionWireGuardControl/')"
@@ -15067,21 +15077,18 @@ main.example.com
     wireGuardMenuAddEdgePeer() {
         local reservedCredentialJson
         local reservedCredential
-        reservedCredentialJson=$(jq -n --arg publicKey "$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456' | base64 -w 0)" '{address:"10.77.0.2/24",public_key:$publicKey,control_port:39778,token:"token-main",kind:"controlled"}')
+        reservedCredentialJson=$(jq -n --arg publicKey "${updatedPublicKey}" '{address:"10.77.0.2/24",public_key:$publicKey,control_port:39778,token:"token-main",kind:"controlled"}')
         reservedCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -c 'del(.kind)' <<<"${reservedCredentialJson}")")
         resetMenuActions
-        manageSubscriptionMultiServer <<<"2
-1
-${reservedCredential}
-main
-3
-5"
+        if addOtherSubscribe <<<"${reservedCredential}
+main"; then
+            return 1
+        fi
         assertMenuAction 'errorCard:main 是保留源 ID，不能作为被控服务器别名'
         if subscriptionWireGuardAddPeerFromCredential main "${reservedCredentialJson}" >/dev/null 2>&1; then
             return 1
         fi
         subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "main") | not' >/dev/null
-        controlledCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"controlled-pub","control_port":39778,"token":"token-a"}')
         resetMenuActions
         manageSubscriptionMultiServer <<<"2
 1
@@ -15090,7 +15097,7 @@ edge-a
 3
 5"
         assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-        subscriptionWireGuardReadState | jq -e '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == "controlled-pub")' >/dev/null
+        subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey)' >/dev/null
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
     }
 
@@ -15141,13 +15148,13 @@ SH
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
-        updatedCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.3/24","public_key":"controlled-pub-2","control_port":48779,"token":"token-b"}')
         resetMenuActions
         manageSubscriptionMultiServer <<<"3
 ${updatedCredential}
 edge-a
 5"
         assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        subscriptionWireGuardReadState | jq -e --arg publicKey "${updatedPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.3/24" and .public_key == $publicKey)' >/dev/null
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
     fi
 
@@ -15155,8 +15162,6 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
-        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
-        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
         if subscriptionWireGuardAddPeerFromCredential "bad alias" "${failingCredentialJson}" >/dev/null 2>&1; then
             return 1
         fi
@@ -15178,9 +15183,6 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
-        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
-        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
-
         wireGuardApplyShouldFail=true
         restoreStateWriteShouldFail=true
         resetMenuActions
@@ -15199,9 +15201,6 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
-        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
-        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
-
         addSourceShouldFail=true
         if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
             addSourceShouldFail=
@@ -15216,9 +15215,6 @@ edge-a
     if wireGuardMenuPartSelected peer-rollback-credential || wireGuardMenuPartSelected peer-rollback-credential-write; then
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
-
-        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
-        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
 
         setCredentialShouldFail=true
         if subscriptionWireGuardAddPeerFromCredential "edge-setfail" "${failingCredentialJson}" >/dev/null 2>&1; then
@@ -15237,9 +15233,6 @@ edge-a
     if wireGuardMenuPartSelected peer-rollback-credential || wireGuardMenuPartSelected peer-rollback-credential-groups-restore; then
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
-
-        failingCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.4/24","public_key":"controlled-pub-fail","control_port":39778,"token":"token-fail"}')
-        failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
 
         setCredentialShouldFail=true
         restoreGroupsWriteShouldFail=true
