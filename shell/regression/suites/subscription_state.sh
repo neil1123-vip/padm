@@ -67,6 +67,12 @@ listRegressionSubscriptionStateQuotaChildSelectors() {
         subscription-state-quota-partial-sync
 }
 
+runRegressionSubscriptionStateQuota() {
+    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector \
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota" \
+            listRegressionSubscriptionStateQuotaChildSelectors
+}
+
 listRegressionSubscriptionStateQuotaTrafficChildSelectors() {
     printf '%s\n' \
         subscription-state-quota-traffic-summary \
@@ -513,12 +519,7 @@ registerRegressionAggregateRunnerParallelWithArgs \
 registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \
     $(listRegressionSubscriptionStateStructureChildSelectors)
 
-registerRegressionAggregateRunnerParallelWithArgs \
-    subscription-state-quota \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/subscription-state-quota" \
-    listRegressionSubscriptionStateQuotaChildSelectors \
-    -- \
+registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \
     $(listRegressionSubscriptionStateQuotaChildSelectors)
 
 registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \

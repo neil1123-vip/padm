@@ -1058,7 +1058,7 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     ! grep -Eq '^runRegressionSubscriptionStateSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     grep -Eq '^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${suiteFile}"
     grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${suiteFile}"
     ! grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${suiteFile}"
@@ -1248,7 +1248,6 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
     ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateSyncRollbackSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureMigrationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureSourceIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
@@ -1269,6 +1268,7 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionSubscriptionStateStructureChildSelectors \
         runRegressionSubscriptionStateStructure \
         listRegressionSubscriptionStateQuotaChildSelectors \
+        runRegressionSubscriptionStateQuota \
         listRegressionSubscriptionStateQuotaTrafficChildSelectors \
         listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors \
         listRegressionSubscriptionStateQuotaPartialSyncChildSelectors \
@@ -1523,6 +1523,7 @@ runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
 
     grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \\' "${suiteFile}" || return 1
+    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}" || return 1
     grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}" || return 1
@@ -1559,11 +1560,8 @@ runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
     runAggregateRunnerRegistrationAssertions \
         subscription-state-quota \
         parallel \
-        runFrameworkParallelRegressionSelectorList \
+        runRegressionSubscriptionStateQuota \
         "$(listRegressionSubscriptionStateQuotaChildSelectors)"
-    runAggregateRunnerRunnerArgsAssertions \
-        subscription-state-quota \
-        "$(printf '%s\n%s' "${PADM_REGRESSION_SELECTOR_RUNNER_ARGS["subscription-state-quota"]%%$'\n'*}" 'listRegressionSubscriptionStateQuotaChildSelectors')"
     runAggregateRunnerRegistrationAssertions \
         subscription-state-quota-traffic \
         sequential \
@@ -1660,6 +1658,7 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
     local structureBody
+    local quotaBody
     local remoteRestoreBody
     local syncRollbackBody
 
@@ -1684,12 +1683,17 @@ runSubscriptionStateFullUsesFrameworkParallelHelperContract() {
     ! grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-sync-rollback-failure"' "${scriptFile}"
 
     structureBody=$(sed -n '/^runRegressionSubscriptionStateStructure() {$/,/^}$/p' "${suiteFile}")
+    quotaBody=$(sed -n '/^runRegressionSubscriptionStateQuota() {$/,/^}$/p' "${suiteFile}")
     remoteRestoreBody=$(sed -n '/^runRegressionSubscriptionStateRemoteRestore() {$/,/^}$/p' "${suiteFile}")
     syncRollbackBody=$(sed -n '/^runRegressionSubscriptionStateSyncRollback() {$/,/^}$/p' "${suiteFile}")
 
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector' <<<"${structureBody}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-structure"' <<<"${structureBody}"
     grep -q 'listRegressionSubscriptionStateStructureChildSelectors' <<<"${structureBody}"
+
+    grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector' <<<"${quotaBody}"
+    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-quota"' <<<"${quotaBody}"
+    grep -q 'listRegressionSubscriptionStateQuotaChildSelectors' <<<"${quotaBody}"
 
     grep -q 'PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runSubscriptionStateParallelChildRegressionIsolatedSelector' <<<"${remoteRestoreBody}"
     grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-state-remote-restore"' <<<"${remoteRestoreBody}"
@@ -1724,6 +1728,15 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
         local selectorListFn=$2
         shift 2
         local -a selectors=()
+
+        case "${selectorListFn}" in
+        listRegressionSubscriptionStateStructureChildSelectors | \
+            listRegressionSubscriptionStateQuotaChildSelectors | \
+            listRegressionSubscriptionStateRemoteRestoreChildSelectors | \
+            listRegressionSubscriptionStateSyncRollbackFailureChildSelectors)
+            [[ "${PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER:-}" == "runSubscriptionStateParallelChildRegressionIsolatedSelector" ]] || return 1
+            ;;
+        esac
 
         mapfile -t selectors < <("${selectorListFn}" "$@")
         printf 'framework:list:%s:%s:%s\n' \
