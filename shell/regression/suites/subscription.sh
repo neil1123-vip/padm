@@ -164,12 +164,20 @@ runRegressionSubscriptionOutputParallelCompositionRegression() (
 )
 
 runRegressionSubscriptionOutput() {
+    local status
+
+    set +e
     runSubscriptionSelectorListRegression \
         subscription-output-parallel \
         listRegressionSubscriptionOutputChildSelectors \
         2 \
-        PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS &&
-        runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
+        PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS
+    status=$?
+    set -e
+    if (( status != 0 )); then
+        return "${status}"
+    fi
+    runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
 }
 
 runRegressionSubscriptionRemoteParallelCompositionRegression() (
