@@ -1940,6 +1940,8 @@ manageCDN() {
 clashMetaConfig() {
     local url=$1
     local id=$2
+    # Public profiles must use the per-account identifier, never the shared salt.
+    local subscribeSalt=${id}
     local targetPath=${3:-$(subscribePublicBaseDir)/clashMetaProfiles/${id}}
     [[ "${PADM_FAKE_CLASH_META_CONFIG_MODE:-success}" == "success" ]] || return 1
     cat <<EOF >"${targetPath}"

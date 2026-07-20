@@ -10748,6 +10748,9 @@ runSubscribeUserOutputTransactionRegression() {
     grep -qx '  allow-private-network: false' "${clashProfilePath}"
     grep -qx '  listen: 127.0.0.1:1053' "${clashProfilePath}"
     ! grep -qE '^(bind-address: "\*"|external-controller: 0\.0\.0\.0:|  listen: 0\.0\.0\.0:)' "${clashProfilePath}"
+    grep -q '^  atomic-md5_provider:' "${clashProfilePath}"
+    grep -q '^    path: ./atomic-md5_provider.yaml$' "${clashProfilePath}"
+    ! grep -q 'salt_provider' "${clashProfilePath}"
     eval "$(declare -f clashMetaConfig | sed '1s/^clashMetaConfig/originalClashMetaConfig/')"
     eval "$(declare -f commitSubscribeUserOutputFile | sed '1s/^commitSubscribeUserOutputFile/originalCommitSubscribeUserOutputFile/')"
 
