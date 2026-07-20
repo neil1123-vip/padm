@@ -1947,8 +1947,8 @@ log-level: debug
 mode: rule
 ipv6: true
 mixed-port: 7890
-allow-lan: true
-bind-address: "*"
+allow-lan: false
+bind-address: "127.0.0.1"
 lan-allowed-ips:
   - 0.0.0.0/0
   - ::/0
@@ -1986,7 +1986,7 @@ sniffer:
 dns:
   enable: true
   prefer-h3: false
-  listen: 0.0.0.0:1053
+  listen: 127.0.0.1:1053
   ipv6: true
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
