@@ -5452,6 +5452,7 @@ runTlsFailureReturnRegression() (
     local caRcFile="${root}/ca.rc"
     local installRcFile="${root}/install.rc"
     local xrayRcFile="${root}/xray.rc"
+    local chmodLog="${root}/chmod.log"
     local reachedFile="${root}/reached"
     local shellRc
 
@@ -5512,6 +5513,33 @@ runTlsFailureReturnRegression() (
     shellRc=$?
     set -e
     [[ "${shellRc}" == "1" ]]
+    unset -f sudo
+
+    local secureTlsRoot="${root}/secure-install"
+    mkdir -p "${secureTlsRoot}/home/.acme.sh" "${secureTlsRoot}/tls"
+    HOME="${secureTlsRoot}/home"
+    export PADM_TLS_DIR="${secureTlsRoot}/tls"
+    domain=secure.example.com
+    installedDNSAPIStatus=
+    printf '#!/usr/bin/env sh\n' >"${HOME}/.acme.sh/acme.sh"
+    command chmod 755 "${HOME}/.acme.sh/acme.sh"
+    printf 'old-cert\n' >"${PADM_TLS_DIR}/secure.example.com.crt"
+    printf 'old-key\n' >"${PADM_TLS_DIR}/secure.example.com.key"
+    command chmod 644 "${PADM_TLS_DIR}/secure.example.com.key"
+    : >"${chmodLog}"
+    chmod() {
+        printf '%s\n' "$*" >>"${chmodLog}"
+        command chmod "$@"
+    }
+    sudo() {
+        printf 'new-cert\n' >"${PADM_TLS_DIR}/secure.example.com.crt"
+        printf 'new-key\n' >"${PADM_TLS_DIR}/secure.example.com.key"
+        return 0
+    }
+    installTLSFromAcme >/dev/null 2>&1
+    grep -F -q -- "600 -- ${PADM_TLS_DIR}/secure.example.com.key" "${chmodLog}"
+    [[ "$(<"${PADM_TLS_DIR}/secure.example.com.key")" == "new-key" ]]
+    unset -f chmod
     unset -f sudo
 
     (
@@ -18696,6 +18724,7 @@ runTlsRenewalFailurePropagationRegression() (
     local errorLog="${root}/error.log"
     local statusJson
     local mode rc tlsRegressionStatMode=
+    local chmodLog="${TMP_DIR}/tls-renew-chmod.log"
     local nginxState xrayState singBoxState
 
     mkdir -p "${tlsDir}" "${homeDir}"
@@ -18770,6 +18799,10 @@ runTlsRenewalFailurePropagationRegression() (
         [[ "${mode}" == "install-fail" && "$*" == *" --installcert "* ]] && return 1
         return 0
     }
+    chmod() {
+        printf '%s\n' "$*" >>"${chmodLog}"
+        command chmod "$@"
+    }
     prepareRenewalFixture() {
         rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
         mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/renew.example.com_ecc"
@@ -18781,6 +18814,7 @@ runTlsRenewalFailurePropagationRegression() (
         chmod 755 "${homeDir}/.acme.sh/acme.sh"
         : >"${serviceLog}"
         : >"${commandLog}"
+        : >"${chmodLog}"
         : >"${statusLog}"
         : >"${errorLog}"
         SERVICE_QUEUE_ALLOW_FAILURE=previous
@@ -18902,6 +18936,7 @@ runTlsRenewalFailurePropagationRegression() (
 
     runRenewalCase stopped-services
     [[ "${rc}" == "0" ]]
+    grep -F -q -- "600 -- ${tlsDir}/renew.example.com.key" "${chmodLog}"
     [[ ! -s "${serviceLog}" ]]
     [[ "${nginxState}" == "false" && "${xrayState}" == "false" && "${singBoxState}" == "false" ]]
 

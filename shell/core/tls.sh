@@ -256,6 +256,11 @@ installTLSFromAcme() {
     acmeLogFile=$(tlsAcmeLogFile) || return 1
     acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
 
+    if [[ -f "${keyFile}" ]] && ! chmod 600 -- "${keyFile}"; then
+        errorCard "TLS 私钥权限收紧失败"
+        return 1
+    fi
+
     if [[ -s "${crtFile}" && -s "${keyFile}" ]]; then
         padmCreateTmpRootPath backupDir padm-tls-install.XXXXXX -d || return 1
         backupCrt="${backupDir}/$(basename -- "${crtFile}")"
@@ -270,7 +275,9 @@ installTLSFromAcme() {
         sudo "${acmeBin}" --installcert -d "${tlsDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc >/dev/null || installStatus=$?
     fi
 
-    if [[ "${installStatus}" -ne 0 || ! -f "${crtFile}" || ! -f "${keyFile}" ]] || [[ -z $(cat "${keyFile}") || -z $(cat "${crtFile}") ]]; then
+    if [[ "${installStatus}" -ne 0 || ! -f "${crtFile}" || ! -f "${keyFile}" ]] ||
+        [[ -z $(cat "${keyFile}") || -z $(cat "${crtFile}") ]] ||
+        ! chmod 600 -- "${keyFile}"; then
         tail -n 10 "${acmeLogFile}" 2>/dev/null || true
         if [[ -n "${backupDir}" ]]; then
             if ! restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644; then
@@ -667,6 +674,7 @@ renewalTLS() {
     fi
     if [[ -n "${acmeDir}" ]] && { [[ -d "${acmeDir}/${domain}_ecc" && -f "${acmeDir}/${domain}_ecc/${domain}.key" && -f "${acmeDir}/${domain}_ecc/${domain}.cer" ]] || [[ "${installedDNSAPIStatus:-}" == "true" ]]; }; then
         acmeBin=$(acmeExecutable) || { errorCard "acme.sh 路径、所有者或权限异常"; return 1; }
+        chmod 600 -- "${tlsDir}/${domain}.key" || { errorCard "TLS 私钥权限收紧失败"; return 1; }
         modifyTime=
 
         if [[ "${installedDNSAPIStatus:-}" == "true" ]]; then
@@ -742,8 +750,12 @@ renewalTLS() {
                 restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || errorCard "TLS 证书续签失败，且服务恢复失败"
                 return "${renewStatus}"
             fi
-            sudo "${acmeBin}" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || {
-                local installStatus=$?
+            local installStatus=0
+            sudo "${acmeBin}" --installcert -d "${installDomain}" --fullchainpath "${crtFile}" --keypath "${keyFile}" --ecc || installStatus=$?
+            if [[ "${installStatus}" -eq 0 ]]; then
+                chmod 600 -- "${keyFile}" || installStatus=$?
+            fi
+            if [[ "${installStatus}" -ne 0 ]]; then
                 errorCard "TLS 证书安装失败，正在尝试恢复服务"
                 restoreManagedFileFromBackup "${backupCrt}" "${crtFile}" 644 || restoreStatus=1
                 restoreManagedFileFromBackup "${backupKey}" "${keyFile}" 600 || restoreStatus=1
@@ -755,7 +767,7 @@ renewalTLS() {
                 fi
                 restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || errorCard "TLS 证书安装失败，且服务恢复失败"
                 return "${installStatus}"
-            }
+            fi
             padmRemoveCleanupPath "${backupDir}"
             if ! restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}"; then
                 errorCard "TLS 证书已安装，但服务恢复失败"
