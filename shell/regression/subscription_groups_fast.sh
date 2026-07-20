@@ -5924,10 +5924,13 @@ runCoreReleaseTagsPaginationRegression() {
     (
         set -euo pipefail
         local requestLog="${TMP_DIR}/core-release-tags-pages.log"
-        local version
+        local version tags
         fetchUrlToStdout() {
             printf '%s\n' "$1" >>"${requestLog}"
             case "$1" in
+            */releases/latest)
+                printf '%s\n' '{"tag_name":"v1.9.0","prerelease":false}'
+                ;;
             *page=1)
                 printf '%s\n' '[{"tag_name":"v2.0.0-pre.5","prerelease":true},{"tag_name":"v2.0.0-pre.4","prerelease":true},{"tag_name":"v2.0.0-pre.3","prerelease":true},{"tag_name":"v2.0.0-pre.2","prerelease":true},{"tag_name":"v2.0.0-pre.1","prerelease":true}]'
                 ;;
@@ -5940,9 +5943,13 @@ runCoreReleaseTagsPaginationRegression() {
 
         version=$(coreLatestReleaseTag XTLS/Xray-core false)
         [[ "${version}" == "v1.9.0" ]]
+        grep -qxF 'https://api.github.com/repos/XTLS/Xray-core/releases/latest' "${requestLog}"
+
+        tags=$(coreReleaseTags XTLS/Xray-core false)
+        [[ "${tags}" == "v1.9.0" ]]
         grep -qxF 'https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5&page=1' "${requestLog}"
         grep -qxF 'https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5&page=2' "${requestLog}"
-        [[ "$(wc -l <"${requestLog}" | tr -d '[:space:]')" == "2" ]]
+        [[ "$(wc -l <"${requestLog}" | tr -d '[:space:]')" == "3" ]]
     )
 }
 

@@ -530,6 +530,13 @@ coreReleaseTags() {
 coreLatestReleaseTag() {
     local repo=$1
     local prerelease=${2:-false}
+    local metadata
+    if [[ "${prerelease}" == "false" ]]; then
+        metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases/latest" 3) || metadata=
+        if [[ -n "${metadata}" ]]; then
+            jq -er '.tag_name | select(type == "string" and length > 0)' <<<"${metadata}" && return 0
+        fi
+    fi
     coreReleaseTags "${repo}" "${prerelease}" 1
 }
 
