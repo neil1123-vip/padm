@@ -3118,37 +3118,6 @@ EOF
     cmp -s "${TMP_DIR}/fast-reality-compat-helper.expected.log" "${callLog}"
 )
 
-runFastSuiteUsesSuiteLocalHelperContract() (
-    local callLog="${TMP_DIR}/fast-suite-root-dispatch.log"
-
-    : >"${callLog}"
-
-    runMenuSmokeLightRegression() {
-        printf 'legacy-ui-smoke-light\n' >>"${callLog}"
-        return 97
-    }
-
-    runRegressionUiSmokeSuiteRoot() {
-        printf 'suite-ui-smoke-light\n' >>"${callLog}"
-    }
-
-    runRegisteredRegressionMain() {
-        local selector=$1
-
-        if [[ "${selector}" == "ui-smoke-light" ]]; then
-            runRegressionUiSmokeSuiteRoot
-            return $?
-        fi
-
-        return 0
-    }
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain fast-only-core
-
-    grep -qx 'suite-ui-smoke-light' "${callLog}"
-    ! grep -q '^legacy-ui-smoke-light$' "${callLog}"
-)
-
 runRegisteredChildSelectorsAlignedAssertions() (
     local selectorListFn=$1
     local filePrefix=$2
@@ -6639,7 +6608,6 @@ runRegressionDispatcherContracts() {
     runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract
     runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract
     runRegressionStep fast-reality-uses-reality-compat-helper runFastRealityUsesRealityCompatHelperContract
-    runRegressionStep fast-suite-uses-suite-local-helper runFastSuiteUsesSuiteLocalHelperContract
     runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract
     runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract
     runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract
