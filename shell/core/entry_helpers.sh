@@ -1314,6 +1314,10 @@ aliasInstall() {
         fi
     fi
 
+    if sameInstallPath "${sourceInstall}" "${targetDir}/install.sh"; then
+        return 0
+    fi
+
     if [[ -f "${sourceInstall}" && -d "${targetDir}" ]] && padmEntryScriptReady "${sourceInstall}"; then
         local rollbackBackupDir=
         local rollbackStatus=0
