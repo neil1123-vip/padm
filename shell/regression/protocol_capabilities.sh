@@ -400,6 +400,48 @@ JSON
     AUTO_ENTRY_HOST="${oldAutoEntryHost}"
 }
 
+runXrayDirectTlsInboundWithoutFallbackRegression() {
+    local oldCoreInstallType="${coreInstallType:-}"
+    local oldConfigPath="${configPath:-}"
+    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
+    local oldNginxConfigPath="${nginxConfigPath:-}"
+    local oldFrontingType="${frontingType:-}"
+    local oldCurrentInstallProtocolType="${currentInstallProtocolType:-}"
+    local configDir="${TMP_DIR}/xray-direct-tls/"
+    local errorFile="${TMP_DIR}/xray-direct-tls.err"
+
+    mkdir -p "${configDir}"
+    cat >"${configDir}28_trojan_TCP_direct_inbounds.json" <<'JSON'
+{"inbounds":[{"port":443,"settings":{"clients":[{"password":"secret","email":"main-Trojan_TCP_direct"}]},"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/example.com.crt"}]}}}]}
+JSON
+    printf '{}\n' >"${configDir}02_dokodemodoor_inbounds_443_default.json"
+
+    coreInstallType=1
+    configPath="${configDir}"
+    singBoxConfigPath=
+    nginxConfigPath="${configDir}"
+    frontingType=28_trojan_TCP_direct_inbounds
+    currentInstallProtocolType=",28,"
+    local readStatus
+    set +e
+    readConfigHostPathUUID 2>"${errorFile}"
+    readStatus=$?
+    set -e
+    [[ "${readStatus}" == "0" ]]
+    if [[ -s "${errorFile}" ]]; then
+        cat "${errorFile}" >&2
+        return 1
+    fi
+    assertEquals '' "${currentUUID}" "xray-direct-tls-current-uuid"
+
+    coreInstallType="${oldCoreInstallType}"
+    configPath="${oldConfigPath}"
+    singBoxConfigPath="${oldSingBoxConfigPath}"
+    nginxConfigPath="${oldNginxConfigPath}"
+    frontingType="${oldFrontingType}"
+    currentInstallProtocolType="${oldCurrentInstallProtocolType}"
+}
+
 runRegressionStep protocol-capability-registry runProtocolCapabilityRegistryRegression
 runRegressionStep protocol-capability-menu-core runProtocolCapabilityMenuAndCoreRegression
 runRegressionStep protocol-capability-nginx-topology runProtocolCapabilityNginxTopologyRegression
@@ -407,4 +449,5 @@ runRegressionStep protocol-capability-templates runProtocolCapabilityTemplateReg
 runRegressionStep hysteria2-capability runHysteria2CapabilityRegression
 runRegressionStep subscription-capability-dispatch runSubscriptionCapabilityDispatchRegression
 runRegressionStep singbox-plain-inbound-host-fallback runSingBoxPlainInboundHostFallbackRegression
+runRegressionStep xray-direct-tls-inbound-without-fallback runXrayDirectTlsInboundWithoutFallbackRegression
 echo "protocol-capabilities-regression-ok"

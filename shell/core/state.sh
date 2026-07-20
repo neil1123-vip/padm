@@ -850,7 +850,7 @@ readConfigHostPathUUID() {
     if [[ -n "${configPath}" && -n "${frontingType}" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then
             local fallback
-            fallback=$(jq -r -c '.inbounds[0].settings.fallbacks[]|select(.path)' ${configPath}${frontingType}.json | head -1)
+            fallback=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.path)' ${configPath}${frontingType}.json | head -1)
 
             local path
             path=$(echo "${fallback}" | jq -r .path | awk -F "[/]" '{print $2}')
@@ -863,7 +863,7 @@ readConfigHostPathUUID() {
 
             # 尝试读取alpn h2 Path
             if [[ -z "${currentPath}" ]]; then
-                dest=$(jq -r -c '.inbounds[0].settings.fallbacks[]|select(.alpn)|.dest' ${configPath}${frontingType}.json | head -1)
+                dest=$(jq -r -c '.inbounds[0].settings.fallbacks[]?|select(.alpn)|.dest' ${configPath}${frontingType}.json | head -1)
                 if [[ "${dest}" == "31302" || "${dest}" == "31304" ]]; then
                     # checkBTPanel
                     # check1Panel
