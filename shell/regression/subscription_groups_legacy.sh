@@ -18850,7 +18850,7 @@ runTlsRenewalFailurePropagationRegression() (
     : >"${errorLog}"
     statusJson=$(tlsCertificateStatusJson)
     jq -e '.status == "missing"' <<<"${statusJson}" >/dev/null
-    renewalTLS >/dev/null 2>&1
+    ! renewalTLS >/dev/null 2>&1
     grep -q "未安装本机 TLS 证书" "${errorLog}"
     ! grep -q "检测到使用自定义证书" "${statusLog}"
     rm -f "${root}/escape.crt" "${root}/escape.key"
@@ -18862,7 +18862,7 @@ runTlsRenewalFailurePropagationRegression() (
     : >"${errorLog}"
     statusJson=$(tlsCertificateStatusJson)
     jq -e '.status == "missing"' <<<"${statusJson}" >/dev/null
-    renewalTLS >/dev/null 2>&1
+    ! renewalTLS >/dev/null 2>&1
     grep -q "未安装本机 TLS 证书" "${errorLog}"
     ! grep -q "检测到使用自定义证书" "${statusLog}"
     rm -f "${tlsDir}/bad;name.crt" "${tlsDir}/bad;name.key"
