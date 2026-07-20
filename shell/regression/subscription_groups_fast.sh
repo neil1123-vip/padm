@@ -4013,7 +4013,7 @@ EOF
 }
 
 runSubscribeNginxLocationPatternRegression() {
-    local strictPattern='location ~ ^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$ {'
+    local strictPattern='location ~ "^/s/(clashMeta|default|clashMetaProfiles|sing-box|sing-box_profiles)/([A-Fa-f0-9]{32})$" {'
     grep -qF "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/subscription.sh"
     grep -qF "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
     grep -A3 -F "${strictPattern}" "${PROJECT_ROOT}/shell/subscription/subscription.sh" | grep -qF 'access_log off;'
