@@ -2029,11 +2029,13 @@ runRemoteControlSelectorHelpersStayAlignedContract() (
         remote-control-concurrency \
         remote-control-aggregation-failure \
         remote-control-inline-aggregation-helpers \
+        remote-control-sources-parsed-once \
         remote-control-health \
         remote-control-inline-request-helpers \
         remote-control-inline-wireguard-peer-helpers \
         remote-control-inline-token-consumers \
         remote-control-inline-sync-runner \
+        remote-control-inline-sync-parallel-runner \
         remote-control-handle-inline-helpers
     remoteControlAssertSelectorList listRegressionRemoteControlContractServiceInstallChildSelectors contract-service-install \
         remote-control-contract-service-install-success \
