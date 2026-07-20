@@ -10688,7 +10688,7 @@ runSubscribeUserOutputTransactionRegression() {
     local oldScriptDir="${SCRIPT_DIR}"
     local oldTmpDir="${TMPDIR:-}"
     local rootRel="${TMP_DIR}/subscribe-user-transaction"
-    local root localDir publicDir userTmpRoot stageMarker
+    local root localDir publicDir userTmpRoot stageMarker clashProfilePath
     local email="atomic-user"
     local emailMd5="atomic-md5"
     mkdir -p "${rootRel}"
@@ -10705,6 +10705,10 @@ runSubscribeUserOutputTransactionRegression() {
     subscribeSalt=salt
     mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box" "${publicDir}/default" "${publicDir}/clashMeta" "${publicDir}/clashMetaProfiles" "${publicDir}/sing-box" "${publicDir}/sing-box_profiles" "${userTmpRoot}"
     : >"${stageMarker}"
+    clashProfilePath="${root}/clash-meta-profile.yaml"
+    clashMetaConfig "https://example.com/proxies" "${emailMd5}" "${clashProfilePath}"
+    grep -qx 'external-controller: 127.0.0.1:9090' "${clashProfilePath}"
+    ! grep -q '^external-controller: 0\.0\.0\.0:' "${clashProfilePath}"
     eval "$(declare -f clashMetaConfig | sed '1s/^clashMetaConfig/originalClashMetaConfig/')"
     eval "$(declare -f commitSubscribeUserOutputFile | sed '1s/^commitSubscribeUserOutputFile/originalCommitSubscribeUserOutputFile/')"
 
