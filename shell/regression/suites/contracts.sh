@@ -6456,7 +6456,10 @@ runRegressionParallelSelectorLimitCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    PADM_REGRESSION_PARALLEL_JOBS=1 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
+    PADM_REGRESSION_PARALLEL_JOBS=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
         first \
         second \
         third
@@ -6499,7 +6502,10 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    PADM_REGRESSION_PARALLEL_JOBS=2 runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
+    PADM_REGRESSION_PARALLEL_JOBS=2 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
+        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
         first \
         second \
         third
