@@ -26,6 +26,7 @@ listRegressionFastOnlyCoreChildSelectors() {
         xray-configured-validation-path \
         xray-prerelease-dry-run \
         core-release-tags-pagination \
+        core-rollback-selection \
         singbox-compat-audit \
         singbox-prerelease-dry-run \
         services-proc-race \
@@ -181,6 +182,7 @@ registerRegressionFunctionLeaf xray-compat-trusted-xff runXrayCompatibilityTrust
 registerRegressionFunctionLeaf xray-configured-validation-path runXrayConfiguredValidationPathRegression
 registerRegressionFunctionLeaf xray-prerelease-dry-run runXrayPrereleaseDryRunRegression
 registerRegressionFunctionLeaf core-release-tags-pagination runCoreReleaseTagsPaginationRegression
+registerRegressionFunctionLeaf core-rollback-selection runCoreRollbackSelectionRegression
 registerRegressionFunctionLeaf singbox-compat-audit runSingBoxCompatibilityAuditRegression
 registerRegressionFunctionLeaf singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
 registerRegressionFunctionLeaf services-proc-race runServicesProcRaceRegression

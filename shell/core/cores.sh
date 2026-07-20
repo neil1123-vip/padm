@@ -1624,15 +1624,24 @@ upgradeSingBoxCore() {
 selectRollbackVersion() {
     local repo=$1
     local title=$2
-    local selected version
+    local resultVar=${3:-}
+    local selection version versions
+    versions=$(coreReleaseTags "${repo}" false 20) || {
+        errorCard "获取稳定版本列表失败，请稍后重试"
+        return 2
+    }
     echoContent title "\n┌─ ${title} 版本回退 ─────────────────────────────────"
     menuLine "只列出最近稳定版本；回退前会使用目标二进制校验当前配置"
-    coreReleaseTags "${repo}" false 20 | awk '{print "│ "NR". "$0}'
+    awk '{print "│ "NR". "$0}' <<<"${versions}"
     menuClose
-    autoRead core_rollback_version "请输入要回退的版本序号:" selected
-    version=$(coreReleaseTags "${repo}" false 20 | awk -v selected="${selected}" 'NR==selected {print $0}')
+    autoRead core_rollback_version "请输入要回退的版本序号:" selection
+    version=$(awk -v selected="${selection}" 'NR==selected {print $0}' <<<"${versions}")
     [[ -n "${version}" ]] || return 1
-    echo "${version}"
+    if [[ -n "${resultVar}" ]]; then
+        printf -v "${resultVar}" '%s' "${version}"
+    else
+        printf '%s\n' "${version}"
+    fi
 }
 
 xrayVersionManageMenu() {
@@ -1657,7 +1666,15 @@ xrayVersionManageMenu() {
     2) checkXrayPrereleaseCompatibility ;;
     3) upgradeXrayCore true ;;
     4)
-        version=$(selectRollbackVersion XTLS/Xray-core "Xray-core") || { coreInvalidInputRetryMenu xrayVersionManageMenu; return; }
+        local version
+        local rollbackStatus=0
+        selectRollbackVersion XTLS/Xray-core "Xray-core" version || rollbackStatus=$?
+        if [[ "${rollbackStatus}" -eq 1 ]]; then
+            coreInvalidInputRetryMenu xrayVersionManageMenu
+            return
+        elif [[ "${rollbackStatus}" -ne 0 ]]; then
+            return "${rollbackStatus}"
+        fi
         upgradeXrayCore false "${version}"
         ;;
     5)
@@ -2816,7 +2833,15 @@ singBoxVersionManageMenu() {
     2) checkSingBoxPrereleaseCompatibility ;;
     3) upgradeSingBoxCore true ;;
     4)
-        version=$(selectRollbackVersion SagerNet/sing-box "sing-box") || { coreInvalidInputRetryMenu singBoxVersionManageMenu; return; }
+        local version
+        local rollbackStatus=0
+        selectRollbackVersion SagerNet/sing-box "sing-box" version || rollbackStatus=$?
+        if [[ "${rollbackStatus}" -eq 1 ]]; then
+            coreInvalidInputRetryMenu singBoxVersionManageMenu
+            return
+        elif [[ "${rollbackStatus}" -ne 0 ]]; then
+            return "${rollbackStatus}"
+        fi
         upgradeSingBoxCore false "${version}"
         ;;
     5)

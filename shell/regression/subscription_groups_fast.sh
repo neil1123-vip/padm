@@ -5944,6 +5944,29 @@ runCoreReleaseTagsPaginationRegression() {
     )
 }
 
+runCoreRollbackSelectionRegression() {
+    (
+        set -euo pipefail
+        local requestLog="${TMP_DIR}/core-rollback-selection-requests.log"
+        coreReleaseTags() {
+            printf 'request\n' >>"${requestLog}"
+            printf '%s\n' v1.9.0 v1.8.0
+        }
+
+        local selected
+        selectRollbackVersion XTLS/Xray-core Xray-core selected <<<"1"
+        [[ "${selected}" == "v1.9.0" ]]
+        [[ "$(wc -l <"${requestLog}" | tr -d '[:space:]')" == "1" ]]
+
+        coreReleaseTags() { return 1; }
+        if selectRollbackVersion XTLS/Xray-core Xray-core selected <<<"1"; then
+            return 1
+        else
+            [[ "$?" == "2" ]]
+        fi
+    )
+}
+
 runRegressionPlatformUpdate() {
     runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
     runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
@@ -6153,6 +6176,7 @@ runRegressionFastOnlyCore() {
     runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression
     runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression
     runRegressionStep core-release-tags-pagination runCoreReleaseTagsPaginationRegression
+    runRegressionStep core-rollback-selection runCoreRollbackSelectionRegression
     runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression
     runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
     runRegressionStep services-proc-race runServicesProcRaceRegression
