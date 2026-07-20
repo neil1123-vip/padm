@@ -1775,10 +1775,10 @@ runLocalTrafficAccountsBatchRegression() (
     singBoxConfigPath="${singBoxConfig}"
     coreInstallType=1
     cat >"${xrayConfig}01_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-vless"},{"email":"admin-root"}]}},{"users":[{"name":"sub_team_b-hysteria2"}]}]}
+{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-VLESS_WS"},{"email":"admin-VLESS_TCP/TLS_Vision"}]}},{"users":[{"name":"sub_team_b-singbox_hysteria2"}]}]}
 JSON
     cat >"${singBoxConfig}02_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"username":"sub_team_a-tuic"},{"username":"ops"}]}]}
+{"inbounds":[{"users":[{"username":"sub_team_a-singbox_tuic"},{"username":"ops"}]}]}
 JSON
     accounts=$(collectLocalTrafficAccounts)
     jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
