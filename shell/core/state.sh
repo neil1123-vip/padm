@@ -223,8 +223,16 @@ readInstallProtocolType() {
             xrayVLESSRealityXHTTPort=$(jq -r .inbounds[0].port "${row}.json")
 
             xrayVLESSRealityXHTTPSNI=$(jq -r .inbounds[0].streamSettings.realitySettings.serverNames[0] "${row}.json")
+            realitySNI=${xrayVLESSRealityXHTTPSNI}
+
+            local realityXHTTPTarget
+            realityXHTTPTarget=$(jq -r '.inbounds[0].streamSettings.realitySettings.target // empty' "${row}.json")
+            realityTargetHost=${realityXHTTPTarget%%:*}
+            realityTargetPort=${realityXHTTPTarget#*:}
 
             currentRealityXHTTPPublicKey=$(jq -r .inbounds[0].streamSettings.realitySettings.publicKey "${row}.json")
+            currentRealityPublicKey=${currentRealityXHTTPPublicKey}
+            currentRealityPrivateKey=$(jq -r '.inbounds[0].streamSettings.realitySettings.privateKey // empty' "${row}.json")
         fi
 
         if [[ "${row}" == *VMess_WS_inbounds* ]]; then

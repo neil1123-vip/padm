@@ -4509,6 +4509,24 @@ JSON
             readInstallProtocolType
             [[ "${currentInstallProtocolType}" == "," && -z "${frontingType}" ]]
         )
+
+        mkdir -p "${root}/xray/conf"
+        cat >"${root}/xray/conf/12_VLESS_XHTTP_inbounds.json" <<'JSON'
+{"inbounds":[{"port":12606,"streamSettings":{"network":"xhttp","security":"reality","realitySettings":{"target":"xhttp-target.example:443","serverNames":["xhttp-sni.example"],"privateKey":"private-key","publicKey":"public-key"}}}]}
+JSON
+        (
+            cd -- "${root}/xray/conf"
+            coreInstallType=1
+            configPath="${root}/xray/conf/"
+            singBoxConfigPath=
+            readInstallProtocolType
+            [[ "${realityTargetHost}" == "xhttp-target.example" ]]
+            [[ "${realityTargetPort}" == "443" ]]
+            [[ "${realitySNI}" == "xhttp-sni.example" ]]
+            [[ "${xrayVLESSRealityXHTTPSNI}" == "xhttp-sni.example" ]]
+            [[ "${currentRealityPublicKey}" == "public-key" ]]
+            [[ "${currentRealityPrivateKey}" == "private-key" ]]
+        )
     )
 }
 
