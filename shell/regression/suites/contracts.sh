@@ -2603,6 +2603,10 @@ runPlatformRefreshChildStepsContract() {
         install-refresh-rejects-unsafe-archive \
         install-refresh-rejects-unsupported-archive-entry \
         install-refresh-restore \
+        install-refresh-signal-restores-and-exits \
+        install-module-lock-serializes-load \
+        install-refresh-rejects-entry-mismatch \
+        install-refresh-ref-commit-rollback \
         install-refresh-single-archive-guard
 }
 
