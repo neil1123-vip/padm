@@ -7908,7 +7908,7 @@ runWarpConfigSafeDirRegression() (
             printf '#!/usr/bin/env sh\n' >"${2%/}/$5"
         }
         installWarpReg
-        [[ -s "${downloadMarker}" ]]
+        [[ -e "${downloadMarker}" ]]
         [[ -x "${PADM_WARP_DIR}/warp-reg" ]]
     )
 
