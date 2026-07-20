@@ -5918,6 +5918,32 @@ runXrayPrereleaseDryRunRegression() {
     )
 }
 
+runCoreReleaseTagsPaginationRegression() {
+    (
+        set -euo pipefail
+        local requestLog="${TMP_DIR}/core-release-tags-pages.log"
+        local version
+        fetchUrlToStdout() {
+            printf '%s\n' "$1" >>"${requestLog}"
+            case "$1" in
+            *page=1)
+                printf '%s\n' '[{"tag_name":"v2.0.0-pre.5","prerelease":true},{"tag_name":"v2.0.0-pre.4","prerelease":true},{"tag_name":"v2.0.0-pre.3","prerelease":true},{"tag_name":"v2.0.0-pre.2","prerelease":true},{"tag_name":"v2.0.0-pre.1","prerelease":true}]'
+                ;;
+            *page=2)
+                printf '%s\n' '[{"tag_name":"v1.9.0","prerelease":false}]'
+                ;;
+            *) return 1 ;;
+            esac
+        }
+
+        version=$(coreLatestReleaseTag XTLS/Xray-core false)
+        [[ "${version}" == "v1.9.0" ]]
+        grep -qxF 'https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5&page=1' "${requestLog}"
+        grep -qxF 'https://api.github.com/repos/XTLS/Xray-core/releases?per_page=5&page=2' "${requestLog}"
+        [[ "$(wc -l <"${requestLog}" | tr -d '[:space:]')" == "2" ]]
+    )
+}
+
 runRegressionPlatformUpdate() {
     runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
     runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
@@ -6126,6 +6152,7 @@ runRegressionFastOnlyCore() {
     runRegressionStep xray-strict-validation runXrayStrictValidationRegression
     runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression
     runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression
+    runRegressionStep core-release-tags-pagination runCoreReleaseTagsPaginationRegression
     runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression
     runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
     runRegressionStep services-proc-race runServicesProcRaceRegression

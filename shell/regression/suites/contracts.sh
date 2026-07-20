@@ -2806,6 +2806,7 @@ runFastOnlyCoreChildStepsContract() {
     grep -qx 'dispatch:xray-strict-validation' "${callLog}"
     grep -qx 'dispatch:xray-compat-audit' "${callLog}"
     grep -qx 'dispatch:xray-prerelease-dry-run' "${callLog}"
+    grep -qx 'dispatch:core-release-tags-pagination' "${callLog}"
     grep -qx 'dispatch:singbox-compat-audit' "${callLog}"
     grep -qx 'dispatch:singbox-prerelease-dry-run' "${callLog}"
     grep -qx 'dispatch:services-proc-race' "${callLog}"
@@ -2964,6 +2965,7 @@ xray-compat-audit
 xray-compat-trusted-xff
 xray-configured-validation-path
 xray-prerelease-dry-run
+core-release-tags-pagination
 singbox-compat-audit
 singbox-prerelease-dry-run
 services-proc-race

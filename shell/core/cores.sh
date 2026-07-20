@@ -505,14 +505,26 @@ coreReleaseTags() {
     local repo=$1
     local prerelease=${2:-false}
     local limit=${3:-20}
-    local metadata
+    local metadata page=1 pageSize=5 pageCount tagCount=0 tag
     [[ "${repo}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || return 1
     [[ "${prerelease}" == "true" || "${prerelease}" == "false" ]] || return 1
     [[ "${limit}" =~ ^[0-9]+$ && "${limit}" -gt 0 && "${limit}" -le 100 ]] || return 1
-    metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases?per_page=100" 3) || return 1
-    jq -er --argjson prerelease "${prerelease}" --argjson limit "${limit}" '
-      [.[] | select(.prerelease == $prerelease) | .tag_name | select(type == "string" and length > 0)][: $limit][]
-    ' <<<"${metadata}"
+    while ((tagCount < limit && page <= 20)); do
+        metadata=$(fetchUrlToStdout "https://api.github.com/repos/${repo}/releases?per_page=${pageSize}&page=${page}" 3) || return 1
+        pageCount=$(jq -er 'if type == "array" then length else error("release metadata is not an array") end' <<<"${metadata}") || return 1
+        tag=$(jq -r --argjson prerelease "${prerelease}" '
+          .[] | select(.prerelease == $prerelease) | .tag_name | select(type == "string" and length > 0)
+        ' <<<"${metadata}") || return 1
+        while IFS= read -r tag; do
+            [[ -n "${tag}" ]] || continue
+            printf '%s\n' "${tag}"
+            tagCount=$((tagCount + 1))
+            ((tagCount >= limit)) && break
+        done <<<"${tag}"
+        ((pageCount < pageSize)) && break
+        page=$((page + 1))
+    done
+    ((tagCount > 0))
 }
 
 coreLatestReleaseTag() {
