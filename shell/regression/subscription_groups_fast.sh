@@ -1126,7 +1126,7 @@ runClientNameSuffixPreservesRandomPrefixRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/core/cores.sh"
         local xrayUsers singboxUsers
-        xrayUsers=$(initXrayClients 0)
+        xrayUsers=$(initXrayClients 27)
         singboxUsers=$(initSingBoxClients 1)
         jq -e '.[0].email == "padm-abcdef12-VLESS_TCP/TLS_Vision"' <<<"${xrayUsers}" >/dev/null
         jq -e '.[0].name == "padm-abcdef12-VLESS_Reality_Vision"' <<<"${singboxUsers}" >/dev/null
@@ -2141,6 +2141,7 @@ runUpdatePadmVersionPromptRegression() {
     restoreFailureDir=$(cd -- "${restoreFailureDir}" && pwd -P)
     replaceFailureDir=$(cd -- "${replaceFailureDir}" && pwd -P)
     stageFailureDir=$(cd -- "${stageFailureDir}" && pwd -P)
+    fetchRemoteRef() { printf '1111111111111111111111111111111111111111\n'; }
 
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
     chmod 700 "${installDir}/install.sh"
@@ -2533,7 +2534,7 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
                 fi
                 builtin command "$@"
             }
-            curl() { tar -cz -C "${archiveRoot}" padm-main; }
+            curl() { tar -czf "${@: -2:1}" -C "${archiveRoot}" padm-main; }
             if refreshScriptModules ""; then
                 exit 0
             fi
@@ -2581,7 +2582,7 @@ runInstallRefreshRejectsUnsafeScriptDirRegression() {
             fi
             builtin command "$@"
         }
-        curl() { tar -cz -C "${root}/archive" padm-main; }
+        curl() { tar -czf "${@: -2:1}" -C "${root}/archive" padm-main; }
         refreshScriptModules 4444444444444444444444444444444444444444
     ) >"${outputLog}" 2>&1 && return 1
 
@@ -2632,7 +2633,7 @@ runInstallRefreshRejectsUnsafeArchiveRegression() {
                 fi
                 builtin command "$@"
             }
-            curl() { tar -cz -C "${archiveRoot}" padm-main --transform='s#^escape.txt$#../escape.txt#' escape.txt; }
+            curl() { tar -czf "${@: -2:1}" -C "${archiveRoot}" padm-main --transform='s#^escape.txt$#../escape.txt#' escape.txt; }
             refreshScriptModules 4444444444444444444444444444444444444444
         ) >"${outputLog}" 2>&1 && return 1
 
@@ -2686,7 +2687,7 @@ runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
                 fi
                 builtin command "$@"
             }
-            curl() { tar -cz -C "${archiveRoot}" padm-main; }
+            curl() { tar -czf "${@: -2:1}" -C "${archiveRoot}" padm-main; }
             refreshScriptModules 4444444444444444444444444444444444444444
         )
 
@@ -2844,7 +2845,7 @@ runUninstallPadmRootScopeRegression() {
         [[ ! -e "${padmRoot}/xray/conf/00_log.json" ]]
         [[ -f "${padmRoot}/custom/keep" ]]
         ! grep -qxF -- "-rf ${padmRoot}" "${rmLog}"
-        grep -qx 'handleNginx:stop' "${serviceLog}"
+        ! grep -qx 'handleNginx:stop' "${serviceLog}" || return 1
         grep -qx 'handleXray:stop' "${serviceLog}"
         [[ ! -s "${errorLog}" ]]
     )
@@ -2919,7 +2920,7 @@ runInstallRefreshRestoresBackupRegression() {
     printf 'new-doc\n' >"${archiveRoot}/documents/marker"
     printf 'new-readme\n' >"${archiveRoot}/README.md"
 
-    (
+    if (
         set +e
         TMPDIR="${refreshTmpRoot}"
         eval "$(awk '
@@ -2939,15 +2940,17 @@ runInstallRefreshRestoresBackupRegression() {
             fi
             builtin command "$@"
         }
-        curl() { tar -cz -C "${fixtureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
+        curl() { tar -czf "${@: -2:1}" -C "${fixtureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
         cp() {
-            if [[ "$1" == "-R" && "$2" == "${archiveRoot}/documents" ]]; then
+            if [[ "$1" == "-R" && "$2" == */"${REPO_ARCHIVE_DIR}"/documents ]]; then
                 return 1
             fi
             command cp "$@"
         }
         refreshScriptModules 5555555555555555555555555555555555555555
-    ) >"${outputLog}" 2>&1
+    ) >"${outputLog}" 2>&1; then
+        return 1
+    fi
     grep -q '完整安装包替换失败，已恢复旧模块' "${outputLog}"
     [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
     [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
@@ -2964,7 +2967,7 @@ runInstallRefreshRestoresBackupRegression() {
     printf 'new-doc\n' >"${restoreFailureArchiveRoot}/documents/marker"
     printf 'new-readme\n' >"${restoreFailureArchiveRoot}/README.md"
 
-    (
+    if (
         set +e
         TMPDIR="${restoreFailureTmpRoot}"
         eval "$(awk '
@@ -2984,9 +2987,9 @@ runInstallRefreshRestoresBackupRegression() {
             fi
             builtin command "$@"
         }
-        curl() { tar -cz -C "${restoreFailureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
+        curl() { tar -czf "${@: -2:1}" -C "${restoreFailureDir}/archive" "${REPO_ARCHIVE_DIR}"; }
         cp() {
-            if [[ "$1" == "-R" && "$2" == "${restoreFailureArchiveRoot}/documents" ]]; then
+            if [[ "$1" == "-R" && "$2" == */"${REPO_ARCHIVE_DIR}"/documents ]]; then
                 return 1
             fi
             command cp "$@"
@@ -2998,7 +3001,9 @@ runInstallRefreshRestoresBackupRegression() {
             command mv "$@"
         }
         refreshScriptModules 5555555555555555555555555555555555555555
-    ) >"${restoreFailureOutputLog}" 2>&1
+    ) >"${restoreFailureOutputLog}" 2>&1; then
+        return 1
+    fi
     grep -q '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录' "${restoreFailureOutputLog}"
     [[ "$(<"${restoreFailureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
     [[ -d "${restoreFailureDir}/.padm-update-backup" ]]
@@ -3140,7 +3145,7 @@ runInstallRefreshRejectsEntryMismatchRegression() (
         SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
         SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
         scriptIsSafeAbsolutePath() { return 0; }
-        downloadRepoArchive() { command cp -R "${archiveRoot}" "$2/padm-main"; }
+        downloadRepoArchive() { mkdir -p "$2" && command cp -R "${archiveRoot}" "$2/"; }
         refreshScriptModules 8888888888888888888888888888888888888888
     ) >"${root}/output.log" 2>&1
     local status=$?
@@ -3188,7 +3193,7 @@ runInstallRefreshRefCommitRollbackRegression() (
         SCRIPT_EXPECTED_REF_FILE="${fixtureDir}/.padm-entry-ref"
         SCRIPT_MANIFEST_FILE="${fixtureDir}/.padm-module-manifest"
         scriptIsSafeAbsolutePath() { return 0; }
-        downloadRepoArchive() { command cp -R "${archiveRoot}" "$2/padm-main"; }
+        downloadRepoArchive() { mkdir -p "$2" && command cp -R "${archiveRoot}" "$2/"; }
         writeModuleManifest() { printf 'new-manifest\n' >"$1"; }
 
         writeScriptModuleRefs "${newRef}"
@@ -3887,6 +3892,7 @@ runInstallModulePathsRegression() {
 source "${CORE_DIR}/version.sh"
 EOF
     printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/core/version.sh"
+    printf '#!/usr/bin/env bash\n' >"${fixtureDir}/shell/validate_install.sh"
     (
         TMPDIR="${moduleTmpRoot}"
         eval "$(awk '
@@ -3900,6 +3906,7 @@ EOF
         SCRIPT_REF_FILE="${TMP_DIR}/install-module-paths-ref"
         moduleListBefore=$(find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' | wc -l | tr -d ' ')
         modulePaths
+        writeModuleManifest "${SCRIPT_MANIFEST_FILE}"
         scriptModulesReady >/dev/null
         moduleListAfter=$(find "${moduleTmpRoot}" -maxdepth 1 -type f -name 'padm-modules.*' | wc -l | tr -d ' ')
         [[ "${moduleListBefore}" == "0" && "${moduleListAfter}" == "0" ]]
@@ -4566,8 +4573,13 @@ runSuppressedRegressionFailurePropagationRegression() {
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/framework/runtime.sh"
         regressionSuppressedFailureFixture() { return 23; }
+        regressionSuppressedAssertionFixture() {
+            false
+            : >"${TMP_DIR}/suppressed-assertion-marker"
+        }
         listSuppressedFailureFixture() { printf '%s\n' suppressed-failure-fixture; }
         registerRegressionFunctionLeaf suppressed-failure-fixture regressionSuppressedFailureFixture
+        registerRegressionFunctionLeaf suppressed-assertion-fixture regressionSuppressedAssertionFixture
 
         local status
         set +e
@@ -4576,7 +4588,17 @@ runSuppressedRegressionFailurePropagationRegression() {
         ) >/dev/null 2>&1
         status=$?
         set -e
-        [[ "${status}" == "23" ]]
+        [[ "${status}" == "23" ]] || return 1
+        rm -f "${TMP_DIR}/suppressed-assertion-marker"
+        listSuppressedAssertionFixture() { printf '%s\n' suppressed-assertion-fixture; }
+        set +e
+        (
+            PADM_REGRESSION_SUPPRESS_DONE=1 runFrameworkSequentialRegressionSelectorList listSuppressedAssertionFixture
+        ) >/dev/null 2>&1
+        status=$?
+        set -e
+        [[ "${status}" != "0" ]] || return 1
+        [[ ! -e "${TMP_DIR}/suppressed-assertion-marker" ]] || return 1
     )
 }
 
@@ -4722,10 +4744,10 @@ JSON
 {"inbounds":[{"port":17694,"settings":{"clients":[{"email":"sub_xray_grpc-vless_reality_grpc","id":"44444444-4444-4444-4444-444444444444"}]},"streamSettings":{"realitySettings":{"serverNames":["www.cloudflare.com"],"publicKey":"xray-grpc-public-key","privateKey":"xray-grpc-private-key","target":"www.cloudflare.com:443","mldsa65Seed":"","mldsa65Verify":""},"grpcSettings":{"serviceName":"grpc"}}}]}
 JSON
         cat >"${xrayRoot}/04_trojan_GRPc_inbounds.json" <<'JSON'
-{"inbounds":[{"listen":"127.0.0.1","port":31304,"protocol":"trojan","settings":{"clients":[{"email":"sub_trojan_grpc-trojan_grpc","password":"trojan-grpc-pass"}]},"streamSettings":{"network":"grpc","security":"none","grpcSettings":{"serviceName":"padmtrojangrpc"}}}]}
+{"inbounds":[{"listen":"127.0.0.1","port":31304,"protocol":"trojan","settings":{"clients":[{"email":"sub_trojan_grpc-Trojan_gRPC","password":"trojan-grpc-pass"}]},"streamSettings":{"network":"grpc","security":"none","grpcSettings":{"serviceName":"padmtrojangrpc"}}}]}
 JSON
         cat >"${singBoxRoot}/08_VLESS_vision_gRPC_inbounds.json" <<'JSON'
-{"inbounds":[{"type":"vless","listen_port":20888,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"nodejs.org","reality":{"handshake":{"server":"nodejs.org","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
+{"inbounds":[{"type":"vless","listen_port":20888,"users":[{"uuid":"22222222-2222-2222-2222-222222222222","name":"sub_grpc-VLESS_Reality_gPRC"}],"tls":{"server_name":"nodejs.org","reality":{"private_key":"grpc-private-key","handshake":{"server":"nodejs.org","server_port":443}}},"transport":{"type":"grpc","service_name":"grpc"}}]}
 JSON
         cat >"${singBoxRoot}/10_naive_inbounds.json" <<'JSON'
 {"inbounds":[{"type":"naive","listen_port":33577,"users":[{"username":"sub_naive-singbox_naive","password":"naive-pass"}]}]}
@@ -5056,6 +5078,7 @@ runSingBoxHttpUpgradeIncrementalStartsNginxRegression() {
         singBoxConfigPath="${singBoxRoot}/"
         nginxConfigPath="${nginxRoot}/"
 
+        singBoxTemplateConfigDir() { printf '%s\n' "${singBoxRoot}"; }
         collectTLSProfile() { tlsCertDomain=example.com; }
         readSingBoxPortResult() {
             local -n resultRef=$1
@@ -5144,6 +5167,7 @@ runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression() {
         singBoxConfigPath="${singBoxRoot}/"
         nginxConfigPath=
 
+        singBoxTemplateConfigDir() { printf '%s\n' "${singBoxRoot}"; }
         collectTLSProfile() { tlsCertDomain=example.com; }
         readSingBoxPortResult() {
             local -n resultRef=$1
@@ -5680,7 +5704,7 @@ JSON
         logFile=$(coreTmpFilePath padm-sing-box-compat-audit.log)
         collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
         grep -q '^fail:' "${statusFile}"
-        grep -q 'old WireGuard outbound' "${logFile}"
+        grep -q '旧 WireGuard outbound' "${logFile}"
         grep -q 'legacy special outbound' "${logFile}"
         grep -q '旧 DNS server 格式' "${logFile}"
     )
@@ -5709,9 +5733,10 @@ runSingBoxPrereleaseDryRunRegression() {
             printf 'checked %s\n' "${binary}" >"${logFile}"
             [[ "${binary}" == "${PADM_SINGBOX_BINARY}" ]]
         }
-        : >"${REGRESSION_STATUS_CARD_LOG:-/dev/null}"
+        REGRESSION_STATUS_CARD_LOG="${root}/status.log"
+        : >"${REGRESSION_STATUS_CARD_LOG}"
         checkSingBoxPrereleaseCompatibility "v1.14.0-alpha.test" "${TMP_DIR}/prerelease.log"
-        grep -q '目标版本: v1.14.0-alpha.test' "${REGRESSION_STATUS_CARD_LOG:-/dev/null}"
+        grep -q '目标版本: v1.14.0-alpha.test' "${REGRESSION_STATUS_CARD_LOG}"
         grep -q 'checked' "${TMP_DIR}/prerelease.log"
     )
 }
@@ -5867,73 +5892,73 @@ runXrayPrereleaseDryRunRegression() {
 }
 
 runRegressionPlatformUpdate() {
-    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression &&
-        runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
+    runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
+    runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
 }
 
 runRegressionPlatformRefresh() {
-    runRegressionStep install-refresh-ref-fail-closed runInstallRefreshRefFailClosedRegression &&
-        runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression &&
-        runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression &&
-        runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression &&
-        runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression &&
-        runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression &&
-        runRegressionStep install-refresh-signal-restores-and-exits runInstallRefreshSignalRestoresAndExitsRegression &&
-        runRegressionStep install-module-lock-serializes-load runInstallModuleLockSerializesLoadRegression &&
-        runRegressionStep install-refresh-rejects-entry-mismatch runInstallRefreshRejectsEntryMismatchRegression &&
-        runRegressionStep install-refresh-ref-commit-rollback runInstallRefreshRefCommitRollbackRegression &&
-        runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression
+    runRegressionStep install-refresh-ref-fail-closed runInstallRefreshRefFailClosedRegression
+    runRegressionStep install-refresh-keep-ref-on-lookup-fail runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression
+    runRegressionStep install-refresh-rejects-unsafe-script-dir runInstallRefreshRejectsUnsafeScriptDirRegression
+    runRegressionStep install-refresh-rejects-unsafe-archive runInstallRefreshRejectsUnsafeArchiveRegression
+    runRegressionStep install-refresh-rejects-unsupported-archive-entry runInstallRefreshRejectsUnsupportedArchiveEntriesRegression
+    runRegressionStep install-refresh-restore runInstallRefreshRestoresBackupRegression
+    runRegressionStep install-refresh-signal-restores-and-exits runInstallRefreshSignalRestoresAndExitsRegression
+    runRegressionStep install-module-lock-serializes-load runInstallModuleLockSerializesLoadRegression
+    runRegressionStep install-refresh-rejects-entry-mismatch runInstallRefreshRejectsEntryMismatchRegression
+    runRegressionStep install-refresh-ref-commit-rollback runInstallRefreshRefCommitRollbackRegression
+    runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression
 }
 
 runRegressionPlatformRest() {
-    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression &&
-        runRegressionStep version-helpers runVersionHelpersRegression &&
-        runRegressionStep regression-bootstrap-local-env-fallback runRegressionBootstrapLocalEnvFallbackRegression &&
-        runRegressionStep cleanup-trap runCleanupTrapRegression &&
-        runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression &&
-        runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression &&
-        runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression &&
-        runRegressionStep managed-file-backup-manifest-validator runManagedFileBackupManifestValidatorRegression &&
-        runRegressionStep remove-managed-files-ignore-failure runRemoveManagedFilesIgnoreFailureRegression &&
-        runRegressionStep remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression &&
-        runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression &&
-        runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression &&
-        runRegressionStep regression-fast-parallel-composition runRegressionFastParallelCompositionRegression &&
-        runRegressionStep regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression &&
-        runRegressionStep regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression &&
-        runRegressionStep regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression &&
-        runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression &&
-        runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression &&
-        runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression &&
-        runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression &&
-        runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression &&
-        runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression &&
-        runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression &&
-        runRegressionStep subscription-menu-dead-entry-count runSubscriptionMenuDeadEntryCountRegression &&
-        runRegressionStep unused-helper-function-count runUnusedHelperFunctionCountRegression &&
-        runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression &&
-        runRegressionStep install-entry-refresh runInstallEnsureModulesRegression &&
-        runRegressionStep install-module-paths runInstallModulePathsRegression &&
-        runRegressionStep install-module-manifest-complete runInstallModuleManifestCompleteRegression &&
-        runRegressionStep install-module-manifest-requires-sha256 runInstallModuleManifestRequiresSha256Regression &&
-        runRegressionStep subscribe-nginx-location-pattern runSubscribeNginxLocationPatternRegression &&
-        runRegressionStep install-early-capability-list runInstallEarlyCapabilityListRegression &&
-        runRegressionStep install-menu-recommended-ids runInstallMenuRecommendedIdsRegression &&
-        runRegressionStep validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression &&
-        runRegressionStep validate-install-temp-root-parent-shell runValidateInstallTempRootStaysInParentShellRegression &&
-        runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression &&
-        runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression &&
-        runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression &&
-        runRegressionStep alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression &&
-        runRegressionStep alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression &&
-        runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression &&
-        runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression &&
-        runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression &&
-        runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression &&
-        runRegressionStep rhel-like-detection runRhelLikeDetectionRegression &&
-        runRegressionStep fedora-detection runFedoraDetectionRegression &&
-        runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression &&
-        runRegressionStep port-hopping-menu-command-lookup runPortHoppingMenuUsesCommandLookupRegression
+    runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression
+    runRegressionStep version-helpers runVersionHelpersRegression
+    runRegressionStep regression-bootstrap-local-env-fallback runRegressionBootstrapLocalEnvFallbackRegression
+    runRegressionStep cleanup-trap runCleanupTrapRegression
+    runRegressionStep cleanup-trap-relative-path runCleanupTrapRelativePathRegression
+    runRegressionStep clean-directory-safety runCleanDirectoryContentSafetyRegression
+    runRegressionStep managed-file-backup-manifest runManagedFileBackupManifestRegression
+    runRegressionStep managed-file-backup-manifest-validator runManagedFileBackupManifestValidatorRegression
+    runRegressionStep remove-managed-files-ignore-failure runRemoveManagedFilesIgnoreFailureRegression
+    runRegressionStep remove-managed-path-ignore-failure runRemoveManagedPathIgnoreFailureRegression
+    runRegressionStep check-log-backup-restore runCheckLogBackupMissingRestoreRegression
+    runRegressionStep remote-control-systemctl-stub-default-stop-disable runRemoteControlSystemctlStubDefaultStopDisableRegression
+    runRegressionStep regression-fast-parallel-composition runRegressionFastParallelCompositionRegression
+    runRegressionStep regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression
+    runRegressionStep regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression
+    runRegressionStep regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
+    runRegressionStep remote-control-function-stub-default-stop-disable runRemoteControlFunctionStubDefaultStopDisableRegression
+    runRegressionStep tuic-protocol-single-default-branch runTuicProtocolSingleDefaultBranchRegression
+    runRegressionStep tls-dns-api-single-default-branch runTlsDnsApiSingleDefaultBranchRegression
+    runRegressionStep tls-ca-single-default-branch runTlsCaSingleDefaultBranchRegression
+    runRegressionStep reality-target-single-default-branch runRealityTargetSingleDefaultBranchRegression
+    runRegressionStep auto-install-type-single-custom-branch runAutoInstallTypeSingleCustomBranchRegression
+    runRegressionStep subscription-menu-wrapper-count runSubscriptionMenuWrapperCountRegression
+    runRegressionStep subscription-menu-dead-entry-count runSubscriptionMenuDeadEntryCountRegression
+    runRegressionStep unused-helper-function-count runUnusedHelperFunctionCountRegression
+    runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression
+    runRegressionStep install-entry-refresh runInstallEnsureModulesRegression
+    runRegressionStep install-module-paths runInstallModulePathsRegression
+    runRegressionStep install-module-manifest-complete runInstallModuleManifestCompleteRegression
+    runRegressionStep install-module-manifest-requires-sha256 runInstallModuleManifestRequiresSha256Regression
+    runRegressionStep subscribe-nginx-location-pattern runSubscribeNginxLocationPatternRegression
+    runRegressionStep install-early-capability-list runInstallEarlyCapabilityListRegression
+    runRegressionStep install-menu-recommended-ids runInstallMenuRecommendedIdsRegression
+    runRegressionStep validate-install-loads-runtime runValidateInstallLoadsRuntimeRegression
+    runRegressionStep validate-install-temp-root-parent-shell runValidateInstallTempRootStaysInParentShellRegression
+    runRegressionStep install-entry-symlink runInstallEntrySymlinkPathRegression
+    runRegressionStep alias-install-metadata runAliasInstallMetadataCopyRegression
+    runRegressionStep alias-install-same-target runAliasInstallSameTargetRegression
+    runRegressionStep alias-install-rejects-unsafe-target runAliasInstallRejectsUnsafeTargetRegression
+    runRegressionStep alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression
+    runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression
+    runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression
+    runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression
+    runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression
+    runRegressionStep rhel-like-detection runRhelLikeDetectionRegression
+    runRegressionStep fedora-detection runFedoraDetectionRegression
+    runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression
+    runRegressionStep port-hopping-menu-command-lookup runPortHoppingMenuUsesCommandLookupRegression
 }
 
 runRegressionPlatform() {
@@ -5993,67 +6018,67 @@ runParallelFastTotals() {
 }
 
 runRegressionFastOnlySafety() {
-    runRegressionStep commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression &&
-        runRegressionStep restore-managed-file-directory-target runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression &&
-        runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression &&
-        runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression &&
-        runRegressionStep fetch-url-wget-hard-limit runFetchUrlWgetHardLimitRegression &&
-        runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression &&
-        runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression &&
-        runRegressionStep remove-install-path-file-mode runRemoveInstallPathFileModeRegression &&
-        runRegressionStep uninstall-padm-root-scope runUninstallPadmRootScopeRegression &&
-        runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression &&
-        runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression &&
-        runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression &&
-        runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression &&
-        runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression &&
-        runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression &&
-        runRegressionStep write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression &&
-        runRegressionStep wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression &&
-        runRegressionStep wireguard-nginx-disable-lifecycle runSubscriptionWireGuardNginxDisableLifecycleRegression &&
-        runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression &&
-        runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression &&
-        runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression &&
-        runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression &&
-        runRegressionStep install-nginx-static-unzip-failure runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression &&
-        runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression &&
-        runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression &&
-        runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression &&
-        runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression &&
-        runRegressionStep state-readers-clear-stale-values runStateReadersClearStaleValuesRegression &&
-        runRegressionStep read-install-type-keeps-sing-box-shards runReadInstallTypeKeepsSingBoxShardsRegression &&
-        runRegressionStep check-log-backup-output-variable runCheckLogBackupOutputVariableRegression &&
-        runRegressionStep suppressed-regression-failure-propagation runSuppressedRegressionFailurePropagationRegression &&
-        runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression &&
-        runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression &&
-        runRegressionStep no-third-party-qr-service runNoThirdPartyQrServiceRegression &&
-        runRegressionStep install-refresh-download-bounds runInstallRefreshDownloadBoundsRegression
+    runRegressionStep commit-generated-file-directory-target runCommitGeneratedFileRejectsDirectoryTargetRegression
+    runRegressionStep restore-managed-file-directory-target runRestoreManagedFileFromBackupRejectsDirectoryTargetRegression
+    runRegressionStep github-release-direct-fallback runGitHubReleaseAssetDirectFallbackRegression
+    runRegressionStep download-arg-missing-value runDownloadArgumentMissingValueRegression
+    runRegressionStep fetch-url-wget-hard-limit runFetchUrlWgetHardLimitRegression
+    runRegressionStep github-release-arg-missing-value runGitHubReleaseArgumentMissingValueRegression
+    runRegressionStep remove-install-path-retry runRemoveInstallPathRetryRegression
+    runRegressionStep remove-install-path-file-mode runRemoveInstallPathFileModeRegression
+    runRegressionStep uninstall-padm-root-scope runUninstallPadmRootScopeRegression
+    runRegressionStep remove-install-path-safety runRemoveInstallPathSafetyRegression
+    runRegressionStep remove-nginx-default-conf-safety runRemoveNginxDefaultConfSafetyRegression
+    runRegressionStep clean-agent-nginx-conf-safety runCleanAgentNginxConfSafetyRegression
+    runRegressionStep uninstall-subscribe-nginx-path-safety runUninstallSubscribeNginxPathSafetyRegression
+    runRegressionStep check-port-open-nginx-path-safety runCheckPortOpenNginxPathSafetyRegression
+    runRegressionStep write-subscribe-nginx-path-safety runWriteSubscribeNginxPathSafetyRegression
+    runRegressionStep write-wireguard-control-nginx-path-safety runWriteWireGuardControlNginxPathSafetyRegression
+    runRegressionStep wireguard-firewall-lifecycle runSubscriptionWireGuardFirewallLifecycleRegression
+    runRegressionStep wireguard-nginx-disable-lifecycle runSubscriptionWireGuardNginxDisableLifecycleRegression
+    runRegressionStep write-alone-nginx-path-safety runWriteAloneNginxPathSafetyRegression
+    runRegressionStep clean-last-installation-nginx-safety runCleanLastInstallationSkipsDuplicateNginxCleanupRegression
+    runRegressionStep install-nginx-alpine-default-path-safety runInstallNginxAlpineDefaultPathSafetyRegression
+    runRegressionStep install-nginx-static-unsafe-path runInstallNginxStaticRejectsUnsafePathRegression
+    runRegressionStep install-nginx-static-unzip-failure runInstallNginxStaticPreservesLiveSiteOnUnzipFailureRegression
+    runRegressionStep clean-last-installation-static-safety runCleanLastInstallationRejectsUnsafeStaticPathRegression
+    runRegressionStep subscription-sync-path-safety runSubscriptionSyncPathSafetyRegression
+    runRegressionStep subscription-sync-config-directory-target runSubscriptionSyncConfigRestoreRejectsDirectoryTargetRegression
+    runRegressionStep subscription-sync-create-local-apply-backups-rollback runSubscriptionSyncCreateLocalApplyBackupsRollbackRegression
+    runRegressionStep state-readers-clear-stale-values runStateReadersClearStaleValuesRegression
+    runRegressionStep read-install-type-keeps-sing-box-shards runReadInstallTypeKeepsSingBoxShardsRegression
+    runRegressionStep check-log-backup-output-variable runCheckLogBackupOutputVariableRegression
+    runRegressionStep suppressed-regression-failure-propagation runSuppressedRegressionFailurePropagationRegression
+    runRegressionStep subscription-sync-config-unmanaged-target runSubscriptionSyncConfigRestoreRejectsUnmanagedFileRegression
+    runRegressionStep subscription-sync-missing-restore-scope runSubscriptionSyncMissingRestoreScopeRegression
+    runRegressionStep no-third-party-qr-service runNoThirdPartyQrServiceRegression
+    runRegressionStep install-refresh-download-bounds runInstallRefreshDownloadBoundsRegression
 }
 
 runRegressionFastOnlyOutputAutoInstall() {
-    runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression &&
-        runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression &&
-        runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression &&
-        runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression &&
-        runRegressionStep auto-install-two-digit-single-protocol runAutoInstallTwoDigitSingleProtocolRegression
+    runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression
+    runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression
+    runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression
+    runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression
+    runRegressionStep auto-install-two-digit-single-protocol runAutoInstallTwoDigitSingleProtocolRegression
 }
 
 runRegressionFastOnlyOutputRest() {
-    runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression &&
-        runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression &&
-        runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression &&
-        runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression &&
-        runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression &&
-        runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression &&
-        runRegressionStep trojan-grpc-account-template-filename runTrojanGrpcAccountUsesTemplateFilenameRegression &&
-        runRegressionStep trojan-fallback-subscribe-entry runTrojanFallbackSubscribeUsesTlsEntryRegression &&
-        runRegressionStep trojan-fallback-template-frontend runTrojanFallbackTemplateCreatesTlsFrontendRegression &&
-        runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression &&
-        runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression &&
-        runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression &&
-        runRegressionStep httpupgrade-rejects-unsafe-nginx-path runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression &&
-        runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression &&
-        runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression
+    runRegressionStep client-name-suffix-preserves-random-prefix runClientNameSuffixPreservesRandomPrefixRegression
+    runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression
+    runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression
+    runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression
+    runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression
+    runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression
+    runRegressionStep trojan-grpc-account-template-filename runTrojanGrpcAccountUsesTemplateFilenameRegression
+    runRegressionStep trojan-fallback-subscribe-entry runTrojanFallbackSubscribeUsesTlsEntryRegression
+    runRegressionStep trojan-fallback-template-frontend runTrojanFallbackTemplateCreatesTlsFrontendRegression
+    runRegressionStep parse-install-args-missing-value runParseInstallArgsMissingValueRegression
+    runRegressionStep locale-unset-printN runLocaleEchoContentUnsetPrintNRegression
+    runRegressionStep httpupgrade-incremental-starts-nginx runSingBoxHttpUpgradeIncrementalStartsNginxRegression
+    runRegressionStep httpupgrade-rejects-unsafe-nginx-path runSingBoxHttpUpgradeRejectsUnsafeNginxPathRegression
+    runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression
+    runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression
 }
 
 runRegressionFastOnlyOutput() {
@@ -6063,23 +6088,23 @@ runRegressionFastOnlyOutput() {
 }
 
 runRegressionFastOnlyCore() {
-    runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression &&
-        runRegressionStep check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression &&
-        runRegressionStep service-wait-state runServiceWaitForStateRegression &&
-        runRegressionStep core-running-service-state runCoreRunningFallsBackToServiceStateRegression &&
-        runRegressionStep warp-config-generation-failure runWarpConfigGenerationFailureRegression &&
-        runRegressionStep fail2ban-profile runFail2banProfileRegression &&
-        runRegressionStep fail2ban-sshd-systemd-backend runFail2banSshdSystemdBackendRegression &&
-        runRegressionStep fail2ban-menu runFail2banMenuRegression &&
-        runRegressionStep xray-strict-validation runXrayStrictValidationRegression &&
-        runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression &&
-        runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression &&
-        runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression &&
-        runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression &&
-        runRegressionStep services-proc-race runServicesProcRaceRegression &&
-        runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression &&
-        runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression &&
-        runRegressionStep ui-smoke-light runMenuSmokeLightRegression
+    runRegressionStep singbox-mainpid-template runSingBoxServiceMainPidTemplateRegression
+    runRegressionStep check-gfw-status-service-wait runCheckGFWStatusServiceWaitRegression
+    runRegressionStep service-wait-state runServiceWaitForStateRegression
+    runRegressionStep core-running-service-state runCoreRunningFallsBackToServiceStateRegression
+    runRegressionStep warp-config-generation-failure runWarpConfigGenerationFailureRegression
+    runRegressionStep fail2ban-profile runFail2banProfileRegression
+    runRegressionStep fail2ban-sshd-systemd-backend runFail2banSshdSystemdBackendRegression
+    runRegressionStep fail2ban-menu runFail2banMenuRegression
+    runRegressionStep xray-strict-validation runXrayStrictValidationRegression
+    runRegressionStep xray-compat-audit runXrayCompatibilityAuditRegression
+    runRegressionStep xray-prerelease-dry-run runXrayPrereleaseDryRunRegression
+    runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression
+    runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
+    runRegressionStep services-proc-race runServicesProcRaceRegression
+    runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression
+    runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression
+    runRegressionStep ui-smoke-light runMenuSmokeLightRegression
 }
 
 runRegressionFastOnly() {

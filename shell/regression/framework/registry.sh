@@ -253,6 +253,8 @@ runRegisteredRegressionSelector() {
 
 runRegisteredRegressionMain() {
     local selector=${1:-fast}
+    local status=0
+    local hadErrexit=0
 
     if [[ "${PADM_REGRESSION_REGISTRY_VALIDATED:-}" != "1" ]]; then
         validateRegressionRegistry || return 1
@@ -263,7 +265,17 @@ runRegisteredRegressionMain() {
         return 2
     fi
 
-    runRegressionStep "total:${selector}" runRegisteredRegressionSelector "${selector}" || return $?
+    case $- in
+    *e*) hadErrexit=1; set +e ;;
+    esac
+    runRegressionStep "total:${selector}" runRegisteredRegressionSelector "${selector}"
+    status=$?
+    if (( hadErrexit )); then
+        set -e
+    fi
+    if (( status != 0 )); then
+        return "${status}"
+    fi
     if [[ "${PADM_REGRESSION_SUPPRESS_DONE:-}" != "1" ]]; then
         echo "subscription-groups-regression-ok:${selector}"
     fi

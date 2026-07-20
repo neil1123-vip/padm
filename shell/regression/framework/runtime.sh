@@ -255,15 +255,28 @@ runFrameworkParallelRegressionSelectorListWithJobs() {
 
 runFrameworkSequentialRegressionSelectorList() {
     local selectorListFn=$1
+    local status=0
+    local hadErrexit=0
     shift
     local -a selectors=()
     local selector
 
     mapfile -t selectors < <("${selectorListFn}" "$@")
+    case $- in
+    *e*) hadErrexit=1; set +e ;;
+    esac
     for selector in "${selectors[@]}"; do
         [[ -n "${selector}" ]] || continue
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}" || return $?
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+        status=$?
+        if (( status != 0 )); then
+            break
+        fi
     done
+    if (( hadErrexit )); then
+        set -e
+    fi
+    return "${status}"
 }
 
 runParallelRegressionSelectors() {

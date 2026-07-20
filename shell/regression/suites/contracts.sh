@@ -472,8 +472,8 @@ runRegressionStepSequenceAssertionContract() (
 
     cat <<'EOF' >"${fixtureFile}"
 runFixtureRegressionSequence() {
-    runRegressionStep first runFixtureFirst &&
-        runRegressionStep second runFixtureSecond
+    runRegressionStep first runFixtureFirst
+    runRegressionStep second runFixtureSecond
 }
 EOF
 
@@ -489,8 +489,8 @@ runRegressionDispatcherStepCoverageAssertionContract() (
 
     cat <<'EOF' >"${fixtureFile}"
 runRegressionDispatcherContracts() {
-    runRegressionStep alpha runFixtureAlpha &&
-        runRegressionStep beta runFixtureBeta
+    runRegressionStep alpha runFixtureAlpha
+    runRegressionStep beta runFixtureBeta
 }
 EOF
 
@@ -6548,223 +6548,223 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 )
 
 runRegressionDispatcherContracts() {
-    runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract &&
-        runRegressionStep regression-step-sequence-assertion runRegressionStepSequenceAssertionContract &&
-        runRegressionStep regression-dispatcher-step-coverage-assertion runRegressionDispatcherStepCoverageAssertionContract &&
-        runRegressionStep contract-helper-adoption-assertion runContractHelperAdoptionAssertionContract &&
-        runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract &&
-        runRegressionStep regression-function-leaf-supports-runner-args runRegressionFunctionLeafSupportsRunnerArgsContract &&
-        runRegressionStep regression-aggregate-runner-supports-runner-args runRegressionAggregateRunnerSupportsRunnerArgsContract &&
-        runRegressionStep regression-parallel-aggregate-runner-supports-runner-args runRegressionParallelAggregateRunnerSupportsRunnerArgsContract &&
-        runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract &&
-        runRegressionStep aggregate-runner-runner-args-assertion runAggregateRunnerRunnerArgsAssertionContract &&
-        runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract &&
-        runRegressionStep aggregate-runner-uses-suite-local-helper-assertion runAggregateRunnerUsesSuiteLocalHelperAssertionContract &&
-        runRegressionStep aggregate-runner-uses-suite-local-helper-adoption runAggregateRunnerUsesSuiteLocalHelperAdoptionContract &&
-        runRegressionStep aggregate-runner-uses-framework-selector-helper-assertion runAggregateRunnerUsesFrameworkSelectorHelperAssertionContract &&
-        runRegressionStep aggregate-runner-uses-framework-selector-helper-adoption runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract &&
-        runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-assertion runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertionContract &&
-        runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-adoption runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract &&
-        runRegressionStep contract-function-definitions-unique runContractFunctionDefinitionsUniqueContract &&
-        runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract &&
-        runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract &&
-        runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract &&
-        runRegressionStep regression-dispatcher-step-coverage-helper-adoption runRegressionDispatcherStepCoverageHelperAdoptionContract &&
-        runRegressionStep contract-helper-adoption-helper-adoption runContractHelperAdoptionHelperAdoptionContract &&
-        runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract &&
-        runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract &&
-        runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract &&
-        runRegressionStep no-compat-wrapper-functions-helper-adoption runNoCompatWrapperFunctionsHelperAdoptionContract &&
-        runRegressionStep subscription-state-cli-retirement-helper-adoption runSubscriptionStateCliRetirementHelperAdoptionContract &&
-        runRegressionStep subscription-state-cli-retirement-helper-adoption-covered-by-dispatcher runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract &&
-        runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract &&
-        runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract &&
-        runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract &&
-        runRegressionStep subscription-state-shim-stays-thin runSubscriptionStateShimStaysThinContract &&
-        runRegressionStep subscription-state-shim-public-cli-retirement runSubscriptionStateShimPublicCliRetirementContract &&
-        runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract &&
-        runRegressionStep legacy-regression-scripts-retire-internal-cli runLegacyRegressionScriptsRetireInternalCliContract &&
-        runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract &&
-        runRegressionStep subscription-state-no-empty-aggregate-wrapper-functions runSubscriptionStateNoEmptyAggregateWrapperFunctionsContract &&
-        runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract &&
-        runRegressionStep subscription-state-nested-selector-helpers-are-suite-owned runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract &&
-        runRegressionStep subscription-state-no-step-wrapper-functions runSubscriptionStateNoStepWrapperFunctionsContract &&
-        runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract &&
-        runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract &&
-        runRegressionStep subscription-state-structure-source-child-steps runSubscriptionStateStructureSourceChildStepsContract &&
-        runRegressionStep subscription-state-structure-migration-child-steps runSubscriptionStateStructureMigrationChildStepsContract &&
-        runRegressionStep subscription-state-quota-traffic-child-steps runSubscriptionStateQuotaTrafficChildStepsContract &&
-        runRegressionStep subscription-state-quota-menu-tx-child-steps runSubscriptionStateQuotaMenuTransactionChildStepsContract &&
-        runRegressionStep subscription-state-quota-partial-sync-child-steps runSubscriptionStateQuotaPartialSyncChildStepsContract &&
-        runRegressionStep subscription-state-remote-restore-self-reference-child-steps runSubscriptionStateRemoteRestoreSelfReferenceChildStepsContract &&
-        runRegressionStep subscription-state-remote-restore-serial-child-steps runSubscriptionStateRemoteRestoreSerialChildStepsContract &&
-        runRegressionStep subscription-state-sync-rollback-failure-serial-child-steps runSubscriptionStateSyncRollbackFailureSerialChildStepsContract &&
-        runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract &&
-        runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract &&
-        runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract &&
-        runRegressionStep subscription-state-full-uses-framework-parallel-helper runSubscriptionStateFullUsesFrameworkParallelHelperContract &&
-        runRegressionStep subscription-state-full-public-cli-retirement runSubscriptionStateFullPublicCliRetirementContract &&
-        runRegressionStep subscription-state-aggregates-support-source-only runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract &&
-        runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract &&
-        runRegressionStep remote-control-public-selector-retirement runRemoteControlPublicSelectorRetirementContract &&
-        runRegressionStep legacy-retires-suite-owned-wrappers runLegacyRetiresSuiteOwnedWrappersContract &&
-        runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract &&
-        runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract &&
-        runRegressionStep remote-control-nested-selector-helpers-are-suite-owned runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract &&
-        runRegressionStep remote-control-leaves-use-compat-helper runRemoteControlLeavesUseCompatHelperContract &&
-        runRegressionStep remote-control-no-compat-wrapper-functions runRemoteControlNoCompatWrapperFunctionsContract &&
-        runRegressionStep remote-control-no-step-wrapper-functions runRemoteControlNoStepWrapperFunctionsContract &&
-        runRegressionStep remote-control-smoke-core-no-compat-helper runRemoteControlSmokeCoreNoCompatHelperContract &&
-        runRegressionStep remote-control-smoke-refresh-no-compat-helper runRemoteControlSmokeRefreshNoCompatHelperContract &&
-        runRegressionStep remote-control-contract-service-install-no-compat-helper runRemoteControlContractServiceInstallNoCompatHelperContract &&
-        runRegressionStep remote-control-legacy-tmpdir-isolation-guard-registered runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract &&
-        runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract &&
-        runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract &&
-        runRegressionStep remote-control-nested-aggregate-runner-registration runRemoteControlNestedAggregateRunnerRegistrationContract &&
-        runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract &&
-        runRegressionStep remote-control-top-level-no-suite-selector-runner runRemoteControlTopLevelNoSuiteSelectorRunnerContract &&
-        runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract &&
-        runRegressionStep fast-no-empty-local-wrapper-functions runFastNoEmptyLocalWrapperFunctionsContract &&
-        runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract &&
-        runRegressionStep fast-public-cli-retirement runFastPublicCliRetirementContract &&
-        runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract &&
-        runRegressionStep fast-selector-helpers-stay-aligned runFastSelectorHelpersStayAlignedContract &&
-        runRegressionStep fast-aggregate-runner-registration runFastAggregateRunnerRegistrationContract &&
-        runRegressionStep fast-only-aggregate-runner-registration runFastOnlyAggregateRunnerRegistrationContract &&
-        runRegressionStep fast-only-safety-child-steps runFastOnlySafetyChildStepsContract &&
-        runRegressionStep fast-only-output-aggregate-runner-registration runFastOnlyOutputAggregateRunnerRegistrationContract &&
-        runRegressionStep fast-only-output-auto-install-child-steps runFastOnlyOutputAutoInstallChildStepsContract &&
-        runRegressionStep fast-only-output-rest-child-steps runFastOnlyOutputRestChildStepsContract &&
-        runRegressionStep fast-only-core-aggregate-runner-registration runFastOnlyCoreAggregateRunnerRegistrationContract &&
-        runRegressionStep fast-only-core-child-steps runFastOnlyCoreChildStepsContract &&
-        runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract &&
-        runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract &&
-        runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract &&
-        runRegressionStep fast-reality-uses-reality-compat-helper runFastRealityUsesRealityCompatHelperContract &&
-        runRegressionStep fast-suite-uses-suite-local-helper runFastSuiteUsesSuiteLocalHelperContract &&
-        runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract &&
-        runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract &&
-        runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract &&
-        runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract &&
-        runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract &&
-        runRegressionStep platform-io-leaves-use-legacy-compat-helper runPlatformIoLeavesUseLegacyCompatHelperContract &&
-        runRegressionStep platform-fast-helper-isolation-guard-registered runPlatformFastHelperIsolationGuardRegisteredContract &&
-        runRegressionStep platform-update-child-steps runPlatformUpdateChildStepsContract &&
-        runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract &&
-        runRegressionStep platform-rest-child-steps runPlatformRestChildStepsContract &&
-        runRegressionStep platform-io-child-steps runPlatformIoChildStepsContract &&
-        runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract &&
-        runRegressionStep all-no-empty-aggregate-wrapper-functions runAllNoEmptyAggregateWrapperFunctionsContract &&
-        runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract &&
-        runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract &&
-        runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract &&
-        runRegressionStep framework-parallel-selector-list-builds-pair-dispatch runFrameworkParallelSelectorListBuildsPairDispatchContract &&
-        runRegressionStep framework-parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract &&
-        runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract &&
-        runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract &&
-        runRegressionStep targeted-batch-helpers-legacy-retirement runTargetedBatchHelpersLegacyRetirementContract &&
-        runRegressionStep targeted-batch-helpers-child-steps runTargetedBatchHelpersChildStepsContract &&
-        runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract &&
-        runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract &&
-        runRegressionStep tls-legacy-retirement runTlsLegacyRetirementContract &&
-        runRegressionStep tls-legacy-public-selector-retirement runTlsLegacyPublicSelectorRetirementContract &&
-        runRegressionStep tls-suite-child-steps runTlsSuiteChildStepsContract &&
-        runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract &&
-        runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract &&
-        runRegressionStep tls-no-empty-aggregate-wrapper-functions runTlsNoEmptyAggregateWrapperFunctionsContract &&
-        runRegressionStep tls-leaves-use-compat-helper runTlsLeavesUseCompatHelperContract &&
-        runRegressionStep tls-legacy-tmpdir-isolation-guard-registered runTlsLegacyTmpDirIsolationGuardRegisteredContract &&
-        runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract &&
-        runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract &&
-        runRegressionStep composition-leaf-selectors-legacy-public-retirement runCompositionLeafSelectorsLegacyPublicRetirementContract &&
-        runRegressionStep transaction-direct-leaf-selectors-use-function-registry runTransactionDirectLeafSelectorsUseFunctionRegistryContract &&
-        runRegressionStep transaction-no-compat-wrapper-functions runTransactionNoCompatWrapperFunctionsContract &&
-        runRegressionStep transaction-subscription-leaves-use-compat-helper runTransactionSubscriptionLeavesUseCompatHelperContract &&
-        runRegressionStep transaction-core-direct-leaf-selectors-use-function-registry runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract &&
-        runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract &&
-        runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract &&
-        runRegressionStep subscription-state-composition-leaf-selectors-use-function-registry runSubscriptionStateCompositionLeafSelectorsUseFunctionRegistryContract &&
-        runRegressionStep targeted-subscription-restore-retirement runTargetedSubscriptionRestoreRetirementContract &&
-        runRegressionStep subscription-output-legacy-retirement runSubscriptionOutputLegacyRetirementContract &&
-        runRegressionStep subscription-selector-helpers-are-suite-owned runSubscriptionSelectorHelpersAreSuiteOwnedContract &&
-        runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract &&
-        runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract &&
-        runRegressionStep ui-full-legacy-wrapper-retirement runUiFullLegacyWrapperRetirementContract &&
-        runRegressionStep ui-full-subscription-main-legacy-wrapper-retirement runUiFullSubscriptionMainLegacyWrapperRetirementContract &&
-        runRegressionStep ui-wireguard-legacy-wrapper-retirement runUiWireGuardLegacyWrapperRetirementContract &&
-        runRegressionStep ui-legacy-public-selector-retirement runUiLegacyPublicSelectorRetirementContract &&
-        runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract &&
-        runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract &&
-        runRegressionStep ui-nested-aggregate-runners-use-shared-suite-helpers runUiNestedAggregateRunnersUseSharedSuiteHelpersContract &&
-        runRegressionStep ui-leaves-use-compat-helper runUiLeavesUseCompatHelperContract &&
-        runRegressionStep ui-no-compat-wrapper-functions runUiNoCompatWrapperFunctionsContract &&
-        runRegressionStep ui-legacy-tmpdir-isolation-guard-registered runUiLegacyTmpDirIsolationGuardRegisteredContract &&
-        runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract &&
-        runRegressionStep ui-aggregate-runner-uses-suite-local-helper runUiAggregateRunnerUsesSuiteLocalHelperContract &&
-        runRegressionStep ui-aggregate-runner-uses-framework-selector-helper runUiAggregateRunnerUsesFrameworkSelectorHelperContract &&
-        runRegressionStep routing-suite-uses-function-registry runRoutingSuiteUsesFunctionRegistryContract &&
-        runRegressionStep routing-legacy-public-selector-retirement runRoutingLegacyPublicSelectorRetirementContract &&
-        runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract &&
-        runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract &&
-        runRegressionStep routing-aggregate-runner-uses-suite-local-helper runRoutingAggregateRunnerUsesSuiteLocalHelperContract &&
-        runRegressionStep routing-aggregate-runner-uses-framework-selector-helper runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract &&
-        runRegressionStep routing-legacy-leaves-use-compat-helper runRoutingLegacyLeavesUseCompatHelperContract &&
-        runRegressionStep routing-legacy-read-install-type-isolation-guard-registered runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract &&
-        runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract &&
-        runRegressionStep transaction-no-empty-aggregate-wrapper-functions runTransactionNoEmptyAggregateWrapperFunctionsContract &&
-        runRegressionStep transaction-legacy-tmpdir-isolation-guard-registered runTransactionLegacyTmpDirIsolationGuardRegisteredContract &&
-        runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract &&
-        runRegressionStep transaction-subscription-child-steps runTransactionSubscriptionChildStepsContract &&
-        runRegressionStep transaction-suite-child-steps runTransactionSuiteChildStepsContract &&
-        runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract &&
-        runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract &&
-        runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract &&
-        runRegressionStep transaction-selector-helpers-stay-aligned runTransactionSelectorHelpersStayAlignedContract &&
-        runRegressionStep transaction-aggregate-runner-registration runTransactionAggregateRunnerRegistrationContract &&
-        runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract &&
-        runRegressionStep transaction-sequential-aggregates-use-framework-selector-helper-args runTransactionSequentialAggregatesUseFrameworkSelectorHelperArgsContract &&
-        runRegressionStep transaction-core-aggregate-runner-uses-framework-selector-helper runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract &&
-        runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract &&
-        runRegressionStep all-suite-child-steps runAllSuiteChildStepsContract &&
-        runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract &&
-        runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract &&
-        runRegressionStep all-selector-dispatch-avoids-entry-script-spawn runAllSelectorDispatchAvoidsEntryScriptSpawnContract &&
-        runRegressionStep all-aggregate-runner-uses-framework-selector-helper runAllAggregateRunnerUsesFrameworkSelectorHelperContract &&
-        runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract &&
-        runRegressionStep subscription-legacy-public-selector-retirement runSubscriptionLegacyPublicSelectorRetirementContract &&
-        runRegressionStep subscription-no-empty-aggregate-wrapper-functions runSubscriptionNoEmptyAggregateWrapperFunctionsContract &&
-        runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract &&
-        runRegressionStep subscription-output-child-steps runSubscriptionOutputChildStepsContract &&
-        runRegressionStep subscription-remote-registered-child-selectors-aligned runSubscriptionRemoteRegisteredChildSelectorsAlignedContract &&
-        runRegressionStep subscription-tx-registered-child-selectors-aligned runSubscriptionTxRegisteredChildSelectorsAlignedContract &&
-        runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract &&
-        runRegressionStep subscription-remote-aggregate-runner-registration runSubscriptionRemoteAggregateRunnerRegistrationContract &&
-        runRegressionStep subscription-tx-aggregate-runner-registration runSubscriptionTxAggregateRunnerRegistrationContract &&
-        runRegressionStep subscription-aggregate-runners-use-suite-local-helpers runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract &&
-        runRegressionStep subscription-aggregate-runners-use-framework-selector-helper runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract &&
-        runRegressionStep reality-suite-uses-function-registry runRealitySuiteUsesFunctionRegistryContract &&
-        runRegressionStep reality-legacy-public-selector-retirement runRealityLegacyPublicSelectorRetirementContract &&
-        runRegressionStep reality-suite-child-steps runRealitySuiteChildStepsContract &&
-        runRegressionStep reality-candidates-aggregate-runner-registration runRealityCandidatesAggregateRunnerRegistrationContract &&
-        runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract &&
-        runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract &&
-        runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract &&
-        runRegressionStep reality-leaves-use-compat-helper runRealityLeavesUseCompatHelperContract &&
-        runRegressionStep reality-legacy-tmpdir-isolation-guard-registered runRealityLegacyTmpDirIsolationGuardRegisteredContract &&
-        runRegressionStep runtime-suite-uses-function-registry runRuntimeSuiteUsesFunctionRegistryContract &&
-        runRegressionStep runtime-legacy-public-selector-retirement runRuntimeLegacyPublicSelectorRetirementContract &&
-        runRegressionStep runtime-suite-child-steps runRuntimeSuiteChildStepsContract &&
-        runRegressionStep runtime-selector-helpers-stay-aligned runRuntimeSelectorHelpersStayAlignedContract &&
-        runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract &&
-        runRegressionStep runtime-aggregate-runner-uses-suite-local-helper runRuntimeAggregateRunnerUsesSuiteLocalHelperContract &&
-        runRegressionStep runtime-aggregate-runner-uses-framework-selector-helper runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract &&
-        runRegressionStep runtime-leaves-use-compat-helper runRuntimeLeavesUseCompatHelperContract &&
-        runRegressionStep runtime-legacy-tmpdir-isolation-guard-registered runRuntimeLegacyTmpDirIsolationGuardRegisteredContract &&
-        runRegressionStep reality-no-empty-aggregate-wrapper-functions runRealityNoEmptyAggregateWrapperFunctionsContract &&
-        runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract &&
-        runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract &&
-        runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract &&
-        runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract
+    runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract
+    runRegressionStep regression-step-sequence-assertion runRegressionStepSequenceAssertionContract
+    runRegressionStep regression-dispatcher-step-coverage-assertion runRegressionDispatcherStepCoverageAssertionContract
+    runRegressionStep contract-helper-adoption-assertion runContractHelperAdoptionAssertionContract
+    runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract
+    runRegressionStep regression-function-leaf-supports-runner-args runRegressionFunctionLeafSupportsRunnerArgsContract
+    runRegressionStep regression-aggregate-runner-supports-runner-args runRegressionAggregateRunnerSupportsRunnerArgsContract
+    runRegressionStep regression-parallel-aggregate-runner-supports-runner-args runRegressionParallelAggregateRunnerSupportsRunnerArgsContract
+    runRegressionStep aggregate-runner-registration-assertion runAggregateRunnerRegistrationAssertionContract
+    runRegressionStep aggregate-runner-runner-args-assertion runAggregateRunnerRunnerArgsAssertionContract
+    runRegressionStep aggregate-runner-registration-helper-adoption runAggregateRunnerRegistrationHelperAdoptionContract
+    runRegressionStep aggregate-runner-uses-suite-local-helper-assertion runAggregateRunnerUsesSuiteLocalHelperAssertionContract
+    runRegressionStep aggregate-runner-uses-suite-local-helper-adoption runAggregateRunnerUsesSuiteLocalHelperAdoptionContract
+    runRegressionStep aggregate-runner-uses-framework-selector-helper-assertion runAggregateRunnerUsesFrameworkSelectorHelperAssertionContract
+    runRegressionStep aggregate-runner-uses-framework-selector-helper-adoption runAggregateRunnerUsesFrameworkSelectorHelperAdoptionContract
+    runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-assertion runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAssertionContract
+    runRegressionStep aggregate-runner-uses-framework-selector-helper-multiline-adoption runAggregateRunnerUsesFrameworkSelectorHelperMultiLineAdoptionContract
+    runRegressionStep contract-function-definitions-unique runContractFunctionDefinitionsUniqueContract
+    runRegressionStep legacy-public-selector-retirement-assertion runLegacyPublicSelectorRetirementAssertionContract
+    runRegressionStep legacy-public-selector-retirement-helper-adoption runLegacyPublicSelectorRetirementHelperAdoptionContract
+    runRegressionStep regression-step-sequence-helper-adoption runRegressionStepSequenceHelperAdoptionContract
+    runRegressionStep regression-dispatcher-step-coverage-helper-adoption runRegressionDispatcherStepCoverageHelperAdoptionContract
+    runRegressionStep contract-helper-adoption-helper-adoption runContractHelperAdoptionHelperAdoptionContract
+    runRegressionStep aggregate-runner-dispatches-children-in-order-helper-adoption runAggregateRunnerDispatchesChildrenInOrderHelperAdoptionContract
+    runRegressionStep legacy-function-selector-retirement-helper-adoption runLegacyFunctionSelectorRetirementHelperAdoptionContract
+    runRegressionStep legacy-function-retirement-batch-helper-adoption runLegacyFunctionRetirementBatchHelperAdoptionContract
+    runRegressionStep no-compat-wrapper-functions-helper-adoption runNoCompatWrapperFunctionsHelperAdoptionContract
+    runRegressionStep subscription-state-cli-retirement-helper-adoption runSubscriptionStateCliRetirementHelperAdoptionContract
+    runRegressionStep subscription-state-cli-retirement-helper-adoption-covered-by-dispatcher runSubscriptionStateCliRetirementHelperAdoptionCoveredByDispatcherContract
+    runRegressionStep pre-legacy-suites-avoid-legacy-function-collisions runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract
+    runRegressionStep subscription-state-no-implicit-full-fallback runSubscriptionStateNoImplicitFullFallbackContract
+    runRegressionStep subscription-state-shim-uses-source-only-full runSubscriptionStateShimUsesSourceOnlyFullContract
+    runRegressionStep subscription-state-shim-stays-thin runSubscriptionStateShimStaysThinContract
+    runRegressionStep subscription-state-shim-public-cli-retirement runSubscriptionStateShimPublicCliRetirementContract
+    runRegressionStep legacy-regression-scripts-require-dispatcher runLegacyRegressionScriptsRequireDispatcherContract
+    runRegressionStep legacy-regression-scripts-retire-internal-cli runLegacyRegressionScriptsRetireInternalCliContract
+    runRegressionStep subscription-state-suite-uses-function-registry runSubscriptionStateSuiteUsesFunctionRegistryContract
+    runRegressionStep subscription-state-no-empty-aggregate-wrapper-functions runSubscriptionStateNoEmptyAggregateWrapperFunctionsContract
+    runRegressionStep subscription-state-selector-helpers-stay-aligned runSubscriptionStateSelectorHelpersStayAlignedContract
+    runRegressionStep subscription-state-nested-selector-helpers-are-suite-owned runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract
+    runRegressionStep subscription-state-no-step-wrapper-functions runSubscriptionStateNoStepWrapperFunctionsContract
+    runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract
+    runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract
+    runRegressionStep subscription-state-structure-source-child-steps runSubscriptionStateStructureSourceChildStepsContract
+    runRegressionStep subscription-state-structure-migration-child-steps runSubscriptionStateStructureMigrationChildStepsContract
+    runRegressionStep subscription-state-quota-traffic-child-steps runSubscriptionStateQuotaTrafficChildStepsContract
+    runRegressionStep subscription-state-quota-menu-tx-child-steps runSubscriptionStateQuotaMenuTransactionChildStepsContract
+    runRegressionStep subscription-state-quota-partial-sync-child-steps runSubscriptionStateQuotaPartialSyncChildStepsContract
+    runRegressionStep subscription-state-remote-restore-self-reference-child-steps runSubscriptionStateRemoteRestoreSelfReferenceChildStepsContract
+    runRegressionStep subscription-state-remote-restore-serial-child-steps runSubscriptionStateRemoteRestoreSerialChildStepsContract
+    runRegressionStep subscription-state-sync-rollback-failure-serial-child-steps runSubscriptionStateSyncRollbackFailureSerialChildStepsContract
+    runRegressionStep subscription-state-core-aggregate-runner-registration runSubscriptionStateCoreAggregateRunnerRegistrationContract
+    runRegressionStep subscription-state-aggregate-runner-registration runSubscriptionStateAggregateRunnerRegistrationContract
+    runRegressionStep subscription-state-nested-aggregate-runner-registration runSubscriptionStateNestedAggregateRunnerRegistrationContract
+    runRegressionStep subscription-state-full-uses-framework-parallel-helper runSubscriptionStateFullUsesFrameworkParallelHelperContract
+    runRegressionStep subscription-state-full-public-cli-retirement runSubscriptionStateFullPublicCliRetirementContract
+    runRegressionStep subscription-state-aggregates-support-source-only runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract
+    runRegressionStep remote-control-suite-uses-function-registry runRemoteControlSuiteUsesFunctionRegistryContract
+    runRegressionStep remote-control-public-selector-retirement runRemoteControlPublicSelectorRetirementContract
+    runRegressionStep legacy-retires-suite-owned-wrappers runLegacyRetiresSuiteOwnedWrappersContract
+    runRegressionStep remote-control-aggregates-support-source-only runRemoteControlAggregatesSupportSourceOnlyExecutionContract
+    runRegressionStep remote-control-selector-helpers-stay-aligned runRemoteControlSelectorHelpersStayAlignedContract
+    runRegressionStep remote-control-nested-selector-helpers-are-suite-owned runRemoteControlNestedSelectorHelpersAreSuiteOwnedContract
+    runRegressionStep remote-control-leaves-use-compat-helper runRemoteControlLeavesUseCompatHelperContract
+    runRegressionStep remote-control-no-compat-wrapper-functions runRemoteControlNoCompatWrapperFunctionsContract
+    runRegressionStep remote-control-no-step-wrapper-functions runRemoteControlNoStepWrapperFunctionsContract
+    runRegressionStep remote-control-smoke-core-no-compat-helper runRemoteControlSmokeCoreNoCompatHelperContract
+    runRegressionStep remote-control-smoke-refresh-no-compat-helper runRemoteControlSmokeRefreshNoCompatHelperContract
+    runRegressionStep remote-control-contract-service-install-no-compat-helper runRemoteControlContractServiceInstallNoCompatHelperContract
+    runRegressionStep remote-control-legacy-tmpdir-isolation-guard-registered runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract
+    runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract
+    runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract
+    runRegressionStep remote-control-nested-aggregate-runner-registration runRemoteControlNestedAggregateRunnerRegistrationContract
+    runRegressionStep remote-control-aggregate-runner-uses-framework-selector-helper runRemoteControlAggregateRunnerUsesFrameworkSelectorHelperContract
+    runRegressionStep remote-control-top-level-no-suite-selector-runner runRemoteControlTopLevelNoSuiteSelectorRunnerContract
+    runRegressionStep fast-suite-uses-function-registry runFastSuiteUsesFunctionRegistryContract
+    runRegressionStep fast-no-empty-local-wrapper-functions runFastNoEmptyLocalWrapperFunctionsContract
+    runRegressionStep fast-legacy-retirement runFastLegacyRetirementContract
+    runRegressionStep fast-public-cli-retirement runFastPublicCliRetirementContract
+    runRegressionStep fast-reality-selector-helpers-stay-aligned runFastRealitySelectorHelpersStayAlignedContract
+    runRegressionStep fast-selector-helpers-stay-aligned runFastSelectorHelpersStayAlignedContract
+    runRegressionStep fast-aggregate-runner-registration runFastAggregateRunnerRegistrationContract
+    runRegressionStep fast-only-aggregate-runner-registration runFastOnlyAggregateRunnerRegistrationContract
+    runRegressionStep fast-only-safety-child-steps runFastOnlySafetyChildStepsContract
+    runRegressionStep fast-only-output-aggregate-runner-registration runFastOnlyOutputAggregateRunnerRegistrationContract
+    runRegressionStep fast-only-output-auto-install-child-steps runFastOnlyOutputAutoInstallChildStepsContract
+    runRegressionStep fast-only-output-rest-child-steps runFastOnlyOutputRestChildStepsContract
+    runRegressionStep fast-only-core-aggregate-runner-registration runFastOnlyCoreAggregateRunnerRegistrationContract
+    runRegressionStep fast-only-core-child-steps runFastOnlyCoreChildStepsContract
+    runRegressionStep fast-reality-aggregate-runner-registration runFastRealityAggregateRunnerRegistrationContract
+    runRegressionStep fast-reality-legacy-retirement runFastRealityLegacyRetirementContract
+    runRegressionStep fast-reality-aggregate-runner-dispatches-children-in-order runFastRealityAggregateRunnerDispatchesChildrenInOrderContract
+    runRegressionStep fast-reality-uses-reality-compat-helper runFastRealityUsesRealityCompatHelperContract
+    runRegressionStep fast-suite-uses-suite-local-helper runFastSuiteUsesSuiteLocalHelperContract
+    runRegressionStep platform-suite-uses-function-registry runPlatformSuiteUsesFunctionRegistryContract
+    runRegressionStep platform-public-selector-retirement runPlatformPublicSelectorRetirementContract
+    runRegressionStep platform-hot-selector-helpers-stay-aligned runPlatformHotSelectorHelpersStayAlignedContract
+    runRegressionStep platform-hot-aggregate-runner-registration runPlatformHotAggregateRunnerRegistrationContract
+    runRegressionStep platform-hot-leaves-use-fast-compat-helper runPlatformHotLeavesUseFastCompatHelperContract
+    runRegressionStep platform-io-leaves-use-legacy-compat-helper runPlatformIoLeavesUseLegacyCompatHelperContract
+    runRegressionStep platform-fast-helper-isolation-guard-registered runPlatformFastHelperIsolationGuardRegisteredContract
+    runRegressionStep platform-update-child-steps runPlatformUpdateChildStepsContract
+    runRegressionStep platform-refresh-child-steps runPlatformRefreshChildStepsContract
+    runRegressionStep platform-rest-child-steps runPlatformRestChildStepsContract
+    runRegressionStep platform-io-child-steps runPlatformIoChildStepsContract
+    runRegressionStep all-suite-uses-function-registry runAllSuiteUsesFunctionRegistryContract
+    runRegressionStep all-no-empty-aggregate-wrapper-functions runAllNoEmptyAggregateWrapperFunctionsContract
+    runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract
+    runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract
+    runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract
+    runRegressionStep framework-parallel-selector-list-builds-pair-dispatch runFrameworkParallelSelectorListBuildsPairDispatchContract
+    runRegressionStep framework-parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract
+    runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract
+    runRegressionStep legacy-suite-uses-function-registry runLegacySuiteUsesFunctionRegistryContract
+    runRegressionStep targeted-batch-helpers-legacy-retirement runTargetedBatchHelpersLegacyRetirementContract
+    runRegressionStep targeted-batch-helpers-child-steps runTargetedBatchHelpersChildStepsContract
+    runRegressionStep platform-suite-uses-suite-local-helpers runPlatformSuiteUsesSuiteLocalHelpersContract
+    runRegressionStep tls-suite-uses-function-registry runTlsSuiteUsesFunctionRegistryContract
+    runRegressionStep tls-legacy-retirement runTlsLegacyRetirementContract
+    runRegressionStep tls-legacy-public-selector-retirement runTlsLegacyPublicSelectorRetirementContract
+    runRegressionStep tls-suite-child-steps runTlsSuiteChildStepsContract
+    runRegressionStep tls-selector-helpers-stay-aligned runTlsSelectorHelpersStayAlignedContract
+    runRegressionStep tls-aggregate-runner-registration runTlsAggregateRunnerRegistrationContract
+    runRegressionStep tls-no-empty-aggregate-wrapper-functions runTlsNoEmptyAggregateWrapperFunctionsContract
+    runRegressionStep tls-leaves-use-compat-helper runTlsLeavesUseCompatHelperContract
+    runRegressionStep tls-legacy-tmpdir-isolation-guard-registered runTlsLegacyTmpDirIsolationGuardRegisteredContract
+    runRegressionStep legacy-direct-leaf-selectors-use-function-registry runLegacyDirectLeafSelectorsUseFunctionRegistryContract
+    runRegressionStep composition-leaf-selectors-use-suite-local-registry runCompositionLeafSelectorsUseSuiteLocalRegistryContract
+    runRegressionStep composition-leaf-selectors-legacy-public-retirement runCompositionLeafSelectorsLegacyPublicRetirementContract
+    runRegressionStep transaction-direct-leaf-selectors-use-function-registry runTransactionDirectLeafSelectorsUseFunctionRegistryContract
+    runRegressionStep transaction-no-compat-wrapper-functions runTransactionNoCompatWrapperFunctionsContract
+    runRegressionStep transaction-subscription-leaves-use-compat-helper runTransactionSubscriptionLeavesUseCompatHelperContract
+    runRegressionStep transaction-core-direct-leaf-selectors-use-function-registry runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract
+    runRegressionStep subscription-direct-leaf-selectors-use-function-registry runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract
+    runRegressionStep subscription-composition-leaf-selectors-use-function-registry runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract
+    runRegressionStep subscription-state-composition-leaf-selectors-use-function-registry runSubscriptionStateCompositionLeafSelectorsUseFunctionRegistryContract
+    runRegressionStep targeted-subscription-restore-retirement runTargetedSubscriptionRestoreRetirementContract
+    runRegressionStep subscription-output-legacy-retirement runSubscriptionOutputLegacyRetirementContract
+    runRegressionStep subscription-selector-helpers-are-suite-owned runSubscriptionSelectorHelpersAreSuiteOwnedContract
+    runRegressionStep ui-suite-uses-function-registry runUiSuiteUsesFunctionRegistryContract
+    runRegressionStep ui-smoke-legacy-wrapper-retirement runUiSmokeLegacyWrapperRetirementContract
+    runRegressionStep ui-full-legacy-wrapper-retirement runUiFullLegacyWrapperRetirementContract
+    runRegressionStep ui-full-subscription-main-legacy-wrapper-retirement runUiFullSubscriptionMainLegacyWrapperRetirementContract
+    runRegressionStep ui-wireguard-legacy-wrapper-retirement runUiWireGuardLegacyWrapperRetirementContract
+    runRegressionStep ui-legacy-public-selector-retirement runUiLegacyPublicSelectorRetirementContract
+    runRegressionStep ui-public-selectors-use-function-registry runUiPublicSelectorsUseFunctionRegistryContract
+    runRegressionStep ui-selector-helpers-stay-aligned runUiSelectorHelpersStayAlignedContract
+    runRegressionStep ui-nested-aggregate-runners-use-shared-suite-helpers runUiNestedAggregateRunnersUseSharedSuiteHelpersContract
+    runRegressionStep ui-leaves-use-compat-helper runUiLeavesUseCompatHelperContract
+    runRegressionStep ui-no-compat-wrapper-functions runUiNoCompatWrapperFunctionsContract
+    runRegressionStep ui-legacy-tmpdir-isolation-guard-registered runUiLegacyTmpDirIsolationGuardRegisteredContract
+    runRegressionStep ui-aggregate-runner-registration runUiAggregateRunnerRegistrationContract
+    runRegressionStep ui-aggregate-runner-uses-suite-local-helper runUiAggregateRunnerUsesSuiteLocalHelperContract
+    runRegressionStep ui-aggregate-runner-uses-framework-selector-helper runUiAggregateRunnerUsesFrameworkSelectorHelperContract
+    runRegressionStep routing-suite-uses-function-registry runRoutingSuiteUsesFunctionRegistryContract
+    runRegressionStep routing-legacy-public-selector-retirement runRoutingLegacyPublicSelectorRetirementContract
+    runRegressionStep routing-selector-helpers-stay-aligned runRoutingSelectorHelpersStayAlignedContract
+    runRegressionStep routing-aggregate-runner-registration runRoutingAggregateRunnerRegistrationContract
+    runRegressionStep routing-aggregate-runner-uses-suite-local-helper runRoutingAggregateRunnerUsesSuiteLocalHelperContract
+    runRegressionStep routing-aggregate-runner-uses-framework-selector-helper runRoutingAggregateRunnerUsesFrameworkSelectorHelperContract
+    runRegressionStep routing-legacy-leaves-use-compat-helper runRoutingLegacyLeavesUseCompatHelperContract
+    runRegressionStep routing-legacy-read-install-type-isolation-guard-registered runRoutingLegacyReadInstallTypeIsolationGuardRegisteredContract
+    runRegressionStep transaction-suite-uses-function-registry runTransactionSuiteUsesFunctionRegistryContract
+    runRegressionStep transaction-no-empty-aggregate-wrapper-functions runTransactionNoEmptyAggregateWrapperFunctionsContract
+    runRegressionStep transaction-legacy-tmpdir-isolation-guard-registered runTransactionLegacyTmpDirIsolationGuardRegisteredContract
+    runRegressionStep transaction-legacy-public-selector-retirement runTransactionLegacyPublicSelectorRetirementContract
+    runRegressionStep transaction-subscription-child-steps runTransactionSubscriptionChildStepsContract
+    runRegressionStep transaction-suite-child-steps runTransactionSuiteChildStepsContract
+    runRegressionStep transaction-core-selector-helpers-stay-aligned runTransactionCoreSelectorHelpersStayAlignedContract
+    runRegressionStep transaction-core-registered-child-selectors-aligned runTransactionCoreRegisteredChildSelectorsAlignedContract
+    runRegressionStep transaction-core-aggregate-runner-registration runTransactionCoreAggregateRunnerRegistrationContract
+    runRegressionStep transaction-selector-helpers-stay-aligned runTransactionSelectorHelpersStayAlignedContract
+    runRegressionStep transaction-aggregate-runner-registration runTransactionAggregateRunnerRegistrationContract
+    runRegressionStep transaction-system-aggregate-runner-registration runTransactionSystemAggregateRunnerRegistrationContract
+    runRegressionStep transaction-sequential-aggregates-use-framework-selector-helper-args runTransactionSequentialAggregatesUseFrameworkSelectorHelperArgsContract
+    runRegressionStep transaction-core-aggregate-runner-uses-framework-selector-helper runTransactionCoreAggregateRunnerUsesFrameworkSelectorHelperContract
+    runRegressionStep all-selector-helpers-stay-aligned runAllSelectorHelpersStayAlignedContract
+    runRegressionStep all-suite-child-steps runAllSuiteChildStepsContract
+    runRegressionStep all-aggregate-runner-registration runAllAggregateRunnerRegistrationContract
+    runRegressionStep all-aggregate-runner-uses-suite-local-dispatch-helper runAllAggregateRunnerUsesSuiteLocalDispatchHelperContract
+    runRegressionStep all-selector-dispatch-avoids-entry-script-spawn runAllSelectorDispatchAvoidsEntryScriptSpawnContract
+    runRegressionStep all-aggregate-runner-uses-framework-selector-helper runAllAggregateRunnerUsesFrameworkSelectorHelperContract
+    runRegressionStep subscription-suite-uses-function-registry runSubscriptionSuiteUsesFunctionRegistryContract
+    runRegressionStep subscription-legacy-public-selector-retirement runSubscriptionLegacyPublicSelectorRetirementContract
+    runRegressionStep subscription-no-empty-aggregate-wrapper-functions runSubscriptionNoEmptyAggregateWrapperFunctionsContract
+    runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract
+    runRegressionStep subscription-output-child-steps runSubscriptionOutputChildStepsContract
+    runRegressionStep subscription-remote-registered-child-selectors-aligned runSubscriptionRemoteRegisteredChildSelectorsAlignedContract
+    runRegressionStep subscription-tx-registered-child-selectors-aligned runSubscriptionTxRegisteredChildSelectorsAlignedContract
+    runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract
+    runRegressionStep subscription-remote-aggregate-runner-registration runSubscriptionRemoteAggregateRunnerRegistrationContract
+    runRegressionStep subscription-tx-aggregate-runner-registration runSubscriptionTxAggregateRunnerRegistrationContract
+    runRegressionStep subscription-aggregate-runners-use-suite-local-helpers runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract
+    runRegressionStep subscription-aggregate-runners-use-framework-selector-helper runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract
+    runRegressionStep reality-suite-uses-function-registry runRealitySuiteUsesFunctionRegistryContract
+    runRegressionStep reality-legacy-public-selector-retirement runRealityLegacyPublicSelectorRetirementContract
+    runRegressionStep reality-suite-child-steps runRealitySuiteChildStepsContract
+    runRegressionStep reality-candidates-aggregate-runner-registration runRealityCandidatesAggregateRunnerRegistrationContract
+    runRegressionStep reality-candidates-aggregate-runner-dispatches-children-in-order runRealityCandidatesAggregateRunnerDispatchesChildrenInOrderContract
+    runRegressionStep reality-stream-aggregate-runner-registration runRealityStreamAggregateRunnerRegistrationContract
+    runRegressionStep reality-stream-aggregate-runner-dispatches-children-in-order runRealityStreamAggregateRunnerDispatchesChildrenInOrderContract
+    runRegressionStep reality-leaves-use-compat-helper runRealityLeavesUseCompatHelperContract
+    runRegressionStep reality-legacy-tmpdir-isolation-guard-registered runRealityLegacyTmpDirIsolationGuardRegisteredContract
+    runRegressionStep runtime-suite-uses-function-registry runRuntimeSuiteUsesFunctionRegistryContract
+    runRegressionStep runtime-legacy-public-selector-retirement runRuntimeLegacyPublicSelectorRetirementContract
+    runRegressionStep runtime-suite-child-steps runRuntimeSuiteChildStepsContract
+    runRegressionStep runtime-selector-helpers-stay-aligned runRuntimeSelectorHelpersStayAlignedContract
+    runRegressionStep runtime-aggregate-runner-registration runRuntimeAggregateRunnerRegistrationContract
+    runRegressionStep runtime-aggregate-runner-uses-suite-local-helper runRuntimeAggregateRunnerUsesSuiteLocalHelperContract
+    runRegressionStep runtime-aggregate-runner-uses-framework-selector-helper runRuntimeAggregateRunnerUsesFrameworkSelectorHelperContract
+    runRegressionStep runtime-leaves-use-compat-helper runRuntimeLeavesUseCompatHelperContract
+    runRegressionStep runtime-legacy-tmpdir-isolation-guard-registered runRuntimeLegacyTmpDirIsolationGuardRegisteredContract
+    runRegressionStep reality-no-empty-aggregate-wrapper-functions runRealityNoEmptyAggregateWrapperFunctionsContract
+    runRegressionStep parallel-selector-collects-exited-child-without-rc runParallelSelectorCollectsExitedChildWithoutRcContract
+    runRegressionStep transaction-core-compatible-dispatcher-leaves-execute runTransactionCoreCompatibleDispatcherLeavesExecutionContract
+    runRegressionStep transaction-system-aggregate-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract
+    runRegressionStep legacy-reality-stubs-survive-suite-load runLegacyRealityStubsSurviveSuiteLoadContract
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts

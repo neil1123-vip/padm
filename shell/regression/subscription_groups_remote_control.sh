@@ -2239,17 +2239,17 @@ PY
 )
 
 runRegressionRemoteControlSmokeCoreSteps() {
-    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression &&
-        runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression &&
-        runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression &&
-        runRegressionStep remote-control-sources-parsed-once runRemoteControlSourcesParsedOnceRegression &&
-        runRegressionStep remote-control-health runRemoteControlHealthRegression &&
-        runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression &&
-        runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression &&
-        runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression &&
-        runRegressionStep remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression &&
-        runRegressionStep remote-control-inline-sync-parallel-runner runRemoteControlInlineSyncParallelRunnerRegression &&
-        runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
+    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
+    runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
+    runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
+    runRegressionStep remote-control-sources-parsed-once runRemoteControlSourcesParsedOnceRegression
+    runRegressionStep remote-control-health runRemoteControlHealthRegression
+    runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
+    runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression
+    runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression
+    runRegressionStep remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression
+    runRegressionStep remote-control-inline-sync-parallel-runner runRemoteControlInlineSyncParallelRunnerRegression
+    runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
 }
 
 runRegressionRemoteControlSmokeRefreshApplyBasicSteps() {
