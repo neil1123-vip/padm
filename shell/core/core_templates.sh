@@ -559,7 +559,7 @@ EOF
     fi
 
     # Trojan TCP direct
-    if protocolSelectionIncludes "${selectCustomInstallType}" 28 "$1"; then
+    if [[ "$1" != "all" ]] && protocolSelectionIncludes "${selectCustomInstallType}" 28 "$1"; then
         writeGeneratedJsonFile /etc/padm/xray/conf/28_trojan_TCP_direct_inbounds.json padm-xray-trojan-direct <<EOF || { errorCard "Xray Trojan TCP direct 入站模板提交失败"; return 1; }
 {
     "inbounds":[

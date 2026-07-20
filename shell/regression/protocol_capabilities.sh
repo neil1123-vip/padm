@@ -214,6 +214,10 @@ runProtocolCapabilityTemplateRegression() {
             return 1
         fi
     done
+    if ! grep -Fq 'if [[ "$1" != "all" ]] && protocolSelectionIncludes "${selectCustomInstallType}" 28 "$1"; then' "${coreTemplate}"; then
+        printf 'assert-fail:xray all mode must exclude direct Trojan sharing the fallback port\n' >&2
+        return 1
+    fi
     if ! grep -Fq 'protocolCapabilityIdsByProjectCore xray' "${stateFile}" ||
         ! grep -Fq 'protocolCapabilityMeta "${configFile}" config_file' "${stateFile}"; then
         printf 'assert-fail:readInstallType should recognize xray configs through capability metadata\n' >&2
