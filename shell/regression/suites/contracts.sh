@@ -577,18 +577,18 @@ runAggregateRunnerRegistrationAssertionContract() (
 runAggregateRunnerUsesSuiteLocalHelperAssertionContract() (
     local callLog="${TMP_DIR}/aggregate-suite-local-helper.log"
 
-    runRegressionTls() {
-        printf 'legacy-tls\n' >>"${callLog}"
+    runRegressionRuntime() {
+        printf 'legacy-runtime\n' >>"${callLog}"
         return 97
     }
 
-    runRegressionTlsSuiteRoot() {
-        printf 'suite-tls\n' >>"${callLog}"
+    runRegressionRuntimeSuiteRoot() {
+        printf 'suite-runtime\n' >>"${callLog}"
     }
 
-    runAggregateRunnerUsesSuiteLocalHelperAssertions tls "${callLog}" 'suite-tls' 'legacy-tls'
+    runAggregateRunnerUsesSuiteLocalHelperAssertions runtime "${callLog}" 'suite-runtime' 'legacy-runtime'
 
-    if runAggregateRunnerUsesSuiteLocalHelperAssertions tls "${callLog}" 'suite-runtime' 'legacy-tls'; then
+    if runAggregateRunnerUsesSuiteLocalHelperAssertions runtime "${callLog}" 'suite-tls' 'legacy-runtime'; then
         return 1
     fi
 )
