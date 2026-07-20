@@ -13,7 +13,8 @@ resolveScriptPath() {
             sourcePath="${targetPath}"
         fi
     done
-    printf '%s\n' "${sourcePath}"
+    sourceDir=$(cd -- "$(dirname -- "${sourcePath}")" && pwd -P) || return 1
+    printf '%s/%s\n' "${sourceDir}" "$(basename -- "${sourcePath}")"
 }
 
 SCRIPT_PATH=$(resolveScriptPath "${BASH_SOURCE[0]}") || {
