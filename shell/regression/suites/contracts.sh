@@ -1194,8 +1194,10 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-sync-append-restore-failure-detail \
         subscription-sync-single-restore-result-message \
         subscription-sync-rollback-result-message \
+        subscription-sync-find-user-enabled-projection \
         subscription-sync-reconcile-early-exit \
         subscription-group-sync-publish-refresh-inline \
+        subscription-group-sync-single-config-backup \
         subscription-groups-restore-failure
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateSerialChildSelectors serial \
         subscription-state \
