@@ -531,10 +531,8 @@ runLegacyPublicSelectorRetirementAssertionContract() (
     local selectorsFile="${TMP_DIR}/legacy-public-selector-retirement-selectors.txt"
 
     cat <<'EOF' >"${helperFile}"
-usage: %s [alpha|delta]
+usage: %s [gamma]
 case "$1" in
-    alpha)
-        ;;
     beta)
         ;;
 esac
@@ -548,6 +546,9 @@ EOF
     runLegacyPublicSelectorRetirementAssertions "${helperFile}" alpha delta
     runLegacyPublicSelectorRetirementAssertions "${helperFile}" $(<"${selectorsFile}")
     if runLegacyPublicSelectorRetirementAssertions "${helperFile}" beta; then
+        return 1
+    fi
+    if runLegacyPublicSelectorRetirementAssertions "${helperFile}" gamma; then
         return 1
     fi
 )
