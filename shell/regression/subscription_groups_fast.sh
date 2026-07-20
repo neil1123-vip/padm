@@ -4599,6 +4599,15 @@ runSuppressedRegressionFailurePropagationRegression() {
         set -e
         [[ "${status}" != "0" ]] || return 1
         [[ ! -e "${TMP_DIR}/suppressed-assertion-marker" ]] || return 1
+
+        if PADM_REGRESSION_SUPPRESS_DONE=1 \
+            runRegisteredRegressionMain suppressed-assertion-fixture >/dev/null 2>&1; then
+            status=0
+        else
+            status=$?
+        fi
+        [[ "${status}" == "2" ]] || return 1
+        [[ ! -e "${TMP_DIR}/suppressed-assertion-marker" ]] || return 1
     )
 }
 

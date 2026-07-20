@@ -256,6 +256,26 @@ runRegisteredRegressionMain() {
     local status=0
     local hadErrexit=0
 
+    case $- in
+    *e*) hadErrexit=1 ;;
+    esac
+    set +e
+    (
+        trap - EXIT ERR INT TERM
+        set -e
+        [[ 1 == 0 ]]
+        exit 0
+    )
+    status=$?
+    if (( hadErrexit )); then
+        set -e
+    fi
+    if (( status == 0 )); then
+        printf 'runRegisteredRegressionMain cannot run from a conditional command context\n' >&2
+        return 2
+    fi
+    status=0
+
     if [[ "${PADM_REGRESSION_REGISTRY_VALIDATED:-}" != "1" ]]; then
         validateRegressionRegistry || return 1
     fi
@@ -265,9 +285,9 @@ runRegisteredRegressionMain() {
         return 2
     fi
 
-    case $- in
-    *e*) hadErrexit=1; set +e ;;
-    esac
+    if (( hadErrexit )); then
+        set +e
+    fi
     runRegressionStep "total:${selector}" runRegisteredRegressionSelector "${selector}"
     status=$?
     if (( hadErrexit )); then
