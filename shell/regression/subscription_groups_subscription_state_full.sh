@@ -1347,9 +1347,7 @@ JSON
     set -e
     [[ "${syncStatus}" == "1" ]]
     [[ "$(<"${syncConfigFile}")" == "${originalConfig}" ]]
-    [[ "$(wc -l <"${reconcileLog}" | tr -d ' ')" == "2" ]]
-    grep -qx '<empty>' "${reconcileLog}"
-    grep -qx 'true' "${reconcileLog}"
+    [[ ! -s "${reconcileLog}" ]]
     grep -q '订阅输出恢复失败' "${resultFailures}"
 )
 
