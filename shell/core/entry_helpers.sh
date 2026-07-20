@@ -1191,6 +1191,9 @@ checkLog() {
         tail -n 100 /etc/padm/crontab_tls.log
         ;;
     5)
+        if [[ ! -f "/etc/padm/tls/acme.log" ]]; then
+            touch /etc/padm/tls/acme.log
+        fi
         tail -n 100 /etc/padm/tls/acme.log
         ;;
     6)
