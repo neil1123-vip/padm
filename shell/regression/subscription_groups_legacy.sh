@@ -10491,6 +10491,12 @@ SH
     grep -q "return 302 'https://redirect.example';" "${targetPath}"
 
     printf 'server {\nlocation / {\n}\n}\n' >"${targetPath}"
+    if addNginx302 "https://malicious.example'; add_header X-Padm injected; #" >/dev/null 2>&1; then
+        return 1
+    fi
+    ! grep -q 'X-Padm' "${targetPath}"
+
+    printf 'server {\nlocation / {\n}\n}\n' >"${targetPath}"
     (
         local errorLog="${TMP_DIR}/nginx-alone-update-commit-error.log"
         : >"${errorLog}"

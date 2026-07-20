@@ -484,6 +484,14 @@ checkWgetShowProgress() {
         fi
     fi
 }
+
+padmIsSafeNginxRedirectTarget() {
+    local redirectTarget=$1
+    [[ "${redirectTarget}" =~ ^https?://[^[:space:]]+$ ]] || return 1
+    [[ "${redirectTarget}" != *"'"* && "${redirectTarget}" != *'"'* &&
+        "${redirectTarget}" != *\\* && "${redirectTarget}" != *'$'* ]]
+}
+
 addNginx302ToFile() {
     local redirectTarget=$1
     local targetPath=$2
@@ -512,6 +520,10 @@ addNginx302ToFile() {
 # 添加 302 重定向配置
 addNginx302() {
     local redirectTarget=$1
+    if ! padmIsSafeNginxRedirectTarget "${redirectTarget}"; then
+        errorCard "Nginx 302 重定向目标不合法，仅支持不含空白、引号、反斜杠或变量的 http/https URL"
+        return 1
+    fi
     if ! updateAloneNginxConfig addNginx302ToFile "${redirectTarget}"; then
         [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || aloneNginxConfigRecoveredErrorCard
         return 1
