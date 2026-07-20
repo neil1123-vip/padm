@@ -621,8 +621,8 @@ initRealityKey() {
                 errorCard "Reality Key 生成失败"
                 return 1
             fi
-            realityPrivateKey=$(echo "${realityX25519Key}" | head -1 | awk '{print $2}')
-            realityPublicKey=$(echo "${realityX25519Key}" | tail -n 1 | awk '{print $2}')
+            realityPrivateKey=$(printf '%s\n' "${realityX25519Key}" | awk '$1 ~ /^PrivateKey:?$/ { print $2; exit }')
+            realityPublicKey=$(printf '%s\n' "${realityX25519Key}" | awk '$1 ~ /^PublicKey:?$/ { print $2; exit }')
             if [[ -z "${realityPrivateKey}" || -z "${realityPublicKey}" ]]; then
                 errorCard "Reality Key 生成结果不完整"
                 return 1
