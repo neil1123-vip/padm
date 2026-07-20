@@ -5457,7 +5457,7 @@ runAllSelectorDispatchAvoidsEntryScriptSpawnContract() (
     grep -qx 'dispatch:runtime jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile=all transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'dispatch:transaction-system jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     grep -qx 'dispatch:remote-control-smoke jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
-    grep -qx 'dispatch:remote-control-contract-server-response jobs=1 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
+    grep -qx 'dispatch:remote-control-contract-server-response jobs=4 ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile= suppress=1' "${callLog}"
     ! grep -q '^bash:' "${callLog}"
 )
 
