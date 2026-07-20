@@ -13942,6 +13942,7 @@ jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].pa
 
 runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+export REGRESSION_ECHO_LOG="${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 currentHost="tls.example.com"
 singBoxAnyTLSPort=8443
 defaultBase64Code anytls 443 tls-any-user pass-any "" ""
@@ -13965,6 +13966,7 @@ hysteria2ClientDownloadSpeed=200
 defaultBase64Code hysteria "20000-20002" tls-hysteria-hop-user pass-hysteria-hop "" ""
 grep -qxF "hysteria2://pass-hysteria-hop@tls.example.com:20000-20002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user"
 grep -qx "    ports: 20000-20002" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-hop-user"
+[[ -f "${SUBSCRIBE_CAPTURE_DIR}/screen.log" ]] || return 1
 if grep -q 'mport' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"; then
     return 1
 fi
