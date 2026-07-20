@@ -1963,7 +1963,8 @@ geo-auto-update: true
 geo-update-interval: 24
 
 external-controller-cors:
-  allow-private-network: true
+  allow-origins: []
+  allow-private-network: false
 
 global-client-fingerprint: chrome
 

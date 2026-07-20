@@ -10710,6 +10710,8 @@ runSubscribeUserOutputTransactionRegression() {
     grep -qx 'allow-lan: false' "${clashProfilePath}"
     grep -qx 'bind-address: "127.0.0.1"' "${clashProfilePath}"
     grep -qx 'external-controller: 127.0.0.1:9090' "${clashProfilePath}"
+    grep -qx '  allow-origins: \[\]' "${clashProfilePath}"
+    grep -qx '  allow-private-network: false' "${clashProfilePath}"
     grep -qx '  listen: 127.0.0.1:1053' "${clashProfilePath}"
     ! grep -qE '^(bind-address: "\*"|external-controller: 0\.0\.0\.0:|  listen: 0\.0\.0\.0:)' "${clashProfilePath}"
     eval "$(declare -f clashMetaConfig | sed '1s/^clashMetaConfig/originalClashMetaConfig/')"
