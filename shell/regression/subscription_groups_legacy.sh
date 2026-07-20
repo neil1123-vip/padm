@@ -7609,8 +7609,10 @@ SH
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
-    PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1
-    [[ "$(cat "${PADM_FAKE_NGINX_STATE_FILE}")" == "false" ]]
+    if PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(cat "${PADM_FAKE_NGINX_STATE_FILE}")" == "true" ]]
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
