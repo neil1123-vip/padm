@@ -5984,6 +5984,18 @@ runSingBoxLogMenuDisableReturnRegression() {
     )
 }
 
+runRealityStreamSplitStatusDisabledReturnRegression() {
+    (
+        set -euo pipefail
+        realityStreamSplitEnabled() { return 1; }
+        realityStreamSplitStateFile() { printf '%s\n' "${TMP_DIR}/missing-reality-stream-state"; }
+        realityStreamSplitConfFile() { printf '%s\n' "${TMP_DIR}/missing-reality-stream.conf"; }
+        realityStreamSplitNginxConf() { printf '%s\n' "${TMP_DIR}/missing-nginx.conf"; }
+
+        showRealityStreamSplitStatus
+    )
+}
+
 runRegressionPlatformUpdate() {
     runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
     runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
@@ -6197,6 +6209,7 @@ runRegressionFastOnlyCore() {
     runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression
     runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
     runRegressionStep singbox-log-menu-disable-return runSingBoxLogMenuDisableReturnRegression
+    runRegressionStep reality-stream-split-status-disabled-return runRealityStreamSplitStatusDisabledReturnRegression
     runRegressionStep services-proc-race runServicesProcRaceRegression
     runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression
     runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression

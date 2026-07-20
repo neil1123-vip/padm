@@ -2811,6 +2811,7 @@ runFastOnlyCoreChildStepsContract() {
     grep -qx 'dispatch:singbox-compat-audit' "${callLog}"
     grep -qx 'dispatch:singbox-prerelease-dry-run' "${callLog}"
     grep -qx 'dispatch:singbox-log-menu-disable-return' "${callLog}"
+    grep -qx 'dispatch:reality-stream-split-status-disabled-return' "${callLog}"
     grep -qx 'dispatch:services-proc-race' "${callLog}"
     grep -qx 'dispatch:singbox-ignore-client-proc' "${callLog}"
     grep -qx 'dispatch:nginx-blog-auto-install' "${callLog}"
@@ -2972,6 +2973,7 @@ core-rollback-selection
 singbox-compat-audit
 singbox-prerelease-dry-run
 singbox-log-menu-disable-return
+reality-stream-split-status-disabled-return
 services-proc-race
 singbox-ignore-client-proc
 nginx-blog-auto-install

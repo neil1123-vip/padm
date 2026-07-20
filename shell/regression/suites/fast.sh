@@ -30,6 +30,7 @@ listRegressionFastOnlyCoreChildSelectors() {
         singbox-compat-audit \
         singbox-prerelease-dry-run \
         singbox-log-menu-disable-return \
+        reality-stream-split-status-disabled-return \
         services-proc-race \
         singbox-ignore-client-proc \
         nginx-blog-auto-install \
@@ -187,6 +188,7 @@ registerRegressionFunctionLeaf core-rollback-selection runCoreRollbackSelectionR
 registerRegressionFunctionLeaf singbox-compat-audit runSingBoxCompatibilityAuditRegression
 registerRegressionFunctionLeaf singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
 registerRegressionFunctionLeaf singbox-log-menu-disable-return runSingBoxLogMenuDisableReturnRegression
+registerRegressionFunctionLeaf reality-stream-split-status-disabled-return runRealityStreamSplitStatusDisabledReturnRegression
 registerRegressionFunctionLeaf services-proc-race runServicesProcRaceRegression
 registerRegressionFunctionLeaf singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression
 registerRegressionFunctionLeaf nginx-blog-auto-install runNginxBlogAutoInstallRegression

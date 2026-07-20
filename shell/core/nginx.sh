@@ -442,7 +442,7 @@ showRealityStreamSplitStatus() {
         menuLine "$(uiStyle warn "当前未启用 Reality 443 共存分流")"
         [[ -f "${stateFile}" ]] && menuLine "$(uiStyle warn "检测到状态文件残留:") $(uiStyle value "${stateFile}")"
         [[ -f "${confFile}" ]] && menuLine "$(uiStyle warn "检测到 Nginx stream 配置残留:") $(uiStyle value "${confFile}")"
-        return
+        return 0
     fi
     menuLine "$(uiStyle ok "当前已启用 Reality 443 共存分流")"
     jq -r '
