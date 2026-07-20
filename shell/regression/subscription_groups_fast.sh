@@ -5967,6 +5967,23 @@ runCoreRollbackSelectionRegression() {
     )
 }
 
+runSingBoxLogMenuDisableReturnRegression() {
+    (
+        set -euo pipefail
+        local root="${TMP_DIR}/singbox-log-menu-return"
+        mkdir -p "${root}"
+        printf '%s\n' '{"log":{"disabled":false}}' >"${root}/log.json"
+        singBoxLogConfigFile() {
+            printf '%s\n' "${root}/log.json"
+        }
+        singBoxLog() {
+            [[ "$1" == "true" ]]
+        }
+
+        singBoxVersionManageMenu <<<"7"
+    )
+}
+
 runRegressionPlatformUpdate() {
     runRegressionStep update-padm-version-prompt runUpdatePadmVersionPromptRegression
     runRegressionStep update-padm-single-ref runUpdatePadmSingleRefRegression
@@ -6179,6 +6196,7 @@ runRegressionFastOnlyCore() {
     runRegressionStep core-rollback-selection runCoreRollbackSelectionRegression
     runRegressionStep singbox-compat-audit runSingBoxCompatibilityAuditRegression
     runRegressionStep singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
+    runRegressionStep singbox-log-menu-disable-return runSingBoxLogMenuDisableReturnRegression
     runRegressionStep services-proc-race runServicesProcRaceRegression
     runRegressionStep singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression
     runRegressionStep nginx-blog-auto-install runNginxBlogAutoInstallRegression

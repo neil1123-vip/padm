@@ -2856,7 +2856,9 @@ singBoxVersionManageMenu() {
     6) showSingBoxCompatibilityAudit ;;
     7)
         singBoxLog ${logStatus}
-        [[ "${logStatus}" == "false" ]] && tail -f /etc/padm/sing-box/conf/box.log
+        if [[ "${logStatus}" == "false" ]]; then
+            tail -f /etc/padm/sing-box/conf/box.log
+        fi
         ;;
     8)
         mkdir -p /etc/padm/sing-box/conf

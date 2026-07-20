@@ -29,6 +29,7 @@ listRegressionFastOnlyCoreChildSelectors() {
         core-rollback-selection \
         singbox-compat-audit \
         singbox-prerelease-dry-run \
+        singbox-log-menu-disable-return \
         services-proc-race \
         singbox-ignore-client-proc \
         nginx-blog-auto-install \
@@ -185,6 +186,7 @@ registerRegressionFunctionLeaf core-release-tags-pagination runCoreReleaseTagsPa
 registerRegressionFunctionLeaf core-rollback-selection runCoreRollbackSelectionRegression
 registerRegressionFunctionLeaf singbox-compat-audit runSingBoxCompatibilityAuditRegression
 registerRegressionFunctionLeaf singbox-prerelease-dry-run runSingBoxPrereleaseDryRunRegression
+registerRegressionFunctionLeaf singbox-log-menu-disable-return runSingBoxLogMenuDisableReturnRegression
 registerRegressionFunctionLeaf services-proc-race runServicesProcRaceRegression
 registerRegressionFunctionLeaf singbox-ignore-client-proc runSingBoxRunningIgnoresClientProcessRegression
 registerRegressionFunctionLeaf nginx-blog-auto-install runNginxBlogAutoInstallRegression
