@@ -12697,6 +12697,21 @@ EOF
     ! compgen -G "${root}/config/.reality_key.reality.*" >/dev/null
     ! grep -qF 'statusCard "Reality Key" "privateKey:${realityPrivateKey}"' "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
 
+    lastInstallationConfig=true
+    currentRealityPrivateKey=private-reused
+    currentRealityPublicKey=public-reused
+    realityPrivateKey=
+    realityPublicKey=
+    initRealityKey >/dev/null
+    [[ "${realityPrivateKey}" == "private-reused" ]]
+    [[ "${realityPublicKey}" == "public-reused" ]]
+    [[ "$(<"${keyFile}")" == "publicKey:public-reused" ]]
+
+    lastInstallationConfig=
+    currentRealityPrivateKey=
+    currentRealityPublicKey=
+    printf 'publicKey:public-generated\n' >"${keyFile}"
+
     cat >"${singBoxBinary}" <<'EOF'
 #!/usr/bin/env bash
 exit 23

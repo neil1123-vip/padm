@@ -627,11 +627,6 @@ initRealityKey() {
                 errorCard "Reality Key 生成结果不完整"
                 return 1
             fi
-            local realityKeyPath realityKeyStage
-            realityKeyPath=$(realityKeyFile) || return 1
-            padmCreateTempFileForTarget realityKeyStage "${realityKeyPath}" reality || return 1
-            printf 'publicKey:%s\n' "${realityPublicKey}" >"${realityKeyStage}" || { padmRemoveCleanupPath "${realityKeyStage}"; return 1; }
-            commitGeneratedFile "${realityKeyStage}" "${realityKeyPath}" 600 || { padmRemoveCleanupPath "${realityKeyStage}"; return 1; }
         else
             autoRead reality_private_key "请输入Private Key[回车自动生成]:" historyPrivateKey
             if [[ -n "${historyPrivateKey}" ]]; then
@@ -647,6 +642,13 @@ initRealityKey() {
             fi
             statusCard "Reality Key" "publicKey:${realityPublicKey}"
         fi
+    fi
+    if [[ "${selectCoreType}" == "2" || "${coreInstallType}" == "2" ]]; then
+        local realityKeyPath realityKeyStage
+        realityKeyPath=$(realityKeyFile) || return 1
+        padmCreateTempFileForTarget realityKeyStage "${realityKeyPath}" reality || return 1
+        printf 'publicKey:%s\n' "${realityPublicKey}" >"${realityKeyStage}" || { padmRemoveCleanupPath "${realityKeyStage}"; return 1; }
+        commitGeneratedFile "${realityKeyStage}" "${realityKeyPath}" 600 || { padmRemoveCleanupPath "${realityKeyStage}"; return 1; }
     fi
     [[ -n "${realityPrivateKey}" && -n "${realityPublicKey}" ]]
 }
