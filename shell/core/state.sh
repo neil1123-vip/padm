@@ -844,6 +844,8 @@ readConfigHostPathUUID() {
         fi
     fi
 
+    [[ "${currentUUID}" != "null" ]] || currentUUID=
+
     # 读取path
     if [[ -n "${configPath}" && -n "${frontingType}" ]]; then
         if [[ "${coreInstallType}" == "1" ]]; then

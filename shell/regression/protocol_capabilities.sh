@@ -390,6 +390,7 @@ JSON
     AUTO_ENTRY_HOST=45.221.113.40
     readConfigHostPathUUID
     assertEquals 45.221.113.40 "${currentHost}" "singbox-plain-current-host"
+    assertEquals '' "${currentUUID}" "singbox-plain-current-uuid"
 
     coreInstallType="${oldCoreInstallType}"
     configPath="${oldConfigPath}"
