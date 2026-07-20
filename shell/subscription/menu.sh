@@ -632,6 +632,7 @@ createAndSyncUserSubscriptionWizard() {
 
 selectUserSubscriptionId() {
     local id=
+    selectedUserSubscriptionId=
     ensureSubscriptionGroupsState
     if ! subscriptionActiveGroupRead -e 'any(.user_groups[]?; true)' >/dev/null 2>&1; then
         statusCard "用户订阅" "暂无用户订阅" "先到 发布订阅 -> 新建并发布订阅 创建一个"
@@ -643,7 +644,7 @@ selectUserSubscriptionId() {
         errorCard "用户订阅 ID 无效，请按上面的列表重新输入"
         return 1
     fi
-    echo "${id}"
+    selectedUserSubscriptionId=${id}
 }
 
 showUserSubscriptionLinks() {
@@ -748,7 +749,8 @@ removeUserSubscriptionMenu() {
 
 manageUserSubscriptionItem() {
     local userSubscriptionId
-    userSubscriptionId=$(selectUserSubscriptionId) || return
+    selectUserSubscriptionId || return
+    userSubscriptionId=${selectedUserSubscriptionId}
     while true; do
         echoContent title "\n┌─ 处理已有订阅 ─────────────────────────────────────"
         menuLine "当前订阅：${userSubscriptionId}"

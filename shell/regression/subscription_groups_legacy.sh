@@ -11726,7 +11726,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
         [[ "${mode}" != "sync-fail" ]]
     }
     selectUserSubscriptionId() {
-        printf 'team-a\n'
+        selectedUserSubscriptionId=team-a
     }
     showUserSubscriptions() { return 0; }
     showUserSubscriptionTraffic() { return 0; }
