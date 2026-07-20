@@ -13678,7 +13678,7 @@ defaultBase64Code vlessRealityGRPC 8443 user-a-grpc uuid-a "" ""
 expectedGrpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "node.example.com" "8443" "www.microsoft.com" "pubkey" "pqv" "user-a-grpc")
 assertCapturedSubscribeOutputs "user-a-grpc" "${expectedGrpcLink}" "node.example.com" "www.microsoft.com" "grpc" "vless"
 jq -e '.[0].transport.service_name == "grpc" and .[0].tls.reality.short_id == "6ba85179e30d4fc2"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-grpc" >/dev/null
-grep -q 'pqv%3Dpqv' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+grep -q 'pqv=pqv' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 local oldConfigPath="${configPath:-}"
@@ -13699,7 +13699,7 @@ grep -qx "      path: /custom-xhttp" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-
 grep -qx "      host: front.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q 'flow: xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
-! grep -q '%26flow%3Dxtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+! grep -q '&flow=xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 configPath="${oldConfigPath}"
 }
 
