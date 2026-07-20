@@ -1131,6 +1131,12 @@ runClientNameSuffixPreservesRandomPrefixRegression() {
         jq -e '.[0].email == "padm-abcdef12-VLESS_TCP/TLS_Vision"' <<<"${xrayUsers}" >/dev/null
         jq -e '.[0].name == "padm-abcdef12-VLESS_Reality_Vision"' <<<"${singboxUsers}" >/dev/null
 
+        currentClients='[{"password":"trojan-secret","email":"padm-abcdef12-Trojan_gRPC"}]'
+        xrayUsers=$(initXrayClients 25)
+        jq -e '.[0].password == "trojan-secret" and .[0].email == "padm-abcdef12-Trojan_gRPC"' <<<"${xrayUsers}" >/dev/null
+        xrayUsers=$(initXrayClients 29)
+        jq -e '.[0].password == "trojan-secret" and .[0].email == "padm-abcdef12-trojan_tcp"' <<<"${xrayUsers}" >/dev/null
+
         currentClients='{}'
         if initXrayClients 1 >/dev/null 2>&1 || initSingBoxClients 1 >/dev/null 2>&1; then
             return 1

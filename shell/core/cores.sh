@@ -2104,7 +2104,7 @@ initXrayClients() {
     clientRows=$(jq -c '.[]' <<<"${currentClients}") || return 1
     while IFS= read -r user; do
         [[ -n "${user}" ]] || continue
-        uuid=$(jq -r '.id // .uuid // empty' <<<"${user}") || return 1
+        uuid=$(jq -r '.id // .uuid // .password // empty' <<<"${user}") || return 1
         email=$(jq -r '.email // .name // .username // empty' <<<"${user}") || return 1
         [[ -n "${uuid}" && -n "${email}" ]] || return 1
         email=$(stripClientNameSuffix "${email}") || return 1
