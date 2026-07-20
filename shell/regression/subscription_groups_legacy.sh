@@ -700,7 +700,7 @@ JSON
         return 1
     fi
     cat >"${configPath}09_routing.json" <<'JSON'
-{"routing":{"rules":[{"outboundTag":"blackhole_out","domain":["geosite:cn","domain:custom.example"]},{"outboundTag":"blackhole_ip_out","ip":["geoip:cn","203.0.113.0/24"]},{"outboundTag":"keep_out","domain":["domain:keep.example"]}]}}
+{"routing":{"rules":[{"outboundTag":"blackhole_out","domain":["geosite:cn","domain:custom.example"]},{"outboundTag":"blackhole_out","domain":["geosite:cn"]},{"outboundTag":"blackhole_ip_out","ip":["geoip:cn","203.0.113.0/24"]},{"outboundTag":"blackhole_ip_out","ip":["geoip:cn"]},{"outboundTag":"keep_out","domain":["domain:keep.example"]}]}}
 JSON
     removeXrayRegionalRules
     jq -e '
