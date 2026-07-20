@@ -286,11 +286,13 @@ runRemoteControlInlineRequestHelpersRegression() (
     curl() {
         local expectHeader=false
         local arg
-        local stdinPayload
-        stdinPayload=$(cat)
-        printf '%s\n' "${stdinPayload}" >>"${curlPayloadLog}"
+        local stdinPayload=
         printf '%s\n' "$*" >>"${curlArgsLog}"
         for arg in "$@"; do
+            if [[ "${arg}" == "@-" ]]; then
+                stdinPayload=$(cat)
+                printf '%s\n' "${stdinPayload}" >>"${curlPayloadLog}"
+            fi
             if [[ "${expectHeader}" == "true" ]]; then
                 if [[ "${arg}" == @* ]]; then
                     local headerFile="${arg#@}"
