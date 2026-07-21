@@ -6030,7 +6030,7 @@ runRegressionPlatformRefresh() {
     runRegressionStep install-refresh-single-archive-guard runInstallRefreshSingleArchiveGuardRegression
 }
 
-runRegressionPlatformRest() {
+runRegressionPlatformRestFoundation() {
     runRegressionStep release-workflow-version runReleaseWorkflowVersionRegression
     runRegressionStep version-helpers runVersionHelpersRegression
     runRegressionStep regression-bootstrap-local-env-fallback runRegressionBootstrapLocalEnvFallbackRegression
@@ -6059,6 +6059,9 @@ runRegressionPlatformRest() {
     runRegressionStep legacy-users-module-removed runLegacyUsersModuleRemovedRegression
     runRegressionStep install-entry-refresh runInstallEnsureModulesRegression
     runRegressionStep install-module-paths runInstallModulePathsRegression
+}
+
+runRegressionPlatformRestInstall() {
     runRegressionStep install-module-manifest-complete runInstallModuleManifestCompleteRegression
     runRegressionStep install-module-manifest-requires-sha256 runInstallModuleManifestRequiresSha256Regression
     runRegressionStep subscribe-nginx-location-pattern runSubscribeNginxLocationPatternRegression
@@ -6073,12 +6076,22 @@ runRegressionPlatformRest() {
     runRegressionStep alias-install-rejects-unsafe-home runAliasInstallRejectsUnsafeHomeFallbackRegression
     runRegressionStep xray-stats-jq runXrayTrafficStatsJqCompatibilityRegression
     runRegressionStep local-traffic-accounts runLocalTrafficAccountsBatchRegression
+}
+
+runRegressionPlatformRestSystem() {
     runRegressionStep dpkg-installed-pattern runDpkgInstalledPatternRegression
     runRegressionStep dpkg-query-installed-pattern runDpkgQueryInstalledPatternRegression
     runRegressionStep rhel-like-detection runRhelLikeDetectionRegression
     runRegressionStep fedora-detection runFedoraDetectionRegression
     runRegressionStep port-hopping-without-persistent runPortHoppingWithoutPersistentRegression
     runRegressionStep port-hopping-menu-command-lookup runPortHoppingMenuUsesCommandLookupRegression
+}
+
+runRegressionPlatformRest() {
+    runParallelFastTotals "${TMP_DIR}/platform-rest-parallel-${BASHPID:-$$}" \
+        foundation runRegressionPlatformRestFoundation \
+        install runRegressionPlatformRestInstall \
+        system runRegressionPlatformRestSystem
 }
 
 runRegressionPlatform() {

@@ -2632,7 +2632,15 @@ runPlatformUpdateChildStepsContract() {
 
 runPlatformRestChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
-    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRest \
+    local platformRestBody
+
+    platformRestBody=$(sed -n '/^runRegressionPlatformRest() {$/,/^}$/p' "${scriptFile}")
+    grep -q 'runParallelFastTotals "${TMP_DIR}/platform-rest-parallel-${BASHPID:-$$}"' <<<"${platformRestBody}" || return 1
+    grep -q 'foundation runRegressionPlatformRestFoundation' <<<"${platformRestBody}" || return 1
+    grep -q 'install runRegressionPlatformRestInstall' <<<"${platformRestBody}" || return 1
+    grep -q 'system runRegressionPlatformRestSystem' <<<"${platformRestBody}" || return 1
+
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRestFoundation \
         release-workflow-version \
         version-helpers \
         regression-bootstrap-local-env-fallback \
@@ -2660,7 +2668,9 @@ runPlatformRestChildStepsContract() {
         unused-helper-function-count \
         legacy-users-module-removed \
         install-entry-refresh \
-        install-module-paths \
+        install-module-paths || return 1
+
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRestInstall \
         install-module-manifest-complete \
         install-module-manifest-requires-sha256 \
         subscribe-nginx-location-pattern \
@@ -2674,7 +2684,9 @@ runPlatformRestChildStepsContract() {
         alias-install-rejects-unsafe-target \
         alias-install-rejects-unsafe-home \
         xray-stats-jq \
-        local-traffic-accounts \
+        local-traffic-accounts || return 1
+
+    runRegressionStepSequenceAssertions "${scriptFile}" runRegressionPlatformRestSystem \
         dpkg-installed-pattern \
         dpkg-query-installed-pattern \
         rhel-like-detection \
@@ -3129,6 +3141,7 @@ runFastRealityUsesRealityCompatHelperContract() (
     local callLog="${TMP_DIR}/fast-reality-compat-helper.log"
 
     : >"${callLog}"
+    PADM_REGRESSION_SELECTOR_RUNNER["fast"]=:
 
     runRegressionRealityLegacyLeafWithCompat() {
         printf 'compat:%s\n' "$1" >>"${callLog}"
