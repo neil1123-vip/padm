@@ -17686,10 +17686,28 @@ runBasePackageBatchRegression() {
         fi
         builtin command "$@"
     }
-    release=debian
+    (
+        local capturedTimeout=
+        grep() {
+            case "$*" in
+            *centos*) return 1 ;;
+            *debian*) return 0 ;;
+            *) return 1 ;;
+            esac
+        }
+        initVar
+        checkSystem
+        [[ "${installType}" == *"--no-install-recommends"* ]]
+        PADM_INSTALL_LOG="${TMP_DIR}/base-package-install.log"
+        packageInstalled() { return 1; }
+        runPackageCommandWithProgress() {
+            capturedTimeout=$2
+            return 0
+        }
+        installPackageTracked "测试" padm-missing-package
+        [[ "${capturedTimeout}" == "900" ]]
+    )
     initVar
-    checkSystem
-    [[ "${installType}" == *"--no-install-recommends"* ]]
     packageManager=yum
     release=centos
     centosVersion=10
@@ -17698,11 +17716,6 @@ runBasePackageBatchRegression() {
     protocolSelectionSkipsNginx() { return 1; }
     local capturedDisplay=
     local capturedPackages=
-    local capturedTimeout=
-    runPackageCommandWithProgress() {
-        capturedTimeout=$2
-        return 0
-    }
     installPackageTracked() {
         capturedDisplay=$1
         shift
@@ -17718,8 +17731,6 @@ runBasePackageBatchRegression() {
     [[ "${capturedPackages}" == *"iptables"* ]]
     [[ "${capturedPackages}" != *"iptables-legacy"* ]]
     [[ "${capturedPackages}" == *"iputils"* ]]
-    installPackageTracked "测试" padm-missing-package
-    [[ "${capturedTimeout}" == "900" ]]
     PADM_INSTALL_STEP_TOTAL=1
     PADM_INSTALL_STEP_INDEX=2
     nextInstallProgressTitle "安装nginx"
@@ -17937,7 +17948,7 @@ runRealityScannerRejectsUnsafeDirRegression() (
     : >"${rmLog}"
 
     cd "${root}"
-    realityScannerDir() { printf '%s\n' "relative-scanner"; }
+    realityTargetTmpPath() { printf '%s\n' "relative-scanner"; }
     rm() {
         printf 'rm:%s\n' "$*" >>"${rmLog}"
         command rm "$@"
