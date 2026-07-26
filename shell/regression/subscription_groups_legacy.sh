@@ -16876,7 +16876,8 @@ runInstallToolsAcmeResultFailureRegression() {
         [[ -s "${acmeRunCommandLog}" ]]
         grep -q -- '--install' "${acmeRunCommandLog}"
         ! grep -qF "${tmpRoot}/padm-tls/acme.sh" "${acmeRunCommandLog}"
-        grep -Eq "${tmpRoot}/padm-tls\\.[^/]+/acme\\.sh" "${acmeRunCommandLog}"
+        grep -Eq "cd \\\"${tmpRoot}/padm-tls\\.[^/]+\\\"" "${acmeRunCommandLog}"
+        grep -qF '&& sh ./acme.sh --install' "${acmeRunCommandLog}"
         [[ ! -d "${tmpRoot}/padm-tls" ]]
         [[ ! -e "${fakeHome}/.acme.sh/acme.sh" ]]
         [[ "$(<"${fakeHome}/.acme.sh/account.conf")" == "legacy-state" ]]
@@ -17390,6 +17391,7 @@ runAptKeyInstallFailureRegression() {
         export REGRESSION_ERROR_CARD_LOG="${errorLog}"
         : >"${errorLog}"
         : >"${curlCalls}"
+        release=debian
         removeType=true
         PADM_INSTALLED_PACKAGES="new-dependency"
         curl() {
@@ -17738,9 +17740,9 @@ runPackageRollbackFailureRegression() {
         local oldRemoveType="${removeType:-}"
         local rc
 
-        removePackageForRegression() {
-            printf '%s\n' "$1" >>"${removedFile}"
-            [[ "$1" != "bad-package" ]]
+        runWithTimeout() {
+            printf '%s\n' "$2" >>"${removedFile}"
+            [[ "$2" != *"bad-package" ]]
         }
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         coreSetManualCheckMessage() {
@@ -17748,15 +17750,15 @@ runPackageRollbackFailureRegression() {
             printf -v "$1" "%s，请手动检查%s" "$2" "$3"
         }
 
-        removeType=removePackageForRegression
+        removeType='DEBIAN_FRONTEND=noninteractive apt-get -y autoremove'
         PADM_INSTALLED_PACKAGES="ok-package bad-package"
         : >"${errorLog}"
         : >"${helperLog}"
         if rollbackPackageInstallTransaction; then
             return 1
         fi
-        grep -qxF "ok-package" "${removedFile}"
-        grep -qxF "bad-package" "${removedFile}"
+        grep -qxF "${removeType} ok-package" "${removedFile}"
+        grep -qxF "${removeType} bad-package" "${removedFile}"
         [[ "${PADM_INSTALLED_PACKAGES}" == "" ]]
         [[ "${PADM_PACKAGE_ROLLBACK_FAILURES}" == "bad-package" ]]
 
@@ -17824,7 +17826,7 @@ runPackageRollbackFailureRegression() {
             unset PADM_PACKAGE_MANAGED_ROLLBACK_FAILURES
         fi
         removeType="${oldRemoveType}"
-        unset -f removePackageForRegression
+        unset -f runWithTimeout
         unset -f adapterRollbackPackageManagedFiles
         unset -f errorCard
         unset -f coreSetManualCheckMessage

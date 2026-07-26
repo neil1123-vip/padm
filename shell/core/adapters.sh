@@ -407,7 +407,7 @@ rollbackPackageInstallTransaction() {
     fi
 
     for packageName in ${PADM_INSTALLED_PACKAGES}; do
-        if ! ${removeType} "${packageName}" >/dev/null 2>&1; then
+        if ! runWithTimeout 300 "${removeType} ${packageName}" >/dev/null 2>&1; then
             failedPackages+=("${packageName}")
             rc=1
         fi
@@ -793,7 +793,7 @@ installTools() {
             if [[ ${nginxVersion} -lt 14 ]]; then
                 autoRead nginx_grpc_reinstall "读取到当前的Nginx版本不支持gRPC，会导致安装失败，是否卸载Nginx后重新安装？[y/n]:" unInstallNginxStatus
                 if [[ "${unInstallNginxStatus}" == "y" ]]; then
-                    if ! ${removeType} nginx >/dev/null 2>&1; then
+                    if ! runWithTimeout 300 "${removeType} nginx" >/dev/null 2>&1; then
                         failPackageInstallTransaction "旧版Nginx卸载失败"
                     fi
                     statusCard "Nginx 状态" "nginx 卸载完成"
@@ -837,7 +837,7 @@ installTools() {
                 padmRemoveCleanupPath "${acmeTmpDir}"
                 failPackageInstallTransaction "acme安装脚本下载失败"
             fi
-            runWithTimeout 600 "sh \"${acmeInstallScript}\" --install >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
+            runWithTimeout 600 "cd \"${acmeTmpDir}\" && sh ./acme.sh --install >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
 
             if [[ ! -d "$HOME/.acme.sh" ]] || [[ -z $(find "$HOME/.acme.sh/acme.sh") ]]; then
                 padmRemoveCleanupPath "${acmeTmpDir}"
