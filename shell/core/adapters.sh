@@ -728,6 +728,14 @@ installBasePackages() {
     installPackageTracked "${displayName}" "${packages[@]}"
 }
 
+acmeInstallIsComplete() {
+    local acmeDir
+    acmeDir=$(acmeSafeHomeDir) || return 1
+    [[ -f "${acmeDir}/acme.sh" &&
+        -f "${acmeDir}/dnsapi/dns_cf.sh" &&
+        -f "${acmeDir}/dnsapi/dns_ali.sh" ]]
+}
+
 # 安装工具包
 installTools() {
     progressCard "$1" "安装工具"
@@ -809,37 +817,47 @@ installTools() {
     if ! protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
         successCard "检测到无需依赖本机 TLS 证书的服务，跳过安装 acme.sh"
     else
-        if [[ ! -d "$HOME/.acme.sh" ]] || [[ -d "$HOME/.acme.sh" && -z $(find "$HOME/.acme.sh/acme.sh") ]]; then
+        if ! acmeInstallIsComplete; then
             successCard "安装acme.sh"
-            local acmeInstallScript
-            local acmeDownloadScript
+            local acmeArchive
+            local acmeDownloadArchive
             local acmeHomeDirPath
             local acmeBackupDir
             local acmeTmpDir
+            local acmeSourceDir
             local acmeScriptRef
-            local acmeScriptUrl
+            local acmeArchiveUrl
             acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
             adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
             adapterRegisterPackageManagedRollback "${acmeBackupDir}"
             padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
-            acmeInstallScript="${acmeTmpDir}/acme.sh"
-            padmCreateTempPath acmeDownloadScript "${acmeTmpDir}/acme.sh.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本临时文件创建失败"; }
+            acmeArchive="${acmeTmpDir}/acme.tar.gz"
+            padmCreateTempPath acmeDownloadArchive "${acmeTmpDir}/acme.tar.gz.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装包临时文件创建失败"; }
             acmeScriptRef=$(resolveGitHubCommitRef acmesh-official/acme.sh master) || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本最新提交解析失败"; }
-            acmeScriptUrl="https://raw.githubusercontent.com/acmesh-official/acme.sh/${acmeScriptRef}/acme.sh"
-            if downloadUrlToFileBounded "${acmeScriptUrl}" "${acmeDownloadScript}" 1048576 120 &&
-                [[ -s "${acmeDownloadScript}" ]] && grep -q '^#!/usr/bin/env sh' "${acmeDownloadScript}" && sh -n "${acmeDownloadScript}"; then
-                if ! mv "${acmeDownloadScript}" "${acmeInstallScript}"; then
+            acmeArchiveUrl="https://github.com/acmesh-official/acme.sh/archive/${acmeScriptRef}.tar.gz"
+            if downloadUrlToFileBounded "${acmeArchiveUrl}" "${acmeDownloadArchive}" 5242880 120 &&
+                [[ -s "${acmeDownloadArchive}" ]] && validateCoreTarArchive "${acmeDownloadArchive}"; then
+                if ! mv "${acmeDownloadArchive}" "${acmeArchive}"; then
                     padmRemoveCleanupPath "${acmeTmpDir}"
-                    failPackageInstallTransaction "acme安装脚本提交失败"
+                    failPackageInstallTransaction "acme安装包提交失败"
                 fi
-                padmForgetCleanupPath "${acmeDownloadScript}"
+                padmForgetCleanupPath "${acmeDownloadArchive}"
             else
                 padmRemoveCleanupPath "${acmeTmpDir}"
-                failPackageInstallTransaction "acme安装脚本下载失败"
+                failPackageInstallTransaction "acme安装包下载或校验失败"
             fi
-            runWithTimeout 600 "cd \"${acmeTmpDir}\" && sh ./acme.sh --install >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
+            acmeSourceDir="${acmeTmpDir}/acme.sh-${acmeScriptRef}"
+            if ! tar -xzf "${acmeArchive}" -C "${acmeTmpDir}" >/dev/null 2>&1 ||
+                ! coreExtractedFileIsRegular "${acmeSourceDir}/acme.sh" ||
+                ! coreExtractedFileIsRegular "${acmeSourceDir}/dnsapi/dns_cf.sh" ||
+                ! coreExtractedFileIsRegular "${acmeSourceDir}/dnsapi/dns_ali.sh" ||
+                ! grep -q '^#!/usr/bin/env sh' "${acmeSourceDir}/acme.sh" || ! sh -n "${acmeSourceDir}/acme.sh"; then
+                padmRemoveCleanupPath "${acmeTmpDir}"
+                failPackageInstallTransaction "acme安装包解压或校验失败"
+            fi
+            runWithTimeout 600 "cd \"${acmeSourceDir}\" && sh ./acme.sh --install >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
 
-            if [[ ! -d "$HOME/.acme.sh" ]] || [[ -z $(find "$HOME/.acme.sh/acme.sh") ]]; then
+            if ! acmeInstallIsComplete; then
                 padmRemoveCleanupPath "${acmeTmpDir}"
                 echoContent title "\n┌─ acme.sh 安装失败 ─────────────────────────────────"
                 menuLine "安装日志：/etc/padm/tls/acme.log"

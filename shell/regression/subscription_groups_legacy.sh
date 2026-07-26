@@ -16712,6 +16712,22 @@ runMenuSmokeFullCoreMaintenanceRegression() {
     runMenuSmokeRegression core-maintenance
 }
 
+writeInstallToolsAcmeFixture() {
+    local acmeDir=$1
+    mkdir -p "${acmeDir}/dnsapi"
+    printf '#!/usr/bin/env sh\nexit 0\n' >"${acmeDir}/acme.sh"
+    printf '#!/usr/bin/env sh\n' >"${acmeDir}/dnsapi/dns_cf.sh"
+    printf '#!/usr/bin/env sh\n' >"${acmeDir}/dnsapi/dns_ali.sh"
+}
+
+writeInstallToolsAcmeArchiveFixture() {
+    local archiveFile=$1
+    local commitRef=$2
+    local archiveRoot="${archiveFile}.source"
+    writeInstallToolsAcmeFixture "${archiveRoot}/acme.sh-${commitRef}"
+    tar -czf "${archiveFile}" -C "${archiveRoot}" "acme.sh-${commitRef}"
+}
+
 runInstallToolsCertificateDependencyRegression() {
     local oldHome="${HOME}"
     local oldSelect="${selectCustomInstallType:-}"
@@ -16722,8 +16738,7 @@ runInstallToolsCertificateDependencyRegression() {
     local oldSuccessLog="${REGRESSION_SUCCESS_CARD_LOG:-}"
     local oldInstallLog="${PADM_INSTALL_LOG:-}"
     local nginxCommandLog="${TMP_DIR}/install-tools-nginx-command.log"
-    mkdir -p "${fakeHome}/.acme.sh"
-    printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
+    writeInstallToolsAcmeFixture "${fakeHome}/.acme.sh"
     HOME="${fakeHome}"
     export REGRESSION_STATUS_CARD_LOG="${statusLog}"
     export REGRESSION_SUCCESS_CARD_LOG="${statusLog}"
@@ -16861,7 +16876,7 @@ runInstallToolsAcmeResultFailureRegression() {
                 esac
             done
             [[ -n "${outputFile}" ]] || return 1
-            printf '#!/usr/bin/env sh\nexit 0\n' >"${outputFile}"
+            writeInstallToolsAcmeArchiveFixture "${outputFile}" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         }
         tail() { return 0; }
 
@@ -16876,7 +16891,7 @@ runInstallToolsAcmeResultFailureRegression() {
         [[ -s "${acmeRunCommandLog}" ]]
         grep -q -- '--install' "${acmeRunCommandLog}"
         ! grep -qF "${tmpRoot}/padm-tls/acme.sh" "${acmeRunCommandLog}"
-        grep -Eq "cd \\\"${tmpRoot}/padm-tls\\.[^/]+\\\"" "${acmeRunCommandLog}"
+        grep -Eq "cd \\\"${tmpRoot}/padm-tls\\.[^/]+/acme\\.sh-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\\"" "${acmeRunCommandLog}"
         grep -qF '&& sh ./acme.sh --install' "${acmeRunCommandLog}"
         [[ ! -d "${tmpRoot}/padm-tls" ]]
         [[ ! -e "${fakeHome}/.acme.sh/acme.sh" ]]
@@ -16968,7 +16983,7 @@ runInstallToolsAcmeCommitFailureRegression() {
                 esac
             done
             [[ -n "${outputFile}" ]] || return 1
-            printf '#!/usr/bin/env sh\nexit 0\n' >"${outputFile}"
+            writeInstallToolsAcmeArchiveFixture "${outputFile}" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         }
         mv() { return 1; }
 
@@ -16979,10 +16994,10 @@ runInstallToolsAcmeCommitFailureRegression() {
         installStatus=$?
         set -e
         [[ "${installStatus}" -ne 0 ]]
-        grep -q "acme安装脚本提交失败" "${errorLog}"
+        grep -q "acme安装包提交失败" "${errorLog}"
         [[ ! -e "${runMarker}" ]]
         [[ ! -d "${tmpRoot}/padm-tls" ]]
-        if regressionFindHasMatches "${tmpRoot}" -type f -name 'acme.sh.download.*'; then
+        if regressionFindHasMatches "${tmpRoot}" -type f -name 'acme.tar.gz.download.*'; then
             return 1
         fi
 
@@ -17015,7 +17030,8 @@ runInstallToolsAcmeDownloadBoundsRegression() {
 
         rm -rf "${fakeHome}" "${tmpRoot}"
         rm -f "${curlLog}"
-        mkdir -p "${fakeHome}" "${tmpRoot}"
+        mkdir -p "${fakeHome}/.acme.sh" "${tmpRoot}"
+        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
         HOME="${fakeHome}"
         TMPDIR="${tmpRoot}"
         release=debian
@@ -17035,8 +17051,7 @@ runInstallToolsAcmeDownloadBoundsRegression() {
         }
         runWithTimeout() {
             if [[ "${2:-}" == *"acme.sh"* ]]; then
-                mkdir -p "${fakeHome}/.acme.sh"
-                printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
+                writeInstallToolsAcmeFixture "${fakeHome}/.acme.sh"
             fi
             return 0
         }
@@ -17058,14 +17073,16 @@ runInstallToolsAcmeDownloadBoundsRegression() {
                 esac
             done
             [[ -n "${outputFile}" ]] || return 1
-            printf '#!/usr/bin/env sh\nexit 0\n' >"${outputFile}"
+            writeInstallToolsAcmeArchiveFixture "${outputFile}" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         }
 
         installTools 1 >/dev/null 2>&1
         grep -q -- '--connect-timeout 10' "${curlLog}"
         grep -q -- '--max-time 120' "${curlLog}"
-        grep -q -- '--max-filesize 1048576' "${curlLog}"
-        grep -q 'raw.githubusercontent.com/acmesh-official/acme.sh/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/acme.sh' "${curlLog}"
+        grep -q -- '--max-filesize 5242880' "${curlLog}"
+        grep -q 'github.com/acmesh-official/acme.sh/archive/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.tar.gz' "${curlLog}"
+        [[ -f "${fakeHome}/.acme.sh/dnsapi/dns_cf.sh" ]]
+        [[ -f "${fakeHome}/.acme.sh/dnsapi/dns_ali.sh" ]]
 
         if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
         if [[ -n "${oldInstallLog}" ]]; then PADM_INSTALL_LOG="${oldInstallLog}"; else unset PADM_INSTALL_LOG; fi
