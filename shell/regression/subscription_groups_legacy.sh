@@ -5367,6 +5367,22 @@ runNetworkCheckReturnFailureRegression() (
     unset -f curl
     getPublicIP() { printf '203.0.113.10\n'; }
 
+    (
+        command() {
+            if [[ "$1" == "-v" && "$2" == "dig" ]]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        dig() { : >"${root}/unexpected-dig-call"; return 127; }
+        getent() {
+            [[ "$1" == "ahostsv4" && "$2" == "entry.example.com" ]] || return 1
+            printf '203.0.113.10 STREAM entry.example.com\n'
+        }
+        checkDNSIP entry.example.com >/dev/null
+    )
+    [[ ! -e "${root}/unexpected-dig-call" ]]
+
     set +e
     (
         set +e
