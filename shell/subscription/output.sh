@@ -60,6 +60,14 @@ appendClashMetaSubscribeLines() {
     commitGeneratedFile "${tmpPath}" "${targetPath}" 600 || { padmRemoveCleanupPath "${tmpPath}"; return 1; }
 }
 
+formatUriAuthorityHost() {
+    if [[ "$1" == *:* ]]; then
+        printf '[%s]' "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+
 serializeVlessRealityVisionLink() {
     local id=$1
     local entryHost=$2
@@ -69,7 +77,7 @@ serializeVlessRealityVisionLink() {
     local pqv=$6
     local email=$7
     local encryption=${8:-none}
-    printf 'vless://%s@%s:%s?encryption=%s&security=reality&pqv=%s&type=tcp&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#%s' "${id}" "${entryHost}" "${port}" "${encryption}" "${pqv}" "${sni}" "${publicKey}" "${email}"
+    printf 'vless://%s@%s:%s?encryption=%s&security=reality&pqv=%s&type=tcp&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#%s' "${id}" "$(formatUriAuthorityHost "${entryHost}")" "${port}" "${encryption}" "${pqv}" "${sni}" "${publicKey}" "${email}"
 }
 
 serializeVlessRealityGrpcLink() {
@@ -80,7 +88,7 @@ serializeVlessRealityGrpcLink() {
     local publicKey=$5
     local pqv=$6
     local email=$7
-    printf 'vless://%s@%s:%s?encryption=none&security=reality&pqv=%s&type=grpc&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#%s' "${id}" "${entryHost}" "${port}" "${pqv}" "${sni}" "${publicKey}" "${email}"
+    printf 'vless://%s@%s:%s?encryption=none&security=reality&pqv=%s&type=grpc&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#%s' "${id}" "$(formatUriAuthorityHost "${entryHost}")" "${port}" "${pqv}" "${sni}" "${publicKey}" "${email}"
 }
 
 xrayRealityXHTTPSetting() {
@@ -107,7 +115,7 @@ serializeVlessRealityXHTTPLink() {
     local mode=${10:-}
     local modeParam=
     [[ -n "${mode}" ]] && modeParam="&mode=${mode}"
-    printf 'vless://%s@%s:%s?encryption=%s&security=reality&type=xhttp&sni=%s&host=%s&fp=chrome&path=%s%s&pbk=%s&sid=6ba85179e30d4fc2#%s' "${id}" "${add}" "${port}" "${encryption}" "${sni}" "${host}" "${path}" "${modeParam}" "${publicKey}" "${email}"
+    printf 'vless://%s@%s:%s?encryption=%s&security=reality&type=xhttp&sni=%s&host=%s&fp=chrome&path=%s%s&pbk=%s&sid=6ba85179e30d4fc2#%s' "${id}" "$(formatUriAuthorityHost "${add}")" "${port}" "${encryption}" "${sni}" "${host}" "${path}" "${modeParam}" "${publicKey}" "${email}"
 }
 
 appendSingBoxSubscribeLocalConfig() {
