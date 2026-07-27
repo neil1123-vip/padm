@@ -652,12 +652,25 @@ checkFirewalldAllowPort() {
 checkDNSIP() {
     local domain=$1
     local dnsIP=
+    local dnsResolver=dig
+    if ! command -v dig >/dev/null 2>&1; then
+        if command -v getent >/dev/null 2>&1; then
+            dnsResolver=getent
+        else
+            errorCard "缺少 DNS 解析工具，无法校验域名" "请安装 dig 或 getent 后重试"
+            return 1
+        fi
+    fi
     ipType=4
     local dnsRetryCount=0
     while [[ ${dnsRetryCount} -lt 3 && -z "${dnsIP}" ]]; do
-        dnsIP=$(dig @1.1.1.1 +time=2 +short "${domain}" | grep -E "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$")
-        if [[ -z "${dnsIP}" ]]; then
-            dnsIP=$(dig @8.8.8.8 +time=2 +short "${domain}" | grep -E "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$")
+        if [[ "${dnsResolver}" == "dig" ]]; then
+            dnsIP=$(dig @1.1.1.1 +time=2 +short "${domain}" | grep -E "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$")
+            if [[ -z "${dnsIP}" ]]; then
+                dnsIP=$(dig @8.8.8.8 +time=2 +short "${domain}" | grep -E "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$")
+            fi
+        else
+            dnsIP=$(getent ahostsv4 "${domain}" 2>/dev/null | awk '/STREAM/ {print $1; exit}')
         fi
         dnsRetryCount=$((dnsRetryCount + 1))
         if [[ -z "${dnsIP}" && ${dnsRetryCount} -lt 3 ]]; then
@@ -668,7 +681,11 @@ checkDNSIP() {
     if [[ "${dnsIP}" == *"timed out"* || -z "${dnsIP}" ]]; then
         echo
         statusCard "DNS 解析回退" "无法通过 DNS 获取域名 IPv4 地址" "尝试检查域名 IPv6 地址"
-        dnsIP=$(dig @2606:4700:4700::1111 +time=2 aaaa +short "${domain}")
+        if [[ "${dnsResolver}" == "dig" ]]; then
+            dnsIP=$(dig @2606:4700:4700::1111 +time=2 aaaa +short "${domain}")
+        else
+            dnsIP=$(getent ahostsv6 "${domain}" 2>/dev/null | awk '/STREAM/ {print $1; exit}')
+        fi
         ipType=6
         if [[ "${dnsIP}" == *"network unreachable"* || -z "${dnsIP}" ]]; then
             errorCard "无法通过DNS获取域名IPv6地址，退出安装"
