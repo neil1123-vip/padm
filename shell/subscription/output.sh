@@ -77,7 +77,7 @@ serializeVlessRealityVisionLink() {
     local pqv=$6
     local email=$7
     local encryption=${8:-none}
-    printf 'vless://%s@%s:%s?encryption=%s&security=reality&pqv=%s&type=tcp&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#%s' "${id}" "$(formatUriAuthorityHost "${entryHost}")" "${port}" "${encryption}" "${pqv}" "${sni}" "${publicKey}" "${email}"
+    printf 'vless://%s@%s:%s?encryption=%s&security=reality%s&type=tcp&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#%s' "${id}" "$(formatUriAuthorityHost "${entryHost}")" "${port}" "${encryption}" "${pqv:+&pqv=${pqv}}" "${sni}" "${publicKey}" "${email}"
 }
 
 serializeVlessRealityGrpcLink() {
@@ -88,7 +88,7 @@ serializeVlessRealityGrpcLink() {
     local publicKey=$5
     local pqv=$6
     local email=$7
-    printf 'vless://%s@%s:%s?encryption=none&security=reality&pqv=%s&type=grpc&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#%s' "${id}" "$(formatUriAuthorityHost "${entryHost}")" "${port}" "${pqv}" "${sni}" "${publicKey}" "${email}"
+    printf 'vless://%s@%s:%s?encryption=none&security=reality%s&type=grpc&sni=%s&fp=chrome&pbk=%s&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#%s' "${id}" "$(formatUriAuthorityHost "${entryHost}")" "${port}" "${pqv:+&pqv=${pqv}}" "${sni}" "${publicKey}" "${email}"
 }
 
 xrayRealityXHTTPSetting() {

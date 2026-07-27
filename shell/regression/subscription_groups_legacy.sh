@@ -13302,8 +13302,8 @@ runRuntimeAndRealityRegression() {
     [[ "${visionEncLink}" == "vless://uuid-a@node.example.com:443?encryption=mlkem768x25519plus.native.0rtt.test&security=reality&pqv=pqv&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
     visionLink=$(serializeVlessRealityVisionLink "uuid-a" "2001:db8::10" "443" "www.microsoft.com" "pubkey" "pqv" "user-a")
     [[ "${visionLink}" == "vless://uuid-a@[2001:db8::10]:443?encryption=none&security=reality&pqv=pqv&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a" ]]
-    grpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "node.example.com" "8443" "www.microsoft.com" "pubkey" "pqv" "user-a")
-    [[ "${grpcLink}" == "vless://uuid-a@node.example.com:8443?encryption=none&security=reality&pqv=pqv&type=grpc&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#user-a" ]]
+    grpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "node.example.com" "8443" "www.microsoft.com" "pubkey" "" "user-a")
+    [[ "${grpcLink}" == "vless://uuid-a@node.example.com:8443?encryption=none&security=reality&type=grpc&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#user-a" ]]
     grpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "2001:db8::10" "8443" "www.microsoft.com" "pubkey" "pqv" "user-a")
     [[ "${grpcLink}" == "vless://uuid-a@[2001:db8::10]:8443?encryption=none&security=reality&pqv=pqv&type=grpc&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&path=grpc&serviceName=grpc#user-a" ]]
     xhttpLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/xHTTP" "pubkey" "user-a")
@@ -14222,13 +14222,15 @@ currentHost="tls.example.com"
 realityEntryHost="node.example.com"
 xrayVLESSRealitySNI="www.microsoft.com"
 currentRealityPublicKey="pubkey"
-currentRealityMldsa65Verify="pqv"
+currentRealityMldsa65Verify=""
 defaultBase64Code vlessReality 443 user-a-main uuid-a "" ""
-expectedVisionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "pqv" "user-a-main")
+expectedVisionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "" "user-a-main")
 assertCapturedSubscribeOutputs "user-a-main" "${expectedVisionLink}" "node.example.com" "www.microsoft.com" "tcp" "vless"
 jq -e '.[0].flow == "xtls-rprx-vision" and .[0].tls.reality.public_key == "pubkey"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-main" >/dev/null
+! grep -q 'pqv' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-main" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+currentRealityMldsa65Verify="pqv"
 defaultBase64Code vlessRealityGRPC 8443 user-a-grpc uuid-a "" ""
 expectedGrpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "node.example.com" "8443" "www.microsoft.com" "pubkey" "pqv" "user-a-grpc")
 assertCapturedSubscribeOutputs "user-a-grpc" "${expectedGrpcLink}" "node.example.com" "www.microsoft.com" "grpc" "vless"

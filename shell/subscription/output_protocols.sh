@@ -354,7 +354,7 @@ emitVlessRealitySubscribeOutput() {
     echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：VLESS Reality Vision"
-    echoContent green "协议类型:VLESS reality，地址:${entryHost}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2，pqv=${realityMldsa65Verify}，Reality目标SNI：${realitySNI}，端口:${port}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
+    echoContent green "协议类型:VLESS reality，地址:${entryHost}，publicKey:${publicKey}，shortId: 6ba85179e30d4fc2${realityMldsa65Verify:+，pqv=${realityMldsa65Verify}}，Reality目标SNI：${realitySNI}，端口:${port}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}" || return 1
     appendClashMetaSubscribeBlock "${user}" "  - name: \"${email}\"
     type: vless
