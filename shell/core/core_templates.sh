@@ -119,7 +119,49 @@ coreTemplateConfigBackupCreate() {
         done
     fi
 
+    if declare -F realityEntryHostFile >/dev/null 2>&1; then
+        targetPath=$(realityEntryHostFile) || return 1
+    else
+        targetPath=${PADM_REALITY_ENTRY_HOST_FILE:-/etc/padm/reality_entry_host}
+    fi
+    if [[ -z "${seenTargets[${targetPath}]+x}" ]]; then
+        targets+=("${targetPath}")
+    fi
+
     checkLogBackupCreate "${resultVar}" "${targets[@]}"
+}
+
+coreTemplateRestoreServiceState() {
+    local service=$1
+    local wasRunning=$2
+    local restartRunning=${3:-false}
+    local runningFunction handleFunction
+    case "${service}" in
+    xray)
+        runningFunction=xrayRunning
+        handleFunction=handleXray
+        ;;
+    sing-box)
+        runningFunction=singBoxRunning
+        handleFunction=handleSingBox
+        ;;
+    *) return 1 ;;
+    esac
+
+    if [[ "${wasRunning}" == "true" ]]; then
+        if "${runningFunction}"; then
+            [[ "${restartRunning}" == "true" ]] || return 0
+            runCoreServiceActionAllowFailure "${handleFunction}" stop || return 1
+        fi
+        runCoreServiceActionAllowFailure "${handleFunction}" start
+    elif "${runningFunction}"; then
+        runCoreServiceActionAllowFailure "${handleFunction}" stop
+    fi
+}
+
+coreInstallConfigTransaction() {
+    local PADM_CORE_INSTALL_TRANSACTION_ACTIVE=true
+    coreTemplateConfigTransaction "$@"
 }
 
 coreTemplateConfigTransaction() {
@@ -133,18 +175,26 @@ coreTemplateConfigTransaction() {
 
     local backupDir=
     local rc=0
-    local serviceWasRunning=false
+    local xrayWasRunning=false
+    local singBoxWasRunning=false
+    local xrayRestartRunning=false
+    local singBoxRestartRunning=false
     local configRestored=true
     local serviceRestored=true
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
+    [[ "${core}" == "xray" ]] && xrayRestartRunning=true
+    [[ "${core}" == "sing-box" ]] && singBoxRestartRunning=true
 
     coreTemplateConfigBackupCreate backupDir "${core}" || {
         errorCard "${title}备份失败，已取消修改"
         return 1
     }
-    if [[ "${core}" == "sing-box" ]] && singBoxRunning; then
-        serviceWasRunning=true
+    if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] && xrayRunning; then
+        xrayWasRunning=true
+    fi
+    if [[ "${core}" == "sing-box" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] && singBoxRunning; then
+        singBoxWasRunning=true
     fi
 
     local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=true
@@ -160,15 +210,21 @@ coreTemplateConfigTransaction() {
         configRestored=false
         padmForgetCleanupPath "${backupDir}"
     fi
-    if [[ "${core}" == "sing-box" && "${serviceWasRunning}" == "true" && "${configRestored}" == "true" ]] &&
-        ! singBoxRunning && ! runCoreServiceActionAllowFailure handleSingBox start; then
-        serviceRestored=false
+    if [[ "${configRestored}" == "true" ]]; then
+        if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
+            ! coreTemplateRestoreServiceState xray "${xrayWasRunning}" "${xrayRestartRunning}"; then
+            serviceRestored=false
+        fi
+        if [[ "${core}" == "sing-box" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
+            ! coreTemplateRestoreServiceState sing-box "${singBoxWasRunning}" "${singBoxRestartRunning}"; then
+            serviceRestored=false
+        fi
     fi
 
     if [[ "${configRestored}" != "true" ]]; then
         errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
     elif [[ "${serviceRestored}" != "true" ]]; then
-        errorCard "${title}失败，旧配置已恢复，但 sing-box 服务运行状态恢复失败"
+        errorCard "${title}失败，旧配置已恢复，但核心服务运行状态恢复失败"
     else
         errorCard "${title}失败，已恢复旧配置"
     fi
@@ -948,8 +1004,13 @@ EOF
         initRealityProfile || return 1
         initRealityKey || return 1
         echo
-        readSingBoxPortResult result "${singBoxVLESSRealityVisionPort}" || return 1
-        statusCard "VLESS Reality Vision端口" "${result[-1]}"
+        readSingBoxPortResult result "${singBoxVLESSRealityVisionPort}" true tcp reality_subport 1 vision || return 1
+        if declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled &&
+            [[ "${result[-1]}" == "$(realityStreamInternalPortForProtocol vision)" ]]; then
+            statusCard "VLESS Reality Vision 共存内部端口" "${result[-1]}"
+        else
+            statusCard "VLESS Reality Vision 客户端连接端口" "${result[-1]}"
+        fi
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/07_VLESS_vision_reality_inbounds.json padm-sing-box-reality <<EOF || { errorCard "sing-box Reality Vision 入站模板提交失败"; return 1; }
 {
   "inbounds": [
@@ -990,8 +1051,8 @@ EOF
         initRealityProfile || return 1
         initRealityKey || return 1
         echo
-        readSingBoxPortResult result "${singBoxVLESSRealityGRPCPort}" || return 1
-        statusCard "VLESS Reality gPRC端口" "${result[-1]}"
+        readSingBoxPortResult result "${singBoxVLESSRealityGRPCPort}" true tcp reality_grpc_subport 26 || return 1
+        statusCard "VLESS Reality gRPC 客户端连接端口" "${result[-1]}"
         writeGeneratedJsonFile /etc/padm/sing-box/conf/config/08_VLESS_vision_gRPC_inbounds.json padm-sing-box-reality-grpc <<EOF || { errorCard "sing-box Reality gRPC 入站模板提交失败"; return 1; }
 {
   "inbounds": [

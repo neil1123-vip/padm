@@ -238,6 +238,18 @@ protocolSelectionHasAny() {
     return 1
 }
 
+protocolSelectionIsExactly() {
+    [[ "$(protocolSelectionNormalizeCsv "$1")" == ",$2," ]]
+}
+
+protocolSelectionSupportsStrictRealityDomain() {
+    protocolSelectionIsExactly "$1" 1
+}
+
+realityStrictDomainModeEnabled() {
+    [[ -n "${realityOnlyWithDomain:-}" ]] || [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]]
+}
+
 currentProtocolHas() {
     local protocolId=$1
     protocolSelectionHasAny "${currentInstallProtocolType}" "${protocolId}"
@@ -250,7 +262,6 @@ currentProtocolHasAny() {
 protocolSelectionSkipsNginx() {
     local selection=$1
     local normalized protocolId mode sawProtocol=false
-    [[ -z "${realityOnlyWithDomain:-}" ]] || return 1
     normalized=$(protocolSelectionNormalizeCsv "${selection}")
     normalized=${normalized#,}
     normalized=${normalized%,}
@@ -278,7 +289,7 @@ protocolSelectionNeedsCertificate() {
 
 protocolSelectionNeedsLocalCertificate() {
     local selection=$1
-    protocolSelectionNeedsCertificate "${selection}" || [[ -n "${realityOnlyWithDomain:-}" ]]
+    protocolSelectionNeedsCertificate "${selection}"
 }
 
 protocolStateAdd() {

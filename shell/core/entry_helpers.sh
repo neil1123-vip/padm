@@ -188,7 +188,7 @@ customPortFunction() {
     if [[ -n "${customPort}" || -n "${currentPort}" ]]; then
         echo
         if [[ -z "${lastInstallationConfig}" ]]; then
-            autoRead reuse_last "读取到上次安装时的本机 TLS 入口端口 [${currentPort}]，用于传统 TLS 协议或域名 Reality 入口，是否使用？[y/n]:" historyCustomPortStatus
+            autoRead reuse_last "读取到上次安装时的传统 TLS 入口端口 [${currentPort}]，是否使用？[y/n]:" historyCustomPortStatus
             if [[ "${historyCustomPortStatus}" == "y" ]]; then
                 port=${currentPort}
                 statusCard "TLS 入口端口" "${port}"
@@ -201,15 +201,15 @@ customPortFunction() {
         echo
 
         if [[ -n "${btDomain}" ]]; then
-            echoContent yellow "请输入端口[不可与BT Panel/1Panel端口相同，回车随机]"
-            autoRead port "端口:" port
+            echoContent yellow "请输入 TLS 入口端口[不可与 BT Panel/1Panel 端口相同，回车随机]"
+            autoRead port "TLS 入口端口:" port
             if [[ -z "${port}" ]]; then
                 port=$((RANDOM % 20001 + 10000))
             fi
         else
             echo
-            echoContent yellow "请输入本机 TLS 入口端口[默认: 443]，用于传统 TLS 协议或域名 Reality 入口，[回车使用默认]"
-            autoRead port "端口:" port
+            echoContent yellow "请输入传统 TLS 入口端口[回车默认 443]"
+            autoRead port "TLS 入口端口:" port
             if [[ -z "${port}" ]]; then
                 port=443
             fi

@@ -830,6 +830,20 @@ parseInstallArgs() {
 
 autoInstallValidateRequiredInputs() {
     [[ "${AUTO_INSTALL:-}" == "true" ]] || return 0
+
+    if [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]]; then
+        local strictSelection=${AUTO_PROTOCOLS:-}
+        case "${AUTO_INSTALL_TYPE:-}" in
+        reality | reality-only | no-domain-reality | 3)
+            [[ -n "${strictSelection}" ]] || strictSelection=1
+            ;;
+        esac
+        if ! protocolSelectionSupportsStrictRealityDomain "${strictSelection}"; then
+            errorCard "--reality-domain yes 仅支持单选 Reality Vision 协议 1"
+            return 1
+        fi
+    fi
+
     [[ -n "${AUTO_PROTOCOLS:-}" ]] || return 0
 
     if protocolSelectionNeedsLocalCertificate "${AUTO_PROTOCOLS}" && [[ -z "${AUTO_DOMAIN:-}" ]]; then
@@ -862,6 +876,7 @@ showInstallArgsHelp() {
 │ Reality entry: 客户端实际连接地址，通常是自有域名、CDN 入口或服务器 IP
 │ Reality target: REALITY 伪装目标站，建议使用真实大型 HTTPS 站点，端口默认 443
 │ Reality SNI: REALITY 握手 SNI，默认等于 target host
+│ Reality 不申请本机 TLS 证书，也不因安装操作 Nginx；严格域名仅支持单选 Vision 1
 ├─ 常用示例
 │ bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
 │ bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443 --reality-server-name www.ibm.com
@@ -874,7 +889,7 @@ showInstallArgsHelp() {
 │ --list-capabilities                     列出公网节点、内部能力和上游已知能力
 │ --show-risky-protocols                  列出带风险提示的高级公网节点能力
 │ --domain <domain>                       TLS 域名
-│ --port <port>                           TLS 入口端口，默认 443
+│ --port <port>                           TLS 入口端口；单选 Reality 为客户端连接端口，默认 443
 │ --tls-ca <letsencrypt|zerossl|buypass>  证书 CA，默认 letsencrypt
 │ --dns-api <yes|no|y|n>                  是否使用 DNS API 申请证书
 │ --dns-api-type <cloudflare|aliyun|1|2>   DNS API 服务商，默认 cloudflare
@@ -885,10 +900,10 @@ showInstallArgsHelp() {
 │ --aliyun-api-secret <secret>             阿里云 DNS AccessKey Secret，也可用 PADM_ALIYUN_API_SECRET
 │ --reuse-last <yes|no|y|n>               是否复用上次安装配置
 │ --clean-acme <yes|no|y|n>               清空上次配置时是否清理 acme
-│ --reality-domain <yes|no|y|n>           仅选 Reality 时入口是否使用自有域名
+│ --reality-domain <yes|no|y|n>           严格域名模式，仅支持单选 Reality Vision 1
 │ --reality-target <host[:port]>          REALITY 伪装目标站，默认推荐 www.ibm.com:443
 │ --reality-server-name <sni>             REALITY SNI，默认等于 target host
-│ --entry-host <host>                     客户端实际连接地址，默认使用 --domain 或公网 IP
+│ --entry-host <host>                     Reality entry；优先于 --domain、历史 entry、currentHost 和公网 IP
 │ --subscribe-port <port>                 订阅服务端口
 │ --install-nginx <yes|no|y|n>            订阅需要 nginx 时是否自动安装
 │ --uuid <uuid>                           初始用户 UUID，默认随机生成

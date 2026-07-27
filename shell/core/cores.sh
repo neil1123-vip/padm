@@ -2246,85 +2246,92 @@ initSingBoxClients() {
 }
 
 
+# Reality 严格域名模式仅支持单选 Vision。
+configureRealityDomainMode() {
+    local selection=$1
+    local preselectedMode=${2:-}
+    local strictRequested=false
+    local realityOnlyInstallType=
+    realityOnlyWithDomain=
+
+    if [[ "${preselectedMode}" == "domain" || "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]]; then
+        strictRequested=true
+    fi
+    if [[ "${strictRequested}" == "true" ]] && ! protocolSelectionSupportsStrictRealityDomain "${selection}"; then
+        errorCard "严格域名 Reality 仅支持单选 Reality Vision 协议 1"
+        return 1
+    fi
+    protocolSelectionSupportsStrictRealityDomain "${selection}" || return 0
+
+    if [[ "${strictRequested}" != "true" ]]; then
+        echoContent title "\n┌─ Reality 安装方式 ─────────────────────────────────"
+        menuItem 1 "普通 Reality" "客户端入口使用服务器 IP、历史入口或 --entry-host"
+        menuItem 2 "严格域名 Reality" "客户端入口必须是解析到本机的自有域名"
+        menuLine "entry 是客户端连接地址；target/SNI 是 REALITY 伪装目标"
+        menuClose
+        autoRead reality_domain "请选择[默认1]:" realityOnlyInstallType
+        if [[ "${realityOnlyInstallType:-1}" == "2" ]]; then
+            strictRequested=true
+        elif [[ -n "${realityOnlyInstallType:-}" && "${realityOnlyInstallType}" != "1" ]]; then
+            coreSelectionErrorCard "选择错误"
+            return 1
+        fi
+    fi
+    if [[ "${strictRequested}" == "true" ]]; then
+        realityOnlyWithDomain=true
+        statusCard "Reality 安装方式" "严格域名模式：entry 使用自有域名，target/SNI 仍是外部伪装目标"
+    fi
+}
+
 # 安装 Xray-core
 installXrayRealityApply() {
-    local nginxWasRunning=false
-    local previousServiceActions="${SERVICE_ACTIONS:-}"
-    local installFailure=
-    local restoreFailed=false
     selectCustomInstallType=",1,"
+    realityOnlyWithDomain=
+    [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
+    collectEntryProfile || return 1
     readLastInstallationConfig || return 1
     totalProgress=6
     installTools 1
 
-    nginxRunning && nginxWasRunning=true
-    coreInstallServiceAction "Nginx 服务停止失败，已取消 Xray Reality 安装" handleNginx stop || return 1
-    if subscriptionWireGuardControlEnabled; then
-        if ! refreshSubscriptionWireGuardNginxControl; then
-            installFailure="WireGuard Nginx 控制面刷新失败"
-        fi
-    fi
-
-    if [[ -z "${installFailure}" ]] && ! (installXray 2 false); then
-        installFailure="Xray 安装失败"
-    fi
-    if [[ -z "${installFailure}" ]] && ! initXrayConfig custom 3; then
-        installFailure="Xray Reality 配置初始化失败"
-    fi
-    if [[ -z "${installFailure}" ]] && ! cleanUp singBoxDel; then
-        installFailure="旧 sing-box 配置清理失败"
-    fi
-    if [[ -z "${installFailure}" ]] && ! installXrayService 4; then
-        installFailure="Xray 服务安装失败"
-    fi
-    if [[ -z "${installFailure}" ]]; then
-        serviceQueueRestart xray
-        serviceQueueApply || installFailure="Xray Reality 服务应用失败"
-    fi
-    if [[ -n "${installFailure}" ]]; then
-        SERVICE_ACTIONS="${previousServiceActions}"
-        if [[ "${nginxWasRunning}" == "true" ]]; then
-            nginxRunning || runCoreServiceActionAllowFailure handleNginx start restore || restoreFailed=true
-        elif nginxRunning; then
-            runCoreServiceActionAllowFailure handleNginx stop || restoreFailed=true
-        fi
-        if [[ "${restoreFailed}" == "true" ]]; then
-            errorCard "${installFailure}，且 Nginx 运行状态恢复失败"
-        else
-            errorCard "${installFailure}，已恢复原 Nginx 运行状态"
-        fi
-        return 1
-    fi
-    # 生成账号
+    (installXray 2 false) || return 1
+    initXrayConfig custom 3 || return 1
+    installXrayService 4 || return 1
+    serviceQueueRestart xray
+    serviceQueueApply || return 1
+    persistRealityEntryProfile || return 1
     checkGFWStatue 5 || return 1
+    cleanUp singBoxDel || return 1
     showAccounts 6
 }
 
 installXrayReality() {
-    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction installXrayRealityApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction xray padmRunPortAllowTransaction installXrayRealityApply "$@"
 }
 
 # 安装 sing-box Reality
 installSingBoxRealityApply() {
 
     selectCustomInstallType=",1,"
+    realityOnlyWithDomain=
+    [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]] && realityOnlyWithDomain=true
+    collectEntryProfile || return 1
     readLastInstallationConfig || return 1
     totalProgress=6
     installTools 1
 
     installSingBox 2 || return 1
     initSingBoxConfig custom 3 || return 1
-    cleanUp xrayDel || return 1
     installSingBoxService 4 || return 1
     serviceQueueRestart sing-box
     serviceQueueApply || return 1
-    # 生成账号
+    persistRealityEntryProfile || return 1
     checkGFWStatue 5 || return 1
+    cleanUp xrayDel || return 1
     showAccounts 6
 }
 
 installSingBoxReality() {
-    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction installSingBoxRealityApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction sing-box padmRunPortAllowTransaction installSingBoxRealityApply "$@"
 }
 
 # Xray-core个性化安装
@@ -2338,7 +2345,7 @@ customXrayInstallApply() {
     menuLine "可输入单个编号，也可用英文逗号多选，例如 1,2,21"
     menuLine "推荐新人：优先选 1；需要 XHTTP 时选 2；协议说明来自能力库"
     menuLine "WS/gRPC/HTTPUpgrade/传统 TLS 协议仅在明确客户端兼容或迁移需要时选择"
-    menuLine "只安装 Reality 时不补传统 TLS 协议；域名 Reality 会额外申请入口域名的本机 TLS 证书"
+    menuLine "Reality 不申请本机证书；严格域名模式仅支持单选 Reality Vision"
     menuLine "推荐能力"
     protocolRegistryMenuByLifecycle "${allowedIds}" recommended
     menuLine "高级能力"
@@ -2355,35 +2362,12 @@ customXrayInstallApply() {
         exit 0
     fi
 
-    if protocolSelectionOnlyRealityNoDomain "${selectCustomInstallType}"; then
-        if [[ "${selectCustomInstallType}" == "1" ]]; then
-            if [[ "${preselectedMode}" == "domain" ]]; then
-                realityOnlyWithDomain=true
-                statusCard "Reality 安装方式" "已选择域名 Reality：entry 使用自有域名，target/SNI 仍是外部伪装目标"
-            else
-                echoContent title "\n┌─ Reality 安装方式 ─────────────────────────────────"
-                menuItem 1 "无域名 Reality" "客户端入口使用服务器 IP 或 --entry-host，不申请 TLS 证书"
-                menuItem 2 "域名 Reality" "客户端入口使用自有域名，同时仍需单独填写 Reality 伪装目标"
-                menuLine "入口 entry 是客户端连接地址；target/SNI 是 REALITY 伪装目标，不要混淆"
-                menuClose
-                autoRead reality_domain "请选择[默认1]:" realityOnlyInstallType
-                if [[ "${realityOnlyInstallType}" == "2" ]]; then
-                    realityOnlyWithDomain=true
-                elif [[ -n "${realityOnlyInstallType}" && "${realityOnlyInstallType}" != "1" ]]; then
-                    coreSelectionErrorCard "选择错误"
-                    customXrayInstall
-                    return
-                fi
-            fi
-        fi
-        selectCustomInstallType=",${selectCustomInstallType},"
-    else
-        selectCustomInstallType=",${selectCustomInstallType},"
-    fi
-    if [[ "${selectCustomInstallType:0:1}" != "," ]]; then
-        selectCustomInstallType=",${selectCustomInstallType},"
-    fi
+    selectCustomInstallType=$(protocolSelectionNormalizeCsv "${selectCustomInstallType}")
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
+        configureRealityDomainMode "${selectCustomInstallType}" "${preselectedMode}" || return 1
+        if protocolSelectionHasAny "${selectCustomInstallType}" 1 2 26; then
+            collectEntryProfile || return 1
+        fi
         protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
         # checkBTPanel
@@ -2391,31 +2375,29 @@ customXrayInstallApply() {
         totalProgress=12
         installTools 1
         if [[ -n "${btDomain}" ]]; then
-            skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
-            coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
-            if [[ "${selectCustomInstallType}" != ",1," || -n "${realityOnlyWithDomain}" ]]; then
+            if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+                skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
+                coreInstallServiceAction "Xray 服务停止失败，已取消端口配置" handleXray stop || return 1
                 customPortFunction || return 1
+            else
+                skipTlsCertificateStatusCard "Reality 不需要本机 TLS 证书"
             fi
         else
             # 申请tls
             if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
-                if [[ -n "${realityOnlyWithDomain}" ]]; then
-                    statusCard "域名 Reality 证书" "将为自有入口域名申请本机 TLS 证书" "该证书用于客户端连接入口和前置 TLS，不是 Reality target/SNI 伪装目标证书"
-                fi
                 initTLSNginxConfig 2 || return 1
                 installTLS 3 || return 1
             else
-                skipTlsCertificateStatusCard "仅安装无域名 Reality"
-                cleanAgentNginxConf || { errorCard "Nginx 配置清理失败，已取消 Xray 安装"; return 1; }
+                skipTlsCertificateStatusCard "Reality 不需要本机 TLS 证书"
             fi
         fi
 
         if protocolSelectionNeedsPath "${selectCustomInstallType}"; then
             randomPathFunction 4 || return 1
         fi
-        if [[ -n "${btDomain}" ]]; then
+        if [[ -n "${btDomain}" ]] && protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             statusCard "跳过伪装网站" "检测到宝塔面板/1Panel"
-        else
+        elif protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             nginxBlog 6 || return 1
         fi
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
@@ -2426,7 +2408,6 @@ customXrayInstallApply() {
         # 安装 Xray
         installXray 7 false || return 1
         initXrayConfig custom 8 || return 1
-        cleanUp singBoxDel || return 1
         installXrayService 9 || return 1
         if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
             installCronTLS 10 || return 1
@@ -2434,8 +2415,11 @@ customXrayInstallApply() {
 
         serviceQueueRestart xray
         serviceQueueApply || return 1
-        # 生成账号
+        if protocolSelectionHasAny "${selectCustomInstallType}" 1 2 26; then
+            persistRealityEntryProfile || return 1
+        fi
         checkGFWStatue 11 || return 1
+        cleanUp singBoxDel || return 1
         showAccounts 12
     else
         local unsupportedReason=
@@ -2453,15 +2437,17 @@ customXrayInstallApply() {
 }
 
 customXrayInstall() {
-    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction customXrayInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction xray padmRunPortAllowTransaction customXrayInstallApply "$@"
 }
 
 
 # sing-box 个性化安装
 customSingBoxInstallApply() {
     local preselectedProtocols=${1:-}
+    local preselectedMode=${2:-}
     local allowedIds
     allowedIds=$(protocolSelectionCurrentIdsForCore sing-box)
+    realityOnlyWithDomain=
     echoContent title "\n┌─ sing-box 个性化安装 ───────────────────────────────"
     menuLine "可输入单个编号，也可用英文逗号多选，例如 1,3,4"
     menuLine "推荐新人：优先选 1 或 3；XHTTP 为 Xray-only；协议说明来自能力库"
@@ -2483,14 +2469,13 @@ customSingBoxInstallApply() {
         exit 0
     fi
 
-    if [[ "${selectCustomInstallType: -1}" != "," ]]; then
-        selectCustomInstallType="${selectCustomInstallType},"
-    fi
-    if [[ "${selectCustomInstallType:0:1}" != "," ]]; then
-        selectCustomInstallType=",${selectCustomInstallType},"
-    fi
+    selectCustomInstallType=$(protocolSelectionNormalizeCsv "${selectCustomInstallType}")
 
     if [[ "${selectCustomInstallType//,/}" =~ ^[0-9]+$ ]] && protocolSelectionIdsValid "${selectCustomInstallType}" "${allowedIds}"; then
+        configureRealityDomainMode "${selectCustomInstallType}" "${preselectedMode}" || return 1
+        if protocolSelectionHasAny "${selectCustomInstallType}" 1 26; then
+            collectEntryProfile || return 1
+        fi
         protocolSelectionShowRiskNotes "${selectCustomInstallType}"
         readLastInstallationConfig || return 1
         totalProgress=9
@@ -2504,14 +2489,20 @@ customSingBoxInstallApply() {
 
         installSingBox 4 || return 1
         initSingBoxConfig custom 5 || return 1
-        cleanUp xrayDel || return 1
         installSingBoxService 6 || return 1
-        installCronTLS 7 || return 1
+        if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+            installCronTLS 7 || return 1
+        fi
         serviceQueueRestart sing-box
-        serviceQueueRestart nginx
+        if protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
+            serviceQueueRestart nginx
+        fi
         serviceQueueApply || return 1
-        # 生成账号
+        if protocolSelectionHasAny "${selectCustomInstallType}" 1 26; then
+            persistRealityEntryProfile || return 1
+        fi
         checkGFWStatue 8 || return 1
+        cleanUp xrayDel || return 1
         showAccounts 9
     else
         local unsupportedReason=
@@ -2529,7 +2520,7 @@ customSingBoxInstallApply() {
 }
 
 customSingBoxInstall() {
-    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction customSingBoxInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction sing-box padmRunPortAllowTransaction customSingBoxInstallApply "$@"
 }
 
 

@@ -505,20 +505,40 @@ showLastInstallationConfig() {
         menuLine "订阅：${subscribeType} 端口 ${subscribePort}"
     fi
 
+    local visionInternalPort= visionPublicPort= xhttpInternalPort= xhttpPublicPort=
+    if declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled; then
+        visionInternalPort=$(realityStreamInternalPortForProtocol vision)
+        visionPublicPort=$(realityStreamPublicPortForProtocol vision)
+        xhttpInternalPort=$(realityStreamInternalPortForProtocol xhttp)
+        xhttpPublicPort=$(realityStreamPublicPortForProtocol xhttp)
+    fi
+
     if [[ -n "${xrayVLESSRealityPort}" ]]; then
-        menuLine "Xray Reality Vision 端口：${xrayVLESSRealityPort}"
+        if [[ -n "${visionInternalPort}" && "${xrayVLESSRealityPort}" == "${visionInternalPort}" ]]; then
+            menuLine "Xray Reality Vision 客户端公网端口：${visionPublicPort:-443}；共存内部端口：${xrayVLESSRealityPort}"
+        else
+            menuLine "Xray Reality Vision 客户端连接端口：${xrayVLESSRealityPort}"
+        fi
     fi
     if [[ -n "${xrayVLESSRealityXHTTPort}" ]]; then
-        menuLine "Xray Reality XHTTP 端口：${xrayVLESSRealityXHTTPort}"
+        if [[ -n "${xhttpInternalPort}" && "${xrayVLESSRealityXHTTPort}" == "${xhttpInternalPort}" ]]; then
+            menuLine "Xray Reality XHTTP 客户端公网端口：${xhttpPublicPort:-443}；共存内部端口：${xrayVLESSRealityXHTTPort}"
+        else
+            menuLine "Xray Reality XHTTP 客户端连接端口：${xrayVLESSRealityXHTTPort}"
+        fi
     fi
     if [[ -n "${singBoxVLESSVisionPort}" ]]; then
         menuLine "sing-box VLESS Vision 端口：${singBoxVLESSVisionPort}"
     fi
     if [[ -n "${singBoxVLESSRealityVisionPort}" ]]; then
-        menuLine "sing-box Reality Vision 端口：${singBoxVLESSRealityVisionPort}"
+        if [[ -n "${visionInternalPort}" && "${singBoxVLESSRealityVisionPort}" == "${visionInternalPort}" ]]; then
+            menuLine "sing-box Reality Vision 客户端公网端口：${visionPublicPort:-443}；共存内部端口：${singBoxVLESSRealityVisionPort}"
+        else
+            menuLine "sing-box Reality Vision 客户端连接端口：${singBoxVLESSRealityVisionPort}"
+        fi
     fi
     if [[ -n "${singBoxVLESSRealityGRPCPort}" ]]; then
-        menuLine "sing-box Reality gRPC 端口：${singBoxVLESSRealityGRPCPort}"
+        menuLine "sing-box Reality gRPC 客户端连接端口：${singBoxVLESSRealityGRPCPort}"
     fi
     if [[ -n "${singBoxHysteria2Port}" ]]; then
         menuLine "Hysteria2 端口：${singBoxHysteria2Port}"

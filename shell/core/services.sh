@@ -171,18 +171,29 @@ nginxServiceInstalled() {
 
 nginxRuntimeRequired() {
     local configRoot="${nginxConfigPath:-/etc/nginx/conf.d/}"
+    local streamConf=
 
     if ! protocolSelectionSkipsNginx "${selectCustomInstallType:-}"; then
         return 0
     fi
-    if declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled; then
+    if declare -F realityStreamSplitConfFile >/dev/null 2>&1; then
+        streamConf=$(realityStreamSplitConfFile)
+    fi
+    if [[ -f "${streamConf}" || -f "${configRoot%/}/alone.conf" ||
+        -f "${configRoot%/}/sing_box_VMess_HTTPUpgrade.conf" ||
+        -f "${configRoot%/}/subscribe.conf" || -f "${configRoot%/}/padm-control-wg.conf" ]]; then
         return 0
     fi
-    if declare -F subscriptionWireGuardControlEnabled >/dev/null 2>&1 &&
-        subscriptionWireGuardControlEnabled >/dev/null 2>&1; then
-        return 0
+    if command -v jq >/dev/null 2>&1; then
+        if declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled; then
+            return 0
+        fi
+        if declare -F subscriptionWireGuardControlEnabled >/dev/null 2>&1 &&
+            subscriptionWireGuardControlEnabled >/dev/null 2>&1; then
+            return 0
+        fi
     fi
-    [[ -f "${configRoot%/}/subscribe.conf" || -f "${configRoot%/}/padm-control-wg.conf" ]]
+    return 1
 }
 
 # 操作 Nginx

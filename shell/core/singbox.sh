@@ -445,13 +445,35 @@ initSingBoxPort() {
     local port=$1
     local promptHistory=${2:-true}
     local transport=${3:-tcp+udp}
+    local promptKey=${4:-singbox_custom_port}
+    local realityProtocolId=${5:-}
+    local streamProtocol=${6:-}
     local historyPort=
+    local coexistStatus=1 singleReality=false realityLabel=Reality
     case "${transport}" in
     tcp | udp | tcp+udp) ;;
     *) return 1 ;;
     esac
-    if [[ -n "${port}" && "${promptHistory}" != "true" ]]; then
+    if [[ -n "${realityProtocolId}" ]]; then
+        [[ "${realityProtocolId}" == "26" ]] && realityLabel="Reality gRPC"
+        protocolSelectionIsExactly "${selectCustomInstallType:-}" "${realityProtocolId}" && singleReality=true
+        if [[ -n "${streamProtocol}" ]]; then
+            if resolveRealityInstallCoexistPort port "${streamProtocol}" "${realityLabel}"; then
+                coexistStatus=0
+                promptHistory=false
+            else
+                coexistStatus=$?
+                [[ "${coexistStatus}" == "2" ]] && return 1
+            fi
+        fi
+        if [[ "${coexistStatus}" != "0" && "${singleReality}" == "true" && -n "${AUTO_PORT:-}" ]]; then
+            port=${AUTO_PORT}
+            promptHistory=false
+        fi
+    fi
+    if [[ -n "${port}" && ( "${promptHistory}" != "true" || ( "${singleReality}" == "true" && "${AUTO_INSTALL:-}" == "true" ) ) ]]; then
         if validPortNumber "${port}"; then
+            [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
             if [[ "${transport}" == "tcp+udp" ]]; then
                 allowPortTcpAndUdp "${port}" || return 1
             elif [[ "${transport}" == "tcp" ]]; then
@@ -472,18 +494,29 @@ initSingBoxPort() {
             port=
         else
             validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
+            [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
             echo "${port}"
         fi
     elif [[ -n "${port}" && -n "${lastInstallationConfig}" ]]; then
         validPortNumber "${port}" || { corePortInputErrorCard; return 1; }
+        [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
         echo "${port}"
     fi
     if [[ -z "${port}" ]]; then
-        autoRead singbox_custom_port "请输入自定义端口[需合法]，端口不可重复，[回车]随机端口:" port
+        if [[ "${singleReality}" == "true" ]]; then
+            autoRead "${promptKey}" "请输入 Reality 连接端口[回车默认 443]:" port
+        else
+            autoRead "${promptKey}" "请输入自定义端口[需合法]，端口不可重复，[回车]随机端口:" port
+        fi
         if [[ -z "${port}" ]]; then
-            port=$((RANDOM % 50001 + 10000))
+            if [[ "${singleReality}" == "true" ]]; then
+                port=443
+            else
+                port=$((RANDOM % 50001 + 10000))
+            fi
         fi
         if validPortNumber "${port}"; then
+            [[ -z "${realityProtocolId}" ]] || checkPort "${port}" || return 1
             if [[ "${transport}" == "tcp+udp" ]]; then
                 allowPortTcpAndUdp "${port}" || return 1
             elif [[ "${transport}" == "tcp" ]]; then
@@ -504,6 +537,9 @@ readSingBoxPortResult() {
     local port=${2:-}
     local promptHistory=${3:-true}
     local transport=${4:-tcp+udp}
+    local promptKey=${5:-singbox_custom_port}
+    local realityProtocolId=${6:-}
+    local streamProtocol=${7:-}
     local outputFile stateFile beforeState key backend type
 
     resultRef=()
@@ -512,7 +548,7 @@ readSingBoxPortResult() {
         beforeState=$(<"${stateFile}")
     fi
     padmCreateTmpRootPath outputFile padm-sing-box-port.XXXXXX || return 1
-    if ! initSingBoxPort "${port}" "${promptHistory}" "${transport}" >"${outputFile}"; then
+    if ! initSingBoxPort "${port}" "${promptHistory}" "${transport}" "${promptKey}" "${realityProtocolId}" "${streamProtocol}" >"${outputFile}"; then
         padmRemoveCleanupPath "${outputFile}"
         return 1
     fi

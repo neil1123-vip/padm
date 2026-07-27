@@ -100,7 +100,7 @@ protocolEntryMenu() {
 siteCertificateMenu() {
     echoContent title "\n┌─ 站点与证书 ───────────────────────────────────────"
     menuLine "这里只维护传统 TLS fallback 站点、302、ALPN 和本机 TLS 证书"
-    menuLine "无域名 Reality 不需要本机证书；域名 Reality 的自有域名证书也在这里维护"
+    menuLine "Reality 不使用本机 TLS 证书；这里的证书只服务传统 TLS、站点或订阅"
     menuLine "Reality target/SNI 伪装目标仍由 Reality 目标站管理，二者不要混淆"
     menuItem 1 "传统 TLS fallback 维护" "静态站点、302 重定向、ALPN 诊断/修复"
     menuItem 2 "本机 TLS 证书管理" "续签或查看 /etc/padm/tls 证书"

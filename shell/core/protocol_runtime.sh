@@ -724,19 +724,44 @@ collectTLSProfile() {
 }
 
 collectEntryProfile() {
+    local entryHostFile storedEntry= strictDomain=false
+    realityStrictDomainModeEnabled && strictDomain=true
+
     if [[ -n "${AUTO_ENTRY_HOST:-}" ]]; then
         realityEntryHost=${AUTO_ENTRY_HOST}
+    elif [[ -n "${AUTO_DOMAIN:-}" ]]; then
+        realityEntryHost=${AUTO_DOMAIN%%:*}
     elif [[ -n "${domain:-}" ]]; then
         realityEntryHost=${domain%%:*}
-    elif [[ -n "${currentHost:-}" ]]; then
-        realityEntryHost=${currentHost}
     else
-        realityEntryHost=$(getPublicIP)
-    fi
-    if ! padmIsValidHostName "${realityEntryHost}"; then
-        if declare -F errorCard >/dev/null 2>&1; then
-            errorCard "Reality 客户端入口不合法" "${realityEntryHost}"
+        entryHostFile=$(realityEntryHostFile)
+        if [[ -f "${entryHostFile}" ]]; then
+            storedEntry=$(head -n 1 "${entryHostFile}")
         fi
+        if [[ -n "${storedEntry}" ]]; then
+            realityEntryHost=${storedEntry}
+        elif [[ -n "${currentHost:-}" ]]; then
+            realityEntryHost=${currentHost}
+        elif [[ "${strictDomain}" == "true" ]]; then
+            if [[ "${AUTO_INSTALL:-}" == "true" ]]; then
+                errorCard "严格域名 Reality 缺少入口域名，请传 --entry-host 或 --domain"
+                return 1
+            fi
+            statusCard "Reality 入口域名" "请输入客户端实际连接的域名"
+            autoRead entry_host "入口域名:" realityEntryHost
+        else
+            realityEntryHost=$(getPublicIP)
+        fi
+    fi
+
+    if [[ "${strictDomain}" == "true" ]]; then
+        if ! padmIsValidHostName "${realityEntryHost}" || [[ "${realityEntryHost}" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+            errorCard "Reality 入口域名不合法" "${realityEntryHost}"
+            return 1
+        fi
+        checkDNSIP "${realityEntryHost}" || return 1
+    elif ! padmIsValidConnectAddress "${realityEntryHost}"; then
+        errorCard "Reality 客户端入口不合法" "${realityEntryHost}"
         return 1
     fi
 }
@@ -753,7 +778,7 @@ collectRealityProfile() {
     local targetInput=
     local selectRealityTargetMode=
 
-    collectEntryProfile || return 1
+    [[ -n "${realityEntryHost:-}" ]] || collectEntryProfile || return 1
 
     if [[ -n "${AUTO_REALITY_TARGET:-}" ]]; then
         parseRealityTargetInput "${AUTO_REALITY_TARGET}" || return 1
@@ -830,134 +855,97 @@ persistRealityEntryProfile() {
 # 初始化REALITY配置
 initRealityProfile() {
     collectRealityProfile || return 1
-    persistRealityEntryProfile || return 1
 }
 
 
-# 初始化reality端口
-initXrayRealityPort() {
-    if [[ -n "${xrayVLESSRealityPort}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead reality_history_port "读取到上次安装记录，Reality端口为 [${xrayVLESSRealityPort}]，是否使用？[y/n]:" historyRealityPortStatus
-        if [[ "${historyRealityPortStatus}" == "y" ]]; then
-            realityPort=${xrayVLESSRealityPort}
-        fi
-    elif [[ -n "${xrayVLESSRealityPort}" && -n "${lastInstallationConfig}" ]]; then
-        realityPort=${xrayVLESSRealityPort}
+# 已启用 443 共存时，安装只能继续使用记录的内部端口。
+resolveRealityInstallCoexistPort() {
+    local -n resultRef=$1
+    local protocol=$2
+    local label=$3
+    local internalPort publicPort
+
+    declare -F realityStreamSplitEnabled >/dev/null 2>&1 && realityStreamSplitEnabled || return 1
+    internalPort=$(realityStreamInternalPortForProtocol "${protocol}")
+    [[ -n "${internalPort}" ]] || return 1
+    publicPort=$(realityStreamPublicPortForProtocol "${protocol}")
+    publicPort=${publicPort:-443}
+    if [[ -n "${AUTO_PORT:-}" && "${AUTO_PORT}" != "${publicPort}" ]]; then
+        errorCard "${label} 已启用 443 共存；端口只能省略或传 ${publicPort}，更换端口请先关闭共存"
+        return 2
     fi
+    resultRef=${internalPort}
+}
 
-    if [[ -z "${realityPort}" ]]; then
-        echoContent yellow "请输入端口[回车随机10000-30000]"
+initXrayRealityProtocolPort() {
+    local -n portRef=$1
+    local historyPort=${2:-}
+    local protocolId=$3
+    local promptKey=$4
+    local historyKey=$5
+    local label=$6
+    local transport=${7:-tcp}
+    local streamProtocol=${8:-}
+    local historyPortStatus= coexistStatus=1 singleProtocol=false
 
-        autoRead reality_port "端口:" realityPort
-        if [[ -z "${realityPort}" ]]; then
-            realityPort=$((RANDOM % 20001 + 10000))
-        fi
-        if ! validPortNumber "${realityPort}"; then
-            errorCard "Reality 端口输入错误"
-            return 1
-        fi
-        if [[ -n "${realityPort}" && "${xrayVLESSRealityPort}" == "${realityPort}" ]]; then
-            if ! runCoreServiceActionAllowFailure handleXray stop; then
-                errorCard "Xray 服务停止失败，无法复用当前 Reality 端口"
-                return 1
-            fi
+    protocolSelectionIsExactly "${selectCustomInstallType:-}" "${protocolId}" && singleProtocol=true
+    if [[ -n "${streamProtocol}" ]]; then
+        if resolveRealityInstallCoexistPort portRef "${streamProtocol}" "${label}"; then
+            coexistStatus=0
         else
-            checkPort "${realityPort}" || return 1
+            coexistStatus=$?
+            [[ "${coexistStatus}" == "2" ]] && return 1
         fi
-    fi
-    if [[ -z "${realityPort}" ]]; then
-        initXrayRealityPort || return 1
-    else
-        if ! validPortNumber "${realityPort}"; then
-            errorCard "Reality 端口输入错误"
-            return 1
-        fi
-        allowPort "${realityPort}" || return 1
-        statusCard "Reality 端口" "${realityPort}"
     fi
 
+    if [[ "${coexistStatus}" != "0" && "${singleProtocol}" == "true" && -n "${AUTO_PORT:-}" ]]; then
+        portRef=${AUTO_PORT}
+    elif [[ "${coexistStatus}" != "0" && -z "${portRef}" && -n "${historyPort}" ]]; then
+        if [[ -n "${lastInstallationConfig:-}" || ( "${singleProtocol}" == "true" && "${AUTO_INSTALL:-}" == "true" ) ]]; then
+            portRef=${historyPort}
+        else
+            autoRead "${historyKey}" "读取到上次安装记录，${label}端口为 [${historyPort}]，是否使用？[y/n]:" historyPortStatus
+            [[ "${historyPortStatus}" == "y" ]] && portRef=${historyPort}
+        fi
+    fi
+
+    if [[ -z "${portRef}" ]]; then
+        if [[ "${singleProtocol}" == "true" ]]; then
+            echoContent yellow "请输入 ${label} 连接端口[回车默认 443]"
+            autoRead "${promptKey}" "${label} 连接端口:" portRef
+            portRef=${portRef:-443}
+        else
+            echoContent yellow "请输入 ${label} 连接端口[回车随机 10000-30000]"
+            autoRead "${promptKey}_subport" "${label} 连接端口:" portRef
+            portRef=${portRef:-$((RANDOM % 20001 + 10000))}
+        fi
+    fi
+
+    if ! validPortNumber "${portRef}"; then
+        errorCard "${label} 端口输入错误"
+        return 1
+    fi
+    checkPort "${portRef}" || return 1
+    if [[ "${transport}" == "tcp+udp" ]]; then
+        allowPortTcpAndUdp "${portRef}" || return 1
+    else
+        allowPort "${portRef}" || return 1
+    fi
+    if [[ "${coexistStatus}" == "0" ]]; then
+        statusCard "${label} 共存内部端口" "${portRef}"
+    else
+        statusCard "${label} 客户端连接端口" "${portRef}"
+    fi
+}
+
+initXrayRealityPort() {
+    initXrayRealityProtocolPort realityPort "${xrayVLESSRealityPort:-}" 1 reality_port reality_history_port "Reality" tcp vision
 }
 
 initXrayRealityGrpcPort() {
-    if [[ -n "${xrayVLESSRealityGRPCPort:-}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead reality_grpc_history_port "读取到上次安装记录，Reality gRPC端口为 [${xrayVLESSRealityGRPCPort}]，是否使用？[y/n]:" historyRealityGrpcPortStatus
-        if [[ "${historyRealityGrpcPortStatus}" == "y" ]]; then
-            realityGrpcPort=${xrayVLESSRealityGRPCPort}
-        fi
-    elif [[ -n "${xrayVLESSRealityGRPCPort:-}" && -n "${lastInstallationConfig}" ]]; then
-        realityGrpcPort=${xrayVLESSRealityGRPCPort}
-    fi
-
-    if [[ -z "${realityGrpcPort:-}" ]]; then
-        echoContent yellow "请输入端口[回车随机10000-30000]"
-        autoRead reality_port "端口:" realityGrpcPort
-        if [[ -z "${realityGrpcPort}" ]]; then
-            realityGrpcPort=$((RANDOM % 20001 + 10000))
-        fi
-        if ! validPortNumber "${realityGrpcPort}"; then
-            errorCard "Reality gRPC 端口输入错误"
-            return 1
-        fi
-        if [[ -n "${realityGrpcPort}" && "${xrayVLESSRealityGRPCPort:-}" == "${realityGrpcPort}" ]]; then
-            if ! runCoreServiceActionAllowFailure handleXray stop; then
-                errorCard "Xray 服务停止失败，无法复用当前 Reality gRPC 端口"
-                return 1
-            fi
-        else
-            checkPort "${realityGrpcPort}" || return 1
-        fi
-    fi
-    if [[ -z "${realityGrpcPort}" ]]; then
-        initXrayRealityGrpcPort || return 1
-    else
-        if ! validPortNumber "${realityGrpcPort}"; then
-            errorCard "Reality gRPC 端口输入错误"
-            return 1
-        fi
-        allowPort "${realityGrpcPort}" || return 1
-        statusCard "Reality gRPC 端口" "${realityGrpcPort}"
-    fi
+    initXrayRealityProtocolPort realityGrpcPort "${xrayVLESSRealityGRPCPort:-}" 26 reality_port reality_grpc_history_port "Reality gRPC"
 }
 
-# 初始化XHTTP端口
 initXrayXHTTPort() {
-    if [[ -n "${xrayVLESSRealityXHTTPort}" && -z "${lastInstallationConfig}" ]]; then
-        autoRead xhttp_history_port "读取到上次安装记录，Reality XHTTP端口为 [${xrayVLESSRealityXHTTPort}]，是否使用？[y/n]:" historyXHTTPortStatus
-        if [[ "${historyXHTTPortStatus}" == "y" ]]; then
-            xHTTPort=${xrayVLESSRealityXHTTPort}
-        fi
-    elif [[ -n "${xrayVLESSRealityXHTTPort}" && -n "${lastInstallationConfig}" ]]; then
-        xHTTPort=${xrayVLESSRealityXHTTPort}
-    fi
-
-    if [[ -z "${xHTTPort}" ]]; then
-
-        echoContent yellow "请输入端口[回车随机10000-30000]"
-        autoRead xhttp_port "端口:" xHTTPort
-        if [[ -z "${xHTTPort}" ]]; then
-            xHTTPort=$((RANDOM % 20001 + 10000))
-        fi
-        if ! validPortNumber "${xHTTPort}"; then
-            errorCard "Reality XHTTP 端口输入错误"
-            return 1
-        fi
-        if [[ -n "${xHTTPort}" && "${xrayVLESSRealityXHTTPort}" == "${xHTTPort}" ]]; then
-            if ! runCoreServiceActionAllowFailure handleXray stop; then
-                errorCard "Xray 服务停止失败，无法复用当前 Reality XHTTP 端口"
-                return 1
-            fi
-        else
-            checkPort "${xHTTPort}" || return 1
-        fi
-    fi
-    if [[ -z "${xHTTPort}" ]]; then
-        initXrayXHTTPort || return 1
-    else
-        if ! validPortNumber "${xHTTPort}"; then
-            errorCard "Reality XHTTP 端口输入错误"
-            return 1
-        fi
-        allowPortTcpAndUdp "${xHTTPort}" || return 1
-        statusCard "Reality XHTTP 端口" "${xHTTPort}"
-    fi
+    initXrayRealityProtocolPort xHTTPort "${xrayVLESSRealityXHTTPort:-}" 2 xhttp_port xhttp_history_port "Reality XHTTP" tcp+udp xhttp
 }

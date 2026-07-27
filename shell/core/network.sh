@@ -998,7 +998,11 @@ checkPort() {
     errorCard "${port}端口被占用"
     echoContent yellow "${portProcess}"
 
-    if echo "${portProcess}" | grep -qiE "xray|sing-box|/etc/padm"; then
+    if echo "${portProcess}" | grep -qiE "nginx|openresty"; then
+        statusCard "端口占用" "检测到 ${port} 端口被 Nginx/OpenResty 占用"
+        errorCard "为保护现有站点，安装不会停止 Nginx/OpenResty；请更换端口后重试"
+        return 1
+    elif echo "${portProcess}" | grep -qiE "xray|sing-box|/etc/padm"; then
         statusCard "端口占用" "检测到占用进程属于本脚本服务" "尝试自动停止后继续安装"
         if ! runCoreServiceActionAllowFailure handleXray stop >/dev/null 2>&1; then
             errorCard "Xray 服务停止失败，请手动处理${port}端口占用后重新执行"
@@ -1009,21 +1013,6 @@ checkPort() {
             return 1
         fi
         sleep 1
-    elif echo "${portProcess}" | grep -qiE "nginx|openresty"; then
-        statusCard "端口占用" "检测到 ${port} 端口被 Nginx/OpenResty 占用"
-        autoRead stop_port_service_confirm "是否停止该服务并继续安装？[y/n]:" stopPortProcessStatus
-        if [[ "${stopPortProcessStatus}" == "y" ]]; then
-            if ! runCoreServiceActionAllowFailure handleNginx stop >/dev/null 2>&1; then
-                errorCard "Nginx 服务停止失败，请手动处理${port}端口占用后重新执行"
-                return 1
-            fi
-            systemctl stop openresty >/dev/null 2>&1
-            systemctl stop nginx >/dev/null 2>&1
-            sleep 1
-        else
-            errorCard "已取消安装，请手动处理${port}端口占用后重新执行"
-            return 1
-        fi
     else
         autoRead stop_port_process_confirm "是否停止占用${port}端口的进程并继续安装？[y/n]:" stopPortProcessStatus
         if [[ "${stopPortProcessStatus}" == "y" ]]; then

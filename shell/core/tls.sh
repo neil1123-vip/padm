@@ -563,7 +563,7 @@ showTLSCertificateStatus() {
     remainingDays=$(jq -r '.remaining_days // ""' <<<"${statusJson}")
 
     if [[ "${status}" == "missing" ]]; then
-        tlsCertificateStatusCard "未检测到本机 TLS 证书" "定时续签：${cron}" "无域名 Reality 不需要这里；域名 Reality 或传统 TLS 请检查证书"
+        tlsCertificateStatusCard "未检测到本机 TLS 证书" "定时续签：${cron}" "Reality 不使用本机证书；传统 TLS、站点或订阅需要时请检查证书"
         return 0
     fi
     if [[ "${source}" == "custom" ]]; then
@@ -779,7 +779,7 @@ renewalTLS() {
     elif tlsCertificatePairExists "${tlsDir}" "${domain}"; then
         tlsCertificateCard "检测到使用自定义证书，无法执行 renew 操作"
     else
-        errorCard "未安装本机 TLS 证书；无域名 Reality 不需要这里，域名 Reality 或传统 TLS 请检查 acme 与 /etc/padm/tls"
+        errorCard "未安装本机 TLS 证书；Reality 不使用本机证书，传统 TLS、站点或订阅请检查 acme 与 /etc/padm/tls"
         return 1
     fi
 }
