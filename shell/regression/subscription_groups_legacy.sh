@@ -3117,6 +3117,10 @@ runXrayRealityPortFailureRegression() (
     local oldXrayXHTTPort="${xrayVLESSRealityXHTTPort:-}"
     local oldLastInstallationConfig="${lastInstallationConfig:-}"
     local allowCalls=0
+    local checkCalls=0
+    local streamEnabled=false
+    local rejectPort=
+    local beforeAllow beforeCheck singBoxPort singBoxPromptPort=
     local serviceLog="${xrayRoot}/service.log"
     local errorLog="${xrayRoot}/error.log"
     local allowMarker="${xrayRoot}/allow.log"
@@ -3159,9 +3163,30 @@ runXrayRealityPortFailureRegression() (
         printf 'allow:%s\n' "$*" >>"${allowMarker}"
         return 0
     }
+    allowPortTcpAndUdp() {
+        allowCalls=$((allowCalls + 1))
+        printf 'allow-both:%s\n' "$*" >>"${allowMarker}"
+        return 0
+    }
+    checkPort() {
+        checkCalls=$((checkCalls + 1))
+        [[ -z "${rejectPort}" || "$1" != "${rejectPort}" ]]
+    }
+    realityStreamSplitEnabled() { [[ "${streamEnabled}" == "true" ]]; }
+    realityStreamInternalPortForProtocol() {
+        case "$1" in
+        vision) printf '2443\n' ;;
+        xhttp) printf '2444\n' ;;
+        esac
+    }
+    realityStreamPublicPortForProtocol() { printf '443\n'; }
     handleXray() {
         printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
-        return 1
+        return 0
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        return 0
     }
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
@@ -3186,42 +3211,140 @@ runXrayRealityPortFailureRegression() (
     fi
     [[ "${allowCalls}" == "0" ]]
 
+    selectCustomInstallType=",1,"
     : >"${serviceLog}"
     : >"${errorLog}"
+    rm -f "${allowMarker}"
     realityPort=
     xHTTPort=
     xrayVLESSRealityPort=1443
-    lastInstallationConfig=
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    lastInstallationConfig=true
+    AUTO_PORT=2443
     autoRead() {
-        printf -v "$3" '1443'
+        case "$1" in
+        reality_port_subport) printf -v "$3" '15555' ;;
+        xhttp_port_subport) printf -v "$3" '15556' ;;
+        reality_subport) printf -v "$3" '%s' "${singBoxPromptPort}" ;;
+        *) printf -v "$3" '' ;;
+        esac
     }
+    initXrayRealityPort
+    [[ "${realityPort}" == "2443" ]]
+
+    AUTO_PORT=
+    realityPort=
+    initXrayRealityPort
+    [[ "${realityPort}" == "1443" ]]
+
+    lastInstallationConfig=
+    AUTO_INSTALL=true
+    realityPort=
+    initXrayRealityPort
+    [[ "${realityPort}" == "1443" ]]
+
+    singBoxPort=$(initSingBoxPort 1443 true tcp reality_subport 1 vision)
+    [[ "${singBoxPort}" == "1443" ]]
+    AUTO_INSTALL=
+    lastInstallationConfig=true
+
+    xrayVLESSRealityPort=
+    realityPort=
+    initXrayRealityPort
+    [[ "${realityPort}" == "443" ]]
+
+    selectCustomInstallType=",1,2,"
+    lastInstallationConfig=
+    AUTO_INSTALL=true
+    AUTO_PORT=7443
+    xrayVLESSRealityPort=1443
+    realityPort=
+    initXrayRealityPort
+    [[ "${realityPort}" == "15555" ]]
+    AUTO_INSTALL=
+    lastInstallationConfig=true
+
+    selectCustomInstallType=",1,"
+    AUTO_PORT=16666
+    realityPort=
+    rejectPort=16666
+    beforeAllow=${allowCalls}
     if initXrayRealityPort 2>/dev/null; then
         return 1
     fi
-    grep -qx 'xray:stop:true' "${serviceLog}"
-    grep -q '无法复用当前 Reality 端口' "${errorLog}"
-    [[ "${allowCalls}" == "0" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    [[ "${allowCalls}" == "${beforeAllow}" ]]
+    [[ ! -s "${serviceLog}" ]]
 
-    : >"${serviceLog}"
-    : >"${errorLog}"
+    rejectPort=
+    streamEnabled=true
+    AUTO_PORT=
     realityPort=
-    xHTTPort=
-    xrayVLESSRealityPort=
-    xrayVLESSRealityXHTTPort=2443
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
-    autoRead() {
-        printf -v "$3" '2443'
-    }
-    if initXrayXHTTPort 2>/dev/null; then
+    initXrayRealityPort
+    [[ "${realityPort}" == "2443" ]]
+
+    AUTO_PORT=443
+    realityPort=
+    initXrayRealityPort
+    [[ "${realityPort}" == "2443" ]]
+
+    AUTO_PORT=8443
+    realityPort=
+    beforeAllow=${allowCalls}
+    beforeCheck=${checkCalls}
+    if initXrayRealityPort 2>/dev/null; then
         return 1
     fi
-    grep -qx 'xray:stop:true' "${serviceLog}"
-    grep -q '无法复用当前 Reality XHTTP 端口' "${errorLog}"
-    [[ "${allowCalls}" == "0" ]]
-    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    [[ "${allowCalls}" == "${beforeAllow}" ]]
+    [[ "${checkCalls}" == "${beforeCheck}" ]]
+    [[ ! -s "${serviceLog}" ]]
 
+    selectCustomInstallType=",2,"
+    AUTO_PORT=443
+    xHTTPort=
+    initXrayXHTTPort
+    [[ "${xHTTPort}" == "2444" ]]
+
+    streamEnabled=false
+    selectCustomInstallType=",1,"
+    lastInstallationConfig=true
+    AUTO_PORT=3443
+    singBoxPort=$(initSingBoxPort 1443 true tcp reality_subport 1 vision)
+    [[ "${singBoxPort}" == "3443" ]]
+
+    AUTO_PORT=
+    singBoxPort=$(initSingBoxPort 1443 true tcp reality_subport 1 vision)
+    [[ "${singBoxPort}" == "1443" ]]
+
+    singBoxPort=$(initSingBoxPort '' true tcp reality_subport 1 vision)
+    [[ "${singBoxPort}" == "443" ]]
+
+    selectCustomInstallType=",1,26,"
+    lastInstallationConfig=
+    AUTO_INSTALL=true
+    AUTO_PORT=7443
+    singBoxPromptPort=15557
+    singBoxPort=$(initSingBoxPort 1443 true tcp reality_subport 1 vision)
+    [[ "${singBoxPort}" == "15557" ]]
+    AUTO_INSTALL=
+    lastInstallationConfig=true
+
+    streamEnabled=true
+    selectCustomInstallType=",1,"
+    AUTO_PORT=443
+    singBoxPort=$(initSingBoxPort '' true tcp reality_subport 1 vision)
+    [[ "${singBoxPort}" == "2443" ]]
+
+    AUTO_PORT=8443
+    beforeAllow=${allowCalls}
+    beforeCheck=${checkCalls}
+    if singBoxPort=$(initSingBoxPort '' true tcp reality_subport 1 vision 2>/dev/null); then
+        return 1
+    fi
+    [[ "${allowCalls}" == "${beforeAllow}" ]]
+    [[ "${checkCalls}" == "${beforeCheck}" ]]
+    [[ ! -s "${serviceLog}" ]]
+
+    streamEnabled=false
+    AUTO_PORT=
     selectCustomInstallType=",1,"
     xrayVLESSRealityPort=
     xrayVLESSRealityXHTTPort=
@@ -3270,9 +3393,11 @@ runRealityProfileFailureRegression() (
     local xrayRoot="${root}/xray/"
     local singBoxRoot="${root}/sing-box/"
     local entryHostFile="${root}/reality_entry_host"
+    local errorLog="${root}/error.log"
     local allowCalls=0
     local keyCalls=0
     local portReads=0
+    local dnsCalls=0
 
     mkdir -p "${xrayRoot}" "${singBoxRoot}"
     configPath="${xrayRoot}"
@@ -3285,6 +3410,7 @@ runRealityProfileFailureRegression() (
     AUTO_ENTRY_HOST=node.example.com
     AUTO_REALITY_TARGET=www.microsoft.com:443
     PADM_REALITY_ENTRY_HOST_FILE="${entryHostFile}"
+    : >"${errorLog}"
     realityPort=10888
     xHTTPort=10889
     singBoxVLESSRealityVisionPort=10890
@@ -3304,6 +3430,12 @@ runRealityProfileFailureRegression() (
         realityPublicKey=public
     }
     initRealityMldsa65() { return 0; }
+    checkDNSIP() {
+        dnsCalls=$((dnsCalls + 1))
+        return 0
+    }
+    getPublicIP() { printf '2001:db8::10\n'; }
+    errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     allowPort() {
         allowCalls=$((allowCalls + 1))
         return 0
@@ -3333,7 +3465,91 @@ runRealityProfileFailureRegression() (
         cat >"${outputFile}"
     }
 
+    AUTO_INSTALL=
+    AUTO_REALITY_DOMAIN=
+    AUTO_DOMAIN=domain.example.com
+    domain=legacy.example.com
+    currentHost=current.example.com
+    printf 'stored.example.com\n' >"${entryHostFile}"
+    realityEntryHost=
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "node.example.com" ]]
+
+    AUTO_ENTRY_HOST=
+    realityEntryHost=
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "domain.example.com" ]]
+
+    AUTO_DOMAIN=
+    domain=
+    realityEntryHost=
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "stored.example.com" ]]
+
+    rm -f "${entryHostFile}"
+    realityEntryHost=
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "current.example.com" ]]
+
+    currentHost=
+    realityEntryHost=
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "2001:db8::10" ]]
+
+    AUTO_INSTALL=true
+    AUTO_REALITY_DOMAIN=yes
+    realityEntryHost=
+    if collectEntryProfile 2>/dev/null; then
+        return 1
+    fi
+    grep -q '缺少入口域名' "${errorLog}"
+
+    AUTO_INSTALL=
+    autoRead() {
+        [[ "$1" == "entry_host" ]] || return 1
+        printf -v "$3" 'strict.example.com'
+    }
+    realityEntryHost=
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "strict.example.com" ]]
+    [[ "${dnsCalls}" == "1" ]]
+
+    configureRealityDomainMode ",1," domain
+    [[ "${realityOnlyWithDomain}" == "true" ]]
+    if configureRealityDomainMode ",2," domain 2>/dev/null; then return 1; fi
+    if configureRealityDomainMode ",26," domain 2>/dev/null; then return 1; fi
+    if configureRealityDomainMode ",1,2," domain 2>/dev/null; then return 1; fi
+
+    local sideEffectLog="${root}/strict-side-effects.log"
+    : >"${sideEffectLog}"
+    readLastInstallationConfig() { printf 'read-last\n' >>"${sideEffectLog}"; return 0; }
+    installTools() { printf 'install-tools\n' >>"${sideEffectLog}"; return 0; }
+    AUTO_INSTALL=true
+    AUTO_ENTRY_HOST=
+    AUTO_DOMAIN=
+    domain=
+    currentHost=
+    rm -f "${entryHostFile}"
+    if customXrayInstallApply 2 domain >/dev/null 2>&1; then return 1; fi
+    if customXrayInstallApply 26 domain >/dev/null 2>&1; then return 1; fi
+    if customXrayInstallApply 1,2 domain >/dev/null 2>&1; then return 1; fi
+    if customSingBoxInstallApply 26 domain >/dev/null 2>&1; then return 1; fi
+    if customXrayInstallApply 1 domain >/dev/null 2>&1; then return 1; fi
+    if customSingBoxInstallApply 1 domain >/dev/null 2>&1; then return 1; fi
+    [[ ! -s "${sideEffectLog}" ]]
+
+    AUTO_INSTALL=
+    AUTO_REALITY_DOMAIN=
+    realityOnlyWithDomain=
+    AUTO_ENTRY_HOST=node.example.com
+    AUTO_REALITY_TARGET=www.microsoft.com:443
+    realityEntryHost=
+    realityTargetHost=
+    realityTargetPort=
+    realitySNI=
     initRealityProfile
+    [[ ! -e "${entryHostFile}" ]]
+    persistRealityEntryProfile
     [[ "$(<"${entryHostFile}")" == "node.example.com" ]]
     rm -f "${entryHostFile}"
     AUTO_ENTRY_HOST='bad entry host'
@@ -3386,16 +3602,19 @@ runCoreTemplateReturnFailureRegression() (
     local nginxRoot="${root}/nginx"
     local firewallState="${root}/firewall.state"
     local firewallLog="${root}/firewall.log"
+    local entryHostFile="${root}/reality_entry_host"
     local mode=xray
     local xrayRc singBoxRc
     local stopRc writeCalls=0 serviceLog="${TMP_DIR}/core-template-service.log"
     local singBoxServiceRunning=true
+    local xrayServiceRunning=true
 
     mkdir -p "${xrayRoot}" "${singBoxRoot}" "${nginxRoot}"
     configPath="${xrayRoot}/"
     singBoxConfigPath="${singBoxRoot}/"
     nginxConfigPath="${nginxRoot}/"
     PADM_FIREWALL_STATE_FILE="${firewallState}"
+    PADM_REALITY_ENTRY_HOST_FILE="${entryHostFile}"
     : >"${firewallLog}"
     currentUUID=existing-user
     currentClients='[]'
@@ -3414,6 +3633,15 @@ runCoreTemplateReturnFailureRegression() (
     checkDNSIP() { return 0; }
     removeNginxDefaultConf() { return 0; }
     randomPathFunction() { currentPath=template-path; }
+    xrayRunning() { [[ "${xrayServiceRunning}" == "true" ]]; }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        if [[ "$1" == "stop" ]]; then
+            xrayServiceRunning=false
+        elif [[ "$1" == "start" ]]; then
+            xrayServiceRunning=true
+        fi
+    }
     singBoxRunning() { [[ "${singBoxServiceRunning}" == "true" ]]; }
     handleSingBox() {
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
@@ -3532,13 +3760,28 @@ runCoreTemplateReturnFailureRegression() (
     readLastInstallationConfig() { return 0; }
     installTools() { return 0; }
     installSingBox() { return 0; }
+    installSingBoxService() { return 0; }
+    serviceQueueRestart() { return 0; }
+    serviceQueueApply() { return 0; }
+    checkGFWStatue() { return 0; }
+    showAccounts() { return 0; }
+    collectEntryProfile() {
+        realityEntryHost=new-entry.example.com
+        return 0
+    }
     initSingBoxConfig() {
         local result=()
         readSingBoxPortResult result 10890 false
     }
-    cleanUp() { return 1; }
+    cleanUp() {
+        xrayServiceRunning=false
+        return 1
+    }
+    mode=install-failure
+    printf 'old-entry.example.com\n' >"${entryHostFile}"
     rm -f "${firewallState}"
     : >"${firewallLog}"
+    : >"${serviceLog}"
     set +e
     installSingBoxReality >/dev/null 2>&1
     stopRc=$?
@@ -3547,10 +3790,17 @@ runCoreTemplateReturnFailureRegression() (
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     grep -qx 'ufw:10890:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
+    [[ "$(<"${entryHostFile}")" == "old-entry.example.com" ]]
+    [[ "${xrayServiceRunning}" == "true" ]]
+    [[ "${singBoxServiceRunning}" == "true" ]]
+    grep -qx 'xray:start:true' "${serviceLog}"
+    grep -qx 'sing-box:stop:true' "${serviceLog}"
+    grep -qx 'sing-box:start:true' "${serviceLog}"
 
     mode=state-drift
     padmFirewallStateAdd "port:ufw:tcp:10890"
     : >"${firewallLog}"
+    : >"${serviceLog}"
     set +e
     installSingBoxReality >/dev/null 2>&1
     stopRc=$?
@@ -3559,6 +3809,9 @@ runCoreTemplateReturnFailureRegression() (
     grep -qx 'ufw:10890:tcp' "${firewallLog}"
     ! grep -q ':udp$' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
+    [[ "$(<"${entryHostFile}")" == "old-entry.example.com" ]]
+    [[ "${xrayServiceRunning}" == "true" ]]
+    [[ "${singBoxServiceRunning}" == "true" ]]
 
     autoRead() {
         case "$1" in
@@ -5265,6 +5518,8 @@ runNetworkCheckReturnFailureRegression() (
             case "${portProcessKind}" in
             padm) printf 'xray 123 root 3u IPv4 TCP *:8443 (LISTEN)\n' ;;
             nginx) printf 'nginx 123 root 3u IPv4 TCP *:8443 (LISTEN)\n' ;;
+            openresty) printf 'openresty 123 root 3u IPv4 TCP *:8443 (LISTEN)\n' ;;
+            mixed) printf 'nginx 123 root /etc/padm/site TCP *:8443 (LISTEN)\n' ;;
             other)
                 printf 'listener 123 root 3u IPv4 TCP *:8443 (LISTEN)\n'
                 printf 'client 456 root 4u IPv4 TCP 10.0.0.2:50000->198.51.100.10:8443 (ESTABLISHED)\n'
@@ -5311,9 +5566,10 @@ runNetworkCheckReturnFailureRegression() (
     grep -qx 'xray:stop:true' "${serviceLog}"
     grep -qx 'sing-box:stop:true' "${serviceLog}"
 
-    runCheckPortStopFailureCase nginx-stop-fail nginx
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    ! grep -q '^systemctl:' "${serviceLog}"
+    for portProcessKind in nginx openresty mixed; do
+        runCheckPortStopFailureCase nginx-stop-fail "${portProcessKind}"
+        [[ ! -s "${serviceLog}" ]]
+    done
 
     xargs() {
         [[ "$1" == "-r" && "$2" == "kill" ]] || return 1
@@ -5876,11 +6132,20 @@ runCoreInstallServiceActionFailureRegression() (
     local reachedFile="${root}/reached"
     local firewallState="${root}/firewall.state"
     local firewallLog="${root}/firewall.log"
+    local entryHostFile="${root}/reality_entry_host"
+    local xrayRoot="${root}/xray"
+    local singBoxRoot="${root}/sing-box"
+    local nginxRoot="${root}/nginx"
     local mode rc nginxRuntimeState
+    local xrayRuntimeState=false singBoxRuntimeState=false
 
-    mkdir -p "${root}"
+    mkdir -p "${xrayRoot}" "${singBoxRoot}" "${nginxRoot}"
     REGRESSION_ERROR_CARD_LOG="${errorLog}"
     PADM_FIREWALL_STATE_FILE="${firewallState}"
+    PADM_REALITY_ENTRY_HOST_FILE="${entryHostFile}"
+    configPath="${xrayRoot}/"
+    singBoxConfigPath="${singBoxRoot}/"
+    nginxConfigPath="${nginxRoot}/"
     errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
     protocolRegistryMenu() { return 0; }
     readLastInstallationConfig() { return 0; }
@@ -5965,10 +6230,20 @@ $1:restart"
         return 0
     }
     nginxRunning() { [[ "${nginxRuntimeState}" == "true" ]]; }
+    xrayRunning() { [[ "${xrayRuntimeState}" == "true" ]]; }
+    singBoxRunning() { [[ "${singBoxRuntimeState}" == "true" ]]; }
     handleXray() {
         printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
         [[ "${mode}" == "xray-stop-fail" && "$1" == "stop" ]] && return 1
         [[ "${mode}" == "xray-start-fail" && "$1" == "start" ]] && return 1
+        [[ "$1" == "stop" ]] && xrayRuntimeState=false
+        [[ "$1" == "start" ]] && xrayRuntimeState=true
+        return 0
+    }
+    handleSingBox() {
+        printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        [[ "$1" == "stop" ]] && singBoxRuntimeState=false
+        [[ "$1" == "start" ]] && singBoxRuntimeState=true
         return 0
     }
 
@@ -5985,8 +6260,15 @@ $1:restart"
         realityOnlyWithDomain=
         currentHost=install.example.com
         domain=install.example.com
+        AUTO_ENTRY_HOST=
+        AUTO_DOMAIN=
+        AUTO_REALITY_DOMAIN=
+        realityEntryHost=
         nginxRuntimeState=true
+        xrayRuntimeState=false
+        singBoxRuntimeState=false
         SERVICE_ACTIONS=
+        rm -f "${entryHostFile}"
     }
 
     resetInstallServiceFixture nginx-stop-fail
@@ -5994,12 +6276,34 @@ $1:restart"
     installXrayReality >/dev/null 2>&1
     rc=$?
     set -e
-    [[ "${rc}" == "1" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    ! grep -q '^installXray:' "${callLog}"
+    [[ "${rc}" == "0" ]]
+    ! grep -q '^nginx:' "${serviceLog}"
+    grep -q '^installXray:' "${callLog}"
     ! grep -q '^wg-refresh$' "${callLog}"
-    [[ ! -e "${reachedFile}" ]]
+    ! grep -q '^initTLS:' "${callLog}"
+    ! grep -q '^installTLS:' "${callLog}"
+    ! grep -q '^nginxBlog:' "${callLog}"
+    ! grep -q '^cron:' "${callLog}"
+    ! grep -q '^clean-nginx$' "${callLog}"
+    [[ -e "${reachedFile}" ]]
+    [[ "$(<"${entryHostFile}")" == "install.example.com" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    resetInstallServiceFixture singbox-reality-grpc
+    set +e
+    customSingBoxInstall 26 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    ! grep -q '^nginx:' "${serviceLog}"
+    ! grep -q '^initTLS:' "${callLog}"
+    ! grep -q '^installTLS:' "${callLog}"
+    ! grep -q '^nginxBlog:' "${callLog}"
+    ! grep -q '^cron:' "${callLog}"
+    grep -q '^installSingBox:' "${callLog}"
+    grep -qx 'cleanup:xrayDel' "${callLog}"
+    [[ -e "${reachedFile}" ]]
+    [[ "$(<"${entryHostFile}")" == "install.example.com" ]]
 
     resetInstallServiceFixture path-fail
     set +e
@@ -6035,14 +6339,11 @@ $1:restart"
     installXrayReality >/dev/null 2>&1
     rc=$?
     set -e
-    [[ "${rc}" == "1" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
-    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
-    grep -qx 'wg-refresh' "${callLog}"
-    ! grep -q '^installXray:' "${callLog}"
+    [[ "${rc}" == "0" ]]
+    ! grep -q '^nginx:' "${serviceLog}"
+    ! grep -q '^wg-refresh$' "${callLog}"
+    grep -q '^installXray:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
-    grep -q 'WireGuard Nginx 控制面刷新失败，已恢复原 Nginx 运行状态' "${errorLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     resetInstallServiceFixture xray-config-fail
@@ -6052,15 +6353,13 @@ $1:restart"
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}"
-    grep -qx 'wg-refresh' "${callLog}"
-    grep -qx 'queueRestart:nginx' "${callLog}"
+    ! grep -q '^nginx:' "${serviceLog}"
+    ! grep -q '^wg-refresh$' "${callLog}"
+    ! grep -q '^queueRestart:nginx$' "${callLog}"
     grep -qx 'initXrayConfig:custom 3' "${callLog}"
     ! grep -q '^cleanup:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
     [[ "${SERVICE_ACTIONS}" == "existing:start" ]]
-    grep -q 'Xray Reality 配置初始化失败，已恢复原 Nginx 运行状态' "${errorLog}"
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
 
     for mode in xray-install-exit xray-service-fail; do
@@ -6070,10 +6369,9 @@ $1:restart"
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
-        grep -qx 'nginx:stop:true' "${serviceLog}"
-        grep -qx 'nginx:start:true' "${serviceLog}"
-        grep -qx 'wg-refresh' "${callLog}"
-        grep -qx 'queueRestart:nginx' "${callLog}"
+        ! grep -q '^nginx:' "${serviceLog}"
+        ! grep -q '^wg-refresh$' "${callLog}"
+        ! grep -q '^queueRestart:nginx$' "${callLog}"
         grep -q '^installXray:' "${callLog}"
         if [[ "${mode}" == "xray-service-fail" ]]; then
             grep -q '^installXrayService:' "${callLog}"
@@ -6090,9 +6388,7 @@ $1:restart"
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    grep -qx 'nginx:stop:true' "${serviceLog}"
-    grep -qx 'nginx:start:true' "${serviceLog}" || return 1
-    grep -qx 'nginx-mode:start restore' "${serviceLog}" || return 1
+    ! grep -q '^nginx:' "${serviceLog}"
     [[ "${nginxRuntimeState}" == "true" ]] || return 1
 
     resetInstallServiceFixture nginx-start-fail
@@ -6137,7 +6433,12 @@ $1:restart"
     rc=$?
     set -e
     [[ "${rc}" == "0" ]]
-    grep -qx 'clean-nginx' "${callLog}"
+    ! grep -q '^clean-nginx$' "${callLog}"
+    ! grep -q '^initTLS:' "${callLog}"
+    ! grep -q '^installTLS:' "${callLog}"
+    ! grep -q '^nginxBlog:' "${callLog}"
+    ! grep -q '^cron:' "${callLog}"
+    ! grep -q '^nginx:' "${serviceLog}"
     grep -q '^installXray:' "${callLog}"
     [[ -e "${reachedFile}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
@@ -6905,7 +7206,11 @@ runCoreCleanupFailurePropagationRegression() (
     local queueLog="${root}/queue.log"
     local rc
 
-    mkdir -p "${root}"
+    mkdir -p "${root}/xray" "${root}/sing-box" "${root}/nginx"
+    configPath="${root}/xray/"
+    singBoxConfigPath="${root}/sing-box/"
+    nginxConfigPath="${root}/nginx/"
+    PADM_REALITY_ENTRY_HOST_FILE="${root}/reality_entry_host"
     : >"${serviceLog}"
     : >"${rmLog}"
     : >"${errorLog}"
@@ -6917,6 +7222,7 @@ runCoreCleanupFailurePropagationRegression() (
     }
     handleXray() {
         printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
+        printf 'cleanup\n' >>"${queueLog}"
         return 1
     }
     handleSingBox() {
@@ -6941,6 +7247,8 @@ runCoreCleanupFailurePropagationRegression() (
     : >"${queueLog}"
     command rm -f "${reachedFile}"
     readLastInstallationConfig() { return 0; }
+    collectEntryProfile() { realityEntryHost=cleanup.example.com; return 0; }
+    persistRealityEntryProfile() { printf 'persist\n' >>"${queueLog}"; return 0; }
     unInstallSubscribe() { return 0; }
     installTools() { return 0; }
     installSingBox() { return 0; }
@@ -6955,6 +7263,7 @@ runCoreCleanupFailurePropagationRegression() (
         return 0
     }
     checkGFWStatue() {
+        printf 'check\n' >>"${queueLog}"
         printf 'reached\n' >"${reachedFile}"
         return 0
     }
@@ -6969,9 +7278,9 @@ runCoreCleanupFailurePropagationRegression() (
     set -e
     [[ "${rc}" == "1" ]]
     grep -qx 'xray:stop:true' "${serviceLog}"
-    [[ ! -s "${rmLog}" ]]
-    [[ ! -s "${queueLog}" ]]
-    [[ ! -e "${reachedFile}" ]]
+    ! grep -q '/etc/padm/xray' "${rmLog}"
+    [[ "$(<"${queueLog}")" == $'restart:sing-box\napply\npersist\ncheck\ncleanup' ]]
+    [[ -e "${reachedFile}" ]]
 )
 
 runReloadCorePropagationRegression() (
@@ -7630,6 +7939,31 @@ SH
     nginxConfigPath="${serviceTmp}/nginx/"
     selectCustomInstallType=",1,"
     protocolSelectionSkipsNginx() { return 0; }
+    subscriptionWireGuardControlEnabled() { return 1; }
+    local streamFallbackFile="${serviceTmp}/padm-reality.conf"
+    local nginxFallbackFile
+    realityStreamSplitConfFile() { printf '%s\n' "${streamFallbackFile}"; }
+    command() {
+        if [[ "$1" == "-v" && "$2" == "jq" ]]; then
+            return 1
+        fi
+        builtin command "$@"
+    }
+    subscriptionWireGuardControlEnabled() { return 0; }
+    if nginxRuntimeRequired; then
+        return 1
+    fi
+    for nginxFallbackFile in \
+        "${streamFallbackFile}" \
+        "${nginxConfigPath}alone.conf" \
+        "${nginxConfigPath}sing_box_VMess_HTTPUpgrade.conf" \
+        "${nginxConfigPath}subscribe.conf" \
+        "${nginxConfigPath}padm-control-wg.conf"; do
+        : >"${nginxFallbackFile}"
+        nginxRuntimeRequired
+        rm -f "${nginxFallbackFile}"
+    done
+    unset -f command
     subscriptionWireGuardControlEnabled() { return 1; }
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     handleNginx start >/dev/null 2>&1
@@ -15854,6 +16188,8 @@ runMenuSmokeLightRegression() {
     showAccounts() { recordMenuAction showAccounts; }
     installTools() { recordMenuAction installTools; }
     readLastInstallationConfig() { recordMenuAction readLastInstallationConfig; }
+    collectEntryProfile() { realityEntryHost=smoke.example.com; recordMenuAction collectEntryProfile; }
+    persistRealityEntryProfile() { recordMenuAction persistRealityEntryProfile; }
     unInstallSubscribe() { recordMenuAction unInstallSubscribe; }
     handleNginx() { recordMenuAction "handleNginx:$*"; }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
@@ -15861,9 +16197,11 @@ runMenuSmokeLightRegression() {
     subscriptionWireGuardControlEnabled() { return 0; }
     refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; }
     installXrayReality
-    assertMenuAction 'handleNginx:stop'
-    assertMenuAction refreshSubscriptionWireGuardNginxControl
+    ! grep -q '^handleNginx:' <<<"${actions}"
+    ! assertMenuAction refreshSubscriptionWireGuardNginxControl
     assertMenuAction serviceQueueApply
+    assertMenuAction persistRealityEntryProfile
+    [[ "${actions}" == *$'serviceQueueApply\npersistRealityEntryProfile\ncheckGFWStatue\ncleanUp\nshowAccounts\n'* ]]
     resetMenuActions
     output=
     systemScriptMenu <<<"3"
@@ -16749,7 +17087,7 @@ runInstallToolsCertificateDependencyRegression() {
     upgrade=true
     updateReleaseInfoChange=true
     packageManager=apt
-    selectCustomInstallType=",7,"
+    selectCustomInstallType=",1,"
     realityOnlyWithDomain=
     command() {
         if [[ "$1" == "-v" && "$2" == "qrencode" ]]; then
@@ -16772,6 +17110,16 @@ runInstallToolsCertificateDependencyRegression() {
 
     : >"${statusLog}"
     realityOnlyWithDomain=true
+    installTools 1
+    grep -q "跳过安装 acme.sh" "${statusLog}"
+
+    for selectCustomInstallType in ",1," ",2," ",26,"; do
+        ! protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"
+    done
+
+    : >"${statusLog}"
+    selectCustomInstallType=",3,"
+    realityOnlyWithDomain=
     installTools 1
     ! grep -q "跳过安装 acme.sh" "${statusLog}"
 

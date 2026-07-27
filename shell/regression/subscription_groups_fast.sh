@@ -1076,6 +1076,23 @@ runAutoInstallTlsDomainMissingReturnsRegression() {
         grep -q '域名不可为空' "${logFile}"
         ! grep -q 'initVar' "${logFile}"
         ! grep -q 'mkdirTools' "${logFile}"
+
+        local protocols
+        for protocols in 2 26 1,2; do
+            : >"${logFile}"
+            parseInstallArgs --install-type custom --core xray --protocols "${protocols}" --reality-domain yes --entry-host strict.example.com
+            set +e
+            autoInstallValidateRequiredInputs
+            status=$?
+            set -e
+            [[ "${status}" -ne 0 ]]
+            grep -q '仅支持单选 Reality Vision' "${logFile}"
+            ! grep -q 'initVar' "${logFile}"
+            ! grep -q 'mkdirTools' "${logFile}"
+        done
+
+        parseInstallArgs --install-type custom --core sing-box --protocols 1 --reality-domain yes --entry-host strict.example.com
+        autoInstallValidateRequiredInputs
     )
 }
 
@@ -2092,6 +2109,8 @@ runMenuSmokeLightRegression() {
     showAccounts() { recordMenuAction showAccounts; }
     installTools() { recordMenuAction installTools; }
     readLastInstallationConfig() { recordMenuAction readLastInstallationConfig; }
+    collectEntryProfile() { realityEntryHost=smoke.example.com; recordMenuAction collectEntryProfile; }
+    persistRealityEntryProfile() { recordMenuAction persistRealityEntryProfile; }
     unInstallSubscribe() { recordMenuAction unInstallSubscribe; }
     handleNginx() { recordMenuAction "handleNginx:$*"; }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
@@ -2099,9 +2118,11 @@ runMenuSmokeLightRegression() {
     subscriptionWireGuardControlEnabled() { return 0; }
     refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; }
     installXrayReality
-    assertMenuAction 'handleNginx:stop'
-    assertMenuAction refreshSubscriptionWireGuardNginxControl
+    ! grep -q '^handleNginx:' <<<"${actions}"
+    ! assertMenuAction refreshSubscriptionWireGuardNginxControl
     assertMenuAction serviceQueueApply
+    assertMenuAction persistRealityEntryProfile
+    [[ "${actions}" == *$'serviceQueueApply\npersistRealityEntryProfile\ncheckGFWStatue\ncleanUp\nshowAccounts\n'* ]]
     resetMenuActions
     output=
     systemScriptMenu <<<"3"

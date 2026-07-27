@@ -65,6 +65,8 @@ runRegressionUiSmokeSuiteRoot() {
     showAccounts() { recordMenuAction showAccounts; }
     installTools() { recordMenuAction installTools; }
     readLastInstallationConfig() { recordMenuAction readLastInstallationConfig; }
+    collectEntryProfile() { realityEntryHost=smoke.example.com; recordMenuAction collectEntryProfile; }
+    persistRealityEntryProfile() { recordMenuAction persistRealityEntryProfile; }
     unInstallSubscribe() { recordMenuAction unInstallSubscribe; }
     handleNginx() { recordMenuAction "handleNginx:$*"; }
     serviceQueueRestart() { recordMenuAction "serviceQueueRestart:$*"; }
@@ -72,9 +74,11 @@ runRegressionUiSmokeSuiteRoot() {
     subscriptionWireGuardControlEnabled() { return 0; }
     refreshSubscriptionWireGuardNginxControl() { recordMenuAction refreshSubscriptionWireGuardNginxControl; }
     installXrayReality
-    assertMenuAction 'handleNginx:stop'
-    assertMenuAction refreshSubscriptionWireGuardNginxControl
+    ! grep -q '^handleNginx:' <<<"${actions}"
+    ! assertMenuAction refreshSubscriptionWireGuardNginxControl
     assertMenuAction serviceQueueApply
+    assertMenuAction persistRealityEntryProfile
+    [[ "${actions}" == *$'serviceQueueApply\npersistRealityEntryProfile\ncheckGFWStatue\ncleanUp\nshowAccounts\n'* ]]
 
     resetMenuActions
     output=
