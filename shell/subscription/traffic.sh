@@ -372,7 +372,7 @@ showSubscriptionTrafficOverview() {
 
 
 manageTrafficAndQuota() {
-    subscriptionRequireMainRole || return 1
+    subscriptionRequireLocalPublisherRole || return 1
     while true; do
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
         menuLine "这里是用量治理台：先刷新统计，再看总览、预览并执行超限处理"

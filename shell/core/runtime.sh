@@ -859,18 +859,18 @@ showInstallArgsHelp() {
 ├─ 新人三步走
 │ 1. 推荐直连: bash install.sh --install-type custom --core xray --protocols 1 --entry-host node.example.com --reality-target www.ibm.com:443
 │ 2. 推荐 XHTTP: bash install.sh --install-type custom --core xray --protocols 2 --entry-host cdn.example.com --reality-target www.ibm.com:443
-│ 3. 安装后: 运行 padm -> 订阅与用户；未初始化先选主控或被控，主控走 发布订阅 / 多服务器协同，被控走 接入主控 / 查看本机状态
+│ 3. 安装后: 运行 padm -> 订阅与用户；可选本机单独使用、主控或被控
 ├─ 交互菜单路径
 │ 安装与重装: 含新手选择指引，推荐直连/CDN/无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装
-│ 订阅与用户: 按角色切成三态；未初始化先选主控/被控，主控和被控分别进入独立首页
+│ 订阅与用户: 未启用拓扑时可直接管理本机，也可初始化主控或被控
 │ 协议与入口: REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口
 │ 站点与证书: 传统 TLS fallback 站点、302、ALPN 和证书
 │ 路由与访问控制: 分流、BT、域名/IP 阻断、直连例外和区域阻断
 │ 核心与服务: Xray/sing-box 生命周期、配置校验、服务控制和日志
 │ 系统与脚本: 更新 padm、网络优化和宿主机辅助项
 ├─ 正式子命令
-│ bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
-│ 仅安装或更新 HTTPS 订阅发布服务，适合自动化验收；需要已有核心协议配置
+│ bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-port 39778 --install-nginx yes
+│ 独立确保订阅 TLS 证书与 HTTPS 发布；缺证书时可复用 --tls-ca / --dns-api 参数签发
 ├─ 关键概念
 │ TLS 域名/端口: 普通 TLS 协议入口；当前不作为新人首选，传统 TLS 类协议存在更高识别风险
 │ Reality entry: 客户端实际连接地址，通常是自有域名、CDN 入口或服务器 IP
@@ -888,7 +888,7 @@ showInstallArgsHelp() {
 │ --list-protocols                        列出可安装公网节点能力
 │ --list-capabilities                     列出公网节点、内部能力和上游已知能力
 │ --show-risky-protocols                  列出带风险提示的高级公网节点能力
-│ --domain <domain>                       TLS 域名
+│ --domain <domain>                       TLS 域名；InstallSubscription 中专指订阅 HTTPS 域名
 │ --port <port>                           TLS 入口端口；单选 Reality 为客户端连接端口，默认 443
 │ --tls-ca <letsencrypt|zerossl|buypass>  证书 CA，默认 letsencrypt
 │ --dns-api <yes|no|y|n>                  是否使用 DNS API 申请证书

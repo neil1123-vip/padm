@@ -23,6 +23,7 @@ trap 'rm -rf "${TMP_DIR}"' EXIT
 
 export PADM_SUBSCRIPTION_GROUPS_DIR="${TMP_DIR}/subscribe_groups"
 export PADM_SUBSCRIBE_LOCAL_DIR="${TMP_DIR}/subscribe_local"
+export PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/wireguard"
 export PADM_VLESS_ENCRYPTION_STATE_FILE="${TMP_DIR}/vless_encryption.json"
 export PADM_REALITY_TARGET_RESULTS_FILE="${TMP_DIR}/reality_targets_results.tsv"
 export PADM_REALITY_TARGET_SCAN_FILE="${PADM_REALITY_TARGET_RESULTS_FILE}"

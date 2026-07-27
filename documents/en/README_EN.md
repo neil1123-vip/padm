@@ -98,8 +98,10 @@ PADM_CLOUDFLARE_API_TOKEN=<token> PADM_CLOUDFLARE_ZONE_ID=<zone_id> bash install
 Install or refresh only the HTTPS subscription publishing service for an existing node:
 
 ```bash
-bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
+bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-port 39778 --install-nginx yes
 ```
+
+Subscription publishing manages its own TLS domain and certificate; it never implicitly uses the Reality entry or the traditional TLS domain. A matching usable certificate is reused. If no certificate exists, pass the same `--tls-ca`, `--dns-api`, and provider credential options shown above to issue one. Custom certificates can be reused but must be renewed externally.
 
 ## System Requirements
 
@@ -122,7 +124,7 @@ padm groups the main menu by task object. Each feature has one primary home:
 | Menu | Responsibility |
 | --- | --- |
 | 🚀 Install & reinstall | New-user guidance; recommended direct, recommended CDN, no-domain Reality, NaiveProxy, custom install, and traditional TLS compatibility install. |
-| 🔗 Subscriptions & users | Choose controller/controlled role first, then handle subscription publishing, multi-server coordination, quota, sync, and backups. |
+| 🔗 Subscriptions & users | Use the host locally or initialize a controller/controlled role, then handle subscription publishing, multi-server coordination, quota, sync, and backups. |
 | 🧭 Protocols & entry | REALITY, XHTTP, Hysteria2, Tuic, entry ports, and CDN entry addresses. |
 | 🔐 Sites & certificates | Traditional TLS fallback sites, 302 redirects, ALPN diagnostics/repair, and local TLS certificates. |
 | 🧱 Routing & access control | WARP, IPv6, Socks5, DNS/hosts, BT blocking, domain/IP blocking, direct exceptions, and regional blocking. |

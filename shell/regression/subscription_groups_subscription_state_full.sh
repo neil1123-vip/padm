@@ -216,7 +216,7 @@ runSubscriptionGroupStateStructureMigrationRegression() {
         summaryOutput=$(showSubscriptionGroupsStateSummary)
         [[ "${summaryOutput}" == *"当前组：Edge Group(edge-group)"* ]]
         [[ "${summaryOutput}" == *"分享订阅：1 个，启用 1 个"* ]]
-        [[ "${summaryOutput}" == *"服务器源：2 个，启用远端 1 个"* ]]
+        [[ "${summaryOutput}" == *"服务器源：1 个，启用远端 0 个"* ]]
     )
 
     (
@@ -699,7 +699,7 @@ prepareSubscriptionRemoteRestoreSelfReferenceFixture() {
     PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/subscription-state-wireguard"
     mkdir -p "$(subscriptionWireGuardDir)"
     cat >"$(subscriptionWireGuardStateFile)" <<'JSON'
-{"enabled":true,"role":"main","address":"10.77.0.1/24","peers":[]}
+{"enabled":true,"role":"main","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"firewall_owned":false,"address":"10.77.0.1/24","endpoint_host":"self.example.com","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","peers":[]}
 JSON
     mkdir -p "$(subscriptionGroupsDir)"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
@@ -1326,8 +1326,9 @@ JSON
     [[ ! -e "${remoteLog}" ]]
     [[ ! -e "${reconcileLog}" ]]
     grep -q '本机同步计划应用失败' "${resultFailures}"
-    grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
+    ! grep -q '已跳过被控服务器同步' "${resultFailures}"
     grep -q '本机同步未完全完成' "${statusLog}"
+    ! grep -q '被控服务器' "${statusLog}"
     grep -qx 'partial' "${resultStatus}"
     if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
@@ -1430,8 +1431,9 @@ JSON
     grep -qx '<empty>' "${reconcileLog}"
     grep -qx 'true' "${reconcileLog}"
     grep -q '本机同步后服务重建失败，已恢复旧配置' "${resultFailures}"
-    grep -q '本机同步未完成，已跳过被控服务器同步' "${resultFailures}"
+    ! grep -q '已跳过被控服务器同步' "${resultFailures}"
     grep -q '本机同步未完全完成' "${statusLog}"
+    ! grep -q '被控服务器' "${statusLog}"
     grep -qx 'partial' "${resultStatus}"
     if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
@@ -1469,6 +1471,7 @@ JSON
     originalConfig=$(<"${syncConfigFile}")
 
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+    subscriptionRemoteScopeEnabled() { return 0; }
     subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
@@ -1546,6 +1549,7 @@ JSON
 JSON
 
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+    subscriptionRemoteScopeEnabled() { return 0; }
     subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
@@ -1830,92 +1834,14 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
         [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "1" ]]
     )
 
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 0
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 1
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 0
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        grep -qx 'read' "${callLog}"
-        grep -qx 'install' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "3" ]]
-    )
-
-    (
-        : >"${callLog}"
-        subscribePort=
-        reloadCore() {
-            printf 'reload\n' >>"${callLog}"
-            return 0
-        }
-        readNginxSubscribe() {
-            printf 'read\n' >>"${callLog}"
-            subscribePort=39778
-        }
-        installSubscriptionControlService() {
-            printf 'install\n' >>"${callLog}"
-            return 0
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
-        serviceQueueRestart() {
-            printf 'restart:%s\n' "$1" >>"${callLog}"
-            return 0
-        }
-        serviceQueueApply() {
-            printf 'apply\n' >>"${callLog}"
-            return 1
-        }
-        subscribe() {
-            printf 'subscribe:%s\n' "$*" >>"${callLog}"
-            return 0
-        }
-        set +e
-        subscriptionSyncReconcileLocalServices
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        grep -qx 'reload' "${callLog}"
-        grep -qx 'read' "${callLog}"
-        grep -qx 'install' "${callLog}"
-        grep -qx 'ensure' "${callLog}"
-        grep -qx 'restart:nginx' "${callLog}"
-        grep -qx 'apply' "${callLog}"
-        [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "6" ]]
-    )
+    : >"${callLog}"
+    reloadCore() {
+        printf 'reload\n' >>"${callLog}"
+        return 0
+    }
+    subscriptionSyncReconcileLocalServices
+    grep -qx 'reload' "${callLog}"
+    [[ "$(wc -l <"${callLog}" | tr -d ' ')" == "1" ]]
 )
 
 runSubscriptionGroupsRestoreFailureRegression() (

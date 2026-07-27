@@ -2408,20 +2408,25 @@ renderAllSubscribeUserOutputs() {
     local email emailMd5 currentDomain account
     local publishAccounts=
     local existingMd5s='[]'
+    local remoteScopeEnabled=false
+
+    subscriptionRemoteScopeEnabled && remoteScopeEnabled=true
 
     SUBSCRIPTION_PUBLISH_ACCOUNTS=
     SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=
     if [[ -n "${publishAccountsOverride}" ]]; then
         publishAccounts=${publishAccountsOverride}
         SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=1
-        while IFS= read -r account; do
-            [[ -n "${account}" ]] || continue
-            if subscriptionPublishHasRemoteSources "${account}" 2>/dev/null; then
-                SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
-                break
-            fi
-        done <<<"${publishAccounts}"
-        if [[ "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
+        if [[ "${remoteScopeEnabled}" == "true" ]]; then
+            while IFS= read -r account; do
+                [[ -n "${account}" ]] || continue
+                if subscriptionPublishHasRemoteSources "${account}" 2>/dev/null; then
+                    SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
+                    break
+                fi
+            done <<<"${publishAccounts}"
+        fi
+        if [[ "${remoteScopeEnabled}" == "true" && "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
             subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .enabled == true and .transport != "wireguard")' >/dev/null 2>&1
             SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
         fi
@@ -2500,8 +2505,10 @@ subscriptionPublishAccounts() {
     local allowsMain
     local hasRemote
     local mainPublishSourceAvailable=false
+    local remoteScopeEnabled=false
 
     SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=1
+    subscriptionRemoteScopeEnabled && remoteScopeEnabled=true
     localBase=${localBase:-$(subscribeLocalBaseDir)}
     if [[ -d "${localBase}/default" ]]; then
         while IFS= read -r defaultFile; do
@@ -2519,7 +2526,7 @@ subscriptionPublishAccounts() {
             stagedAccounts+="${account}"$'\n'
             continue
         fi
-        if [[ "${hasRemote}" == "true" ]]; then
+        if [[ "${remoteScopeEnabled}" == "true" && "${hasRemote}" == "true" ]]; then
             SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
             stagedAccounts+="${account}"$'\n'
         fi
@@ -2601,7 +2608,7 @@ renderSubscribeUserOutputs() {
         padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
-    if [[ "${updateRemoteStatus}" == "y" ]]; then
+    if [[ "${updateRemoteStatus}" == "y" ]] && subscriptionRemoteScopeEnabled; then
         if ! PADM_SUBSCRIBE_DIR="${stageDir}" updateRemoteSubscribe "${emailMd5}" "${email}"; then
             padmRemoveCleanupPath "${stageDir}"
             return 1

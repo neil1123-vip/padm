@@ -145,6 +145,13 @@ padmTrackPortAllowTransactionKey() {
     PADM_PORT_ALLOW_TRANSACTION_KEYS+="${key}"$'\n'
 }
 
+padmUntrackPortAllowTransactionKey() {
+    local key=$1
+    [[ "${PADM_PORT_ALLOW_TRANSACTION_ACTIVE:-}" == "true" ]] || return 0
+    PADM_PORT_ALLOW_TRANSACTION_KEYS=$(awk -v key="${key}" '$0 != key' <<<"${PADM_PORT_ALLOW_TRANSACTION_KEYS:-}")
+    [[ -z "${PADM_PORT_ALLOW_TRANSACTION_KEYS}" ]] || PADM_PORT_ALLOW_TRANSACTION_KEYS+=$'\n'
+}
+
 removeFirewallPortRule() {
     local backend=$1
     local requestedPort=$2

@@ -98,8 +98,10 @@ PADM_CLOUDFLARE_API_TOKEN=<token> PADM_CLOUDFLARE_ZONE_ID=<zone_id> bash install
 已有节点只补装或刷新 HTTPS 订阅发布服务：
 
 ```bash
-bash install.sh InstallSubscription --subscribe-port 39778 --install-nginx yes
+bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-port 39778 --install-nginx yes
 ```
+
+订阅发布独立管理自己的 TLS 域名和证书，不会自动使用 Reality entry 或传统 TLS 域名。已有匹配且可用的证书会直接复用；缺少证书时可继续传入上面的 `--tls-ca`、`--dns-api` 和服务商凭据参数完成签发。自定义证书可复用，但需自行续期。
 
 ## 系统要求
 
@@ -122,7 +124,7 @@ padm 主菜单按任务对象分组，一个功能只放在一个主要入口里
 | 菜单 | 负责什么 |
 | --- | --- |
 | 🚀 安装与重装 | 新手选择指引；推荐直连、推荐 CDN、无域名 Reality、NaiveProxy、自定义安装、传统 TLS 兼容安装。 |
-| 🔗 订阅与用户 | 先按主控/被控确定角色，再处理发布订阅、多服务器协同、用量限额、同步和备份恢复。 |
+| 🔗 订阅与用户 | 可本机单独使用，也可初始化主控/被控，再处理发布订阅、多服务器协同、用量限额、同步和备份恢复。 |
 | 🧭 协议与入口 | REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口地址。 |
 | 🔐 站点与证书 | 传统 TLS fallback 站点、302 重定向、ALPN 诊断/修复和本机 TLS 证书。 |
 | 🧱 路由与访问控制 | WARP、IPv6、Socks5、DNS/hosts、BT 阻断、域名/IP 阻断、直连例外和区域阻断。 |

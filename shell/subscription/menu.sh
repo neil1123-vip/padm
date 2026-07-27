@@ -7,12 +7,19 @@ showSubscriptionServerRoleSummary() {
     local enabledText
     local address
     local peerCount
-    state=$(subscriptionWireGuardReadState)
+    state=$(subscriptionWireGuardReadState) || {
+        errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)"
+        return 1
+    }
     role=$(jq -r '.role' <<<"${state}")
     case "${role}" in
     main) roleText="主控" ;;
     controlled) roleText="被控" ;;
-    *) roleText="未配置主控/被控" ;;
+    uninitialized)
+        menuLine "多服务器角色：$(uiStyle value "未启用")；可直接使用本机订阅"
+        return 0
+        ;;
+    *) return 1 ;;
     esac
     if [[ "$(jq -r '.enabled' <<<"${state}")" == "true" ]]; then
         enabledText="已启用"
@@ -26,10 +33,31 @@ showSubscriptionServerRoleSummary() {
 
 subscriptionCurrentRoleNormalized() {
     local role
-    role=$(subscriptionWireGuardRole 2>/dev/null || printf 'uninitialized')
+    role=$(subscriptionWireGuardRole) || return 1
     case "${role}" in
-    main | controlled) printf '%s' "${role}" ;;
-    *) printf 'uninitialized' ;;
+    uninitialized | main | controlled) printf '%s' "${role}" ;;
+    *) return 1 ;;
+    esac
+}
+
+subscriptionRemoteScopeEnabled() {
+    local state
+    state=$(subscriptionWireGuardReadState) || return 1
+    jq -e '.role == "main" and .enabled == true' <<<"${state}" >/dev/null 2>&1
+}
+
+subscriptionRequireLocalPublisherRole() {
+    local role
+    role=$(subscriptionCurrentRoleNormalized) || {
+        errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)"
+        return 1
+    }
+    case "${role}" in
+    uninitialized | main) return 0 ;;
+    controlled)
+        errorCard "当前机器已初始化为被控" "被控不能安装公网订阅服务、执行本机同步或修改本机订阅状态"
+        return 1
+        ;;
     esac
 }
 
@@ -53,7 +81,10 @@ ensureSubscriptionServiceForSharedLinks() {
     subscribePort=
     subscribeDomain=
     subscribeType=
-    readNginxSubscribe
+    if ! readNginxSubscribe; then
+        errorCard "订阅 Nginx 配置损坏" "请先修复受管 subscribe.conf，再生成分享链接"
+        return 2
+    fi
     if [[ -n "${subscribePort:-}" ]]; then
         return 0
     fi
@@ -105,7 +136,10 @@ runSubscriptionEventSyncIfEnabled() {
 
 subscriptionRequireMainRole() {
     local role
-    role=$(subscriptionCurrentRoleNormalized)
+    role=$(subscriptionCurrentRoleNormalized) || {
+        errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)"
+        return 1
+    }
     case "${role}" in
     main) return 0 ;;
     controlled)
@@ -121,7 +155,10 @@ subscriptionRequireMainRole() {
 
 subscriptionRequireControlledRole() {
     local role
-    role=$(subscriptionCurrentRoleNormalized)
+    role=$(subscriptionCurrentRoleNormalized) || {
+        errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)"
+        return 1
+    }
     case "${role}" in
     controlled) return 0 ;;
     main)
@@ -139,17 +176,68 @@ manageSubscriptionRoleSelection() {
     while true; do
         echoContent title "\n┌─ 订阅与用户 ───────────────────────────────────────"
         showSubscriptionServerRoleSummary
-        menuLine "这里先确定这台机器要承担的订阅角色。"
-        menuLine "建议按实际用途选择主控或被控；初始化完成后会自动进入对应首页。"
-        menuItem 1 "这台作为主控" "初始化主控、输出本机接入凭据，并开始添加被控服务器"
-        menuItem 2 "这台作为被控" "初始化被控、导入主控凭据，并输出本机接入凭据"
-        menuReturnItem 3 "返回主菜单" "回到 padm 管理面板"
+        menuLine "可直接管理本机订阅，也可按需启用主控/被控拓扑。"
+        menuItem 1 "本机单独使用" "管理本机订阅、用户、流量和维护，不启用 WireGuard"
+        menuItem 2 "这台作为主控" "初始化主控、输出本机接入凭据，并开始添加被控服务器"
+        menuItem 3 "这台作为被控" "初始化被控、导入主控凭据，并输出本机接入凭据"
+        menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
         menuClose
         autoRead subscription_role_selection_menu "请选择:" roleSelectionStatus
         case "${roleSelectionStatus}" in
-        1) runSubscriptionMainControllerWizard && return 0 ;;
-        2) runSubscriptionControlledWizard && return 0 ;;
-        3) menu; return 1 ;;
+        1) manageSubscriptionLocalHome ;;
+        2) runSubscriptionMainControllerWizard && return 0 ;;
+        3) runSubscriptionControlledWizard && return 0 ;;
+        4) menu; return 1 ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
+manageSubscriptionLocalHome() {
+    subscriptionRequireLocalPublisherRole || return 1
+    while true; do
+        echoContent title "\n┌─ 本机订阅首页 ─────────────────────────────────────"
+        menuItem 1 "发布订阅" "安装订阅服务、查看自用链接，并创建或维护分享订阅"
+        menuItem 2 "本机运行与维护" "本机同步、流量与限额、自动同步和状态备份"
+        menuItem 3 "启用多服务器协同" "将本机初始化为主控，保留现有订阅状态和服务"
+        menuReturnItem 4 "返回上级" "回到订阅模式选择"
+        menuClose
+        autoRead subscription_local_home_menu "请选择:" localHomeStatus
+        case "${localHomeStatus}" in
+        1) manageSubscriptionPublishSubscriptions ;;
+        2) manageSubscriptionLocalMaintenance ;;
+        3) runSubscriptionMainControllerWizard && return 0 ;;
+        4) return ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
+manageSubscriptionLocalMaintenance() {
+    subscriptionRequireLocalPublisherRole || return 1
+    while true; do
+        echoContent title "\n┌─ 本机运行与维护 ───────────────────────────────────"
+        menuItem 1 "刷新并查看运行总览" "采集流量后显示本机订阅、同步和限额摘要"
+        menuItem 2 "立即执行本机同步" "只应用本机同步计划"
+        menuItem 3 "查看本机运行状态" "查看状态摘要、本机同步计划和最近结果"
+        menuItem 4 "用量与限额" "查看本机用量并执行超限处理"
+        menuItem 5 "自动同步设置" "配置本机定时同步和自动超限处理"
+        menuItem 6 "状态备份与恢复" "创建、查看、恢复或显式重建 groups.json"
+        menuReturnItem 7 "返回本机订阅首页" "回到上级菜单"
+        menuClose
+        autoRead subscription_local_maintenance_menu "请选择:" localMaintenanceStatus
+        case "${localMaintenanceStatus}" in
+        1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
+        2) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
+        3)
+            showSubscriptionGroupsStateSummary
+            showSubscriptionLocalSyncPlan
+            showSubscriptionSourceSyncResults
+            ;;
+        4) manageTrafficAndQuota ;;
+        5) manageSubscriptionSyncSettings ;;
+        6) manageSubscriptionStateBackups ;;
+        7) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -208,10 +296,10 @@ manageSubscriptionControlledHome() {
 }
 
 manageSubscriptionPublishSubscriptions() {
-    subscriptionRequireMainRole || return 1
+    subscriptionRequireLocalPublisherRole || return 1
     while true; do
         echoContent title "\n┌─ 发布订阅 ─────────────────────────────────────────"
-        menuLine "这里处理主控侧的订阅发布和日常分享。"
+        menuLine "这里处理本机订阅发布和日常分享。"
         menuLine "建议先安装订阅服务，再查看自用链接或新建分享订阅。"
         menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
         menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
@@ -219,7 +307,7 @@ manageSubscriptionPublishSubscriptions() {
         menuItem 4 "查看并处理已有订阅" "先查看订阅列表，再选择一个刷新链接、改范围、改额度、启停或删除"
         menuItem 5 "查看我的可用服务器" "查看本机和已添加被控服务器源"
         menuItem 6 "查看我的流量" "查看自用账号流量统计"
-        menuReturnItem 7 "返回主控首页" "回到上级菜单"
+        menuReturnItem 7 "返回上级" "回到上级菜单"
         menuClose
         autoRead subscription_publish_menu "请选择:" publishSubscriptionStatus
         case "${publishSubscriptionStatus}" in
@@ -374,6 +462,7 @@ manageSubscriptionControlledMaintenance() {
 
 # 订阅与用户入口
 manageSubscription() {
+    local role
     progressCard "1" "订阅与用户"
     if [[ -z "${configPath}" ]]; then
         errorCard "未安装"
@@ -381,7 +470,11 @@ manageSubscription() {
     fi
 
     while true; do
-        case "$(subscriptionCurrentRoleNormalized)" in
+        role=$(subscriptionCurrentRoleNormalized) || {
+            errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)，本机模式不会绕过损坏状态"
+            return 1
+        }
+        case "${role}" in
         uninitialized)
             manageSubscriptionRoleSelection || return
             ;;
@@ -398,9 +491,12 @@ manageSubscription() {
 }
 
 showSubscriptionServiceStatus() {
-    readNginxSubscribe
+    if ! readNginxSubscribe; then
+        statusCard "订阅服务" "状态：配置损坏" "请修复受管 subscribe.conf；不会按未安装状态覆盖"
+        return 1
+    fi
     if [[ -n "${subscribePort}" ]]; then
-        statusCard "订阅服务" "状态：已配置" "协议：${subscribeType:-https}" "域名：${subscribeDomain:-${currentHost:-未读取}}" "端口：${subscribePort}"
+        statusCard "订阅服务" "状态：已配置" "协议：${subscribeType:-https}" "域名：${subscribeDomain}" "端口：${subscribePort}"
     else
         statusCard "订阅服务" "状态：未检测到可用订阅发布配置" "如需本机向客户端发布订阅，请进入 发布订阅 -> 安装/更新订阅服务" "仅作为被控加入主控时，不需要安装公网订阅服务"
     fi
@@ -950,9 +1046,12 @@ EOF
 
 showSubscriptionSources() {
     local syncSummary
+    local sourceFilter='.'
+    [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
     syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
     subscriptionActiveGroupRead -r "
       .sources[]? |
+      ${sourceFilter} |
       \"ID:\\(.id)\\n名称:\\(.name)\\n角色:\\(.role)\\n地址:\\(.scheme)://\\(.host):\\(.port)\\n启用:\\(.enabled)\\n同步状态:\\(.sync_status)\" +
       ${syncSummary} +
       \"\\n---\""
@@ -966,9 +1065,12 @@ showSubscriptionSourceControlUrls() {
 
 showSubscriptionSourceSyncResults() {
     local syncSummary
+    local sourceFilter='.'
+    [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && sourceFilter='select(.role == "main")'
     syncSummary=$(subscriptionSourceSyncSummaryJq) || return 1
     subscriptionActiveGroupRead -r "
       .sources[]? |
+      ${sourceFilter} |
       \"ID:\\(.id)\\n名称:\\(.name)\\n同步状态:\\(.sync_status)\" +
       ${syncSummary} +
       \"\\n---\""
@@ -1110,7 +1212,65 @@ setSubscriptionGroupSyncIntervalWithCron() {
     return 1
 }
 
+manageSubscriptionLocalSyncSettings() {
+    subscriptionRequireLocalPublisherRole || return 1
+    local syncStatus
+    while true; do
+        syncStatus=$(subscriptionActiveGroupRead -r '.sync') || return 1
+        echoContent title "\n┌─ 本机自动同步 ─────────────────────────────────────"
+        userResultCard "自动同步当前状态"
+        printf '%s\n' "${syncStatus}" | jq '{enabled, interval_minutes, event_enabled, quota_auto_apply, last_run, last_status}'
+        menuClose
+        menuItem 1 "开启/关闭自动同步" "切换本机定时同步状态"
+        menuItem 2 "设置自动同步间隔" "设置 1-59 分钟间隔"
+        menuItem 3 "查看本机同步计划" "预览本机 create/remove"
+        menuItem 4 "立即执行本机同步" "只应用本机同步计划"
+        menuItem 5 "查看超限处理计划" "预览超额用户处理"
+        menuDangerItem 6 "执行超限处理" "停用超额用户并等待同步移除账号"
+        menuItem 7 "开启/关闭自动执行超限处理" "切换超限处理自动执行状态"
+        menuItem 8 "开启/关闭事件同步" "菜单变更后自动同步一次，cron 继续兜底"
+        menuItem 9 "查看定时任务" "显示当前 cron 配置"
+        menuReturnItem 10 "返回本机运行与维护" "回到上级菜单"
+        menuClose
+        autoRead subscription_local_sync_settings_menu "请选择:" localSyncSettingsStatus
+        case "${localSyncSettingsStatus}" in
+        1)
+            local targetSyncEnabled=true
+            subscriptionGroupSyncEnabled && targetSyncEnabled=false
+            setSubscriptionGroupSyncEnabledWithCron "${targetSyncEnabled}" && successCard "自动同步状态已切换" || errorCard "自动同步状态切换失败"
+            ;;
+        2)
+            local interval=
+            autoRead sync_interval_minutes "请输入同步间隔分钟:" interval
+            if subscriptionGroupSyncIntervalValid "${interval}" && setSubscriptionGroupSyncIntervalWithCron "${interval}"; then
+                successCard "自动同步间隔已更新"
+            else
+                errorCard "自动同步间隔更新失败，间隔需为 1-59 分钟"
+            fi
+            ;;
+        3) showSubscriptionLocalSyncPlan ;;
+        4) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
+        5) showSubscriptionQuotaPlan ;;
+        6) executeSubscriptionQuotaPlanMenu ;;
+        7) toggleSubscriptionGroupQuotaAutoApplyEnabled && successCard "限额自动执行状态已切换" || errorCard "限额自动执行状态切换失败" ;;
+        8) toggleSubscriptionEventSyncEnabled && successCard "事件同步状态已切换" || errorCard "事件同步状态切换失败" ;;
+        9) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+        10) return ;;
+        *) coreSelectionErrorCard ;;
+        esac
+    done
+}
+
 manageSubscriptionSyncSettings() {
+    local role
+    role=$(subscriptionCurrentRoleNormalized) || {
+        subscriptionRequireLocalPublisherRole
+        return 1
+    }
+    if [[ "${role}" == "uninitialized" ]]; then
+        manageSubscriptionLocalSyncSettings
+        return $?
+    fi
     subscriptionRequireMainRole || return 1
     local syncStatus
     while true; do

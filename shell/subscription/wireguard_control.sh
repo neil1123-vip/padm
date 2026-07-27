@@ -147,6 +147,22 @@ subscriptionWireGuardValidateStateForConfig() {
     local address network listenPort peer peerAddress peerPublicKey peerEndpoint peerHost publicKey
     local -A seenAddresses=()
     local -A seenPublicKeys=()
+    jq -e '
+      type == "object" and
+      (.network | type == "string") and
+      (.address | type == "string") and
+      (.listen_port | type == "number") and
+      (.public_key | type == "string") and
+      (.peers | type == "array") and
+      all(.peers[]?;
+        type == "object" and
+        (.id | type == "string" and length > 0) and
+        (.name | type == "string") and
+        (.address | type == "string") and
+        (.public_key | type == "string") and
+        (.endpoint | type == "string") and
+        (.enabled | type == "boolean"))
+    ' <<<"${state}" >/dev/null 2>&1 || return 1
     address=$(jq -r '.address // empty' <<<"${state}") || return 1
     network=$(jq -r '.network // empty' <<<"${state}") || return 1
     listenPort=$(jq -r '.listen_port // empty' <<<"${state}") || return 1
@@ -174,7 +190,55 @@ subscriptionWireGuardValidateStateForConfig() {
         seenPublicKeys["${peerPublicKey}"]=1
         [[ -z "${peerEndpoint}" || "${peerEndpoint}" == "null" ]] ||
             subscriptionWireGuardValidEndpointValue "${peerEndpoint}" || return 1
-    done < <(jq -c '.peers[]? | select(.enabled == true)' <<<"${state}")
+    done < <(jq -c '.peers[]?' <<<"${state}")
+}
+
+subscriptionWireGuardValidateState() {
+    local state=$1
+    local role enabled endpointHost publicKey
+    jq -e --arg interface "$(subscriptionWireGuardInterface)" '
+      type == "object" and
+      (.enabled | type == "boolean") and
+      (.role | type == "string" and (. == "uninitialized" or . == "main" or . == "controlled")) and
+      (.interface | type == "string" and . == $interface) and
+      (.network | type == "string") and
+      (.listen_port | type == "number") and
+      (.control_port | type == "number") and
+      (.firewall_owned | type == "boolean") and
+      (.address | type == "string") and
+      (.endpoint_host | type == "string") and
+      (.public_key | type == "string") and
+      (.peers | type == "array")
+    ' <<<"${state}" >/dev/null 2>&1 || return 1
+
+    role=$(jq -r '.role' <<<"${state}") || return 1
+    enabled=$(jq -r '.enabled' <<<"${state}") || return 1
+    endpointHost=$(jq -r '.endpoint_host' <<<"${state}") || return 1
+    publicKey=$(jq -r '.public_key' <<<"${state}") || return 1
+    subscriptionWireGuardValidIPv4Cidr "$(jq -r '.network' <<<"${state}")" &&
+        subscriptionWireGuardValidPort "$(jq -r '.listen_port' <<<"${state}")" &&
+        subscriptionWireGuardValidPort "$(jq -r '.control_port' <<<"${state}")" || return 1
+
+    case "${role}" in
+    uninitialized)
+        [[ "${enabled}" == "false" &&
+            -z "$(jq -r '.address' <<<"${state}")" &&
+            -z "${endpointHost}" &&
+            -z "${publicKey}" &&
+            "$(jq -r '.peers | length' <<<"${state}")" == "0" &&
+            "$(jq -r '.firewall_owned' <<<"${state}")" == "false" ]]
+        ;;
+    main)
+        subscriptionWireGuardValidEndpointHost "${endpointHost}" &&
+            subscriptionWireGuardValidPublicKeyValue "${publicKey}" &&
+            subscriptionWireGuardValidateStateForConfig "${state}"
+        ;;
+    controlled)
+        [[ -z "${endpointHost}" ]] &&
+            subscriptionWireGuardValidPublicKeyValue "${publicKey}" &&
+            subscriptionWireGuardValidateStateForConfig "${state}"
+        ;;
+    esac
 }
 
 subscriptionWireGuardPeerIdentityAvailable() {
@@ -250,7 +314,7 @@ subscriptionWireGuardBase64UrlDecode() {
 }
 
 subscriptionWireGuardReadState() {
-    local stateFile
+    local stateFile state
     stateFile=$(subscriptionWireGuardStateFile)
     if [[ ! -e "${stateFile}" && ! -L "${stateFile}" ]]; then
         jq -n \
@@ -261,17 +325,11 @@ subscriptionWireGuardReadState() {
           '{enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, firewall_owned:false, address:"", endpoint_host:"", public_key:"", peers:[]}'
         return 0
     fi
-    if [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
+    if [[ ! -f "${stateFile}" ]] || ! state=$(jq -e -c '.' "${stateFile}" 2>/dev/null); then
         return 1
     fi
-    jq -c \
-      --arg interface "$(subscriptionWireGuardInterface)" \
-      --arg network "10.77.0.0/24" \
-      --argjson listenPort "$(subscriptionWireGuardDefaultListenPort)" \
-      --argjson controlPort "$(subscriptionWireGuardDefaultControlPort)" \
-      '({enabled:false, role:"uninitialized", interface:$interface, network:$network, listen_port:$listenPort, control_port:$controlPort, firewall_owned:false, address:"", endpoint_host:"", public_key:"", peers:[]} + .) |
-       .peers = ((.peers // []) | map({id:(.id // ""), name:(.name // .id // ""), address:(.address // ""), public_key:(.public_key // ""), endpoint:(.endpoint // ""), enabled:(if .enabled == false then false else true end)}) | map(select(.id != "" and .address != "" and .public_key != "")))' \
-      "${stateFile}"
+    subscriptionWireGuardValidateState "${state}" || return 1
+    printf '%s\n' "${state}"
 }
 
 subscriptionWireGuardControlEnabled() {
@@ -454,6 +512,29 @@ subscriptionWireGuardReadPreviousStateAndGroups() {
 
 subscriptionWireGuardRole() {
     subscriptionWireGuardReadState | jq -r '.role'
+}
+
+subscriptionManagedGroupSyncCronActive() {
+    readUserCrontabContent 2>/dev/null | grep -q '/etc/padm/install.sh SyncSubscriptionGroups'
+}
+
+subscriptionControlledTransitionPreflight() {
+    subscribePort=
+    subscribeDomain=
+    subscribeType=
+    subscribeConfigState=
+    if ! readNginxSubscribe; then
+        errorCard "订阅 Nginx 配置损坏，不能切换为被控" "请先修复或移除受管 subscribe.conf"
+        return 1
+    fi
+    if [[ "${subscribeConfigState:-}" == "valid" || -n "${subscribePort:-}" ]]; then
+        errorCard "检测到活动公网订阅发布服务，不能切换为被控" "请先在本机模式中停用订阅发布服务"
+        return 1
+    fi
+    if subscriptionManagedGroupSyncCronActive; then
+        errorCard "检测到受管订阅同步定时任务，不能切换为被控" "请先在本机模式中关闭自动同步"
+        return 1
+    fi
 }
 
 installSubscriptionWireGuardTools() {
@@ -742,6 +823,47 @@ EOF
     fi
 }
 
+subscriptionWireGuardInstallControlPlane() {
+    local previousState=$1
+    local roleLabel=$2
+    local nginxTarget
+    local nginxBackupDir=
+    local nginxWasRunning=false
+    local previousServiceActions
+
+    nginxTarget=$(subscriptionWireGuardNginxConfigFile) || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置路径异常" || return 1
+        errorCard "WireGuard Nginx 控制面配置路径异常"
+        return 1
+    }
+    checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置备份失败" || return 1
+        errorCard "WireGuard Nginx 控制面配置备份失败"
+        return 1
+    }
+    nginxRunning && nginxWasRunning=true
+    previousServiceActions="${SERVICE_ACTIONS:-}"
+    refreshSubscriptionWireGuardNginxControl || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+        errorCard "WireGuard Nginx 控制面配置失败"
+        return 1
+    }
+    serviceQueueApply || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+        errorCard "WireGuard Nginx 控制面重载失败"
+        return 1
+    }
+    installSubscriptionControlService || {
+        SERVICE_ACTIONS="${previousServiceActions}"
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "${roleLabel}控制服务安装失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+        errorCard "${roleLabel}控制服务安装失败"
+        return 1
+    }
+    padmRemoveCleanupPath "${nginxBackupDir}"
+}
+
 subscriptionWireGuardControlUrl() {
     local source=$1
     local endpoint=$2
@@ -787,11 +909,11 @@ initSubscriptionWireGuardMainApply() {
     local publicKey
     local previousState
     local firewallOwned=false
-    if [[ "$(subscriptionWireGuardRole)" == "controlled" ]]; then
+    subscriptionWireGuardReadPreviousState previousState "WireGuard 状态读取失败" || return 1
+    if [[ "$(jq -r '.role' <<<"${previousState}")" == "controlled" ]]; then
         errorCard "当前机器已初始化为被控" "第一版只支持星型拓扑，被控不能再作为主控"
         return 1
     fi
-    subscriptionWireGuardReadPreviousState previousState "WireGuard 状态读取失败" || return 1
     installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     listenPort=$(subscriptionWireGuardDefaultListenPort)
@@ -839,7 +961,13 @@ initSubscriptionWireGuardMainApply() {
         errorCard "WireGuard 主控配置未落地"
         return 1
     }
-    successCard "WireGuard 主控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "监听端口：${listenPort}/udp"
+    subscriptionWireGuardWaitForAddress "${address}" || {
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 主控地址就绪失败" || return 1
+        errorCard "WireGuard 主控地址就绪失败"
+        return 1
+    }
+    subscriptionWireGuardInstallControlPlane "${previousState}" "主控" || return 1
+    successCard "WireGuard 主控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "监听端口：${listenPort}/udp" "控制服务已通过 WireGuard 内网启用"
 }
 
 initSubscriptionWireGuardMain() {
@@ -851,15 +979,16 @@ initSubscriptionWireGuardControlled() {
     local controlPort
     local publicKey
     local previousState
-    local nginxTarget
-    local nginxBackupDir=
-    local nginxWasRunning=false
-    local previousServiceActions
-    if [[ "$(subscriptionWireGuardRole)" == "main" ]]; then
+    local role
+    subscriptionWireGuardReadPreviousState previousState "WireGuard 状态读取失败" || return 1
+    role=$(jq -r '.role' <<<"${previousState}") || return 1
+    if [[ "${role}" == "main" ]]; then
         errorCard "当前机器已初始化为主控" "第一版只支持星型拓扑，主控不能再作为被控"
         return 1
     fi
-    subscriptionWireGuardReadPreviousState previousState "WireGuard 状态读取失败" || return 1
+    if [[ "${role}" == "uninitialized" ]]; then
+        subscriptionControlledTransitionPreflight || return 1
+    fi
     installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
     subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
     controlPort=$(subscriptionWireGuardDefaultControlPort)
@@ -895,43 +1024,12 @@ initSubscriptionWireGuardControlled() {
         errorCard "WireGuard 被控地址就绪失败"
         return 1
     }
-    nginxTarget=$(subscriptionWireGuardNginxConfigFile) || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置路径异常" || return 1
-        errorCard "WireGuard Nginx 控制面配置路径异常"
-        return 1
-    }
-    checkLogBackupCreate nginxBackupDir "${nginxTarget}" || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置备份失败" || return 1
-        errorCard "WireGuard Nginx 控制面配置备份失败"
-        return 1
-    }
-    nginxRunning && nginxWasRunning=true
-    previousServiceActions="${SERVICE_ACTIONS:-}"
-    refreshSubscriptionWireGuardNginxControl || {
-        SERVICE_ACTIONS="${previousServiceActions}"
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面配置失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
-        errorCard "WireGuard Nginx 控制面配置失败"
-        return 1
-    }
-    serviceQueueApply || {
-        SERVICE_ACTIONS="${previousServiceActions}"
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
-        errorCard "WireGuard Nginx 控制面重载失败"
-        return 1
-    }
     [[ -f "$(subscriptionWireGuardStateFile)" && -f "$(subscriptionWireGuardConfigFile)" ]] || {
-        SERVICE_ACTIONS="${previousServiceActions}"
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控配置未落地" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控配置未落地" || return 1
         errorCard "WireGuard 被控配置未落地"
         return 1
     }
-    installSubscriptionControlService || {
-        SERVICE_ACTIONS="${previousServiceActions}"
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "被控控制服务安装失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
-        errorCard "被控控制服务安装失败"
-        return 1
-    }
-    padmRemoveCleanupPath "${nginxBackupDir}"
+    subscriptionWireGuardInstallControlPlane "${previousState}" "被控" || return 1
     successCard "WireGuard 被控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "控制面：WireGuard 内网 ${controlPort} 端口" "无需安装公网订阅服务；把被控接入凭据交回主控即可"
 }
 

@@ -103,6 +103,10 @@ subscriptionRemoteSubscribeSourcesForAccount() {
     local user
     local allowedSources
     local resolvedSources
+    if ! subscriptionRemoteScopeEnabled; then
+        [[ -n "${outputVar}" ]] && printf -v "${outputVar}" ''
+        return 0
+    fi
     user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 2
     [[ -n "${user}" ]] || return 2
     allowedSources=$(jq -c '.allowed_sources // []' <<<"${user}") || return 1
@@ -126,6 +130,7 @@ subscriptionRemoteSubscribeSourcesForAccount() {
 subscriptionPublishHasRemoteSources() {
     local accountName=$1
     local user
+    subscriptionRemoteScopeEnabled || return 1
     user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 1
     [[ -n "${user}" ]] || return 1
     jq -e '(.has_remote // false) == true' <<<"${user}" >/dev/null 2>&1
@@ -197,28 +202,203 @@ writeSubscribeNginxConfig() {
 }
 
 resolveSubscribeServerName() {
-    local certDir
-    local certFile domainName
+    local outputVar=${1:-}
+    local certDir certFile domainName selectedDomain=
+    local suggestions=
+    local -a certificateDomains=()
     certDir=$(tlsManagedDir) || return 1
-    if [[ -n "${currentHost:-}" ]]; then
-        padmIsValidHostName "${currentHost}" || return 1
-        printf '%s\n' "${currentHost}"
+    if [[ -n "${AUTO_DOMAIN:-}" ]]; then
+        tlsDomainNameIsSafe "${AUTO_DOMAIN}" || {
+            errorCard "订阅 TLS 域名无效" "--domain 必须是合法主机名"
+            return 1
+        }
+        selectedDomain=${AUTO_DOMAIN}
+    elif [[ "${subscribeConfigState:-}" == "valid" && -n "${subscribeDomain:-}" ]]; then
+        selectedDomain=${subscribeDomain}
+    fi
+    if [[ -z "${selectedDomain}" ]]; then
+        for certFile in "${certDir}"/*.crt; do
+            [[ -s "${certFile}" ]] || continue
+            domainName=$(basename "${certFile}" .crt)
+            tlsCertificatePairUsable "${certDir}" "${domainName}" || continue
+            certificateDomains+=("${domainName}")
+        done
+        if [[ ${#certificateDomains[@]} -eq 1 ]]; then
+            selectedDomain=${certificateDomains[0]}
+        elif [[ ${#certificateDomains[@]} -gt 1 && ( "${cronName:-}" == "InstallSubscription" || "${AUTO_INSTALL:-}" == "true" ) ]]; then
+            errorCard "检测到多张可用 TLS 证书" "自动安装必须显式提供 --domain"
+            return 1
+        fi
+    fi
+    if [[ -z "${selectedDomain}" && "${cronName:-}" != "InstallSubscription" && "${AUTO_INSTALL:-}" != "true" ]]; then
+        [[ ${#certificateDomains[@]} -gt 0 ]] && suggestions="可用证书：${certificateDomains[*]}"
+        [[ -n "${currentHost:-}" ]] && suggestions="${suggestions:+${suggestions}；}现有 TLS 域名：${currentHost}"
+        [[ -n "${realityEntryHost:-}" ]] && suggestions="${suggestions:+${suggestions}；}Reality entry：${realityEntryHost}"
+        [[ -n "${suggestions}" ]] && statusCard "订阅 TLS 域名候选" "${suggestions}" "请确认订阅服务自己的公网域名"
+        autoRead subscription_tls_domain "请输入订阅 HTTPS 域名:" selectedDomain
+        tlsDomainNameIsSafe "${selectedDomain}" || {
+            errorCard "订阅 TLS 域名无效"
+            return 1
+        }
+    fi
+    if [[ -z "${selectedDomain}" ]]; then
+        errorCard "无法确定订阅 TLS 域名" "请显式提供 --domain；不会自动使用 currentHost 或 Reality entry"
+        return 1
+    fi
+    if [[ -n "${outputVar}" ]]; then
+        printf -v "${outputVar}" '%s' "${selectedDomain}"
+    else
+        printf '%s\n' "${selectedDomain}"
+    fi
+}
+
+subscriptionTcpPortHasListener() {
+    local port=$1
+    validPortNumber "${port}" || return 2
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 { found = 1 } END { exit !found }'
+        return $?
+    fi
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltn 2>/dev/null | awk -v port=":${port}" '$4 ~ port "$" { found = 1 } END { exit !found }'
+        return $?
+    fi
+    return 2
+}
+
+subscriptionTcpPortListenersAreNginx() {
+    local port=$1
+    local pid commandName lines
+    if command -v lsof >/dev/null 2>&1; then
+        lines=$(lsof -t -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null | LC_ALL=C sort -u) || true
+        [[ -n "${lines}" ]] || return 1
+        while IFS= read -r pid; do
+            commandName=$(ps -p "${pid}" -o comm= 2>/dev/null | awk '{print $1}')
+            [[ "${commandName}" == "nginx" || "${commandName}" == "openresty" ]] || return 1
+        done <<<"${lines}"
         return 0
     fi
-    if [[ -n "${domain:-}" ]]; then
-        padmIsValidHostName "${domain}" || return 1
-        printf '%s\n' "${domain}"
+    command -v ss >/dev/null 2>&1 || return 1
+    lines=$(ss -ltnp 2>/dev/null | awk -v port=":${port}" '$4 ~ port "$" { print }')
+    [[ -n "${lines}" ]] && ! grep -vEq 'users:\(\("(nginx|openresty)"' <<<"${lines}"
+}
+
+subscriptionInstallTLSHttp01() {
+    local certDomain=$1
+    local nginxWasRunning=false
+    local firewallAdded=false
+    local status=0
+    local listenerStatus=0
+
+    checkDNSIP "${certDomain}" || {
+        errorCard "订阅域名未解析到本机" "HTTP-01 未停止服务、开放 80 端口或调用 CA"
+        return 1
+    }
+    subscriptionTcpPortHasListener 80 || listenerStatus=$?
+    if [[ "${listenerStatus}" == "0" ]]; then
+        if ! subscriptionTcpPortListenersAreNginx; then
+            errorCard "80 端口被非 Nginx 进程占用" "不会停止或杀死占用进程"
+            return 1
+        fi
+        nginxRunning || {
+            errorCard "80 端口监听状态无法归属到受管 Nginx"
+            return 1
+        }
+        nginxWasRunning=true
+        runSubscribeNginxAction stop || return 1
+        if subscriptionTcpPortHasListener 80; then
+            runSubscribeNginxAction start restore || true
+            errorCard "停止 Nginx 后 80 端口仍被占用"
+            return 1
+        fi
+    elif [[ "${listenerStatus}" == "2" ]]; then
+        errorCard "无法检查 80 端口监听状态"
+        return 1
+    fi
+    allowPort 80 || status=$?
+    [[ "${PADM_LAST_ALLOW_PORT_ADDED:-false}" == "true" ]] && firewallAdded=true
+    if [[ "${status}" == "0" ]]; then
+        installTLS 1 || status=$?
+    fi
+    if [[ "${firewallAdded}" == "true" ]] && ! denyPort 80; then
+        errorCard "HTTP-01 临时 80 端口防火墙规则恢复失败"
+        status=1
+    fi
+    if [[ "${nginxWasRunning}" == "true" ]] && ! runSubscribeNginxAction start restore; then
+        errorCard "HTTP-01 完成后 Nginx 原运行状态恢复失败"
+        status=1
+    fi
+    return "${status}"
+}
+
+prepareSubscribeTLSCertificate() {
+    local certDomain=$1
+    local tlsDir confirm=
+    tlsDir=$(tlsManagedDir) || return 1
+    if tlsCertificatePairUsable "${tlsDir}" "${certDomain}"; then
+        if tlsCertificateManagedByAcme "${certDomain}"; then
+            crontab -l 2>/dev/null | grep -q '/etc/padm/install.sh RenewTLS' || installCronTLS 1 || return 1
+            statusCard "订阅 TLS 证书" "已复用 acme.sh 管理的可用证书：${certDomain}"
+        else
+            statusCard "订阅 TLS 证书" "已复用自定义证书：${certDomain}" "自定义证书需自行续期"
+        fi
         return 0
     fi
-    for certFile in "${certDir}"/*.crt; do
-        [[ -s "${certFile}" ]] || continue
-        domainName=$(basename "${certFile}" .crt)
-        padmIsValidHostName "${domainName}" || continue
-        [[ -s "${certDir}/${domainName}.key" ]] || continue
-        printf '%s\n' "${domainName}"
-        return 0
-    done
-    return 1
+    if [[ "${cronName:-}" == "InstallSubscription" || "${AUTO_INSTALL:-}" == "true" ]]; then
+        if [[ -z "${AUTO_DOMAIN:-}" ]]; then
+            errorCard "订阅证书缺失或不可用" "自动修复必须显式提供 --domain"
+            return 1
+        fi
+    else
+        statusCard "公网订阅只提供 HTTPS" "需要为 ${certDomain} 申请或修复证书"
+        autoRead subscription_tls_issue_confirm "现在申请证书？[y/n]:" confirm
+        if [[ "${confirm}" != "y" && "${confirm}" != "yes" ]]; then
+            statusCard "已取消订阅服务安装" "Nginx 配置未修改"
+            return 1
+        fi
+    fi
+    if [[ ( "${cronName:-}" == "InstallSubscription" || "${AUTO_INSTALL:-}" == "true" ) &&
+        "$(normalizeYesNo "${AUTO_DNS_API:-}")" == "y" ]]; then
+        case "${AUTO_DNS_API_TYPE:-}" in
+        aliyun | Aliyun | alibaba | 2)
+            if [[ -z "${AUTO_ALIYUN_API_KEY:-${PADM_ALIYUN_API_KEY:-}}" ||
+                -z "${AUTO_ALIYUN_API_SECRET:-${PADM_ALIYUN_API_SECRET:-}}" ]]; then
+                errorCard "阿里云 DNS API 凭据不完整" "请提供 --aliyun-api-key 和 --aliyun-api-secret"
+                return 1
+            fi
+            ;;
+        *)
+            if [[ -z "${AUTO_CLOUDFLARE_API_TOKEN:-${PADM_CLOUDFLARE_API_TOKEN:-${CLOUDFLARE_API_TOKEN:-${CF_Token:-}}}}" ]]; then
+                errorCard "Cloudflare DNS API Token 为空" "请提供 --cloudflare-api-token 或 PADM_CLOUDFLARE_API_TOKEN"
+                return 1
+            fi
+            ;;
+        esac
+    fi
+    (
+        domain=${certDomain}
+        currentHost=
+        tlsDomain=${certDomain}
+        PADM_REQUIRE_USABLE_TLS_CERTIFICATE=true
+        unset dnsAPIStatus dnsAPIType installedDNSAPIStatus sslType selectSSLType
+        readAcmeTLS || exit 1
+        switchDNSAPI || exit 1
+        installAcmeTool || exit 1
+        if [[ -n "${dnsAPIType:-}" ]]; then
+            installTLS 1 || exit 1
+        else
+            subscriptionInstallTLSHttp01 "${certDomain}" || exit 1
+        fi
+    ) || return 1
+    tlsCertificatePairUsable "${tlsDir}" "${certDomain}" || {
+        errorCard "订阅 TLS 证书生成后仍不可用" "未修改 Nginx 配置"
+        return 1
+    }
+    tlsCertificateManagedByAcme "${certDomain}" || {
+        errorCard "订阅证书缺少 acme.sh 安装目标" "无法保证自动续期更新受管 .crt/.key"
+        return 1
+    }
+    crontab -l 2>/dev/null | grep -q '/etc/padm/install.sh RenewTLS' || installCronTLS 1 || return 1
 }
 
 runSubscribeNginxAction() {
@@ -237,12 +417,17 @@ rollbackSubscribeNginxInstall() {
     local nginxWasRunning=$2
     local nginxWasEnabled=$3
     local reason=$4
+    local configWasApplied=${5:-true}
     local installStateRestored=true
     local serviceRestored=true
 
     restoreCoreStartupServiceInstall "${backupDir}" nginx "${nginxWasEnabled}" || installStateRestored=false
 
     if [[ "${nginxWasRunning}" == "true" ]]; then
+        if [[ "${installStateRestored}" == "true" && "${configWasApplied}" == "true" ]] &&
+            nginxRunning && ! runSubscribeNginxAction stop; then
+            serviceRestored=false
+        fi
         if ! nginxRunning && ! runSubscribeNginxAction start restore; then
             serviceRestored=false
         fi
@@ -262,89 +447,192 @@ rollbackSubscribeNginxInstall() {
     return 1
 }
 
+resolveSubscribePort() {
+    local outputVar=$1
+    local currentPort=${2:-}
+    local selectedPort=${AUTO_SUBSCRIBE_PORT:-${currentPort}}
+    if [[ -z "${selectedPort}" ]]; then
+        autoRead subscription_port "请输入订阅 HTTPS 端口[回车随机]:" selectedPort
+        [[ -n "${selectedPort}" ]] || selectedPort=$((RANDOM % 50001 + 10000))
+    fi
+    validPortNumber "${selectedPort}" || {
+        errorCard "订阅端口无效"
+        return 1
+    }
+    printf -v "${outputVar}" '%s' "${selectedPort}"
+}
+
+subscriptionNginxConfigListensOnPort() {
+    local configFile=$1
+    local port=$2
+    awk -v expected="${port}" '
+      /^[[:space:]]*#/ { next }
+      {
+        for (i = 1; i < NF; i++) {
+          token = $i
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", token)
+          if (token != "listen") continue
+          value = $(i + 1)
+          gsub(/;/, "", value)
+          sub(/^.*:/, "", value)
+          if (value == expected) found = 1
+        }
+      }
+      END { exit !found }
+    ' "${configFile}"
+}
+
+subscriptionNginxPortConfiguredElsewhere() {
+    local port=$1
+    local targetPath=$2
+    local configFile
+    local configDir
+    configDir=$(dirname -- "${targetPath}")
+    [[ -d "${configDir}" ]] || return 1
+    for configFile in "${configDir}"/*.conf; do
+        [[ -f "${configFile}" && "${configFile}" != "${targetPath}" ]] || continue
+        subscriptionNginxConfigListensOnPort "${configFile}" "${port}" && return 0
+    done
+    return 1
+}
+
+validateSubscribeTargetPort() {
+    local port=$1
+    local oldPort=$2
+    local targetPath=$3
+    local listenerStatus=0
+    if subscriptionNginxPortConfiguredElsewhere "${port}" "${targetPath}"; then
+        errorCard "订阅端口 ${port} 已被其他 Nginx 配置使用" "不会共享监听或停止其他服务"
+        return 1
+    fi
+    subscriptionTcpPortHasListener "${port}" || listenerStatus=$?
+    if [[ "${listenerStatus}" == "1" ]]; then
+        return 0
+    fi
+    if [[ "${listenerStatus}" == "2" ]]; then
+        errorCard "无法检查订阅端口 ${port} 的监听状态"
+        return 1
+    fi
+    if [[ "${subscribeConfigState:-}" == "valid" && "${port}" == "${oldPort}" ]] &&
+        subscriptionTcpPortListenersAreNginx "${port}"; then
+        return 0
+    fi
+    errorCard "订阅端口 ${port} 已被占用" "不会停止或杀死占用进程"
+    return 1
+}
+
+probeSubscribeTLS() {
+    local certDomain=$1
+    local port=$2
+    local tlsDir peerCertificate expectedFingerprint actualFingerprint
+    tlsDir=$(tlsManagedDir) || return 1
+    padmCreateTmpRootPath peerCertificate padm-subscribe-peer.XXXXXX || return 1
+    if ! timeout 15 openssl s_client -connect "127.0.0.1:${port}" -servername "${certDomain}" -showcerts </dev/null 2>/dev/null |
+        openssl x509 -outform PEM >"${peerCertificate}" 2>/dev/null; then
+        padmRemoveCleanupPath "${peerCertificate}"
+        return 1
+    fi
+    openssl x509 -in "${peerCertificate}" -checkhost "${certDomain}" -noout >/dev/null 2>&1 || {
+        padmRemoveCleanupPath "${peerCertificate}"
+        return 1
+    }
+    expectedFingerprint=$(openssl x509 -in "${tlsDir}/${certDomain}.crt" -noout -fingerprint -sha256 2>/dev/null) || {
+        padmRemoveCleanupPath "${peerCertificate}"
+        return 1
+    }
+    actualFingerprint=$(openssl x509 -in "${peerCertificate}" -noout -fingerprint -sha256 2>/dev/null) || {
+        padmRemoveCleanupPath "${peerCertificate}"
+        return 1
+    }
+    padmRemoveCleanupPath "${peerCertificate}"
+    [[ -n "${expectedFingerprint}" && "${expectedFingerprint}" == "${actualFingerprint}" ]]
+}
+
+subscriptionFirewallPortKeys() {
+    local port=$1
+    local stateFile
+    stateFile=$(padmFirewallStateFile) || return 1
+    [[ -f "${stateFile}" ]] || return 0
+    awk -F: -v port="${port}" '$1 == "port" && $3 == "tcp" && $4 == port { print }' "${stateFile}"
+}
+
 # 安装订阅服务
 installSubscribeApply() {
-    readNginxSubscribe
-    local nginxSubscribeListen=
-    local nginxSubscribeSSL=
-    local serverName=
-    local SSLType=
+    local oldSubscribePort= oldSubscribeDomain= oldSubscribeConfigState=
+    local desiredPort= subscribeServerName=
     local listenIPv6=
-    local subscribeServerName=
     local subscribePublicBase=
     local tlsDir=
     local targetPath=
     local installBackupDir=
     local nginxWasRunning=false
     local nginxWasEnabled=false
-    if [[ -n "${AUTO_SUBSCRIBE_PORT:-}" && "${subscribePort}" != "${AUTO_SUBSCRIBE_PORT}" ]]; then
-        subscribePort=
+    local oldFirewallKeys= key
+    local oldFirewallRestoreFailed=false
+
+    if ! readNginxSubscribe; then
+        errorCard "订阅 Nginx 配置损坏" "不会按未安装状态覆盖 subscribe.conf"
+        return 1
     fi
-    if [[ -z "${subscribePort}" ]]; then
+    oldSubscribePort=${subscribePort:-}
+    oldSubscribeDomain=${subscribeDomain:-}
+    oldSubscribeConfigState=${subscribeConfigState:-missing}
+    targetPath=$(nginxConfigFilePath subscribe.conf) || {
+        errorCard "订阅 Nginx 配置路径异常"
+        return 1
+    }
+    resolveSubscribeServerName subscribeServerName || return 1
+    resolveSubscribePort desiredPort "${oldSubscribePort}" || return 1
+    validateSubscribeTargetPort "${desiredPort}" "${oldSubscribePort}" "${targetPath}" || return 1
+    prepareSubscribeTLSCertificate "${subscribeServerName}" || return 1
+    tlsDir=$(tlsManagedDir) || return 1
+    tlsCertificatePairUsable "${tlsDir}" "${subscribeServerName}" || return 1
 
-        nginxVersion=$(nginx -v 2>&1 || true)
-
-        if echo "${nginxVersion}" | grep -q "not found" || [[ -z "${nginxVersion}" ]]; then
-            menuLine "$(uiStyle warn "未检测到 nginx，无法使用订阅服务")"
-            autoConfirm install_nginx "未检测到 nginx，是否安装？" n installNginxStatus
-            if [[ "${installNginxStatus}" == "y" ]]; then
-                if ! (installNginxTools); then
-                    errorCard "Nginx 安装失败，已取消订阅配置"
-                    return 1
-                fi
-                nginxVersion=$(nginx -v 2>&1) || {
-                    errorCard "Nginx 安装后仍不可用，已取消订阅配置"
-                    return 1
-                }
-            else
-                errorCard "放弃安装nginx\n"
-                exit 0
-            fi
-        fi
-        echoContent title "开始配置订阅，请输入订阅的端口"
-
-        readSingBoxPortResult result "${AUTO_SUBSCRIBE_PORT:-${subscribePort}}" false tcp || return 1
-        PADM_NGINX_BLOG_REINSTALL_PROMPT=false nginxBlog || return 1
-        echo
-        subscribeServerName=$(resolveSubscribeServerName || true)
-        if [[ -z "${subscribeServerName}" ]]; then
-            errorCard "订阅服务需要 HTTPS 域名" "未发现可用于订阅服务的 TLS 域名或证书" "请先在 站点与证书 中配置域名证书，或安装时提供 --domain"
+    if ! command -v nginx >/dev/null 2>&1; then
+        menuLine "$(uiStyle warn "未检测到 nginx，无法使用订阅服务")"
+        autoConfirm install_nginx "未检测到 nginx，是否安装？" n installNginxStatus
+        if [[ "${installNginxStatus}" != "y" ]] || ! (installNginxTools); then
+            errorCard "Nginx 不可用，已取消订阅配置"
             return 1
         fi
+    fi
+    nginx -v >/dev/null 2>&1 || return 1
+    subscribePublicBase=$(padmResolveManagedAbsolutePath "$(subscribePublicBaseDir)") || return 1
+    subscribePublicBase="${subscribePublicBase%/}"
+    padmEnsureSafeDirectory "${subscribePublicBase}" || return 1
+    padmEnsureSafeDirectory "${nginxStaticPath}" || return 1
 
-        SSLType="ssl"
-        serverName="server_name ${subscribeServerName};"
-        tlsDir=$(tlsManagedDir) || return 1
-        subscribePublicBase=$(padmResolveManagedAbsolutePath "$(subscribePublicBaseDir)") || return 1
-        subscribePublicBase="${subscribePublicBase%/}"
-        nginxSubscribeSSL="ssl_certificate ${tlsDir}/${subscribeServerName}.crt;ssl_certificate_key ${tlsDir}/${subscribeServerName}.key;"
-        if hasIPv6Connectivity; then
-            listenIPv6="listen [::]:${result[-1]} ${SSLType};"
-        fi
-        if echo "${nginxVersion}" | grep -q "1.25" && [[ $(echo "${nginxVersion}" | awk -F "[.]" '{print $3}') -gt 0 ]] || [[ $(echo "${nginxVersion}" | awk -F "[.]" '{print $2}') -gt 25 ]]; then
-            nginxSubscribeListen="listen ${result[-1]} ${SSLType} so_keepalive=on;http2 on;${listenIPv6}"
-        else
-            nginxSubscribeListen="listen ${result[-1]} ${SSLType} so_keepalive=on;${listenIPv6}"
-        fi
-
-        targetPath=$(nginxConfigFilePath subscribe.conf) || {
-            errorCard "订阅 Nginx 配置路径异常"
+    if [[ "${oldSubscribeConfigState}" == "valid" &&
+        "${oldSubscribePort}" == "${desiredPort}" &&
+        "${oldSubscribeDomain}" == "${subscribeServerName}" ]]; then
+        nginx -t || {
+            errorCard "订阅 Nginx 配置校验失败"
             return 1
         }
-        checkLogBackupCreate installBackupDir "${targetPath}" || {
-            errorCard "订阅 Nginx 配置备份失败"
+        nginxRunning || runSubscribeNginxAction start || return 1
+        probeSubscribeTLS "${subscribeServerName}" "${desiredPort}" || {
+            errorCard "订阅 HTTPS 本机 SNI/TLS 探测失败"
             return 1
         }
-        if nginxRunning; then
-            nginxWasRunning=true
-        fi
-        coreStartupServiceEnabled nginx && nginxWasEnabled=true
+        return 0
+    fi
 
-        if ! writeSubscribeNginxConfig <<EOF
+    allowPort "${desiredPort}" || return 1
+    checkLogBackupCreate installBackupDir "${targetPath}" || {
+        errorCard "订阅 Nginx 配置备份失败"
+        return 1
+    }
+    nginxRunning && nginxWasRunning=true
+    coreStartupServiceEnabled nginx && nginxWasEnabled=true
+    hasIPv6Connectivity && listenIPv6="    listen [::]:${desiredPort} ssl;"
+
+    if ! writeSubscribeNginxConfig <<EOF
 server {
-    ${nginxSubscribeListen}
-    ${serverName}
-    ${nginxSubscribeSSL}
+    listen ${desiredPort} ssl so_keepalive=on;
+${listenIPv6}
+    server_name ${subscribeServerName};
+    ssl_certificate ${tlsDir}/${subscribeServerName}.crt;
+    ssl_certificate_key ${tlsDir}/${subscribeServerName}.key;
     ssl_protocols              TLSv1.2 TLSv1.3;
     ssl_ciphers                TLS13_AES_128_GCM_SHA256:TLS13_AES_256_GCM_SHA384:TLS13_CHACHA20_POLY1305_SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305;
     ssl_prefer_server_ciphers  on;
@@ -362,41 +650,38 @@ server {
     }
 }
 EOF
-        then
-            rollbackSubscribeNginxInstall \
-                "${installBackupDir}" \
-                "${nginxWasRunning}" \
-                "${nginxWasEnabled}" \
-                "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR:-订阅 Nginx 配置校验失败}" || true
-            return 1
-        fi
-        if ! bootStartup nginx; then
-            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "Nginx 开机自启配置失败" || true
-            return 1
-        fi
-        if ! runSubscribeNginxAction stop || ! runSubscribeNginxAction start; then
-            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅 Nginx 服务重载失败" || true
-            return 1
-        fi
-        if ! installSubscriptionControlService; then
-            rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅控制服务安装失败" || true
-            return 1
-        fi
+    then
+        rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "${SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR:-订阅 Nginx 配置校验失败}" false || true
+        return 1
     fi
-    if ! nginxRunning; then
-        if ! runSubscribeNginxAction start; then
-            if [[ -n "${installBackupDir}" ]]; then
-                rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅 Nginx 服务启动失败" || true
+    if ! bootStartup nginx || ! runSubscribeNginxAction stop || ! runSubscribeNginxAction start; then
+        rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅 Nginx 服务应用失败" || true
+        return 1
+    fi
+    if ! probeSubscribeTLS "${subscribeServerName}" "${desiredPort}"; then
+        rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "订阅 HTTPS 本机 SNI/TLS 探测失败" || true
+        return 1
+    fi
+    if [[ -n "${oldSubscribePort}" && "${oldSubscribePort}" != "${desiredPort}" ]]; then
+        oldFirewallKeys=$(subscriptionFirewallPortKeys "${oldSubscribePort}") || oldFirewallKeys=
+        if [[ -n "${oldFirewallKeys}" ]] && ! denyPort "${oldSubscribePort}"; then
+            allowPort "${oldSubscribePort}" || oldFirewallRestoreFailed=true
+            while IFS= read -r key; do
+                [[ -n "${key}" ]] && padmUntrackPortAllowTransactionKey "${key}"
+            done <<<"${oldFirewallKeys}"
+            if [[ "${oldFirewallRestoreFailed}" == "true" ]]; then
+                rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "旧订阅端口防火墙规则回收失败，且旧规则恢复失败" || true
             else
-                errorCard "订阅 Nginx 服务启动失败"
+                rollbackSubscribeNginxInstall "${installBackupDir}" "${nginxWasRunning}" "${nginxWasEnabled}" "旧订阅端口防火墙规则回收失败" || true
             fi
             return 1
         fi
     fi
-    [[ -z "${installBackupDir}" ]] || padmRemoveCleanupPath "${installBackupDir}"
+    padmRemoveCleanupPath "${installBackupDir}"
 }
 
 installSubscribe() {
+    subscriptionRequireLocalPublisherRole || return 1
     padmRunPortAllowTransaction installSubscribeApply "$@"
 }
 
@@ -498,6 +783,8 @@ updateRemoteSubscribe() {
     local escapedEmail=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
     local commitFailed=false
+
+    subscriptionRemoteScopeEnabled || return 0
 
     padmCreateTmpRootPath tmpDir padm-remote-subscribe-fetch.XXXXXX -d || return 1
     padmCreateTmpRootPath stageDir padm-remote-subscribe-stage.XXXXXX -d || { padmRemoveCleanupPath "${tmpDir}"; return 1; }
