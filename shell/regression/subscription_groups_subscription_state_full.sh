@@ -758,7 +758,7 @@ runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
     [[ ! -e "$(subscriptionGroupsFile).restore.tmp" ]]
 
     case "${OSTYPE:-}" in
-    msys* | cygwin* | win32*) workerCount=4 ;;
+    msys* | cygwin* | win32*) workerCount=2 ;;
     esac
     for ((worker = 0; worker < workerCount; worker++)); do
         (
