@@ -254,6 +254,10 @@ Reality 里有三个容易混淆的概念：
 
 常见配置是：客户端连接 `node.example.com`，Reality target 使用 `www.ibm.com:443`，Reality SNI 使用 `www.ibm.com`。
 
+Reality Vision、Reality XHTTP 和 Reality gRPC 均不申请本机 TLS 证书；纯 Reality 安装不创建或清理站点，不操作 ACME/Cron，也不停止、启动或重载 Nginx。`--reality-domain yes` 是严格域名模式，只允许单选 Reality Vision `1`，并校验 entry 域名及 DNS；协议 `2`、`26` 或任何多选组合会在安装依赖和写配置前拒绝。
+
+Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`、`currentHost`、公网 IP 的顺序选择。普通单选 Reality 端口按显式 `--port`、历史端口、`443` 的顺序选择；多协议继续使用各自端口，不把顶层 `--port` 注入 Reality 子端口。启用 443 共存后，客户端仍连接记录的公网端口，核心继续复用已记录的内部端口。
+
 未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用已有 A/B 实测结果；没有结果时实测内置候选并选择可用目标；仍无可用结果时回退 `www.ibm.com:443`。Reality 目标站检测结果写入 `/etc/padm/reality_targets_results.tsv`，评分包括 TLS 1.3、`X25519MLKEM768`、证书链长度、网络匹配、CDN 风险和检测时间。
 
 `协议与入口` -> `REALITY 管理` 可查看当前目标、运行 `xray tls ping`、刷新目标库、运行 RealiTLScanner、切换实测结果、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。RealiTLScanner 是高级功能，云端扫描可能导致 VPS 被标记；脚本会在执行前提示确认。
@@ -376,11 +380,11 @@ net.ipv4.tcp_congestion_control = bbr
 | `--install-type` | `install`、`custom`、`reality` | 无自动参数时进入交互菜单；传其它安装参数但不传本参数时默认 `custom` | 安装类型。 |
 | `--core` | `xray`、`sing-box`、`1`、`2` | `xray` | `1` 等同 `xray`，`2` 等同 `sing-box`。 |
 | `--protocols` | 当前公开协议编号，逗号分隔 | 无固定默认 | 自定义安装协议，例如 `1` 或 `1,2,21`；旧版 `0..13/20` 编号已废弃。 |
-| `--domain` | 域名 | TLS 安装时必须提供或交互输入 | TLS 证书域名和默认客户端入口地址；不是 Reality target。 |
-| `--entry-host` | 域名或 IP | Reality 默认优先使用 `--domain`，否则使用公网 IP | 客户端实际连接地址。 |
+| `--domain` | 域名 | TLS 安装时必须提供或交互输入 | TLS 证书域名；也是 Reality entry 的第二优先级，但 Reality 不为其申请证书。 |
+| `--entry-host` | 域名或 IP | 优先于 `--domain`、历史 entry、`currentHost` 和公网 IP | Reality 客户端实际连接地址。 |
 | `--reality-target` | `host[:port]` | 未传时进入目标站选择器；兜底 `www.ibm.com:443` | Reality 伪装目标站。 |
 | `--reality-server-name` | SNI 域名 | 默认等于 target host | Reality SNI。 |
-| `--port` | 端口号 | 默认 `443`；部分交互场景可随机 `10000-30000` | TLS 入口端口。 |
+| `--port` | 端口号 | TLS 默认 `443`；单选 Reality 为显式端口 > 历史端口 > `443` | TLS 入口端口或单选 Reality 客户端连接端口；多协议不注入 Reality 子端口。 |
 | `--tls-ca` | `letsencrypt`、`zerossl`、`buypass` | `letsencrypt` | 证书 CA。 |
 | `--dns-api` | `yes`、`no`、`y`、`n` | `no` | 是否使用 DNS API 申请证书。 |
 | `--dns-api-type` | `cloudflare`、`aliyun`、`1`、`2` | `cloudflare` | DNS API 服务商。 |
@@ -391,7 +395,7 @@ net.ipv4.tcp_congestion_control = bbr
 | `--aliyun-api-secret` | secret | 也可用 `PADM_ALIYUN_API_SECRET` | 阿里云 AccessKey Secret。 |
 | `--reuse-last` | `yes`、`no`、`y`、`n` | `no` | 是否复用上次安装配置。 |
 | `--clean-acme` | `yes`、`no`、`y`、`n` | `no` | 清空上次配置时是否同时清理 acme。 |
-| `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 仅选 Reality 时入口是否使用自有域名；新安装优先用 `--entry-host`。 |
+| `--reality-domain` | `yes`、`no`、`y`、`n` | `no` | 严格域名模式，仅支持单选 Reality Vision `1`；优先用 `--entry-host`，其次 `--domain`。 |
 | `--subscribe-port` | 端口号 | 无固定默认 | 订阅发布服务端口。 |
 | `--install-nginx` | `yes`、`no`、`y`、`n` | `no` | 订阅或反代需要 Nginx 时是否自动安装。 |
 | `--uuid` | UUID | 随机生成 | 初始用户 UUID。 |

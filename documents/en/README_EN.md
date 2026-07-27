@@ -254,6 +254,10 @@ Reality has three concepts that are easy to mix up:
 
 A common setup is: client entry `node.example.com`, Reality target `www.ibm.com:443`, and Reality SNI `www.ibm.com`.
 
+Reality Vision, Reality XHTTP, and Reality gRPC never request a local TLS certificate. A Reality-only install does not create or remove sites, touch ACME/cron, or stop, start, or reload Nginx. `--reality-domain yes` enables strict-domain mode only for a single Reality Vision `1` selection and validates the entry hostname and DNS; protocol `2`, `26`, or any multi-selection is rejected before dependencies or configuration writes.
+
+Reality entry selection is `--entry-host`, then `--domain`, `/etc/padm/reality_entry_host`, `currentHost`, and finally the public IP. A normal single Reality port is selected as explicit `--port`, previous port, then `443`. Multi-protocol installs keep independent protocol ports and do not inject top-level `--port` into a Reality sub-port. With 443 coexistence enabled, clients keep using the recorded public port while the core reuses the recorded internal port.
+
 When `--reality-target` is omitted, the script opens the target selector. Automatic selection prefers existing A/B measured results; if none exist, it probes built-in candidates; if no usable result is found, it falls back to `www.ibm.com:443`. Reality target measurements are written to `/etc/padm/reality_targets_results.tsv`, including TLS 1.3, `X25519MLKEM768`, certificate-chain length, network match, CDN risk, and check time.
 
 `Protocols & entry` -> `REALITY management` can show the current target, run `xray tls ping`, refresh the target library, run RealiTLScanner, switch from measured results, view PQC/ML-DSA-65 status, and configure 443 coexistence splitting. RealiTLScanner is advanced; cloud scanning may cause the VPS to be flagged, so the script asks for confirmation first.
@@ -376,11 +380,11 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 | `--install-type` | `install`, `custom`, `reality` | Opens the interactive menu when no automation flags are passed; defaults to `custom` when other install flags are passed | Installation type. |
 | `--core` | `xray`, `sing-box`, `1`, `2` | `xray` | `1` maps to `xray`, `2` maps to `sing-box`. |
 | `--protocols` | comma-separated current public protocol IDs | No fixed default | Custom install protocols, such as `1` or `1,2,21`; old `0..13/20` IDs are deprecated. |
-| `--domain` | domain | Required or prompted for TLS installs | TLS certificate domain and default client entry; not the Reality target. |
-| `--entry-host` | domain or IP | Reality prefers `--domain`, otherwise public IP | Address clients actually connect to. |
+| `--domain` | domain | Required or prompted for TLS installs | TLS certificate domain; also the second Reality entry priority, but Reality does not request a certificate for it. |
+| `--entry-host` | domain or IP | Before `--domain`, saved entry, `currentHost`, and public IP | Address Reality clients actually connect to. |
 | `--reality-target` | `host[:port]` | Opens selector when omitted; fallback `www.ibm.com:443` | Reality camouflage target. |
 | `--reality-server-name` | SNI hostname | Defaults to target host | Reality SNI. |
-| `--port` | port number | `443`; some interactive paths can randomize `10000-30000` | TLS entry port. |
+| `--port` | port number | TLS defaults to `443`; single Reality uses explicit port, previous port, then `443` | TLS entry port or single-Reality client port; not injected into Reality sub-ports in multi-selection installs. |
 | `--tls-ca` | `letsencrypt`, `zerossl`, `buypass` | `letsencrypt` | Certificate authority. |
 | `--dns-api` | `yes`, `no`, `y`, `n` | `no` | Whether to use DNS API certificate issuance. |
 | `--dns-api-type` | `cloudflare`, `aliyun`, `1`, `2` | `cloudflare` | DNS API provider. |
@@ -391,7 +395,7 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 | `--aliyun-api-secret` | secret | Can also use `PADM_ALIYUN_API_SECRET` | Aliyun AccessKey Secret. |
 | `--reuse-last` | `yes`, `no`, `y`, `n` | `no` | Whether to reuse the previous installation config. |
 | `--clean-acme` | `yes`, `no`, `y`, `n` | `no` | Whether to remove acme data when clearing previous config. |
-| `--reality-domain` | `yes`, `no`, `y`, `n` | `no` | Whether a Reality-only install should use your own domain; prefer `--entry-host` for new installs. |
+| `--reality-domain` | `yes`, `no`, `y`, `n` | `no` | Strict-domain mode for a single Reality Vision `1` selection only; `--entry-host` has priority over `--domain`. |
 | `--subscribe-port` | port number | No fixed default | Subscription publishing service port. |
 | `--install-nginx` | `yes`, `no`, `y`, `n` | `no` | Whether to auto-install Nginx when subscription publishing or reverse proxying needs it. |
 | `--uuid` | UUID | Randomly generated | Initial user UUID. |
