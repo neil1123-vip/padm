@@ -736,6 +736,69 @@ acmeInstallIsComplete() {
         -f "${acmeDir}/dnsapi/dns_ali.sh" ]]
 }
 
+installAcmeTool() {
+    acmeInstallIsComplete && return 0
+    beginPackageInstallTransaction
+    local packageTransactionOwner=${PADM_PACKAGE_TRANSACTION_STARTED}
+    local acmeArchive
+    local acmeDownloadArchive
+    local acmeHomeDirPath
+    local acmeBackupDir
+    local acmeTmpDir
+    local acmeSourceDir
+    local acmeScriptRef
+    local acmeArchiveUrl
+
+    successCard "安装acme.sh"
+    acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
+    adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
+    adapterRegisterPackageManagedRollback "${acmeBackupDir}"
+    padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
+    acmeArchive="${acmeTmpDir}/acme.tar.gz"
+    padmCreateTempPath acmeDownloadArchive "${acmeTmpDir}/acme.tar.gz.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装包临时文件创建失败"; }
+    acmeScriptRef=$(resolveGitHubCommitRef acmesh-official/acme.sh master) || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本最新提交解析失败"; }
+    acmeArchiveUrl="https://github.com/acmesh-official/acme.sh/archive/${acmeScriptRef}.tar.gz"
+    if downloadUrlToFileBounded "${acmeArchiveUrl}" "${acmeDownloadArchive}" 5242880 120 &&
+        [[ -s "${acmeDownloadArchive}" ]] && validateCoreTarArchive "${acmeDownloadArchive}"; then
+        if ! mv "${acmeDownloadArchive}" "${acmeArchive}"; then
+            padmRemoveCleanupPath "${acmeTmpDir}"
+            failPackageInstallTransaction "acme安装包提交失败"
+        fi
+        padmForgetCleanupPath "${acmeDownloadArchive}"
+    else
+        padmRemoveCleanupPath "${acmeTmpDir}"
+        failPackageInstallTransaction "acme安装包下载或校验失败"
+    fi
+    acmeSourceDir="${acmeTmpDir}/acme.sh-${acmeScriptRef}"
+    if ! tar -xzf "${acmeArchive}" -C "${acmeTmpDir}" >/dev/null 2>&1 ||
+        ! coreExtractedFileIsRegular "${acmeSourceDir}/acme.sh" ||
+        ! coreExtractedFileIsRegular "${acmeSourceDir}/dnsapi/dns_cf.sh" ||
+        ! coreExtractedFileIsRegular "${acmeSourceDir}/dnsapi/dns_ali.sh" ||
+        ! grep -q '^#!/usr/bin/env sh' "${acmeSourceDir}/acme.sh" || ! sh -n "${acmeSourceDir}/acme.sh"; then
+        padmRemoveCleanupPath "${acmeTmpDir}"
+        failPackageInstallTransaction "acme安装包解压或校验失败"
+    fi
+    runWithTimeout 600 "cd \"${acmeSourceDir}\" && sh ./acme.sh --install >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
+
+    if ! acmeInstallIsComplete; then
+        padmRemoveCleanupPath "${acmeTmpDir}"
+        echoContent title "\n┌─ acme.sh 安装失败 ─────────────────────────────────"
+        menuLine "安装日志：/etc/padm/tls/acme.log"
+        menuClose
+        tail -n 100 /etc/padm/tls/acme.log
+        echoContent title "\n┌─ acme.sh 安装排障 ─────────────────────────────────"
+        menuLine "获取 GitHub 文件失败时，请等待 GitHub 恢复后重试：https://www.githubstatus.com/"
+        menuLine "acme.sh 脚本异常时，可查看 https://github.com/acmesh-official/acme.sh/issues"
+        menuLine "纯 IPv6 机器请设置 NAT64；如仍不可用，请尝试更换其他 NAT64"
+        menuLine "可尝试写入 NAT64 DNS："
+        menuLine "sed -i \"1i\\nameserver 2a00:1098:2b::1\\nnameserver 2a00:1098:2c::1\\nnameserver 2a01:4f8:c2c:123f::1\\nnameserver 2a01:4f9:c010:3f02::1\" /etc/resolv.conf"
+        menuClose
+        failPackageInstallTransaction "acme.sh安装结果校验失败"
+    fi
+    padmRemoveCleanupPath "${acmeTmpDir}"
+    endPackageInstallTransaction "${packageTransactionOwner}"
+}
+
 # 安装工具包
 installTools() {
     progressCard "$1" "安装工具"
@@ -817,63 +880,7 @@ installTools() {
     if ! protocolSelectionNeedsLocalCertificate "${selectCustomInstallType}"; then
         successCard "检测到无需依赖本机 TLS 证书的服务，跳过安装 acme.sh"
     else
-        if ! acmeInstallIsComplete; then
-            successCard "安装acme.sh"
-            local acmeArchive
-            local acmeDownloadArchive
-            local acmeHomeDirPath
-            local acmeBackupDir
-            local acmeTmpDir
-            local acmeSourceDir
-            local acmeScriptRef
-            local acmeArchiveUrl
-            acmeHomeDirPath=$(acmeSafeHomeDir) || failPackageInstallTransaction "acme目录路径异常"
-            adapterCreateManagedRollbackBackup acmeBackupDir "${acmeHomeDirPath}" || failPackageInstallTransaction "acme目录备份失败"
-            adapterRegisterPackageManagedRollback "${acmeBackupDir}"
-            padmCreateTmpRootPath acmeTmpDir padm-tls.XXXXXX -d || failPackageInstallTransaction "acme安装脚本临时目录创建失败"
-            acmeArchive="${acmeTmpDir}/acme.tar.gz"
-            padmCreateTempPath acmeDownloadArchive "${acmeTmpDir}/acme.tar.gz.download.XXXXXX" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装包临时文件创建失败"; }
-            acmeScriptRef=$(resolveGitHubCommitRef acmesh-official/acme.sh master) || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme安装脚本最新提交解析失败"; }
-            acmeArchiveUrl="https://github.com/acmesh-official/acme.sh/archive/${acmeScriptRef}.tar.gz"
-            if downloadUrlToFileBounded "${acmeArchiveUrl}" "${acmeDownloadArchive}" 5242880 120 &&
-                [[ -s "${acmeDownloadArchive}" ]] && validateCoreTarArchive "${acmeDownloadArchive}"; then
-                if ! mv "${acmeDownloadArchive}" "${acmeArchive}"; then
-                    padmRemoveCleanupPath "${acmeTmpDir}"
-                    failPackageInstallTransaction "acme安装包提交失败"
-                fi
-                padmForgetCleanupPath "${acmeDownloadArchive}"
-            else
-                padmRemoveCleanupPath "${acmeTmpDir}"
-                failPackageInstallTransaction "acme安装包下载或校验失败"
-            fi
-            acmeSourceDir="${acmeTmpDir}/acme.sh-${acmeScriptRef}"
-            if ! tar -xzf "${acmeArchive}" -C "${acmeTmpDir}" >/dev/null 2>&1 ||
-                ! coreExtractedFileIsRegular "${acmeSourceDir}/acme.sh" ||
-                ! coreExtractedFileIsRegular "${acmeSourceDir}/dnsapi/dns_cf.sh" ||
-                ! coreExtractedFileIsRegular "${acmeSourceDir}/dnsapi/dns_ali.sh" ||
-                ! grep -q '^#!/usr/bin/env sh' "${acmeSourceDir}/acme.sh" || ! sh -n "${acmeSourceDir}/acme.sh"; then
-                padmRemoveCleanupPath "${acmeTmpDir}"
-                failPackageInstallTransaction "acme安装包解压或校验失败"
-            fi
-            runWithTimeout 600 "cd \"${acmeSourceDir}\" && sh ./acme.sh --install >/etc/padm/tls/acme.log 2>&1" || { padmRemoveCleanupPath "${acmeTmpDir}"; failPackageInstallTransaction "acme.sh安装失败"; }
-
-            if ! acmeInstallIsComplete; then
-                padmRemoveCleanupPath "${acmeTmpDir}"
-                echoContent title "\n┌─ acme.sh 安装失败 ─────────────────────────────────"
-                menuLine "安装日志：/etc/padm/tls/acme.log"
-                menuClose
-                tail -n 100 /etc/padm/tls/acme.log
-                echoContent title "\n┌─ acme.sh 安装排障 ─────────────────────────────────"
-                menuLine "获取 GitHub 文件失败时，请等待 GitHub 恢复后重试：https://www.githubstatus.com/"
-                menuLine "acme.sh 脚本异常时，可查看 https://github.com/acmesh-official/acme.sh/issues"
-                menuLine "纯 IPv6 机器请设置 NAT64；如仍不可用，请尝试更换其他 NAT64"
-                menuLine "可尝试写入 NAT64 DNS："
-                menuLine "sed -i \"1i\\nameserver 2a00:1098:2b::1\\nnameserver 2a00:1098:2c::1\\nnameserver 2a01:4f8:c2c:123f::1\\nnameserver 2a01:4f9:c010:3f02::1\" /etc/resolv.conf"
-                menuClose
-                failPackageInstallTransaction "acme.sh安装结果校验失败"
-            fi
-            padmRemoveCleanupPath "${acmeTmpDir}"
-        fi
+        installAcmeTool || return 1
     fi
 
     endPackageInstallTransaction "${packageTransactionOwner}"

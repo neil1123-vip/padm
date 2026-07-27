@@ -1182,7 +1182,6 @@ subscriptionControlApplySyncUnlocked() {
     local configBackupDir=
     local outputBackupDir=
     local prepareFailureMessage=
-    local refreshPublishedStatus=0
     if ! jq -e '
       def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
@@ -1276,30 +1275,6 @@ subscriptionControlApplySyncUnlocked() {
                     "恢复旧配置后核心重载仍失败，请检查核心服务日志" || true
             fi
             jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-核心重载失败}" '{ok:false, changed:true, dry_run:false, error:"reload_failed", error_detail:{type:"reload_failed", message:$message}, plan:$plan}'
-            return 1
-        fi
-        subscribePort=
-        subscribeType=
-        subscribeDomain=
-        readNginxSubscribe
-        if [[ "$(subscriptionWireGuardRole 2>/dev/null || printf 'uninitialized')" != "controlled" || -n "${subscribePort:-}" ]]; then
-            subscribe false false >/dev/null 2>&1 || refreshPublishedStatus=$?
-        fi
-        if [[ "${refreshPublishedStatus}" -ne 0 ]]; then
-            if subscriptionControlRestoreAppliedPlan "${previousGroupsState}" "${configBackupDir}" "${outputBackupDir}"; then
-                if ! reloadCore; then
-                    subscriptionSyncSetRollbackRetryMessage SUBSCRIPTION_CONTROL_RESTORE_ERROR "订阅发布刷新失败" reloadCore "恢复旧配置后核心重载仍失败，请检查核心服务日志" true
-                fi
-                subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-            else
-                subscriptionSyncReleaseLocalApplyBackups forget "${configBackupDir}" "${outputBackupDir}"
-                subscriptionSyncRetryPartiallyRestoredConfig \
-                    SUBSCRIPTION_CONTROL_RESTORE_ERROR \
-                    "${SUBSCRIPTION_CONTROL_CONFIG_RESTORED:-false}" \
-                    reloadCore \
-                    "恢复旧配置后核心重载仍失败，请检查核心服务日志" || true
-            fi
-            jq -n --argjson plan "${plan}" --arg message "${SUBSCRIPTION_CONTROL_RESTORE_ERROR:-订阅发布刷新失败}" '{ok:false, changed:true, dry_run:false, error:"refresh_failed", error_detail:{type:"refresh_failed", message:$message}, plan:$plan}'
             return 1
         fi
     fi

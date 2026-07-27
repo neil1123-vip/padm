@@ -1025,14 +1025,13 @@ JSON
                 [[ "${remoteSuccessStatus}" -eq 0 ]]
                 responseHasApplySuccess "${remoteSuccessResponse}" true false
                 [[ "${reloadCalls}" == "1" ]]
-                [[ "${subscribeCalls}" == "1" ]]
-                [[ "${subscribeArgs}" == "false false" ]]
+                [[ "${subscribeCalls}" == "0" ]]
                 [[ "${reconcileCalls}" == "0" ]]
 
                 runControlApplyCapture localSuccessResponse localSuccessStatus local '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}'
                 [[ "${localSuccessStatus}" -eq 0 ]]
                 responseHasApplySuccess "${localSuccessResponse}" true false
-                [[ "${subscribeCalls}" == "1" ]]
+                [[ "${subscribeCalls}" == "0" ]]
                 [[ "${reconcileCalls}" == "1" ]]
 
                 (
@@ -1121,8 +1120,9 @@ JSON
                 local refreshFailureResponse applyFailureResponse
                 local refreshStatus applyStatus
                 runControlApplyCapture refreshFailureResponse refreshStatus server '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}'
-                [[ "${refreshStatus}" -ne 0 ]]
-                responseHasErrorType "${refreshFailureResponse}" refresh_failed
+                [[ "${refreshStatus}" -eq 0 ]]
+                responseHasApplySuccess "${refreshFailureResponse}" true false
+                [[ "${subscribeCalls}" == "0" ]]
 
                 subscriptionControlApplyAccountPlan() {
                     return 1
@@ -1413,11 +1413,10 @@ JSON
         PADM_CONTROL_SERVER=1 subscriptionControlApplySync '{"desired_users":[{"id":"publish","uuid":"77777777-7777-7777-7777-777777777777"}],"dry_run":false}' >"${responseFile}.refresh-rollback"
         local refreshRollbackStatus=$?
         set -e
-        [[ "${refreshRollbackStatus}" -ne 0 ]]
-        jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed"' "${responseFile}.refresh-rollback" >/dev/null
-        printf '%s\n' "${refreshRollbackStateBefore}" >"${refreshRollbackExpectedFile}"
-        jq -e --slurpfile expected "${refreshRollbackExpectedFile}" '. == $expected[0]' "$(subscriptionGroupsFile)" >/dev/null
-        [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" == "${refreshRollbackFirstBefore}" ]]
+        [[ "${refreshRollbackStatus}" -eq 0 ]]
+        jq -e '.ok == true and .changed == true' "${responseFile}.refresh-rollback" >/dev/null
+        jq -e 'any(.groups[0].user_groups[]; .id == "publish")' "$(subscriptionGroupsFile)" >/dev/null
+        [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" != "${refreshRollbackFirstBefore}" ]]
         diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
         diff -u "${refreshRollbackPublicExpected}" <(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
         if regressionFindHasMatches "${refreshRollbackRoot}" \( -name '*.sync.*' -o -name '*subscription-sync-backup*' -o -name '*subscription-output-backup*' \); then
@@ -1485,13 +1484,13 @@ JSON
         local restoreFailureStatus=$?
         set -e
         unset -f cp
-        [[ "${restoreFailureStatus}" -ne 0 ]]
-        [[ "${reloadCalls}" -eq $((restoreFailureReloadBefore + 2)) ]]
-        jq -e '.ok == false and .error == "refresh_failed" and .error_detail.type == "refresh_failed" and (.error_detail.message | contains("订阅输出恢复失败"))' "${responseFile}.restore-failure" >/dev/null
+        [[ "${restoreFailureStatus}" -eq 0 ]]
+        [[ "${reloadCalls}" -eq $((restoreFailureReloadBefore + 1)) ]]
+        jq -e '.ok == true and .changed == true' "${responseFile}.restore-failure" >/dev/null
         mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
-        [[ "${#restoreFailureBackupDirs[@]}" == "2" ]]
-        regressionFindHasMatches "${restoreFailureRoot}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
-        [[ ! -e "${restoreFailureLocalDir}/default/existing" || "$(<"${restoreFailureLocalDir}/default/existing")" != "old local" ]]
+        [[ "${#restoreFailureBackupDirs[@]}" == "0" ]]
+        [[ "$(<"${restoreFailureLocalDir}/default/existing")" == "old local" ]]
+        [[ "$(<"${restoreFailurePublicDir}/default/existing-md5")" == "old public" ]]
         if regressionFindHasMatches "${restoreFailureRoot}/xray" -name '*.sync.*'; then
             return 1
         fi

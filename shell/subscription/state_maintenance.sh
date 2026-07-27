@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 
 subscriptionGroupsStateSummaryJson() {
+    local localOnly=false
+    [[ "$(subscriptionCurrentRoleNormalized)" == "uninitialized" ]] && localOnly=true
     ensureSubscriptionGroupsState
-    subscriptionActiveGroupRead '
+    subscriptionActiveGroupRead --argjson localOnly "${localOnly}" '
       {
         group_id: .id,
         group_name: .name,
         subscription_users: (.user_groups | length),
         enabled_users: ([.user_groups[]? | select(.enabled == true)] | length),
-        sources: (.sources | length),
-        enabled_remote_sources: ([.sources[]? | select(.role != "main" and .enabled == true)] | length),
+        sources: ([.sources[]? | select(($localOnly | not) or .role == "main")] | length),
+        enabled_remote_sources: (if $localOnly then 0 else ([.sources[]? | select(.role != "main" and .enabled == true)] | length) end),
         sync: .sync,
         traffic_updated_at: ((.traffic.sources.main.updated_at // .traffic.admin.sources.main.updated_at // "") | if . == "" then "unknown" else . end)
       }'
@@ -170,7 +172,7 @@ resetSubscriptionGroupsStateMenu() {
 }
 
 manageSubscriptionStateBackups() {
-    subscriptionRequireMainRole || return 1
+    subscriptionRequireLocalPublisherRole || return 1
     while true; do
         echoContent title "\n┌─ 状态备份与恢复 ───────────────────────────────────"
         menuLine "这里只管理 groups.json 状态；恢复和重建都会先自动备份当前状态"

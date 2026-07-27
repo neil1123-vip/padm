@@ -938,18 +938,7 @@ subscriptionSyncApplyAccountPlanTransaction() {
 }
 
 subscriptionSyncReconcileLocalServices() {
-    local skipSubscribeRefresh=${1:-}
     reloadCore || return 1
-    readNginxSubscribe
-    installSubscriptionControlService || return 1
-    if ensureSubscriptionControlNginxLocation; then
-        serviceQueueRestart nginx || return 1
-        serviceQueueApply || return 1
-    fi
-    if [[ -n "${subscribePort}" && -z "${skipSubscribeRefresh}" ]]; then
-        subscribe false || return 1
-    fi
-    return 0
 }
 
 subscriptionSyncMarkResult() {
@@ -1213,7 +1202,7 @@ runSubscriptionGroupSyncUnlocked() {
         rc=1
     fi
 
-    if subscriptionGroupRemoteSyncEnabled; then
+    if subscriptionRemoteScopeEnabled && subscriptionGroupRemoteSyncEnabled; then
         remoteSyncEnabled=true
     fi
 
@@ -1234,8 +1223,10 @@ runSubscriptionGroupSyncUnlocked() {
         subscribePort=
         subscribeType=
         subscribeDomain=
-        readNginxSubscribe
-        if [[ -n "${subscribePort:-}" ]]; then
+        if ! readNginxSubscribe; then
+            failures=$(jq '. + ["订阅 Nginx 配置损坏，已跳过公网订阅刷新"]' <<<"${failures}")
+            rc=1
+        elif [[ -n "${subscribePort:-}" ]]; then
             if ! subscribe false false >/dev/null 2>&1; then
                 failures=$(jq '. + ["同步完成后公网订阅刷新失败"]' <<<"${failures}")
                 rc=1
@@ -1270,19 +1261,23 @@ runSubscriptionGroupSyncUnlocked() {
             else
                 statusCard "订阅同步" "本机自动同步完成，但部分步骤失败，请查看失败列表"
             fi
-        else
+        elif [[ "${remoteSyncEnabled}" == "true" ]]; then
             statusCard "订阅同步" "本机同步未完全完成，请先处理本机错误后再试被控服务器同步"
+        else
+            statusCard "订阅同步" "本机同步未完全完成，请先处理本机错误"
         fi
     fi
     return "${rc}"
 }
 
 runSubscriptionGroupSync() {
+    subscriptionRequireLocalPublisherRole || return 1
     subscriptionGroupsWithLock runSubscriptionGroupSyncUnlocked "$@"
 }
 
 runSubscriptionGroupSyncCron() {
     local enabled
+    subscriptionRequireLocalPublisherRole || return 1
     enabled=$(subscriptionActiveGroupRead -r '.sync.enabled == true') || return 1
     [[ "${enabled}" == "true" ]] || return 0
     if [[ $# -eq 0 ]]; then

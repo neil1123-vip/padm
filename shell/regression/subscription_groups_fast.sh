@@ -606,6 +606,7 @@ runSubscriptionWireGuardFirewallLifecycleRegression() (
         [[ "${applyFail}" != "true" ]] || return 1
         printf 'wireguard\n' >"$(subscriptionWireGuardConfigFile)"
     }
+    subscriptionWireGuardWaitForAddress() { return 0; }
     stopSubscriptionWireGuardControlService() {
         actions+="stop"$'\n'
     }
@@ -693,7 +694,8 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
     resetWireGuardNginxDisableFixture() {
         actions=
         nginxRuntimeState=true
-        subscriptionWireGuardWriteState '.enabled = true | .role = "controlled" | .address = "10.77.0.2/24"' >/dev/null
+        subscriptionWireGuardWriteState --arg publicKey 'MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=' \
+            '.enabled = true | .role = "controlled" | .address = "10.77.0.2/24" | .public_key = $publicKey' >/dev/null
         printf 'old-wireguard\n' >"$(subscriptionWireGuardConfigFile)"
         printf 'old-nginx\n' >"${nginxTarget}"
     }
@@ -4510,7 +4512,7 @@ runStateReadersClearStaleValuesRegression() {
         source "${PROJECT_ROOT}/shell/core/state.sh"
         local root="${TMP_DIR}/state-readers-clear-stale-values"
 
-        mkdir -p "${root}/home" "${root}/nginx" "${root}/probe"
+        mkdir -p "${root}/home" "${root}/nginx" "${root}/probe" "${root}/tls"
         HOME="${root}/home"
         currentHost=missing.example.com
         domain=
@@ -4519,10 +4521,37 @@ runStateReadersClearStaleValuesRegression() {
         [[ -z "${installedDNSAPIStatus}" ]]
 
         nginxConfigPath="${root}/nginx/"
+        PADM_TLS_DIR="${root}/tls"
         subscribePort=39778
         subscribeDomain=stale.example.com
         subscribeType=https
         readNginxSubscribe
+        [[ -z "${subscribePort}" && -z "${subscribeDomain}" && -z "${subscribeType}" ]]
+        [[ "${subscribeConfigState}" == "missing" ]]
+
+        currentHost=reality.example.com
+        cat >"${root}/nginx/subscribe.conf" <<EOF
+server {
+    listen 39778 ssl;
+    server_name subscribe.example.com;
+    ssl_certificate ${root}/tls/subscribe.example.com.crt;
+    ssl_certificate_key ${root}/tls/subscribe.example.com.key;
+    location ~ sing-box_profiles { }
+}
+EOF
+        readNginxSubscribe
+        [[ "${subscribeConfigState}" == "valid" ]]
+        [[ "${subscribeDomain}" == "subscribe.example.com" && "${subscribePort}" == "39778" && "${subscribeType}" == "https" ]]
+
+        sed -i 's/listen 39778 ssl;/listen 39778;/' "${root}/nginx/subscribe.conf"
+        if readNginxSubscribe; then
+            return 1
+        fi
+        [[ "${subscribeConfigState}" == "invalid" ]]
+
+        rm -f "${root}/nginx/subscribe.conf"
+        readNginxSubscribe
+        [[ "${subscribeConfigState}" == "missing" ]]
         [[ -z "${subscribePort}" && -z "${subscribeDomain}" && -z "${subscribeType}" ]]
 
         cat >"${root}/probe/09_tuic_inbounds.json" <<'JSON'

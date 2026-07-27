@@ -781,8 +781,10 @@ handleScriptCommand() {
         installSubscribe
         installStatus=$?
         if [[ "${installStatus}" -eq 0 ]]; then
-            readNginxSubscribe
-            if [[ -n "${subscribePort}" ]]; then
+            if ! readNginxSubscribe || [[ "${subscribeConfigState:-}" != "valid" ]]; then
+                errorCard "订阅服务安装后配置读取失败"
+                installStatus=1
+            else
                 successCard "订阅服务安装完成: ${subscribeType} 端口 ${subscribePort}"
             fi
         fi

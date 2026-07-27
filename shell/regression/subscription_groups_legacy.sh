@@ -10012,34 +10012,215 @@ runSingBoxSubscribeWriteRegression() {
 
 runSubscribeServerNameRegression() {
     local oldCurrentHost="${currentHost:-}"
-    local oldDomain="${domain:-}"
     local oldTlsDir="${PADM_TLS_DIR:-}"
+    local oldAutoDomain="${AUTO_DOMAIN:-}"
+    local oldCronName="${cronName:-}"
+    local oldConfigState="${subscribeConfigState:-}"
+    local oldSubscribeDomain="${subscribeDomain:-}"
+    local originalPairUsable
     local tlsDir="${TMP_DIR}/subscribe-tls"
     mkdir -p "${tlsDir}"
+    originalPairUsable=$(declare -f tlsCertificatePairUsable)
 
+    cronName=InstallSubscription
     currentHost=host.example.com
-    domain=
-    [[ "$(resolveSubscribeServerName)" == "host.example.com" ]]
-    currentHost=$'bad.example.com;\nreturn 444'
+    AUTO_DOMAIN=
+    subscribeConfigState=missing
+    subscribeDomain=
     ! resolveSubscribeServerName >/dev/null
 
-    currentHost=
-    domain=domain.example.com
+    AUTO_DOMAIN=domain.example.com
     [[ "$(resolveSubscribeServerName)" == "domain.example.com" ]]
-    domain='bad domain.example.com'
+    AUTO_DOMAIN='bad domain.example.com'
     ! resolveSubscribeServerName >/dev/null
 
-    currentHost=
-    domain=
+    AUTO_DOMAIN=
+    subscribeConfigState=valid
+    subscribeDomain=subscribe.example.com
+    [[ "$(resolveSubscribeServerName)" == "subscribe.example.com" ]]
+
+    subscribeConfigState=missing
+    subscribeDomain=
     export PADM_TLS_DIR="${tlsDir}"
     printf 'cert\n' >"${tlsDir}/cert.example.com.crt"
     printf 'key\n' >"${tlsDir}/cert.example.com.key"
     printf 'cert\n' >"${tlsDir}/bad;name.crt"
     printf 'key\n' >"${tlsDir}/bad;name.key"
+    tlsCertificatePairUsable() { [[ "$2" == "cert.example.com" ]]; }
     [[ "$(resolveSubscribeServerName)" == "cert.example.com" ]]
 
+    eval "${originalPairUsable}"
+
+    (
+        set -e
+        local certRoot="${TMP_DIR}/subscribe-real-certificates"
+        local caDir="${certRoot}/ca"
+        local subjectPrefix=/
+        [[ -z "${MSYSTEM:-}" ]] || subjectPrefix=//
+        mkdir -p "${certRoot}" "${caDir}/newcerts"
+        openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${certRoot}/valid.example.com.key" \
+            -out "${certRoot}/valid.example.com.crt" \
+            -days 1 -subj "${subjectPrefix}CN=valid.example.com" \
+            -addext 'subjectAltName=DNS:valid.example.com' >/dev/null 2>&1
+        openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${certRoot}/other.example.com.key" \
+            -out "${certRoot}/other.example.com.crt" \
+            -days 1 -subj "${subjectPrefix}CN=other.example.com" \
+            -addext 'subjectAltName=DNS:other.example.com' >/dev/null 2>&1
+        tlsCertificatePairUsable "${certRoot}" valid.example.com
+        cp "${certRoot}/valid.example.com.crt" "${certRoot}/wrong.example.com.crt"
+        cp "${certRoot}/valid.example.com.key" "${certRoot}/wrong.example.com.key"
+        ! tlsCertificatePairUsable "${certRoot}" wrong.example.com
+        cp "${certRoot}/other.example.com.key" "${certRoot}/valid.example.com.key"
+        ! tlsCertificatePairUsable "${certRoot}" valid.example.com
+        printf 'not-a-certificate\n' >"${certRoot}/broken.example.com.crt"
+        printf 'not-a-key\n' >"${certRoot}/broken.example.com.key"
+        ! tlsCertificatePairUsable "${certRoot}" broken.example.com
+
+        export PADM_TEST_CA_DIR="${caDir}"
+        : >"${caDir}/index.txt"
+        printf '1000\n' >"${caDir}/serial"
+        openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "${caDir}/ca.key" -out "${caDir}/ca.crt" \
+            -days 1 -subj "${subjectPrefix}CN=padm-regression-ca" >/dev/null 2>&1
+        openssl req -new -newkey rsa:2048 -nodes \
+            -keyout "${certRoot}/expired.example.com.key" \
+            -out "${caDir}/expired.csr" -subj "${subjectPrefix}CN=expired.example.com" \
+            -addext 'subjectAltName=DNS:expired.example.com' >/dev/null 2>&1
+        cat >"${caDir}/ca.cnf" <<'EOF'
+[ ca ]
+default_ca = CA_default
+[ CA_default ]
+dir = $ENV::PADM_TEST_CA_DIR
+database = $dir/index.txt
+new_certs_dir = $dir/newcerts
+certificate = $dir/ca.crt
+private_key = $dir/ca.key
+serial = $dir/serial
+default_md = sha256
+default_days = 1
+policy = policy_any
+copy_extensions = copy
+unique_subject = no
+[ policy_any ]
+commonName = optional
+EOF
+        openssl ca -batch -notext -config "${caDir}/ca.cnf" \
+            -startdate 20200101000000Z -enddate 20200102000000Z \
+            -in "${caDir}/expired.csr" \
+            -out "${certRoot}/expired.example.com.crt" >/dev/null 2>&1
+        ! tlsCertificatePairUsable "${certRoot}" expired.example.com
+        unset PADM_TEST_CA_DIR
+    )
+
+    (
+        local callLog="${TMP_DIR}/subscribe-auto-dns-preflight.log"
+        local errorLog="${TMP_DIR}/subscribe-auto-dns-preflight-error.log"
+        local testTlsDir="${tlsDir}"
+        : >"${callLog}"
+        : >"${errorLog}"
+        tlsManagedDir() { printf '%s\n' "${testTlsDir}"; }
+        tlsCertificatePairUsable() { return 1; }
+        readAcmeTLS() { printf 'read-acme\n' >>"${callLog}"; }
+        switchDNSAPI() { printf 'switch-dns\n' >>"${callLog}"; }
+        installAcmeTool() { printf 'install-acme\n' >>"${callLog}"; }
+        installTLS() { printf 'install-tls\n' >>"${callLog}"; }
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        cronName=InstallSubscription
+        AUTO_INSTALL=true
+        AUTO_DOMAIN=cert.example.com
+        AUTO_DNS_API=yes
+        AUTO_DNS_API_TYPE=cloudflare
+        AUTO_CLOUDFLARE_API_TOKEN=
+        PADM_CLOUDFLARE_API_TOKEN=
+        CLOUDFLARE_API_TOKEN=
+        CF_Token=
+        ! prepareSubscribeTLSCertificate cert.example.com
+        [[ ! -s "${callLog}" ]]
+        grep -q 'Cloudflare DNS API Token 为空' "${errorLog}"
+
+        : >"${errorLog}"
+        AUTO_DNS_API_TYPE=aliyun
+        AUTO_ALIYUN_API_KEY=only-key
+        AUTO_ALIYUN_API_SECRET=
+        PADM_ALIYUN_API_KEY=
+        PADM_ALIYUN_API_SECRET=
+        ! prepareSubscribeTLSCertificate cert.example.com
+        [[ ! -s "${callLog}" ]]
+        grep -q '阿里云 DNS API 凭据不完整' "${errorLog}"
+    )
+
+    (
+        local callLog="${TMP_DIR}/subscribe-http01-restore.log"
+        local dnsReady=true
+        local issueStatus=0
+        local nginxStopped=false
+        checkDNSIP() { [[ "${dnsReady}" == "true" ]]; }
+        subscriptionTcpPortHasListener() { [[ "${nginxStopped}" != "true" ]]; }
+        subscriptionTcpPortListenersAreNginx() { return 0; }
+        nginxRunning() { return 0; }
+        runSubscribeNginxAction() {
+            printf 'nginx:%s\n' "$1" >>"${callLog}"
+            [[ "$1" == "stop" ]] && nginxStopped=true || nginxStopped=false
+        }
+        allowPort() { PADM_LAST_ALLOW_PORT_ADDED=true; printf 'allow:80\n' >>"${callLog}"; }
+        denyPort() { printf 'deny:80\n' >>"${callLog}"; }
+        installTLS() { printf 'issue\n' >>"${callLog}"; return "${issueStatus}"; }
+        : >"${callLog}"
+        subscriptionInstallTLSHttp01 cert.example.com
+        [[ "$(<"${callLog}")" == $'nginx:stop\nallow:80\nissue\ndeny:80\nnginx:start' ]]
+
+        : >"${callLog}"
+        issueStatus=1
+        nginxStopped=false
+        ! subscriptionInstallTLSHttp01 cert.example.com
+        [[ "$(<"${callLog}")" == $'nginx:stop\nallow:80\nissue\ndeny:80\nnginx:start' ]]
+
+        : >"${callLog}"
+        dnsReady=false
+        nginxStopped=false
+        ! subscriptionInstallTLSHttp01 cert.example.com
+        [[ ! -s "${callLog}" ]]
+    )
+
+    (
+        local commandLog="${TMP_DIR}/install-subscription-command.log"
+        local commandStatus
+        eval "$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")"
+        mkdirTools() { return 0; }
+        installSubscribe() { return 0; }
+        errorCard() { printf 'error:%s\n' "$*" >>"${commandLog}"; }
+        successCard() { printf 'success:%s\n' "$*" >>"${commandLog}"; }
+        cronName=InstallSubscription
+        readNginxSubscribe() { subscribeConfigState=invalid; return 1; }
+        : >"${commandLog}"
+        set +e
+        (handleScriptCommand)
+        commandStatus=$?
+        set -e
+        [[ "${commandStatus}" == "1" ]]
+        grep -q '安装后配置读取失败' "${commandLog}"
+
+        readNginxSubscribe() {
+            subscribeConfigState=valid
+            subscribeType=https
+            subscribePort=39778
+        }
+        : >"${commandLog}"
+        set +e
+        (handleScriptCommand)
+        commandStatus=$?
+        set -e
+        [[ "${commandStatus}" == "0" ]]
+        grep -q 'success:订阅服务安装完成: https 端口 39778' "${commandLog}"
+    )
+
     currentHost="${oldCurrentHost}"
-    domain="${oldDomain}"
+    AUTO_DOMAIN="${oldAutoDomain}"
+    cronName="${oldCronName}"
+    subscribeConfigState="${oldConfigState}"
+    subscribeDomain="${oldSubscribeDomain}"
     if [[ -n "${oldTlsDir}" ]]; then
         PADM_TLS_DIR="${oldTlsDir}"
     else
@@ -10178,27 +10359,35 @@ SH
         nginxStaticPath="${staticRoot}"
         export PADM_TLS_DIR="${tlsRoot}"
         export PADM_SUBSCRIBE_DIR="${subscribeRoot}"
-        currentHost=subscribe.example.com
+        currentHost=reality.example.com
+        AUTO_DOMAIN=subscribe.example.com
+        AUTO_SUBSCRIBE_PORT=39778
         printf 'cert\n' >"${tlsRoot}/subscribe.example.com.crt"
         printf 'key\n' >"${tlsRoot}/subscribe.example.com.key"
 
-        readNginxSubscribe() { subscribePort=; }
-        readSingBoxPortResult() {
-            local -n resultRef=$1
-            resultRef=(39778)
+        readNginxSubscribe() {
+            subscribePort=
+            subscribeDomain=
+            subscribeType=
+            subscribeConfigState=missing
         }
-        nginxBlog() { return 0; }
+        prepareSubscribeTLSCertificate() { return 0; }
+        tlsCertificatePairUsable() { return 0; }
+        subscriptionTcpPortHasListener() { return 1; }
+        allowPort() { return 0; }
+        probeSubscribeTLS() { return 0; }
         hasIPv6Connectivity() { return 1; }
-        installSubscriptionControlService() { return 0; }
+        installSubscriptionControlService() { return 1; }
         coreStartupServiceEnabled() { return 1; }
         bootStartup() { return 0; }
         handleNginx() { return 0; }
-        pgrep() { return 0; }
+        nginxRunning() { return 0; }
 
         installSubscribe >/dev/null 2>&1
         configPath="${nginxRoot}/subscribe.conf"
         grep -q "alias ${subscribeRoot}/\\\$1/\\\$2;" "${configPath}"
-        grep -q "ssl_certificate ${tlsRoot}/subscribe.example.com.crt;ssl_certificate_key ${tlsRoot}/subscribe.example.com.key;" "${configPath}"
+        grep -q "ssl_certificate ${tlsRoot}/subscribe.example.com.crt;" "${configPath}"
+        grep -q "ssl_certificate_key ${tlsRoot}/subscribe.example.com.key;" "${configPath}"
 
         if [[ -n "${oldSubscribeDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldSubscribeDir}"; else unset PADM_SUBSCRIBE_DIR; fi
         if [[ -n "${oldTlsDir}" ]]; then export PADM_TLS_DIR="${oldTlsDir}"; else unset PADM_TLS_DIR; fi
@@ -10213,7 +10402,6 @@ runSubscribeNginxServiceFailureRegression() (
     local firewallState="${root}/firewall.state"
     local firewallLog="${root}/firewall.log"
     local errorLog="${root}/error.log"
-    local installMarker="${root}/install.marker"
     local mode=reload
     local rc writeCalls controlCalls bootCalls
     local runtimeRunning=true
@@ -10232,19 +10420,13 @@ exit 0
 SH
     chmod +x "${root}/fake-bin/nginx"
     PATH="${root}/fake-bin:${PATH}"
-    nginx() {
-        [[ "${mode}" != "install-fail" ]] || return 127
-        command nginx "$@"
-    }
-    autoConfirm() { printf -v "$4" '%s' y; }
-    installNginxTools() {
-        : >"${installMarker}"
-        exit 17
-    }
     nginxConfigPath="${root}/nginx/"
     nginxStaticPath="${root}/static"
     export PADM_TLS_DIR="${root}/tls"
-    currentHost=subscribe.example.com
+    export PADM_SUBSCRIBE_DIR="${root}/public"
+    currentHost=reality.example.com
+    AUTO_DOMAIN=subscribe.example.com
+    AUTO_SUBSCRIBE_PORT=39778
     printf 'cert\n' >"${PADM_TLS_DIR}/subscribe.example.com.crt"
     printf 'key\n' >"${PADM_TLS_DIR}/subscribe.example.com.key"
     printf 'old-subscribe-config\n' >"${nginxConfigPath}subscribe.conf"
@@ -10255,22 +10437,39 @@ SH
     : >"${errorLog}"
 
     readNginxSubscribe() {
+        subscribePort=
+        subscribeDomain=
+        subscribeType=
+        subscribeConfigState=missing
         if [[ "${mode}" == "existing-port" ]]; then
             subscribePort=39778
-        else
-            subscribePort=
+            subscribeDomain=subscribe.example.com
+            subscribeType=https
+            subscribeConfigState=valid
+        elif [[ "${mode}" == "port-change" || "${mode}" == "old-port-deny-fail" ]]; then
+            subscribePort=3443
+            subscribeDomain=subscribe.example.com
+            subscribeType=https
+            subscribeConfigState=valid
         fi
     }
-    initSingBoxPort() {
-        padmFirewallStateAdd "port:ufw:tcp:39778"
-        padmFirewallStateAdd "port:ufw:udp:39778"
-        printf '39778\n'
+    prepareSubscribeTLSCertificate() { return 0; }
+    tlsCertificatePairUsable() { return 0; }
+    subscriptionTcpPortHasListener() {
+        [[ "${mode}" == "existing-port" ]]
+    }
+    subscriptionTcpPortListenersAreNginx() { return 0; }
+    allowPort() {
+        local key="port:ufw:tcp:$1"
+        PADM_LAST_ALLOW_PORT_ADDED=true
+        padmFirewallStateAdd "${key}" || return 1
+        padmTrackPortAllowTransactionKey "${key}"
     }
     removeFirewallPortRule() {
         printf '%s:%s:%s\n' "$1" "$2" "$3" >>"${firewallLog}"
+        [[ "${mode}" == "old-port-deny-fail" && "$2" == "3443" ]] && return 1
         return 0
     }
-    nginxBlog() { [[ "${mode}" != "blog-fail" ]]; }
     hasIPv6Connectivity() { return 1; }
     writeSubscribeNginxConfig() {
         writeCalls=$((writeCalls + 1))
@@ -10284,16 +10483,12 @@ SH
     }
     installSubscriptionControlService() {
         controlCalls=$((controlCalls + 1))
-        printf '%s:control\n' "${mode}" >>"${serviceLog}"
-        [[ "${mode}" == "control-fail" ]] && return 1
-        [[ "${mode}" == "final-start-fail" ]] && runtimeRunning=false
-        return 0
+        return 1
     }
     bootStartup() {
         bootCalls=$((bootCalls + 1))
         printf '%s:boot\n' "${mode}" >>"${serviceLog}"
         runtimeEnabled=true
-        [[ "${mode}" == "boot-fail" ]] && return 1
         return 0
     }
     coreStartupServiceEnabled() { [[ "${runtimeEnabled}" == "true" ]]; }
@@ -10311,9 +10506,6 @@ SH
             return 0
         fi
         startCalls=$((startCalls + 1))
-        if [[ "${mode}" == "final-start-fail" && "${startCalls}" == "2" ]]; then
-            return 1
-        fi
         if ((startFailures > 0)); then
             startFailures=$((startFailures - 1))
             return 1
@@ -10321,52 +10513,21 @@ SH
         runtimeRunning=true
         return 0
     }
-    pgrep() {
-        [[ "${mode}" == "final-start-fail" ]] && return 1
-        return 0
-    }
+    probeSubscribeTLS() { [[ "${mode}" != "probe-fail" ]]; }
 
-    writeCalls=0
-    controlCalls=0
-    bootCalls=0
-    mode=install-fail
-    rm -f "${installMarker}" "${firewallState}"
+    mode=reload
+    : >"${serviceLog}"
+    : >"${errorLog}"
+    rm -f "${firewallState}"
     : >"${firewallLog}"
-    set +e
-    installSubscribe >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ -e "${installMarker}" ]]
-    [[ "${writeCalls}" == "0" ]]
-    [[ "${controlCalls}" == "0" ]]
-    [[ "${bootCalls}" == "0" ]]
-    [[ ! -s "${firewallLog}" ]]
-    [[ ! -e "${firewallState}" ]]
-
     writeCalls=0
     controlCalls=0
     bootCalls=0
-    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    startCalls=0
     runtimeRunning=true
     runtimeEnabled=false
     startFailures=1
-    mode=blog-fail
-    rm -f "${firewallState}"
-    : >"${firewallLog}"
-    set +e
-    installSubscribe >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ "${writeCalls}" == "0" ]]
-    grep -qx 'ufw:39778:tcp' "${firewallLog}"
-    grep -qx 'ufw:39778:udp' "${firewallLog}"
-    [[ ! -e "${firewallState}" ]]
-
-    mode=reload
-    rm -f "${firewallState}"
-    : >"${firewallLog}"
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
     set +e
     installSubscribe >/dev/null 2>&1
     rc=$?
@@ -10378,13 +10539,12 @@ SH
     grep -qx 'reload:stop:true' "${serviceLog}"
     grep -qx 'reload:start:true' "${serviceLog}"
     grep -qx 'reload:nginx-mode:start restore' "${serviceLog}" || return 1
-    grep -q '订阅 Nginx 服务重载失败' "${errorLog}"
+    grep -q '订阅 Nginx 服务应用失败' "${errorLog}"
     grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
     [[ "${runtimeRunning}" == "true" ]]
     [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     grep -qx 'ufw:39778:tcp' "${firewallLog}"
-    grep -qx 'ufw:39778:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
 
     mode=existing-port
@@ -10396,22 +10556,80 @@ SH
     controlCalls=0
     bootCalls=0
     SERVICE_QUEUE_ALLOW_FAILURE=previous
-    runtimeRunning=false
+    runtimeRunning=true
     runtimeEnabled=false
-    startFailures=1
+    startFailures=0
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ "${writeCalls}" == "0" ]]
+    [[ "${controlCalls}" == "0" ]]
+    [[ "${bootCalls}" == "0" ]]
+    [[ ! -s "${serviceLog}" ]]
+    [[ ! -s "${errorLog}" ]]
+    [[ "${runtimeEnabled}" == "false" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    [[ ! -s "${firewallLog}" ]]
+
+    mode=port-change
+    : >"${serviceLog}"
+    : >"${firewallLog}"
+    : >"${errorLog}"
+    printf 'old-subscribe-config\n' >"${nginxConfigPath}subscribe.conf"
+    printf 'port:ufw:tcp:3443\n' >"${firewallState}"
+    writeCalls=0
+    controlCalls=0
+    bootCalls=0
+    startCalls=0
+    runtimeRunning=true
+    runtimeEnabled=false
+    startFailures=0
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
+    set +e
+    installSubscribe >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ "${writeCalls}" == "1" && "${controlCalls}" == "0" && "${bootCalls}" == "1" ]]
+    grep -q 'listen 39778 ssl' "${nginxConfigPath}subscribe.conf"
+    grep -qx 'port:ufw:tcp:39778' "${firewallState}"
+    ! grep -q 'port:ufw:tcp:3443' "${firewallState}"
+    grep -qx 'ufw:3443:tcp' "${firewallLog}"
+    [[ "${runtimeRunning}" == "true" && "${runtimeEnabled}" == "true" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    mode=old-port-deny-fail
+    : >"${serviceLog}"
+    : >"${firewallLog}"
+    : >"${errorLog}"
+    printf 'old-subscribe-config\n' >"${nginxConfigPath}subscribe.conf"
+    printf 'port:ufw:tcp:3443\n' >"${firewallState}"
+    writeCalls=0
+    controlCalls=0
+    bootCalls=0
+    startCalls=0
+    runtimeRunning=true
+    runtimeEnabled=false
+    startFailures=0
+    SERVICE_QUEUE_ALLOW_FAILURE=previous
     set +e
     installSubscribe >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    [[ "${writeCalls}" == "0" ]]
-    [[ "${controlCalls}" == "0" ]]
-    [[ "${bootCalls}" == "0" ]]
-    grep -qx 'existing-port:start:true' "${serviceLog}"
-    grep -q '订阅 Nginx 服务启动失败' "${errorLog}"
-    [[ "${runtimeEnabled}" == "false" ]]
+    [[ "${writeCalls}" == "1" && "${controlCalls}" == "0" && "${bootCalls}" == "1" ]]
+    grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
+    grep -qx 'port:ufw:tcp:3443' "${firewallState}"
+    ! grep -q 'port:ufw:tcp:39778' "${firewallState}"
+    grep -qx 'ufw:3443:tcp' "${firewallLog}"
+    grep -qx 'ufw:39778:tcp' "${firewallLog}"
+    [[ "$(grep -c '^old-port-deny-fail:stop:true$' "${serviceLog}")" == "2" ]]
+    [[ "$(grep -c '^old-port-deny-fail:start:true$' "${serviceLog}")" == "2" ]]
+    grep -q '旧订阅端口防火墙规则回收失败，已恢复旧 Nginx 配置' "${errorLog}"
+    [[ "${runtimeRunning}" == "true" && "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
-    [[ ! -s "${firewallLog}" ]]
 
     mode=config-fail
     : >"${serviceLog}"
@@ -10438,57 +10656,9 @@ SH
     [[ "${runtimeEnabled}" == "false" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     grep -qx 'ufw:39778:tcp' "${firewallLog}"
-    grep -qx 'ufw:39778:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
 
-    for mode in control-fail boot-fail; do
-        : >"${serviceLog}"
-        : >"${errorLog}"
-        writeCalls=0
-        controlCalls=0
-        bootCalls=0
-        runtimeRunning=true
-        if [[ "${mode}" == "control-fail" ]]; then
-            runtimeEnabled=true
-        else
-            runtimeEnabled=false
-        fi
-        startFailures=0
-        rm -f "${firewallState}"
-        : >"${firewallLog}"
-        SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        installSubscribe >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-        [[ "${writeCalls}" == "1" ]]
-        if [[ "${mode}" == "control-fail" ]]; then
-            [[ "${controlCalls}" == "1" ]]
-            [[ "${bootCalls}" == "1" ]]
-            awk '
-                $0 == "control-fail:start:true" { start = NR }
-                $0 == "control-fail:control" { control = NR }
-                END { exit !(start && control && start < control) }
-            ' "${serviceLog}"
-        else
-            [[ "${controlCalls}" == "0" ]]
-            [[ "${bootCalls}" == "1" ]]
-        fi
-        grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
-        [[ "${runtimeRunning}" == "true" ]]
-        if [[ "${mode}" == "control-fail" ]]; then
-            [[ "${runtimeEnabled}" == "true" ]]
-        else
-            [[ "${runtimeEnabled}" == "false" ]]
-        fi
-        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
-        grep -qx 'ufw:39778:tcp' "${firewallLog}"
-        grep -qx 'ufw:39778:udp' "${firewallLog}"
-        [[ ! -e "${firewallState}" ]]
-    done
-
-    mode=final-start-fail
+    mode=probe-fail
     : >"${serviceLog}"
     : >"${errorLog}"
     : >"${firewallLog}"
@@ -10507,12 +10677,18 @@ SH
     set -e
     [[ "${rc}" == "1" ]]
     [[ "${writeCalls}" == "1" ]]
-    grep -qx 'final-start-fail:start:true' "${serviceLog}"
-    grep -q '订阅 Nginx 服务启动失败' "${errorLog}"
+    [[ "${controlCalls}" == "0" ]]
+    [[ "${bootCalls}" == "1" ]]
+    grep -qx 'probe-fail:stop:true' "${serviceLog}"
+    grep -qx 'probe-fail:start:true' "${serviceLog}"
+    [[ "$(grep -c '^probe-fail:stop:true$' "${serviceLog}")" == "2" ]]
+    [[ "$(grep -c '^probe-fail:start:true$' "${serviceLog}")" == "2" ]]
+    grep -q '订阅 HTTPS 本机 SNI/TLS 探测失败' "${errorLog}"
     grep -qxF 'old-subscribe-config' "${nginxConfigPath}subscribe.conf"
     [[ "${runtimeRunning}" == "true" ]]
+    [[ "${runtimeEnabled}" == "false" ]]
+    [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     grep -qx 'ufw:39778:tcp' "${firewallLog}"
-    grep -qx 'ufw:39778:udp' "${firewallLog}"
     [[ ! -e "${firewallState}" ]]
 
     PATH="${oldPath}"
@@ -10527,6 +10703,7 @@ runSingBoxPortFailureRegression() (
     local oldStaticPath="${nginxStaticPath:-}"
     local oldSubscribePort="${subscribePort:-}"
     local oldAutoSubscribePort="${AUTO_SUBSCRIBE_PORT:-}"
+    local oldAutoDomain="${AUTO_DOMAIN:-}"
     local oldCurrentHost="${currentHost:-}"
     local oldTlsDir="${PADM_TLS_DIR:-}"
     local writeCalls=0
@@ -10567,22 +10744,22 @@ SH
     nginxConfigPath="${subscribeRoot}/nginx/"
     nginxStaticPath="${subscribeRoot}/static"
     export PADM_TLS_DIR="${subscribeRoot}/tls"
-    currentHost=port.example.com
+    currentHost=reality.example.com
+    AUTO_DOMAIN=port.example.com
     printf 'cert\n' >"${PADM_TLS_DIR}/port.example.com.crt"
     printf 'key\n' >"${PADM_TLS_DIR}/port.example.com.key"
     subscribePort=
     AUTO_SUBSCRIBE_PORT=70000
+    readNginxSubscribe() {
+        subscribePort=
+        subscribeDomain=
+        subscribeType=
+        subscribeConfigState=missing
+    }
     writeSubscribeNginxConfig() {
         writeCalls=$((writeCalls + 1))
         return 0
     }
-    nginxBlog() { return 0; }
-    hasIPv6Connectivity() { return 1; }
-    installSubscriptionControlService() { return 0; }
-    bootStartup() { return 0; }
-    handleNginx() { return 0; }
-    pgrep() { return 0; }
-
     if installSubscribe 2>/dev/null; then
         return 1
     fi
@@ -10594,6 +10771,7 @@ SH
     nginxStaticPath="${oldStaticPath}"
     subscribePort="${oldSubscribePort}"
     AUTO_SUBSCRIBE_PORT="${oldAutoSubscribePort}"
+    AUTO_DOMAIN="${oldAutoDomain}"
     currentHost="${oldCurrentHost}"
     if [[ -n "${oldTlsDir}" ]]; then export PADM_TLS_DIR="${oldTlsDir}"; else unset PADM_TLS_DIR; fi
 )
@@ -11229,6 +11407,7 @@ runSubscribeUserOutputTransactionRegression() {
     writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
     (
+        subscriptionRemoteScopeEnabled() { return 0; }
         updateRemoteSubscribe() {
             return 1
         }
@@ -11243,6 +11422,7 @@ runSubscribeUserOutputTransactionRegression() {
     writeOldSubscribeOutputs
     rm -f "${localDir}/default/${email}" "${localDir}/clashMeta/${email}" "${localDir}/sing-box/${email}"
     (
+        subscriptionRemoteScopeEnabled() { return 0; }
         updateRemoteSubscribe() {
             mkdir -p "${PADM_SUBSCRIBE_DIR}/default" "${PADM_SUBSCRIBE_DIR}/clashMeta" "${localDir}/sing-box"
             printf 'vless://remote-node#atomic-user_remote\n' >"${PADM_SUBSCRIBE_DIR}/default/${emailMd5}"
@@ -12081,6 +12261,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
     showUserSubscriptions() { return 0; }
     showUserSubscriptionTraffic() { return 0; }
     showSubscriptionLocalSyncPlan() { return 0; }
+    subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     subscriptionRequireMainRole() { return 0; }
     subscriptionActiveGroupRead() {
         if [[ "$*" == *'.sync'* ]]; then
@@ -14124,6 +14305,7 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
 (
     local sourceLines
     local helperAccountFile="${TMP_DIR}/subscription-output-remote-hint-account.log"
+    subscriptionRemoteScopeEnabled() { return 0; }
     subscriptionSyncFindUserByAccountName() {
         printf '%s\n' "$1" >"${helperAccountFile}"
         printf '{"id":"team-a","account":"sub_team_a","allowed_sources":["edge"]}\n'
@@ -14158,6 +14340,7 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
     : >"${remoteChecksFile}"
     subscribeSalt=test-salt
     currentDefaultPort=443
+    subscriptionRemoteScopeEnabled() { return 0; }
 
     subscriptionActiveGroupRead() {
         if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
@@ -14219,6 +14402,7 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
     : >"${unexpectedRemoteChecksFile}"
     subscribeSalt=test-salt
     currentDefaultPort=443
+    subscriptionRemoteScopeEnabled() { return 0; }
 
     subscriptionPublishHasRemoteSources() {
         printf '%s\n' "$1" >"${helperAccountsFile}"
@@ -14377,6 +14561,7 @@ runSubscriptionOutputRegression() {
 runRemoteSubscribeSourcesAvoidReverseDecodeRegression() (
     local sourceLines
     local helperAccountFile="${TMP_DIR}/subscription-remote-sources-account.log"
+    subscriptionRemoteScopeEnabled() { return 0; }
 
     subscriptionSyncAccountIdFromName() {
         return 97
@@ -14464,6 +14649,7 @@ runRemoteSubscribeFetchRegression() {
     local remoteTmpRoot="${TMP_DIR}/remote-subscribe-tmp"
     local fetchTmpMarker="${TMP_DIR}/remote-subscribe-fetch-tmpdirs.txt"
     local stageTmpMarker="${TMP_DIR}/remote-subscribe-stage-tmpdirs.txt"
+    subscriptionRemoteScopeEnabled() { return 0; }
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     export PADM_SUBSCRIBE_DIR="${publicDir}"
     TMPDIR="${remoteTmpRoot}"
@@ -15278,6 +15464,8 @@ runSubscriptionWireGuardMenuFlowRegression() (
     # Restore the real subscription functions because earlier UI smoke tests
     # define menu stubs with global Bash function scope.
     # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/core/state.sh"
+    # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/subscription/groups.sh"
     # shellcheck source=/dev/null
     source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
@@ -15439,7 +15627,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     wireGuardMenuInitializeMain() {
         wireGuardMenuResetFixture
         resetMenuActions
-        manageSubscriptionRoleSelection <<<"1
+        manageSubscriptionRoleSelection <<<"2
 main.example.com
 3"
         assertMenuAction initSubscriptionWireGuardMain
@@ -15478,11 +15666,11 @@ edge-a
     if wireGuardMenuPartSelected bootstrap; then
         wireGuardMenuInitializeMain
 
-        subscriptionWireGuardWriteState '.endpoint_host = ""'
+        jq '.endpoint_host = ""' <<<"${mainStateSnapshot}" >"$(subscriptionWireGuardStateFile)"
         if showSubscriptionWireGuardMainCredential >/dev/null 2>&1; then
             return 1
         fi
-        subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState'
+        printf '%s\n' "${mainStateSnapshot}" >"$(subscriptionWireGuardStateFile)"
 
         nginxFakeBin="${TMP_DIR}/wg-nginx-fail-bin"
         mkdir -p "${nginxFakeBin}"
@@ -15760,7 +15948,7 @@ enable"
         subscriptionWireGuardReadState | jq -e '.enabled == true' >/dev/null
         grep -q 'Address = 10.77.0.1/24' "$(subscriptionWireGuardConfigFile)"
 
-        local restoreStopState='{"enabled":false,"role":"uninitialized","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"address":"","endpoint_host":"","public_key":"","peers":[]}'
+        local restoreStopState='{"enabled":false,"role":"uninitialized","interface":"wg-padm","network":"10.77.0.0/24","listen_port":51820,"control_port":39778,"firewall_owned":false,"address":"","endpoint_host":"","public_key":"","peers":[]}'
         printf 'keep-config\n' >"$(subscriptionWireGuardConfigFile)"
         stopShouldFail=true
         if subscriptionWireGuardRestoreStateAndConfig "${restoreStopState}" >/dev/null 2>&1; then
@@ -15790,7 +15978,7 @@ enable"
         local disabledConfiguredState
         subscriptionWireGuardWriteState --argjson previousState "${mainStateSnapshot}" '$previousState | .enabled = false'
         disabledConfiguredState=$(subscriptionWireGuardReadState)
-        subscriptionWireGuardWriteState '.enabled = true | .peers += [{id:"edge-b", address:"10.77.0.3/24", public_key:"peer-key", enabled:true}]'
+        subscriptionWireGuardWriteState --arg peerPublicKey "${controlledPublicKey}" '.enabled = true | .peers += [{id:"edge-b", name:"Edge B", address:"10.77.0.3/24", public_key:$peerPublicKey, endpoint:"", enabled:true}]'
         printf 'new-config\n' >"$(subscriptionWireGuardConfigFile)"
         nginxTarget=$(subscriptionWireGuardNginxConfigFile)
         printf 'keep-nginx-control\n' >"${nginxTarget}"
@@ -15818,30 +16006,88 @@ runSubscriptionWireGuardMenuFlowBootstrapRegression() {
     local duplicateKeyState
     local outsideNetworkState
     local validState
+    local baseState mainDisabledState mainEnabledState controlledState invalidState
     validPublicKey=$(printf '01234567890123456789012345678901' | base64 -w 0)
     peerPublicKey=$(printf 'abcdefghijklmnopqrstuvwxyz123456' | base64 -w 0)
     newPeerPublicKey=$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456' | base64 -w 0)
     subscriptionWireGuardValidPublicKeyValue "${validPublicKey}"
     ! subscriptionWireGuardValidPublicKeyValue 'not-a-wireguard-key'
     ! subscriptionWireGuardValidPublicKeyValue 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-    validState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.77.0.2/24",public_key:$peerPublicKey,enabled:true}]}')
+    baseState=$(jq -n --arg interface "$(subscriptionWireGuardInterface)" '{enabled:false,role:"uninitialized",interface:$interface,network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"",endpoint_host:"",public_key:"",peers:[]}')
+    subscriptionWireGuardValidateState "${baseState}"
+    invalidState=$(jq '.enabled = true' <<<"${baseState}")
+    ! subscriptionWireGuardValidateState "${invalidState}"
+    invalidState=$(jq 'del(.role)' <<<"${baseState}")
+    ! subscriptionWireGuardValidateState "${invalidState}"
+    invalidState=$(jq '.enabled = "false"' <<<"${baseState}")
+    ! subscriptionWireGuardValidateState "${invalidState}"
+
+    mainDisabledState=$(jq --arg publicKey "${validPublicKey}" '.role = "main" | .address = "10.77.0.1/24" | .endpoint_host = "main.example.com" | .public_key = $publicKey' <<<"${baseState}")
+    mainEnabledState=$(jq '.enabled = true' <<<"${mainDisabledState}")
+    controlledState=$(jq --arg publicKey "${validPublicKey}" '.role = "controlled" | .address = "10.77.0.2/24" | .public_key = $publicKey' <<<"${baseState}")
+    subscriptionWireGuardValidateState "${mainDisabledState}"
+    subscriptionWireGuardValidateState "${mainEnabledState}"
+    subscriptionWireGuardValidateState "${controlledState}"
+    validState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",name:"A",address:"10.77.0.2/24",public_key:$peerPublicKey,endpoint:"",enabled:true}]}')
     subscriptionWireGuardValidateStateForConfig "${validState}" || return 1
     subscriptionWireGuardPeerIdentityAvailable "${validState}" "b" "10.77.0.3/24" "${newPeerPublicKey}" || return 1
     if subscriptionWireGuardPeerIdentityAvailable "${validState}" "b" "10.77.0.2/24" "${newPeerPublicKey}"; then
         return 1
     fi
-    duplicateAddressState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" --arg newPeerPublicKey "${newPeerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.77.0.2/24",public_key:$peerPublicKey,enabled:true},{id:"b",address:"10.77.0.2/32",public_key:$newPeerPublicKey,enabled:true}]}')
+    duplicateAddressState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" --arg newPeerPublicKey "${newPeerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",name:"A",address:"10.77.0.2/24",public_key:$peerPublicKey,endpoint:"",enabled:true},{id:"b",name:"B",address:"10.77.0.2/32",public_key:$newPeerPublicKey,endpoint:"",enabled:true}]}')
     if subscriptionWireGuardValidateStateForConfig "${duplicateAddressState}" >/dev/null 2>&1; then
         return 1
     fi
-    duplicateKeyState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.77.0.2/24",public_key:$peerPublicKey,enabled:true},{id:"b",address:"10.77.0.3/24",public_key:$peerPublicKey,enabled:true}]}')
+    duplicateKeyState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",name:"A",address:"10.77.0.2/24",public_key:$peerPublicKey,endpoint:"",enabled:true},{id:"b",name:"B",address:"10.77.0.3/24",public_key:$peerPublicKey,endpoint:"",enabled:true}]}')
     if subscriptionWireGuardValidateStateForConfig "${duplicateKeyState}" >/dev/null 2>&1; then
         return 1
     fi
-    outsideNetworkState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",address:"10.78.0.2/24",public_key:$peerPublicKey,enabled:true}]}')
+    outsideNetworkState=$(jq -n --arg publicKey "${validPublicKey}" --arg peerPublicKey "${peerPublicKey}" '{network:"10.77.0.0/24",address:"10.77.0.1/24",listen_port:51820,public_key:$publicKey,peers:[{id:"a",name:"A",address:"10.78.0.2/24",public_key:$peerPublicKey,endpoint:"",enabled:true}]}')
     if subscriptionWireGuardValidateStateForConfig "${outsideNetworkState}" >/dev/null 2>&1; then
         return 1
     fi
+    (
+        local callLog="${TMP_DIR}/wireguard-role-shared-entry.log"
+        local stateFile
+        PADM_WIREGUARD_CONTROL_DIR="${TMP_DIR}/wireguard-role-shared-entry"
+        mkdir -p "${PADM_WIREGUARD_CONTROL_DIR}"
+        stateFile=$(subscriptionWireGuardStateFile)
+        padmRunPortAllowTransaction() { printf 'install\n' >>"${callLog}"; }
+        subscriptionGroupsWithLock() { printf 'sync\n' >>"${callLog}"; }
+
+        : >"${callLog}"
+        printf '%s\n' "${controlledState}" >"${stateFile}"
+        if installSubscribe >/dev/null 2>&1 || runSubscriptionGroupSync >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ ! -s "${callLog}" ]]
+
+        printf '%s\n' "${invalidState}" >"${stateFile}"
+        if installSubscribe >/dev/null 2>&1 || runSubscriptionGroupSync >/dev/null 2>&1; then
+            return 1
+        fi
+        [[ ! -s "${callLog}" ]]
+
+        printf '%s\n' "${mainDisabledState}" >"${stateFile}"
+        if subscriptionRemoteScopeEnabled; then
+            return 1
+        fi
+        installSubscribe
+        runSubscriptionGroupSync
+        [[ "$(<"${callLog}")" == $'install\nsync' ]]
+
+        : >"${callLog}"
+        rm -f "${stateFile}"
+        if subscriptionRemoteScopeEnabled; then
+            return 1
+        fi
+        installSubscribe
+        runSubscriptionGroupSync
+        [[ "$(<"${callLog}")" == $'install\nsync' ]]
+
+        printf '%s\n' "${mainEnabledState}" >"${stateFile}"
+        subscriptionRemoteScopeEnabled
+    )
     runSubscriptionWireGuardMenuFlowRegression bootstrap
 }
 
@@ -16561,9 +16807,10 @@ runMenuSmokeRegression() {
         setMenuSmokeRole uninitialized
         resetMenuActions
         output=
-        manageSubscription <<<"3" || true
+        manageSubscription <<<"4" || true
         assertMenuAction menu
-        grep -q "当前服务器角色：.*未配置主控/被控" <<<"${output}"
+        grep -q "多服务器角色：.*未启用；可直接使用本机订阅" <<<"${output}"
+        grep -q "本机单独使用" <<<"${output}"
         grep -q "这台作为主控" <<<"${output}"
         grep -q "这台作为被控" <<<"${output}"
         if grep -q "快速开始" <<<"${output}" || grep -q "发布订阅" <<<"${output}" || grep -q "多服务器协同" <<<"${output}" || grep -q "高级诊断" <<<"${output}"; then
@@ -16572,7 +16819,7 @@ runMenuSmokeRegression() {
         fi
         resetMenuActions
         output=
-        manageSubscriptionRoleSelection <<<"1
+        manageSubscriptionRoleSelection <<<"2
 3"
         assertMenuAction initSubscriptionWireGuardMain
         assertMenuAction showSubscriptionWireGuardMainCredential
@@ -16580,7 +16827,7 @@ runMenuSmokeRegression() {
         assertMenuAction showSubscriptionRemoteSyncPlan
         resetMenuActions
         output=
-        manageSubscriptionRoleSelection <<<"2"
+        manageSubscriptionRoleSelection <<<"3"
         assertMenuAction initSubscriptionWireGuardControlled
         assertMenuAction importSubscriptionWireGuardMainCredential
         assertMenuAction showSubscriptionWireGuardControlledCredential
@@ -19374,6 +19621,136 @@ runTlsRenewalFailurePropagationRegression() (
     grep -qx 'nginx:start:true' "${serviceLog}"
     ! grep -qx 'reload' "${serviceLog}"
     [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "true" ]]
+
+    (
+        local legacyDomain=legacy.example.com
+        local subscribeTlsDomain=subscribe.example.com
+        local usableChecks=0
+        mode=multi-cert
+        rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
+        mkdir -p "${tlsDir}" \
+            "${homeDir}/.acme.sh/${legacyDomain}_ecc" \
+            "${homeDir}/.acme.sh/${subscribeTlsDomain}_ecc"
+        chmod 700 "${homeDir}/.acme.sh"
+        printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
+        chmod 755 "${homeDir}/.acme.sh/acme.sh"
+        printf 'legacy-old-cert\n' >"${tlsDir}/${legacyDomain}.crt"
+        printf 'legacy-old-key\n' >"${tlsDir}/${legacyDomain}.key"
+        printf 'subscribe-old-cert\n' >"${tlsDir}/${subscribeTlsDomain}.crt"
+        printf 'subscribe-old-key\n' >"${tlsDir}/${subscribeTlsDomain}.key"
+        cat >"${homeDir}/.acme.sh/${legacyDomain}_ecc/${legacyDomain}.conf" <<EOF
+Le_Domain='${legacyDomain}'
+Le_Webroot='dns_cf'
+Le_RealFullChainPath='${tlsDir}/${legacyDomain}.crt'
+Le_RealKeyPath='${tlsDir}/${legacyDomain}.key'
+EOF
+        cat >"${homeDir}/.acme.sh/${subscribeTlsDomain}_ecc/${subscribeTlsDomain}.conf" <<EOF
+Le_Domain='${subscribeTlsDomain}'
+Le_Webroot='dns_cf'
+Le_RealFullChainPath='${tlsDir}/${subscribeTlsDomain}.crt'
+Le_RealKeyPath='${tlsDir}/${subscribeTlsDomain}.key'
+EOF
+        : >"${commandLog}"
+        : >"${serviceLog}"
+        nginxState=true
+        xrayState=false
+        singBoxState=false
+        SERVICE_QUEUE_ALLOW_FAILURE=previous
+        tlsCertificatePairUsable() {
+            usableChecks=$((usableChecks + 1))
+            ((usableChecks > 2))
+        }
+        sudo() {
+            printf 'sudo:%s\n' "$*" >>"${commandLog}"
+            case " $* " in
+            *" --installcert -d ${legacyDomain} "*)
+                printf 'legacy-new-cert\n' >"${tlsDir}/${legacyDomain}.crt"
+                printf 'legacy-new-key\n' >"${tlsDir}/${legacyDomain}.key"
+                ;;
+            *" --installcert -d ${subscribeTlsDomain} "*)
+                printf 'subscribe-new-cert\n' >"${tlsDir}/${subscribeTlsDomain}.crt"
+                printf 'subscribe-new-key\n' >"${tlsDir}/${subscribeTlsDomain}.key"
+                ;;
+            esac
+        }
+        reloadCore() { printf 'reload\n' >>"${serviceLog}"; }
+        handleNginx() { printf 'nginx:%s\n' "$1" >>"${serviceLog}"; }
+        readNginxSubscribe() {
+            subscribeConfigState=valid
+            subscribeDomain=${subscribeTlsDomain}
+            subscribePort=39778
+        }
+        probeSubscribeTLS() { printf 'probe:%s:%s\n' "$1" "$2" >>"${serviceLog}"; }
+
+        renewManagedTLSCertificates
+        [[ "$(grep -c -- ' --cron ' "${commandLog}")" == "1" ]]
+        [[ "$(grep -c -- ' --installcert ' "${commandLog}")" == "2" ]]
+        grep -q -- " --installcert -d ${legacyDomain} " "${commandLog}"
+        grep -q -- " --installcert -d ${subscribeTlsDomain} " "${commandLog}"
+        [[ "$(<"${tlsDir}/${legacyDomain}.crt")" == "legacy-new-cert" ]]
+        [[ "$(<"${tlsDir}/${subscribeTlsDomain}.crt")" == "subscribe-new-cert" ]]
+        [[ "$(grep -c '^reload$' "${serviceLog}")" == "1" ]]
+        [[ "$(grep -c '^nginx:stop$' "${serviceLog}")" == "1" ]]
+        [[ "$(grep -c '^nginx:start$' "${serviceLog}")" == "1" ]]
+        ! grep -q '^nginx:restart$' "${serviceLog}"
+        grep -qx "probe:${subscribeTlsDomain}:39778" "${serviceLog}"
+        [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+    )
+
+    (
+        local certDomain=managed-http.example.com
+        local usableChecks=0 chmodChecks=0 managedRc
+        mode=managed-post-renew-chmod-fail
+        rm -rf "${tlsDir}" "${homeDir}/.acme.sh"
+        mkdir -p "${tlsDir}" "${homeDir}/.acme.sh/${certDomain}_ecc"
+        chmod 700 "${homeDir}/.acme.sh"
+        printf '#!/usr/bin/env sh\n' >"${homeDir}/.acme.sh/acme.sh"
+        chmod 755 "${homeDir}/.acme.sh/acme.sh"
+        printf 'old-cert\n' >"${tlsDir}/${certDomain}.crt"
+        printf 'old-key\n' >"${tlsDir}/${certDomain}.key"
+        cat >"${homeDir}/.acme.sh/${certDomain}_ecc/${certDomain}.conf" <<EOF
+Le_Domain='${certDomain}'
+Le_Webroot='/var/www/html'
+Le_RealFullChainPath='${tlsDir}/${certDomain}.crt'
+Le_RealKeyPath='${tlsDir}/${certDomain}.key'
+EOF
+        : >"${commandLog}"
+        : >"${serviceLog}"
+        : >"${errorLog}"
+        nginxState=true
+        xrayState=true
+        singBoxState=false
+        tlsCertificatePairUsable() {
+            usableChecks=$((usableChecks + 1))
+            ((usableChecks > 1))
+        }
+        sudo() {
+            printf 'sudo:%s\n' "$*" >>"${commandLog}"
+            if [[ " $* " == *" --installcert -d ${certDomain} "* ]]; then
+                printf 'new-cert\n' >"${tlsDir}/${certDomain}.crt"
+                printf 'new-key\n' >"${tlsDir}/${certDomain}.key"
+            fi
+        }
+        chmod() {
+            if [[ "${1:-}" == "600" && "${3:-}" == "${tlsDir}/${certDomain}.key" ]]; then
+                chmodChecks=$((chmodChecks + 1))
+                ((chmodChecks == 2)) && return 1
+            fi
+            command chmod "$@"
+        }
+
+        set +e
+        renewManagedTLSCertificates >/dev/null 2>&1
+        managedRc=$?
+        set -e
+        [[ "${managedRc}" == "1" ]]
+        [[ "$(<"${tlsDir}/${certDomain}.crt")" == "old-cert" ]]
+        [[ "$(<"${tlsDir}/${certDomain}.key")" == "old-key" ]]
+        grep -qx 'xray:start:true' "${serviceLog}"
+        grep -qx 'nginx:start:true' "${serviceLog}"
+        [[ "${nginxState}" == "true" && "${xrayState}" == "true" && "${singBoxState}" == "false" ]]
+        grep -q 'TLS 证书续签后文件校验失败' "${errorLog}"
+    )
 
     eval "$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")"
     renewalTLS() { return 37; }

@@ -57,54 +57,89 @@ readCustomPort() {
 
 # 读取 Nginx 订阅端口
 readNginxSubscribe() {
-    local subscribeConfig="${nginxConfigPath}subscribe.conf"
-    local -a subscribeFields
+    local subscribeConfig
+    local normalizedConfig
+    local tlsDir
+    local listenEntry listenPort listenSsl
+    local -a listenEntries serverNames certificateFiles keyFiles
     subscribePort=
     subscribeDomain=
     subscribeType=
-    if [[ -f "${subscribeConfig}" ]]; then
-        mapfile -t subscribeFields < <(awk '
-          /sing-box/ {
-            hasSingBox = 1
-          }
-          /listen/ {
-            for (i = 1; i <= NF; i++) {
-              value = $i
-              gsub(/;/, "", value)
-              if (value == "ssl") {
-                hasSsl = 1
-              }
-              if (port == "" && value ~ /^[0-9]+$/) {
-                port = value
-              }
-              if (port == "" && value ~ /^\[::\]:[0-9]+$/) {
-                sub(/^\[::\]:/, "", value)
-                port = value
-              }
-            }
-          }
-          /server_name/ {
-            domain = $2
-            gsub(/;/, "", domain)
-          }
-          END {
-            if (hasSingBox) {
-              print port
-              print domain
-              print hasSsl ? "https" : ""
-            }
-          }
-        ' "${subscribeConfig}")
-        if [[ ${#subscribeFields[@]} -gt 0 ]]; then
-            subscribePort=${subscribeFields[0]}
-            subscribeDomain=${subscribeFields[1]}
-            subscribeType=${subscribeFields[2]}
-            if [[ -n "${currentHost}" && "${subscribeDomain}" != "${currentHost}" ]]; then
-                subscribePort=
-                subscribeType=
-            fi
-        fi
+    subscribeCertificateFile=
+    subscribeKeyFile=
+    subscribeConfigState=missing
+    subscribeConfig=$(nginxConfigFilePath subscribe.conf) || {
+        subscribeConfigState=invalid
+        return 1
+    }
+    if [[ ! -e "${subscribeConfig}" && ! -L "${subscribeConfig}" ]]; then
+        return 0
     fi
+    if [[ ! -f "${subscribeConfig}" ]]; then
+        subscribeConfigState=invalid
+        return 1
+    fi
+    normalizedConfig=$(sed 's/;/;\n/g' "${subscribeConfig}") || {
+        subscribeConfigState=invalid
+        return 1
+    }
+    [[ "$(grep -Ec '^[[:space:]]*server[[:space:]]*\{' <<<"${normalizedConfig}")" == "1" ]] || {
+        subscribeConfigState=invalid
+        return 1
+    }
+    mapfile -t listenEntries < <(awk '
+      $1 == "listen" {
+        value = $2
+        gsub(/;/, "", value)
+        sub(/^.*:/, "", value)
+        ssl = 0
+        for (i = 3; i <= NF; i++) {
+          token = $i
+          gsub(/;/, "", token)
+          if (token == "ssl") ssl = 1
+        }
+        print value "|" ssl
+      }
+    ' <<<"${normalizedConfig}")
+    mapfile -t serverNames < <(awk '$1 == "server_name" { gsub(/;/, "", $2); if (NF == 2) print $2; else print "" }' <<<"${normalizedConfig}")
+    mapfile -t certificateFiles < <(awk '$1 == "ssl_certificate" { gsub(/;/, "", $2); if (NF == 2) print $2; else print "" }' <<<"${normalizedConfig}")
+    mapfile -t keyFiles < <(awk '$1 == "ssl_certificate_key" { gsub(/;/, "", $2); if (NF == 2) print $2; else print "" }' <<<"${normalizedConfig}")
+    if [[ ${#listenEntries[@]} -eq 0 || ${#serverNames[@]} -ne 1 ||
+        ${#certificateFiles[@]} -ne 1 || ${#keyFiles[@]} -ne 1 ]] ||
+        ! grep -Fq 'sing-box_profiles' <<<"${normalizedConfig}"; then
+        subscribeConfigState=invalid
+        return 1
+    fi
+    subscribeDomain=${serverNames[0]}
+    subscribeCertificateFile=${certificateFiles[0]}
+    subscribeKeyFile=${keyFiles[0]}
+    tlsDomainNameIsSafe "${subscribeDomain}" || {
+        subscribeConfigState=invalid
+        return 1
+    }
+    for listenEntry in "${listenEntries[@]}"; do
+        IFS='|' read -r listenPort listenSsl <<<"${listenEntry}"
+        if ! validPortNumber "${listenPort}" || [[ "${listenSsl}" != "1" ]]; then
+            subscribeConfigState=invalid
+            return 1
+        fi
+        if [[ -n "${subscribePort}" && "${subscribePort}" != "${listenPort}" ]]; then
+            subscribeConfigState=invalid
+            return 1
+        fi
+        subscribePort=${listenPort}
+    done
+    tlsDir=$(tlsManagedDir) || {
+        subscribeConfigState=invalid
+        return 1
+    }
+    if [[ "${subscribeCertificateFile}" != "${tlsDir}/${subscribeDomain}.crt" ||
+        "${subscribeKeyFile}" != "${tlsDir}/${subscribeDomain}.key" ]]; then
+        subscribeConfigState=invalid
+        return 1
+    fi
+    subscribeType=https
+    subscribeConfigState=valid
 }
 
 # 检测安装方式
