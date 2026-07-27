@@ -17,7 +17,7 @@ emitVlessTcpSubscribeOutput() {
     local clashMetaBlock
     local singBoxFilter
 
-    defaultLink="vless://${id}@${currentHost}:${port}?encryption=none&security=tls&type=tcp&host=${currentHost}&fp=chrome&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}"
+    defaultLink="vless://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?encryption=none&security=tls&type=tcp&host=${currentHost}&fp=chrome&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: vless
@@ -34,7 +34,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS TCP TLS Vision"
-    echoContent green "    vless://${id}@${currentHost}:${port}?encryption=none&security=tls&fp=chrome&type=tcp&host=${currentHost}&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}\n"
+    echoContent green "    vless://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?encryption=none&security=tls&fp=chrome&type=tcp&host=${currentHost}&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}\n"
 
     subscribeOutputTitle "格式化明文：VLESS TCP TLS Vision"
     echoContent green "协议类型:VLESS，地址:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证），传输方式:tcp，flow:xtls-rprx-vision，账户名:${email}\n"
@@ -96,7 +96,7 @@ emitVlessWsSubscribeOutput() {
     local clashMetaBlock
     local singBoxFilter
 
-    defaultLink="vless://${id}@${add}:${port}?encryption=none&security=tls&type=ws&host=${currentHost}&sni=${currentHost}&fp=chrome&path=${path}#${email}"
+    defaultLink="vless://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&security=tls&type=ws&host=${currentHost}&sni=${currentHost}&fp=chrome&path=${path}#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: vless
@@ -188,7 +188,7 @@ emitVlessGrpcSubscribeOutput() {
     local clashMetaBlock
     local singBoxFilter
 
-    defaultLink="vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&serviceName=${currentPath}grpc&fp=chrome&alpn=h2&sni=${currentHost}#${email}"
+    defaultLink="vless://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&serviceName=${currentPath}grpc&fp=chrome&alpn=h2&sni=${currentHost}#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: vless
@@ -207,7 +207,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:$service}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg service "${currentPath}grpc") || return 1
 
     subscribeOutputTitle "通用格式：VLESS gRPC TLS"
-    echoContent green "    vless://${id}@${add}:${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&fp=chrome&serviceName=${currentPath}grpc&alpn=h2&sni=${currentHost}#${email}\n"
+    echoContent green "    vless://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&fp=chrome&serviceName=${currentPath}grpc&alpn=h2&sni=${currentHost}#${email}\n"
 
     subscribeOutputTitle "格式化明文：VLESS gRPC TLS"
     echoContent green "    协议类型:VLESS，地址:${add}，TLS域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:gRPC，alpn:h2，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证）,serviceName:${currentPath}grpc，账户名:${email}\n"
@@ -224,12 +224,12 @@ emitTrojanSubscribeOutput() {
     local user=$6
     # URLEncode
     subscribeOutputTitle "通用链接：Trojan TLS"
-    echoContent green "    trojan://${id}@${currentHost}:${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${currentHost}_Trojan\n"
+    echoContent green "    trojan://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${currentHost}_Trojan\n"
 
     local defaultLink
     local clashMetaBlock
     local singBoxFilter
-    defaultLink="trojan://${id}@${currentHost}:${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
+    defaultLink="trojan://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: trojan
@@ -256,11 +256,11 @@ emitTrojanGrpcSubscribeOutput() {
     # URLEncode
 
     subscribeOutputTitle "通用链接：Trojan gRPC TLS"
-    echoContent green "    trojan://${id}@${add}:${port}?encryption=none&peer=${currentHost}&fp=chrome&security=tls&type=grpc&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}\n"
+    echoContent green "    trojan://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&fp=chrome&security=tls&type=grpc&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}\n"
     local defaultLink
     local clashMetaBlock
     local singBoxFilter
-    defaultLink="trojan://${id}@${add}:${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
+    defaultLink="trojan://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     server: ${add}
@@ -299,7 +299,7 @@ emitHysteriaSubscribeOutput() {
     local defaultLink
     local clashMetaBlock
     local singBoxFilter
-    defaultLink="hysteria2://${id}@${currentHost}:${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}"
+    defaultLink="hysteria2://${id}@$(formatUriAuthorityHost "${currentHost}"):${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: hysteria2
@@ -452,7 +452,7 @@ emitTuicSubscribeOutput() {
     local clashMetaBlock
     local singBoxFilter
     local singBoxServerPort=${singBoxTuicPort:-${port}}
-    defaultLink="tuic://${tuicUUID}:${tuicPassword}@${currentHost}:${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
+    defaultLink="tuic://${tuicUUID}:${tuicPassword}@$(formatUriAuthorityHost "${currentHost}"):${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     server: ${currentHost}
@@ -491,7 +491,7 @@ emitShadowsocksSubscribeOutput() {
     local singBoxFilter
 
     defaultUserInfo=$(printf '%s' "${method}:${id}" | base64 -w 0)
-    defaultLink="ss://${defaultUserInfo}@${currentHost}:${port}#${email}"
+    defaultLink="ss://${defaultUserInfo}@$(formatUriAuthorityHost "${currentHost}"):${port}#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: ss
@@ -523,7 +523,7 @@ emitNaiveSubscribeOutput() {
     echoContent green "    NaiveProxy 适合需要 TLS 指纹抗性的场景；需要真实域名和可信证书，不是无域名 Reality 替代。\n"
 
     local defaultLink
-    defaultLink="naive+https://${email}:${id}@${currentHost}:${port}?padding=true#${email}"
+    defaultLink="naive+https://${email}:${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?padding=true#${email}"
 
     echoContent green "    ${defaultLink}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"
@@ -588,7 +588,7 @@ emitAnyTlsSubscribeOutput() {
     local defaultLink
     local clashMetaBlock
     local singBoxFilter
-    defaultLink="anytls://${id}@${currentHost}:${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
+    defaultLink="anytls://${id}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: anytls
