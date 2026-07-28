@@ -34,7 +34,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,flow:"xtls-rprx-vision",tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp"}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}") || return 1
 
     subscribeOutputTitle "通用格式：VLESS TCP TLS Vision"
-    echoContent green "    vless://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?encryption=none&security=tls&fp=chrome&type=tcp&host=${currentHost}&headerType=none&sni=${currentHost}&flow=xtls-rprx-vision#${email}\n"
+    echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：VLESS TCP TLS Vision"
     echoContent green "协议类型:VLESS，地址:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证），传输方式:tcp，flow:xtls-rprx-vision，账户名:${email}\n"
@@ -51,16 +51,15 @@ emitVmessWsSubscribeOutput() {
     local user=$6
     qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0)
     qrCodeBase64Default="${qrCodeBase64Default// /}"
+    local defaultLink="vmess://${qrCodeBase64Default}"
+    local clashMetaBlock
+    local singBoxFilter
 
     subscribeOutputTitle "通用 JSON：VMess WS TLS"
     echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
     subscribeOutputTitle "通用链接：VMess WS TLS"
-    echoContent green "    vmess://${qrCodeBase64Default}\n"
+    echoContent green "    ${defaultLink}\n"
 
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
-    defaultLink="vmess://${qrCodeBase64Default}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: vmess
@@ -207,7 +206,7 @@ EOF
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"vless",server:$server,server_port:$port,uuid:$uuid,tls:{enabled:true,server_name:$sni,utls:{enabled:true,fingerprint:"chrome"}},packet_encoding:"xudp",transport:{type:"grpc",service_name:$service}}' --arg tag "${email}" --arg server "${add}" --argjson port "${port}" --arg uuid "${id}" --arg sni "${currentHost}" --arg service "${currentPath}grpc") || return 1
 
     subscribeOutputTitle "通用格式：VLESS gRPC TLS"
-    echoContent green "    vless://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&security=tls&type=grpc&host=${currentHost}&path=${currentPath}grpc&fp=chrome&serviceName=${currentPath}grpc&alpn=h2&sni=${currentHost}#${email}\n"
+    echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：VLESS gRPC TLS"
     echoContent green "    协议类型:VLESS，地址:${add}，TLS域名/SNI:${currentHost}，端口:${port}，用户ID:${id}，安全:tls，传输方式:gRPC，alpn:h2，client-fingerprint: chrome（兼容模拟，不作为抗封锁保证）,serviceName:${currentPath}grpc，账户名:${email}\n"
@@ -222,14 +221,13 @@ emitTrojanSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    # URLEncode
-    subscribeOutputTitle "通用链接：Trojan TLS"
-    echoContent green "    trojan://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${currentHost}_Trojan\n"
-
-    local defaultLink
+    local defaultLink="trojan://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
     local clashMetaBlock
     local singBoxFilter
-    defaultLink="trojan://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
+    # URLEncode
+    subscribeOutputTitle "通用链接：Trojan TLS"
+    echoContent green "    ${defaultLink}\n"
+
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: trojan
@@ -253,14 +251,13 @@ emitTrojanGrpcSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
+    local defaultLink="trojan://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
+    local clashMetaBlock
+    local singBoxFilter
     # URLEncode
 
     subscribeOutputTitle "通用链接：Trojan gRPC TLS"
-    echoContent green "    trojan://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&fp=chrome&security=tls&type=grpc&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}\n"
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
-    defaultLink="trojan://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
+    echoContent green "    ${defaultLink}\n"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     server: ${add}
@@ -439,20 +436,22 @@ emitTuicSubscribeOutput() {
 
     local tuicPassword=
     tuicPassword=${id#*_}
+    local defaultLink="tuic://${tuicUUID}:${tuicPassword}@$(formatUriAuthorityHost "${currentHost}"):${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
+    local clashMetaBlock
+    local singBoxFilter
+    local singBoxServerPort=${singBoxTuicPort:-${port}}
 
     if [[ -z "${email}" ]]; then
         errorCard "读取配置失败，请重新安装"
         exit 0
     fi
 
+    subscribeOutputTitle "通用链接：Tuic TLS"
+    echoContent green "    ${defaultLink}\n"
+
     subscribeOutputTitle "格式化明文：Tuic TLS"
     echoContent green "    协议类型:Tuic，地址:${currentHost}，端口：${port}，uuid：${tuicUUID}，password：${tuicPassword}，congestion-controller:${tuicAlgorithm}，alpn: h3，账户名:${email}\n"
 
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
-    local singBoxServerPort=${singBoxTuicPort:-${port}}
-    defaultLink="tuic://${tuicUUID}:${tuicPassword}@$(formatUriAuthorityHost "${currentHost}"):${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     server: ${currentHost}
@@ -538,16 +537,15 @@ emitVmessHTTPUpgradeSubscribeOutput() {
     local user=$6
     qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0)
     qrCodeBase64Default="${qrCodeBase64Default// /}"
+    local defaultLink="vmess://${qrCodeBase64Default}"
+    local clashMetaBlock
+    local singBoxFilter
 
     subscribeOutputTitle "通用 JSON：VMess HTTPUpgrade TLS"
     echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
     subscribeOutputTitle "通用链接：VMess HTTPUpgrade TLS"
-    echoContent green "    vmess://${qrCodeBase64Default}\n"
+    echoContent green "    ${defaultLink}\n"
 
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
-    defaultLink="vmess://${qrCodeBase64Default}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: vmess
@@ -580,15 +578,15 @@ emitAnyTlsSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
+    local defaultLink="anytls://${id}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
+    local clashMetaBlock
+    local singBoxFilter
     subscribeOutputTitle "通用链接：AnyTLS"
+    echoContent green "    ${defaultLink}\n"
 
     subscribeOutputTitle "格式化明文：AnyTLS"
     echoContent green "协议类型:anytls，地址:${currentHost}，端口:${singBoxAnyTLSPort}，用户ID:${id}，传输方式:tcp，账户名:${email}\n"
 
-    local defaultLink
-    local clashMetaBlock
-    local singBoxFilter
-    defaultLink="anytls://${id}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: anytls
@@ -605,7 +603,6 @@ EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"anytls",server:$server,server_port:$port,password:$password,tls:{enabled:true,server_name:$sni}}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${singBoxAnyTLSPort}" --arg password "${id}" --arg sni "${currentHost}") || return 1
 
-    echoContent green "    ${defaultLink}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
 
 }

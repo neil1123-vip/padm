@@ -12973,6 +12973,17 @@ assertCapturedSubscribeOutputs() {
     ' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${user}" >/dev/null
 }
 
+assertDisplayedDefaultSubscribeLink() {
+    local user=$1
+    local title=$2
+    local link
+    IFS= read -r link <"${SUBSCRIBE_CAPTURE_DIR}/default/${user}"
+    awk -v title="${title}" -v link="${link}" '
+      index($0, title) { getline; found = ($0 == "green     " link "\\n"); exit }
+      END { exit(found ? 0 : 1) }
+    ' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+}
+
 runRealityCandidateFastRegression() {
     local fixtureFile="${TMP_DIR}/reality-candidates-fast.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
@@ -14226,6 +14237,7 @@ currentRealityMldsa65Verify=""
 defaultBase64Code vlessReality 443 user-a-main uuid-a "" ""
 expectedVisionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "" "user-a-main")
 assertCapturedSubscribeOutputs "user-a-main" "${expectedVisionLink}" "node.example.com" "www.microsoft.com" "tcp" "vless"
+assertDisplayedDefaultSubscribeLink "user-a-main" "通用格式：VLESS Reality Vision"
 jq -e '.[0].flow == "xtls-rprx-vision" and .[0].tls.reality.public_key == "pubkey"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-main" >/dev/null
 ! grep -q 'pqv' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-main" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
@@ -14234,6 +14246,7 @@ currentRealityMldsa65Verify="pqv"
 defaultBase64Code vlessRealityGRPC 8443 user-a-grpc uuid-a "" ""
 expectedGrpcLink=$(serializeVlessRealityGrpcLink "uuid-a" "node.example.com" "8443" "www.microsoft.com" "pubkey" "pqv" "user-a-grpc")
 assertCapturedSubscribeOutputs "user-a-grpc" "${expectedGrpcLink}" "node.example.com" "www.microsoft.com" "grpc" "vless"
+assertDisplayedDefaultSubscribeLink "user-a-grpc" "通用格式：VLESS Reality gRPC"
 jq -e '.[0].transport.service_name == "grpc" and .[0].tls.reality.short_id == "6ba85179e30d4fc2"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-grpc" >/dev/null
 grep -q 'pqv=pqv' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
@@ -14249,6 +14262,7 @@ currentRealityXHTTPPublicKey="pubkey"
 defaultBase64Code vlessXHTTP 443 user-a-xhttp uuid-a "cdn.example.com" "/ignored"
 expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp" none "front.example.com" "packet-up")
 grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp"
+assertDisplayedDefaultSubscribeLink "user-a-xhttp" "通用格式：VLESS Reality XHTTP Vision XMUX"
 ! grep -q 'flow=xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp"
 grep -qx "    server: cdn.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "    servername: www.microsoft.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
@@ -14446,6 +14460,7 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
 runSubscriptionOutputTlsVlessVmessTrojanRegression() {
 local quotedTlsUser='tls-"quoted-user'
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+export REGRESSION_ECHO_LOG="${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 currentHost="tls.example.com"
 ! defaultBase64Code vlesstcp 443 "${quotedTlsUser}" uuid-quoted "" "" >/dev/null 2>&1
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/${quotedTlsUser}" ]]
@@ -14454,12 +14469,14 @@ rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
 defaultBase64Code vlesstcp 443 tls-user uuid-tls "" ""
 assertCapturedSubscribeOutputs "tls-user" "vless://uuid-tls@[2001:db8::10]:443?encryption=none&security=tls&type=tcp&host=2001:db8::10&fp=chrome&headerType=none&sni=2001:db8::10&flow=xtls-rprx-vision#tls-user" "2001:db8::10" "2001:db8::10" "tcp" "vless"
+assertDisplayedDefaultSubscribeLink "tls-user" "通用格式：VLESS TCP TLS Vision"
 jq -e '.[0].flow == "xtls-rprx-vision" and (.[0].tls.reality | not)' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
 defaultBase64Code vlessws 443 tls-ws-user uuid-ws "2001:db8::20" "/ws-path"
 assertCapturedSubscribeOutputs "tls-ws-user" "vless://uuid-ws@[2001:db8::20]:443?encryption=none&security=tls&type=ws&host=tls.example.com&sni=tls.example.com&fp=chrome&path=/ws-path#tls-ws-user" "2001:db8::20" "tls.example.com" "ws" "vless"
+assertDisplayedDefaultSubscribeLink "tls-ws-user" "通用格式：VLESS WS TLS"
 jq -e '.[0].transport.path == "/ws-path" and .[0].transport.headers.Host == "tls.example.com" and .[0].multiplex.enabled == false' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-ws-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14467,6 +14484,7 @@ currentHost="tls.example.com"
 currentPath="svc-"
 defaultBase64Code vlessgrpc 443 tls-grpc-user uuid-grpc "2001:db8::20" ""
 assertCapturedSubscribeOutputs "tls-grpc-user" "vless://uuid-grpc@[2001:db8::20]:443?encryption=none&security=tls&type=grpc&host=tls.example.com&path=svc-grpc&serviceName=svc-grpc&fp=chrome&alpn=h2&sni=tls.example.com#tls-grpc-user" "2001:db8::20" "tls.example.com" "grpc" "vless"
+assertDisplayedDefaultSubscribeLink "tls-grpc-user" "通用格式：VLESS gRPC TLS"
 jq -e '.[0].transport.service_name == "svc-grpc" and .[0].packet_encoding == "xudp"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-grpc-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14475,12 +14493,14 @@ defaultBase64Code vmessws 443 tls-vmess-user uuid-vmess "edge.example.com" "/vme
 vmessWsLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-vmess-user")
 [[ "${vmessWsLink}" == vmess://* ]]
 assertCapturedSubscribeOutputs "tls-vmess-user" "${vmessWsLink}" "edge.example.com" "tls.example.com" "ws" "vmess"
+assertDisplayedDefaultSubscribeLink "tls-vmess-user" "通用链接：VMess WS TLS"
 jq -e '.[0].alter_id == 0 and .[0].transport.max_early_data == 2048 and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-vmess-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
 defaultBase64Code trojan 443 tls-trojan-user pass-trojan "" ""
 assertCapturedSubscribeOutputs "tls-trojan-user" "trojan://pass-trojan@[2001:db8::10]:443?peer=2001:db8::10&fp=chrome&sni=2001:db8::10&alpn=http/1.1#tls-trojan-user_Trojan" "2001:db8::10" "2001:db8::10" "tcp" "trojan"
+assertDisplayedDefaultSubscribeLink "tls-trojan-user" "通用链接：Trojan TLS"
 jq -e '.[0].password == "pass-trojan" and .[0].tls.alpn[0] == "http/1.1"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-trojan-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14488,6 +14508,7 @@ currentHost="tls.example.com"
 currentPath="svc-"
 defaultBase64Code trojangrpc 443 tls-trojan-grpc-user pass-trojan-grpc "2001:db8::20" ""
 assertCapturedSubscribeOutputs "tls-trojan-grpc-user" "trojan://pass-trojan-grpc@[2001:db8::20]:443?encryption=none&peer=tls.example.com&security=tls&type=grpc&fp=chrome&sni=tls.example.com&alpn=h2&path=svc-trojangrpc&serviceName=svc-trojangrpc#tls-trojan-grpc-user" "2001:db8::20" "tls.example.com" "grpc" "trojan"
+assertDisplayedDefaultSubscribeLink "tls-trojan-grpc-user" "通用链接：Trojan gRPC TLS"
 jq -e '.[0].transport.service_name == "svc-trojangrpc" and (.[0].tls | has("insecure") | not) and .[0].multiplex.enabled == false' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-trojan-grpc-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14497,7 +14518,9 @@ httpUpgradeLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-httpupgrade-
 [[ "${httpUpgradeLink}" == vmess://* ]]
 [[ "${httpUpgradeLink}" != " "* ]]
 assertCapturedSubscribeOutputs "tls-httpupgrade-user" "${httpUpgradeLink}" "edge.example.com" "tls.example.com" "httpupgrade" "vmess"
+assertDisplayedDefaultSubscribeLink "tls-httpupgrade-user" "通用链接：VMess HTTPUpgrade TLS"
 jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-httpupgrade-user" >/dev/null
+unset REGRESSION_ECHO_LOG
 }
 
 runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
@@ -14507,6 +14530,7 @@ currentHost="2001:db8::10"
 singBoxAnyTLSPort=8443
 defaultBase64Code anytls 443 tls-any-user pass-any "" ""
 assertCapturedSubscribeOutputs "tls-any-user" "anytls://pass-any@[2001:db8::10]:8443?peer=2001:db8::10&insecure=0&sni=2001:db8::10#tls-any-user" "2001:db8::10" "2001:db8::10" "tcp" "anytls"
+assertDisplayedDefaultSubscribeLink "tls-any-user" "通用链接：AnyTLS"
 jq -e '.[0].password == "pass-any" and .[0].server_port == 8443' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-any-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14516,6 +14540,7 @@ hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
 defaultBase64Code hysteria 8443 tls-hysteria-user pass-hysteria "" ""
 assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass-hysteria@[2001:db8::10]:9443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2"
+assertDisplayedDefaultSubscribeLink "tls-hysteria-user" "通用链接：Hysteria2 TLS"
 jq -e '.[0].password == "pass-hysteria" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14536,6 +14561,7 @@ currentHost="2001:db8::10"
 tuicAlgorithm="bbr"
 defaultBase64Code tuic 9443 tls-tuic-user uuid-tuic_pass-tuic "" ""
 grep -qxF "tuic://uuid-tuic:pass-tuic@[2001:db8::10]:9443?congestion_control=bbr&alpn=h3&sni=2001:db8::10&udp_relay_mode=native&allow_insecure=0#tls-tuic-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-tuic-user"
+assertDisplayedDefaultSubscribeLink "tls-tuic-user" "通用链接：Tuic TLS"
 grep -qx "    server: 2001:db8::10" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    udp-relay-mode: native" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    disable-sni: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
@@ -14556,6 +14582,7 @@ currentHost="2001:db8::10"
 defaultBase64Code shadowsocks 8388 tls-ss-user pass-ss "" ""
 defaultUserInfo=$(printf '%s' '2022-blake3-aes-128-gcm:pass-ss' | base64 -w 0)
 grep -qxF "ss://${defaultUserInfo}@[2001:db8::10]:8388#tls-ss-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-ss-user"
+assertDisplayedDefaultSubscribeLink "tls-ss-user" "通用链接：Shadowsocks"
 unset REGRESSION_ECHO_LOG
 }
 
