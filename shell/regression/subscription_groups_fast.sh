@@ -1027,6 +1027,45 @@ runAutoInstallGeneratedIdentityRegression() {
     )
 }
 
+runRandomUuidEntropyFallbackRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local uuid syncUuid autoValue=
+        uuidgen() { return 1; }
+        od() { printf ' 00 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f\n'; }
+
+        uuid=$(generateRandomUuidValue)
+        [[ "${uuid}" == "00010203-0405-4607-8809-0a0b0c0d0e0f" ]]
+        validUuidValue "${uuid}"
+        [[ "$(declare -f generateRandomUuidValue)" != *'$RANDOM'* ]]
+
+        coreInstallType=
+        ctlPath="${TMP_DIR}/missing-core"
+        syncUuid=$(subscriptionSyncGenerateUUID)
+        [[ "${syncUuid}" == "${uuid}" ]]
+        [[ "$(declare -f subscriptionSyncGenerateUUID)" != *'$RANDOM'* ]]
+
+        generateRandomUuidValue() { return 1; }
+        AUTO_INSTALL=true
+        AUTO_UUID=
+        AUTO_USER=
+        if autoValueForKey core_init_uuid >/dev/null; then
+            return 1
+        fi
+        if defaultRandomUserNameFromUuid >/dev/null; then
+            return 1
+        fi
+        if autoRead core_init_username '用户名:' autoValue >/dev/null; then
+            return 1
+        fi
+        if subscriptionSyncGenerateUUID >/dev/null; then
+            return 1
+        fi
+    )
+}
+
 runAutoInstallUuidValidationRegression() {
     (
         set -euo pipefail
@@ -6316,6 +6355,7 @@ runRegressionFastOnlySafety() {
 
 runRegressionFastOnlyOutputAutoInstall() {
     runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression
+    runRegressionStep random-uuid-entropy-fallback runRandomUuidEntropyFallbackRegression
     runRegressionStep auto-install-uuid-validation runAutoInstallUuidValidationRegression
     runRegressionStep auto-install-user-validation runAutoInstallUserValidationRegression
     runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression

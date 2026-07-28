@@ -1002,14 +1002,14 @@ autoValueForKey() {
         ;;
     core_init_uuid)
         if [[ -z "${AUTO_UUID:-}" ]]; then
-            AUTO_UUID=$(generateRandomUuidValue)
+            AUTO_UUID=$(generateRandomUuidValue) || return 1
         fi
         printf '%s' "${AUTO_UUID}"
         ;;
     core_init_username)
         if [[ -z "${AUTO_USER:-}" ]]; then
-            [[ -n "${AUTO_UUID:-}" ]] || AUTO_UUID=$(generateRandomUuidValue)
-            AUTO_USER=$(defaultRandomUserNameFromUuid "${AUTO_UUID}")
+            [[ -n "${AUTO_UUID:-}" ]] || AUTO_UUID=$(generateRandomUuidValue) || return 1
+            AUTO_USER=$(defaultRandomUserNameFromUuid "${AUTO_UUID}") || return 1
         fi
         printf '%s' "${AUTO_USER}"
         ;;
@@ -1119,20 +1119,32 @@ autoValueForKey() {
 }
 
 generateRandomUuidValue() {
+    local uuid=
+    local hex=
+    local variant
     if command -v uuidgen >/dev/null 2>&1; then
-        uuidgen | tr 'A-Z' 'a-z'
-    elif [[ -r /proc/sys/kernel/random/uuid ]]; then
-        cat /proc/sys/kernel/random/uuid
-    else
-        printf '%04x%04x-%04x-%04x-%04x-%04x%04x%04x\n' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
+        uuid=$(uuidgen 2>/dev/null || true)
     fi
+    if ! validUuidValue "${uuid}" && [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
+        hex=$(od -An -N16 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n') || hex=
+        if [[ "${hex}" =~ ^[0-9A-Fa-f]{32}$ ]]; then
+            variant=$(((16#${hex:16:1} & 3) | 8))
+            printf -v uuid '%s-%s-4%s-%x%s-%s' "${hex:0:8}" "${hex:8:4}" "${hex:13:3}" "${variant}" "${hex:17:3}" "${hex:20:12}"
+        fi
+    fi
+    if ! validUuidValue "${uuid}" && [[ -r /proc/sys/kernel/random/uuid ]]; then
+        uuid=$(</proc/sys/kernel/random/uuid)
+    fi
+    uuid=${uuid,,}
+    validUuidValue "${uuid}" || return 1
+    printf '%s\n' "${uuid}"
 }
 
 defaultRandomUserNameFromUuid() {
     local uuid=${1:-}
     local prefix
     if [[ -z "${uuid}" ]]; then
-        uuid=$(generateRandomUuidValue)
+        uuid=$(generateRandomUuidValue) || return 1
     fi
     prefix=${uuid%%-*}
     prefix=${prefix,,}
@@ -1205,7 +1217,7 @@ autoRead() {
     prompt=$(formatReadPrompt "${prompt}")
 
     if [[ -n "${AUTO_INSTALL:-}" && ( "${key}" != "install_type" || -n "${AUTO_INSTALL_TYPE:-}" ) ]]; then
-        autoValue=$(autoValueForKey "${key}")
+        autoValue=$(autoValueForKey "${key}") || return 1
         if [[ -n "${autoValue}" ]]; then
             showAutoInstallSummary
             printf -v "${resultVar}" '%s' "${autoValue}"

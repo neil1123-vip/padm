@@ -45,12 +45,8 @@ subscriptionSyncGenerateUUID() {
         ${ctlPath} uuid
     elif [[ "${coreInstallType}" == "2" && -x "${ctlPath}" ]]; then
         ${ctlPath} generate uuid
-    elif command -v uuidgen >/dev/null 2>&1; then
-        uuidgen | tr 'A-Z' 'a-z'
-    elif [[ -r /proc/sys/kernel/random/uuid ]]; then
-        cat /proc/sys/kernel/random/uuid
     else
-        printf '%04x%04x-%04x-%04x-%04x-%04x%04x%04x\n' "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM" "$RANDOM"
+        generateRandomUuidValue
     fi
 }
 
