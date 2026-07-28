@@ -14292,6 +14292,25 @@ grep -qx "      host: front.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/use
 grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q 'flow: xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q '&flow=xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
+{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/bad path","mode":"auto"}}}]}
+EOF
+! defaultBase64Code vlessXHTTP 443 user-bad-path uuid-a "cdn.example.com" "/ignored"
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-bad-path" ]]
+
+cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
+{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front host","path":"/valid","mode":"auto"}}}]}
+EOF
+! defaultBase64Code vlessXHTTP 443 user-bad-host uuid-a "cdn.example.com" "/ignored"
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-bad-host" ]]
+
+cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
+{"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/valid","mode":"future-mode"}}}]}
+EOF
+! defaultBase64Code vlessXHTTP 443 user-bad-mode uuid-a "cdn.example.com" "/ignored"
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-bad-mode" ]]
 configPath="${oldConfigPath}"
 }
 

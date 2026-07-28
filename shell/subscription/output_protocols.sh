@@ -144,6 +144,21 @@ emitVlessXHTTPSubscribeOutput() {
     path=$(xrayRealityXHTTPSetting path "${path}")
     xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}")
     xhttpMode=$(xrayRealityXHTTPSetting mode auto)
+    if ! subscribeOutputSafeRouteValue "${path}"; then
+        errorCard "订阅输出生成失败" "XHTTP path 格式不合法"
+        return 1
+    fi
+    if ! subscribeOutputSafeHostValue "${xhttpHost}"; then
+        errorCard "订阅输出生成失败" "XHTTP host 格式不合法"
+        return 1
+    fi
+    case "${xhttpMode}" in
+    auto | stream-one | packet-up | stream-up) ;;
+    *)
+        errorCard "订阅输出生成失败" "XHTTP mode 不受支持"
+        return 1
+        ;;
+    esac
     defaultLink=$(serializeVlessRealityXHTTPLink "${id}" "${add}" "${port}" "${xrayVLESSRealityXHTTPSNI}" "${path}" "${currentRealityXHTTPPublicKey}" "${email}" "${vlessEncryption}" "${xhttpHost}" "${xhttpMode}")
 
     subscribeOutputTitle "通用格式：VLESS Reality XHTTP Vision XMUX"
