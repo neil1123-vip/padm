@@ -222,10 +222,11 @@ emitTrojanSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    local defaultLink="trojan://${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
+    local encodedId defaultLink
     local clashMetaBlock
     local singBoxFilter
-    # URLEncode
+    encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
     subscribeOutputTitle "通用链接：Trojan TLS"
     echoContent green "    ${defaultLink}\n"
 
@@ -252,10 +253,11 @@ emitTrojanGrpcSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    local defaultLink="trojan://${id}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
+    local encodedId defaultLink
     local clashMetaBlock
     local singBoxFilter
-    # URLEncode
+    encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
 
     subscribeOutputTitle "通用链接：Trojan gRPC TLS"
     echoContent green "    ${defaultLink}\n"
@@ -294,10 +296,11 @@ emitHysteriaSubscribeOutput() {
         uriPortEncode=${port//,/%2C}
     fi
 
-    local defaultLink
+    local encodedId defaultLink
     local clashMetaBlock
     local singBoxFilter
-    defaultLink="hysteria2://${id}@$(formatUriAuthorityHost "${currentHost}"):${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}"
+    encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    defaultLink="hysteria2://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: hysteria2
@@ -441,10 +444,13 @@ emitTuicSubscribeOutput() {
 
     local tuicPassword=
     tuicPassword=${id#*_}
-    local defaultLink="tuic://${tuicUUID}:${tuicPassword}@$(formatUriAuthorityHost "${currentHost}"):${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
+    local encodedTuicUUID encodedTuicPassword defaultLink
     local clashMetaBlock
     local singBoxFilter
     local singBoxServerPort=${singBoxTuicPort:-${port}}
+    encodedTuicUUID=$(encodeUriUserInfoComponent "${tuicUUID}") || return 1
+    encodedTuicPassword=$(encodeUriUserInfoComponent "${tuicPassword}") || return 1
+    defaultLink="tuic://${encodedTuicUUID}:${encodedTuicPassword}@$(formatUriAuthorityHost "${currentHost}"):${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
 
     if [[ -z "${email}" ]]; then
         errorCard "读取配置失败，请重新安装"
@@ -532,8 +538,10 @@ emitNaiveSubscribeOutput() {
     subscribeOutputTitle "通用链接：Naive TLS"
     echoContent green "    NaiveProxy 适合需要 TLS 指纹抗性的场景；需要真实域名和可信证书，不是无域名 Reality 替代。\n"
 
-    local defaultLink
-    defaultLink="naive+https://${email}:${id}@$(formatUriAuthorityHost "${currentHost}"):${port}?padding=true#${email}"
+    local encodedEmail encodedId defaultLink
+    encodedEmail=$(encodeUriUserInfoComponent "${email}") || return 1
+    encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    defaultLink="naive+https://${encodedEmail}:${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${port}?padding=true#${email}"
 
     echoContent green "    ${defaultLink}\n"
     appendDefaultSubscribeLine "${user}" "${defaultLink}"
@@ -590,9 +598,11 @@ emitAnyTlsSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    local defaultLink="anytls://${id}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
+    local encodedId defaultLink
     local clashMetaBlock
     local singBoxFilter
+    encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
     subscribeOutputTitle "通用链接：AnyTLS"
     echoContent green "    ${defaultLink}\n"
 

@@ -68,6 +68,10 @@ formatUriAuthorityHost() {
     fi
 }
 
+encodeUriUserInfoComponent() {
+    jq -nr --arg value "$1" '$value | @uri'
+}
+
 serializeVmessShareJson() {
     local port=$1
     local email=$2
