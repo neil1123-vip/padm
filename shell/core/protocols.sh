@@ -5,8 +5,8 @@ protocolCapabilityRegistry() {
 1|VLESS Reality Vision|node|recommended|both|xray,sing-box|vless|tcp|reality|none|yes|core|no|no|no|conditional|||07_VLESS_vision_reality_inbounds.json|uri,clash-meta,sing-box|wide|||默认直连推荐
 2|VLESS Reality XHTTP|node|recommended|xray|xray|vless|xhttp|reality|none|yes|core|no|no|no|conditional|||12_VLESS_XHTTP_inbounds.json|uri,clash-meta|modern|||Xray-only；sing-box 不生成
 3|Hysteria2|node|recommended|both|sing-box|hysteria2|quic|tls|none|yes|core|yes|yes|yes|no||1.11.0|06_hysteria2_inbounds.json|uri,clash-meta,sing-box|modern|||UDP/移动/弱网默认推荐
-4|AnyTLS|node|recommended|sing-box|sing-box|anytls|tcp|tls|none|yes|core|yes|yes|no|no||1.12.0|13_anytls_inbounds.json|uri,sing-box|modern|||sing-box AnyTLS
-5|NaiveProxy|node|recommended|sing-box|sing-box|naive|tcp|tls|none|yes|core|yes|yes|no|no|||10_naive_inbounds.json|uri,sing-box|modern|||HTTPS/Cronet 指纹场景
+4|AnyTLS|node|recommended|sing-box|sing-box|anytls|tcp|tls|none|yes|core|yes|yes|no|no||1.12.0|13_anytls_inbounds.json|uri,clash-meta,sing-box|modern|||sing-box AnyTLS
+5|NaiveProxy|node|recommended|sing-box|sing-box|naive|tcp|tls|none|yes|core|yes|yes|no|no|||10_naive_inbounds.json|uri|modern|||HTTPS/Cronet 指纹场景
 21|VLESS WS TLS|node|advanced|xray|xray|vless|ws|tls|http_front|yes|nginx|yes|yes|no|yes|||03_VLESS_WS_inbounds.json|uri,clash-meta,sing-box|wide|WebSocket 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP|高级兼容协议
 22|VMess WS TLS|node|advanced|xray|xray|vmess|ws|tls|http_front|yes|nginx|yes|yes|no|yes|||05_VMess_WS_inbounds.json|uri,clash-meta,sing-box|wide|VMess 与 WebSocket 均为高级方案|VLESS Reality Vision|高级兼容协议
 23|VMess HTTPUpgrade TLS|node|advanced|both|xray,sing-box|vmess|httpupgrade|tls|http_front|yes|nginx|yes|yes|no|yes|||11_VMess_HTTPUpgrade_inbounds.json|uri,clash-meta,sing-box|modern|HTTPUpgrade 属高级方案，新装优先 XHTTP|VLESS Reality XHTTP|高级兼容协议

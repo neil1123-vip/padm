@@ -48,6 +48,8 @@ runProtocolCapabilityRegistryRegression() {
 
     assertEquals xray "$(protocolCapabilityMeta 2 core_support)" "xhttp-core-support"
     assertEquals xray "$(protocolCapabilityMeta 2 project_core)" "xhttp-project-core"
+    assertEquals uri,clash-meta,sing-box "$(protocolCapabilityMeta 4 subscription_emitters)" "anytls-subscription-emitters"
+    assertEquals uri "$(protocolCapabilityMeta 5 subscription_emitters)" "naive-subscription-emitters"
     assertEquals 1 "$(protocolCapabilityIdByConfigFile 07_VLESS_vision_reality_inbounds.json)" "reality-config-file-id"
     assertEquals 2 "$(protocolCapabilityIdByConfigFile 12_VLESS_XHTTP_inbounds.json)" "xhttp-config-file-id"
     assertEquals 29 "$(protocolCapabilityIdByConfigFile 04_trojan_TCP_inbounds.json)" "trojan-fallback-config-file-id"
