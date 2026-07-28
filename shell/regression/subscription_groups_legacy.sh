@@ -3819,9 +3819,10 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${xrayServiceRunning}" == "true" ]]
     [[ "${singBoxServiceRunning}" == "true" ]]
 
+    local manualUuid=11111111-1111-1111-1111-111111111111
     autoRead() {
         case "$1" in
-        core_init_uuid) printf -v "$3" '%s' '11111111-1111-1111-1111-111111111111' ;;
+        core_init_uuid) printf -v "$3" '%s' "${manualUuid}" ;;
         core_init_username) printf -v "$3" '%s' 'sub_manual' ;;
         *) return 1 ;;
         esac
@@ -3843,6 +3844,16 @@ runCoreTemplateReturnFailureRegression() (
     singBoxRc=$?
     set -e
     [[ "${singBoxRc}" != "0" ]]
+    [[ "${writeCalls}" == "0" ]]
+
+    manualUuid=not-a-uuid
+    set +e
+    initXrayConfigApply custom 1 true 2>/dev/null
+    xrayRc=$?
+    initSingBoxConfigApply custom 1 true 2>/dev/null
+    singBoxRc=$?
+    set -e
+    [[ "${xrayRc}" != "0" && "${singBoxRc}" != "0" ]]
     [[ "${writeCalls}" == "0" ]]
     currentUUID=existing-user
     lastInstallationConfig=true

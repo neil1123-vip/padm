@@ -1027,6 +1027,24 @@ runAutoInstallGeneratedIdentityRegression() {
     )
 }
 
+runAutoInstallUuidValidationRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local errorLog="${TMP_DIR}/auto-install-invalid-uuid.log"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        AUTO_INSTALL=true
+        AUTO_UUID=not-a-uuid
+        if autoInstallValidateRequiredInputs; then
+            return 1
+        fi
+        grep -q -- '--uuid 格式不合法' "${errorLog}"
+        validUuidValue 11111111-1111-1111-1111-111111111111
+        ! validUuidValue not-a-uuid
+    )
+}
+
 runAutoInstallAllowsEmptyDefaultRegression() {
     (
         set -euo pipefail
@@ -6266,6 +6284,7 @@ runRegressionFastOnlySafety() {
 
 runRegressionFastOnlyOutputAutoInstall() {
     runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression
+    runRegressionStep auto-install-uuid-validation runAutoInstallUuidValidationRegression
     runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression
     runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression
     runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression

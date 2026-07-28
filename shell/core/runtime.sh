@@ -828,8 +828,17 @@ parseInstallArgs() {
     done
 }
 
+validUuidValue() {
+    [[ "${1:-}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
+}
+
 autoInstallValidateRequiredInputs() {
     [[ "${AUTO_INSTALL:-}" == "true" ]] || return 0
+
+    if [[ -n "${AUTO_UUID:-}" ]] && ! validUuidValue "${AUTO_UUID}"; then
+        errorCard "--uuid 格式不合法"
+        return 1
+    fi
 
     if [[ "$(normalizeYesNo "${AUTO_REALITY_DOMAIN:-}")" == "y" ]]; then
         local strictSelection=${AUTO_PROTOCOLS:-}

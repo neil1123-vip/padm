@@ -255,6 +255,7 @@ initXrayConfigApply() {
         autoRead core_init_uuid "UUID:" customUUID
 
         if [[ -n ${customUUID} ]]; then
+            validUuidValue "${customUUID}" || { errorCard "UUID 格式不合法"; return 1; }
             uuid=${customUUID}
         else
             uuid=$(/etc/padm/xray/xray uuid)
@@ -851,6 +852,7 @@ initSingBoxConfigApply() {
         autoRead core_init_uuid "UUID:" customUUID
 
         if [[ -n ${customUUID} ]]; then
+            validUuidValue "${customUUID}" || { errorCard "UUID 格式不合法"; return 1; }
             uuid=${customUUID}
         else
             uuid=$(/etc/padm/sing-box/sing-box generate uuid)
