@@ -198,7 +198,7 @@ realityEntryHost() {
     elif [[ -n "${currentHost:-}" ]]; then
         printf '%s' "${currentHost}"
     elif [[ -n "${domain:-}" ]]; then
-        printf '%s' "${domain%%:*}"
+        printf '%s' "${domain}"
     else
         getPublicIP
     fi

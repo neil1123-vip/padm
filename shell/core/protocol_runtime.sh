@@ -730,9 +730,9 @@ collectEntryProfile() {
     if [[ -n "${AUTO_ENTRY_HOST:-}" ]]; then
         realityEntryHost=${AUTO_ENTRY_HOST}
     elif [[ -n "${AUTO_DOMAIN:-}" ]]; then
-        realityEntryHost=${AUTO_DOMAIN%%:*}
+        realityEntryHost=${AUTO_DOMAIN}
     elif [[ -n "${domain:-}" ]]; then
-        realityEntryHost=${domain%%:*}
+        realityEntryHost=${domain}
     else
         entryHostFile=$(realityEntryHostFile)
         if [[ -f "${entryHostFile}" ]]; then

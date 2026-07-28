@@ -3476,11 +3476,17 @@ runRealityProfileFailureRegression() (
     [[ "${realityEntryHost}" == "node.example.com" ]]
 
     AUTO_ENTRY_HOST=
+    AUTO_DOMAIN=2001:db8::10
     realityEntryHost=
     collectEntryProfile
-    [[ "${realityEntryHost}" == "domain.example.com" ]]
+    [[ "${realityEntryHost}" == "2001:db8::10" ]]
 
     AUTO_DOMAIN=
+    domain=2001:db8::20
+    realityEntryHost=
+    collectEntryProfile
+    [[ "${realityEntryHost}" == "2001:db8::20" ]]
+
     domain=
     realityEntryHost=
     collectEntryProfile
@@ -13323,6 +13329,10 @@ runRuntimeAndRealityRegression() {
     [[ "${xhttpLink}" == "vless://uuid-a@cdn.example.com:443?encryption=none&security=reality&type=xhttp&sni=www.microsoft.com&host=front.example.com&fp=chrome&path=/custom&mode=stream-one&pbk=pubkey&sid=6ba85179e30d4fc2#user-a" ]]
     xhttpLink=$(serializeVlessRealityXHTTPLink "uuid-a" "2001:db8::10" "443" "www.microsoft.com" "/xHTTP" "pubkey" "user-a")
     [[ "${xhttpLink}" == "vless://uuid-a@[2001:db8::10]:443?encryption=none&security=reality&type=xhttp&sni=www.microsoft.com&host=www.microsoft.com&fp=chrome&path=/xHTTP&pbk=pubkey&sid=6ba85179e30d4fc2#user-a" ]]
+    realityEntryHost=
+    currentHost=
+    domain=2001:db8::30
+    [[ "$(realityEntryHost)" == "2001:db8::30" ]]
     currentClients='[{"id":"uuid-a","email":"user-a"}]'
     xhttpClients=$(initXrayClients 2)
     jq -e '.[0].email == "user-a-VLESS_Reality_XHTTP" and (.[0].flow | not)' <<<"${xhttpClients}" >/dev/null
@@ -14538,9 +14548,10 @@ currentHost="2001:db8::10"
 singBoxHysteria2Port=9443
 hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
-defaultBase64Code hysteria 8443 tls-hysteria-user pass-hysteria "" ""
+hysteriaV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code hysteria 8443 tls-hysteria-user pass-hysteria "" "")
 assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass-hysteria@[2001:db8::10]:9443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2"
 assertDisplayedDefaultSubscribeLink "tls-hysteria-user" "通用链接：Hysteria2 TLS"
+jq -e '.server == "[2001:db8::10]:8443"' <<<"${hysteriaV2rayN}" >/dev/null
 jq -e '.[0].password == "pass-hysteria" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14559,9 +14570,10 @@ fi
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
 tuicAlgorithm="bbr"
-defaultBase64Code tuic 9443 tls-tuic-user uuid-tuic_pass-tuic "" ""
+tuicV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code tuic 9443 tls-tuic-user uuid-tuic_pass-tuic "" "")
 grep -qxF "tuic://uuid-tuic:pass-tuic@[2001:db8::10]:9443?congestion_control=bbr&alpn=h3&sni=2001:db8::10&udp_relay_mode=native&allow_insecure=0#tls-tuic-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-tuic-user"
 assertDisplayedDefaultSubscribeLink "tls-tuic-user" "通用链接：Tuic TLS"
+jq -e '.relay.server == "[2001:db8::10]:9443" and .relay.ip == "2001:db8::10"' <<<"${tuicV2rayN}" >/dev/null
 grep -qx "    server: 2001:db8::10" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    udp-relay-mode: native" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    disable-sni: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
