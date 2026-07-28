@@ -4306,6 +4306,32 @@ runShowAccountsOptionalStepRegression() {
         fi
         [[ "$(<"${callLog}")" == "first" ]]
     )
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        while IFS='|' read -r protocolId _; do
+            subscriptionAccountDisplayFunction "${protocolId}" >/dev/null
+        done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
+
+        readInstallType() { return 0; }
+        readInstallProtocolType() { return 0; }
+        readConfigHostPathUUID() { return 0; }
+        readSingBoxConfig() { return 0; }
+        initSubscribeLocalConfig() { return 0; }
+        currentProtocolHas() { return 0; }
+        protocolCapabilityRegistry() { printf '%s\n' '999|Missing output mapping|node'; }
+        subscriptionAccountDisplayFunction() { return 1; }
+        if showAccounts >/dev/null 2>&1; then
+            return 1
+        fi
+
+        currentHost=example.com
+        if defaultBase64Code unsupported 443 safe-user safe-id "" "" >/dev/null 2>&1; then
+            return 1
+        fi
+    )
 }
 
 runInitSubscribeLocalConfigCleansAllFormatsRegression() {

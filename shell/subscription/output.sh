@@ -271,5 +271,9 @@ defaultBase64Code() {
     anytls)
         emitAnyTlsSubscribeOutput "${port}" "${email}" "${id}" "${add}" "${path}" "${user}"
         ;;
+    *)
+        errorCard "订阅输出生成失败" "不支持的协议输出类型：${type}"
+        return 1
+        ;;
     esac
 }

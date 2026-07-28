@@ -48,8 +48,10 @@ showAccounts() {
     initSubscribeLocalConfig || return 1
     while IFS='|' read -r protocolId _; do
         currentProtocolHas "${protocolId}" || continue
-        displayFn=$(subscriptionAccountDisplayFunction "${protocolId}" 2>/dev/null || true)
-        [[ -n "${displayFn}" ]] || continue
+        displayFn=$(subscriptionAccountDisplayFunction "${protocolId}") || {
+            errorCard "订阅输出生成失败" "协议 ${protocolId} 缺少账号输出映射"
+            return 1
+        }
         "${displayFn}" || return 1
     done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
 }
