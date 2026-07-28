@@ -185,8 +185,7 @@ subscribeOutputSafeLabel() {
 }
 
 subscribeOutputSafeFileName() {
-    local value=$1
-    [[ -n "${value}" && "${value}" != "." && "${value}" != ".." && "${value}" =~ ^[A-Za-z0-9._~@+=:-]+$ ]]
+    validAccountNameValue "$1"
 }
 
 subscribeOutputSafeRouteValue() {

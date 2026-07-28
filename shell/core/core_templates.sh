@@ -43,8 +43,14 @@ removeSingBoxTemplateConfigFiles() {
 
 coreTemplateValidateManualAccountName() {
     local accountName=$1
-    if [[ "${accountName}" == sub_* ]]; then
+    local baseName
+    baseName=$(stripClientNameSuffix "${accountName}") || return 1
+    if [[ "${baseName}" == sub_* ]]; then
         errorCard "用户名不能使用 sub_ 开头，该前缀由订阅同步保留"
+        return 1
+    fi
+    if ! validAccountNameValue "${baseName}"; then
+        errorCard "用户名格式不合法，仅支持英文、数字及 . _ ~ @ + = : -"
         return 1
     fi
 }

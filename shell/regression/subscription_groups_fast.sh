@@ -1045,6 +1045,38 @@ runAutoInstallUuidValidationRegression() {
     )
 }
 
+runAutoInstallUserValidationRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/core/runtime.sh"
+        local errorLog="${TMP_DIR}/auto-install-invalid-user.log"
+        errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
+        AUTO_INSTALL=true
+        AUTO_USER='valid.user+ops'
+        autoInstallValidateRequiredInputs
+        validAccountNameValue 'sub_managed'
+        subscribeOutputSafeFileName 'sub_managed'
+        coreTemplateValidateManualAccountName 'padm-abcdef12-VLESS_TCP/TLS_Vision'
+
+        AUTO_USER='bad user'
+        if autoInstallValidateRequiredInputs; then
+            return 1
+        fi
+        grep -q -- '--user 格式不合法' "${errorLog}"
+
+        : >"${errorLog}"
+        AUTO_USER='sub_managed'
+        if autoInstallValidateRequiredInputs; then
+            return 1
+        fi
+        grep -q -- '--user 不能使用 sub_ 开头' "${errorLog}"
+        ! validAccountNameValue '中文用户'
+        ! subscribeOutputSafeFileName 'bad user'
+        ! coreTemplateValidateManualAccountName 'bad user-VLESS_TCP/TLS_Vision'
+    )
+}
+
 runAutoInstallAllowsEmptyDefaultRegression() {
     (
         set -euo pipefail
@@ -6285,6 +6317,7 @@ runRegressionFastOnlySafety() {
 runRegressionFastOnlyOutputAutoInstall() {
     runRegressionStep auto-install-generated-identity runAutoInstallGeneratedIdentityRegression
     runRegressionStep auto-install-uuid-validation runAutoInstallUuidValidationRegression
+    runRegressionStep auto-install-user-validation runAutoInstallUserValidationRegression
     runRegressionStep auto-install-empty-defaults runAutoInstallAllowsEmptyDefaultRegression
     runRegressionStep auto-install-missing-required-no-stdin runAutoInstallDoesNotReadMissingRequiredValueRegression
     runRegressionStep auto-install-tls-domain-missing-returns runAutoInstallTlsDomainMissingReturnsRegression

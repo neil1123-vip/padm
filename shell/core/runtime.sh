@@ -832,11 +832,29 @@ validUuidValue() {
     [[ "${1:-}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
 }
 
+validAccountNameValue() {
+    local value=${1:-}
+    [[ -n "${value}" && "${value}" != "." && "${value}" != ".." && "${value}" =~ ^[A-Za-z0-9._~@+=:-]+$ ]]
+}
+
+validManualAccountNameValue() {
+    validAccountNameValue "${1:-}" && [[ "$1" != sub_* ]]
+}
+
 autoInstallValidateRequiredInputs() {
     [[ "${AUTO_INSTALL:-}" == "true" ]] || return 0
 
     if [[ -n "${AUTO_UUID:-}" ]] && ! validUuidValue "${AUTO_UUID}"; then
         errorCard "--uuid 格式不合法"
+        return 1
+    fi
+
+    if [[ -n "${AUTO_USER:-}" ]] && ! validManualAccountNameValue "${AUTO_USER}"; then
+        if [[ "${AUTO_USER}" == sub_* ]]; then
+            errorCard "--user 不能使用 sub_ 开头，该前缀由订阅同步保留"
+        else
+            errorCard "--user 格式不合法，仅支持英文、数字及 . _ ~ @ + = : -"
+        fi
         return 1
     fi
 
