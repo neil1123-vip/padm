@@ -1356,6 +1356,7 @@ subscriptionControlRenderSubscribeAccount() (
     }
     if ! showAccounts >/dev/null 2>&1; then
         padmRemoveCleanupPath "${subscribeRoot}"
+        jq -n --arg account "${account}" '{ok:false, error:"generation_failed", error_detail:{type:"generation_failed", message:"远端账号订阅输出生成失败"}, account:$account}'
         return 1
     fi
 

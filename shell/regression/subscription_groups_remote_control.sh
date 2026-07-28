@@ -634,6 +634,8 @@ runRemoteControlHandleInlineHelpersRegression() (
     local healthResponse
     local syncResponse
     local subscribeResponse
+    local generationFailureResponse
+    local generationFailureStatus
     local syncLockMarker="${controlRoot}/sync-lock-observed"
 
     mkdir -p "${controlRoot}/state"
@@ -657,6 +659,7 @@ runRemoteControlHandleInlineHelpersRegression() (
         return 97
     }
     eval "$(declare -f subscriptionSyncPlanFromDesiredUsers | sed '1s/^subscriptionSyncPlanFromDesiredUsers/originalSubscriptionSyncPlanFromDesiredUsers/')"
+    eval "$(declare -f subscriptionControlRenderSubscribeAccount | sed '1s/^subscriptionControlRenderSubscribeAccount/originalSubscriptionControlRenderSubscribeAccount/')"
     subscriptionSyncPlanFromDesiredUsers() {
         [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] && : >"${syncLockMarker}"
         printf '{"create":[],"remove":[]}'
@@ -675,6 +678,19 @@ runRemoteControlHandleInlineHelpersRegression() (
 
     subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}' | jq -c .)
     [[ "${subscribeResponse}" == *'"ok":true'*'"account":"team_a"'* ]]
+
+    showAccounts() {
+        printf 'vless://secret-credential\n'
+        printf 'private diagnostic\n' >&2
+        return 1
+    }
+    set +e
+    generationFailureResponse=$(originalSubscriptionControlRenderSubscribeAccount team_a)
+    generationFailureStatus=$?
+    set -e
+    [[ "${generationFailureStatus}" -eq 1 ]]
+    jq -e '.ok == false and .error == "generation_failed" and .error_detail.type == "generation_failed" and .account == "team_a"' <<<"${generationFailureResponse}" >/dev/null
+    [[ "${generationFailureResponse}" != *secret-credential* && "${generationFailureResponse}" != *'private diagnostic'* ]]
 
     mkdir -p "${configDir}"
     configPath="${configDir}/"
