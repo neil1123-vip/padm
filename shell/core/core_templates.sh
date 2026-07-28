@@ -264,7 +264,7 @@ initXrayConfigApply() {
             validUuidValue "${customUUID}" || { errorCard "UUID 格式不合法"; return 1; }
             uuid=${customUUID}
         else
-            uuid=$(/etc/padm/xray/xray uuid)
+            uuid=$(generateRandomUuidValue) || { errorCard "UUID 生成失败"; return 1; }
         fi
 
         echoContent yellow "\n请输入自定义用户名[需合法]，[回车]随机用户名"
@@ -273,12 +273,6 @@ initXrayConfigApply() {
             customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
         fi
         coreTemplateValidateManualAccountName "${customEmail}" || return 1
-    fi
-
-    if [[ -z "${addClientsStatus}" && -z "${uuid}" ]]; then
-        addClientsStatus=
-        errorCard "uuid读取错误，随机生成"
-        uuid=$(/etc/padm/xray/xray uuid)
     fi
 
     if [[ -n "${uuid}" ]]; then
@@ -861,7 +855,7 @@ initSingBoxConfigApply() {
             validUuidValue "${customUUID}" || { errorCard "UUID 格式不合法"; return 1; }
             uuid=${customUUID}
         else
-            uuid=$(/etc/padm/sing-box/sing-box generate uuid)
+            uuid=$(generateRandomUuidValue) || { errorCard "UUID 生成失败"; return 1; }
         fi
 
         echoContent yellow "\n请输入自定义用户名[需合法]，[回车]随机用户名"
@@ -870,12 +864,6 @@ initSingBoxConfigApply() {
             customEmail="$(defaultRandomUserNameFromUuid "${uuid}")-VLESS_TCP/TLS_Vision"
         fi
         coreTemplateValidateManualAccountName "${customEmail}" || return 1
-    fi
-
-    if [[ -z "${addClientsStatus}" && -z "${uuid}" ]]; then
-        addClientsStatus=
-        errorCard "uuid读取错误，随机生成"
-        uuid=$(/etc/padm/sing-box/sing-box generate uuid)
     fi
 
     if [[ -n "${uuid}" ]]; then

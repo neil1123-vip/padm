@@ -3820,10 +3820,12 @@ runCoreTemplateReturnFailureRegression() (
     [[ "${singBoxServiceRunning}" == "true" ]]
 
     local manualUuid=11111111-1111-1111-1111-111111111111
+    local manualUser=sub_manual
+    local uuidGenerationLog="${root}/uuid-generation.log"
     autoRead() {
         case "$1" in
         core_init_uuid) printf -v "$3" '%s' "${manualUuid}" ;;
-        core_init_username) printf -v "$3" '%s' 'sub_manual' ;;
+        core_init_username) printf -v "$3" '%s' "${manualUser}" ;;
         *) return 1 ;;
         esac
     }
@@ -3854,6 +3856,23 @@ runCoreTemplateReturnFailureRegression() (
     singBoxRc=$?
     set -e
     [[ "${xrayRc}" != "0" && "${singBoxRc}" != "0" ]]
+    [[ "${writeCalls}" == "0" ]]
+
+    manualUuid=
+    manualUser=manual
+    : >"${uuidGenerationLog}"
+    generateRandomUuidValue() {
+        printf 'call\n' >>"${uuidGenerationLog}"
+        return 1
+    }
+    set +e
+    initXrayConfigApply custom 1 true 2>/dev/null
+    xrayRc=$?
+    initSingBoxConfigApply custom 1 true 2>/dev/null
+    singBoxRc=$?
+    set -e
+    [[ "${xrayRc}" != "0" && "${singBoxRc}" != "0" ]]
+    [[ "$(grep -c '^call$' "${uuidGenerationLog}")" == "2" ]]
     [[ "${writeCalls}" == "0" ]]
     currentUUID=existing-user
     lastInstallationConfig=true
