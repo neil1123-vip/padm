@@ -72,6 +72,10 @@ encodeUriUserInfoComponent() {
     jq -nr --arg value "$1" '$value | @uri'
 }
 
+serializeYamlString() {
+    jq -n --arg value "$1" '$value'
+}
+
 serializeVmessShareJson() {
     local port=$1
     local email=$2

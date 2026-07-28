@@ -222,10 +222,11 @@ emitTrojanSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    local encodedId defaultLink
+    local encodedId yamlPassword defaultLink
     local clashMetaBlock
     local singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${port}?peer=${currentHost}&fp=chrome&sni=${currentHost}&alpn=http/1.1#${email}_Trojan"
     subscribeOutputTitle "通用链接：Trojan TLS"
     echoContent green "    ${defaultLink}\n"
@@ -235,7 +236,7 @@ emitTrojanSubscribeOutput() {
     type: trojan
     server: ${currentHost}
     port: ${port}
-    password: ${id}
+    password: ${yamlPassword}
     client-fingerprint: chrome
     udp: true
     sni: ${currentHost}
@@ -253,10 +254,11 @@ emitTrojanGrpcSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    local encodedId defaultLink
+    local encodedId yamlPassword defaultLink
     local clashMetaBlock
     local singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="trojan://${encodedId}@$(formatUriAuthorityHost "${add}"):${port}?encryption=none&peer=${currentHost}&security=tls&type=grpc&fp=chrome&sni=${currentHost}&alpn=h2&path=${currentPath}trojangrpc&serviceName=${currentPath}trojangrpc#${email}"
 
     subscribeOutputTitle "通用链接：Trojan gRPC TLS"
@@ -266,7 +268,7 @@ emitTrojanGrpcSubscribeOutput() {
     server: ${add}
     port: ${port}
     type: trojan
-    password: ${id}
+    password: ${yamlPassword}
     network: grpc
     sni: ${currentHost}
     udp: true
@@ -296,17 +298,18 @@ emitHysteriaSubscribeOutput() {
         uriPortEncode=${port//,/%2C}
     fi
 
-    local encodedId defaultLink
+    local encodedId yamlPassword defaultLink
     local clashMetaBlock
     local singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="hysteria2://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${uriPort}?peer=${currentHost}&insecure=0&sni=${currentHost}&alpn=h3#${email}"
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: hysteria2
     server: ${currentHost}
     ${clashMetaPortContent}
-    password: ${id}
+    password: ${yamlPassword}
     alpn:
         - h3
     sni: ${currentHost}
@@ -444,12 +447,13 @@ emitTuicSubscribeOutput() {
 
     local tuicPassword=
     tuicPassword=${id#*_}
-    local encodedTuicUUID encodedTuicPassword defaultLink
+    local encodedTuicUUID encodedTuicPassword yamlPassword defaultLink
     local clashMetaBlock
     local singBoxFilter
     local singBoxServerPort=${singBoxTuicPort:-${port}}
     encodedTuicUUID=$(encodeUriUserInfoComponent "${tuicUUID}") || return 1
     encodedTuicPassword=$(encodeUriUserInfoComponent "${tuicPassword}") || return 1
+    yamlPassword=$(serializeYamlString "${tuicPassword}") || return 1
     defaultLink="tuic://${encodedTuicUUID}:${encodedTuicPassword}@$(formatUriAuthorityHost "${currentHost}"):${port}?congestion_control=${tuicAlgorithm}&alpn=h3&sni=${currentHost}&udp_relay_mode=native&allow_insecure=0#${email}"
 
     if [[ -z "${email}" ]]; then
@@ -469,7 +473,7 @@ emitTuicSubscribeOutput() {
     type: tuic
     port: ${port}
     uuid: ${tuicUUID}
-    password: ${tuicPassword}
+    password: ${yamlPassword}
     alpn:
      - h3
     congestion-controller: ${tuicAlgorithm}
@@ -505,16 +509,18 @@ emitShadowsocksSubscribeOutput() {
     local defaultLink
     local clashMetaBlock
     local singBoxFilter
+    local yamlPassword
 
     defaultUserInfo=$(printf '%s' "${method}:${id}" | base64 -w 0)
     defaultLink="ss://${defaultUserInfo}@$(formatUriAuthorityHost "${currentHost}"):${port}#${email}"
+    yamlPassword=$(serializeYamlString "${id}") || return 1
     clashMetaBlock=$(cat <<EOF
   - name: "${email}"
     type: ss
     server: ${currentHost}
     port: ${port}
     cipher: ${method}
-    password: "${id}"
+    password: ${yamlPassword}
 EOF
 )
     singBoxFilter=$(singBoxSubscribeAppendFilter '{tag:$tag,type:"shadowsocks",server:$server,server_port:$port,method:$method,password:$password}' --arg tag "${email}" --arg server "${currentHost}" --argjson port "${port}" --arg method "${method}" --arg password "${id}") || return 1
@@ -598,10 +604,11 @@ emitAnyTlsSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    local encodedId defaultLink
+    local encodedId yamlPassword defaultLink
     local clashMetaBlock
     local singBoxFilter
     encodedId=$(encodeUriUserInfoComponent "${id}") || return 1
+    yamlPassword=$(serializeYamlString "${id}") || return 1
     defaultLink="anytls://${encodedId}@$(formatUriAuthorityHost "${currentHost}"):${singBoxAnyTLSPort}?peer=${currentHost}&insecure=0&sni=${currentHost}#${email}"
     subscribeOutputTitle "通用链接：AnyTLS"
     echoContent green "    ${defaultLink}\n"
@@ -614,7 +621,7 @@ emitAnyTlsSubscribeOutput() {
     type: anytls
     port: ${singBoxAnyTLSPort}
     server: ${currentHost}
-    password: ${id}
+    password: ${yamlPassword}
     client-fingerprint: chrome
     udp: true
     sni: ${currentHost}

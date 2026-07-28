@@ -14511,10 +14511,11 @@ jq -e '.[0].alter_id == 0 and .[0].transport.max_early_data == 2048 and .[0].pac
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
-defaultBase64Code trojan 443 tls-trojan-user "pass@:/?#[]" "" ""
-assertCapturedSubscribeOutputs "tls-trojan-user" "trojan://pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:443?peer=2001:db8::10&fp=chrome&sni=2001:db8::10&alpn=http/1.1#tls-trojan-user_Trojan" "2001:db8::10" "2001:db8::10" "tcp" "trojan"
+defaultBase64Code trojan 443 tls-trojan-user "@:/?#[]" "" ""
+assertCapturedSubscribeOutputs "tls-trojan-user" "trojan://%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:443?peer=2001:db8::10&fp=chrome&sni=2001:db8::10&alpn=http/1.1#tls-trojan-user_Trojan" "2001:db8::10" "2001:db8::10" "tcp" "trojan"
 assertDisplayedDefaultSubscribeLink "tls-trojan-user" "通用链接：Trojan TLS"
-jq -e '.[0].password == "pass@:/?#[]" and .[0].tls.alpn[0] == "http/1.1"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-trojan-user" >/dev/null
+grep -qxF '    password: "@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-trojan-user"
+jq -e '.[0].password == "@:/?#[]" and .[0].tls.alpn[0] == "http/1.1"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-trojan-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="tls.example.com"
@@ -14522,6 +14523,7 @@ currentPath="svc-"
 defaultBase64Code trojangrpc 443 tls-trojan-grpc-user "grpc@:/?#[]" "2001:db8::20" ""
 assertCapturedSubscribeOutputs "tls-trojan-grpc-user" "trojan://grpc%40%3A%2F%3F%23%5B%5D@[2001:db8::20]:443?encryption=none&peer=tls.example.com&security=tls&type=grpc&fp=chrome&sni=tls.example.com&alpn=h2&path=svc-trojangrpc&serviceName=svc-trojangrpc#tls-trojan-grpc-user" "2001:db8::20" "tls.example.com" "grpc" "trojan"
 assertDisplayedDefaultSubscribeLink "tls-trojan-grpc-user" "通用链接：Trojan gRPC TLS"
+grep -qxF '    password: "grpc@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-trojan-grpc-user"
 jq -e '.[0].transport.service_name == "svc-trojangrpc" and (.[0].tls | has("insecure") | not) and .[0].multiplex.enabled == false' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-trojan-grpc-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14547,6 +14549,7 @@ singBoxAnyTLSPort=8443
 defaultBase64Code anytls 443 tls-any-user "pass@:/?#[]" "" ""
 assertCapturedSubscribeOutputs "tls-any-user" "anytls://pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:8443?peer=2001:db8::10&insecure=0&sni=2001:db8::10#tls-any-user" "2001:db8::10" "2001:db8::10" "tcp" "anytls"
 assertDisplayedDefaultSubscribeLink "tls-any-user" "通用链接：AnyTLS"
+grep -qxF '    password: "pass@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-any-user"
 jq -e '.[0].password == "pass@:/?#[]" and .[0].server_port == 8443' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-any-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14557,6 +14560,7 @@ hysteria2ClientDownloadSpeed=200
 hysteriaV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code hysteria 8443 tls-hysteria-user "pass@:/?#[]" "" "")
 assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:9443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2"
 assertDisplayedDefaultSubscribeLink "tls-hysteria-user" "通用链接：Hysteria2 TLS"
+grep -qxF '    password: "pass@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-user"
 jq -e '.server == "[2001:db8::10]:8443" and .auth == "pass@:/?#[]" and .tls.sni == "2001:db8::10" and .socks5.timeout == 300' <<<"${hysteriaV2rayN}" >/dev/null
 jq -e '.[0].password == "pass@:/?#[]" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-user" >/dev/null
 
@@ -14581,6 +14585,7 @@ grep -qxF "tuic://uuid-tuic:pass%40%3A%2F%3F%23%5B%5D@[2001:db8::10]:9443?conges
 assertDisplayedDefaultSubscribeLink "tls-tuic-user" "通用链接：Tuic TLS"
 jq -e '.relay.server == "[2001:db8::10]:9443" and .relay.ip == "2001:db8::10" and .relay.uuid == "uuid-tuic" and .relay.password == "pass@:/?#[]" and .relay.congestion_control == "bbr" and .local.server == "127.0.0.1:7798"' <<<"${tuicV2rayN}" >/dev/null
 grep -qx "    server: 2001:db8::10" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
+grep -qxF '    password: "pass@:/?#[]"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    udp-relay-mode: native" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    disable-sni: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    reduce-rtt: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
@@ -14597,10 +14602,11 @@ grep -qxF "naive+https://tls-naive%40user:pass%40%3A%2F%3F%23%5B%5D@[2001:db8::1
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 currentHost="2001:db8::10"
-defaultBase64Code shadowsocks 8388 tls-ss-user pass-ss "" ""
-defaultUserInfo=$(printf '%s' '2022-blake3-aes-128-gcm:pass-ss' | base64 -w 0)
+defaultBase64Code shadowsocks 8388 tls-ss-user 'pass-"quoted' "" ""
+defaultUserInfo=$(printf '%s' '2022-blake3-aes-128-gcm:pass-"quoted' | base64 -w 0)
 grep -qxF "ss://${defaultUserInfo}@[2001:db8::10]:8388#tls-ss-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-ss-user"
 assertDisplayedDefaultSubscribeLink "tls-ss-user" "通用链接：Shadowsocks"
+grep -qxF '    password: "pass-\"quoted"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-ss-user"
 unset REGRESSION_ECHO_LOG
 }
 
