@@ -49,14 +49,15 @@ emitVmessWsSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0)
-    qrCodeBase64Default="${qrCodeBase64Default// /}"
-    local defaultLink="vmess://${qrCodeBase64Default}"
+    local vmessJson qrCodeBase64Default defaultLink
     local clashMetaBlock
     local singBoxFilter
+    vmessJson=$(serializeVmessShareJson "${port}" "${email}" "${id}" "${currentHost}" "${path}" ws "${add}") || return 1
+    qrCodeBase64Default=$(printf '%s' "${vmessJson}" | base64 -w 0) || return 1
+    defaultLink="vmess://${qrCodeBase64Default}"
 
     subscribeOutputTitle "通用 JSON：VMess WS TLS"
-    echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"ws\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
+    echoContent green "    ${vmessJson}\n"
     subscribeOutputTitle "通用链接：VMess WS TLS"
     echoContent green "    ${defaultLink}\n"
 
@@ -315,7 +316,11 @@ EOF
     echoContent green "    ${defaultLink}\n"
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
     subscribeOutputTitle "v2rayN：Hysteria2 TLS"
-    echo "{\"server\": \"$(formatUriAuthorityHost "${currentHost}"):${port}\",\"socks5\": { \"listen\": \"127.0.0.1:7798\", \"timeout\": 300},\"auth\":\"${id}\",\"tls\":{\"sni\":\"${currentHost}\"}}" | jq
+    jq -n \
+        --arg server "$(formatUriAuthorityHost "${currentHost}"):${port}" \
+        --arg auth "${id}" \
+        --arg sni "${currentHost}" \
+        '{server:$server,socks5:{listen:"127.0.0.1:7798",timeout:300},auth:$auth,tls:{sni:$sni}}'
 
 }
 
@@ -472,7 +477,13 @@ EOF
 
     appendStandardTLSSubscribeOutputs "${user}" "${defaultLink}" "${clashMetaBlock}" "${singBoxFilter}"
     subscribeOutputTitle "v2rayN：Tuic TLS"
-    echo "{\"relay\": {\"server\": \"$(formatUriAuthorityHost "${currentHost}"):${port}\",\"uuid\": \"${tuicUUID}\",\"password\": \"${tuicPassword}\",\"ip\": \"${currentHost}\",\"congestion_control\": \"${tuicAlgorithm}\",\"alpn\": [\"h3\"]},\"local\": {\"server\": \"127.0.0.1:7798\"},\"log_level\": \"warn\"}" | jq
+    jq -n \
+        --arg server "$(formatUriAuthorityHost "${currentHost}"):${port}" \
+        --arg uuid "${tuicUUID}" \
+        --arg password "${tuicPassword}" \
+        --arg ip "${currentHost}" \
+        --arg congestion "${tuicAlgorithm}" \
+        '{relay:{server:$server,uuid:$uuid,password:$password,ip:$ip,congestion_control:$congestion,alpn:["h3"]},local:{server:"127.0.0.1:7798"},log_level:"warn"}'
 
 }
 
@@ -535,14 +546,15 @@ emitVmessHTTPUpgradeSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    qrCodeBase64Default=$(echo -n "{\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}" | base64 -w 0)
-    qrCodeBase64Default="${qrCodeBase64Default// /}"
-    local defaultLink="vmess://${qrCodeBase64Default}"
+    local vmessJson qrCodeBase64Default defaultLink
     local clashMetaBlock
     local singBoxFilter
+    vmessJson=$(serializeVmessShareJson "${port}" "${email}" "${id}" "${currentHost}" "${path}" httpupgrade "${add}") || return 1
+    qrCodeBase64Default=$(printf '%s' "${vmessJson}" | base64 -w 0) || return 1
+    defaultLink="vmess://${qrCodeBase64Default}"
 
     subscribeOutputTitle "通用 JSON：VMess HTTPUpgrade TLS"
-    echoContent green "    {\"port\":${port},\"ps\":\"${email}\",\"tls\":\"tls\",\"id\":\"${id}\",\"aid\":0,\"v\":2,\"host\":\"${currentHost}\",\"type\":\"none\",\"path\":\"${path}\",\"net\":\"httpupgrade\",\"add\":\"${add}\",\"method\":\"none\",\"peer\":\"${currentHost}\",\"sni\":\"${currentHost}\"}\n"
+    echoContent green "    ${vmessJson}\n"
     subscribeOutputTitle "通用链接：VMess HTTPUpgrade TLS"
     echoContent green "    ${defaultLink}\n"
 

@@ -14502,6 +14502,9 @@ currentHost="tls.example.com"
 defaultBase64Code vmessws 443 tls-vmess-user uuid-vmess "edge.example.com" "/vmess-ws"
 vmessWsLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-vmess-user")
 [[ "${vmessWsLink}" == vmess://* ]]
+vmessWsJson=$(printf '%s' "${vmessWsLink#vmess://}" | base64 -d)
+jq -e '.port == 443 and .ps == "tls-vmess-user" and .net == "ws" and .path == "/vmess-ws" and .add == "edge.example.com"' <<<"${vmessWsJson}" >/dev/null
+grep -qxF "green     ${vmessWsJson}\\n" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 assertCapturedSubscribeOutputs "tls-vmess-user" "${vmessWsLink}" "edge.example.com" "tls.example.com" "ws" "vmess"
 assertDisplayedDefaultSubscribeLink "tls-vmess-user" "通用链接：VMess WS TLS"
 jq -e '.[0].alter_id == 0 and .[0].transport.max_early_data == 2048 and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-vmess-user" >/dev/null
@@ -14527,6 +14530,9 @@ defaultBase64Code vmessHTTPUpgrade 443 tls-httpupgrade-user uuid-http "edge.exam
 httpUpgradeLink=$(sed -n '1p' "${SUBSCRIBE_CAPTURE_DIR}/default/tls-httpupgrade-user")
 [[ "${httpUpgradeLink}" == vmess://* ]]
 [[ "${httpUpgradeLink}" != " "* ]]
+httpUpgradeJson=$(printf '%s' "${httpUpgradeLink#vmess://}" | base64 -d)
+jq -e '.port == 443 and .ps == "tls-httpupgrade-user" and .net == "httpupgrade" and .path == "/upgrade" and .add == "edge.example.com"' <<<"${httpUpgradeJson}" >/dev/null
+grep -qxF "green     ${httpUpgradeJson}\\n" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 assertCapturedSubscribeOutputs "tls-httpupgrade-user" "${httpUpgradeLink}" "edge.example.com" "tls.example.com" "httpupgrade" "vmess"
 assertDisplayedDefaultSubscribeLink "tls-httpupgrade-user" "通用链接：VMess HTTPUpgrade TLS"
 jq -e '.[0].security == "auto" and .[0].transport.path == "/upgrade" and .[0].packet_encoding == "packetaddr"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-httpupgrade-user" >/dev/null
@@ -14551,7 +14557,7 @@ hysteria2ClientDownloadSpeed=200
 hysteriaV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code hysteria 8443 tls-hysteria-user pass-hysteria "" "")
 assertCapturedSubscribeOutputs "tls-hysteria-user" "hysteria2://pass-hysteria@[2001:db8::10]:9443?peer=2001:db8::10&insecure=0&sni=2001:db8::10&alpn=h3#tls-hysteria-user" "2001:db8::10" "2001:db8::10" "tcp" "hysteria2"
 assertDisplayedDefaultSubscribeLink "tls-hysteria-user" "通用链接：Hysteria2 TLS"
-jq -e '.server == "[2001:db8::10]:8443"' <<<"${hysteriaV2rayN}" >/dev/null
+jq -e '.server == "[2001:db8::10]:8443" and .auth == "pass-hysteria" and .tls.sni == "2001:db8::10" and .socks5.timeout == 300' <<<"${hysteriaV2rayN}" >/dev/null
 jq -e '.[0].password == "pass-hysteria" and .[0].up_mbps == 100 and .[0].down_mbps == 200 and .[0].tls.alpn[0] == "h3"' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/tls-hysteria-user" >/dev/null
 
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
@@ -14559,7 +14565,7 @@ currentHost="tls.example.com"
 singBoxHysteria2Port=9443
 hysteria2ClientUploadSpeed=100
 hysteria2ClientDownloadSpeed=200
-defaultBase64Code hysteria "20000-20002" tls-hysteria-hop-user pass-hysteria-hop "" ""
+defaultBase64Code hysteria "20000-20002" tls-hysteria-hop-user pass-hysteria-hop "" "" >/dev/null
 grep -qxF "hysteria2://pass-hysteria-hop@tls.example.com:20000-20002?peer=tls.example.com&insecure=0&sni=tls.example.com&alpn=h3#tls-hysteria-hop-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-hysteria-hop-user"
 grep -qx "    ports: 20000-20002" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-hysteria-hop-user"
 [[ -f "${SUBSCRIBE_CAPTURE_DIR}/screen.log" ]] || return 1
@@ -14573,7 +14579,7 @@ tuicAlgorithm="bbr"
 tuicV2rayN=$(jq() { command jq "$@"; }; defaultBase64Code tuic 9443 tls-tuic-user uuid-tuic_pass-tuic "" "")
 grep -qxF "tuic://uuid-tuic:pass-tuic@[2001:db8::10]:9443?congestion_control=bbr&alpn=h3&sni=2001:db8::10&udp_relay_mode=native&allow_insecure=0#tls-tuic-user" "${SUBSCRIBE_CAPTURE_DIR}/default/tls-tuic-user"
 assertDisplayedDefaultSubscribeLink "tls-tuic-user" "通用链接：Tuic TLS"
-jq -e '.relay.server == "[2001:db8::10]:9443" and .relay.ip == "2001:db8::10"' <<<"${tuicV2rayN}" >/dev/null
+jq -e '.relay.server == "[2001:db8::10]:9443" and .relay.ip == "2001:db8::10" and .relay.uuid == "uuid-tuic" and .relay.password == "pass-tuic" and .relay.congestion_control == "bbr" and .local.server == "127.0.0.1:7798"' <<<"${tuicV2rayN}" >/dev/null
 grep -qx "    server: 2001:db8::10" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    udp-relay-mode: native" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"
 grep -qx "    disable-sni: false" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/tls-tuic-user"

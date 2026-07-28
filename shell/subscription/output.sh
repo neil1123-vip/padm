@@ -68,6 +68,26 @@ formatUriAuthorityHost() {
     fi
 }
 
+serializeVmessShareJson() {
+    local port=$1
+    local email=$2
+    local id=$3
+    local host=$4
+    local path=$5
+    local network=$6
+    local add=$7
+
+    jq -cn \
+        --argjson port "${port}" \
+        --arg ps "${email}" \
+        --arg id "${id}" \
+        --arg host "${host}" \
+        --arg path "${path}" \
+        --arg network "${network}" \
+        --arg add "${add}" \
+        '{port:$port,ps:$ps,tls:"tls",id:$id,aid:0,v:2,host:$host,type:"none",path:$path,net:$network,add:$add,method:"none",peer:$host,sni:$host}'
+}
+
 serializeVlessRealityVisionLink() {
     local id=$1
     local entryHost=$2
