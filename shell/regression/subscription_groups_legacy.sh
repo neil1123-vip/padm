@@ -14949,6 +14949,18 @@ JSON
         grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
         grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
         jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+        printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
+        printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
+        subscriptionRemoteControlRequest() {
+            printf '%s\n' '{"ok":false,"error":"generation_failed"}'
+        }
+        if updateRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" 2>/dev/null; then
+            return 1
+        fi
+        [[ "$(<"${controlledPublic}/default/${controlledEmailMd5}")" == "old-default" ]]
+        [[ "$(<"${controlledPublic}/clashMeta/${controlledEmailMd5}")" == "old-clash" ]]
+        jq -e '.[0].tag == "old-local"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
         if [[ -n "${oldSubscribeLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldSubscribeLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
         if [[ -n "${oldSubscribeDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldSubscribeDir}"; else unset PADM_SUBSCRIBE_DIR; fi
         if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
