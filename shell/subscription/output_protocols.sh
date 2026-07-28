@@ -291,11 +291,9 @@ emitHysteriaSubscribeOutput() {
     subscribeOutputTitle "通用链接：Hysteria2 TLS"
     local clashMetaPortContent="port: ${port}"
     local uriPort=${singBoxHysteria2Port}
-    local uriPortEncode=${singBoxHysteria2Port}
     if [[ "${port}" == *-* ]]; then
         clashMetaPortContent="ports: ${port}"
         uriPort=${port}
-        uriPortEncode=${port//,/%2C}
     fi
 
     local encodedId yamlPassword defaultLink

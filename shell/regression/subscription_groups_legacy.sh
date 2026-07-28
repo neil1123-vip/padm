@@ -14553,6 +14553,18 @@ unset REGRESSION_ECHO_LOG
 }
 
 runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression() {
+subscribeOutputPortIsValid hysteria "20000-20002"
+subscribeOutputPortIsValid tuic "30000-30002"
+! subscribeOutputPortIsValid vlesstcp "20000-20002"
+! subscribeOutputPortIsValid hysteria "20002-20000"
+! subscribeOutputPortIsValid hysteria "0-20000"
+! subscribeOutputPortIsValid anytls 65536
+
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+currentHost="tls.example.com"
+! defaultBase64Code vlesstcp 0 invalid-port-user invalid-port-id "" "" >/dev/null 2>&1
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/invalid-port-user" ]]
+
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 export REGRESSION_ECHO_LOG="${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 currentHost="2001:db8::10"

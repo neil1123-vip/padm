@@ -214,6 +214,20 @@ subscribeOutputSafeHostValue() {
     fi
 }
 
+subscribeOutputPortIsValid() {
+    local type=$1
+    local port=$2
+    local start end
+    if [[ "${type}" == "hysteria" || "${type}" == "tuic" ]] &&
+        [[ "${port}" =~ ^([0-9]{1,5})-([0-9]{1,5})$ ]]; then
+        start=${BASH_REMATCH[1]}
+        end=${BASH_REMATCH[2]}
+        validPortNumber "${start}" && validPortNumber "${end}" && ((10#${start} <= 10#${end}))
+        return
+    fi
+    validPortNumber "${port}"
+}
+
 subscribeOutputTitle() {
     local title=$1
     echoContent title "\n┌─ ${title} ─────────────────────────────────────────"
@@ -243,6 +257,10 @@ defaultBase64Code() {
     local user=
     local defaultDir clashDir singBoxDir
     user=$(stripClientNameSuffix "${email}")
+    if ! subscribeOutputPortIsValid "${type}" "${port}"; then
+        errorCard "订阅输出生成失败" "协议 ${type} 的端口格式不合法"
+        return 1
+    fi
     subscribeOutputSafeLabel "${email}" || return 1
     subscribeOutputSafeFileName "${user}" || return 1
     [[ -z "${path}" ]] || subscribeOutputSafeRouteValue "${path}" || return 1
