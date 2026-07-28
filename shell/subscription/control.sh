@@ -660,6 +660,8 @@ class Handler(BaseHTTPRequestHandler):
             return 401
         if endpoint in ("sync", "subscribe") and error in ("invalid_payload", "empty_payload"):
             return 400
+        if endpoint == "subscribe" and error == "not_found":
+            return 404
         if endpoint == "health":
             return 503
         if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):

@@ -2038,6 +2038,10 @@ sync:timeout)
 {"ok":true,"default":"dmxlc3M6Ly91dWlkQGV4YW1wbGUuY29tOjQ0MyN0ZWFtLWE=","clash_meta":"proxies:\n- name: team-a\n","sing_box":[{"tag":"team-a"}]}
 JSON
         ;;
+    subscribe:not-found)
+        printf '{"ok":false,"error":"not_found","error_detail":{"type":"not_found","message":"远端账号订阅输出不存在"}}\n'
+        exit 1
+        ;;
     *)
         printf '{"ok":false,"error":"unexpected"}\n'
         exit 1
@@ -2193,6 +2197,8 @@ for _ in range(80):
 set_mode("noise")
 results["sync_success"] = request("POST", "sync", '{"desired_users":[]}')
 results["subscribe_success"] = request("POST", "subscribe", '{"account":"team_a"}')
+set_mode("not-found")
+results["subscribe_not_found"] = request("POST", "subscribe", '{"account":"missing"}')
 results["health_unauthorized"] = request("GET", "health", token_override="wrong-token")
 results["sync_empty_payload"] = request("POST", "sync", "")
 results["sync_invalid_payload"] = request("POST", "sync", "not-json")
@@ -2239,6 +2245,7 @@ PY
     jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync","subscribe"]' "${responseFile}" >/dev/null
     jq -e '.sync_success.status == 200 and .sync_success.body.ok == true and .sync_success.body.changed == true and (.sync_success.body.plan.create | length) == 0' "${responseFile}" >/dev/null
     jq -e '.subscribe_success.status == 200 and .subscribe_success.body.ok == true and (.subscribe_success.body.default | @base64d) == "vless://uuid@example.com:443#team-a" and (.subscribe_success.body.clash_meta | contains("team-a")) and .subscribe_success.body.sing_box[0].tag == "team-a"' "${responseFile}" >/dev/null
+    jq -e '.subscribe_not_found.status == 404 and .subscribe_not_found.body.error == "not_found" and .subscribe_not_found.body.error_detail.type == "not_found"' "${responseFile}" >/dev/null
     jq -e '.health_unauthorized.status == 401' "${responseFile}" >/dev/null
     jq -e '.sync_empty_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_payload.status == 400' "${responseFile}" >/dev/null
