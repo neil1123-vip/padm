@@ -1,8 +1,10 @@
 # WireGuard 被控邀请与接入回执计划
 
-状态：已完成五轮审计，待实施。
+状态：功能实现、功能分支验收和合并态验收已完成；两台测试 VPS 现场验收待授权。
 
 基线：`main` / `14a4075`（`v2.2.0` 后 1 个本地修复提交）。Peer 状态完整性修复已合并并通过合并态定向回归。
+
+实施：功能分支 `codex/wireguard-invite-onboarding`，功能提交 `9408559`；本地 `main` 已从计划提交 `6d4f406` 快进到该功能提交。
 
 ## 目标
 
@@ -380,6 +382,32 @@ git diff --exit-code main -- shell/core/version.sh
 现场证据至少保存：两端角色/地址/Peer 摘要、主控针对该来源的 health JSON、重放失败提示、权限检查和日志秘密扫描结果。证据中必须遮蔽邀请、回执、完整公钥以外的长期 Token 和 DNS API 凭据。
 
 现场验收前必须轮换此前已暴露的 Cloudflare API Token 和被控控制 Token，不复用聊天中出现过的凭据。
+
+## 实施与自动验收记录
+
+日期：2026-07-29。
+
+实施结果：
+
+- `9408559 feat(subscription): add WireGuard invite onboarding` 完成邀请/回执合同、待完成邀请状态、`/24` 地址预留、双方事务与恢复、幂等续跑、旧凭据兼容、单来源健康检查和显式秘密展示入口。
+- 实际功能差异为下列预计清单中的前 6 个文件；本计划只回填结果。没有修改 `groups.sh`、公共控制 API、TLS/公网入口、依赖或 `shell/core/version.sh`。
+- 普通状态、健康输出和待完成列表不显示完整邀请、回执或控制 Token；完整秘密只在创建结果或明确命名的展示操作中输出。
+- 完整聚合回归首次发现一条旧断言仍要求普通状态页显示主控凭据；只修正该回归为“状态仍可查看且不含 `padmwg1:`/测试 Token”，孤立复验与聚合复验随后均通过，生产代码未因此调整。
+
+功能分支验收（`E:\CC\padm\.worktrees\wireguard-invite-onboarding`）：
+
+- 四个改动 Shell 文件 `bash -n` 通过。
+- `subscription-state-structure-foundation-credential`、`wireguard-menu-flow-bootstrap`、`wireguard-menu-flow-peer-add-update`、`wireguard-menu-flow-peer-rollback`、`ui-full-subscription-main-entry`、`ui-full-subscription-controlled` 全部通过。
+- 完整 `wireguard-menu-flow` 最终通过，聚合耗时 `303618ms`；失败恢复、来源控制、邀请生命周期和菜单子项均返回成功。
+- `git diff --check` 通过；`git diff --exit-code main -- shell/core/version.sh` 通过；差异和秘密输出扫描通过。
+
+合并态验收（本地 `main` / `9408559`）：
+
+- 四个改动 Shell 文件 `bash -n` 通过。
+- 凭据结构 `13792ms`、Peer 添加/更新 `91789ms`、Peer 回滚聚合 `104856ms`、完整 `wireguard-menu-flow` `306533ms`，全部通过。
+- 合并态 `git diff --check` 通过，工作区干净；本任务未推送。
+
+尚未执行两台 VPS 现场验收。该步骤需要全新测试主机、连接信息、先轮换已暴露 Token，并再次取得远程写操作授权；在这些条件具备前不声称完成现场验收。
 
 ## 预计影响文件
 
