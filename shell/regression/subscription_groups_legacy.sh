@@ -15791,7 +15791,7 @@ edge-a
 3
 5"
         assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-        subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey)' >/dev/null
+        subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
     }
 
@@ -15840,6 +15840,11 @@ SH
 
     if wireGuardMenuPartSelected peer-add-update; then
         wireGuardMenuInitializeMain
+        if subscriptionWireGuardWriteState --arg publicKey "${controlledPublicKey}" \
+            '.peers += [{id:"invalid", name:"invalid", address:"10.77.0.9/24", public_key:$publicKey, enabled:true}]'; then
+            return 1
+        fi
+        [[ "$(subscriptionWireGuardReadState)" == "${mainStateSnapshot}" ]]
         wireGuardMenuAddEdgePeer
 
         resetMenuActions
@@ -15848,7 +15853,7 @@ ${updatedCredential}
 edge-a
 5"
         assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-        subscriptionWireGuardReadState | jq -e --arg publicKey "${updatedPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.3/24" and .public_key == $publicKey)' >/dev/null
+        subscriptionWireGuardReadState | jq -e --arg publicKey "${updatedPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.3/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
     fi
 

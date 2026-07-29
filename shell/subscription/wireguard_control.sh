@@ -341,6 +341,7 @@ subscriptionWireGuardWriteState() {
     local stateDir
     local tmpFile
     local stateJson
+    local candidateState
     local filter
     local jqArgs=()
     stateFile=$(subscriptionWireGuardStateFile)
@@ -355,7 +356,9 @@ subscriptionWireGuardWriteState() {
     done
     filter=$1
     stateJson=$(subscriptionWireGuardReadState) || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-    if ! jq "${jqArgs[@]}" "${filter}" <<<"${stateJson}" >"${tmpFile}" || ! jq empty "${tmpFile}" >/dev/null 2>&1; then
+    if ! jq "${jqArgs[@]}" "${filter}" <<<"${stateJson}" >"${tmpFile}" ||
+        ! candidateState=$(jq -e -c '.' "${tmpFile}" 2>/dev/null) ||
+        ! subscriptionWireGuardValidateState "${candidateState}"; then
         padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
@@ -1171,7 +1174,7 @@ subscriptionWireGuardAddPeerFromCredential() {
       --arg id "${alias}" \
       --arg address "${address}" \
       --arg publicKey "${publicKey}" \
-      'if any(.peers[]?; .id == $id) then .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end) else .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, enabled:true}] end' || return 1
+      'if any(.peers[]?; .id == $id) then .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end) else .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, endpoint:"", enabled:true}] end' || return 1
     if ! applySubscriptionWireGuardService; then
         subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "WireGuard 被控服务器服务应用失败" || return 1
         return 1
@@ -1206,7 +1209,7 @@ subscriptionWireGuardUpdatePeerFromCredential() {
       'if any(.peers[]?; .id == $id) then
          .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end)
        else
-         .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, enabled:true}]
+         .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, endpoint:"", enabled:true}]
        end'
 }
 
