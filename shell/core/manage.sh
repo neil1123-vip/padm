@@ -2804,7 +2804,7 @@ initRandomSalt() {
 }
 
 manageRealityTarget() {
-    local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary currentAsnSummary
+    local currentTarget selectTargetMenu targetInput sniInput selectedHost selectedSni targetAsnSummary networkMatchSummary
     while true; do
     readInstallProtocolType
     readConfigHostPathUUID || return 1
@@ -2812,18 +2812,19 @@ manageRealityTarget() {
     readSingBoxConfig
     if [[ -n "${realityTargetHost:-}" ]]; then
         currentTarget=$(formatRealityTarget "${realityTargetHost}" "${realityTargetPort:-443}")
-        targetAsnSummary=$(realityTargetAsnSummary "${realityTargetHost}" || true)
+        targetAsnSummary=$(realityTargetCachedAsnSummary "${currentTarget}")
+        networkMatchSummary=$(realityTargetCachedNetworkSummary "${currentTarget}")
     else
         currentTarget="未读取到"
         targetAsnSummary="未读取到目标站"
+        networkMatchSummary="未读取到目标站"
     fi
-    currentAsnSummary=$(currentRealityAsnSummary || true)
 
     echoContent title "\n┌─ REALITY 目标站管理 ───────────────────────────────"
     menuLine "当前目标: ${currentTarget}"
     menuLine "当前 SNI: ${realitySNI:-未知}"
-    menuLine "目标 ASN: ${targetAsnSummary}"
-    menuLine "本机 ASN: ${currentAsnSummary}"
+    menuLine "目标 ASN（缓存）: ${targetAsnSummary}"
+    menuLine "网络关系（缓存）: ${networkMatchSummary}"
     menuItem 1 "实时查看目标质量" "重新检测评分、TLS/PQC，并展示证书链与链路分析"
     menuItem 2 "刷新目标库质量" "复测统一目标库，按 TLS/PQC 与 ASN 关系写入结果"
     menuItem 3 "扫描本机附近网段" "运行 RealiTLScanner，发现目标并导入统一目标库"

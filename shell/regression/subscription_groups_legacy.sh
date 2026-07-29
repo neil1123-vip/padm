@@ -13021,10 +13021,12 @@ assertDisplayedDefaultSubscribeLink() {
 
 runRealityCandidateFastRegression() {
     local fixtureFile="${TMP_DIR}/reality-candidates-fast.txt"
+    local cacheFile="${TMP_DIR}/reality-target-cache-fast.tsv"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
+    local oldResultsFile="${PADM_REALITY_TARGET_RESULTS_FILE:-}"
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
-    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate microsoftCandidate targetAsnSummary currentAsnSummary
+    local firstRecommendedRealityCandidate firstDeveloperRealityCandidate microsoftCandidate cachedLine
 
     cat >"${fixtureFile}" <<'EOF'
 www.ibm.com|www.ibm.com|IBM|global|large_site|unknown|1|yes|fixture default
@@ -13048,10 +13050,17 @@ EOF
     [[ "$(realityTargetCandidateField "${firstRecommendedRealityCandidate}" 1)" == "www.ibm.com" ]]
     firstDeveloperRealityCandidate=$(realityTargetFilteredCandidateLineByIndex developer 1)
     [[ "$(realityTargetCandidateField "${firstDeveloperRealityCandidate}" 5)" == "developer" ]]
-    targetAsnSummary=$(realityTargetAsnSummary "www.ibm.com")
-    [[ "${targetAsnSummary}" == "192.0.2.1 AS64500 ExampleNet" ]]
-    currentAsnSummary=$(currentRealityAsnSummary)
-    [[ "${currentAsnSummary}" == "203.0.113.10 AS64500 ExampleNet" ]]
+    export PADM_REALITY_TARGET_RESULTS_FILE="${cacheFile}"
+    formatRealityTargetResultLine "www.ibm.com:443" "www.ibm.com" "IBM" "large_site" "no" "192.0.2.44" "AS64500" "ExampleNet" "same_asn" "A" "yes" "4096" "yes" "1234567890" "cached" >"${cacheFile}"
+    [[ "$(realityTargetCachedAsnSummary "www.ibm.com:443")" == "192.0.2.44 AS64500 ExampleNet" ]]
+    [[ "$(realityTargetCachedNetworkSummary "www.ibm.com:443")" == "同 ASN" ]]
+    [[ "$(realityTargetCachedAsnSummary "missing.example.com:443")" == "暂无缓存" ]]
+    writeRealityTargetCacheLine "www.ibm.com:443" "B" "yes" "2048" "yes" "1234567891" "updated"
+    cachedLine=$(realityTargetResultLine "www.ibm.com:443")
+    [[ "$(realityTargetResultField "${cachedLine}" 6)" == "192.0.2.44" ]]
+    [[ "$(realityTargetResultField "${cachedLine}" 7)" == "AS64500" ]]
+    [[ "$(realityTargetResultField "${cachedLine}" 9)" == "same_asn" ]]
+    [[ "$(realityTargetResultField "${cachedLine}" 10)" == "B" ]]
     ! realityTargetCandidates | grep -q '^www.cloudflare.com|'
     ! realityTargetCandidates | grep -q '^www.apple.com|'
 
@@ -13080,6 +13089,11 @@ manual.example.com:8443
         AUTO_INSTALL="${oldAutoInstall}"
     else
         unset AUTO_INSTALL
+    fi
+    if [[ -n "${oldResultsFile}" ]]; then
+        export PADM_REALITY_TARGET_RESULTS_FILE="${oldResultsFile}"
+    else
+        unset PADM_REALITY_TARGET_RESULTS_FILE
     fi
     if [[ -n "${oldRealityPageSize}" ]]; then
         REALITY_TARGET_PAGE_SIZE="${oldRealityPageSize}"
@@ -17154,10 +17168,18 @@ runMenuSmokeRegression() {
         assertMenuAction menu
         resetMenuActions
         output=
+        local realityMenuNetworkMarker="${TMP_DIR}/menu-smoke-reality-network"
+        rm -f "${realityMenuNetworkMarker}"
+        resolveRealityTargetIPv4() { : >"${realityMenuNetworkMarker}"; return 1; }
+        lookupRealityTargetAsn() { : >"${realityMenuNetworkMarker}"; return 1; }
+        currentRealityNetworkProfile() { : >"${realityMenuNetworkMarker}"; return 1; }
         protocolEntryMenu <<<"1
 2
 9"
         grep -q "实时查看目标质量" <<<"${output}"
+        grep -q "目标 ASN（缓存）" <<<"${output}"
+        grep -q "网络关系（缓存）" <<<"${output}"
+        [[ ! -e "${realityMenuNetworkMarker}" ]]
         if assertMenuAction 'errorCard:选择错误'; then
             printf 'menu-smoke failed: protocol entry reality target flow returned unexpected selection error\n' >&2
             return 1

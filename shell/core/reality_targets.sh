@@ -430,6 +430,42 @@ realityTargetResultField() {
     printf '%s\n' "${value}"
 }
 
+realityTargetResultLine() {
+    local target=$1
+    local resultsFile
+    resultsFile=$(realityTargetManagedResultsFile) || return 1
+    [[ -n "${target}" && -f "${resultsFile}" ]] || return 1
+    awk -F'\t' -v target="${target}" '$1 == target {line = $0} END {if (line != "") print line; else exit 1}' "${resultsFile}"
+}
+
+realityTargetCachedAsnSummary() {
+    local target=$1
+    local line ip asn asOrg summary=
+    line=$(realityTargetResultLine "${target}" 2>/dev/null || true)
+    [[ -n "${line}" ]] || { printf '暂无缓存\n'; return 0; }
+    ip=$(realityTargetResultField "${line}" 6)
+    asn=$(realityTargetResultField "${line}" 7)
+    asOrg=$(realityTargetResultField "${line}" 8)
+    [[ -z "${ip}" || "${ip}" == "unknown" ]] || summary=${ip}
+    [[ -z "${asn}" || "${asn}" == "unknown" ]] || summary="${summary:+${summary} }${asn}"
+    [[ -z "${asOrg}" || "${asOrg}" == "unknown" ]] || summary="${summary:+${summary} }${asOrg}"
+    printf '%s\n' "${summary:-暂无缓存}"
+}
+
+realityTargetCachedNetworkSummary() {
+    local target=$1
+    local line networkMatch
+    line=$(realityTargetResultLine "${target}" 2>/dev/null || true)
+    [[ -n "${line}" ]] || { printf '暂无缓存\n'; return 0; }
+    networkMatch=$(realityTargetResultField "${line}" 9)
+    case "${networkMatch}" in
+    same_asn) printf '同 ASN\n' ;;
+    same_provider) printf '同提供商\n' ;;
+    different_network) printf '不同网络\n' ;;
+    *) printf '暂无缓存\n' ;;
+    esac
+}
+
 removeRealityTargetResultLine() {
     local target=$1
     local resultsFile stagedFile
@@ -687,35 +723,6 @@ currentRealityNetworkProfile() {
     [[ "${currentIp}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
     profile=$(lookupRealityTargetAsn "${currentIp}") || return 1
     printf '%s\t%s\n' "${currentIp}" "${profile}"
-}
-
-realityTargetAsnSummary() {
-    local host=$1
-    local ip profile asn org
-    ip=$(resolveRealityTargetIPv4 "${host}") || {
-        printf '未知（解析失败）\n'
-        return 1
-    }
-    profile=$(lookupRealityTargetAsn "${ip}") || {
-        printf '%s（ASN 未识别）\n' "${ip}"
-        return 1
-    }
-    asn=${profile%%$'\t'*}
-    org=${profile#*$'\t'}
-    printf '%s %s %s\n' "${ip}" "${asn}" "${org}"
-}
-
-currentRealityAsnSummary() {
-    local profile ip rest asn org
-    profile=$(currentRealityNetworkProfile) || {
-        printf '未知（公网 ASN 未识别）\n'
-        return 1
-    }
-    ip=${profile%%$'\t'*}
-    rest=${profile#*$'\t'}
-    asn=${rest%%$'\t'*}
-    org=${rest#*$'\t'}
-    printf '%s %s %s\n' "${ip}" "${asn}" "${org}"
 }
 
 normalizeRealityAsn() {
@@ -1331,10 +1338,29 @@ writeRealityTargetCacheLine() {
     local tls13=$5
     local checkedAt=$6
     local note=$7
-    local parsed host
+    local parsed host line sni name category cdnRisk ip asn asOrg networkMatch
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
-    writeRealityTargetResultLine "${target}" "${host}" "${host}" "manual" "unknown" "unknown" "unknown" "unknown" "unknown" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
+    sni=${host}
+    name=${host}
+    category=manual
+    cdnRisk=unknown
+    ip=unknown
+    asn=unknown
+    asOrg=unknown
+    networkMatch=unknown
+    line=$(realityTargetResultLine "${target}" 2>/dev/null || true)
+    if [[ -n "${line}" ]]; then
+        sni=$(realityTargetResultField "${line}" 2)
+        name=$(realityTargetResultField "${line}" 3)
+        category=$(realityTargetResultField "${line}" 4)
+        cdnRisk=$(realityTargetResultField "${line}" 5)
+        ip=$(realityTargetResultField "${line}" 6)
+        asn=$(realityTargetResultField "${line}" 7)
+        asOrg=$(realityTargetResultField "${line}" 8)
+        networkMatch=$(realityTargetResultField "${line}" 9)
+    fi
+    writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
 }
 
 scoreRealityTargetFromTlsPing() {
