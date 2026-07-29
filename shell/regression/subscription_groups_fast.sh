@@ -2915,6 +2915,7 @@ runUninstallPadmRootScopeRegression() {
         errorLog="${root}/error.log"
         successLog="${root}/success.log"
         printf 'managed\n' >"${padmRoot}/xray/conf/00_log.json"
+        printf 'managed\n' >"${padmRoot}/README.md"
         printf 'keep\n' >"${padmRoot}/custom/keep"
         : >"${rmLog}"
         : >"${serviceLog}"
@@ -2961,6 +2962,7 @@ runUninstallPadmRootScopeRegression() {
 
         unInstall >/dev/null
         [[ ! -e "${padmRoot}/xray/conf/00_log.json" ]]
+        [[ ! -e "${padmRoot}/README.md" ]]
         [[ -f "${padmRoot}/custom/keep" ]]
         ! grep -qxF -- "-rf ${padmRoot}" "${rmLog}"
         ! grep -qx 'handleNginx:stop' "${serviceLog}" || return 1

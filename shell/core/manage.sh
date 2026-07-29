@@ -1567,6 +1567,7 @@ cleanupPadmManagedRootOnUninstall() {
         "${installRoot%/}/documents"
         "${installRoot%/}/assets"
         "${installRoot%/}/install.sh"
+        "${installRoot%/}/README.md"
         "${installRoot%/}/install.sh.bak"
         "${installRoot%/}/.padm-ref"
         "${installRoot%/}/.padm-module-manifest"
