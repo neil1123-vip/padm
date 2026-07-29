@@ -1,10 +1,10 @@
 # WireGuard 被控邀请与接入回执计划
 
-状态：功能实现、功能分支验收和合并态验收已完成；两台测试 VPS 现场验收待授权。
+状态：功能实现、功能分支验收、合并态验收、两台测试 VPS 现场验收和最终清场均已完成。
 
 基线：`main` / `14a4075`（`v2.2.0` 后 1 个本地修复提交）。Peer 状态完整性修复已合并并通过合并态定向回归。
 
-实施：功能分支 `codex/wireguard-invite-onboarding`，功能提交 `9408559`；本地 `main` 已从计划提交 `6d4f406` 快进到该功能提交。
+实施：功能分支 `codex/wireguard-invite-onboarding`，功能提交 `9408559`；验收中发现并由 `80d97e9` 修复根级 README 未被卸载的问题。
 
 ## 目标
 
@@ -385,12 +385,12 @@ git diff --exit-code main -- shell/core/version.sh
 
 ## 实施与自动验收记录
 
-日期：2026-07-29。
+日期：2026-07-29 至 2026-07-30。
 
 实施结果：
 
 - `9408559 feat(subscription): add WireGuard invite onboarding` 完成邀请/回执合同、待完成邀请状态、`/24` 地址预留、双方事务与恢复、幂等续跑、旧凭据兼容、单来源健康检查和显式秘密展示入口。
-- 实际功能差异为下列预计清单中的前 6 个文件；本计划只回填结果。没有修改 `groups.sh`、公共控制 API、TLS/公网入口、依赖或 `shell/core/version.sh`。
+- 邀请/回执功能差异为下列预计清单中的前 6 个文件；现场完整卸载另以最小补丁修改 `manage.sh` 和对应快速回归。没有修改 `groups.sh`、公共控制 API、TLS/公网入口、依赖或 `shell/core/version.sh`。
 - 普通状态、健康输出和待完成列表不显示完整邀请、回执或控制 Token；完整秘密只在创建结果或明确命名的展示操作中输出。
 - 完整聚合回归首次发现一条旧断言仍要求普通状态页显示主控凭据；只修正该回归为“状态仍可查看且不含 `padmwg1:`/测试 Token”，孤立复验与聚合复验随后均通过，生产代码未因此调整。
 
@@ -407,7 +407,23 @@ git diff --exit-code main -- shell/core/version.sh
 - 凭据结构 `13792ms`、Peer 添加/更新 `91789ms`、Peer 回滚聚合 `104856ms`、完整 `wireguard-menu-flow` `306533ms`，全部通过。
 - 合并态 `git diff --check` 通过，工作区干净；本任务未推送。
 
-尚未执行两台 VPS 现场验收。该步骤需要全新测试主机、连接信息、先轮换已暴露 Token，并再次取得远程写操作授权；在这些条件具备前不声称完成现场验收。
+现场验收（Debian 13，A 主控 / B 被控）：
+
+- 验收前确认 `a.951101.xyz` 的 A 记录为 A 公网地址；聊天中暴露的 Cloudflare API Token 已由用户撤销，现场未使用该 Token。两台旧安装先经各自卸载器清理，再部署同一份本地 `caf5d04` 归档；远端 SHA-256、manifest 和 ref 均一致。
+- A 初始化为 `10.77.0.1/24` 主控，B 仅接收一行邀请后初始化为 `10.77.0.2/24` 被控并生成回执；A 仅接收一行回执后以预留别名 `hk-1` 完成提交。两端接口均为 `wg-padm`，Peer 地址一致。
+- 完成接入前人为停止 B 的控制服务；A 显示“接入已保存，但暂不可达”，同时 Peer、服务器源、64 位控制 Token 已提交且邀请已消费。恢复服务后 WireGuard 最新握手非零，单来源 health 返回 `{"id":"hk-1","ok":true,"version":"v2.2.0","capabilities":["health","sync","subscribe"]}`。
+- B 通过显式入口重新显示同一回执后重放；A 返回“接入回执未知、已取消或已消费”，且 `control.json`、`groups.json` 和 WireGuard 配置的组合哈希前后不变。
+- 第二个邀请自动分配 `10.77.0.3/24`。待完成列表显示别名和地址但不显示完整凭据或 `invite_id`；取消后新邀请复用 `.3`，模拟过期后下一邀请再次复用 `.3`，最终无待完成邀请。
+- 旧兼容流程经强制 PTY 验证：B 导入旧 `main` 凭据时出现地址输入，A 添加旧 `controlled` 凭据时出现别名输入；旧导入清除 `join_invite_id`，`legacy-b` health 成功。
+- 两端 `control.json`、WireGuard 私钥、控制 Token 和 `groups.json` 均为 `0600`，WireGuard 与 Token 父目录均为 `0700`。安装日志、普通状态、health 和待完成邀请列表均未出现实际控制 Token、`padmwg1:` 或 `cfat_`；完整秘密只在明确生成/显示入口出现。
+- 两端 `shell/validate_install.sh` 均为 `PASS=21 WARN=9 FAIL=0`；现场功能验收完成后均调用产品卸载器清场。
+
+现场验收发现与闭环：
+
+- 首轮清场时，两台均只残留安装器同步的 `/etc/padm/README.md`；服务、WireGuard 接口/配置、Xray、快捷方式、上传包和 padm 防火墙标记均已清除，Nginx 保持 active。
+- 根因为 `cleanupPadmManagedRootOnUninstall()` 的受管路径漏列根级 README。`80d97e9 fix(core): remove deployed readme on uninstall` 只增加该路径，并在 `runUninstallPadmRootScopeRegression()` 增加删除断言，同时继续保留未知 `custom/` 内容。
+- `bash -n`、`git diff --check` 和 `fast-only-safety` 通过；后者包含卸载根目录范围、相邻路径安全与 WireGuard 防火墙生命周期，耗时 `97025ms`。
+- 使用 `80d97e9` 在 A/B 再次完整安装，确认根级 README 已部署；随后再次完整卸载，两台均确认 `/etc/padm` 不存在、Nginx active、无 padm 防火墙标记，上传归档和暂存目录已删除。
 
 ## 预计影响文件
 
@@ -418,6 +434,8 @@ git diff --exit-code main -- shell/core/version.sh
 - `README.md`
 - `documents/en/README_EN.md`
 - `documents/wireguard-invite-receipt-plan.md`
+- `shell/core/manage.sh`（现场验收发现的卸载闭环修复）
+- `shell/regression/subscription_groups_fast.sh`（对应最小回归）
 
 具体实现以调用链为准，不为满足文件清单制造无效改动。
 
@@ -425,11 +443,13 @@ git diff --exit-code main -- shell/core/version.sh
 
 计划审计使用当前独立 worktree `wireguard-invite-onboarding-plan` 和分支 `codex/wireguard-invite-onboarding-plan`，只提交本计划。计划合并并清理后，功能实施另建 worktree `wireguard-invite-onboarding` 和分支 `codex/wireguard-invite-onboarding`。
 
-提交顺序：
+实际提交顺序：
 
 1. `docs(subscription): plan WireGuard invite onboarding`
 2. `feat(subscription): add WireGuard invite onboarding`
 3. `docs(subscription): record WireGuard invite acceptance`
+4. `fix(core): remove deployed readme on uninstall`
+5. `docs(subscription): record VPS invite acceptance`
 
 `docs(subscription)` 和现有 `fix(subscription)` 属于 patch 候选，`feat(subscription)` 属于 minor 候选。最终版本取决于推送时最新标签及其后的全部提交，由发布自动化统一计算；本地计划不预测或写死版本号，不手工修改 `SCRIPT_VERSION`，也不在本任务推送。
 
