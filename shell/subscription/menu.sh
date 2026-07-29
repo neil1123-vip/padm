@@ -316,7 +316,7 @@ manageSubscriptionPublishSubscriptions() {
         menuLine "建议先安装订阅服务，再查看自用链接或新建分享订阅。"
         menuItem 1 "安装/更新订阅服务" "安装或刷新 Nginx 订阅发布配置"
         menuItem 2 "刷新并查看我的订阅链接" "重新生成并显示当前自用订阅"
-        menuItem 3 "新建并发布订阅" "填写 ID/名称、节点范围和额度，然后同步并拿到可发送的链接"
+        menuItem 3 "新建并发布订阅" "填写 ID、节点范围和额度，然后同步并拿到可发送的链接"
         menuItem 4 "查看并处理已有订阅" "先查看订阅列表，再选择一个刷新链接、改范围、改额度、启停或删除"
         menuItem 5 "查看我的可用服务器" "查看本机和已添加被控服务器源"
         menuItem 6 "查看我的流量" "查看自用账号流量统计"
@@ -669,7 +669,6 @@ validateUserSubscriptionSourcesJson() {
 
 createAndSyncUserSubscriptionWizard() {
     local id=
-    local name=
     local sourceIds=main
     local sourceJson=
     local limit=0
@@ -678,9 +677,8 @@ createAndSyncUserSubscriptionWizard() {
     local eventSyncEnabled=false
     local subscriptionServiceStatus=0
     autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
-    autoRead user_subscription_name "请输入显示名称[例 家人A/团队A]:" name
-    if [[ -z "${id}" || -z "${name}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
-        errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线，名称不能为空"
+    if [[ -z "${id}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+        errorCard "输入有误，ID 只能包含英文、数字、下划线或短横线"
         return 1
     fi
 
@@ -717,11 +715,11 @@ createAndSyncUserSubscriptionWizard() {
         return 1
     fi
 
-    if ! addUserSubscriptionState "${id}" "${name}" "${sourceJson}" "${limit}"; then
+    if ! addUserSubscriptionState "${id}" "${id}" "${sourceJson}" "${limit}"; then
         errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
         return 1
     fi
-    statusCard "分享订阅已创建" "订阅ID：${id}" "显示名称：${name}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 主控维护与排障 -> 用量与限额 执行"
+    statusCard "分享订阅已创建" "订阅ID：${id}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 主控维护与排障 -> 用量与限额 执行"
 
     if ! subscriptionGroupSyncEnabled; then
         autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync

@@ -12235,7 +12235,6 @@ runUserSubscriptionMenuMutationFailureRegression() (
         local targetVar=$3
         case "${key}" in
         user_subscription_id) printf -v "${targetVar}" 'team-new' ;;
-        user_subscription_name) printf -v "${targetVar}" 'Team New' ;;
         user_subscription_sources)
             if [[ "${mode}" == "empty-sources" ]]; then
                 printf -v "${targetVar}" ', ,'
@@ -12362,7 +12361,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
-    grep -qxF 'create:team-new:Team New:["main","remote-a"]:100' "${callLog}"
+    grep -qxF 'create:team-new:team-new:["main","remote-a"]:100' "${callLog}"
     grep -q '分享订阅创建失败' "${errorLog}"
     ! grep -q '分享订阅已创建' "${statusLog}"
     ! grep -q '^sync:' "${callLog}"
