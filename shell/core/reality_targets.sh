@@ -1338,6 +1338,10 @@ writeRealityTargetCacheLine() {
     local tls13=$5
     local checkedAt=$6
     local note=$7
+    local refreshedIp=${8:-}
+    local refreshedAsn=${9:-}
+    local refreshedAsOrg=${10:-}
+    local refreshedNetworkMatch=${11:-}
     local parsed host line sni name category cdnRisk ip asn asOrg networkMatch
     parsed=$(parseHostPort "${target}" 443)
     host=${parsed%:*}
@@ -1359,6 +1363,12 @@ writeRealityTargetCacheLine() {
         asn=$(realityTargetResultField "${line}" 7)
         asOrg=$(realityTargetResultField "${line}" 8)
         networkMatch=$(realityTargetResultField "${line}" 9)
+    fi
+    if [[ -n "${refreshedIp}" ]]; then
+        ip=${refreshedIp}
+        asn=${refreshedAsn:-unknown}
+        asOrg=${refreshedAsOrg:-unknown}
+        networkMatch=${refreshedNetworkMatch:-unknown}
     fi
     writeRealityTargetResultLine "${target}" "${sni}" "${name}" "${category}" "${cdnRisk}" "${ip}" "${asn}" "${asOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
 }
@@ -2045,6 +2055,7 @@ showRealityTargetCertificateChain() {
 showRealityTargetQuality() {
     local target=$1
     local detector tlsPingResult result score pqc certLength tls13 note checkedAt detectStart detectSeconds
+    local parsed host ip= networkProfile rest currentAsn= currentOrg= candidateProfile candidateAsn= candidateOrg= networkMatch= networkStatus
     if ! detector=$(realityTargetDetector); then
         realityTargetStatusBlock yellow "REALITY 目标站检测" "未找到 xray，无法在线检测" "安装核心后可在 REALITY 管理中检测"
         return 1
@@ -2064,10 +2075,34 @@ showRealityTargetQuality() {
     certLength=$(printf '%s\n' "${result}" | awk -F'\t' '{print $3}')
     tls13=$(printf '%s\n' "${result}" | awk -F'\t' '{print $4}')
     note=$(printf '%s\n' "${result}" | awk -F'\t' '{print $5}')
+    parsed=$(parseHostPort "${target}" 443)
+    host=${parsed%:*}
+    networkStatus="目标 IP 解析失败，保留原缓存"
+    if ip=$(resolveRealityTargetIPv4 "${host}"); then
+        if networkProfile=$(currentRealityNetworkProfile 2>/dev/null); then
+            rest=${networkProfile#*$'\t'}
+            currentAsn=${rest%%$'\t'*}
+            currentOrg=${rest#*$'\t'}
+        fi
+        candidateProfile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}")
+        IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${candidateProfile}"
+        if [[ "${candidateAsn}" == "unknown" ]]; then
+            ip=
+            candidateAsn=
+            candidateOrg=
+            networkMatch=
+            networkStatus="目标 ASN 查询失败，保留原缓存"
+        elif [[ -z "${currentAsn}" ]]; then
+            networkMatch=unknown
+            networkStatus="已刷新目标 ASN；本机 ASN 查询失败，网络关系未知"
+        else
+            networkStatus="已刷新目标 ASN 与网络关系"
+        fi
+    fi
     checkedAt=$(date +%s)
     detectSeconds=$((checkedAt - detectStart))
-    writeRealityTargetCacheLine "${target}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}"
-    realityTargetStatusBlock green "REALITY 目标站检测" "评分: $(realityTargetScoreStyle "${score}")" "X25519MLKEM768: ${pqc}" "TLS1.3: ${tls13}" "证书链长度: ${certLength}" "耗时: ${detectSeconds}s" "结论: ${note}"
+    writeRealityTargetCacheLine "${target}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "${note}" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}"
+    realityTargetStatusBlock green "REALITY 目标站检测" "评分: $(realityTargetScoreStyle "${score}")" "X25519MLKEM768: ${pqc}" "TLS1.3: ${tls13}" "证书链长度: ${certLength}" "目标 ASN（缓存）: $(realityTargetCachedAsnSummary "${target}")" "网络关系（缓存）: $(realityTargetCachedNetworkSummary "${target}")" "网络缓存: ${networkStatus}" "耗时: ${detectSeconds}s" "结论: ${note}"
 }
 
 showRealityTargetQualityActions() {

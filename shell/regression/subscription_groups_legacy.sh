@@ -13476,6 +13476,10 @@ runRuntimeAndRealityRegression() {
     showRealityTargetQuality "www.microsoft.com:443"
     [[ "$(realityTargetResultCount)" -ge "1" ]]
     cachedLine=$(awk -F'\t' '$1 == "www.microsoft.com:443" {print; found=1; exit} END {exit found ? 0 : 1}' "${PADM_REALITY_TARGET_RESULTS_FILE}")
+    [[ "$(realityTargetResultField "${cachedLine}" 6)" == "192.0.2.1" ]]
+    [[ "$(realityTargetResultField "${cachedLine}" 7)" == "AS64500" ]]
+    [[ "$(realityTargetResultField "${cachedLine}" 8)" == "ExampleNet" ]]
+    [[ "$(realityTargetResultField "${cachedLine}" 9)" == "same_asn" ]]
     [[ "$(printf '%s\n' "${cachedLine}" | awk -F'\t' '{print $10}')" == "A" ]]
     grep -q "tls ping www.microsoft.com:443" "${REALITY_TLS_PING_ARGS_FILE}"
     scoreLine=$(scoreRealityTargetFromTlsPing $'Pinging with SNI\nTLS Post-Quantum key exchange: X25519MLKEM768\nTLS version: TLS 1.3\nCertificate chain total length: 2048')

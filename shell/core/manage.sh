@@ -2825,7 +2825,7 @@ manageRealityTarget() {
     menuLine "当前 SNI: ${realitySNI:-未知}"
     menuLine "目标 ASN（缓存）: ${targetAsnSummary}"
     menuLine "网络关系（缓存）: ${networkMatchSummary}"
-    menuItem 1 "实时查看目标质量" "重新检测评分、TLS/PQC，并展示证书链与链路分析"
+    menuItem 1 "实时查看目标质量" "重新检测 TLS/PQC、ASN 与网络关系，并展示证书链"
     menuItem 2 "刷新目标库质量" "复测统一目标库，按 TLS/PQC 与 ASN 关系写入结果"
     menuItem 3 "扫描本机附近网段" "运行 RealiTLScanner，发现目标并导入统一目标库"
     menuItem 4 "随机抽样同 ASN" "拉取本机 ASN 公告前缀，发现目标并导入统一目标库"
