@@ -2901,6 +2901,7 @@ regenerateRealityProfile() {
 }
 
 manageReality() {
+    while true; do
     readInstallProtocolType
     readConfigHostPathUUID || return 1
     readCustomPort
@@ -2917,6 +2918,7 @@ manageReality() {
     menuItem 3 "配置 443 共存分流" "同机真实网站与 Reality 共用公网 443"
     menuItem 4 "查看当前分流状态" "检查 state、Nginx stream 与后端监听"
     menuItem 5 "关闭 443 共存分流" "恢复 Reality 原入口端口并清理分流配置"
+    menuReturnItem 6 "返回协议与入口" "回到上级菜单"
     menuLine "Reality 不需要本机伪装站点；443 共存分流仅用于同机真实网站"
     menuLine "分流时只填写真实网站域名，其他 SNI 默认转给 Reality"
     menuClose
@@ -2938,10 +2940,15 @@ manageReality() {
     5)
         disableRealityStreamSplit
         ;;
+    6)
+        protocolEntryMenu
+        return 0
+        ;;
     *)
         coreSelectionErrorCard "选择错误"
         ;;
     esac
+    done
 }
 
 

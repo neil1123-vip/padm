@@ -17245,11 +17245,15 @@ runMenuSmokeRegression() {
         currentRealityNetworkProfile() { : >"${realityMenuNetworkMarker}"; return 1; }
         protocolEntryMenu <<<"1
 2
-9"
+9
+6
+7"
         grep -q "实时查看目标质量" <<<"${output}"
         grep -q "目标 ASN（缓存）" <<<"${output}"
         grep -q "网络关系（缓存）" <<<"${output}"
+        [[ "$(grep -cF '重新生成 Reality 参数' <<<"${output}")" == "2" ]]
         [[ ! -e "${realityMenuNetworkMarker}" ]]
+        assertMenuAction menu
         if assertMenuAction 'errorCard:选择错误'; then
             printf 'menu-smoke failed: protocol entry reality target flow returned unexpected selection error\n' >&2
             return 1
