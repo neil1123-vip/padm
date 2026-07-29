@@ -313,11 +313,12 @@ Recommended flow for controller-side shared subscriptions:
 
 Recommended multi-server flow:
 
-1. On the controller, open `Multi-server coordination` -> `Controller setup wizard`, initialize the controller, and copy the controller join credential.
-2. On the controlled server, open `Join controller`, import the controller credential, then copy the local controlled join credential.
-3. Back on the controller, open `Multi-server coordination` -> `Add/remove controlled server`, paste the controlled credential, and set an alias.
-4. Open `Multi-server coordination` -> `View coordination status` to confirm credentials, server sources, health checks, and recent sync results.
-5. Client subscriptions continue over public HTTPS; server-to-server control stays inside the WireGuard private network.
+1. On the controller, open `Multi-server coordination` -> `Controller setup wizard`, then use `Add/remove controlled server` -> `Create controlled-server invite` and enter the controlled-server alias once. The controller reserves its WireGuard address automatically.
+2. On the controlled server, open `Join controller` and paste the invite. Initialization and controller-peer import complete without an address prompt; copy the resulting join receipt once.
+3. Back on the controller, use `Add/remove controlled server` -> `Complete controlled-server join` and paste the receipt. The reserved alias drives the peer, source, and control-token transaction, followed by a health check for that source only.
+4. Pending invites can be viewed or cancelled by alias. Invites and receipts are bearer secrets, so normal status, health output, and pending lists never show their complete values. Cancel and recreate a lost invite.
+5. Legacy `main` / `controlled` credentials remain available through explicitly named compatibility actions. Receipts and legacy controlled credentials contain long-lived control tokens and must travel through a trusted channel.
+6. WireGuard uses UDP and the control API uses HTTP only inside the tunnel, so this join flow needs no TLS certificate. Public client subscriptions continue to use HTTPS separately.
 
 State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`.
 

@@ -15785,10 +15785,10 @@ main"; then
         subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "main") | not' >/dev/null
         resetMenuActions
         manageSubscriptionMultiServer <<<"2
-1
+2
 ${controlledCredential}
 edge-a
-3
+5
 5"
         assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
@@ -16004,10 +16004,12 @@ enable"
         if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-status; then
             resetMenuActions
             local multiServerStatusOutput
-            multiServerStatusOutput=
-            manageSubscriptionMultiServer <<<"4
-5"
-            assertMenuAction 'statusCard:本机主控接入凭据'
+            multiServerStatusOutput=$(manageSubscriptionMultiServer <<<"4
+5")
+            grep -q '^ID:edge-a$' <<<"${multiServerStatusOutput}"
+            if grep -Eq 'padmwg1:|token-a' <<<"${multiServerStatusOutput}"; then
+                return 1
+            fi
         fi
     fi
 
@@ -16135,6 +16137,223 @@ enable"
     nginxConfigPath="${oldNginxConfigPath}"
 )
 
+runSubscriptionWireGuardInviteReceiptRegression() (
+    local root="${TMP_DIR}/wireguard-invite-receipt"
+    local mainWireGuardDir="${root}/main-wireguard"
+    local controlledWireGuardDir="${root}/controlled-wireguard"
+    local mainGroupsDir="${root}/main-groups"
+    local controlledGroupsDir="${root}/controlled-groups"
+    local wireGuardConfig="${root}/main-wg.conf"
+    local stateMarker="${root}/control.json"
+    local counterFile="${root}/invite-counter"
+    local testNow=1770000000
+    local applyFailNext=false
+    local mainPublicKey controlledPublicKeyA controlledPublicKeyB controlledPublicKeyC
+    local receiptToken='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB'
+    local inviteCredentialA inviteCredentialB inviteCredentialC joinCredential
+    local inviteJsonA inviteJsonB inviteJsonC joinJson receiptJson receiptCredential controlledCredentialJson completedAlias
+    local stateBefore groupsBefore pendingJson readSecretValue= secretOutput staleInviteId
+    local testWireGuardState testGroupsState
+
+    # Restore production functions because other legacy UI tests install global stubs.
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/core/state.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/control.sh"
+    # shellcheck source=/dev/null
+    source "${PROJECT_ROOT}/shell/subscription/wireguard_control.sh"
+
+    rm -rf "${root}"
+    mkdir -p "${root}"
+    PADM_WIREGUARD_CONTROL_DIR="${mainWireGuardDir}"
+    PADM_SUBSCRIPTION_GROUPS_DIR="${mainGroupsDir}"
+    mainPublicKey=$(printf '0123456789abcdefghijklmnopqrstuv' | base64 -w 0)
+    controlledPublicKeyA=$(printf 'abcdefghijklmnopqrstuvwxyz123456' | base64 -w 0)
+    controlledPublicKeyB=$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456' | base64 -w 0)
+    controlledPublicKeyC=$(printf '01234567890123456789012345678901' | base64 -w 0)
+
+    errorCard() { return 0; }
+    statusCard() { return 0; }
+    successCard() { return 0; }
+    warnCard() { return 0; }
+    subscriptionWireGuardConfigFile() { printf '%s\n' "${wireGuardConfig}"; }
+    subscriptionWireGuardStateFile() { printf '%s\n' "${stateMarker}"; }
+    subscriptionWireGuardReadState() {
+        subscriptionWireGuardValidateState "${testWireGuardState}" || return 1
+        printf '%s\n' "${testWireGuardState}"
+    }
+    subscriptionWireGuardWriteState() {
+        local filter candidate
+        local jqArgs=()
+        while (($# > 1)); do
+            jqArgs+=("$1")
+            shift
+        done
+        filter=$1
+        candidate=$(jq -c "${jqArgs[@]}" "${filter}" <<<"${testWireGuardState}") || return 1
+        subscriptionWireGuardValidateState "${candidate}" || return 1
+        testWireGuardState=${candidate}
+        printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
+    }
+    subscriptionGroupsStateRead() { jq "$@" <<<"${testGroupsState}"; }
+    subscriptionGroupsStateWrite() {
+        local candidate
+        candidate=$(jq -c "$@" <<<"${testGroupsState}") || return 1
+        testGroupsState=${candidate}
+    }
+    subscriptionGroupsWithLock() {
+        local SUBSCRIPTION_GROUPS_LOCK_HELD=1
+        "$@"
+    }
+    subscriptionWireGuardNow() { printf '%s\n' "${testNow}"; }
+    subscriptionWireGuardRandomInviteId() {
+        local counter=0
+        [[ -f "${counterFile}" ]] && counter=$(<"${counterFile}")
+        counter=$((counter + 1))
+        printf '%s\n' "${counter}" >"${counterFile}"
+        printf '%064x\n' "${counter}"
+    }
+    applySubscriptionWireGuardService() {
+        if [[ "${applyFailNext}" == "true" ]]; then
+            applyFailNext=false
+            return 1
+        fi
+        mkdir -p "$(dirname "${wireGuardConfig}")"
+        printf 'Address = %s\n' "$(subscriptionWireGuardReadState | jq -r '.address')" >"${wireGuardConfig}"
+    }
+    subscriptionWireGuardWaitForAddress() { return 0; }
+    subscriptionWireGuardInstallControlPlane() { return 0; }
+    installSubscriptionWireGuardTools() { return 0; }
+    subscriptionWireGuardEnsureKeys() { return 0; }
+    subscriptionControlledTransitionPreflight() { return 0; }
+    subscriptionWireGuardPublicKey() { printf '%s\n' "${controlledPublicKeyA}"; }
+    subscriptionControlEnsureToken() { return 0; }
+    subscriptionControlToken() { printf '%s\n' "${receiptToken}"; }
+    testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,remote_enabled:true,event_enabled:true,quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
+    testWireGuardState=$(jq -cn --arg publicKey "${mainPublicKey}" '{enabled:true,role:"main",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"10.77.0.1/24",endpoint_host:"main.example.com",public_key:$publicKey,peers:[]}')
+    printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
+    printf 'keep-config\n' >"${wireGuardConfig}"
+
+    subscriptionWireGuardCreateInvite hk-1 inviteCredentialA
+    inviteJsonA=$(subscriptionWireGuardCredentialDecode "${inviteCredentialA}")
+    jq -e '.kind == "invite" and .alias == "hk-1" and .address == "10.77.0.2/24" and .expires_at == 1770086400' <<<"${inviteJsonA}" >/dev/null
+    subscriptionWireGuardReadState | jq -e '(.peers | length) == 0 and (.pending_invites | length) == 1' >/dev/null
+    grep -qxF 'keep-config' "${wireGuardConfig}"
+
+    subscriptionWireGuardCreateInvite hk-2 inviteCredentialB
+    inviteJsonB=$(subscriptionWireGuardCredentialDecode "${inviteCredentialB}")
+    jq -e '.address == "10.77.0.3/24"' <<<"${inviteJsonB}" >/dev/null
+    pendingJson=$(subscriptionWireGuardListPendingInvites)
+    jq -e 'length == 2 and all(.[]; has("invite_id") | not)' <<<"${pendingJson}" >/dev/null
+    if grep -q "$(jq -r '.invite_id' <<<"${inviteJsonA}")" <<<"${pendingJson}"; then
+        return 1
+    fi
+
+    subscriptionWireGuardCancelInvite hk-1
+    subscriptionWireGuardCreateInvite hk-3 inviteCredentialC
+    inviteJsonC=$(subscriptionWireGuardCredentialDecode "${inviteCredentialC}")
+    jq -e '.address == "10.77.0.2/24"' <<<"${inviteJsonC}" >/dev/null
+    if subscriptionWireGuardCreateInvite hk-3 inviteCredentialA >/dev/null 2>&1; then
+        return 1
+    fi
+    staleInviteId=$(printf '%064x' 99)
+    subscriptionWireGuardWriteState --arg inviteId "${staleInviteId}" --argjson expiresAt "$((testNow - 1))" '.pending_invites += [{invite_id:$inviteId,alias:"stale-edge",address:"10.77.0.4/24",expires_at:$expiresAt}]'
+
+    receiptJson=$(jq -cn --arg inviteId "$(jq -r '.invite_id' <<<"${inviteJsonB}")" --arg publicKey "${controlledPublicKeyB}" --arg token "${receiptToken}" '{version:1,kind:"receipt",invite_id:$inviteId,public_key:$publicKey,control_port:39778,token:$token}')
+    subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias
+    [[ "${completedAlias}" == "hk-2" ]]
+    subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKeyB}" 'any(.peers[]?; .id == "hk-2" and .address == "10.77.0.3/24" and .public_key == $publicKey and .endpoint == "") and (.pending_invites | length) == 1 and .pending_invites[0].alias == "hk-3"' >/dev/null
+    subscriptionGroupsStateRead -e --arg token "${receiptToken}" '.groups[0].sources[] | select(.id == "hk-2" and .host == "10.77.0.3" and .control_token == $token)' >/dev/null
+    stateBefore=$(subscriptionWireGuardReadState)
+    groupsBefore=$(subscriptionGroupsStateRead -c '.')
+    if subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(subscriptionWireGuardReadState)" == "${stateBefore}" ]]
+    [[ "$(subscriptionGroupsStateRead -c '.')" == "${groupsBefore}" ]]
+
+    receiptJson=$(jq -cn --arg inviteId "$(jq -r '.invite_id' <<<"${inviteJsonC}")" --arg publicKey "${controlledPublicKeyC}" --arg token "${receiptToken}" '{version:1,kind:"receipt",invite_id:$inviteId,public_key:$publicKey,control_port:39778,token:$token}')
+    stateBefore=$(subscriptionWireGuardReadState)
+    groupsBefore=$(subscriptionGroupsStateRead -c '.')
+    applyFailNext=true
+    if subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(subscriptionWireGuardReadState)" == "${stateBefore}" ]]
+    [[ "$(subscriptionGroupsStateRead -c '.')" == "${groupsBefore}" ]]
+
+    subscriptionWireGuardWriteState --arg id hk-3 --arg address "$(jq -r '.address' <<<"${inviteJsonC}")" --arg publicKey "${controlledPublicKeyC}" '.peers += [{id:$id,name:$id,address:$address,public_key:$publicKey,endpoint:"",enabled:true}]'
+    subscriptionWireGuardCompleteInvite "${receiptJson}" completedAlias
+    [[ "${completedAlias}" == "hk-3" ]]
+    subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "hk-3" and .control_token != "")' >/dev/null
+
+    stateBefore=$(subscriptionWireGuardReadState)
+    staleInviteId=$(printf '%064x' 100)
+    subscriptionWireGuardWriteState --arg inviteId "${staleInviteId}" --argjson expiresAt "$((testNow - 1))" '.network = "10.77.0.0/16" | .address = "10.77.0.1/16" | .pending_invites = [{invite_id:$inviteId,alias:"expired-edge",address:"10.77.0.4/24",expires_at:$expiresAt}]'
+    if subscriptionWireGuardCreateInvite unsupported inviteCredentialA >/dev/null 2>&1; then
+        return 1
+    fi
+    subscriptionWireGuardReadState | jq -e '(.pending_invites | length) == 0' >/dev/null
+    testWireGuardState=${stateBefore}
+    printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
+
+    controlledCredentialJson=$(jq -cn --arg publicKey "${controlledPublicKeyA}" --arg token "${receiptToken}" '{version:1,kind:"controlled",address:"10.77.0.10/24",public_key:$publicKey,control_port:39778,token:$token}')
+    stateBefore=$(subscriptionWireGuardReadState)
+    groupsBefore=$(subscriptionGroupsStateRead -c '.')
+    if subscriptionWireGuardUpdatePeerAndCredential missing-edge "${controlledCredentialJson}" >/dev/null 2>&1 ||
+        subscriptionWireGuardRemovePeerAndSource missing-edge >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(subscriptionWireGuardReadState)" == "${stateBefore}" ]]
+    [[ "$(subscriptionGroupsStateRead -c '.')" == "${groupsBefore}" ]]
+
+    subscriptionWireGuardCreateInvite join-edge joinCredential
+    joinJson=$(subscriptionWireGuardCredentialDecode "${joinCredential}")
+    PADM_WIREGUARD_CONTROL_DIR="${controlledWireGuardDir}"
+    PADM_SUBSCRIPTION_GROUPS_DIR="${controlledGroupsDir}"
+    wireGuardConfig="${root}/controlled-wg.conf"
+    stateMarker="${root}/controlled-control.json"
+    testWireGuardState=$(jq -cn '{enabled:false,role:"uninitialized",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"",endpoint_host:"",public_key:"",peers:[]}')
+    testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,remote_enabled:true,event_enabled:true,quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
+    printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
+    subscriptionWireGuardJoinInvite "${joinJson}" false
+    subscriptionWireGuardReadState | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" '.role == "controlled" and .address == $address and .join_invite_id == $inviteId and (.peers | length) == 1 and .peers[0].id == "main"' --arg address "$(jq -r '.address' <<<"${joinJson}")" >/dev/null
+    subscriptionWireGuardJoinReceiptCredential receiptCredential
+    subscriptionWireGuardCredentialDecode "${receiptCredential}" | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" --arg token "${receiptToken}" '.kind == "receipt" and .invite_id == $inviteId and .token == $token' >/dev/null
+    stateBefore=$(subscriptionWireGuardReadState)
+    subscriptionWireGuardWriteState --arg publicKey "${controlledPublicKeyB}" '.peers += [{id:"main",name:"重复主控",address:"10.77.0.9/24",public_key:$publicKey,endpoint:"backup.example.com:51820",enabled:true}]'
+    if subscriptionWireGuardJoinReceiptCredential receiptCredential >/dev/null 2>&1; then
+        return 1
+    fi
+    testWireGuardState=${stateBefore}
+    printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
+    stateBefore=$(subscriptionWireGuardReadState)
+    if subscriptionWireGuardJoinInvite "$(jq -c '.address = "10.77.0.9/24"' <<<"${joinJson}")" false >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(subscriptionWireGuardReadState)" == "${stateBefore}" ]]
+
+    joinJson=$(jq -c '.invite_id = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" | .address = "10.77.0.8/24"' <<<"${joinJson}")
+    if subscriptionWireGuardJoinInvite "${joinJson}" false >/dev/null 2>&1; then
+        return 1
+    fi
+    subscriptionWireGuardJoinInvite "${joinJson}" true
+    subscriptionWireGuardReadState | jq -e '.address == "10.77.0.8/24" and .join_invite_id == "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"' >/dev/null
+
+    joinJson=$(jq -cn --arg publicKey "${mainPublicKey}" '{version:1,kind:"main",endpoint_host:"main.example.com",listen_port:51820,network:"10.77.0.0/24",address:"10.77.0.1/24",public_key:$publicKey}')
+    subscriptionWireGuardImportMainCredentialJson "${joinJson}"
+    subscriptionWireGuardReadState | jq -e 'has("join_invite_id") | not' >/dev/null
+
+    secretOutput="${root}/secret-output"
+    subscriptionWireGuardReadSecret readSecretValue "secret:" <<<"hidden-value" >"${secretOutput}" 2>&1
+    [[ "${readSecretValue}" == "hidden-value" ]]
+    if grep -q 'hidden-value' "${secretOutput}"; then
+        return 1
+    fi
+)
+
 runSubscriptionWireGuardMenuFlowBootstrapRegression() {
     local validPublicKey
     local peerPublicKey
@@ -16226,6 +16445,7 @@ runSubscriptionWireGuardMenuFlowBootstrapRegression() {
         subscriptionRemoteScopeEnabled
     )
     runSubscriptionWireGuardMenuFlowRegression bootstrap
+    runSubscriptionWireGuardInviteReceiptRegression
 }
 
 runSubscriptionWireGuardMenuFlowPeerAddUpdateRegression() {
@@ -16786,7 +17006,15 @@ runMenuSmokeRegression() {
     showSubscriptionSourceSyncResults() { recordMenuAction showSubscriptionSourceSyncResults; }
     showSubscriptionWireGuardMainCredential() { recordMenuAction showSubscriptionWireGuardMainCredential; }
     showSubscriptionWireGuardControlledCredential() { recordMenuAction showSubscriptionWireGuardControlledCredential; }
+    showSubscriptionWireGuardControlledAccessCredential() { recordMenuAction showSubscriptionWireGuardControlledAccessCredential; }
+    showSubscriptionWireGuardJoinReceipt() { recordMenuAction showSubscriptionWireGuardJoinReceipt; }
+    createSubscriptionWireGuardInviteMenu() { recordMenuAction createSubscriptionWireGuardInviteMenu; }
     importSubscriptionWireGuardMainCredential() { recordMenuAction importSubscriptionWireGuardMainCredential; }
+    subscriptionWireGuardImportMainCredentialJson() { recordMenuAction importSubscriptionWireGuardMainCredential; }
+    subscriptionWireGuardCredentialDecode() {
+        [[ "$1" == "main-credential" ]] || return 1
+        jq -n '{version:1,kind:"main",endpoint_host:"main.example.com",listen_port:51820,network:"10.77.0.0/24",address:"10.77.0.1/24",public_key:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+    }
     initSubscriptionWireGuardMain() {
         recordMenuAction initSubscriptionWireGuardMain
         subscriptionWireGuardReadState() {
@@ -16957,14 +17185,16 @@ runMenuSmokeRegression() {
         resetMenuActions
         output=
         manageSubscriptionRoleSelection <<<"2
-3"
+n"
         assertMenuAction initSubscriptionWireGuardMain
-        assertMenuAction showSubscriptionWireGuardMainCredential
-        assertMenuAction showSubscriptionRemoteHealthPlan
-        assertMenuAction showSubscriptionRemoteSyncPlan
+        assertMenuAction 'statusCard:主控建链已完成'
+        if assertMenuAction showSubscriptionWireGuardMainCredential || assertMenuAction createSubscriptionWireGuardInviteMenu; then
+            return 1
+        fi
         resetMenuActions
         output=
-        manageSubscriptionRoleSelection <<<"3"
+        manageSubscriptionRoleSelection <<<"3
+main-credential"
         assertMenuAction initSubscriptionWireGuardControlled
         assertMenuAction importSubscriptionWireGuardMainCredential
         assertMenuAction showSubscriptionWireGuardControlledCredential
@@ -17122,7 +17352,7 @@ main
         fi
         resetMenuActions
         manageSubscriptionMultiServer <<<"1
-3
+n
 5"
         assertMenuAction initSubscriptionWireGuardMain
         resetMenuActions
@@ -17132,7 +17362,9 @@ main
         resetMenuActions
         manageSubscriptionMultiServer <<<"4
 5"
-        assertMenuAction showSubscriptionWireGuardMainCredential
+        if assertMenuAction showSubscriptionWireGuardMainCredential; then
+            return 1
+        fi
         assertMenuAction showSubscriptionSources
         assertMenuAction showSubscriptionRemoteHealthPlan
         assertMenuAction subscriptionRemoteControlHealthAll
@@ -17282,13 +17514,16 @@ main-credential
         manageSubscriptionControlledHome <<<"2
 4"
         grep -q "当前服务器角色：" <<<"${output}"
-        assertMenuAction showSubscriptionWireGuardControlledCredential
+        if assertMenuAction showSubscriptionWireGuardControlledCredential || assertMenuAction showSubscriptionWireGuardJoinReceipt; then
+            return 1
+        fi
         assertMenuAction showSubscriptionWireGuardStatus
         assertMenuAction showSubscriptionSourceSyncResults
         resetMenuActions
         output=
-        manageSubscriptionControlledMaintenance <<<"5"
+        manageSubscriptionControlledMaintenance <<<"6"
         grep -q "导入/更新主控接入凭据" <<<"${output}"
+        grep -q "显示接入回执/旧版被控凭据" <<<"${output}"
         grep -q "查看控制面与 Peer 细节" <<<"${output}"
         grep -q "重写配置并重启被控控制面" <<<"${output}"
         grep -q "关闭被控控制面" <<<"${output}"
@@ -17298,20 +17533,24 @@ main-credential
         fi
         resetMenuActions
         manageSubscriptionControlledMaintenance <<<"1
-5"
+6"
         assertMenuAction importSubscriptionWireGuardMainCredential
         resetMenuActions
         manageSubscriptionControlledMaintenance <<<"2
-5"
+6"
+        assertMenuAction showSubscriptionWireGuardControlledAccessCredential
+        resetMenuActions
+        manageSubscriptionControlledMaintenance <<<"3
+6"
         assertMenuAction showSubscriptionWireGuardStatus
         assertMenuAction showSubscriptionWireGuardPeers
         resetMenuActions
-        manageSubscriptionControlledMaintenance <<<"3
-5"
+        manageSubscriptionControlledMaintenance <<<"4
+6"
         assertMenuAction restartSubscriptionWireGuardControl
         resetMenuActions
-        manageSubscriptionControlledMaintenance <<<"4
-5"
+        manageSubscriptionControlledMaintenance <<<"5
+6"
         assertMenuAction disableSubscriptionWireGuardControl
         resetMenuActions
         addSubscribeMenu <<<"3" || true
@@ -17356,14 +17595,14 @@ main-credential
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         setMenuSmokeRole uninitialized
-        manageTrafficAndQuota <<<"8" || true
-        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
+        manageTrafficAndQuota <<<"8"
+        [[ -z "${actions}" ]]
         resetMenuActions
-        manageSubscriptionStateBackups <<<"6" || true
-        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
+        manageSubscriptionStateBackups <<<"6"
+        [[ -z "${actions}" ]]
         resetMenuActions
-        manageSubscriptionSyncSettings <<<"12" || true
-        assertMenuAction 'errorCard:当前机器还没完成角色初始化'
+        manageSubscriptionSyncSettings <<<"10"
+        [[ -z "${actions}" ]]
     fi
 
     if menuSmokePartSelected core-maintenance; then

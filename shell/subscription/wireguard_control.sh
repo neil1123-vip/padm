@@ -39,6 +39,34 @@ subscriptionWireGuardDefaultControlPort() {
     echo 39778
 }
 
+subscriptionWireGuardNow() {
+    date +%s
+}
+
+subscriptionWireGuardRandomInviteId() {
+    local inviteId
+    if command -v openssl >/dev/null 2>&1; then
+        inviteId=$(openssl rand -hex 32 2>/dev/null) || return 1
+    else
+        inviteId=$(od -An -N32 -tx1 /dev/urandom 2>/dev/null | tr -d '[:space:]') || return 1
+    fi
+    [[ "${inviteId}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "${inviteId}"
+}
+
+subscriptionWireGuardReadSecret() {
+    local outputVar=$1
+    local prompt=$2
+    local __padmSecret=
+    if [[ -t 0 ]]; then
+        IFS= read -r -s -p "${prompt}" __padmSecret || return 1
+        printf '\n' >&2
+    else
+        IFS= read -r __padmSecret || return 1
+    fi
+    printf -v "${outputVar}" '%s' "${__padmSecret}"
+}
+
 subscriptionWireGuardPrivateKeyFile() {
     local wireGuardDir
     wireGuardDir=$(subscriptionWireGuardSafeDir) || return 1
@@ -124,6 +152,22 @@ subscriptionWireGuardValidEndpointHost() {
 subscriptionWireGuardValidTokenValue() {
     local value=$1
     [[ -n "${value}" && "${value}" != "null" && ! "${value}" =~ [[:space:]] ]]
+}
+
+subscriptionWireGuardValidReceiptTokenValue() {
+    [[ "$1" =~ ^[A-Za-z0-9]{64}$ ]]
+}
+
+subscriptionWireGuardValidAlias() {
+    [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]
+}
+
+subscriptionWireGuardValidInviteId() {
+    [[ "$1" =~ ^[0-9a-f]{64}$ ]]
+}
+
+subscriptionWireGuardValidExpiry() {
+    [[ "$1" =~ ^[0-9]+$ ]] && ((10#$1 > 0))
 }
 
 subscriptionWireGuardValidPublicKeyValue() {
@@ -217,7 +261,8 @@ subscriptionWireGuardValidateState() {
     publicKey=$(jq -r '.public_key' <<<"${state}") || return 1
     subscriptionWireGuardValidIPv4Cidr "$(jq -r '.network' <<<"${state}")" &&
         subscriptionWireGuardValidPort "$(jq -r '.listen_port' <<<"${state}")" &&
-        subscriptionWireGuardValidPort "$(jq -r '.control_port' <<<"${state}")" || return 1
+        subscriptionWireGuardValidPort "$(jq -r '.control_port' <<<"${state}")" &&
+        subscriptionWireGuardValidateOptionalStateFields "${state}" || return 1
 
     case "${role}" in
     uninitialized)
@@ -239,6 +284,59 @@ subscriptionWireGuardValidateState() {
             subscriptionWireGuardValidateStateForConfig "${state}"
         ;;
     esac
+}
+
+subscriptionWireGuardValidateOptionalStateFields() {
+    local state=$1
+    local role network joinInviteId invite inviteId alias address expiresAt
+    local -A seenInviteIds=()
+    local -A seenAliases=()
+    local -A seenAddresses=()
+
+    jq -e '
+      ((has("pending_invites") | not) or
+        ((.pending_invites | type) == "array" and
+         all(.pending_invites[]?;
+           type == "object" and
+           keys == ["address", "alias", "expires_at", "invite_id"] and
+           (.invite_id | type) == "string" and
+           (.alias | type) == "string" and
+           (.address | type) == "string" and
+           (.expires_at | type) == "number"))) and
+      ((has("join_invite_id") | not) or (.join_invite_id | type) == "string")
+    ' <<<"${state}" >/dev/null 2>&1 || return 1
+
+    role=$(jq -r '.role' <<<"${state}") || return 1
+    network=$(jq -r '.network' <<<"${state}") || return 1
+    if jq -e 'has("pending_invites")' <<<"${state}" >/dev/null 2>&1; then
+        [[ "${role}" == "main" ]] || return 1
+    fi
+    if jq -e 'has("join_invite_id")' <<<"${state}" >/dev/null 2>&1; then
+        [[ "${role}" == "controlled" ]] || return 1
+        joinInviteId=$(jq -r '.join_invite_id' <<<"${state}") || return 1
+        subscriptionWireGuardValidInviteId "${joinInviteId}" || return 1
+    fi
+
+    while IFS= read -r invite; do
+        [[ -n "${invite}" ]] || continue
+        inviteId=$(jq -r '.invite_id' <<<"${invite}") || return 1
+        alias=$(jq -r '.alias' <<<"${invite}") || return 1
+        address=$(jq -r '.address' <<<"${invite}") || return 1
+        expiresAt=$(jq -r '.expires_at' <<<"${invite}") || return 1
+        subscriptionWireGuardValidInviteId "${inviteId}" &&
+            subscriptionWireGuardValidAlias "${alias}" &&
+            [[ "${alias,,}" != "main" ]] &&
+            subscriptionWireGuardValidIPv4Cidr "${address}" &&
+            [[ "${address#*/}" == "24" ]] &&
+            subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
+            subscriptionWireGuardValidExpiry "${expiresAt}" || return 1
+        [[ -z "${seenInviteIds[${inviteId}]+x}" &&
+            -z "${seenAliases[${alias}]+x}" &&
+            -z "${seenAddresses[${address}]+x}" ]] || return 1
+        seenInviteIds["${inviteId}"]=1
+        seenAliases["${alias}"]=1
+        seenAddresses["${address}"]=1
+    done < <(jq -c '.pending_invites[]?' <<<"${state}")
 }
 
 subscriptionWireGuardPeerIdentityAvailable() {
@@ -273,7 +371,16 @@ subscriptionWireGuardValidNginxLogPath() {
 subscriptionWireGuardValidateMainCredentialJson() {
     local credentialJson=$1
     local endpointHost listenPort network address publicKey
-    [[ "$(jq -r '.kind // empty' <<<"${credentialJson}")" == "main" ]] || return 1
+    jq -e '
+      type == "object" and
+      keys == ["address", "endpoint_host", "kind", "listen_port", "network", "public_key", "version"] and
+      .version == 1 and .kind == "main" and
+      (.endpoint_host | type) == "string" and
+      (.listen_port | type) == "number" and
+      (.network | type) == "string" and
+      (.address | type) == "string" and
+      (.public_key | type) == "string"
+    ' <<<"${credentialJson}" >/dev/null 2>&1 || return 1
     endpointHost=$(jq -r '.endpoint_host // empty' <<<"${credentialJson}")
     listenPort=$(jq -r '.listen_port // empty' <<<"${credentialJson}")
     network=$(jq -r '.network // empty' <<<"${credentialJson}")
@@ -283,13 +390,22 @@ subscriptionWireGuardValidateMainCredentialJson() {
         subscriptionWireGuardValidPort "${listenPort}" &&
         subscriptionWireGuardValidIPv4Cidr "${network}" &&
         subscriptionWireGuardValidIPv4Cidr "${address}" &&
+        subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
         subscriptionWireGuardValidPublicKeyValue "${publicKey}"
 }
 
 subscriptionWireGuardValidateControlledCredentialJson() {
     local credentialJson=$1
     local address publicKey controlPort token
-    [[ "$(jq -r '.kind // empty' <<<"${credentialJson}")" == "controlled" ]] || return 1
+    jq -e '
+      type == "object" and
+      keys == ["address", "control_port", "kind", "public_key", "token", "version"] and
+      .version == 1 and .kind == "controlled" and
+      (.address | type) == "string" and
+      (.public_key | type) == "string" and
+      (.control_port | type) == "number" and
+      (.token | type) == "string"
+    ' <<<"${credentialJson}" >/dev/null 2>&1 || return 1
     address=$(jq -r '.address // empty' <<<"${credentialJson}")
     publicKey=$(jq -r '.public_key // empty' <<<"${credentialJson}")
     controlPort=$(jq -r '.control_port // empty' <<<"${credentialJson}")
@@ -300,6 +416,68 @@ subscriptionWireGuardValidateControlledCredentialJson() {
         subscriptionWireGuardValidTokenValue "${token}"
 }
 
+subscriptionWireGuardValidateInviteCredentialJson() {
+    local credentialJson=$1
+    local inviteId alias address network mainAddress endpointHost listenPort mainPublicKey expiresAt
+    jq -e '
+      type == "object" and
+      keys == ["address", "alias", "endpoint_host", "expires_at", "invite_id", "kind", "listen_port", "main_address", "main_public_key", "network", "version"] and
+      .version == 1 and .kind == "invite" and
+      (.invite_id | type) == "string" and
+      (.alias | type) == "string" and
+      (.address | type) == "string" and
+      (.network | type) == "string" and
+      (.main_address | type) == "string" and
+      (.endpoint_host | type) == "string" and
+      (.listen_port | type) == "number" and
+      (.main_public_key | type) == "string" and
+      (.expires_at | type) == "number"
+    ' <<<"${credentialJson}" >/dev/null 2>&1 || return 1
+    inviteId=$(jq -r '.invite_id' <<<"${credentialJson}") || return 1
+    alias=$(jq -r '.alias' <<<"${credentialJson}") || return 1
+    address=$(jq -r '.address' <<<"${credentialJson}") || return 1
+    network=$(jq -r '.network' <<<"${credentialJson}") || return 1
+    mainAddress=$(jq -r '.main_address' <<<"${credentialJson}") || return 1
+    endpointHost=$(jq -r '.endpoint_host' <<<"${credentialJson}") || return 1
+    listenPort=$(jq -r '.listen_port' <<<"${credentialJson}") || return 1
+    mainPublicKey=$(jq -r '.main_public_key' <<<"${credentialJson}") || return 1
+    expiresAt=$(jq -r '.expires_at' <<<"${credentialJson}") || return 1
+    subscriptionWireGuardValidInviteId "${inviteId}" &&
+        subscriptionWireGuardValidAlias "${alias}" &&
+        subscriptionWireGuardValidIPv4Cidr "${network}" && [[ "${network#*/}" == "24" ]] &&
+        subscriptionWireGuardValidIPv4Cidr "${address}" && [[ "${address#*/}" == "24" ]] &&
+        subscriptionWireGuardValidIPv4Cidr "${mainAddress}" && [[ "${mainAddress#*/}" == "24" ]] &&
+        subscriptionWireGuardIPv4CidrContains "${network}" "${address}" &&
+        subscriptionWireGuardIPv4CidrContains "${network}" "${mainAddress}" &&
+        [[ "$(subscriptionWireGuardAddressHost "${address}")" != "$(subscriptionWireGuardAddressHost "${mainAddress}")" ]] &&
+        subscriptionWireGuardValidEndpointHost "${endpointHost}" &&
+        subscriptionWireGuardValidPort "${listenPort}" &&
+        subscriptionWireGuardValidPublicKeyValue "${mainPublicKey}" &&
+        subscriptionWireGuardValidExpiry "${expiresAt}"
+}
+
+subscriptionWireGuardValidateReceiptCredentialJson() {
+    local credentialJson=$1
+    local inviteId publicKey controlPort token
+    jq -e '
+      type == "object" and
+      keys == ["control_port", "invite_id", "kind", "public_key", "token", "version"] and
+      .version == 1 and .kind == "receipt" and
+      (.invite_id | type) == "string" and
+      (.public_key | type) == "string" and
+      (.control_port | type) == "number" and
+      (.token | type) == "string"
+    ' <<<"${credentialJson}" >/dev/null 2>&1 || return 1
+    inviteId=$(jq -r '.invite_id' <<<"${credentialJson}") || return 1
+    publicKey=$(jq -r '.public_key' <<<"${credentialJson}") || return 1
+    controlPort=$(jq -r '.control_port' <<<"${credentialJson}") || return 1
+    token=$(jq -r '.token' <<<"${credentialJson}") || return 1
+    subscriptionWireGuardValidInviteId "${inviteId}" &&
+        subscriptionWireGuardValidPublicKeyValue "${publicKey}" &&
+        subscriptionWireGuardValidPort "${controlPort}" &&
+        subscriptionWireGuardValidReceiptTokenValue "${token}"
+}
+
 subscriptionWireGuardBase64UrlEncode() {
     base64 -w 0 | tr '+/' '-_' | tr -d '='
 }
@@ -307,6 +485,7 @@ subscriptionWireGuardBase64UrlEncode() {
 subscriptionWireGuardBase64UrlDecode() {
     local payload=$1
     local padding
+    ((${#payload} % 4 != 1)) || return 1
     payload=$(printf '%s' "${payload}" | tr '_-' '/+')
     padding=$(( (4 - ${#payload} % 4) % 4 ))
     payload="${payload}$(printf '%*s' "${padding}" '' | tr ' ' '=')"
@@ -884,11 +1063,12 @@ subscriptionWireGuardCredentialDecode() {
     local credential=$1
     local payload
     local kind
-    credential=$(printf '%s' "${credential}" | tr -d '[:space:]')
+    ((${#credential} <= 4096)) || return 1
     [[ "${credential}" == padmwg1:* ]] || return 1
     payload=${credential#padmwg1:}
+    [[ -n "${payload}" && "${payload}" =~ ^[A-Za-z0-9_-]+$ ]] || return 1
     payload=$(subscriptionWireGuardBase64UrlDecode "${payload}") || return 1
-    payload=$(jq -e -c 'select(.version == 1 and (.kind == "main" or .kind == "controlled"))' <<<"${payload}") || return 1
+    payload=$(jq -e -cs 'select(length == 1 and (.[0] | type) == "object") | .[0]' <<<"${payload}") || return 1
     kind=$(jq -r '.kind' <<<"${payload}")
     case "${kind}" in
     main)
@@ -897,11 +1077,437 @@ subscriptionWireGuardCredentialDecode() {
     controlled)
         subscriptionWireGuardValidateControlledCredentialJson "${payload}" || return 1
         ;;
+    invite)
+        subscriptionWireGuardValidateInviteCredentialJson "${payload}" || return 1
+        ;;
+    receipt)
+        subscriptionWireGuardValidateReceiptCredentialJson "${payload}" || return 1
+        ;;
     *)
         return 1
         ;;
     esac
     printf '%s\n' "${payload}"
+}
+
+subscriptionWireGuardActiveSourcesFromGroupsState() {
+    local groupsState=$1
+    jq -c '.active_group as $active | [.groups[]? | select(.id == $active) | .sources[]?]' <<<"${groupsState}"
+}
+
+subscriptionWireGuardCleanPendingInvitesJson() {
+    local state=$1
+    local groupsState=$2
+    local now=$3
+    local sources pending result invite inviteId alias address host expiresAt
+    local peerById peerByAddress sourceById sourceByAddress
+    local peerSame sourceSame conflict complete
+    sources=$(subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}") || return 1
+    pending=$(jq -c '.pending_invites // []' <<<"${state}") || return 1
+    result='[]'
+    while IFS= read -r invite; do
+        [[ -n "${invite}" ]] || continue
+        inviteId=$(jq -r '.invite_id' <<<"${invite}") || return 1
+        alias=$(jq -r '.alias' <<<"${invite}") || return 1
+        address=$(jq -r '.address' <<<"${invite}") || return 1
+        host=$(subscriptionWireGuardAddressHost "${address}")
+        expiresAt=$(jq -r '.expires_at' <<<"${invite}") || return 1
+        peerById=$(jq -c --arg alias "${alias}" 'first(.peers[]? | select(.id == $alias)) // empty' <<<"${state}") || return 1
+        peerByAddress=$(jq -c --arg host "${host}" 'first(.peers[]? | select((.address | split("/")[0]) == $host)) // empty' <<<"${state}") || return 1
+        sourceById=$(jq -c --arg alias "${alias}" 'first(.[]? | select(.id == $alias)) // empty' <<<"${sources}") || return 1
+        sourceByAddress=$(jq -c --arg host "${host}" 'first(.[]? | select(.host == $host)) // empty' <<<"${sources}") || return 1
+        peerSame=false
+        sourceSame=false
+        conflict=false
+        complete=false
+
+        if [[ -n "${peerById}" ]]; then
+            if [[ "$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${peerById}")")" == "${host}" ]]; then
+                peerSame=true
+            else
+                conflict=true
+            fi
+        fi
+        if [[ -n "${peerByAddress}" && "$(jq -r '.id' <<<"${peerByAddress}")" != "${alias}" ]]; then
+            conflict=true
+        fi
+        if [[ -n "${sourceById}" ]]; then
+            if jq -e --arg host "${host}" '.role != "main" and .host == $host' <<<"${sourceById}" >/dev/null 2>&1; then
+                sourceSame=true
+            else
+                conflict=true
+            fi
+        fi
+        if [[ -n "${sourceByAddress}" && "$(jq -r '.id' <<<"${sourceByAddress}")" != "${alias}" ]]; then
+            conflict=true
+        fi
+        if [[ "${peerSame}" == "true" && "${sourceSame}" == "true" ]] &&
+            jq -e '((.transport // .scheme // "") == "wireguard") and ((.control_token // "") | length > 0)' <<<"${sourceById}" >/dev/null 2>&1; then
+            complete=true
+        fi
+
+        if [[ "${conflict}" == "true" || "${complete}" == "true" ]]; then
+            continue
+        fi
+        if ((10#${expiresAt} <= 10#${now})) && [[ "${peerSame}" != "true" && "${sourceSame}" != "true" ]]; then
+            continue
+        fi
+        result=$(jq -c --argjson invite "${invite}" '. + [$invite]' <<<"${result}") || return 1
+    done < <(jq -c '.[]?' <<<"${pending}")
+    printf '%s\n' "${result}"
+}
+
+subscriptionWireGuardPersistCleanPendingInvites() {
+    local stateVar=$1
+    local groupsVar=$2
+    local now=$3
+    local __padmState __padmGroupsState __padmCurrentPending __padmCleanPending
+    __padmState=${!stateVar}
+    __padmGroupsState=${!groupsVar}
+    __padmCurrentPending=$(jq -c '.pending_invites // []' <<<"${__padmState}") || return 1
+    __padmCleanPending=$(subscriptionWireGuardCleanPendingInvitesJson "${__padmState}" "${__padmGroupsState}" "${now}") || return 1
+    if [[ "${__padmCleanPending}" != "${__padmCurrentPending}" ]]; then
+        subscriptionWireGuardWriteState --argjson pendingInvites "${__padmCleanPending}" '.pending_invites = $pendingInvites' || return 1
+        __padmState=$(jq -c --argjson pendingInvites "${__padmCleanPending}" '.pending_invites = $pendingInvites' <<<"${__padmState}") || return 1
+        printf -v "${stateVar}" '%s' "${__padmState}"
+    fi
+}
+
+subscriptionWireGuardAllocateInviteAddress() {
+    local state=$1
+    local groupsState=$2
+    local pendingInvites=$3
+    local network networkHost networkValue prefix sources address host suffix
+    local -A occupied=()
+    network=$(jq -r '.network' <<<"${state}") || return 1
+    [[ "${network#*/}" == "24" ]] || return 1
+    networkHost=${network%/*}
+    networkValue=$(subscriptionWireGuardIPv4HostValue "${networkHost}") || return 1
+    ((networkValue % 256 == 0)) || return 1
+    prefix=${networkHost%.*}
+    sources=$(subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}") || return 1
+    host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${state}")")
+    [[ -n "${host}" ]] && occupied["${host}"]=1
+    while IFS= read -r address; do
+        [[ -n "${address}" ]] || continue
+        occupied["$(subscriptionWireGuardAddressHost "${address}")"]=1
+    done < <(jq -r '.peers[]?.address, .pending_invites[]?.address' <<<"$(jq -c --argjson pendingInvites "${pendingInvites}" '.pending_invites = $pendingInvites' <<<"${state}")")
+    while IFS= read -r host; do
+        subscriptionWireGuardValidIPv4Host "${host}" && occupied["${host}"]=1
+    done < <(jq -r '.[]? | select(.role != "main") | .host' <<<"${sources}")
+    for ((suffix = 2; suffix <= 254; suffix++)); do
+        host="${prefix}.${suffix}"
+        if [[ -z "${occupied[${host}]+x}" ]]; then
+            printf '%s/24\n' "${host}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+subscriptionWireGuardCreateInviteUnlocked() {
+    local alias=$1
+    local outputVar=$2
+    local state groupsState now currentPending cleanPending address inviteId expiresAt payload __padmInviteCredential attempt
+    subscriptionWireGuardValidAlias "${alias}" || { errorCard "被控别名无效" "别名只能包含 1 到 64 个英文、数字、短横线或下划线"; return 1; }
+    [[ "${alias,,}" != "main" ]] || { errorCard "main 是保留源 ID，不能作为被控服务器别名"; return 1; }
+    subscriptionWireGuardReadPreviousStateAndGroups state groupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
+    [[ "$(jq -r '.role' <<<"${state}")" == "main" ]] || { errorCard "只有主控可以创建被控邀请"; return 1; }
+    now=$(subscriptionWireGuardNow) || return 1
+    subscriptionWireGuardValidExpiry "${now}" || return 1
+    currentPending=$(jq -c '.pending_invites // []' <<<"${state}") || return 1
+    cleanPending=$(subscriptionWireGuardCleanPendingInvitesJson "${state}" "${groupsState}" "${now}") || return 1
+    state=$(jq -c --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' <<<"${state}") || return 1
+    if jq -e --arg alias "${alias}" 'any(.peers[]?; .id == $alias) or any(.pending_invites[]?; .alias == $alias)' <<<"${state}" >/dev/null 2>&1 ||
+        subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}" | jq -e --arg alias "${alias}" 'any(.[]?; .id == $alias)' >/dev/null 2>&1; then
+        [[ "${cleanPending}" == "${currentPending}" ]] || subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' || return 1
+        errorCard "被控别名已被 Peer、服务器源或待完成邀请占用"
+        return 1
+    fi
+    address=$(subscriptionWireGuardAllocateInviteAddress "${state}" "${groupsState}" "${cleanPending}") || {
+        if [[ "${cleanPending}" != "${currentPending}" ]]; then
+            subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' || return 1
+        fi
+        [[ "$(jq -r '.network | split("/")[1]' <<<"${state}")" == "24" ]] && errorCard "WireGuard 邀请地址池已耗尽" || errorCard "当前 WireGuard 网络不是受支持的 /24" "请使用旧版主控/被控凭据流程"
+        return 1
+    }
+    inviteId=
+    for ((attempt = 0; attempt < 5; attempt++)); do
+        inviteId=$(subscriptionWireGuardRandomInviteId) || return 1
+        jq -e --arg inviteId "${inviteId}" 'any(.[]?; .invite_id == $inviteId)' <<<"${cleanPending}" >/dev/null 2>&1 || break
+        inviteId=
+    done
+    subscriptionWireGuardValidInviteId "${inviteId}" || return 1
+    expiresAt=$((10#${now} + 86400))
+    payload=$(jq -cn \
+      --arg inviteId "${inviteId}" \
+      --arg alias "${alias}" \
+      --arg address "${address}" \
+      --arg network "$(jq -r '.network' <<<"${state}")" \
+      --arg mainAddress "$(jq -r '.address' <<<"${state}")" \
+      --arg endpointHost "$(jq -r '.endpoint_host' <<<"${state}")" \
+      --argjson listenPort "$(jq -r '.listen_port' <<<"${state}")" \
+      --arg mainPublicKey "$(jq -r '.public_key' <<<"${state}")" \
+      --argjson expiresAt "${expiresAt}" \
+      '{invite_id:$inviteId, alias:$alias, address:$address, network:$network, main_address:$mainAddress, endpoint_host:$endpointHost, listen_port:$listenPort, main_public_key:$mainPublicKey, expires_at:$expiresAt}') || return 1
+    subscriptionWireGuardValidateInviteCredentialJson "$(jq -c '. + {version:1, kind:"invite"}' <<<"${payload}")" || return 1
+    __padmInviteCredential=$(subscriptionWireGuardCredentialEncode invite "${payload}") || return 1
+    cleanPending=$(jq -c --arg inviteId "${inviteId}" --arg alias "${alias}" --arg address "${address}" --argjson expiresAt "${expiresAt}" '. + [{invite_id:$inviteId, alias:$alias, address:$address, expires_at:$expiresAt}]' <<<"${cleanPending}") || return 1
+    subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' || { errorCard "待完成邀请写入失败"; return 1; }
+    printf -v "${outputVar}" '%s' "${__padmInviteCredential}"
+}
+
+subscriptionWireGuardCreateInvite() {
+    subscriptionGroupsWithLock subscriptionWireGuardCreateInviteUnlocked "$@"
+}
+
+subscriptionWireGuardListPendingInvitesUnlocked() {
+    local state groupsState now invite alias address expiresAt status result='[]'
+    subscriptionWireGuardReadPreviousStateAndGroups state groupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
+    [[ "$(jq -r '.role' <<<"${state}")" == "main" ]] || return 1
+    now=$(subscriptionWireGuardNow) || return 1
+    subscriptionWireGuardPersistCleanPendingInvites state groupsState "${now}" || return 1
+    while IFS= read -r invite; do
+        [[ -n "${invite}" ]] || continue
+        alias=$(jq -r '.alias' <<<"${invite}") || return 1
+        address=$(jq -r '.address' <<<"${invite}") || return 1
+        expiresAt=$(jq -r '.expires_at' <<<"${invite}") || return 1
+        status=pending
+        if jq -e --arg alias "${alias}" 'any(.peers[]?; .id == $alias)' <<<"${state}" >/dev/null 2>&1 ||
+            subscriptionWireGuardActiveSourcesFromGroupsState "${groupsState}" | jq -e --arg alias "${alias}" 'any(.[]?; .id == $alias)' >/dev/null 2>&1; then
+            status=incomplete
+        fi
+        result=$(jq -c --arg alias "${alias}" --arg address "${address}" --argjson expiresAt "${expiresAt}" --arg status "${status}" --argjson now "${now}" '. + [{alias:$alias,address:$address,expires_at:$expiresAt,remaining_seconds:($expiresAt-$now),status:$status}]' <<<"${result}") || return 1
+    done < <(jq -c '.pending_invites[]?' <<<"${state}")
+    printf '%s\n' "${result}"
+}
+
+subscriptionWireGuardListPendingInvites() {
+    subscriptionGroupsWithLock subscriptionWireGuardListPendingInvitesUnlocked "$@"
+}
+
+subscriptionWireGuardCancelInviteUnlocked() {
+    local alias=$1
+    local previousState previousGroupsState now currentPending cleanPending invite peerExists=false sourceExists=false workingPending
+    subscriptionWireGuardValidAlias "${alias}" || return 1
+    subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
+    [[ "$(jq -r '.role' <<<"${previousState}")" == "main" ]] || return 1
+    now=$(subscriptionWireGuardNow) || return 1
+    currentPending=$(jq -c '.pending_invites // []' <<<"${previousState}") || return 1
+    cleanPending=$(subscriptionWireGuardCleanPendingInvitesJson "${previousState}" "${previousGroupsState}" "${now}") || return 1
+    invite=$(jq -c --arg alias "${alias}" 'first(.[]? | select(.alias == $alias)) // empty' <<<"${cleanPending}") || return 1
+    if [[ -z "${invite}" ]]; then
+        [[ "${cleanPending}" == "${currentPending}" ]] || subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' || return 1
+        errorCard "未找到该待完成邀请" "邀请可能已过期、已取消或已完成"
+        return 1
+    fi
+    jq -e --arg alias "${alias}" 'any(.peers[]?; .id == $alias)' <<<"${previousState}" >/dev/null 2>&1 && peerExists=true
+    subscriptionWireGuardActiveSourcesFromGroupsState "${previousGroupsState}" | jq -e --arg alias "${alias}" 'any(.[]?; .id == $alias)' >/dev/null 2>&1 && sourceExists=true
+    workingPending=$(jq -c --arg alias "${alias}" '[.[]? | select(.alias != $alias)]' <<<"${cleanPending}") || return 1
+    if [[ "${peerExists}" != "true" && "${sourceExists}" != "true" ]]; then
+        subscriptionWireGuardWriteState --argjson pendingInvites "${workingPending}" '.pending_invites = $pendingInvites' || return 1
+        return 0
+    fi
+    subscriptionWireGuardWriteState --arg alias "${alias}" --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites | .peers = [.peers[]? | select(.id != $alias)]' || return 1
+    if [[ "${peerExists}" == "true" ]] && ! applySubscriptionWireGuardService; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请取消失败" || return 1
+        return 1
+    fi
+    if [[ "${sourceExists}" == "true" ]] && ! removeSubscriptionSourceState "${alias}"; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请取消失败" || return 1
+        return 1
+    fi
+    if ! subscriptionWireGuardWriteState --argjson pendingInvites "${workingPending}" '.pending_invites = $pendingInvites'; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请取消失败" || return 1
+        return 1
+    fi
+}
+
+subscriptionWireGuardCancelInvite() {
+    subscriptionGroupsWithLock subscriptionWireGuardCancelInviteUnlocked "$@"
+}
+
+subscriptionWireGuardInviteMatchesControlledState() {
+    local state=$1
+    local credentialJson=$2
+    local endpoint
+    endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
+    jq -e \
+      --arg inviteId "$(jq -r '.invite_id' <<<"${credentialJson}")" \
+      --arg address "$(jq -r '.address' <<<"${credentialJson}")" \
+      --arg network "$(jq -r '.network' <<<"${credentialJson}")" \
+      --arg mainAddress "$(jq -r '.main_address' <<<"${credentialJson}")" \
+      --arg mainPublicKey "$(jq -r '.main_public_key' <<<"${credentialJson}")" \
+      --arg endpoint "${endpoint}" '
+      .role == "controlled" and .join_invite_id == $inviteId and
+      .address == $address and .network == $network and
+      (.peers | length) == 1 and
+      (.peers[0].id == "main" and .peers[0].address == $mainAddress and .peers[0].public_key == $mainPublicKey and .peers[0].endpoint == $endpoint and .peers[0].enabled == true)
+    ' <<<"${state}" >/dev/null 2>&1
+}
+
+subscriptionWireGuardJoinInviteUnlocked() {
+    local credentialJson=$1
+    local expectedState=$2
+    local publicKey=$3
+    local currentState expiresAt endpoint controlPort
+    currentState=$(subscriptionWireGuardReadState) || return 1
+    [[ "${currentState}" == "${expectedState}" ]] || { errorCard "WireGuard 状态已变化" "请重新执行接入主控"; return 1; }
+    expiresAt=$(jq -r '.expires_at' <<<"${credentialJson}") || return 1
+    ((10#$(subscriptionWireGuardNow) < 10#${expiresAt})) || { errorCard "被控邀请已过期" "请先校准系统时间或让主控重建邀请"; return 1; }
+    endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
+    controlPort=$(subscriptionWireGuardDefaultControlPort)
+    subscriptionWireGuardWriteState \
+      --arg inviteId "$(jq -r '.invite_id' <<<"${credentialJson}")" \
+      --arg address "$(jq -r '.address' <<<"${credentialJson}")" \
+      --arg network "$(jq -r '.network' <<<"${credentialJson}")" \
+      --arg publicKey "${publicKey}" \
+      --arg mainAddress "$(jq -r '.main_address' <<<"${credentialJson}")" \
+      --arg mainPublicKey "$(jq -r '.main_public_key' <<<"${credentialJson}")" \
+      --arg endpoint "${endpoint}" \
+      --argjson controlPort "${controlPort}" '
+      .enabled = true | .role = "controlled" | .address = $address | .network = $network |
+      .endpoint_host = "" | .public_key = $publicKey | .control_port = $controlPort |
+      .join_invite_id = $inviteId |
+      .peers = [{id:"main", name:"主控", address:$mainAddress, public_key:$mainPublicKey, endpoint:$endpoint, enabled:true}]
+    ' || { errorCard "WireGuard 被控状态写入失败"; return 1; }
+    if ! applySubscriptionWireGuardService; then
+        subscriptionWireGuardRestoreStateOrReport "${expectedState}" "WireGuard 被控服务启动失败" || return 1
+        errorCard "WireGuard 被控服务启动失败"
+        return 1
+    fi
+    if ! subscriptionWireGuardWaitForAddress "$(jq -r '.address' <<<"${credentialJson}")"; then
+        subscriptionWireGuardRestoreStateOrReport "${expectedState}" "WireGuard 被控地址就绪失败" || return 1
+        errorCard "WireGuard 被控地址就绪失败"
+        return 1
+    fi
+    if [[ ! -f "$(subscriptionWireGuardStateFile)" || ! -f "$(subscriptionWireGuardConfigFile)" ]]; then
+        subscriptionWireGuardRestoreStateOrReport "${expectedState}" "WireGuard 被控配置未落地" || return 1
+        errorCard "WireGuard 被控配置未落地"
+        return 1
+    fi
+    subscriptionWireGuardInstallControlPlane "${expectedState}" "被控" || return 1
+}
+
+subscriptionWireGuardJoinInvite() {
+    local credentialJson=$1
+    local replaceConfirmed=${2:-false}
+    local expectedState role existingInviteId expiresAt publicKey
+    subscriptionWireGuardValidateInviteCredentialJson "${credentialJson}" || { errorCard "被控邀请字段不完整或格式无效"; return 1; }
+    expiresAt=$(jq -r '.expires_at' <<<"${credentialJson}") || return 1
+    ((10#$(subscriptionWireGuardNow) < 10#${expiresAt})) || { errorCard "被控邀请已过期" "请先校准系统时间或让主控重建邀请"; return 1; }
+    expectedState=$(subscriptionWireGuardReadState) || { errorCard "WireGuard 状态读取失败"; return 1; }
+    role=$(jq -r '.role' <<<"${expectedState}") || return 1
+    [[ "${role}" != "main" ]] || { errorCard "当前机器已初始化为主控" "第一版只支持星型拓扑，主控不能再作为被控"; return 1; }
+    if [[ "${role}" == "uninitialized" ]]; then
+        subscriptionControlledTransitionPreflight || return 1
+    else
+        existingInviteId=$(jq -r '.join_invite_id // empty' <<<"${expectedState}") || return 1
+        if [[ -n "${existingInviteId}" && "${existingInviteId}" == "$(jq -r '.invite_id' <<<"${credentialJson}")" ]]; then
+            subscriptionWireGuardInviteMatchesControlledState "${expectedState}" "${credentialJson}" || { errorCard "同一邀请的身份字段与当前状态不一致" "已拒绝覆盖现有接入"; return 1; }
+        elif [[ "${replaceConfirmed}" != "true" ]]; then
+            errorCard "当前被控已接入其他主控" "确认替换后才能导入新的邀请"
+            return 1
+        fi
+    fi
+    installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
+    subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
+    subscriptionControlEnsureToken || { errorCard "控制 Token 生成失败"; return 1; }
+    publicKey=$(subscriptionWireGuardPublicKey) || { errorCard "WireGuard 公钥读取失败"; return 1; }
+    subscriptionWireGuardValidPublicKeyValue "${publicKey}" || return 1
+    subscriptionGroupsWithLock subscriptionWireGuardJoinInviteUnlocked "${credentialJson}" "${expectedState}" "${publicKey}"
+}
+
+subscriptionWireGuardJoinReceiptCredential() {
+    local outputVar=$1
+    local state inviteId publicKey controlPort token payload __padmReceiptCredential
+    state=$(subscriptionWireGuardReadState) || return 1
+    [[ "$(jq -r '.role' <<<"${state}")" == "controlled" ]] || return 1
+    jq -e '(.peers | length) == 1 and .peers[0].id == "main" and .peers[0].enabled == true' <<<"${state}" >/dev/null 2>&1 || return 1
+    inviteId=$(jq -r '.join_invite_id // empty' <<<"${state}") || return 1
+    publicKey=$(jq -r '.public_key' <<<"${state}") || return 1
+    controlPort=$(jq -r '.control_port' <<<"${state}") || return 1
+    token=$(subscriptionControlToken) || return 1
+    payload=$(jq -cn --arg inviteId "${inviteId}" --arg publicKey "${publicKey}" --argjson controlPort "${controlPort}" --arg token "${token}" '{invite_id:$inviteId,public_key:$publicKey,control_port:$controlPort,token:$token}') || return 1
+    subscriptionWireGuardValidateReceiptCredentialJson "$(jq -c '. + {version:1,kind:"receipt"}' <<<"${payload}")" || return 1
+    __padmReceiptCredential=$(subscriptionWireGuardCredentialEncode receipt "${payload}") || return 1
+    printf -v "${outputVar}" '%s' "${__padmReceiptCredential}"
+}
+
+showSubscriptionWireGuardJoinReceipt() {
+    local credential
+    subscriptionWireGuardJoinReceiptCredential credential || { errorCard "当前状态没有可显示的接入回执"; return 1; }
+    statusCard "被控接入回执" "接入回执：${credential}" "回执包含长期控制 Token，请只通过可信通道交给主控"
+}
+
+subscriptionWireGuardCompleteInviteUnlocked() {
+    local receiptJson=$1
+    local outputVar=$2
+    local previousState previousGroupsState inviteId invite reservedAlias address host expiresAt publicKey controlPort token now cleanPending
+    local peer source sources peerCount sourceCount otherSource
+    subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
+    [[ "$(jq -r '.role' <<<"${previousState}")" == "main" ]] || { errorCard "只有主控可以完成被控接入"; return 1; }
+    inviteId=$(jq -r '.invite_id' <<<"${receiptJson}") || return 1
+    invite=$(jq -c --arg inviteId "${inviteId}" 'first(.pending_invites[]? | select(.invite_id == $inviteId)) // empty' <<<"${previousState}") || return 1
+    [[ -n "${invite}" ]] || { errorCard "接入回执未知、已取消或已消费"; return 1; }
+    expiresAt=$(jq -r '.expires_at' <<<"${invite}") || return 1
+    now=$(subscriptionWireGuardNow) || return 1
+    ((10#${now} < 10#${expiresAt})) || { errorCard "待完成邀请已过期" "请取消该邀请并重新创建"; return 1; }
+    cleanPending=$(subscriptionWireGuardCleanPendingInvitesJson "${previousState}" "${previousGroupsState}" "${now}") || return 1
+    cleanPending=$(jq -c --arg inviteId "${inviteId}" '[.[]? | select(.invite_id != $inviteId)]' <<<"${cleanPending}") || return 1
+    reservedAlias=$(jq -r '.alias' <<<"${invite}") || return 1
+    address=$(jq -r '.address' <<<"${invite}") || return 1
+    host=$(subscriptionWireGuardAddressHost "${address}")
+    publicKey=$(jq -r '.public_key' <<<"${receiptJson}") || return 1
+    controlPort=$(jq -r '.control_port' <<<"${receiptJson}") || return 1
+    token=$(jq -r '.token' <<<"${receiptJson}") || return 1
+    peerCount=$(jq -r --arg alias "${reservedAlias}" '[.peers[]? | select(.id == $alias)] | length' <<<"${previousState}") || return 1
+    ((peerCount <= 1)) || return 1
+    peer=$(jq -c --arg alias "${reservedAlias}" 'first(.peers[]? | select(.id == $alias)) // empty' <<<"${previousState}") || return 1
+    if [[ -n "${peer}" ]]; then
+        jq -e --arg address "${address}" --arg publicKey "${publicKey}" '.address == $address and .public_key == $publicKey and .endpoint == "" and .enabled == true' <<<"${peer}" >/dev/null 2>&1 || { errorCard "已有 Peer 与接入回执不一致"; return 1; }
+    else
+        subscriptionWireGuardPeerIdentityAvailable "${previousState}" "${reservedAlias}" "${address}" "${publicKey}" || { errorCard "WireGuard 被控地址或公钥与现有 Peer 冲突"; return 1; }
+    fi
+    sources=$(subscriptionWireGuardActiveSourcesFromGroupsState "${previousGroupsState}") || return 1
+    sourceCount=$(jq -r --arg alias "${reservedAlias}" '[.[]? | select(.id == $alias)] | length' <<<"${sources}") || return 1
+    ((sourceCount <= 1)) || return 1
+    source=$(jq -c --arg alias "${reservedAlias}" 'first(.[]? | select(.id == $alias)) // empty' <<<"${sources}") || return 1
+    otherSource=$(jq -c --arg alias "${reservedAlias}" --arg host "${host}" 'first(.[]? | select(.id != $alias and .host == $host)) // empty' <<<"${sources}") || return 1
+    [[ -z "${otherSource}" ]] || { errorCard "预留地址已被其他服务器源占用"; return 1; }
+    if [[ -n "${source}" ]]; then
+        jq -e --arg host "${host}" --argjson port "${controlPort}" --arg token "${token}" '
+          .role != "main" and (.transport // .scheme // "") == "wireguard" and
+          .host == $host and .port == $port and (((.control_token // "") == "") or .control_token == $token)
+        ' <<<"${source}" >/dev/null 2>&1 || { errorCard "已有服务器源或 Token 与接入回执不一致"; return 1; }
+    fi
+    if [[ -z "${peer}" ]]; then
+        subscriptionWireGuardWriteState --arg id "${reservedAlias}" --arg address "${address}" --arg publicKey "${publicKey}" '.peers += [{id:$id,name:$id,address:$address,public_key:$publicKey,endpoint:"",enabled:true}]' || return 1
+    fi
+    if ! applySubscriptionWireGuardService; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "WireGuard 被控服务器服务应用失败" || return 1
+        return 1
+    fi
+    if [[ -z "${source}" ]] && ! addSubscriptionSourceState "${reservedAlias}" "${reservedAlias}" "${host}" "${controlPort}"; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源状态写入失败" || return 1
+        return 1
+    fi
+    if ! setSubscriptionSourceCredential "${reservedAlias}" "${host}" "${controlPort}" "${token}"; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源凭据写入失败" || return 1
+        return 1
+    fi
+    if ! subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites'; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请消费失败" || return 1
+        return 1
+    fi
+    printf -v "${outputVar}" '%s' "${reservedAlias}"
+}
+
+subscriptionWireGuardCompleteInvite() {
+    local receiptJson=$1
+    local outputVar=$2
+    subscriptionWireGuardValidateReceiptCredentialJson "${receiptJson}" || { errorCard "接入回执字段不完整或格式无效"; return 1; }
+    subscriptionGroupsWithLock subscriptionWireGuardCompleteInviteUnlocked "${receiptJson}" "${outputVar}"
 }
 
 initSubscriptionWireGuardMainApply() {
@@ -1013,7 +1619,7 @@ initSubscriptionWireGuardControlled() {
       --arg address "${address}" \
       --arg publicKey "${publicKey}" \
       --argjson controlPort "${controlPort}" \
-      '.enabled = true | .role = "controlled" | .address = $address | .public_key = $publicKey | .control_port = $controlPort' || {
+      '.enabled = true | .role = "controlled" | .address = $address | .public_key = $publicKey | .control_port = $controlPort | del(.join_invite_id)' || {
         errorCard "WireGuard 被控状态写入失败"
         return 1
       }
@@ -1066,41 +1672,54 @@ showSubscriptionWireGuardMainCredential() {
     statusCard "本机主控接入凭据" "主控接入凭据：$(subscriptionWireGuardCredentialEncode main "${payload}")" "用途：复制到被控服务器导入" "凭据只包含 WireGuard 入网信息，不包含公网订阅地址"
 }
 
-importSubscriptionWireGuardMainCredential() {
-    local credential=
-    local credentialJson
+subscriptionWireGuardImportMainCredentialJsonUnlocked() {
+    local credentialJson=$1
+    local expectedState=$2
     local endpoint
-    local previousState
-    autoRead wg_main_credential "请粘贴主控接入凭据:" credential
-    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || { errorCard "主控接入凭据无效"; return 1; }
-    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "main" ]]; then
-        errorCard "请粘贴主控接入凭据"
-        return 1
-    fi
-    subscriptionWireGuardValidateMainCredentialJson "${credentialJson}" || {
-        errorCard "主控接入凭据字段不完整或格式无效"
-        return 1
-    }
-    if [[ "$(subscriptionWireGuardRole)" != "controlled" ]]; then
+    local currentState
+    currentState=$(subscriptionWireGuardReadState) || return 1
+    [[ "${currentState}" == "${expectedState}" ]] || { errorCard "WireGuard 状态已变化" "请重新导入主控凭据"; return 1; }
+    if [[ "$(jq -r '.role' <<<"${currentState}")" != "controlled" ]]; then
         errorCard "请先初始化本机为被控" "第一版星型拓扑要求被控导入主控凭据"
         return 1
     fi
-    subscriptionWireGuardReadPreviousState previousState "当前 WireGuard 状态读取失败" || return 1
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
     subscriptionWireGuardWriteState \
       --arg network "$(jq -r '.network' <<<"${credentialJson}")" \
       --arg mainAddress "$(jq -r '.address' <<<"${credentialJson}")" \
       --arg mainPublicKey "$(jq -r '.public_key' <<<"${credentialJson}")" \
       --arg endpoint "${endpoint}" \
-      '.network = $network | .peers = [{id:"main", name:"主控", address:$mainAddress, public_key:$mainPublicKey, endpoint:$endpoint, enabled:true}]' || {
+      '.network = $network | .peers = [{id:"main", name:"主控", address:$mainAddress, public_key:$mainPublicKey, endpoint:$endpoint, enabled:true}] | del(.join_invite_id)' || {
         errorCard "主控接入状态写入失败"
         return 1
       }
     applySubscriptionWireGuardService || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 主控接入服务启动失败" || return 1
+        subscriptionWireGuardRestoreStateOrReport "${expectedState}" "WireGuard 主控接入服务启动失败" || return 1
         errorCard "WireGuard 主控接入服务启动失败"
         return 1
     }
+}
+
+subscriptionWireGuardImportMainCredentialJson() {
+    local credentialJson=$1
+    local expectedState
+    subscriptionWireGuardValidateMainCredentialJson "${credentialJson}" || { errorCard "主控接入凭据字段不完整或格式无效"; return 1; }
+    expectedState=$(subscriptionWireGuardReadState) || { errorCard "当前 WireGuard 状态读取失败"; return 1; }
+    subscriptionGroupsWithLock subscriptionWireGuardImportMainCredentialJsonUnlocked "${credentialJson}" "${expectedState}"
+}
+
+importSubscriptionWireGuardMainCredential() {
+    local credential=
+    local credentialJson
+    local endpoint
+    subscriptionWireGuardReadSecret credential "请粘贴主控接入凭据:" || return 1
+    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || { errorCard "主控接入凭据无效"; return 1; }
+    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "main" ]]; then
+        errorCard "请粘贴主控接入凭据"
+        return 1
+    fi
+    subscriptionWireGuardImportMainCredentialJson "${credentialJson}" || return 1
+    endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
     successCard "主控接入凭据已导入" "主控端点：${endpoint}" "下一步：查看本机被控接入凭据，并复制回主控添加"
 }
 
@@ -1139,7 +1758,7 @@ showSubscriptionWireGuardControlledCredential() {
     statusCard "本机被控接入凭据" "被控接入凭据：$(subscriptionWireGuardCredentialEncode controlled "${payload}")" "用途：复制到主控服务器添加被控" "控制接口只通过 WireGuard 内网访问" "无需安装公网订阅服务"
 }
 
-subscriptionWireGuardAddPeerFromCredential() {
+subscriptionWireGuardAddPeerFromCredentialUnlocked() {
     local alias=$1
     local credentialJson=$2
     local address
@@ -1153,7 +1772,7 @@ subscriptionWireGuardAddPeerFromCredential() {
         errorCard "只有主控可以添加被控服务器" "第一版只支持一台主控管理多台被控"
         return 1
     fi
-    [[ -n "${alias}" && "${alias}" =~ ^[a-zA-Z0-9_-]+$ ]] || return 1
+    subscriptionWireGuardValidAlias "${alias}" || return 1
     [[ "${alias,,}" != "main" ]] || {
         errorCard "main 是保留源 ID，不能作为被控服务器别名"
         return 1
@@ -1187,9 +1806,21 @@ subscriptionWireGuardAddPeerFromCredential() {
         subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源凭据写入失败" || return 1
         return 1
     fi
+    if ! subscriptionWireGuardWriteState --arg id "${alias}" --arg host "${host}" '
+      if has("pending_invites") then
+        .pending_invites = [.pending_invites[]? | select(.alias != $id and (.address | split("/")[0]) != $host)]
+      else . end
+    '; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请清理失败" || return 1
+        return 1
+    fi
 }
 
-subscriptionWireGuardUpdatePeerFromCredential() {
+subscriptionWireGuardAddPeerFromCredential() {
+    subscriptionGroupsWithLock subscriptionWireGuardAddPeerFromCredentialUnlocked "$@"
+}
+
+subscriptionWireGuardUpdatePeerFromCredentialUnlocked() {
     local id=$1
     local credentialJson=$2
     local address
@@ -1213,7 +1844,49 @@ subscriptionWireGuardUpdatePeerFromCredential() {
        end'
 }
 
-subscriptionWireGuardRemovePeerAndSource() {
+subscriptionWireGuardUpdatePeerFromCredential() {
+    subscriptionGroupsWithLock subscriptionWireGuardUpdatePeerFromCredentialUnlocked "$@"
+}
+
+subscriptionWireGuardUpdatePeerAndCredentialUnlocked() {
+    local id=$1
+    local credentialJson=$2
+    local address host controlPort token previousState previousGroupsState
+    [[ -n "${id}" ]] || return 1
+    subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || return 1
+    address=$(jq -r '.address' <<<"${credentialJson}") || return 1
+    host=$(subscriptionWireGuardAddressHost "${address}")
+    controlPort=$(jq -r '.control_port' <<<"${credentialJson}") || return 1
+    token=$(jq -r '.token' <<<"${credentialJson}") || return 1
+    subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "WireGuard 状态读取失败" "订阅组状态读取失败" || return 1
+    if ! subscriptionSourceExists "${id}" || subscriptionSourceIsMain "${id}"; then
+        errorCard "被控服务器源已变化" "请重新选择后重试"
+        return 1
+    fi
+    subscriptionWireGuardUpdatePeerFromCredentialUnlocked "${id}" "${credentialJson}" || return 1
+    if ! applySubscriptionWireGuardService; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器 Peer 应用失败" || return 1
+        return 1
+    fi
+    if ! setSubscriptionSourceCredential "${id}" "${host}" "${controlPort}" "${token}"; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器凭据更新失败" || return 1
+        return 1
+    fi
+    if ! subscriptionWireGuardWriteState --arg id "${id}" --arg host "${host}" '
+      if has("pending_invites") then
+        .pending_invites = [.pending_invites[]? | select(.alias != $id and (.address | split("/")[0]) != $host)]
+      else . end
+    '; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请清理失败" || return 1
+        return 1
+    fi
+}
+
+subscriptionWireGuardUpdatePeerAndCredential() {
+    subscriptionGroupsWithLock subscriptionWireGuardUpdatePeerAndCredentialUnlocked "$@"
+}
+
+subscriptionWireGuardRemovePeerAndSourceUnlocked() {
     local id=$1
     local previousState
     local previousGroupsState
@@ -1223,6 +1896,10 @@ subscriptionWireGuardRemovePeerAndSource() {
         return 1
     fi
     subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "" "订阅组状态读取失败" || return 1
+    if ! subscriptionSourceExists "${id}" || subscriptionSourceIsMain "${id}"; then
+        errorCard "被控服务器源已变化" "请重新选择后重试"
+        return 1
+    fi
     subscriptionWireGuardWriteState \
       --arg id "${id}" \
       '.peers = ([.peers[]? | select(.id != $id)])' || return 1
@@ -1234,6 +1911,14 @@ subscriptionWireGuardRemovePeerAndSource() {
         subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器状态移除失败" || return 1
         return 1
     fi
+    if ! subscriptionWireGuardWriteState --arg id "${id}" 'if has("pending_invites") then .pending_invites = [.pending_invites[]? | select(.alias != $id)] else . end'; then
+        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "被控服务器状态移除失败" || return 1
+        return 1
+    fi
+}
+
+subscriptionWireGuardRemovePeerAndSource() {
+    subscriptionGroupsWithLock subscriptionWireGuardRemovePeerAndSourceUnlocked "$@"
 }
 
 showSubscriptionWireGuardStatus() {

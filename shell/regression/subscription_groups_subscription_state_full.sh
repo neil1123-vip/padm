@@ -89,7 +89,10 @@ runSubscriptionGroupStateStructureFoundationAddRemoveRegression() {
 }
 
 runSubscriptionGroupStateStructureFoundationCredentialRegression() {
-    local credential decodedCredential invalidCredential
+    local credential decodedCredential invalidCredential encodedPayload
+    local publicKey='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    local inviteId='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    local receiptToken='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789AB'
     credential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":39778,"token":"token-abc"}')
     decodedCredential=$(subscriptionWireGuardCredentialDecode "${credential}")
     jq -e '.kind == "controlled" and .address == "10.77.0.2/24" and .control_port == 39778 and .token == "token-abc"' <<<"${decodedCredential}" >/dev/null
@@ -106,6 +109,61 @@ runSubscriptionGroupStateStructureFoundationCredentialRegression() {
     fi
     invalidCredential=$(subscriptionWireGuardCredentialEncode controlled '{"address":"10.77.0.2/24","public_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","control_port":70000,"token":"token-abc"}')
     if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    credential=$(subscriptionWireGuardCredentialEncode main "$(jq -cn --arg publicKey "${publicKey}" '{endpoint_host:"main.example.com",listen_port:51820,network:"10.77.0.0/24",address:"10.77.0.1/24",public_key:$publicKey}')")
+    subscriptionWireGuardCredentialDecode "${credential}" | jq -e '.kind == "main" and .address == "10.77.0.1/24"' >/dev/null
+    credential=$(subscriptionWireGuardCredentialEncode invite "$(jq -cn --arg inviteId "${inviteId}" --arg publicKey "${publicKey}" '{invite_id:$inviteId,alias:"hk-1",address:"10.77.0.2/24",network:"10.77.0.0/24",main_address:"10.77.0.1/24",endpoint_host:"main.example.com",listen_port:51820,main_public_key:$publicKey,expires_at:1780000000}')")
+    subscriptionWireGuardCredentialDecode "${credential}" | jq -e '.kind == "invite" and .invite_id == $inviteId and .alias == "hk-1"' --arg inviteId "${inviteId}" >/dev/null
+    credential=$(subscriptionWireGuardCredentialEncode receipt "$(jq -cn --arg inviteId "${inviteId}" --arg publicKey "${publicKey}" --arg token "${receiptToken}" '{invite_id:$inviteId,public_key:$publicKey,control_port:39778,token:$token}')")
+    subscriptionWireGuardCredentialDecode "${credential}" | jq -e '.kind == "receipt" and .token == $token' --arg token "${receiptToken}" >/dev/null
+
+    invalidCredential=$(subscriptionWireGuardCredentialEncode receipt "$(jq -cn --arg inviteId "${inviteId}" --arg publicKey "${publicKey}" '{invite_id:$inviteId,public_key:$publicKey,control_port:39778,token:"token-abc"}')")
+    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -cn --arg publicKey "${publicKey}" '{address:"10.77.0.2/24",public_key:$publicKey,control_port:39778,token:"token-abc",extra:true}')")
+    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
+        return 1
+    fi
+    if subscriptionWireGuardCredentialDecode "padmwg1:abc=" >/dev/null 2>&1 ||
+        subscriptionWireGuardCredentialDecode " padmwg1:abc" >/dev/null 2>&1 ||
+        subscriptionWireGuardCredentialDecode "padmwg1:$(printf 'A%.0s' {1..4090})" >/dev/null 2>&1; then
+        return 1
+    fi
+    encodedPayload=$(printf '%s' '{}{}' | subscriptionWireGuardBase64UrlEncode)
+    if subscriptionWireGuardCredentialDecode "padmwg1:${encodedPayload}" >/dev/null 2>&1; then
+        return 1
+    fi
+    encodedPayload=$(printf '%s' '[]' | subscriptionWireGuardBase64UrlEncode)
+    if subscriptionWireGuardCredentialDecode "padmwg1:${encodedPayload}" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidCredential=$(subscriptionWireGuardCredentialEncode unknown '{}')
+    if subscriptionWireGuardCredentialDecode "${invalidCredential}" >/dev/null 2>&1; then
+        return 1
+    fi
+
+    local mainState controlledState invalidState
+    mainState=$(jq -cn --arg publicKey "${publicKey}" --arg inviteId "${inviteId}" '{enabled:true,role:"main",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"10.77.0.1/24",endpoint_host:"main.example.com",public_key:$publicKey,peers:[],pending_invites:[{invite_id:$inviteId,alias:"hk-1",address:"10.77.0.2/24",expires_at:1780000000}]}')
+    subscriptionWireGuardValidateState "${mainState}"
+    controlledState=$(jq -cn --arg publicKey "${publicKey}" --arg inviteId "${inviteId}" '{enabled:true,role:"controlled",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"10.77.0.2/24",endpoint_host:"",public_key:$publicKey,peers:[],join_invite_id:$inviteId}')
+    subscriptionWireGuardValidateState "${controlledState}"
+    invalidState=$(jq '.role = "controlled"' <<<"${mainState}")
+    if subscriptionWireGuardValidateState "${invalidState}" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidState=$(jq '.pending_invites += [.pending_invites[0]]' <<<"${mainState}")
+    if subscriptionWireGuardValidateState "${invalidState}" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidState=$(jq '.pending_invites[0].alias = "main"' <<<"${mainState}")
+    if subscriptionWireGuardValidateState "${invalidState}" >/dev/null 2>&1; then
+        return 1
+    fi
+    invalidState=$(jq '.join_invite_id = "bad"' <<<"${controlledState}")
+    if subscriptionWireGuardValidateState "${invalidState}" >/dev/null 2>&1; then
         return 1
     fi
 }
