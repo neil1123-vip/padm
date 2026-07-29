@@ -13731,16 +13731,18 @@ EOF
     export PADM_REALITY_TARGET_CANDIDATES_FILE="${scannerCandidatesFile}"
 
     cat >"${TMP_DIR}/realitlscanner.csv" <<'CSV'
-IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
-192.0.2.10,192.0.2.0/24,www.cloudflare.com,"Google Trust Services",N/A
-198.51.100.11,198.51.100.0/24,scanner.example.com,"Let's Encrypt",N/A
-192.0.2.12,192.0.2.0/24,images.apple.com,"Apple Inc.",N/A
-192.0.2.13,192.0.2.0/24,Common Name,"Test",N/A
-192.0.2.14,192.0.2.0/24,CloudFlare Origin Certificate,"CloudFlare, Inc.",N/A
-192.0.2.15,192.0.2.0/24,localhost,"Test",N/A
-192.0.2.16,192.0.2.0/24,invalid.invalid,"Invalid",N/A
-192.0.2.17,192.0.2.0/24,192.0.2.17,"Self",N/A
+IP,ORIGIN,TLS,ALPN,CURVE,CERT_LENGTH,CERT_SIGNATURE,CERT_PUBLICKEY,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
+192.0.2.10,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,www.cloudflare.com,"Google Trust Services",N/A
+198.51.100.11,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner.example.com,"Let's Encrypt, Inc.",N/A
+192.0.2.12,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,images.apple.com,"Apple Inc.",N/A
+192.0.2.13,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,Common Name,"Test",N/A
+192.0.2.14,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,CloudFlare Origin Certificate,"CloudFlare, Inc.",N/A
+192.0.2.15,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,localhost,"Test",N/A
+192.0.2.16,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,invalid.invalid,"Invalid",N/A
+192.0.2.17,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,192.0.2.17,"Self",N/A
 CSV
+    printf 'IP,ORIGIN,TLS\n192.0.2.1,192.0.2.0/24,TLS 1.3\n' >"${TMP_DIR}/realitlscanner-invalid.csv"
+    ! normalizeRealityScannerCsv "${TMP_DIR}/realitlscanner-invalid.csv" >/dev/null
     importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet" scannerSummary
     IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${scannerSummary}"
     [[ "${scannerImported}" == "1" ]]
@@ -13753,6 +13755,7 @@ CSV
     [[ "$(realityTargetResultField "${scannerLine}" 7)" == "AS64501" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 8)" == "RemoteNet" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 9)" == "different_network" ]]
+    [[ "$(realityTargetResultField "${scannerLine}" 15)" == *"RealiTLScanner: Let's Encrypt, Inc.;"* ]]
     batchLinesFile="${TMP_DIR}/reality-batch-lines.tsv"
     failedTargetsFile="${TMP_DIR}/reality-failed-targets.txt"
     writeRealityTargetResultLine "batch-old.example.com:443" "old.example.com" "Old Batch" "test" "unknown" "192.0.2.20" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567800" "old batch line"

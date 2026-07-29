@@ -1424,13 +1424,60 @@ scannerRealityNetworkProfile() {
     printf '%s\t%s\t%s\n' "${candidateAsn}" "${candidateOrg}" "${networkMatch}"
 }
 
+normalizeRealityScannerCsv() {
+    local sourceFile=$1
+    awk '
+function parseCsv(line, fields,    ch, count, i, key, quoted) {
+    for (key in fields) delete fields[key]
+    count = 1
+    fields[count] = ""
+    quoted = 0
+    for (i = 1; i <= length(line); i++) {
+        ch = substr(line, i, 1)
+        if (ch == "\"") {
+            if (quoted && substr(line, i + 1, 1) == "\"") {
+                fields[count] = fields[count] "\""
+                i++
+            } else {
+                quoted = !quoted
+            }
+        } else if (ch == "," && !quoted) {
+            count++
+            fields[count] = ""
+        } else {
+            fields[count] = fields[count] ch
+        }
+    }
+    return quoted ? 0 : count
+}
+NR == 1 {
+    sub(/\r$/, "")
+    count = parseCsv($0, fields)
+    if (!count) exit 2
+    for (i = 1; i <= count; i++) columns[fields[i]] = i
+    if (!("IP" in columns) || !("ORIGIN" in columns) || !("CERT_DOMAIN" in columns) || !("CERT_ISSUER" in columns) || !("GEO_CODE" in columns)) exit 2
+    next
+}
+{
+    sub(/\r$/, "")
+    count = parseCsv($0, fields)
+    if (!count) exit 3
+    if (fields[columns["IP"]] == "") next
+    printf "%s\t%s\t%s\t%s\t%s\n", fields[columns["IP"]], fields[columns["ORIGIN"]], fields[columns["CERT_DOMAIN"]], fields[columns["CERT_ISSUER"]], fields[columns["GEO_CODE"]]
+}
+END {
+    if (NR == 0) exit 2
+}
+' "${sourceFile}"
+}
+
 importRealityScannerResults() {
     local sourceFile=$1
     local currentAsn=${2:-}
     local currentOrg=${3:-}
     local summaryVar=${4:-}
     local detector ip origin domain issuer geo target tlsPingResult result score pqc certLength tls13 note checkedAt imported=0 skipped=0 processed=0 totalRecords importStart lastProgressAt=0 now profile candidateAsn candidateOrg networkMatch countA=0 countB=0 countC=0 countFail=0
-    local resultLinesFile failedTargetsFile
+    local normalizedFile resultLinesFile failedTargetsFile
     [[ -f "${sourceFile}" ]] || {
         realityTargetStatusBlock red "RealiTLScanner 导入" "CSV 不存在: ${sourceFile}"
         return 1
@@ -1447,17 +1494,18 @@ importRealityScannerResults() {
             currentOrg=${rest#*$'\t'}
         fi
     fi
-    totalRecords=$(awk -F, 'NR > 1 && $1 != "" {count++} END{print count + 0}' "${sourceFile}")
-    padmCreateTempPath resultLinesFile || return 1
-    padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
+    padmCreateTempPath normalizedFile || return 1
+    if ! normalizeRealityScannerCsv "${sourceFile}" >"${normalizedFile}"; then
+        padmRemoveCleanupPath "${normalizedFile}"
+        realityTargetStatusBlock red "RealiTLScanner 导入" "CSV 表头或记录格式不兼容: ${sourceFile}" "需要字段: IP, ORIGIN, CERT_DOMAIN, CERT_ISSUER, GEO_CODE"
+        return 1
+    fi
+    totalRecords=$(wc -l <"${normalizedFile}" | tr -d ' ')
+    padmCreateTempPath resultLinesFile || { padmRemoveCleanupPath "${normalizedFile}"; return 1; }
+    padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${normalizedFile}"; padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
     importStart=$(date +%s)
-    while IFS=, read -r ip origin domain issuer geo; do
-        [[ "${ip}" == "IP" ]] && continue
+    while IFS=$'\t' read -r ip origin domain issuer geo; do
         processed=$((processed + 1))
-        domain=${domain#\"}
-        domain=${domain%\"}
-        issuer=${issuer#\"}
-        issuer=${issuer%\"}
         now=$(date +%s)
         if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalRecords )); then
             realityTargetProgressLine "RealiTLScanner 二次检测 ${processed}/${totalRecords} 当前：${domain:-未知} 已耗时：$((now - importStart))s"
@@ -1493,9 +1541,10 @@ importRealityScannerResults() {
         C) countC=$((countC + 1)) ;;
         esac
         imported=$((imported + 1))
-    done < "${sourceFile}"
+    done < "${normalizedFile}"
     writeRealityTargetResultLines "${resultLinesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
+    padmRemoveCleanupPath "${normalizedFile}"
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
     if [[ -n "${summaryVar}" ]]; then
