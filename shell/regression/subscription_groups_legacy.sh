@@ -18904,11 +18904,15 @@ SH
 runRealityScannerBinaryRegression() {
     local scannerDirRel="${TMP_DIR}/scanner-bin"
     local scannerDir=
+    local scannerRoot=
     local scannerBin=
+    local scannerOutputFile="${TMP_DIR}/scanner-output.csv"
+    local scannerOutput=
     local capturedRepo= capturedVersion= capturedAsset= capturedDir=
 
     mkdir -p "${scannerDirRel}"
     scannerDir="$(cd -- "${scannerDirRel}" && pwd -P)"
+    scannerRoot=${scannerDir}
     scannerBin="${scannerDir}/RealiTLScanner"
 
     rm() {
@@ -18928,7 +18932,11 @@ runRealityScannerBinaryRegression() {
         capturedRepo=$3
         capturedVersion=$4
         capturedAsset=$5
-        printf '#!/usr/bin/env bash\n' >"${capturedDir}/${capturedAsset}"
+        cat >"${capturedDir}/${capturedAsset}" <<'SH'
+#!/usr/bin/env bash
+printf 'scanner-row-stdout\n'
+printf 'scanner-row-stderr\n' >&2
+SH
         return 0
     }
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}"
@@ -18937,6 +18945,18 @@ runRealityScannerBinaryRegression() {
     [[ "${capturedVersion}" == "latest" ]]
     [[ "${capturedAsset}" == "RealiTLScanner-linux-amd64" ]]
     unset -f rm mkdir downloadGitHubReleaseAsset
+
+    realityTargetTmpPath() { printf '%s\n' "${scannerRoot}"; }
+    realityScannerOutputPath() { printf '%s\n' "${scannerOutputFile}"; }
+    realityTargetProgressLine() { printf 'progress:%s\n' "$1"; }
+    realityTargetStatusBlock() { return 0; }
+    importRealityScannerResults() { return 0; }
+    sleep() { command sleep 0.01; }
+    scannerOutput=$(runRealityScannerRange "198.51.100.0/28" 2>&1)
+    grep -q '^progress:RealiTLScanner 扫描范围' <<<"${scannerOutput}"
+    ! grep -q 'scanner-row-' <<<"${scannerOutput}"
+    grep -qx 'scanner-row-stdout' "${scannerOutputFile}.log"
+    grep -qx 'scanner-row-stderr' "${scannerOutputFile}.log"
 }
 
 runRealityScannerDownloadFailureKeepsExistingDirRegression() {

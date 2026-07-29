@@ -1634,6 +1634,12 @@ ensureRealityScannerBinary() {
     padmRemoveCleanupPath "${stageDir}"
 }
 
+runRealityScannerQuietly() {
+    local outputFile=$1
+    shift
+    "$@" >"${outputFile}.log" 2>&1
+}
+
 runRealityScannerRange() {
     local scanRange=$1
     local scannerDir scannerBin outputFile startAt elapsed scannerStatus scannerPid
@@ -1647,7 +1653,7 @@ runRealityScannerRange() {
     outputFile=$(realityScannerOutputPath "$(date +%s)")
     startAt=$(date +%s)
     realityTargetProgressLine "RealiTLScanner 扫描范围：${scanRange} 已耗时：0s"
-    "${scannerBin}" -addr "${scanRange}" -thread 20 -timeout 3 -out "${outputFile}" &
+    runRealityScannerQuietly "${outputFile}" "${scannerBin}" -addr "${scanRange}" -thread 20 -timeout 3 -out "${outputFile}" &
     scannerPid=$!
     while kill -0 "${scannerPid}" >/dev/null 2>&1; do
         sleep 10
@@ -1657,10 +1663,10 @@ runRealityScannerRange() {
     wait "${scannerPid}" || scannerStatus=$?
     if [[ ${scannerStatus} -ne 0 ]]; then
         if [[ ! -s "${outputFile}" ]]; then
-            realityTargetStatusBlock red "RealiTLScanner 扫描" "执行失败，且未生成有效结果文件"
+            realityTargetStatusBlock red "RealiTLScanner 扫描" "执行失败，且未生成有效结果文件" "日志: ${outputFile}.log"
             return 1
         fi
-        realityTargetStatusBlock yellow "RealiTLScanner 扫描" "返回非零状态，但已生成结果文件" "继续导入结果"
+        realityTargetStatusBlock yellow "RealiTLScanner 扫描" "返回非零状态，但已生成结果文件" "继续导入结果" "日志: ${outputFile}.log"
     fi
     elapsed=$(( $(date +%s) - startAt ))
     realityTargetStatusBlock green "RealiTLScanner 扫描" "扫描完成" "耗时: ${elapsed}s" "结果: ${outputFile}"
@@ -1698,7 +1704,7 @@ runRealityScannerTargetFile() {
         outputFile=$(realityScannerOutputPath "$(date +%s)" "sample-${batchIndex}")
         startAt=$(date +%s)
         realityTargetProgressLine "RealiTLScanner 抽样扫描进度：$((processed + 1))-$((processed + batchCount))/${total} 已耗时：0s"
-        "${scannerBin}" -in "${batchFile}" -thread 20 -timeout 3 -out "${outputFile}" &
+        runRealityScannerQuietly "${outputFile}" "${scannerBin}" -in "${batchFile}" -thread 20 -timeout 3 -out "${outputFile}" &
         scannerPid=$!
         while kill -0 "${scannerPid}" >/dev/null 2>&1; do
             sleep 10
@@ -1708,7 +1714,7 @@ runRealityScannerTargetFile() {
         wait "${scannerPid}" || scannerStatus=$?
         padmRemoveCleanupPath "${batchFile}"
         if [[ ${scannerStatus} -ne 0 && ! -s "${outputFile}" ]]; then
-            realityTargetStatusBlock yellow "RealiTLScanner 扫描" "抽样批次失败且无结果" "进度: $((processed + batchCount))/${total}" "继续扫描剩余目标"
+            realityTargetStatusBlock yellow "RealiTLScanner 扫描" "抽样批次失败且无结果" "进度: $((processed + batchCount))/${total}" "继续扫描剩余目标" "日志: ${outputFile}.log"
             processed=$((processed + batchCount))
             continue
         fi
@@ -1748,7 +1754,7 @@ runRealityScannerPrefixFile() {
         outputFile=$(realityScannerOutputPath "$(date +%s)" "${index}")
         startAt=$(date +%s)
         realityTargetProgressLine "RealiTLScanner 扫描 prefix ${index}/${total}：${prefix} 已耗时：0s"
-        "${scannerBin}" -addr "${prefix}" -thread 20 -timeout 3 -out "${outputFile}" &
+        runRealityScannerQuietly "${outputFile}" "${scannerBin}" -addr "${prefix}" -thread 20 -timeout 3 -out "${outputFile}" &
         scannerPid=$!
         while kill -0 "${scannerPid}" >/dev/null 2>&1; do
             sleep 10
@@ -1757,7 +1763,7 @@ runRealityScannerPrefixFile() {
         scannerStatus=0
         wait "${scannerPid}" || scannerStatus=$?
         if [[ ${scannerStatus} -ne 0 && ! -s "${outputFile}" ]]; then
-            realityTargetStatusBlock yellow "RealiTLScanner 扫描" "prefix 扫描失败且无结果: ${prefix}" "继续扫描剩余 prefix"
+            realityTargetStatusBlock yellow "RealiTLScanner 扫描" "prefix 扫描失败且无结果: ${prefix}" "继续扫描剩余 prefix" "日志: ${outputFile}.log"
             continue
         fi
         elapsed=$(( $(date +%s) - startAt ))
