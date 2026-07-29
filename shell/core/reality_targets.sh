@@ -1471,13 +1471,54 @@ END {
 ' "${sourceFile}"
 }
 
+probeRealityScannerCandidate() {
+    local detector=$1
+    local ip=$2
+    local domain=$3
+    local issuer=$4
+    local currentAsn=${5:-}
+    local currentOrg=${6:-}
+    local networkMode=${7:-lookup}
+    local target tlsPingResult result score pqc certLength tls13 note checkedAt profile candidateAsn candidateOrg networkMatch
+
+    trap - EXIT INT TERM
+    target=$(formatRealityTarget "${domain}" 443)
+    if ! tlsPingResult=$("${detector}" tls ping -ip "${ip}" "${target}" 2>&1); then
+        printf 'FAIL\t%s\n' "${target}"
+        return 0
+    fi
+    result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
+    IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
+    if [[ "${score}" == "FAIL" ]]; then
+        printf 'FAIL\t%s\n' "${target}"
+        return 0
+    fi
+    if [[ "${networkMode}" == "same_asn" && -n "${currentAsn}" && -n "${currentOrg}" ]]; then
+        candidateAsn=${currentAsn}
+        candidateOrg=${currentOrg}
+        networkMatch=same_asn
+    else
+        profile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}")
+        IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${profile}"
+    fi
+    checkedAt=$(date +%s)
+    printf 'OK\t'
+    formatRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "unknown" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}"
+}
+
 importRealityScannerResults() {
     local sourceFile=$1
     local currentAsn=${2:-}
     local currentOrg=${3:-}
     local summaryVar=${4:-}
-    local detector ip origin domain issuer geo target tlsPingResult result score pqc certLength tls13 note checkedAt imported=0 skipped=0 processed=0 totalRecords importStart lastProgressAt=0 now profile candidateAsn candidateOrg networkMatch countA=0 countB=0 countC=0 countFail=0
-    local normalizedFile resultLinesFile failedTargetsFile
+    local networkMode=${5:-lookup}
+    local seenDomainsFile=${6:-}
+    local maxJobs=${PADM_REALITY_SECONDARY_JOBS:-4}
+    local detector ip origin domain issuer geo domainKey record target score _ip _origin _issuer _geo
+    local normalizedFile resultLinesFile failedTargetsFile probeDir jobFile probeRecord probeStatus probePayload currentDomain
+    local offset=0 batchEnd index slot pid imported=0 skipped=0 duplicateCount=0 processed=0 totalRecords importStart lastProgressAt=0 now countA=0 countB=0 countC=0 countFail=0
+    local -a candidates=() jobPids=() jobFiles=() jobTargets=()
+    local -A seenDomains=()
     [[ -f "${sourceFile}" ]] || {
         realityTargetStatusBlock red "RealiTLScanner 导入" "CSV 不存在: ${sourceFile}"
         return 1
@@ -1494,63 +1535,117 @@ importRealityScannerResults() {
             currentOrg=${rest#*$'\t'}
         fi
     fi
+    [[ "${maxJobs}" =~ ^[1-9][0-9]*$ ]] || maxJobs=4
+    (( maxJobs > 16 )) && maxJobs=16
+    importStart=$(date +%s)
     padmCreateTempPath normalizedFile || return 1
     if ! normalizeRealityScannerCsv "${sourceFile}" >"${normalizedFile}"; then
         padmRemoveCleanupPath "${normalizedFile}"
         realityTargetStatusBlock red "RealiTLScanner 导入" "CSV 表头或记录格式不兼容: ${sourceFile}" "需要字段: IP, ORIGIN, CERT_DOMAIN, CERT_ISSUER, GEO_CODE"
         return 1
     fi
-    totalRecords=$(wc -l <"${normalizedFile}" | tr -d ' ')
-    padmCreateTempPath resultLinesFile || { padmRemoveCleanupPath "${normalizedFile}"; return 1; }
-    padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${normalizedFile}"; padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
-    importStart=$(date +%s)
-    while IFS=$'\t' read -r ip origin domain issuer geo; do
-        processed=$((processed + 1))
-        now=$(date +%s)
-        if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalRecords )); then
-            realityTargetProgressLine "RealiTLScanner 二次检测 ${processed}/${totalRecords} 当前：${domain:-未知} 已耗时：$((now - importStart))s"
-            lastProgressAt=${now}
-        fi
+    if [[ -n "${seenDomainsFile}" && -f "${seenDomainsFile}" ]]; then
+        while IFS= read -r domainKey; do
+            [[ -n "${domainKey}" ]] && seenDomains["${domainKey}"]=1
+        done <"${seenDomainsFile}"
+    fi
+    while IFS= read -r record; do
+        IFS=$'\t' read -r ip origin domain issuer geo <<<"${record}"
         if ! realityTargetScannerRecordAllowed "${domain}"; then
             skipped=$((skipped + 1))
             continue
         fi
-        target=$(formatRealityTarget "${domain}" 443)
-        checkedAt=$(date +%s)
-        profile=$(scannerRealityNetworkProfile "${ip}" "${currentAsn}" "${currentOrg}")
-        IFS=$'\t' read -r candidateAsn candidateOrg networkMatch <<<"${profile}"
-        if ! tlsPingResult=$("${detector}" tls ping -ip "${ip}" "${target}" 2>&1); then
-            printf '%s\n' "${target}" >>"${failedTargetsFile}"
-            countFail=$((countFail + 1))
+        domainKey=${domain,,}
+        if [[ -v "seenDomains[${domainKey}]" ]]; then
+            duplicateCount=$((duplicateCount + 1))
             skipped=$((skipped + 1))
             continue
         fi
-        result=$(scoreRealityTargetFromTlsPing "${tlsPingResult}")
-        IFS=$'\t' read -r score pqc certLength tls13 note <<<"${result}"
-        checkedAt=$(date +%s)
-        if [[ "${score}" == "FAIL" ]]; then
-            printf '%s\n' "${target}" >>"${failedTargetsFile}"
-            countFail=$((countFail + 1))
-            skipped=$((skipped + 1))
-            continue
+        seenDomains["${domainKey}"]=1
+        if [[ -n "${seenDomainsFile}" ]]; then
+            printf '%s\n' "${domainKey}" >>"${seenDomainsFile}" || return 1
         fi
-        formatRealityTargetResultLine "${target}" "${domain}" "${domain}" "scanner" "unknown" "${ip}" "${candidateAsn}" "${candidateOrg}" "${networkMatch}" "${score}" "${pqc}" "${certLength}" "${tls13}" "${checkedAt}" "RealiTLScanner: ${issuer}; ${note}" >>"${resultLinesFile}"
-        case "${score}" in
-        A) countA=$((countA + 1)) ;;
-        B) countB=$((countB + 1)) ;;
-        C) countC=$((countC + 1)) ;;
-        esac
-        imported=$((imported + 1))
-    done < "${normalizedFile}"
+        candidates+=("${record}")
+    done <"${normalizedFile}"
+    totalRecords=${#candidates[@]}
+    padmCreateTempPath resultLinesFile || { padmRemoveCleanupPath "${normalizedFile}"; return 1; }
+    padmCreateTempPath failedTargetsFile || { padmRemoveCleanupPath "${normalizedFile}"; padmRemoveCleanupPath "${resultLinesFile}"; return 1; }
+    padmCreateTempPath probeDir -d || { padmRemoveCleanupPath "${normalizedFile}"; padmRemoveCleanupPath "${resultLinesFile}"; padmRemoveCleanupPath "${failedTargetsFile}"; return 1; }
+    if (( totalRecords > 0 )); then
+        realityTargetProgressLine "RealiTLScanner 二次检测 0/${totalRecords} 并发：${maxJobs} 已耗时：0s"
+        lastProgressAt=${importStart}
+    fi
+    while (( offset < totalRecords )); do
+        batchEnd=$((offset + maxJobs))
+        (( batchEnd > totalRecords )) && batchEnd=${totalRecords}
+        jobPids=()
+        jobFiles=()
+        jobTargets=()
+        for ((index = offset; index < batchEnd; index++)); do
+            IFS=$'\t' read -r ip origin domain issuer geo <<<"${candidates[${index}]}"
+            target=$(formatRealityTarget "${domain}" 443)
+            jobFile="${probeDir}/${index}.result"
+            probeRealityScannerCandidate "${detector}" "${ip}" "${domain}" "${issuer}" "${currentAsn}" "${currentOrg}" "${networkMode}" >"${jobFile}" &
+            jobPids+=("$!")
+            jobFiles+=("${jobFile}")
+            jobTargets+=("${target}")
+        done
+        for pid in "${jobPids[@]}"; do
+            wait "${pid}" || true
+        done
+        for ((slot = 0; slot < ${#jobFiles[@]}; slot++)); do
+            probeRecord=
+            [[ -f "${jobFiles[${slot}]}" ]] && probeRecord=$(<"${jobFiles[${slot}]}")
+            probeStatus=${probeRecord%%$'\t'*}
+            probePayload=${probeRecord#*$'\t'}
+            case "${probeStatus}" in
+            OK)
+                if [[ -n "${probePayload}" ]]; then
+                    printf '%s\n' "${probePayload}" >>"${resultLinesFile}"
+                    score=$(realityTargetResultField "${probePayload}" 10)
+                    case "${score}" in
+                    A) countA=$((countA + 1)) ;;
+                    B) countB=$((countB + 1)) ;;
+                    C) countC=$((countC + 1)) ;;
+                    esac
+                    imported=$((imported + 1))
+                else
+                    printf '%s\n' "${jobTargets[${slot}]}" >>"${failedTargetsFile}"
+                    countFail=$((countFail + 1))
+                    skipped=$((skipped + 1))
+                fi
+                ;;
+            FAIL)
+                printf '%s\n' "${probePayload:-${jobTargets[${slot}]}}" >>"${failedTargetsFile}"
+                countFail=$((countFail + 1))
+                skipped=$((skipped + 1))
+                ;;
+            *)
+                printf '%s\n' "${jobTargets[${slot}]}" >>"${failedTargetsFile}"
+                countFail=$((countFail + 1))
+                skipped=$((skipped + 1))
+                ;;
+            esac
+            processed=$((processed + 1))
+        done
+        now=$(date +%s)
+        if (( lastProgressAt == 0 || now - lastProgressAt >= 10 || processed == totalRecords )); then
+            IFS=$'\t' read -r _ip _origin currentDomain _issuer _geo <<<"${candidates[$((batchEnd - 1))]}"
+            realityTargetProgressLine "RealiTLScanner 二次检测 ${processed}/${totalRecords} 当前：${currentDomain:-未知} 并发：${maxJobs} 已耗时：$((now - importStart))s"
+            lastProgressAt=${now}
+        fi
+        offset=${batchEnd}
+    done
     writeRealityTargetResultLines "${resultLinesFile}"
     removeRealityTargetsFromUnifiedLibrary "${failedTargetsFile}"
     padmRemoveCleanupPath "${normalizedFile}"
     padmRemoveCleanupPath "${resultLinesFile}"
     padmRemoveCleanupPath "${failedTargetsFile}"
+    padmRemoveCleanupPath "${probeDir}"
     if [[ -n "${summaryVar}" ]]; then
         printf -v "${summaryVar}" '%s\t%s\t%s\t%s\t%s\t%s' "${imported}" "${skipped}" "${countA}" "${countB}" "${countC}" "${countFail}"
     fi
-    realityTargetStatusBlock green "RealiTLScanner 导入" "写入: ${imported}" "剔除/跳过: ${skipped}" "A: ${countA}" "B: ${countB}" "C: ${countC}" "FAIL剔除: ${countFail}" "耗时: $(($(date +%s) - importStart))s"
+    realityTargetStatusBlock green "RealiTLScanner 导入" "二次检测: ${totalRecords}" "并发: ${maxJobs}" "重复域名: ${duplicateCount}" "写入: ${imported}" "剔除/跳过: ${skipped}" "A: ${countA}" "B: ${countB}" "C: ${countC}" "FAIL剔除: ${countFail}" "耗时: $(($(date +%s) - importStart))s"
 }
 
 
@@ -1726,7 +1821,7 @@ runRealityScannerTargetFile() {
     local targetFile=$1
     local currentAsn=${2:-}
     local currentOrg=${3:-}
-    local scannerDir scannerBin outputFile batchFile startAt elapsed scannerStatus scannerPid total batchSize batchIndex processed batchCount totalStartAt totalElapsed importSummary batchImported batchSkipped batchA batchB batchC batchFail totalImported=0 totalSkipped=0 totalA=0 totalB=0 totalC=0 totalFail=0
+    local scannerDir scannerBin outputFile batchFile seenDomainsFile startAt elapsed scannerStatus scannerPid total batchSize batchIndex processed batchCount totalStartAt totalElapsed importSummary batchImported batchSkipped batchA batchB batchC batchFail totalImported=0 totalSkipped=0 totalA=0 totalB=0 totalC=0 totalFail=0
     [[ -f "${targetFile}" && -s "${targetFile}" ]] || {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "目标列表为空"
         return 1
@@ -1734,6 +1829,7 @@ runRealityScannerTargetFile() {
     scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
+    padmCreateTempPath seenDomainsFile || return 1
     total=$(wc -l <"${targetFile}" | tr -d ' ')
     batchSize=${total}
     (( total >= 1000 )) && batchSize=1000
@@ -1771,7 +1867,7 @@ runRealityScannerTargetFile() {
         processed=$((processed + batchCount))
         realityTargetStatusBlock green "RealiTLScanner 扫描" "抽样批次完成" "进度: ${processed}/${total}" "耗时: ${elapsed}s" "结果: ${outputFile}"
         if [[ -s "${outputFile}" ]]; then
-            importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" importSummary
+            importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" importSummary same_asn "${seenDomainsFile}"
             IFS=$'\t' read -r batchImported batchSkipped batchA batchB batchC batchFail <<<"${importSummary}"
             totalImported=$((totalImported + batchImported))
             totalSkipped=$((totalSkipped + batchSkipped))
@@ -1781,6 +1877,7 @@ runRealityScannerTargetFile() {
             totalFail=$((totalFail + batchFail))
         fi
     done
+    padmRemoveCleanupPath "${seenDomainsFile}"
     totalElapsed=$(( $(date +%s) - totalStartAt ))
     realityTargetStatusBlock green "RealiTLScanner 抽样扫描汇总" "扫描目标: ${total}" "写入结果: ${totalImported}" "剔除/跳过: ${totalSkipped}" "A: ${totalA}" "B: ${totalB}" "C: ${totalC}" "FAIL剔除: ${totalFail}" "总耗时: ${totalElapsed}s"
 }
@@ -1788,7 +1885,9 @@ runRealityScannerTargetFile() {
 
 runRealityScannerPrefixFile() {
     local prefixFile=$1
-    local scannerDir scannerBin outputFile startAt elapsed scannerStatus scannerPid prefix total index=0
+    local currentAsn=${2:-}
+    local currentOrg=${3:-}
+    local scannerDir scannerBin outputFile seenDomainsFile startAt elapsed scannerStatus scannerPid prefix total index=0
     [[ -f "${prefixFile}" && -s "${prefixFile}" ]] || {
         realityTargetStatusBlock red "RealiTLScanner 扫描" "prefix 列表为空"
         return 1
@@ -1796,6 +1895,7 @@ runRealityScannerPrefixFile() {
     scannerDir=$(realityTargetTmpPath RealiTLScanner)
     scannerBin="${scannerDir}/RealiTLScanner"
     ensureRealityScannerBinary "${scannerDir}" "${scannerBin}" || return 1
+    padmCreateTempPath seenDomainsFile || return 1
     total=$(wc -l <"${prefixFile}" | tr -d ' ')
     while IFS= read -r prefix; do
         [[ -n "${prefix}" ]] || continue
@@ -1817,8 +1917,9 @@ runRealityScannerPrefixFile() {
         fi
         elapsed=$(( $(date +%s) - startAt ))
         realityTargetStatusBlock green "RealiTLScanner 扫描" "prefix 完成: ${prefix}" "进度: ${index}/${total}" "耗时: ${elapsed}s" "结果: ${outputFile}"
-        [[ -s "${outputFile}" ]] && importRealityScannerResults "${outputFile}"
+        [[ -s "${outputFile}" ]] && importRealityScannerResults "${outputFile}" "${currentAsn}" "${currentOrg}" "" same_asn "${seenDomainsFile}"
     done <"${prefixFile}"
+    padmRemoveCleanupPath "${seenDomainsFile}"
 }
 
 runRealityScannerAdvanced() {
@@ -1864,7 +1965,7 @@ runRealityScannerSameAsnPrefixes() {
         return 1
     fi
     if [[ "${selectedRealityAsnFullScan}" == "true" ]]; then
-        runRealityScannerPrefixFile "${selectedRealityScannerPrefixFile}"
+        runRealityScannerPrefixFile "${selectedRealityScannerPrefixFile}" "${currentAsn}" "${currentOrg}"
         padmRemoveCleanupPath "${selectedRealityScannerPrefixFile}"
     else
         runRealityScannerTargetFile "${selectedRealityScannerPrefixFile}" "${currentAsn}" "${currentOrg}"

@@ -320,6 +320,9 @@ resolveRealityTargetIPv4() {
 }
 
 lookupRealityTargetAsn() {
+    if [[ -n "${REALITY_ASN_LOOKUP_ARGS_FILE:-}" ]]; then
+        printf '%s\n' "$1" >>"${REALITY_ASN_LOOKUP_ARGS_FILE}"
+    fi
     case "$1" in
     198.51.100.*)
         printf 'AS64501\tRemoteNet\n'
@@ -332,8 +335,22 @@ lookupRealityTargetAsn() {
 
 REALITY_TLS_PING_ARGS_FILE="${TMP_DIR}/tls_ping_args.txt"
 fake-xray() {
+    local concurrencyMarker= active=0 attempt=0
     [[ "$1" == "tls" && "$2" == "ping" ]]
     printf '%s\n' "$*" >>"${REALITY_TLS_PING_ARGS_FILE}"
+    if [[ -n "${PADM_FAKE_XRAY_CONCURRENCY_DIR:-}" ]]; then
+        command mkdir -p "${PADM_FAKE_XRAY_CONCURRENCY_DIR}/active"
+        concurrencyMarker="${PADM_FAKE_XRAY_CONCURRENCY_DIR}/active/${BASHPID:-$$}"
+        : >"${concurrencyMarker}"
+        for ((attempt = 0; attempt < 200; attempt++)); do
+            active=$(find "${PADM_FAKE_XRAY_CONCURRENCY_DIR}/active" -type f | wc -l | tr -d ' ')
+            (( active >= 2 )) && break
+            command sleep 0.01
+        done
+        printf '%s\n' "${active}" >>"${PADM_FAKE_XRAY_CONCURRENCY_DIR}/observed"
+        command sleep 0.05
+        command rm -f "${concurrencyMarker}"
+    fi
     if [[ "$*" == *"fail.example.com"* || "$*" == *"fail-auto.example.com"* ]]; then
         return 1
     fi
@@ -13722,7 +13739,10 @@ JSON
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
     local oldCandidatesFile="${PADM_REALITY_TARGET_CANDIDATES_FILE:-}"
-    local scannerLine batchLinesFile failedTargetsFile scannerSummary
+    local scannerLine sameAsnLine batchLinesFile failedTargetsFile scannerSummary sameAsnSummary seenDomainsFile
+    local asnLookupFile="${TMP_DIR}/reality-scanner-asn-lookups.log"
+    local concurrencyDir="${TMP_DIR}/reality-scanner-concurrency"
+    local maxConcurrency
     local scannerImported scannerSkipped scannerA scannerB scannerC scannerFail
     cat >"${scannerCandidatesFile}" <<'EOF'
 fail-auto.example.com|fail-auto.example.com|Fail Auto|global|large_site|unknown|1|yes|fixture failing candidate
@@ -13734,6 +13754,12 @@ EOF
 IP,ORIGIN,TLS,ALPN,CURVE,CERT_LENGTH,CERT_SIGNATURE,CERT_PUBLICKEY,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
 192.0.2.10,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,www.cloudflare.com,"Google Trust Services",N/A
 198.51.100.11,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner.example.com,"Let's Encrypt, Inc.",N/A
+198.51.100.12,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner.example.com,"Duplicate",N/A
+198.51.100.13,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-two.example.com,"Let's Encrypt",N/A
+198.51.100.14,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-three.example.com,"Let's Encrypt",N/A
+198.51.100.15,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-four.example.com,"Let's Encrypt",N/A
+198.51.100.16,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,scanner-five.example.com,"Let's Encrypt",N/A
+198.51.100.17,198.51.100.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,fail.example.com,"Let's Encrypt",N/A
 192.0.2.12,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,images.apple.com,"Apple Inc.",N/A
 192.0.2.13,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,Common Name,"Test",N/A
 192.0.2.14,192.0.2.0/24,TLS 1.3,h2,X25519,4096,ECDSA,ECDSA,CloudFlare Origin Certificate,"CloudFlare, Inc.",N/A
@@ -13743,19 +13769,56 @@ IP,ORIGIN,TLS,ALPN,CURVE,CERT_LENGTH,CERT_SIGNATURE,CERT_PUBLICKEY,CERT_DOMAIN,C
 CSV
     printf 'IP,ORIGIN,TLS\n192.0.2.1,192.0.2.0/24,TLS 1.3\n' >"${TMP_DIR}/realitlscanner-invalid.csv"
     ! normalizeRealityScannerCsv "${TMP_DIR}/realitlscanner-invalid.csv" >/dev/null
+    rm -f "${REALITY_TLS_PING_ARGS_FILE}" "${asnLookupFile}"
+    mkdir -p "${concurrencyDir}"
+    export REALITY_ASN_LOOKUP_ARGS_FILE="${asnLookupFile}"
+    export PADM_FAKE_XRAY_CONCURRENCY_DIR="${concurrencyDir}"
+    export PADM_REALITY_SECONDARY_JOBS=4
     importRealityScannerResults "${TMP_DIR}/realitlscanner.csv" "AS64500" "ExampleNet" scannerSummary
     IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${scannerSummary}"
-    [[ "${scannerImported}" == "1" ]]
-    [[ "${scannerSkipped}" == "7" ]]
-    [[ "${scannerA}" == "1" ]]
+    [[ "${scannerImported}" == "5" ]]
+    [[ "${scannerSkipped}" == "9" ]]
+    [[ "${scannerA}" == "5" ]]
     [[ "${scannerB}" == "0" ]]
     [[ "${scannerC}" == "0" ]]
-    [[ "${scannerFail}" == "0" ]]
+    [[ "${scannerFail}" == "1" ]]
+    [[ "$(wc -l <"${REALITY_TLS_PING_ARGS_FILE}" | tr -d ' ')" == "6" ]]
+    [[ "$(grep -c 'scanner.example.com:443' "${REALITY_TLS_PING_ARGS_FILE}")" == "1" ]]
+    [[ "$(wc -l <"${asnLookupFile}" | tr -d ' ')" == "5" ]]
+    ! grep -qx '198.51.100.17' "${asnLookupFile}"
+    maxConcurrency=$(sort -nr "${concurrencyDir}/observed" | head -n 1)
+    [[ "${maxConcurrency}" -ge 2 && "${maxConcurrency}" -le 4 ]]
     scannerLine=$(grep -F $'scanner.example.com:443\tscanner.example.com\tscanner.example.com\tscanner' "${PADM_REALITY_TARGET_SCAN_FILE}")
     [[ "$(realityTargetResultField "${scannerLine}" 7)" == "AS64501" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 8)" == "RemoteNet" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 9)" == "different_network" ]]
     [[ "$(realityTargetResultField "${scannerLine}" 15)" == *"RealiTLScanner: Let's Encrypt, Inc.;"* ]]
+    grep -qF $'scanner-five.example.com:443\tscanner-five.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}"
+
+    unset PADM_FAKE_XRAY_CONCURRENCY_DIR
+    seenDomainsFile="${TMP_DIR}/reality-scanner-seen-domains.txt"
+    : >"${seenDomainsFile}"
+    cat >"${TMP_DIR}/realitlscanner-same-asn-1.csv" <<'CSV'
+IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
+192.0.2.30,192.0.2.0/24,sameasn.example.com,"Let's Encrypt",N/A
+CSV
+    cat >"${TMP_DIR}/realitlscanner-same-asn-2.csv" <<'CSV'
+IP,ORIGIN,CERT_DOMAIN,CERT_ISSUER,GEO_CODE
+192.0.2.31,192.0.2.0/24,sameasn.example.com,"Let's Encrypt",N/A
+CSV
+    rm -f "${asnLookupFile}"
+    importRealityScannerResults "${TMP_DIR}/realitlscanner-same-asn-1.csv" "AS64500" "ExampleNet" sameAsnSummary same_asn "${seenDomainsFile}"
+    IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${sameAsnSummary}"
+    [[ "${scannerImported}" == "1" && "${scannerSkipped}" == "0" ]]
+    importRealityScannerResults "${TMP_DIR}/realitlscanner-same-asn-2.csv" "AS64500" "ExampleNet" sameAsnSummary same_asn "${seenDomainsFile}"
+    IFS=$'\t' read -r scannerImported scannerSkipped scannerA scannerB scannerC scannerFail <<<"${sameAsnSummary}"
+    [[ "${scannerImported}" == "0" && "${scannerSkipped}" == "1" ]]
+    [[ ! -s "${asnLookupFile}" ]]
+    [[ "$(grep -c 'sameasn.example.com:443' "${REALITY_TLS_PING_ARGS_FILE}")" == "1" ]]
+    sameAsnLine=$(grep -F $'sameasn.example.com:443\tsameasn.example.com' "${PADM_REALITY_TARGET_SCAN_FILE}")
+    [[ "$(realityTargetResultField "${sameAsnLine}" 7)" == "AS64500" ]]
+    [[ "$(realityTargetResultField "${sameAsnLine}" 9)" == "same_asn" ]]
+    unset REALITY_ASN_LOOKUP_ARGS_FILE PADM_REALITY_SECONDARY_JOBS
     batchLinesFile="${TMP_DIR}/reality-batch-lines.tsv"
     failedTargetsFile="${TMP_DIR}/reality-failed-targets.txt"
     writeRealityTargetResultLine "batch-old.example.com:443" "old.example.com" "Old Batch" "test" "unknown" "192.0.2.20" "AS64500" "ExampleNet" "same_asn" "B" "yes" "4096" "yes" "1234567800" "old batch line"
