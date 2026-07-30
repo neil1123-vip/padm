@@ -1208,6 +1208,7 @@ runSubscriptionGroupSyncUnlocked() {
     fi
 
     if [[ "${localSyncReady}" == "true" && "${remoteSyncEnabled}" == "true" ]]; then
+        statusCard "订阅同步" "正在同步被控服务器，请稍候"
         remoteFailures=$(runSubscriptionRemoteSync)
         failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
         if [[ "${remoteFailures}" != "[]" ]]; then
@@ -1223,6 +1224,7 @@ runSubscriptionGroupSyncUnlocked() {
             failures=$(jq '. + ["订阅 Nginx 配置损坏，已跳过公网订阅刷新"]' <<<"${failures}")
             rc=1
         elif [[ -n "${subscribePort:-}" ]]; then
+            statusCard "订阅同步" "正在刷新并原子发布订阅节点，请稍候"
             if ! subscribe false false >/dev/null 2>&1; then
                 failures=$(jq '. + ["同步完成后公网订阅刷新失败"]' <<<"${failures}")
                 rc=1

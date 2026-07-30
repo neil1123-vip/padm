@@ -38,25 +38,6 @@ subscriptionRemoteSourceUsesWireGuard() {
     jq -e '(.transport // .scheme // "") == "wireguard"' <<<"${source}" >/dev/null 2>&1
 }
 
-subscriptionRemoteControlWarmup() {
-    local source=$1
-    local attempts=${2:-${PADM_REMOTE_CONTROL_WARMUP_RETRIES:-12}}
-    local delay=${3:-${PADM_REMOTE_CONTROL_WARMUP_DELAY:-5}}
-    local result
-    local tryIndex
-    subscriptionRemoteSourceUsesWireGuard "${source}" || return 0
-    for ((tryIndex = 0; tryIndex < attempts; tryIndex++)); do
-        result=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null || true)
-        if [[ -n "${result}" ]] && jq -e '.ok == true' <<<"${result}" >/dev/null 2>&1; then
-            return 0
-        fi
-        if ((tryIndex + 1 < attempts)); then
-            sleep "${delay}"
-        fi
-    done
-    return 1
-}
-
 subscriptionRemoteWireGuardPeerStateFromSource() {
     local source=$1
     local sourceId
@@ -387,9 +368,6 @@ subscriptionRemoteSyncPlanForSource() {
     elif [[ -z "$(jq -r '.control_token // empty' <<<"${source}")" ]]; then
         jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}, dry_run:$dryRun, request:$payload}'
     else
-        if [[ "${dryRun}" != "true" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            subscriptionRemoteControlWarmup "${source}" >/dev/null 2>&1 || true
-        fi
         if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
             if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
                 jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"success", dry_run:$dryRun, request:$payload, response:$response}'

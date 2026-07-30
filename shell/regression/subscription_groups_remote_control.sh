@@ -452,10 +452,11 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
 )
 
 runRemoteControlInlineTokenConsumersRegression() (
-    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
+    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":10086}'
     local desiredUsersBySourceJson='{"edge-remote":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
     local requestPayloadLog="${TMP_DIR}/remote-control-inline-token-consumers.payloads"
     local statusLog="${TMP_DIR}/remote-control-inline-token-consumers.status"
+    local healthLog="${TMP_DIR}/remote-control-inline-token-consumers.health"
     local planResponse
     local syncFailures
 
@@ -466,7 +467,11 @@ runRemoteControlInlineTokenConsumersRegression() (
         return 1
     }
     subscriptionRemoteSourceUsesWireGuard() {
-        return 1
+        return 0
+    }
+    subscriptionRemoteControlHealth() {
+        printf 'health\n' >>"${healthLog}"
+        printf '{"ok":true}\n'
     }
     subscriptionRemoteControlSources() {
         printf '[%s]\n' "${remoteSourceJson}"
@@ -508,6 +513,7 @@ runRemoteControlInlineTokenConsumersRegression() (
     jq -s -e 'length == 2 and .[0].dry_run == true and .[1].dry_run == false and all(.[]; .source_id == "edge-remote" and .desired_users[0].account == "sub_team_a")' "${requestPayloadLog}" >/dev/null || return 1
     grep -qx $'edge-remote\tsync' "${statusLog}" || return 1
     grep -qx $'status\tedge-remote\tsuccess' "${statusLog}" || return 1
+    [[ ! -e "${healthLog}" ]] || return 1
     ! grep -q '^failure	' "${statusLog}" || return 1
 )
 
