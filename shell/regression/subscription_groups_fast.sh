@@ -2185,6 +2185,8 @@ runMenuSmokeLightRegression() {
     updatePadm() { recordMenuAction "updatePadm:$*"; }
     showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
     bbrInstall() { recordMenuAction bbrInstall; }
+    upgradeXrayCore() { recordMenuAction "upgradeXrayCore:$*"; }
+    showXrayConfigHealthCheck() { recordMenuAction showXrayConfigHealthCheck; }
 
     installMenu <<<"6"
     assertMenuAction selectCoreInstall
@@ -2228,6 +2230,18 @@ runMenuSmokeLightRegression() {
     resetMenuActions
     systemScriptMenu <<<"4"
     assertMenuAction bbrInstall
+    resetMenuActions
+    output=
+    xrayVersionManageMenu <<<"2"
+    assertMenuAction 'upgradeXrayCore:true'
+    grep -q '预发布验证/升级' <<<"${output}"
+    ! grep -q '检查预发布兼容性' <<<"${output}"
+    ! grep -q '升级预发布版' <<<"${output}"
+    resetMenuActions
+    output=
+    xrayVersionManageMenu <<<"4"
+    assertMenuAction showXrayConfigHealthCheck
+    grep -q '配置体检' <<<"${output}"
     [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
     [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
@@ -5948,8 +5962,11 @@ runXrayStrictValidationRegression() {
         set -euo pipefail
         local root="${TMP_DIR}/xray-strict-validation"
         local xrayRoot="${root}/etc/padm/xray"
+        local callLog="${root}/calls.log"
+        local statusLog="${root}/status.log"
         export PADM_XRAY_BINARY="${xrayRoot}/xray"
         export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
+        export PADM_XRAY_HEALTH_CALL_LOG="${callLog}"
         mkdir -p "${PADM_XRAY_CONF_DIR}"
         cat >"${PADM_XRAY_BINARY}" <<'EOF'
 #!/usr/bin/env bash
@@ -5958,12 +5975,22 @@ if [[ "${XRAY_JSON_STRICT:-}" == "true" ]]; then
 else
     printf 'normal-ok\n'
 fi
+printf '%s\n' "${XRAY_JSON_STRICT:-false}" >>"${PADM_XRAY_HEALTH_CALL_LOG:-/dev/null}"
 exit 0
 EOF
         chmod +x "${PADM_XRAY_BINARY}"
         printf '{"log":{}}\n' >"${PADM_XRAY_CONF_DIR}/00_log.json"
         showXrayStrictValidation "${TMP_DIR}/xray-strict.log"
         grep -q 'strict-ok' "${TMP_DIR}/xray-strict.log"
+        : >"${callLog}"
+        REGRESSION_STATUS_CARD_LOG="${statusLog}"
+        : >"${statusLog}"
+        showXrayConfigHealthCheck
+        grep -qx 'false' "${callLog}"
+        grep -qx 'true' "${callLog}"
+        grep -q '当前配置: 通过' "${statusLog}"
+        grep -q '严格检查: 通过' "${statusLog}"
+        grep -q '升级兼容: 通过（FAIL=0 WARN=0 PASS=1）' "${statusLog}"
     )
 }
 

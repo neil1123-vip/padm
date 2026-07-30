@@ -1174,6 +1174,51 @@ showXrayStrictValidation() {
     return 1
 }
 
+showXrayConfigHealthCheck() {
+    local binary validateLog strictLog statusFile warnFile compatLog summary
+    local strictResult compatibilityResult
+
+    if ! xrayInstalled; then
+        statusCard "Xray 配置体检" "跳过" "未检测到 Xray 二进制"
+        return 0
+    fi
+    if ! xrayConfigInstalled; then
+        statusCard "Xray 配置体检" "跳过" "未检测到 Xray 配置"
+        return 0
+    fi
+
+    binary=$(coreXrayBinaryPath)
+    validateLog=$(coreTmpFilePath padm-core-xray-test.log)
+    strictLog=$(coreTmpFilePath padm-core-xray-strict-test.log)
+    statusFile=$(xrayCompatibilityAuditStatusFile)
+    warnFile=$(xrayCompatibilityAuditWarnFile)
+    compatLog=$(xrayCompatibilityAuditLog)
+
+    if ! validateXrayConfigWithBinary "${binary}" "${validateLog}"; then
+        statusCard "Xray 配置体检" "当前配置: 失败" "排查日志: ${validateLog}"
+        return 1
+    fi
+
+    if validateXrayConfigStrictWithBinary "${binary}" "${strictLog}"; then
+        strictResult="通过"
+    else
+        appendXrayCompatibilityHints "${strictLog}"
+        strictResult="需关注，日志: ${strictLog}"
+    fi
+
+    collectXrayCompatibilityFindings "${statusFile}" "${compatLog}" "${warnFile}"
+    summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
+    if xrayCompatibilityAuditHasFailures "${statusFile}"; then
+        compatibilityResult="升级阻断（${summary}），日志: ${compatLog}"
+    elif [[ -s "${warnFile}" ]]; then
+        compatibilityResult="迁移提醒（${summary}），日志: ${compatLog}"
+    else
+        compatibilityResult="通过（${summary}）"
+    fi
+
+    statusCard "Xray 配置体检" "当前配置: 通过" "严格检查: ${strictResult}" "升级兼容: ${compatibilityResult}"
+}
+
 checkXrayPrereleaseCompatibility() {
     local version=${1:-}
     local logFile=${2:-$(coreTmpFilePath padm-core-xray-prerelease-audit.log)}
@@ -1654,25 +1699,21 @@ selectRollbackVersion() {
 xrayVersionManageMenu() {
     echoContent title "\n┌─ Xray-core 生命周期 ────────────────────────────────"
     menuItem 1 "升级稳定版" "下载最新稳定版，校验后替换"
-    menuItem 2 "检查预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
-    menuItem 3 "升级预发布版" "下载 prerelease，适合验证新能力"
-    menuItem 4 "回退稳定版" "选择最近稳定版本回退"
-    menuItem 5 "校验配置" "执行 xray -test -confdir"
-    menuItem 6 "严格模式校验" "执行 XRAY_JSON_STRICT=true xray -test"
-    menuItem 7 "兼容体检" "扫描 users/ECH 迁移提醒及 legacy reverse 风险"
-    menuItem 8 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 9 "查看 Geo 状态" "查看文件、版本和自动更新状态"
-    menuItem 10 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
-    menuItem 11 "服务控制" "启动、停止、重启 Xray"
-    menuItem 12 "日志管理" "查看或调整 Xray 日志"
-    menuReturnItem 13 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 2 "预发布验证/升级" "先用目标版本校验，确认后替换"
+    menuItem 3 "回退稳定版" "选择最近稳定版本回退"
+    menuItem 4 "配置体检" "当前校验 + 严格检查 + 升级风险扫描"
+    menuItem 5 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
+    menuItem 6 "查看 Geo 状态" "查看文件、版本和自动更新状态"
+    menuItem 7 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
+    menuItem 8 "服务控制" "启动、停止、重启 Xray"
+    menuItem 9 "日志管理" "查看或调整 Xray 日志"
+    menuReturnItem 10 "返回核心与服务" "回到核心生命周期管理"
     menuClose
     autoRead xray_lifecycle_menu "请选择:" selectXrayType
     case "${selectXrayType}" in
     1) upgradeXrayCore false ;;
-    2) checkXrayPrereleaseCompatibility ;;
-    3) upgradeXrayCore true ;;
-    4)
+    2) upgradeXrayCore true ;;
+    3)
         local version
         local rollbackStatus=0
         selectRollbackVersion XTLS/Xray-core "Xray-core" version || rollbackStatus=$?
@@ -1684,23 +1725,13 @@ xrayVersionManageMenu() {
         fi
         upgradeXrayCore false "${version}"
         ;;
-    5)
-        local logFile
-        logFile=$(coreTmpFilePath padm-core-xray-test.log)
-        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
-            xrayConfigValidationCard "通过"
-        else
-            xrayConfigValidationCard "失败" "排查日志: ${logFile}"
-        fi
-        ;;
-    6) showXrayStrictValidation ;;
-    7) showXrayCompatibilityAudit ;;
-    8) updateGeoSite ;;
-    9) showXrayGeoStatus ;;
-    10) installCronUpdateGeo ;;
-    11) coreServiceControlMenu xray ;;
-    12) checkLog 1 ;;
-    13) coreVersionManageMenu ;;
+    4) showXrayConfigHealthCheck ;;
+    5) updateGeoSite ;;
+    6) showXrayGeoStatus ;;
+    7) installCronUpdateGeo ;;
+    8) coreServiceControlMenu xray ;;
+    9) checkLog 1 ;;
+    10) coreVersionManageMenu ;;
     *) coreInvalidInputRetryMenu xrayVersionManageMenu ;;
     esac
 }
