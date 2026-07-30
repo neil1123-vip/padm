@@ -6088,36 +6088,115 @@ runXrayPrereleaseDryRunRegression() {
         set -euo pipefail
         local root="${TMP_DIR}/xray-prerelease"
         local xrayRoot="${root}/etc/padm/xray"
+        local downloadDir="${root}/download"
+        local downloadLog="${root}/download.log"
+        local serviceLog="${root}/service.log"
+        local statusLog="${root}/status.log"
+        local successLog="${root}/success.log"
+        local finalizeLog="${root}/finalize.log"
+        local confirmUpgrade=false
+        local serviceRunning=true
+        local mismatchRc
         export PADM_XRAY_BINARY="${xrayRoot}/xray"
         export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
         mkdir -p "${PADM_XRAY_CONF_DIR}"
         printf '{"log":{}}\n' >"${PADM_XRAY_CONF_DIR}/00_log.json"
         printf '#!/usr/bin/env bash\nif [[ \"$1\" == \"--version\" ]]; then printf \"Xray 26.0.0 test\\n\"; exit 0; fi\nprintf \"checked:%s:%s\\n\" \"${XRAY_JSON_STRICT:-false}\" \"$*\"\nexit 0\n' >"${PADM_XRAY_BINARY}"
         chmod +x "${PADM_XRAY_BINARY}"
+        REGRESSION_STATUS_CARD_LOG="${statusLog}"
+        REGRESSION_SUCCESS_CARD_LOG="${successLog}"
+        : >"${downloadLog}"
+        : >"${serviceLog}"
+        : >"${statusLog}"
+        : >"${successLog}"
+        : >"${finalizeLog}"
         downloadXrayReleaseBinaryToTemp() {
-            local _version=$1
+            local version=$1
             local _outVar=$2
             local _tmpVar=${3:-}
-            printf -v "${_outVar}" '%s' "${PADM_XRAY_BINARY}"
-            [[ -n "${_tmpVar}" ]] && printf -v "${_tmpVar}" '%s' "${TMP_DIR}/fake-xray-download"
+            local binaryVersion=${PADM_FAKE_XRAY_DOWNLOAD_VERSION:-${version}}
+            mkdir -p "${downloadDir}"
+            cat >"${downloadDir}/xray" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "--version" ]]; then
+    printf 'Xray ${binaryVersion#v} test\n'
+    exit 0
+fi
+exit 0
+EOF
+            chmod +x "${downloadDir}/xray"
+            printf 'precheck:%s\n' "${version}" >>"${downloadLog}"
+            printf -v "${_outVar}" '%s' "${downloadDir}/xray"
+            [[ -n "${_tmpVar}" ]] && printf -v "${_tmpVar}" '%s' "${downloadDir}"
         }
         validateXrayConfigWithBinary() {
             local binary=$1
             local logFile=$2
             printf 'checked:normal:%s\n' "${binary}" >"${logFile}"
-            [[ "${binary}" == "${PADM_XRAY_BINARY}" ]]
+            [[ -x "${binary}" ]]
         }
         validateXrayConfigStrictWithBinary() {
             local binary=$1
             local logFile=$2
             printf 'checked:strict:%s\n' "${binary}" >"${logFile}"
-            [[ "${binary}" == "${PADM_XRAY_BINARY}" ]]
+            [[ -x "${binary}" ]]
         }
         checkXrayPrereleaseCompatibility "v26.6.1" "${TMP_DIR}/xray-prerelease.log"
         grep -q '\[普通模式校验\]' "${TMP_DIR}/xray-prerelease.log"
         grep -q '\[严格模式校验\]' "${TMP_DIR}/xray-prerelease.log"
         grep -q 'checked:normal:' "${TMP_DIR}/xray-prerelease.log"
         grep -q 'checked:strict:' "${TMP_DIR}/xray-prerelease.log"
+        grep -q '仅执行 dry-run，未替换本机二进制' "${statusLog}"
+        [[ ! -e "${downloadDir}" ]]
+
+        downloadXrayReleaseBinaryToTempDir() {
+            printf 'second-download:%s\n' "$1" >>"${downloadLog}"
+            return 1
+        }
+        validateCoreInstallTargetPath() { return 0; }
+        padmEnsureSafeDirectory() { return 0; }
+        backupManagedFileToPath() { cp "$1" "$2"; chmod "$3" "$2"; }
+        commitStagedCoreInstallFile() { cp "$1" "$2"; chmod "$3" "$2"; }
+        removeManagedFilesIfPresentIgnoreFailure() { rm -f -- "$@"; }
+        handleXray() {
+            printf '%s\n' "$1" >>"${serviceLog}"
+            [[ "$1" == "start" ]] && serviceRunning=true || serviceRunning=false
+        }
+        xrayRunning() { [[ "${serviceRunning}" == "true" ]]; }
+        confirmCoreUpgrade() { [[ "${confirmUpgrade}" == "true" ]]; }
+        finalizeFailedCoreBinaryInstall() {
+            printf '%s:%s\n' "$1" "$5" >>"${finalizeLog}"
+            return 1
+        }
+
+        : >"${downloadLog}"
+        : >"${statusLog}"
+        upgradeXrayCore true "v26.6.1"
+        [[ "$(grep -c '^precheck:' "${downloadLog}")" == "1" ]]
+        [[ ! -e "${downloadDir}" ]]
+
+        confirmUpgrade=true
+        : >"${downloadLog}"
+        : >"${statusLog}"
+        upgradeXrayCore true "v26.6.1"
+        [[ "$(grep -c '^precheck:' "${downloadLog}")" == "1" ]]
+        ! grep -q '^second-download:' "${downloadLog}"
+        grep -q '预检通过，确认后安装本次已校验文件' "${statusLog}"
+        grep -q 'Xray-core更新成功' "${successLog}"
+        grep -q '当前版本: v26.6.1' "${successLog}"
+        [[ "$(coreXrayCurrentVersion)" == "v26.6.1" ]]
+        [[ ! -e "${downloadDir}" ]]
+
+        PADM_FAKE_XRAY_DOWNLOAD_VERSION=v26.6.1
+        set +e
+        upgradeXrayCore true "v26.6.2"
+        mismatchRc=$?
+        set -e
+        [[ "${mismatchRc}" == "1" ]]
+        grep -q '^目标版本: v26.6.2$' "$(coreTmpFilePath padm-core-xray-upgrade-test.log)"
+        grep -q '^实际版本: v26.6.1$' "$(coreTmpFilePath padm-core-xray-upgrade-test.log)"
+        [[ "$(tail -n 1 "${serviceLog}")" == "stop" ]]
+        grep -q '^Xray-core:' "${finalizeLog}"
     )
 }
 

@@ -1222,10 +1222,11 @@ showXrayConfigHealthCheck() {
 checkXrayPrereleaseCompatibility() {
     local version=${1:-}
     local logFile=${2:-$(coreTmpFilePath padm-core-xray-prerelease-audit.log)}
+    local retainedTmpDirVar=${3:-}
     local downloadedBinary=
     local downloadTmpDir=
     local resolvedVersion=
-    local validateLog strictLog
+    local validateLog strictLog completionMessage="仅执行 dry-run，未替换本机二进制"
 
     resolvedVersion=${version:-$(coreLatestReleaseTag XTLS/Xray-core true)}
     checkVersionNotEmpty "${resolvedVersion}"
@@ -1269,8 +1270,13 @@ checkXrayPrereleaseCompatibility() {
         printf '\n[严格模式校验]\n'
         cat "${strictLog}"
     } >"${logFile}"
-    xrayPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "已通过普通校验和严格模式校验" "仅执行 dry-run，未替换本机二进制"
-    [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+    if [[ -n "${retainedTmpDirVar}" ]]; then
+        printf -v "${retainedTmpDirVar}" '%s' "${downloadTmpDir}"
+        completionMessage="预检通过，确认后安装本次已校验文件"
+    else
+        padmRemoveCleanupPath "${downloadTmpDir}"
+    fi
+    xrayPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "已通过普通校验和严格模式校验" "${completionMessage}"
     return 0
 }
 
@@ -1500,21 +1506,30 @@ finalizeFailedSingBoxBinaryInstall() {
 
 installDownloadedXrayBinary() {
     local version=$1
-    local tmpDir oldBinary backupBinary newBinary logFile
+    local tmpDir=${2:-}
+    local oldBinary backupBinary newBinary logFile installedVersion
+    local newServiceRunning=false
     local rc
     logFile=$(coreTmpFilePath padm-core-xray-upgrade-test.log)
-    padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.XXXXXX || return 1
-    downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
-    rc=$?
-    if [[ "${rc}" -ne 0 ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        case "${rc}" in
-        2) errorCard "Xray-core 解压失败" ;;
-        3) errorCard "Xray-core 资产中未找到 xray 二进制" ;;
-        esac
-        return 1
+    if [[ -z "${tmpDir}" ]]; then
+        padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.XXXXXX || return 1
+        downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
+        rc=$?
+        if [[ "${rc}" -ne 0 ]]; then
+            padmRemoveCleanupPath "${tmpDir}"
+            case "${rc}" in
+            2) errorCard "Xray-core 解压失败" ;;
+            3) errorCard "Xray-core 资产中未找到 xray 二进制" ;;
+            esac
+            return 1
+        fi
     fi
     newBinary="${tmpDir}/xray"
+    if ! coreExtractedFileIsRegular "${newBinary}" || [[ ! -x "${newBinary}" ]]; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "Xray-core 已校验临时文件不可用"
+        return 1
+    fi
     if xrayConfigInstalled && ! validateXrayConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
         xrayConfigValidationFailureCard "已取消升级" "排查日志: ${logFile}"
@@ -1546,11 +1561,23 @@ installDownloadedXrayBinary() {
         return 1
     fi
     runCoreServiceActionAllowFailure handleXray start || true
-    if xrayInstalled && xrayRunning; then
-        successCard "Xray-core更新成功"
+    installedVersion=$(coreXrayCurrentVersion)
+    if xrayRunning; then
+        newServiceRunning=true
+    fi
+    if xrayInstalled && [[ "${newServiceRunning}" == "true" && "${installedVersion}" == "${version}" ]]; then
+        successCard "Xray-core更新成功" "当前版本: ${installedVersion}"
         padmRemoveCleanupPath "${tmpDir}"
         [[ -f "${backupBinary}" ]] && removeManagedFilesIfPresentIgnoreFailure "${backupBinary}"
         return 0
+    fi
+    if [[ "${installedVersion}" != "${version}" ]]; then
+        printf '目标版本: %s\n实际版本: %s\n' "${version}" "${installedVersion}" >>"${logFile}"
+        if [[ "${newServiceRunning}" == "true" ]] && ! runCoreServiceActionAllowFailure handleXray stop; then
+            padmRemoveCleanupPath "${tmpDir}"
+            statusCard "Xray-core 更新失败" "版本核验失败，且 Xray 服务停止失败" "目标版本: ${version}" "实际版本: ${installedVersion}" "请手动检查服务与备份: ${backupBinary}"
+            return 1
+        fi
     fi
     padmRemoveCleanupPath "${tmpDir}"
     finalizeFailedCoreBinaryInstall "Xray-core" "${backupBinary}" "${oldBinary}" handleXray "${logFile}"
@@ -1645,16 +1672,21 @@ upgradeXrayCore() {
     local prerelease=${1:-false}
     local version=${2:-}
     local channel="稳定版"
+    local preparedDir=
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
     version=${version:-$(coreLatestReleaseTag XTLS/Xray-core "${prerelease}")}
     checkVersionNotEmpty "${version}"
     if [[ "${prerelease}" == "true" ]]; then
-        if ! checkXrayPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-xray-prerelease-audit.log)"; then
+        if ! checkXrayPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-xray-prerelease-audit.log)" preparedDir; then
             return 1
         fi
     fi
-    confirmCoreUpgrade "Xray-core" "${version}" "${channel}" || { coreCancelledStatusCard "未更新 Xray-core"; return 0; }
-    installDownloadedXrayBinary "${version}"
+    if ! confirmCoreUpgrade "Xray-core" "${version}" "${channel}"; then
+        [[ -n "${preparedDir}" ]] && padmRemoveCleanupPath "${preparedDir}"
+        coreCancelledStatusCard "未更新 Xray-core"
+        return 0
+    fi
+    installDownloadedXrayBinary "${version}" "${preparedDir}"
 }
 
 upgradeSingBoxCore() {
@@ -1699,7 +1731,7 @@ selectRollbackVersion() {
 xrayVersionManageMenu() {
     echoContent title "\n┌─ Xray-core 生命周期 ────────────────────────────────"
     menuItem 1 "升级稳定版" "下载最新稳定版，校验后替换"
-    menuItem 2 "预发布验证/升级" "先用目标版本校验，确认后替换"
+    menuItem 2 "预发布验证/升级" "下载校验一次，确认后直接替换"
     menuItem 3 "回退稳定版" "选择最近稳定版本回退"
     menuItem 4 "配置体检" "当前校验 + 严格检查 + 升级风险扫描"
     menuItem 5 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
