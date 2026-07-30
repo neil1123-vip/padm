@@ -954,9 +954,9 @@ appendXrayCompatibilityHints() {
     if grep -Eqi 'echForceQuery|trustedXForwardedFor|settings\.clients|settings\.accounts|legacy reverse|unknown field.*users|unknown field.*clients|unknown field.*accounts|reverse' "${logFile}"; then
         {
             printf '\n[padm 兼容性提示]\n'
-            printf -- '- Xray 26.5.9+ 预发布已开始把 inbounds 的 clients/accounts 收敛到 users，请优先关注旧 settings.clients/settings.accounts。\n'
+            printf -- '- 当前预发布仍兼容 settings.clients/settings.accounts，users 是建议迁移方向。\n'
             printf -- '- XHTTP / WS / HTTPUpgrade 如前置 CDN 或反代，建议显式复核 sockopt.trustedXForwardedFor。\n'
-            printf -- '- ECH 相关旧字段 echForceQuery 已移除；legacy reverse 也已不再建议继续使用。\n'
+            printf -- '- Xray 26.5.9 起 echForceQuery 不再控制 ECH 行为；legacy reverse 会被拒绝，请迁移到 VLESS Reverse Proxy。\n'
         } >>"${logFile}"
     fi
 }
@@ -1023,13 +1023,13 @@ xrayCompatibilityAuditScanJsonFile() {
         .. | objects |
         select(has("settings") and (.settings | type == "object") and (.settings | has("clients") or has("accounts")))
     ' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 users schema（settings.clients/accounts），升级预发布前请专项复核：${file}"
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到兼容别名 settings.clients/accounts；当前预发布仍兼容，建议后续迁移到 users：${file}"
     fi
     if jq -e '.. | objects | select(has("echForceQuery"))' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到已移除的 echForceQuery：${file}"
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 echForceQuery；Xray 26.5.9 起该字段不再控制 ECH，配置 ECH 时将强制查询：${file}"
     fi
     if jq -e 'type == "object" and has("reverse")' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy reverse 配置，请在升级前确认迁移方案：${file}"
+        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy reverse；Xray 26.5.9 起会拒绝该配置，请迁移到 VLESS Reverse Proxy：${file}"
     fi
     if jq -e '
         .inbounds[]? |
@@ -1100,9 +1100,9 @@ summarizeXrayCompatibilityAudit() {
     local warnFile=$2
     local failCount=0 passCount=0 warnCount=0
 
-    [[ -f "${statusFile}" ]] && failCount=$(grep -c '^fail:' "${statusFile}" 2>/dev/null || printf '0')
-    [[ -f "${statusFile}" ]] && passCount=$(grep -c '^pass:' "${statusFile}" 2>/dev/null || printf '0')
-    [[ -f "${warnFile}" ]] && warnCount=$(grep -c '.' "${warnFile}" 2>/dev/null || printf '0')
+    [[ -f "${statusFile}" ]] && failCount=$(grep -c '^fail:' "${statusFile}" 2>/dev/null || true)
+    [[ -f "${statusFile}" ]] && passCount=$(grep -c '^pass:' "${statusFile}" 2>/dev/null || true)
+    [[ -f "${warnFile}" ]] && warnCount=$(grep -c '.' "${warnFile}" 2>/dev/null || true)
     printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
 }
 
@@ -1122,7 +1122,7 @@ showXrayCompatibilityAudit() {
 
     collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
     if xrayCompatibilityAuditHasFailures "${statusFile}"; then
-        xrayCompatibilityAuditCard "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 users schema / echForceQuery / legacy reverse"
+        xrayCompatibilityAuditCard "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 JSON 解析 / legacy reverse"
     elif [[ -s "${warnFile}" ]]; then
         xrayCompatibilityAuditCard "发现需关注项" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
     else
@@ -1659,7 +1659,7 @@ xrayVersionManageMenu() {
     menuItem 4 "回退稳定版" "选择最近稳定版本回退"
     menuItem 5 "校验配置" "执行 xray -test -confdir"
     menuItem 6 "严格模式校验" "执行 XRAY_JSON_STRICT=true xray -test"
-    menuItem 7 "兼容体检" "扫描 users schema / ECH / legacy reverse 风险"
+    menuItem 7 "兼容体检" "扫描 users/ECH 迁移提醒及 legacy reverse 风险"
     menuItem 8 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
     menuItem 9 "查看 Geo 状态" "查看文件、版本和自动更新状态"
     menuItem 10 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
@@ -2699,7 +2699,7 @@ coreConfigMaintenanceMenu() {
     echoContent title "\n┌─ 配置校验与数据维护 ───────────────────────────────"
     menuItem 1 "校验 Xray 配置" "执行 xray -test -confdir"
     menuItem 2 "严格模式校验 Xray" "执行 XRAY_JSON_STRICT=true xray -test"
-    menuItem 3 "Xray 兼容体检" "扫描 users schema / ECH / legacy reverse 风险"
+    menuItem 3 "Xray 兼容体检" "扫描 users/ECH 迁移提醒及 legacy reverse 风险"
     menuItem 4 "检查 Xray 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
     menuItem 5 "校验 sing-box 配置" "执行 merge + check"
     menuItem 6 "sing-box 兼容体检" "扫描 1.13/1.14 迁移风险并输出提示"

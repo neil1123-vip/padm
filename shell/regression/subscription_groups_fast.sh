@@ -5983,15 +5983,16 @@ JSON
         cat >"${PADM_XRAY_CONF_DIR}/00_reverse.json" <<'JSON'
 {"reverse":{"bridges":[]}}
 JSON
-        local statusFile warnFile logFile
+        local statusFile warnFile logFile summary
         statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
         warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
         logFile=$(coreTmpFilePath padm-xray-compat-audit.log)
         collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
-        grep -q '^fail:' "${statusFile}"
-        grep -q '旧 users schema' "${logFile}"
-        grep -q 'echForceQuery' "${logFile}"
-        grep -q 'legacy reverse' "${logFile}"
+        summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
+        [[ "${summary}" == 'FAIL=1 WARN=3 PASS=0' ]]
+        grep -q '^\[WARN\].*settings\.clients/accounts' "${logFile}"
+        grep -q '^\[WARN\].*echForceQuery' "${logFile}"
+        grep -q '^\[FAIL\].*legacy reverse' "${logFile}"
         grep -q 'trustedXForwardedFor' "${logFile}"
     )
 }
