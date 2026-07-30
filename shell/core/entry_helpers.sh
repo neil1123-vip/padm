@@ -654,6 +654,7 @@ updatePadm() {
     successCard "更新入口已下载，正在重新打开新版脚本"
     if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${remoteRef}" "${installPath}" RefreshScriptModules; then
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
+        successCard "padm 管理脚本更新成功"
         exit 0
     fi
 

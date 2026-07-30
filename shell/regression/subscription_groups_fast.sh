@@ -2500,18 +2500,20 @@ EOF
 }
 
 runUpdatePadmSingleRefRegression() {
-    local root installDir updateTmpRoot downloadLog execLog errorLog oldTmpDir
+    local root installDir updateTmpRoot downloadLog execLog errorLog successLog oldTmpDir
     root="${TMP_DIR}/update-padm-single-ref"
     installDir="${root}/install"
     updateTmpRoot="${root}/tmp"
     downloadLog="${root}/download.log"
     execLog="${root}/exec.log"
     errorLog="${root}/error.log"
+    successLog="${root}/success.log"
     oldTmpDir="${TMPDIR:-}"
     mkdir -p "${installDir}" "${updateTmpRoot}"
     : >"${downloadLog}"
     : >"${execLog}"
     : >"${errorLog}"
+    : >"${successLog}"
     installDir=$(cd -- "${installDir}" && pwd -P)
     updateTmpRoot=$(cd -- "${updateTmpRoot}" && pwd -P)
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${installDir}/install.sh"
@@ -2519,6 +2521,7 @@ runUpdatePadmSingleRefRegression() {
 
     (
         REGRESSION_ERROR_CARD_LOG="${errorLog}"
+        REGRESSION_SUCCESS_CARD_LOG="${successLog}"
         release=debian
         PADM_INSTALL_DIR="${installDir}"
         TMPDIR="${updateTmpRoot}"
@@ -2551,6 +2554,7 @@ EOF
     grep -q 'https://raw.githubusercontent.com/neil1123-vip/padm/1111111111111111111111111111111111111111/install.sh' "${downloadLog}"
     grep -qx 'force:1' "${execLog}"
     grep -qx 'ref:1111111111111111111111111111111111111111' "${execLog}"
+    grep -q 'padm 管理脚本更新成功' "${successLog}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
