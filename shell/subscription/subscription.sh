@@ -103,22 +103,26 @@ subscriptionRemoteSubscribeSourcesForAccount() {
     local user
     local allowedSources
     local resolvedSources
+    local allowWireGuard=true
     if ! subscriptionRemoteScopeEnabled; then
         [[ -n "${outputVar}" ]] && printf -v "${outputVar}" ''
         return 0
     fi
-    user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 2
-    [[ -n "${user}" ]] || return 2
-    allowedSources=$(jq -c '.allowed_sources // []' <<<"${user}") || return 1
+    if user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) && [[ -n "${user}" ]]; then
+        allowedSources=$(jq -c '.allowed_sources // []' <<<"${user}") || return 1
+    else
+        allowedSources=$(subscriptionActiveGroupRead -c '.admin.allowed_sources // ["*"]') || return 1
+        allowWireGuard=false
+    fi
     [[ -n "${allowedSources}" ]] || return 1
-    resolvedSources=$(subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" '
+    resolvedSources=$(subscriptionActiveGroupRead -r --argjson allowed "${allowedSources}" --argjson allowWireGuard "${allowWireGuard}" '
       . as $group |
       if ($allowed | length) == 0 then
         empty
       elif ($allowed | index("*")) then
-        $group.sources[]? | select(.role != "main" and .enabled == true) | "\(.host):\(.port):\(.id):\(.scheme)"
+        $group.sources[]? | select(.role != "main" and .enabled == true and ($allowWireGuard or .transport != "wireguard")) | "\(.host):\(.port):\(.id):\(.scheme)"
       else
-        $group.sources[]? | select(.role != "main" and .enabled == true and (.id as $sid | $allowed | index($sid))) | "\(.host):\(.port):\(.id):\(.scheme)"
+        $group.sources[]? | select(.role != "main" and .enabled == true and ($allowWireGuard or .transport != "wireguard") and (.id as $sid | $allowed | index($sid))) | "\(.host):\(.port):\(.id):\(.scheme)"
       end') || return 1
     if [[ -n "${outputVar}" ]]; then
         printf -v "${outputVar}" '%s' "${resolvedSources}"
@@ -129,11 +133,9 @@ subscriptionRemoteSubscribeSourcesForAccount() {
 
 subscriptionPublishHasRemoteSources() {
     local accountName=$1
-    local user
-    subscriptionRemoteScopeEnabled || return 1
-    user=$(subscriptionSyncFindUserByAccountName "${accountName}" 2>/dev/null) || return 1
-    [[ -n "${user}" ]] || return 1
-    jq -e '(.has_remote // false) == true' <<<"${user}" >/dev/null 2>&1
+    local sourceLines
+    subscriptionRemoteSubscribeSourcesForAccount "${accountName}" sourceLines || return 1
+    [[ -n "${sourceLines}" ]]
 }
 
 ensureSubscriptionControlNginxLocation() {
@@ -779,7 +781,6 @@ updateRemoteSubscribe() {
     local line=
     local source=
     local sourceLines=
-    local sourceStatus=0
     local escapedEmail=
     local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
     local commitFailed=false
@@ -812,13 +813,9 @@ updateRemoteSubscribe() {
         printf '[]\n' >"${singBoxTarget}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     fi
 
-    subscriptionRemoteSubscribeSourcesForAccount "${email}" sourceLines || sourceStatus=$?
-    if [[ "${sourceStatus}" == "2" ]]; then
-        sourceLines=$(subscriptionActiveGroupRead -r '
-          .sources[]?
-          | select(.role != "main" and .enabled == true and .transport != "wireguard")
-          | "\(.host):\(.port):\(.id):\(.scheme)"')
-    elif [[ "${sourceStatus}" != "0" ]]; then
+    if ! subscriptionRemoteSubscribeSourcesForAccount "${email}" sourceLines; then
+        padmRemoveCleanupPath "${tmpDir}"
+        padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
     escapedEmail=$(printf '%s\n' "${email}" | sed 's/[][\/.^$*+?(){}|]/\\&/g')
@@ -841,6 +838,7 @@ updateRemoteSubscribe() {
         local singBoxFile="${tmpDir}/sing-box"
         local clashPid defaultPid singBoxPid
         local fetchFailed=false
+        local sourceInvalid=false
 
         IFS=':' read -r remoteHost remotePort serverAlias subscribeType <<<"${line}"
         remoteUrl="${remoteHost}:${remotePort}"
@@ -886,6 +884,7 @@ updateRemoteSubscribe() {
             successCard "clashMeta订阅 ${remoteUrl}:${email} 更新成功"
         else
             errorCard "clashMeta订阅 ${remoteUrl}:${email} 拉取失败或不存在"
+            sourceInvalid=true
         fi
 
         default=$(<"${defaultFile}")
@@ -904,13 +903,15 @@ updateRemoteSubscribe() {
                 successCard "通用订阅 ${remoteUrl}:${email} 更新成功"
             else
                 errorCard "通用订阅 ${remoteUrl}:${email} 解码失败"
+                sourceInvalid=true
             fi
         else
             errorCard "通用订阅 ${remoteUrl}:${email} 拉取失败或不存在"
+            sourceInvalid=true
         fi
 
         singBoxSubscribe=$(<"${singBoxFile}")
-        if [[ -n "${singBoxSubscribe}" && "${singBoxSubscribe}" != *nginx* ]] && echo "${singBoxSubscribe}" | jq empty >/dev/null 2>&1; then
+        if [[ -n "${singBoxSubscribe}" && "${singBoxSubscribe}" != *nginx* ]] && echo "${singBoxSubscribe}" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
             if ! singBoxSubscribe=$(jq --arg email "${email}" --arg alias "${serverAlias}" 'map(if ((.tag // "") | startswith($email)) then .tag = ($email + "_" + $alias + (.tag[($email | length):])) else . end)' <<<"${singBoxSubscribe}"); then
                 padmRemoveCleanupPath "${tmpDir}"
                 padmRemoveCleanupPath "${stageDir}"
@@ -924,6 +925,12 @@ updateRemoteSubscribe() {
             successCard "sing-box订阅 ${remoteUrl}:${email} 更新成功"
         else
             errorCard "sing-box订阅 ${remoteUrl}:${email} 拉取失败或不存在"
+            sourceInvalid=true
+        fi
+        if [[ "${sourceInvalid}" == "true" ]]; then
+            padmRemoveCleanupPath "${tmpDir}"
+            padmRemoveCleanupPath "${stageDir}"
+            return 1
         fi
         rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
     done <<<"${sourceLines}"

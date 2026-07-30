@@ -14488,6 +14488,40 @@ runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {
 )
 
 (
+    local renderRoot="${TMP_DIR}/subscription-render-admin-remote-hint"
+    local localBase="${renderRoot}/local"
+    local renderArgsFile="${renderRoot}/render-args.log"
+    mkdir -p "${localBase}/default"
+    : >"${localBase}/default/self-user"
+    subscribeSalt=test-salt
+    currentDefaultPort=443
+    subscriptionRemoteScopeEnabled() { return 0; }
+    subscriptionSyncFindUserByAccountName() { return 99; }
+    subscriptionActiveEnabledUsersJson() { printf '[]\n'; }
+    subscriptionActiveGroupRead() {
+        if [[ "$*" == *'any(.sources[]?; .id == "main" and ((.enabled // true) == true))'* ]]; then
+            return 1
+        fi
+        if [[ "$*" == *'.admin.allowed_sources // ["*"]'* ]]; then
+            printf '["edge"]\n'
+            return 0
+        fi
+        if [[ "$*" == *'--argjson allowed ["edge"]'* && "$*" == *'--argjson allowWireGuard false'* ]]; then
+            printf 'edge.example:443:edge:https\n'
+            return 0
+        fi
+        return 1
+    }
+    resolveSubscribePublicDomain() { printf 'example.com'; }
+    renderSubscribeUserOutputs() {
+        printf '%s\t%s\n' "$1" "$4" >"${renderArgsFile}"
+    }
+
+    renderAllSubscribeUserOutputs "${localBase}" false true "" true
+    grep -qx $'self-user\ty' "${renderArgsFile}"
+)
+
+(
     local renderRoot="${TMP_DIR}/subscription-render-remote-hint-batch"
     local localBase="${renderRoot}/local"
     local remoteChecksFile="${renderRoot}/remote-checks.log"
@@ -14914,17 +14948,17 @@ JSON
             printf '%s\n' '[{"tag":"sub_team"}]'
             ;;
         *remote2.example*/s/clashMeta/*)
-            [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-partial}" != "fetch-failure" ]]
+            [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-valid}" != "fetch-failure" ]] || return 1
+            printf '%s\n' 'proxies:' '- name: "sub_team"'
             ;;
         *remote2.example*/s/default/*)
-            printf '%s' 'vless://bad@remote2.example:443#sub_team' | base64
-            printf '@@'
+            printf '%s' 'vless://uuid@remote2.example:443#sub_team' | base64
             ;;
         *remote2.example*/s/sing-box_profiles/*)
-            if [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-partial}" == "fail-singbox-merge" ]]; then
-                printf '%s\n' '[{"tag":"sub_team_r2"}]'
+            if [[ "${PADM_FAKE_REMOTE_SUBSCRIBE_MODE:-valid}" == "invalid-content" ]]; then
+                printf '%s\n' '[]'
             else
-                printf '%s\n' '{bad json'
+                printf '%s\n' '[{"tag":"sub_team"}]'
             fi
             ;;
         *remote3.example*/s/clashMeta/*)
@@ -14956,6 +14990,15 @@ JSON
         jq -e '.[0].tag == "old-local"' "${localDir}/sing-box/${email}" >/dev/null
 
         writeRemoteSubscribeOldOutputs
+        export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=invalid-content
+        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+            return 1
+        fi
+        [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
+        [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
+        jq -e 'length == 1 and .[0].tag == "old-local"' "${localDir}/sing-box/${email}" >/dev/null
+
+        writeRemoteSubscribeOldOutputs
         export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fail-singbox-merge
         printf '{bad local json\n' >"${localDir}/sing-box/${email}"
         if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
@@ -14978,16 +15021,17 @@ JSON
     fi
 
     if remoteSubscribeFetchPartSelected merge; then
-        writeRemoteSubscribeOldOutputs
+        printf 'vless://new-local@new-target.example:443?security=reality#sub_team\n' >"${publicDir}/default/${emailMd5}"
+        printf '  - name: "sub_team"\n    type: vless\n' >"${publicDir}/clashMeta/${emailMd5}"
+        printf '[{"tag":"sub_team","type":"vless"}]\n' >"${localDir}/sing-box/${email}"
         unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
         updateRemoteSubscribe "${emailMd5}" "${email}"
+        grep -qxF 'vless://new-local@new-target.example:443?security=reality#sub_team' "${publicDir}/default/${emailMd5}"
         grep -qxF -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}"
         grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
-        if grep -qxF 'vless://bad@remote2.example:443#sub_team_r2' "${publicDir}/default/${emailMd5}"; then
-            return 1
-        fi
+        grep -qxF 'vless://uuid@remote2.example:443#sub_team_r2' "${publicDir}/default/${emailMd5}"
         grep -qxF 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}"
-        jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+        jq -e '.[0].tag == "sub_team" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r2" and .[3].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
         [[ ! -e "${publicDir}/default/${emailMd5}.tmp" ]]
         [[ ! -e "${publicDir}/clashMeta/${emailMd5}.tmp" ]]
         [[ ! -e "${localDir}/sing-box/${email}.tmp" ]]
@@ -15124,8 +15168,9 @@ JSON
         updateRemoteSubscribe "${emailMd5}" "${email}"
         [[ "$(grep -cFx -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
         [[ "$(grep -cFx 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
+        [[ "$(grep -cFx 'vless://uuid@remote2.example:443#sub_team_r2' "${publicDir}/default/${emailMd5}")" == "1" ]]
         [[ "$(grep -cFx 'trojan://pass@remote3.example:443#sub_team_r3-extra' "${publicDir}/default/${emailMd5}")" == "1" ]]
-        jq -e 'length == 3 and .[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
+        jq -e 'length == 4 and .[0].tag == "old-local" and .[1].tag == "sub_team_r1" and .[2].tag == "sub_team_r2" and .[3].tag == "sub_team_r3-extra"' "${localDir}/sing-box/${email}" >/dev/null
     fi
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi

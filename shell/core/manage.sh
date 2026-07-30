@@ -2541,6 +2541,15 @@ subscriptionPublishAccounts() {
         ]
       | @tsv')
     publishAccounts=$(printf '%s\n%s' "${localAccounts}" "${stagedAccounts}" | awk 'length($0) > 0 && !seen[$0]++' | sed '/^$/d')
+    if [[ "${remoteScopeEnabled}" == "true" && "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
+        while IFS= read -r account; do
+            [[ -n "${account}" ]] || continue
+            if subscriptionPublishHasRemoteSources "${account}"; then
+                SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=0
+                break
+            fi
+        done <<<"${publishAccounts}"
+    fi
     SUBSCRIPTION_PUBLISH_ACCOUNTS=${publishAccounts}
     [[ -n "${publishAccounts}" ]] && printf '%s\n' "${publishAccounts}"
 }
