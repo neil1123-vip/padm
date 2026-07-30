@@ -759,7 +759,6 @@ collectEntryProfile() {
             errorCard "Reality 入口域名不合法" "${realityEntryHost}"
             return 1
         fi
-        checkDNSIP "${realityEntryHost}" || return 1
     elif ! padmIsValidConnectAddress "${realityEntryHost}"; then
         errorCard "Reality 客户端入口不合法" "${realityEntryHost}"
         return 1
@@ -855,6 +854,9 @@ persistRealityEntryProfile() {
 # 初始化REALITY配置
 initRealityProfile() {
     collectRealityProfile || return 1
+    if realityStrictDomainModeEnabled; then
+        checkDNSIP "${realityEntryHost}" || return 1
+    fi
 }
 
 

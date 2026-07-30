@@ -702,6 +702,10 @@ checkDNSIP() {
     local publicIP=
 
     publicIP=$(getPublicIP "${ipType}")
+    if [[ -z "${publicIP}" ]]; then
+        errorCard "无法获取当前 VPS 公网 IPv${ipType} 地址" "请确认 curl 已安装，并检查 https://www.cloudflare.com/cdn-cgi/trace 是否可访问"
+        return 1
+    fi
     if [[ "${publicIP}" != "${dnsIP}" ]]; then
         statusCard "域名 IP 不一致" "当前 VPS IP：${publicIP}" "DNS 解析 IP：${dnsIP}" "请检查域名解析是否生效且正确"
         return 1

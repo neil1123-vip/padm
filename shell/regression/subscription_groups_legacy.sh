@@ -3535,6 +3535,8 @@ runRealityProfileFailureRegression() (
     realityEntryHost=
     collectEntryProfile
     [[ "${realityEntryHost}" == "strict.example.com" ]]
+    [[ "${dnsCalls}" == "0" ]]
+    initRealityProfile
     [[ "${dnsCalls}" == "1" ]]
 
     configureRealityDomainMode ",1," domain
@@ -5418,6 +5420,18 @@ runNetworkCheckReturnFailureRegression() (
     curl() { printf 'ip=not-an-ip\n'; }
     [[ -z "$(getPublicIP 4)" ]]
     unset -f curl
+    (
+        local publicIpErrorLog="${root}/public-ip-error.log"
+        : >"${publicIpErrorLog}"
+        errorCard() { printf '%s\n' "$*" >>"${publicIpErrorLog}"; }
+        dig() { printf '203.0.113.10\n'; }
+        getPublicIP() { return 0; }
+        if checkDNSIP entry.example.com >/dev/null; then
+            return 1
+        fi
+        grep -q '无法获取当前 VPS 公网 IPv4 地址' "${publicIpErrorLog}"
+        grep -q 'curl 已安装' "${publicIpErrorLog}"
+    )
     getPublicIP() { printf '203.0.113.10\n'; }
 
     (
