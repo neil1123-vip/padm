@@ -11475,7 +11475,7 @@ runSubscribeUserOutputTransactionRegression() {
     writeLocalSubscribeOutputs
     (
         subscriptionRemoteScopeEnabled() { return 0; }
-        updateRemoteSubscribe() {
+        stageRemoteSubscribe() {
             return 1
         }
         if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" y true 2>/dev/null; then
@@ -11490,7 +11490,7 @@ runSubscribeUserOutputTransactionRegression() {
     rm -f "${localDir}/default/${email}" "${localDir}/clashMeta/${email}" "${localDir}/sing-box/${email}"
     (
         subscriptionRemoteScopeEnabled() { return 0; }
-        updateRemoteSubscribe() {
+        stageRemoteSubscribe() {
             mkdir -p "${PADM_SUBSCRIBE_DIR}/default" "${PADM_SUBSCRIBE_DIR}/clashMeta" "${localDir}/sing-box"
             printf 'vless://remote-node#atomic-user_remote\n' >"${PADM_SUBSCRIBE_DIR}/default/${emailMd5}"
             printf '  - name: atomic-user_remote\n    type: vless\n' >"${PADM_SUBSCRIBE_DIR}/clashMeta/${emailMd5}"
@@ -11521,20 +11521,13 @@ runSubscribeUserOutputTransactionRegression() {
     writeOldSubscribeOutputs
     writeLocalSubscribeOutputs
     (
-        local helperCalls=0
-        local helperMessage=
-        subscriptionSyncSetSingleRestoreResultMessage() {
-            helperCalls=$((helperCalls + 1))
-            command printf -v "$1" '%s' "${2}|${3}|${4}|${5}|${6}|${7:-true}"
-            [[ "$2" == "订阅生成失败" ]]
-            [[ "$3" == "true" ]]
-            [[ "$4" == "已恢复旧订阅输出" ]]
-            [[ "$5" == "旧订阅输出" ]]
-            [[ "$6" == "备份目录: ${subscribeBackupDir}" ]]
-            helperMessage=${!1}
-            return 0
-        }
+        local publishStage="${root}/publish-stage"
         local commitCalls=0
+        mkdir -p "${publishStage}"
+        cp -a "${publicDir}/." "${publishStage}/"
+        checkLogBackupCreate() {
+            return 97
+        }
         commitSubscribeUserOutputFile() {
             commitCalls=$((commitCalls + 1))
             if [[ "${commitCalls}" == "2" ]]; then
@@ -11542,50 +11535,15 @@ runSubscribeUserOutputTransactionRegression() {
             fi
             originalCommitSubscribeUserOutputFile "$@"
         }
-        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
+        if PADM_SUBSCRIBE_DIR="${publishStage}" renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
             return 1
         fi
-        [[ "${helperCalls}" == "1" ]]
-        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "${helperMessage}" ]]
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
         [[ "$(<"${publicDir}/clashMeta/${emailMd5}")" == "old-clash" ]]
         [[ "$(<"${publicDir}/clashMetaProfiles/${emailMd5}")" == "old-profile" ]]
         [[ "$(<"${publicDir}/sing-box_profiles/${emailMd5}")" == "old-sing-profile" ]]
         [[ "$(<"${publicDir}/sing-box/${emailMd5}")" == "old-sing" ]]
-        if regressionFindHasMatches "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'; then
-            return 1
-        fi
-    )
-
-    writeOldSubscribeOutputs
-    writeLocalSubscribeOutputs
-    (
-        local helperCalls=0
-        local helperMessage=
-        subscriptionSyncSetSingleRestoreResultMessage() {
-            helperCalls=$((helperCalls + 1))
-            command printf -v "$1" '%s' "${2}|${3}|${4}|${5}|${6}|${7:-true}"
-            [[ "$2" == "订阅生成失败" ]]
-            [[ "$3" == "false" ]]
-            [[ "$4" == "已恢复旧订阅输出" ]]
-            [[ "$5" == "旧订阅输出" ]]
-            [[ "$6" == "备份目录: ${subscribeBackupDir}" ]]
-            helperMessage=${!1}
-            return 1
-        }
-        commitSubscribeUserOutputFile() {
-            return 1
-        }
-        checkLogBackupRestore() {
-            return 1
-        }
-        if renderSubscribeUserOutputs "${email}" "${emailMd5}" "example.com" n true 2>/dev/null; then
-            return 1
-        fi
-        [[ "${helperCalls}" == "1" ]]
-        [[ "${SUBSCRIBE_USER_OUTPUT_ERROR}" == "${helperMessage}" ]]
-        regressionFindHasMatches "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*'
-        find "${userTmpRoot}" -maxdepth 1 -type d -name 'padm-check-log-backup.*' -exec rm -rf {} +
+        rm -rf "${publishStage}"
     )
 
     writeLocalSubscribeOutputs
@@ -11641,13 +11599,15 @@ runSubscribeReturnFailureRegression() (
     local installCalls=0
     local renderCalls=0
     local showAccountsCalls=0
+    local renderTarget=
 
     # Re-source manage.sh because the regression bootstrap replaces subscribe with a menu-safe no-op.
     source "${PROJECT_ROOT}/shell/core/manage.sh"
     export PADM_SUBSCRIBE_LOCAL_DIR="${localDir}"
     export PADM_SUBSCRIBE_DIR="${publicDir}"
     mkdir -p "${localDir}/default" "${localDir}/clashMeta" "${localDir}/sing-box"
-    mkdir -p "${publicDir}"
+    mkdir -p "${publicDir}/default"
+    printf 'stale\n' >"${publicDir}/default/stale"
     printf 'existing-salt\n' >"${localDir}/subscribeSalt"
 
     readInstallProtocolType() { return 0; }
@@ -11662,6 +11622,10 @@ runSubscribeReturnFailureRegression() (
     }
     renderAllSubscribeUserOutputs() {
         renderCalls=$((renderCalls + 1))
+        renderTarget=${PADM_SUBSCRIBE_DIR}
+        [[ "${renderTarget}" != "${publicDir}" ]] || return 1
+        mkdir -p "${renderTarget}/default"
+        printf 'generated\n' >"${renderTarget}/default/generated"
         return 0
     }
 
@@ -11672,6 +11636,44 @@ runSubscribeReturnFailureRegression() (
     [[ "${installCalls}" == "1" ]]
     [[ "${showAccountsCalls}" == "0" ]]
     [[ "${renderCalls}" == "0" ]]
+
+    subscriptionGroupsWithLock() { "$@"; }
+    refreshPublishedSubscriptions >/dev/null 2>&1
+    [[ "${installCalls}" == "1" ]]
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+    [[ "$(<"${publicDir}/default/generated")" == "generated" ]]
+    [[ ! -e "${publicDir}/default/stale" ]]
+    [[ -n "${renderTarget}" && ! -e "${renderTarget}" ]]
+
+    readNginxSubscribe() { return 1; }
+    showAccountsCalls=0
+    renderCalls=0
+    if refreshPublishedSubscriptions >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "${showAccountsCalls}" == "0" ]]
+    [[ "${renderCalls}" == "0" ]]
+    [[ "$(<"${publicDir}/default/generated")" == "generated" ]]
+    readNginxSubscribe() { return 0; }
+    showAccountsCalls=0
+    renderCalls=0
+
+    printf 'keep\n' >"${publicDir}/default/other-account"
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        renderTarget=${PADM_SUBSCRIBE_DIR}
+        [[ "$4" == "selected-account" && "$5" == "true" ]] || return 1
+        printf 'selected\n' >"${renderTarget}/default/selected-account"
+    }
+    generateSubscribeOutputsUnlocked false "" selected-account true >/dev/null 2>&1
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+    [[ "$(<"${publicDir}/default/other-account")" == "keep" ]]
+    [[ "$(<"${publicDir}/default/selected-account")" == "selected" ]]
+    [[ -n "${renderTarget}" && ! -e "${renderTarget}" ]]
+    showAccountsCalls=0
+    renderCalls=0
 
     installSubscribe() {
         installCalls=$((installCalls + 1))
@@ -11829,8 +11831,9 @@ runSubscribeLocalRollbackRegression() (
     renderAllSubscribeUserOutputs() {
         renderCalls=$((renderCalls + 1))
         printf 'render\n' >>"${callLog}"
-        printf 'new public\n' >"${publicDir}/default/existing"
-        printf 'first account published\n' >"${publicDir}/default/first-account"
+        [[ "${PADM_SUBSCRIBE_DIR}" != "${publicDir}" ]] || return 1
+        printf 'new public\n' >"${PADM_SUBSCRIBE_DIR}/default/existing"
+        printf 'first account published\n' >"${PADM_SUBSCRIBE_DIR}/default/first-account"
         return 1
     }
     set +e
@@ -11848,7 +11851,33 @@ runSubscribeLocalRollbackRegression() (
     grep -q '订阅生成失败：生成订阅输出失败，已恢复旧订阅输出' "${errorLog}"
     grep -qx 'showAccounts' "${callLog}"
     grep -qx 'render' "${callLog}"
-    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d -name 'padm-subscription-output-backup.*'
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscribe-publish.*' \)
+
+    : >"${errorLog}"
+    : >"${callLog}"
+    renderCalls=0
+    showAccountsCalls=0
+    renderAllSubscribeUserOutputs() {
+        renderCalls=$((renderCalls + 1))
+        printf 'render\n' >>"${callLog}"
+        printf 'new public\n' >"${PADM_SUBSCRIBE_DIR}/default/existing"
+        return 0
+    }
+    syncInstallDirectoryTree() {
+        return 1
+    }
+    set +e
+    subscribe false true >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    [[ "${showAccountsCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+    [[ "${subscribeSalt}" == "existing-salt" ]]
+    diff -u "${beforeSnapshot}" <(captureSubscribeLocalSnapshot)
+    diff -u "${beforePublicSnapshot}" <(captureSubscribePublicSnapshot)
+    grep -q '订阅生成失败：发布订阅输出失败，已恢复旧订阅输出' "${errorLog}"
+    ! regressionFindHasMatches "${root}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscribe-publish.*' \)
 
     if [[ -n "${oldLocalDir}" ]]; then export PADM_SUBSCRIBE_LOCAL_DIR="${oldLocalDir}"; else unset PADM_SUBSCRIBE_LOCAL_DIR; fi
     if [[ -n "${oldPublicDir}" ]]; then export PADM_SUBSCRIBE_DIR="${oldPublicDir}"; else unset PADM_SUBSCRIBE_DIR; fi
@@ -12228,14 +12257,14 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     [[ "${rc}" == "0" ]]
     grep -qx "cleanup:${backupDir}" "${callLog}"
     grep -qx 'reload' "${callLog}"
-    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -qx 'sync:' "${callLog}"
     grep -q '用户订阅已删除' "${successLog}"
 
     runRemoveCase sync-fail
     [[ "${rc}" == "0" ]]
     grep -qx "cleanup:${backupDir}" "${callLog}"
     grep -qx 'reload' "${callLog}"
-    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -qx 'sync:' "${callLog}"
     grep -q '用户订阅已删除' "${successLog}"
     grep -q '订阅已删除，但自动同步失败' "${statusLog}"
 )
@@ -12400,7 +12429,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
     mode=success
     resetLogs
     runSubscriptionEventSyncIfEnabled "test-enabled" >/dev/null 2>&1
-    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -qx 'sync:' "${callLog}"
 
     mode=subscribe-fail
     resetLogs
@@ -12493,15 +12522,15 @@ runUserSubscriptionMenuMutationFailureRegression() (
     resetLogs
     setUserSubscriptionSourcesMenu team-a >/dev/null 2>&1
     grep -q '节点范围已更新' "${successLog}"
-    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -qx 'sync:' "${callLog}"
     resetLogs
     setUserSubscriptionTrafficLimitMenu team-a >/dev/null 2>&1
     grep -q '订阅额度已更新' "${successLog}"
-    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -qx 'sync:' "${callLog}"
     resetLogs
     manageUserSubscriptionItem >/dev/null 2>&1
     grep -q '用户订阅状态已切换' "${successLog}"
-    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -qx 'sync:' "${callLog}"
 )
 
 runRealityStreamDisableRegression() {
@@ -14996,7 +15025,7 @@ JSON
     if remoteSubscribeFetchPartSelected rollback; then
         writeRemoteSubscribeOldOutputs
         export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fetch-failure
-        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+        if stageRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
@@ -15005,7 +15034,7 @@ JSON
 
         writeRemoteSubscribeOldOutputs
         export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=invalid-content
-        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+        if stageRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
@@ -15015,7 +15044,7 @@ JSON
         writeRemoteSubscribeOldOutputs
         export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fail-singbox-merge
         printf '{bad local json\n' >"${localDir}/sing-box/${email}"
-        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+        if stageRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
@@ -15039,7 +15068,7 @@ JSON
         printf '  - name: "sub_team"\n    type: vless\n' >"${publicDir}/clashMeta/${emailMd5}"
         printf '[{"tag":"sub_team","type":"vless"}]\n' >"${localDir}/sing-box/${email}"
         unset PADM_FAKE_REMOTE_SUBSCRIBE_MODE
-        updateRemoteSubscribe "${emailMd5}" "${email}"
+        stageRemoteSubscribe "${emailMd5}" "${email}"
         grep -qxF 'vless://new-local@new-target.example:443?security=reality#sub_team' "${publicDir}/default/${emailMd5}"
         grep -qxF -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}"
         grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
@@ -15060,7 +15089,7 @@ JSON
           .groups[0].sources |= map(if .id == "r2" or .id == "r3" then .enabled = false else . end)
         ' "$(subscriptionGroupsFile)" >"${TMP_DIR}/remote-subscribe-disabled-state.json"
         mv "${TMP_DIR}/remote-subscribe-disabled-state.json" "$(subscriptionGroupsFile)"
-        updateRemoteSubscribe "${emailMd5}" "${email}"
+        stageRemoteSubscribe "${emailMd5}" "${email}"
         grep -qxF 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}"
         if grep -q 'remote3.example' "${publicDir}/default/${emailMd5}"; then
             return 1
@@ -15104,18 +15133,46 @@ JSON
             printf '%s\n' "${payload}" >"${controlledRequestLog}"
             printf '%s\n' '{"ok":true,"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}'
         }
-        updateRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}"
+        stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}"
         jq -e --arg account "${controlledEmail}" '.account == $account' "${controlledRequestLog}" >/dev/null
         grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
         grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
         jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+
+        printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
+        printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
+        rm -f "${controlledRequestLog}"
+        local syncSnapshots='{"edge-wg":{"sub_team":{"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}}}'
+        subscriptionRemoteControlRequest() {
+            : >"${controlledRequestLog}"
+            return 98
+        }
+        stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" "${syncSnapshots}"
+        [[ ! -e "${controlledRequestLog}" ]]
+        grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
+        grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+
+        printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
+        printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
+        printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
+        syncSnapshots='{"edge-wg":null}'
+        if stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" "${syncSnapshots}" 2>/dev/null; then
+            return 1
+        fi
+        [[ ! -e "${controlledRequestLog}" ]]
+        [[ "$(<"${controlledPublic}/default/${controlledEmailMd5}")" == "old-default" ]]
+        [[ "$(<"${controlledPublic}/clashMeta/${controlledEmailMd5}")" == "old-clash" ]]
+        jq -e '.[0].tag == "old-local"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+
         printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
         printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
         printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
         subscriptionRemoteControlRequest() {
             printf '%s\n' '{"ok":false,"error":"generation_failed"}'
         }
-        if updateRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" 2>/dev/null; then
+        if stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${controlledPublic}/default/${controlledEmailMd5}")" == "old-default" ]]
@@ -15138,7 +15195,7 @@ JSON
             fi
             originalAppendUniqueLines "$@"
         }
-        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+        if stageRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
@@ -15161,7 +15218,7 @@ JSON
             fi
             originalCommitGeneratedFile "$@"
         }
-        if updateRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
+        if stageRemoteSubscribe "${emailMd5}" "${email}" 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${publicDir}/default/${emailMd5}")" == "old-default" ]]
@@ -15178,8 +15235,8 @@ JSON
 
     if remoteSubscribeFetchPartSelected idempotent; then
         writeRemoteSubscribeOldOutputs
-        updateRemoteSubscribe "${emailMd5}" "${email}"
-        updateRemoteSubscribe "${emailMd5}" "${email}"
+        stageRemoteSubscribe "${emailMd5}" "${email}"
+        stageRemoteSubscribe "${emailMd5}" "${email}"
         [[ "$(grep -cFx -- '- name: "sub_team_r1"' "${publicDir}/clashMeta/${emailMd5}")" == "1" ]]
         [[ "$(grep -cFx 'vless://uuid@remote1.example:443#sub_team_r1' "${publicDir}/default/${emailMd5}")" == "1" ]]
         [[ "$(grep -cFx 'vless://uuid@remote2.example:443#sub_team_r2' "${publicDir}/default/${emailMd5}")" == "1" ]]
@@ -15932,7 +15989,7 @@ ${controlledCredential}
 edge-a
 5
 5"
-        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
     }
@@ -15994,7 +16051,7 @@ SH
 ${updatedCredential}
 edge-a
 5"
-        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${updatedPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.3/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .host == "10.77.0.3" and .port == 48779 and .control_token == "token-b")' >/dev/null
     fi
@@ -17416,11 +17473,10 @@ main-credential"
         resetMenuActions
         manageSubscriptionPublishSubscriptions <<<"3
 demo-user
-Demo User
 main
 0
 7"
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "Demo User")' >/dev/null
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "demo-user" and .name == "demo-user")' >/dev/null
     fi
 
     if menuSmokePartSelected subscription-main-publish-user || menuSmokePartSelected subscription-main-publish-user-inspect; then
@@ -17431,7 +17487,6 @@ main
         if [[ "${menuSmokePart}" == "subscription-main-publish-user-inspect" ]]; then
             manageSubscriptionPublishSubscriptions <<<"3
 demo-user
-Demo User
 main
 0
 7"
@@ -17457,14 +17512,13 @@ demo-user
         subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
         manageSubscriptionPublishSubscriptions <<<"3
 team-a
-Team A
 *
 0
 n
 7"
-        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "Team A")' >/dev/null
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
-        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        assertMenuAction 'runSubscriptionGroupSync:'
     fi
 
     if menuSmokePartSelected subscription-main-publish-sync || menuSmokePartSelected subscription-main-publish-sync-enable; then
@@ -17478,13 +17532,12 @@ n
         subscriptionGroupsStateWrite --arg groupId "default" '.groups |= map(if .id == $groupId then .sync.enabled = false else . end)'
         manageSubscriptionPublishSubscriptions <<<"3
 team-b
-Team B
 main
 0
 
 7"
         assertMenuAction refreshSubscriptionGroupSyncCron
-        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
+        assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == true' >/dev/null
     fi
 
@@ -17546,11 +17599,7 @@ n
         resetMenuActions
         manageSubscriptionMainMaintenance <<<"2
 9"
-        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-        if assertMenuAction 'runSubscriptionGroupSync:'; then
-            printf 'menu-smoke failed: main maintenance sync still triggers publish refresh path\n' >&2
-            return 1
-        fi
+        assertMenuAction 'runSubscriptionGroupSync:'
         resetMenuActions
         manageSubscriptionMainMaintenance <<<"3
 9"
@@ -17585,11 +17634,7 @@ n
         resetMenuActions
         manageSubscriptionSyncSettings <<<"5
 12"
-        assertMenuAction 'runSubscriptionGroupSync:skip-subscribe-refresh'
-        if assertMenuAction 'runSubscriptionGroupSync:'; then
-            printf 'menu-smoke failed: sync settings immediate sync still triggers publish refresh path\n' >&2
-            return 1
-        fi
+        assertMenuAction 'runSubscriptionGroupSync:'
         resetMenuActions
         manageSubscriptionSyncSettings <<<"10
 12"
@@ -19692,7 +19737,7 @@ EOF
     (
         cp() {
             printf 'cp %s\n' "$*" >>"${cpLog}"
-            if [[ "$1" == "-R" && "$2" == "${sourceDir}/shell" ]]; then
+            if [[ "$1" == "-a" && "$2" == "${sourceDir}/shell" ]]; then
                 return 1
             fi
             command cp "$@"
@@ -19707,9 +19752,9 @@ EOF
     rc=$(<"${rcFile}")
 
     [[ "${rc}" == "1" ]]
-    grep -q "cp -R ${sourceDir}/shell " "${cpLog}"
-    ! grep -q "cp -R ${sourceDir}/documents " "${cpLog}"
-    ! grep -q "cp -R ${sourceDir}/assets " "${cpLog}"
+    grep -q "cp -a ${sourceDir}/shell " "${cpLog}"
+    ! grep -q "cp -a ${sourceDir}/documents " "${cpLog}"
+    ! grep -q "cp -a ${sourceDir}/assets " "${cpLog}"
     [[ "$(<"${targetDir}/shell/marker")" == "old-shell" ]]
     [[ "$(<"${targetDir}/documents/marker")" == "old-doc" ]]
     [[ "$(<"${targetDir}/assets/marker")" == "old-asset" ]]

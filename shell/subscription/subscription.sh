@@ -774,16 +774,16 @@ mergeSingBoxSubscribeOutbounds() {
     padmRemoveCleanupPath "${remoteTmpPath}"
 }
 
-# 更新远程订阅源
-updateRemoteSubscribe() {
+# 生成远端订阅暂存输出
+stageRemoteSubscribe() {
     local emailMD5=$1
     local email=$2
+    local syncSnapshots=${3:-}
     local line=
     local source=
     local sourceLines=
     local escapedEmail=
-    local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget remoteBackupDir=
-    local commitFailed=false
+    local tmpDir stageDir publicBase localBase defaultTarget clashTarget singBoxTarget
 
     subscriptionRemoteScopeEnabled || return 0
 
@@ -845,7 +845,21 @@ updateRemoteSubscribe() {
         source=$(subscriptionActiveGroupRead -c --arg id "${serverAlias}" '.sources[]? | select(.id == $id)' 2>/dev/null) || source=
         if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
             controlledResponse=
-            if controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
+            if [[ -n "${syncSnapshots}" ]]; then
+                if jq -e --arg sourceId "${serverAlias}" 'type == "object" and has($sourceId)' <<<"${syncSnapshots}" >/dev/null 2>&1; then
+                    controlledResponse=$(jq -ce --arg sourceId "${serverAlias}" --arg account "${email}" '
+                      .[$sourceId]
+                      | select(type == "object" and has($account))
+                      | .[$account]
+                      | select(type == "object")
+                      | . + {ok:true, account:$account}
+                    ' <<<"${syncSnapshots}") || controlledResponse=
+                elif jq -e 'type == "object"' <<<"${syncSnapshots}" >/dev/null 2>&1 &&
+                    controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
+                    controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null); then
+                    :
+                fi
+            elif controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
                 controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null); then
                 :
             fi
@@ -935,33 +949,12 @@ updateRemoteSubscribe() {
         rm -f "${clashFile}" "${defaultFile}" "${singBoxFile}"
     done <<<"${sourceLines}"
 
-    checkLogBackupCreate remoteBackupDir \
-        "${publicBase}/default/${emailMD5}" \
-        "${publicBase}/clashMeta/${emailMD5}" \
-        "${localBase}/sing-box/${email}" || {
-        padmRemoveCleanupPath "${tmpDir}"
-        padmRemoveCleanupPath "${stageDir}"
-        return 1
-    }
-    padmEnsureSafeDirectory "${publicBase}/default" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-    padmEnsureSafeDirectory "${publicBase}/clashMeta" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-    padmEnsureSafeDirectory "${localBase}/sing-box" || { padmRemoveCleanupPath "${remoteBackupDir}"; padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-    commitSubscribePublicFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" || commitFailed=true
-    commitSubscribePublicFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" || commitFailed=true
-    commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || commitFailed=true
-    if [[ "${commitFailed}" == "true" ]]; then
-        if ! checkLogBackupRestore "${remoteBackupDir}"; then
-            padmForgetCleanupPath "${remoteBackupDir}"
-            padmRemoveCleanupPath "${tmpDir}"
-            padmRemoveCleanupPath "${stageDir}"
-            return 1
-        fi
-        padmRemoveCleanupPath "${remoteBackupDir}"
-        padmRemoveCleanupPath "${tmpDir}"
-        padmRemoveCleanupPath "${stageDir}"
-        return 1
-    fi
-    padmRemoveCleanupPath "${remoteBackupDir}"
+    padmEnsureSafeDirectory "${publicBase}/default" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    padmEnsureSafeDirectory "${publicBase}/clashMeta" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    padmEnsureSafeDirectory "${localBase}/sing-box" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitSubscribePublicFile "${defaultTarget}" "${publicBase}/default/${emailMD5}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitSubscribePublicFile "${clashTarget}" "${publicBase}/clashMeta/${emailMD5}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitGeneratedJsonFile "${singBoxTarget}" "${localBase}/sing-box/${email}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     padmRemoveCleanupPath "${tmpDir}"
     padmRemoveCleanupPath "${stageDir}"
 }

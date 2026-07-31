@@ -1088,11 +1088,10 @@ executeSubscriptionQuotaPlanMenu() {
 }
 
 runSubscriptionGroupSyncUnlocked() {
-    local skipSubscribeRefresh=${1:-}
-    local id
-    local accountName
     local failures='[]'
     local remoteFailures='[]'
+    local remoteSyncResult='{"failures":[],"snapshots":{}}'
+    local remoteSnapshots='{}'
     local syncPlan
     local quotaPlan='[]'
     local configBackupDir=
@@ -1161,7 +1160,7 @@ runSubscriptionGroupSyncUnlocked() {
             outputBackupDir=
             groupsBackupFile=
             rc=1
-        elif ! subscriptionSyncReconcileLocalServices "${skipSubscribeRefresh}"; then
+        elif ! subscriptionSyncReconcileLocalServices; then
             localSyncFailure="本机同步后服务重建失败"
             if subscriptionSyncRollbackLocalApply "${configBackupDir}" "${outputBackupDir}" "${localSyncFailure}" "${groupsBackupFile}"; then
                 subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}" "${groupsBackupFile}"
@@ -1209,7 +1208,13 @@ runSubscriptionGroupSyncUnlocked() {
 
     if [[ "${localSyncReady}" == "true" && "${remoteSyncEnabled}" == "true" ]]; then
         statusCard "订阅同步" "正在同步被控服务器，请稍候"
-        remoteFailures=$(runSubscriptionRemoteSync)
+        if ! remoteSyncResult=$(runSubscriptionRemoteSync) ||
+            ! jq -e '.failures | type == "array"' <<<"${remoteSyncResult}" >/dev/null 2>&1 ||
+            ! jq -e '.snapshots | type == "object"' <<<"${remoteSyncResult}" >/dev/null 2>&1; then
+            remoteSyncResult='{"failures":["被控服务器同步结果生成失败"],"snapshots":null}'
+        fi
+        remoteFailures=$(jq -c '.failures' <<<"${remoteSyncResult}")
+        remoteSnapshots=$(jq -c '.snapshots' <<<"${remoteSyncResult}")
         failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
         if [[ "${remoteFailures}" != "[]" ]]; then
             rc=1
@@ -1225,7 +1230,7 @@ runSubscriptionGroupSyncUnlocked() {
             rc=1
         elif [[ -n "${subscribePort:-}" ]]; then
             statusCard "订阅同步" "正在刷新并原子发布订阅节点，请稍候"
-            if ! subscribe false false >/dev/null 2>&1; then
+            if ! refreshPublishedSubscriptions "${remoteSnapshots}" >/dev/null 2>&1; then
                 failures=$(jq '. + ["同步完成后公网订阅刷新失败"]' <<<"${failures}")
                 rc=1
             fi
@@ -1270,7 +1275,7 @@ runSubscriptionGroupSyncUnlocked() {
 
 runSubscriptionGroupSync() {
     subscriptionRequireLocalPublisherRole || return 1
-    subscriptionGroupsWithLock runSubscriptionGroupSyncUnlocked "$@"
+    subscriptionGroupsWithLock runSubscriptionGroupSyncUnlocked
 }
 
 runSubscriptionGroupSyncCron() {
@@ -1278,11 +1283,7 @@ runSubscriptionGroupSyncCron() {
     subscriptionRequireLocalPublisherRole || return 1
     enabled=$(subscriptionActiveGroupRead -r '.sync.enabled == true') || return 1
     [[ "${enabled}" == "true" ]] || return 0
-    if [[ $# -eq 0 ]]; then
-        runSubscriptionGroupSync skip-subscribe-refresh
-    else
-        runSubscriptionGroupSync "$@"
-    fi
+    runSubscriptionGroupSync
 }
 
 subscriptionGroupSyncCronFile() {

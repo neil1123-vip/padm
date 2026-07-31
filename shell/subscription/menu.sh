@@ -142,7 +142,7 @@ runSubscriptionEventSyncIfEnabled() {
     local reason=${1:-subscription-change}
     if subscriptionEventSyncEnabled; then
         statusCard "订阅变更已保存" "正在自动同步订阅控制面（${reason}）"
-        runSubscriptionGroupSync skip-subscribe-refresh
+        runSubscriptionGroupSync
         return $?
     fi
     statusCard "订阅变更已保存" "事件同步已关闭，等待手动/定时同步" "也可到 主控维护与排障 -> 自动同步设置 中重新开启事件同步"
@@ -242,7 +242,7 @@ manageSubscriptionLocalMaintenance() {
         autoRead subscription_local_maintenance_menu "请选择:" localMaintenanceStatus
         case "${localMaintenanceStatus}" in
         1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
-        2) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
+        2) runSubscriptionGroupSync || true ;;
         3)
             showSubscriptionGroupsStateSummary
             showSubscriptionLocalSyncPlan
@@ -426,7 +426,7 @@ manageSubscriptionMainMaintenance() {
         autoRead subscription_main_maintenance_menu "请选择:" mainMaintenanceStatus
         case "${mainMaintenanceStatus}" in
         1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
-        2) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
+        2) runSubscriptionGroupSync || true ;;
         3)
             showSubscriptionGroupsStateSummary
             showSubscriptionLocalSyncPlan
@@ -888,7 +888,7 @@ manageUserSubscriptionItem() {
         autoRead user_subscription_item_menu "请选择:" userSubscriptionItemStatus
         case "${userSubscriptionItemStatus}" in
         1)
-            runSubscriptionGroupSync skip-subscribe-refresh || return 1
+            runSubscriptionGroupSync || return 1
             showUserSubscriptionLinks "${userSubscriptionId}"
             ;;
         2) showUserSubscriptionLinks "${userSubscriptionId}" ;;
@@ -1324,7 +1324,7 @@ manageSubscriptionLocalSyncSettings() {
             fi
             ;;
         3) showSubscriptionLocalSyncPlan ;;
-        4) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
+        4) runSubscriptionGroupSync || true ;;
         5) showSubscriptionQuotaPlan ;;
         6) executeSubscriptionQuotaPlanMenu ;;
         7) toggleSubscriptionGroupQuotaAutoApplyEnabled && successCard "限额自动执行状态已切换" || errorCard "限额自动执行状态切换失败" ;;
@@ -1398,7 +1398,7 @@ manageSubscriptionSyncSettings() {
             ;;
         3) showSubscriptionLocalSyncPlan ;;
         4) showSubscriptionRemoteSyncPlan ;;
-        5) runSubscriptionGroupSync skip-subscribe-refresh || true ;;
+        5) runSubscriptionGroupSync || true ;;
         6) showSubscriptionQuotaPlan ;;
         7) executeSubscriptionQuotaPlanMenu ;;
         8)

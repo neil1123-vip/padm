@@ -2405,6 +2405,7 @@ renderAllSubscribeUserOutputs() {
     local showStatus=$3
     local publishAccountsOverride=${4:-}
     local skipCleanup=${5:-}
+    local remoteSnapshots=${6:-}
     local subscribePortLocal="${subscribePort:-}"
     local email emailMd5 currentDomain account
     local publishAccounts=
@@ -2469,7 +2470,7 @@ renderAllSubscribeUserOutputs() {
             currentDomain="${currentDomain}:${subscribePort}"
         fi
 
-        if ! renderSubscribeUserOutputs "${email}" "${emailMd5}" "${currentDomain}" "${updateOtherSubscribeStatus:-}" "${showStatus}"; then
+        if ! renderSubscribeUserOutputs "${email}" "${emailMd5}" "${currentDomain}" "${updateOtherSubscribeStatus:-}" "${showStatus}" "${remoteSnapshots}"; then
             errorCard "${SUBSCRIBE_USER_OUTPUT_ERROR:-订阅生成失败，已保留旧订阅输出}"
             return 1
         fi
@@ -2589,8 +2590,8 @@ renderSubscribeUserOutputs() {
     local currentDomain=$3
     local updateRemoteStatus=$4
     local showStatus=$5
-    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath subscribeBackupDir clashSourcePath clashContentPath
-    local commitFailed=false
+    local remoteSnapshots=${6:-}
+    local localBase publicBase stageDir defaultPath clashPath clashProfilePath singBoxProfilePath singBoxPath clashProxyUrl localSingBoxTemplate base64Result singBoxTmpPath clashSourcePath clashContentPath
 
     SUBSCRIBE_USER_OUTPUT_ERROR=
     localBase=$(subscribeLocalBaseDir)
@@ -2618,10 +2619,19 @@ renderSubscribeUserOutputs() {
         padmRemoveCleanupPath "${stageDir}"
         return 1
     fi
+    if [[ -f "${localBase}/clashMeta/${email}" ]]; then
+        cp "${localBase}/clashMeta/${email}" "${clashPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    fi
+    if [[ -f "${localBase}/sing-box/${email}" ]]; then
+        cp "${localBase}/sing-box/${email}" "${singBoxProfilePath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    fi
     if [[ "${updateRemoteStatus}" == "y" ]] && subscriptionRemoteScopeEnabled; then
-        if ! PADM_SUBSCRIBE_DIR="${stageDir}" updateRemoteSubscribe "${emailMd5}" "${email}"; then
+        if ! PADM_SUBSCRIBE_DIR="${stageDir}" stageRemoteSubscribe "${emailMd5}" "${email}" "${remoteSnapshots}"; then
             padmRemoveCleanupPath "${stageDir}"
             return 1
+        fi
+        if [[ -f "${localBase}/sing-box/${email}" ]]; then
+            cp "${localBase}/sing-box/${email}" "${singBoxProfilePath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         fi
     fi
     if [[ ! -s "${defaultPath}" ]]; then
@@ -2634,10 +2644,7 @@ renderSubscribeUserOutputs() {
     fi
     printf '%s\n' "${base64Result}" >"${defaultPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
 
-    clashSourcePath="${localBase}/clashMeta/${email}"
-    if [[ ! -f "${clashSourcePath}" && -s "${clashPath}" ]]; then
-        clashSourcePath="${clashPath}"
-    fi
+    clashSourcePath="${clashPath}"
     if [[ -f "${clashSourcePath}" ]]; then
         clashContentPath="${clashSourcePath}"
         if [[ "${clashSourcePath}" == "${clashPath}" ]]; then
@@ -2656,11 +2663,7 @@ renderSubscribeUserOutputs() {
         fi
     fi
 
-    if [[ -f "${localBase}/sing-box/${email}" ]]; then
-        if ! cp "${localBase}/sing-box/${email}" "${singBoxProfilePath}"; then
-            padmRemoveCleanupPath "${stageDir}"
-            return 1
-        fi
+    if [[ -f "${singBoxProfilePath}" ]]; then
         [[ -z "${showStatus}" ]] && statusCard "sing-box 通用配置" "正在生成 sing-box 通用配置文件"
         localSingBoxTemplate="${SCRIPT_DIR:-/etc/padm}/documents/sing-box.json"
         if [[ ! -f "${localSingBoxTemplate}" ]]; then
@@ -2669,7 +2672,7 @@ renderSubscribeUserOutputs() {
         fi
         cp "${localSingBoxTemplate}" "${singBoxPath}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
         padmCreateTempFileForTarget singBoxTmpPath "${singBoxPath}" singbox || { padmRemoveCleanupPath "${stageDir}"; return 1; }
-        if ! jq --slurpfile localOutbounds "${localBase}/sing-box/${email}" '
+        if ! jq --slurpfile localOutbounds "${singBoxProfilePath}" '
           ($localOutbounds[0] | map(.tag)) as $tags |
           .outbounds |= (map(if has("outbounds") then .outbounds += $tags else . end) + $localOutbounds[0])
         ' "${singBoxPath}" >"${singBoxTmpPath}"; then
@@ -2680,57 +2683,27 @@ renderSubscribeUserOutputs() {
         commitGeneratedJsonFile "${singBoxTmpPath}" "${singBoxPath}" || { padmRemoveCleanupPath "${singBoxTmpPath}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
     fi
 
-    checkLogBackupCreate subscribeBackupDir \
-        "${publicBase}/default/${emailMd5}" \
-        "${publicBase}/clashMeta/${emailMd5}" \
-        "${publicBase}/clashMetaProfiles/${emailMd5}" \
-        "${publicBase}/sing-box_profiles/${emailMd5}" \
-        "${publicBase}/sing-box/${emailMd5}" || {
-        padmRemoveCleanupPath "${stageDir}"
-        SUBSCRIBE_USER_OUTPUT_ERROR="订阅输出备份失败，已取消发布"
-        return 1
-    }
+    commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitSubscribeUserOutputFile "${clashPath}" "${publicBase}/clashMeta/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
+    commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}" || { padmRemoveCleanupPath "${stageDir}"; return 1; }
 
-    commitSubscribeUserOutputFile "${defaultPath}" "${publicBase}/default/${emailMd5}" || commitFailed=true
-    commitSubscribeUserOutputFile "${clashPath}" "${publicBase}/clashMeta/${emailMd5}" || commitFailed=true
-    commitSubscribeUserOutputFile "${clashProfilePath}" "${publicBase}/clashMetaProfiles/${emailMd5}" || commitFailed=true
-    commitSubscribeUserOutputFile "${singBoxProfilePath}" "${publicBase}/sing-box_profiles/${emailMd5}" || commitFailed=true
-    commitSubscribeUserOutputFile "${singBoxPath}" "${publicBase}/sing-box/${emailMd5}" || commitFailed=true
-
-    if [[ "${commitFailed}" == "true" ]]; then
-        if ! checkLogBackupRestore "${subscribeBackupDir}"; then
-            local restoreMessage
-            padmForgetCleanupPath "${subscribeBackupDir}"
-            padmRemoveCleanupPath "${stageDir}"
-            subscriptionSyncSetSingleRestoreResultMessage restoreMessage "订阅生成失败" false "已恢复旧订阅输出" "旧订阅输出" "备份目录: ${subscribeBackupDir}" || true
-            SUBSCRIBE_USER_OUTPUT_ERROR="${restoreMessage}"
-            return 1
-        fi
-        local restoreMessage
-        padmRemoveCleanupPath "${subscribeBackupDir}"
-        padmRemoveCleanupPath "${stageDir}"
-        subscriptionSyncSetSingleRestoreResultMessage restoreMessage "订阅生成失败" true "已恢复旧订阅输出" "旧订阅输出" "备份目录: ${subscribeBackupDir}"
-        SUBSCRIBE_USER_OUTPUT_ERROR="${restoreMessage}"
-        return 1
-    fi
-
-    padmRemoveCleanupPath "${subscribeBackupDir}"
     padmRemoveCleanupPath "${stageDir}"
     return 0
 }
 
-# 订阅
-subscribeUnlocked() {
-    readInstallProtocolType
-    if ! installSubscribe; then
+# 生成并发布订阅输出
+generateSubscribeOutputsUnlocked() {
+    if ! readNginxSubscribe; then
+        errorCard "订阅生成失败：订阅服务配置读取失败"
         return 1
     fi
-
-    readNginxSubscribe
     local renewSalt=$1
     local showStatus=$2
     local publishAccountsOverride=${3:-}
     local skipCleanup=${4:-}
+    local remoteSnapshots=${5:-}
     if [[ "${coreInstallType}" == "1" || "${coreInstallType}" == "2" ]]; then
 
         echoContent title "\n┌─ 订阅生成说明 ─────────────────────────────────────"
@@ -2739,15 +2712,37 @@ subscribeUnlocked() {
         menuLine "不影响已添加的远程订阅内容"
         menuClose
 
-        local localBase subscribeSaltFile backupDir previousSubscribeSalt
+        local localBase publicBase subscribeSaltFile backupDir previousSubscribeSalt publishStage
         localBase=$(subscribeLocalBaseDir)
+        publicBase=$(padmResolveManagedAbsolutePath "$(subscribePublicBaseDir)") || return 1
         subscribeSaltFile="${localBase}/subscribeSalt"
         previousSubscribeSalt=$(readSubscribeSalt "${subscribeSaltFile}")
         if ! subscriptionSyncCreateSubscribeOutputBackups backupDir; then
             errorCard "订阅生成失败：备份旧订阅输出失败"
             return 1
         fi
+        if ! padmCreateTmpRootPath publishStage padm-subscribe-publish.XXXXXX -d; then
+            padmRemoveCleanupPath "${backupDir}"
+            errorCard "订阅生成失败：创建发布暂存目录失败"
+            return 1
+        fi
+        if ! mkdir -p \
+            "${publishStage}/default" \
+            "${publishStage}/clashMeta" \
+            "${publishStage}/clashMetaProfiles" \
+            "${publishStage}/sing-box" \
+            "${publishStage}/sing-box_profiles"; then
+            padmRemoveCleanupPath "${publishStage}"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：准备发布暂存目录失败" "${previousSubscribeSalt}" true
+            return 1
+        fi
+        if [[ "${skipCleanup}" == "true" && -d "${publicBase}" ]] && ! cp -a "${publicBase}/." "${publishStage}/"; then
+            padmRemoveCleanupPath "${publishStage}"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：准备发布暂存目录失败" "${previousSubscribeSalt}" true
+            return 1
+        fi
         if ! resolveSubscribeSalt "${subscribeSaltFile}" "${renewSalt}"; then
+            padmRemoveCleanupPath "${publishStage}"
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅 Salt 初始化失败" "${previousSubscribeSalt}" true
             return 1
         fi
@@ -2755,17 +2750,33 @@ subscribeUnlocked() {
         if ! cleanDirectoryContent "${localBase}/default" ||
             ! cleanDirectoryContent "${localBase}/clashMeta" ||
             ! cleanDirectoryContent "${localBase}/sing-box"; then
+            padmRemoveCleanupPath "${publishStage}"
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：清理本地订阅目录失败" "${previousSubscribeSalt}" true
             return 1
         fi
         if ! showAccounts >/dev/null; then
+            padmRemoveCleanupPath "${publishStage}"
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：重建本地订阅失败" "${previousSubscribeSalt}" true
             return 1
         fi
-        if ! renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" "${publishAccountsOverride}" "${skipCleanup}"; then
+        if ! PADM_SUBSCRIBE_DIR="${publishStage}" renderAllSubscribeUserOutputs "${localBase}" "${renewSalt}" "${showStatus}" "${publishAccountsOverride}" "${skipCleanup}" "${remoteSnapshots}"; then
+            padmRemoveCleanupPath "${publishStage}"
             restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：生成订阅输出失败" "${previousSubscribeSalt}" true
             return 1
         fi
+        if ! chmod 755 \
+            "${publishStage}" \
+            "${publishStage}/default" \
+            "${publishStage}/clashMeta" \
+            "${publishStage}/clashMetaProfiles" \
+            "${publishStage}/sing-box" \
+            "${publishStage}/sing-box_profiles" ||
+            ! syncInstallDirectoryTree "${publishStage}" "${publicBase}"; then
+            padmRemoveCleanupPath "${publishStage}"
+            restoreLocalSubscribeOutputs "${localBase}" "${backupDir}" "订阅生成失败：发布订阅输出失败" "${previousSubscribeSalt}" true
+            return 1
+        fi
+        padmRemoveCleanupPath "${publishStage}"
         padmRemoveCleanupPath "${backupDir}"
     else
         errorCard "未安装传统 TLS fallback 静态站点，无法使用订阅服务"
@@ -2773,8 +2784,20 @@ subscribeUnlocked() {
     fi
 }
 
+subscribeUnlocked() {
+    readInstallProtocolType
+    installSubscribe || return 1
+    generateSubscribeOutputsUnlocked "$@"
+}
+
 subscribe() {
     subscriptionGroupsWithLock subscribeUnlocked "$@"
+}
+
+refreshPublishedSubscriptions() {
+    local remoteSnapshots=${1:-}
+    readInstallProtocolType
+    subscriptionGroupsWithLock generateSubscribeOutputsUnlocked false false "" "" "${remoteSnapshots}"
 }
 
 

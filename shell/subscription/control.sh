@@ -190,7 +190,10 @@ subscriptionRemoteControlPayload() {
     sourceId=$(jq -r '.id' <<<"${source}")
     [[ -n "${desiredUsersBySource}" ]] || return 1
     users=$(jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []' <<<"${desiredUsersBySource}") || return 1
-    jq -n --arg sourceId "${sourceId}" --arg groupId "$(activeSubscriptionGroupId)" --argjson dryRun "${dryRun}" --argjson users "${users}" '{version:1, group_id:$groupId, source_id:$sourceId, dry_run:$dryRun, desired_users:$users}'
+    jq -n --arg sourceId "${sourceId}" --arg groupId "$(activeSubscriptionGroupId)" --argjson dryRun "${dryRun}" --argjson users "${users}" '
+      {version:1, group_id:$groupId, source_id:$sourceId, dry_run:$dryRun, desired_users:$users}
+      + if $dryRun then {} else {include_subscriptions:true} end
+    '
 }
 
 subscriptionRemoteResponseErrorMessage() {
@@ -397,7 +400,6 @@ subscriptionRemoteSyncPlan() {
 }
 
 runSubscriptionRemoteSync() {
-    local source
     local sources
     local desiredUsersBySource='{}'
     local sourceId
@@ -409,6 +411,10 @@ runSubscriptionRemoteSync() {
     local plan
     local stateWriteFailed
     local failures='[]'
+    local snapshots='{}'
+    local sourceSnapshots
+    local expectedAccounts
+    local snapshotInvalid
     sources=$(subscriptionRemoteControlSources) || return 1
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
@@ -425,6 +431,7 @@ runSubscriptionRemoteSync() {
         [[ -n "${sourceId}" ]] || return 1
         status=$(jq -r '.status // empty' <<<"${sourceResult}") || return 1
         stateWriteFailed=false
+        snapshotInvalid=false
         case "${status}" in
         self_reference)
             errorMessage=$(jq -r '.error_detail.message // "服务器源指向当前订阅服务，已跳过以避免递归同步"' <<<"${sourceResult}") || return 1
@@ -439,7 +446,36 @@ runSubscriptionRemoteSync() {
         success)
             changed=$(jq -r 'if (.response | has("changed")) then .response.changed else true end' <<<"${sourceResult}") || return 1
             plan=$(jq -c '.response.plan // {create: [], remove: []}' <<<"${sourceResult}") || return 1
-            setSubscriptionSourceSyncStatus "${sourceId}" success "${changed}" "${plan}" || stateWriteFailed=true
+            if jq -e '.response | has("subscriptions")' <<<"${sourceResult}" >/dev/null 2>&1; then
+                expectedAccounts=$(jq -c --arg sourceId "${sourceId}" '[.[$sourceId][]?.account] | sort' <<<"${desiredUsersBySource}") || return 1
+                if sourceSnapshots=$(jq -ce --argjson expectedAccounts "${expectedAccounts}" '
+                  .response.subscriptions as $subscriptions
+                  | select(
+                      ($subscriptions | type == "object") and
+                      (($subscriptions | keys | sort) == $expectedAccounts) and
+                      ($subscriptions | all(to_entries[]?;
+                        (.key | type == "string" and test("^[A-Za-z0-9_-]+$")) and
+                        (.value | type == "object") and
+                        (.value.default | type == "string") and
+                        (.value.clash_meta | type == "string") and
+                        (.value.sing_box | type == "array") and
+                        (.value.sing_box | all(.[]?; type == "object" and ((.tag // "") | type == "string")))
+                      ))
+                    )
+                  | $subscriptions
+                ' <<<"${sourceResult}"); then
+                    snapshots=$(jq -c --arg sourceId "${sourceId}" --argjson sourceSnapshots "${sourceSnapshots}" '. + {($sourceId):$sourceSnapshots}' <<<"${snapshots}") || return 1
+                else
+                    snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
+                    failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 返回的订阅快照格式无效"]' <<<"${failures}") || return 1
+                    snapshotInvalid=true
+                fi
+            fi
+            if [[ "${snapshotInvalid}" == "true" ]]; then
+                setSubscriptionSourceSyncFailure "${sourceId}" invalid_response "返回的订阅快照格式无效" || stateWriteFailed=true
+            else
+                setSubscriptionSourceSyncStatus "${sourceId}" success "${changed}" "${plan}" || stateWriteFailed=true
+            fi
             ;;
         remote_error)
             errorMessage=$(jq -r 'if ((.error_detail.message // "") | length) > 0 then .error_detail.message else (.error // "unknown_error") end' <<<"${sourceResult}") || return 1
@@ -460,11 +496,14 @@ runSubscriptionRemoteSync() {
             return 1
             ;;
         esac
+        if [[ "${status}" != "success" ]]; then
+            snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
+        fi
         if [[ "${stateWriteFailed}" == "true" ]]; then
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 同步状态写入失败"]' <<<"${failures}") || return 1
         fi
     done < <(jq -c '.[]' <<<"${syncResults}")
-    echo "${failures}"
+    jq -n --argjson failures "${failures}" --argjson snapshots "${snapshots}" '{failures:$failures, snapshots:$snapshots}'
 }
 
 subscriptionGroupSyncInstallScript() {
@@ -1153,6 +1192,29 @@ subscriptionControlRestoreAppliedPlan() {
     fi
 }
 
+subscriptionControlSyncResponse() {
+    local plan=$1
+    local dryRun=$2
+    local changed=$3
+    local desiredUsers=$4
+    local includeSubscriptions=$5
+    local subscriptions
+
+    if [[ "${dryRun}" != "true" && "${includeSubscriptions}" == "true" ]]; then
+        if subscriptions=$(subscriptionControlRenderSubscribeAccounts "${desiredUsers}"); then
+            jq -n --argjson plan "${plan}" --argjson changed "${changed}" --argjson subscriptions "${subscriptions}" \
+                '{ok:true, dry_run:false, changed:$changed, plan:$plan, subscriptions:$subscriptions}'
+        else
+            jq -n --argjson plan "${plan}" --argjson changed "${changed}" \
+                '{ok:false, dry_run:false, changed:$changed, plan:$plan, error:"generation_failed", error_detail:{type:"generation_failed", message:"远端订阅快照生成失败"}}'
+            return 1
+        fi
+    else
+        jq -n --argjson plan "${plan}" --argjson dryRun "${dryRun}" --argjson changed "${changed}" \
+            '{ok:true, dry_run:$dryRun, changed:$changed, plan:$plan}'
+    fi
+}
+
 subscriptionControlApplySyncUnlocked() {
     local payload=$1
     local dryRun
@@ -1162,12 +1224,14 @@ subscriptionControlApplySyncUnlocked() {
     local configBackupDir=
     local outputBackupDir=
     local prepareFailureMessage=
+    local includeSubscriptions
     if ! jq -e '
       def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
       type == "object" and
       (.desired_users? | type == "array") and
       ((has("dry_run") | not) or (.dry_run | type == "boolean")) and
+      ((has("include_subscriptions") | not) or (.include_subscriptions | type == "boolean")) and
       all(.desired_users[]?; type == "object" and
         (.id | valid_id) and
         (has("uuid") and (.uuid | valid_uuid)) and
@@ -1180,6 +1244,7 @@ subscriptionControlApplySyncUnlocked() {
         return 1
     fi
     dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
+    includeSubscriptions=$(jq -r '.include_subscriptions // false' <<<"${payload}")
     desiredUsers=$(jq '[.desired_users[]? | {id, uuid}]' <<<"${payload}") || {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
@@ -1197,8 +1262,8 @@ subscriptionControlApplySyncUnlocked() {
         return 1
     fi
     if jq -e '(.create | length == 0) and (.remove | length == 0)' <<<"${plan}" >/dev/null 2>&1; then
-        jq -n --argjson plan "${plan}" --argjson dryRun "${dryRun}" '{ok:true, dry_run:$dryRun, changed:false, plan:$plan}'
-        return 0
+        subscriptionControlSyncResponse "${plan}" "${dryRun}" false "${desiredUsers}" "${includeSubscriptions}"
+        return
     fi
     if [[ "${dryRun}" == "true" ]]; then
         jq -n --argjson plan "${plan}" '{ok:true, dry_run:true, changed:true, plan:$plan}'
@@ -1259,7 +1324,7 @@ subscriptionControlApplySyncUnlocked() {
         fi
     fi
     subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-    jq -n --argjson plan "${plan}" '{ok:true, dry_run:false, changed:true, plan:$plan}'
+    subscriptionControlSyncResponse "${plan}" false true "${desiredUsers}" "${includeSubscriptions}"
 }
 
 subscriptionControlApplySync() {
@@ -1374,4 +1439,55 @@ subscriptionControlRenderSubscribeAccount() (
         --arg clashMeta "${clashContent}" \
         --argjson singBox "${singBoxContent}" \
         '{ok:true, account:$account, default:$default, clash_meta:$clashMeta, sing_box:$singBox}'
+)
+
+subscriptionControlRenderSubscribeAccounts() (
+    local desiredUsers=$1
+    local subscribeRoot=
+    local localBase account id defaultContent clashContent singBoxContent subscriptions='{}' snapshot
+
+    jq -e 'type == "array" and all(.[]?; (.id | type == "string" and length > 0))' <<<"${desiredUsers}" >/dev/null 2>&1 || return 1
+    if jq -e 'length == 0' <<<"${desiredUsers}" >/dev/null 2>&1; then
+        printf '{}\n'
+        return 0
+    fi
+    padmCreateTmpRootPath subscribeRoot padm-control-subscriptions.XXXXXX -d || return 1
+    export PADM_SUBSCRIBE_LOCAL_DIR="${subscribeRoot}/subscribe_local"
+    export PADM_SUBSCRIBE_DIR="${subscribeRoot}/subscribe"
+    mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box" || {
+        padmRemoveCleanupPath "${subscribeRoot}"
+        return 1
+    }
+    showAccounts >/dev/null 2>&1 || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+    localBase=$(subscribeLocalBaseDir)
+    while IFS= read -r id; do
+        [[ -n "${id}" ]] || continue
+        account=$(subscriptionSyncAccountName "${id}") || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+        [[ -f "${localBase}/default/${account}" || -f "${localBase}/clashMeta/${account}" || -f "${localBase}/sing-box/${account}" ]] || {
+            padmRemoveCleanupPath "${subscribeRoot}"
+            return 1
+        }
+        defaultContent=
+        clashContent=
+        singBoxContent='[]'
+        if [[ -f "${localBase}/default/${account}" ]]; then
+            defaultContent=$(base64 <"${localBase}/default/${account}" | tr -d '\n') || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+        fi
+        [[ -f "${localBase}/clashMeta/${account}" ]] && clashContent=$(<"${localBase}/clashMeta/${account}")
+        if [[ -f "${localBase}/sing-box/${account}" ]]; then
+            singBoxContent=$(jq -c . "${localBase}/sing-box/${account}") || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+        fi
+        snapshot=$(jq -n \
+            --arg default "${defaultContent}" \
+            --arg clashMeta "${clashContent}" \
+            --argjson singBox "${singBoxContent}" \
+            '{default:$default, clash_meta:$clashMeta, sing_box:$singBox}') || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+        subscriptions=$(jq -c --arg account "${account}" --argjson snapshot "${snapshot}" '. + {($account):$snapshot}' <<<"${subscriptions}") || {
+            padmRemoveCleanupPath "${subscribeRoot}"
+            return 1
+        }
+    done < <(jq -r '.[].id' <<<"${desiredUsers}")
+    (( $(printf '%s' "${subscriptions}" | wc -c) <= 900000 )) || { padmRemoveCleanupPath "${subscribeRoot}"; return 1; }
+    padmRemoveCleanupPath "${subscribeRoot}"
+    printf '%s\n' "${subscriptions}"
 )

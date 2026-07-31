@@ -766,7 +766,7 @@ handleScriptCommand() {
         fi
         exit "${updateStatus}"
     elif [[ "${cronName}" == "SyncSubscriptionGroups" ]]; then
-        runSubscriptionGroupSyncCron skip-subscribe-refresh
+        runSubscriptionGroupSyncCron
         exit $?
     elif [[ "${cronName}" == "SubscriptionControl" ]]; then
         shift

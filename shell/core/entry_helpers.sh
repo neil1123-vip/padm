@@ -1282,7 +1282,7 @@ syncInstallDirectoryTree() {
 
     padmCreateTempPathCompat stageRoot -d "${targetParent}/.${targetName}.padm-stage.XXXXXX" || return 1
     stageDir="${stageRoot}/${targetName}"
-    if ! cp -R "${sourceDir}" "${stageDir}"; then
+    if ! cp -a "${sourceDir}" "${stageDir}"; then
         cleanupInstallSyncPath "${stageRoot}"
         return 1
     fi

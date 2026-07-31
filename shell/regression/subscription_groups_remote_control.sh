@@ -458,7 +458,7 @@ runRemoteControlInlineTokenConsumersRegression() (
     local statusLog="${TMP_DIR}/remote-control-inline-token-consumers.status"
     local healthLog="${TMP_DIR}/remote-control-inline-token-consumers.health"
     local planResponse
-    local syncFailures
+    local syncResult
 
     subscriptionRemoteControlToken() {
         return 96
@@ -504,13 +504,18 @@ runRemoteControlInlineTokenConsumersRegression() (
     planResponse=$(jq -c . <<<"${planResponse}") || return 1
     jq -e '.source_id == "edge-remote" and .status == "success" and .dry_run == true and .request.source_id == "edge-remote" and .request.dry_run == true and .request.desired_users[0].account == "sub_team_a" and .response.ok == true' <<<"${planResponse}" >/dev/null || return 1
 
-    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null || true)
-    [[ -n "${syncFailures}" ]] || return 1
-    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
-    [[ "${syncFailures}" == '[]' ]] || return 1
+    syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
+    [[ -n "${syncResult}" ]] || return 1
+    syncResult=$(jq -c . <<<"${syncResult}") || return 1
+    jq -e '.failures == [] and .snapshots == {}' <<<"${syncResult}" >/dev/null || return 1
     [[ -f "${requestPayloadLog}" ]] || return 1
     [[ -f "${statusLog}" ]] || return 1
-    jq -s -e 'length == 2 and .[0].dry_run == true and .[1].dry_run == false and all(.[]; .source_id == "edge-remote" and .desired_users[0].account == "sub_team_a")' "${requestPayloadLog}" >/dev/null || return 1
+    jq -s -e '
+      length == 2 and
+      .[0].dry_run == true and (.[0] | has("include_subscriptions") | not) and
+      .[1].dry_run == false and .[1].include_subscriptions == true and
+      all(.[]; .source_id == "edge-remote" and .desired_users[0].account == "sub_team_a")
+    ' "${requestPayloadLog}" >/dev/null || return 1
     grep -qx $'edge-remote\tsync' "${statusLog}" || return 1
     grep -qx $'status\tedge-remote\tsuccess' "${statusLog}" || return 1
     [[ ! -e "${healthLog}" ]] || return 1
@@ -522,7 +527,8 @@ runRemoteControlInlineSyncRunnerRegression() (
     local desiredUsersBySourceJson='{"edge-remote":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
     local statusLog="${TMP_DIR}/remote-control-inline-sync-runner.status"
     local sourceResultLog="${TMP_DIR}/remote-control-inline-sync-runner.calls"
-    local syncFailures
+    local syncResult
+    local snapshotMode=valid
 
     : >"${sourceResultLog}"
 
@@ -546,10 +552,17 @@ runRemoteControlInlineSyncRunnerRegression() (
         [[ "$(jq -r '.id' <<<"${sourceJson}")" == "edge-remote" ]] || return 1
         [[ "${dryRun}" == "false" ]] || return 1
         jq -e '.["edge-remote"][0].account == "sub_team_a"' <<<"${desiredUsersBySource}" >/dev/null || return 1
-        jq -n \
-            --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
-            --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}' \
-            '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
+        if [[ "${snapshotMode}" == "missing" ]]; then
+            jq -n \
+                --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
+                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{}}' \
+                '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
+        else
+            jq -n \
+                --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
+                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{"sub_team_a":{"default":"dmxlc3M6Ly9zbmFwc2hvdA==","clash_meta":"name: sub_team_a","sing_box":[]}}}' \
+                '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
+        fi
     }
     setSubscriptionSourceSyncStatus() {
         printf 'status\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >>"${statusLog}"
@@ -558,21 +571,30 @@ runRemoteControlInlineSyncRunnerRegression() (
         printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
     }
 
-    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null || true)
-    [[ -n "${syncFailures}" ]] || return 1
-    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
-    [[ "${syncFailures}" == '[]' ]] || return 1
+    syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
+    [[ -n "${syncResult}" ]] || return 1
+    syncResult=$(jq -c . <<<"${syncResult}") || return 1
+    jq -e '.failures == [] and .snapshots["edge-remote"].sub_team_a.default == "dmxlc3M6Ly9zbmFwc2hvdA=="' <<<"${syncResult}" >/dev/null || return 1
     [[ "$(wc -l <"${sourceResultLog}")" == "1" ]] || return 1
     [[ -f "${statusLog}" ]] || return 1
     grep -Fqx $'status\tedge-remote\tsuccess\tfalse\t{"create":[],"remove":[]}' "${statusLog}" || return 1
     ! grep -q '^failure	' "${statusLog}" || return 1
 
+    snapshotMode=missing
+    : >"${statusLog}"
+    syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
+    [[ -n "${syncResult}" ]] || return 1
+    jq -e '.failures == ["远程服务器源 edge-remote 返回的订阅快照格式无效"] and .snapshots["edge-remote"] == null' <<<"${syncResult}" >/dev/null || return 1
+    grep -Fqx $'failure\tedge-remote\tinvalid_response\t返回的订阅快照格式无效' "${statusLog}" || return 1
+    ! grep -q '^status	' "${statusLog}" || return 1
+    snapshotMode=valid
+
     setSubscriptionSourceSyncStatus() {
         return 71
     }
-    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null) || return 1
-    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
-    jq -e 'length == 1 and .[0] == "远程服务器源 edge-remote 同步状态写入失败"' <<<"${syncFailures}" >/dev/null
+    syncResult=$(runSubscriptionRemoteSync 2>/dev/null) || return 1
+    syncResult=$(jq -c . <<<"${syncResult}") || return 1
+    jq -e '.failures == ["远程服务器源 edge-remote 同步状态写入失败"] and .snapshots["edge-remote"].sub_team_a.default == "dmxlc3M6Ly9zbmFwc2hvdA=="' <<<"${syncResult}" >/dev/null
 )
 
 runRemoteControlInlineSyncParallelRunnerRegression() (
@@ -581,7 +603,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
     local statusLog="${TMP_DIR}/remote-control-inline-sync-parallel-runner.status"
     local callLog="${TMP_DIR}/remote-control-inline-sync-parallel-runner.calls"
     local brokenStarted="${TMP_DIR}/remote-control-inline-sync-parallel-runner.broken-started"
-    local syncFailures
+    local syncResult
 
     : >"${callLog}"
 
@@ -621,10 +643,11 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
         printf 'failure\t%s\t%s\t%s\n' "$1" "$2" "$3" >>"${statusLog}"
     }
 
-    syncFailures=$(runSubscriptionRemoteSync 2>/dev/null || true)
-    [[ -n "${syncFailures}" ]] || return 1
-    syncFailures=$(jq -c . <<<"${syncFailures}") || return 1
-    jq -e 'length == 1 and (.[0] | contains("edge-broken"))' <<<"${syncFailures}" >/dev/null || return 1
+    syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
+    [[ -n "${syncResult}" ]] || return 1
+    syncResult=$(jq -c . <<<"${syncResult}") || return 1
+    jq -e '.failures | length == 1 and (.[0] | contains("edge-broken"))' <<<"${syncResult}" >/dev/null || return 1
+    jq -e '.snapshots["edge-broken"] == null and (.snapshots | has("edge-broken")) and (.snapshots | has("edge-slow") | not)' <<<"${syncResult}" >/dev/null || return 1
     grep -qx 'edge-slow-start' "${callLog}" || return 1
     grep -qx 'edge-broken-start' "${callLog}" || return 1
     ! grep -qx 'edge-broken-not-parallel' "${callLog}" || return 1
@@ -639,10 +662,18 @@ runRemoteControlHandleInlineHelpersRegression() (
     local credentialPlan
     local healthResponse
     local syncResponse
+    local syncSnapshotResponse
+    local emptySnapshotResponse
+    local invalidSnapshotResponse
+    local invalidSnapshotStatus
+    local syncSnapshotFailureStatus
     local subscribeResponse
     local generationFailureResponse
     local generationFailureStatus
     local syncLockMarker="${controlRoot}/sync-lock-observed"
+    local snapshotLog="${controlRoot}/snapshot.log"
+    local expectedDefault
+    local expectedDefaultB
 
     mkdir -p "${controlRoot}/state"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${controlRoot}/state"
@@ -680,7 +711,43 @@ runRemoteControlHandleInlineHelpersRegression() (
     syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' | jq -c .)
     [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":false'* ]]
     [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
+    [[ "${syncResponse}" != *'"subscriptions"'* ]]
     [[ -e "${syncLockMarker}" ]]
+
+    showAccounts() {
+        printf 'show\n' >>"${snapshotLog}"
+        mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box"
+        printf 'vless://snapshot\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/sub_team_a"
+        printf 'name: sub_team_a\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/sub_team_a"
+        printf '[{"tag":"sub_team_a"}]\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/sub_team_a"
+        printf 'trojan://snapshot-b\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/sub_team_b"
+        printf 'name: sub_team_b\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/sub_team_b"
+        printf '[{"tag":"sub_team_b"}]\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/sub_team_b"
+    }
+    expectedDefault=$(printf 'vless://snapshot\n' | base64 | tr -d '\n')
+    expectedDefaultB=$(printf 'trojan://snapshot-b\n' | base64 | tr -d '\n')
+    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false,"include_subscriptions":true}' | jq -c .)
+    jq -e --arg expectedDefault "${expectedDefault}" --arg expectedDefaultB "${expectedDefaultB}" '
+      .ok == true and .dry_run == false and .changed == false and
+      .subscriptions.sub_team_a.default == $expectedDefault and
+      .subscriptions.sub_team_a.clash_meta == "name: sub_team_a" and
+      .subscriptions.sub_team_a.sing_box == [{"tag":"sub_team_a"}] and
+      .subscriptions.sub_team_b.default == $expectedDefaultB and
+      .subscriptions.sub_team_b.clash_meta == "name: sub_team_b" and
+      .subscriptions.sub_team_b.sing_box == [{"tag":"sub_team_b"}]
+    ' <<<"${syncSnapshotResponse}" >/dev/null
+    [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "1" ]]
+
+    emptySnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":true}' | jq -c .)
+    jq -e '.ok == true and .subscriptions == {}' <<<"${emptySnapshotResponse}" >/dev/null
+    [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "1" ]]
+
+    set +e
+    invalidSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":"yes"}')
+    invalidSnapshotStatus=$?
+    set -e
+    [[ "${invalidSnapshotStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "invalid_payload"' <<<"${invalidSnapshotResponse}" >/dev/null
 
     subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}' | jq -c .)
     [[ "${subscribeResponse}" == *'"ok":true'*'"account":"team_a"'* ]]
@@ -690,6 +757,12 @@ runRemoteControlHandleInlineHelpersRegression() (
         printf 'private diagnostic\n' >&2
         return 1
     }
+    set +e
+    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false,"include_subscriptions":true}')
+    syncSnapshotFailureStatus=$?
+    set -e
+    [[ "${syncSnapshotFailureStatus}" -ne 0 ]]
+    jq -e '.ok == false and .changed == false and .error == "generation_failed" and .error_detail.type == "generation_failed" and has("subscriptions") == false' <<<"${syncSnapshotResponse}" >/dev/null
     set +e
     generationFailureResponse=$(originalSubscriptionControlRenderSubscribeAccount team_a)
     generationFailureStatus=$?

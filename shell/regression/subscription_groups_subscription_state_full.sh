@@ -730,7 +730,8 @@ JSON
         local cronStatus=$?
         set -e
         [[ "${cronStatus}" -eq 23 ]]
-        grep -qx 'skip-subscribe-refresh' "${TMP_DIR}/subscription-group-sync-cron-args.log"
+        [[ -f "${TMP_DIR}/subscription-group-sync-cron-args.log" ]]
+        [[ "$(<"${TMP_DIR}/subscription-group-sync-cron-args.log")" == "" ]]
     )
 }
 
@@ -778,7 +779,7 @@ runSubscriptionGroupStateRemoteRestoreSelfReferenceSyncRegression() {
     subscriptionRemoteControlRequest() {
         return 19
     }
-    runSubscriptionRemoteSync | jq -e '.[] | contains("self-ref")' >/dev/null
+    runSubscriptionRemoteSync | jq -e '.failures[] | contains("self-ref")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "self-ref" and .sync_status == "failed" and .last_sync_error.type == "self_reference")' >/dev/null
 }
 
@@ -1361,7 +1362,7 @@ JSON
     }
     runSubscriptionRemoteSync() {
         printf 'remote\n' >>"${remoteLog}"
-        printf '[]'
+        printf '{"failures":[],"snapshots":{}}'
     }
     subscriptionSyncMarkResult() {
         printf '%s\n' "$1" >"${resultStatus}"
@@ -1466,7 +1467,7 @@ JSON
     }
     runSubscriptionRemoteSync() {
         printf 'remote\n' >>"${remoteLog}"
-        printf '[]'
+        printf '{"failures":[],"snapshots":{}}'
     }
     subscriptionSyncMarkResult() {
         printf '%s\n' "$1" >"${resultStatus}"
@@ -1554,8 +1555,9 @@ JSON
     }
     runSubscriptionRemoteSync() {
         printf 'remote\n' >>"${remoteLog}"
-        printf '["被控服务器同步失败"]'
+        printf '{"failures":["被控服务器同步失败"],"snapshots":{"edge-a":null}}'
     }
+    refreshPublishedSubscriptions() { return 0; }
     subscriptionSyncMarkResult() {
         printf '%s\n' "$1" >"${resultStatus}"
         printf '%s\n' "$2" >"${resultFailures}"
@@ -1648,10 +1650,10 @@ JSON
     }
     runSubscriptionRemoteSync() {
         printf 'remote-sync\n' >>"${callLog}"
-        printf '[]'
+        printf '{"failures":[],"snapshots":{}}'
     }
-    subscribe() {
-        printf 'refresh-publish:%s\n' "$*" >>"${callLog}"
+    refreshPublishedSubscriptions() {
+        printf 'refresh-publish:%s\n' "$1" >>"${callLog}"
         return 0
     }
     subscriptionSyncMarkResult() {
@@ -1669,11 +1671,11 @@ JSON
     [[ "${syncStatus}" == "0" ]]
     grep -q '^apply-account-plan$' "${callLog}"
     grep -q '^remote-sync$' "${callLog}"
-    grep -q '^refresh-publish:false false$' "${callLog}"
+    grep -q '^refresh-publish:{}$' "${callLog}"
     python - <<'PY' "${callLog}"
 import sys
 lines = [line.strip() for line in open(sys.argv[1], encoding='utf-8') if line.strip()]
-assert lines.index('remote-sync') < lines.index('refresh-publish:false false')
+assert lines.index('remote-sync') < lines.index('refresh-publish:{}')
 PY
     [[ "$(<"${resultFailures}")" == "[]" ]]
     grep -qx 'success' "${resultStatus}"
@@ -1726,7 +1728,7 @@ JSON
     }
     runSubscriptionRemoteSync() {
         printf 'remote\n' >>"${callLog}"
-        printf '[]'
+        printf '{"failures":[],"snapshots":{}}'
     }
     subscriptionSyncRefreshPublishedSubscriptions() {
         return 98
@@ -1737,8 +1739,8 @@ JSON
         subscribeType=https
         subscribeDomain=main.example.com
     }
-    subscribe() {
-        printf 'subscribe:%s\n' "$*" >>"${callLog}"
+    refreshPublishedSubscriptions() {
+        printf 'refresh-publish\n' >>"${callLog}"
         return 0
     }
     subscriptionSyncMarkResult() {
@@ -1761,7 +1763,7 @@ JSON
     grep -qx 'reconcile:<empty>' "${callLog}"
     ! grep -qx 'remote' "${callLog}"
     grep -qx 'read-subscribe' "${callLog}"
-    grep -qx 'subscribe:false false' "${callLog}"
+    grep -qx 'refresh-publish' "${callLog}"
 )
 
 runSubscriptionGroupSyncSingleConfigBackupRegression() (
@@ -1815,7 +1817,7 @@ JSON
     statusCard() { printf '%s\n' "$*" >"${statusLog}"; }
 
     set +e
-    runSubscriptionGroupSync skip-subscribe-refresh
+    runSubscriptionGroupSync
     syncStatus=$?
     set -e
     unset -f subscriptionSyncCreateConfigBackups originalSubscriptionSyncCreateConfigBackups protocolCapabilityRegistry initXrayClients
@@ -2136,13 +2138,13 @@ runSubscriptionGroupSyncUsesStateLockRegression() (
     }
 
     set +e
-    runSubscriptionGroupSync skip-subscribe-refresh
+    runSubscriptionGroupSync
     local status=$?
     set -e
 
     [[ "${status}" == "17" ]]
-    grep -qx 'lock:runSubscriptionGroupSyncUnlocked skip-subscribe-refresh' "${callLog}"
-    grep -qx 'sync:skip-subscribe-refresh' "${callLog}"
+    grep -qx 'lock:runSubscriptionGroupSyncUnlocked' "${callLog}"
+    grep -qx 'sync:' "${callLog}"
 )
 
 runRegressionSubscriptionGroupSyncUsesStateLock() {
