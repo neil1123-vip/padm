@@ -833,6 +833,7 @@ stageRemoteSubscribe() {
         local singBoxSubscribe=
         local controlledResponse=
         local controlledPayload=
+        local usePublicFallback=false
         local clashFile="${tmpDir}/clash"
         local defaultFile="${tmpDir}/default"
         local singBoxFile="${tmpDir}/sing-box"
@@ -843,36 +844,34 @@ stageRemoteSubscribe() {
         IFS=':' read -r remoteHost remotePort serverAlias subscribeType <<<"${line}"
         remoteUrl="${remoteHost}:${remotePort}"
         source=$(subscriptionActiveGroupRead -c --arg id "${serverAlias}" '.sources[]? | select(.id == $id)' 2>/dev/null) || source=
-        if [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            controlledResponse=
-            if [[ -n "${syncSnapshots}" ]]; then
-                if jq -e --arg sourceId "${serverAlias}" 'type == "object" and has($sourceId)' <<<"${syncSnapshots}" >/dev/null 2>&1; then
-                    controlledResponse=$(jq -ce --arg sourceId "${serverAlias}" --arg account "${email}" '
-                      .[$sourceId]
-                      | select(type == "object" and has($account))
-                      | .[$account]
-                      | select(type == "object")
-                      | . + {ok:true, account:$account}
-                    ' <<<"${syncSnapshots}") || controlledResponse=
-                elif jq -e 'type == "object"' <<<"${syncSnapshots}" >/dev/null 2>&1 &&
-                    controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
-                    controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null); then
-                    :
-                fi
-            elif controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') &&
-                controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null); then
-                :
-            fi
-            if [[ -n "${controlledResponse}" ]] && jq -e '.ok == true' <<<"${controlledResponse}" >/dev/null 2>&1; then
-                jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-                jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-                jq -c '.sing_box // []' <<<"${controlledResponse}" >"${singBoxFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
-            else
+        if [[ -n "${syncSnapshots}" ]]; then
+            if ! jq -e 'type == "object"' <<<"${syncSnapshots}" >/dev/null 2>&1; then
                 padmRemoveCleanupPath "${tmpDir}"
                 padmRemoveCleanupPath "${stageDir}"
                 return 1
             fi
+            if jq -e --arg sourceId "${serverAlias}" 'has($sourceId)' <<<"${syncSnapshots}" >/dev/null 2>&1; then
+                controlledResponse=$(jq -ce --arg sourceId "${serverAlias}" --arg account "${email}" '
+                  .[$sourceId]
+                  | select(type == "object" and has($account))
+                  | .[$account]
+                  | select(type == "object")
+                  | . + {ok:true, account:$account}
+                ' <<<"${syncSnapshots}") || controlledResponse=
+            elif [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
+                controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') || controlledPayload=
+                [[ -n "${controlledPayload}" ]] && controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null) || controlledResponse=
+            else
+                usePublicFallback=true
+            fi
+        elif [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
+            controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') || controlledPayload=
+            [[ -n "${controlledPayload}" ]] && controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null) || controlledResponse=
         else
+            usePublicFallback=true
+        fi
+
+        if [[ "${usePublicFallback}" == "true" ]]; then
             fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/clashMeta/${emailMD5}" >"${clashFile}" & clashPid=$!
             fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/default/${emailMD5}" >"${defaultFile}" & defaultPid=$!
             fetchRemoteSubscribeContent "${subscribeType}://${remoteUrl}/s/sing-box_profiles/${emailMD5}" >"${singBoxFile}" & singBoxPid=$!
@@ -884,6 +883,14 @@ stageRemoteSubscribe() {
                 padmRemoveCleanupPath "${stageDir}"
                 return 1
             fi
+        elif [[ -n "${controlledResponse}" ]] && jq -e '.ok == true' <<<"${controlledResponse}" >/dev/null 2>&1; then
+                jq -r '.clash_meta // ""' <<<"${controlledResponse}" >"${clashFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+                jq -r '.default // ""' <<<"${controlledResponse}" >"${defaultFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+                jq -c '.sing_box // []' <<<"${controlledResponse}" >"${singBoxFile}" || { padmRemoveCleanupPath "${tmpDir}"; padmRemoveCleanupPath "${stageDir}"; return 1; }
+        else
+            padmRemoveCleanupPath "${tmpDir}"
+            padmRemoveCleanupPath "${stageDir}"
+            return 1
         fi
 
         clashMetaProxies=$(sed '/proxies:/d' "${clashFile}" | sed -E \

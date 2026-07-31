@@ -138,14 +138,18 @@ ensureSubscriptionServiceForSharedLinks() {
     return 1
 }
 
-runSubscriptionEventSyncIfEnabled() {
+runSubscriptionSyncAfterMutation() {
     local reason=${1:-subscription-change}
-    if subscriptionEventSyncEnabled; then
-        statusCard "订阅变更已保存" "正在自动同步订阅控制面（${reason}）"
-        runSubscriptionGroupSync
-        return $?
+    if ! subscriptionGroupSyncEnabled; then
+        statusCard "订阅变更已保存" "自动同步已关闭，等待手动完整同步（${reason}）"
+        return 0
     fi
-    statusCard "订阅变更已保存" "事件同步已关闭，等待手动/定时同步" "也可到 主控维护与排障 -> 自动同步设置 中重新开启事件同步"
+    statusCard "订阅变更已保存" "正在执行完整同步（${reason}）"
+    if runSubscriptionGroupSync; then
+        return 0
+    fi
+    warnCard "变更已保存，但后置完整同步失败" "请到 订阅同步 -> 状态与排障 查看失败原因，修复后手动重试"
+    return 1
 }
 
 subscriptionRequireMainRole() {
@@ -212,7 +216,7 @@ manageSubscriptionLocalHome() {
     while true; do
         echoContent title "\n┌─ 本机订阅首页 ─────────────────────────────────────"
         menuItem 1 "发布订阅" "安装订阅服务、查看自用链接，并创建或维护分享订阅"
-        menuItem 2 "本机运行与维护" "本机同步、流量与限额、自动同步和状态备份"
+        menuItem 2 "本机运行与维护" "订阅同步、用量与限额和状态备份"
         menuItem 3 "启用多服务器协同" "将本机初始化为主控，保留现有订阅状态和服务"
         menuReturnItem 4 "返回上级" "回到订阅模式选择"
         menuClose
@@ -231,27 +235,15 @@ manageSubscriptionLocalMaintenance() {
     subscriptionRequireLocalPublisherRole || return 1
     while true; do
         echoContent title "\n┌─ 本机运行与维护 ───────────────────────────────────"
-        menuItem 1 "刷新并查看运行总览" "采集流量后显示本机订阅、同步和限额摘要"
-        menuItem 2 "立即执行本机同步" "只应用本机同步计划"
-        menuItem 3 "查看本机运行状态" "查看状态摘要、本机同步计划和最近结果"
-        menuItem 4 "用量与限额" "查看本机用量并执行超限处理"
-        menuItem 5 "自动同步设置" "配置本机定时同步和自动超限处理"
-        menuItem 6 "状态备份与恢复" "创建、查看、恢复或显式重建 groups.json"
-        menuReturnItem 7 "返回本机订阅首页" "回到上级菜单"
+        menuItem 1 "订阅同步" "立即同步、自动同步、状态排障和用量限额"
+        menuItem 2 "状态备份与恢复" "创建、查看、恢复或显式重建 groups.json"
+        menuReturnItem 3 "返回本机订阅首页" "回到上级菜单"
         menuClose
         autoRead subscription_local_maintenance_menu "请选择:" localMaintenanceStatus
         case "${localMaintenanceStatus}" in
-        1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
-        2) runSubscriptionGroupSync || true ;;
-        3)
-            showSubscriptionGroupsStateSummary
-            showSubscriptionLocalSyncPlan
-            showSubscriptionSourceSyncResults
-            ;;
-        4) manageTrafficAndQuota ;;
-        5) manageSubscriptionSyncSettings ;;
-        6) manageSubscriptionStateBackups ;;
-        7) return ;;
+        1) manageSubscriptionSyncSettings ;;
+        2) manageSubscriptionStateBackups ;;
+        3) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -411,34 +403,18 @@ manageSubscriptionMainMaintenance() {
     subscriptionRequireMainRole || return 1
     while true; do
         echoContent title "\n┌─ 主控维护与排障 ───────────────────────────────────"
-        menuLine "这里处理主控侧的同步治理、状态维护和控制面排障。"
-        menuLine "建议先查看运行概览或运行状态，再按需进入用量、自动同步、备份或控制面细节。"
-        menuItem 1 "刷新并查看运行总览" "采集流量后显示订阅用户、服务器源、同步和限额摘要"
-        menuItem 2 "立即执行同步" "立即应用本机和远端同步计划"
-        menuItem 3 "查看运行状态" "连续查看状态摘要、本机/远端同步计划和最近同步结果"
-        menuItem 4 "用量与限额" "进入用量治理细项，查看总览并执行超限处理"
-        menuItem 5 "自动同步设置" "配置定时同步、远程同步和自动执行超限处理"
-        menuItem 6 "状态备份与恢复" "创建、查看、恢复或显式重建 groups.json"
-        menuItem 7 "控制面与连接细节" "查看凭据、Peer、控制面地址，并处理重启或关闭"
-        menuItem 8 "清除同步错误" "清理指定服务器源最近同步错误"
-        menuReturnItem 9 "返回主控首页" "回到上级菜单"
+        menuLine "这里处理主控侧的订阅同步、状态维护和控制面排障。"
+        menuItem 1 "订阅同步" "立即同步、自动同步、状态排障和用量限额"
+        menuItem 2 "状态备份与恢复" "创建、查看、恢复或显式重建 groups.json"
+        menuItem 3 "控制面与连接细节" "查看凭据、Peer、控制面地址，并处理重启或关闭"
+        menuReturnItem 4 "返回主控首页" "回到上级菜单"
         menuClose
         autoRead subscription_main_maintenance_menu "请选择:" mainMaintenanceStatus
         case "${mainMaintenanceStatus}" in
-        1) collectSubscriptionTraffic && showSubscriptionTrafficOverview ;;
-        2) runSubscriptionGroupSync || true ;;
-        3)
-            showSubscriptionGroupsStateSummary
-            showSubscriptionLocalSyncPlan
-            showSubscriptionRemoteSyncPlan
-            showSubscriptionSourceSyncResults
-            ;;
-        4) manageTrafficAndQuota ;;
-        5) manageSubscriptionSyncSettings ;;
-        6) manageSubscriptionStateBackups ;;
-        7) manageSubscriptionMainControlDetails ;;
-        8) clearSubscriptionSourceSyncErrorMenu ;;
-        9) return ;;
+        1) manageSubscriptionSyncSettings ;;
+        2) manageSubscriptionStateBackups ;;
+        3) manageSubscriptionMainControlDetails ;;
+        4) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -674,7 +650,7 @@ createAndSyncUserSubscriptionWizard() {
     local limit=0
     local enableSync=
     local canShowLinks=true
-    local eventSyncEnabled=false
+    local syncWillRun=false
     local subscriptionServiceStatus=0
     autoRead user_subscription_id "请输入分享订阅ID[只用于管理，例 team-a]:" id
     if [[ -z "${id}" ]] || ! echo "${id}" | grep -qE '^[a-zA-Z0-9_-]+$'; then
@@ -708,7 +684,7 @@ createAndSyncUserSubscriptionWizard() {
         return 1
     fi
 
-    autoRead user_subscription_traffic_limit "请输入订阅额度GB[回车/0为不限；这里只设置额度，超限处理在 主控维护与排障 -> 用量与限额 中执行]:" limit
+    autoRead user_subscription_traffic_limit "请输入订阅额度GB[回车/0为不限；这里只设置额度，超限处理在 订阅同步 -> 用量与限额 中执行]:" limit
     limit=${limit:-0}
     if ! echo "${limit}" | grep -qE '^[0-9]+$'; then
         errorCard "订阅额度必须是数字"
@@ -719,28 +695,28 @@ createAndSyncUserSubscriptionWizard() {
         errorCard "分享订阅创建失败，订阅 ID 可能已存在或状态写入失败"
         return 1
     fi
-    statusCard "分享订阅已创建" "订阅ID：${id}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 主控维护与排障 -> 用量与限额 执行"
+    statusCard "分享订阅已创建" "订阅ID：${id}" "实际托管账号：$(subscriptionSyncAccountName "${id}")" "服务器范围：${sourceIds}" "订阅额度GB：${limit}" "超限停用和批量处理请到 订阅同步 -> 用量与限额 执行"
 
     if ! subscriptionGroupSyncEnabled; then
         autoRead user_subscription_enable_auto_sync "是否开启后续自动同步？[yes/no，默认 yes]：" enableSync
         enableSync=${enableSync:-yes}
         if [[ "${enableSync}" == "yes" || "${enableSync}" == "y" ]]; then
             if setSubscriptionGroupSyncEnabledWithCron true; then
-                successCard "自动同步已开启" "后续会按当前间隔自动同步；可在 主控维护与排障 -> 自动同步设置 中调整间隔"
+                successCard "自动同步已开启" "后续会按当前间隔同步；可在 订阅同步 中调整间隔"
             else
                 errorCard "自动同步开启失败"
                 return 1
             fi
         else
-            statusCard "自动同步未开启" "事件同步开启时，菜单变更仍会立即同步一次；cron 兜底可稍后到 主控维护与排障 -> 自动同步设置 中开启"
+            statusCard "自动同步未开启" "本次变更已保存，需稍后手动执行完整同步"
         fi
     fi
 
-    if subscriptionEventSyncEnabled; then
-        eventSyncEnabled=true
+    if subscriptionGroupSyncEnabled; then
+        syncWillRun=true
     fi
-    runSubscriptionEventSyncIfEnabled "用户订阅创建" || return 1
-    if [[ "${eventSyncEnabled}" == "true" ]]; then
+    runSubscriptionSyncAfterMutation "用户订阅创建" || return 1
+    if [[ "${syncWillRun}" == "true" ]]; then
         if [[ "${canShowLinks}" == "true" ]]; then
             showUserSubscriptionLinks "${id}"
         else
@@ -860,9 +836,7 @@ removeUserSubscriptionMenu() {
     fi
     padmRemoveCleanupPath "${configBackupDir}"
     successCard "用户订阅已删除"
-    if ! runSubscriptionEventSyncIfEnabled "用户订阅删除"; then
-        statusCard "订阅已删除，但自动同步失败" "删除已保存；请到 主控维护与排障 -> 立即执行同步 重试" "也可查看同步失败列表定位本机或被控服务器问题"
-    fi
+    runSubscriptionSyncAfterMutation "用户订阅删除" || true
     return 0
 }
 
@@ -898,7 +872,7 @@ manageUserSubscriptionItem() {
         6)
             if toggleUserSubscriptionState "${userSubscriptionId}"; then
                 successCard "用户订阅状态已切换"
-                runSubscriptionEventSyncIfEnabled "用户订阅状态切换" || return 1
+                runSubscriptionSyncAfterMutation "用户订阅状态切换" || return 1
             else
                 errorCard "用户订阅状态切换失败"
             fi
@@ -938,7 +912,7 @@ setUserSubscriptionSourcesMenu() {
         return 1
     fi
     successCard "节点范围已更新"
-    runSubscriptionEventSyncIfEnabled "用户订阅节点范围更新"
+    runSubscriptionSyncAfterMutation "用户订阅节点范围更新"
 }
 
 setUserSubscriptionTrafficLimitMenu() {
@@ -953,8 +927,8 @@ setUserSubscriptionTrafficLimitMenu() {
         errorCard "订阅额度更新失败"
         return 1
     fi
-    successCard "订阅额度已更新" "超限停用和批量处理请到 主控维护与排障 -> 用量与限额 执行"
-    runSubscriptionEventSyncIfEnabled "用户订阅额度更新"
+    successCard "订阅额度已更新" "超限停用和批量处理请到 订阅同步 -> 用量与限额 执行"
+    runSubscriptionSyncAfterMutation "用户订阅额度更新"
 }
 # 添加服务器源
 createSubscriptionWireGuardInviteMenu() {
@@ -1027,7 +1001,46 @@ removeSubscriptionControlledServerMenu() {
     fi
     subscriptionWireGuardRemovePeerAndSource "${sourceId}" || { errorCard "被控服务器删除失败"; return 1; }
     successCard "被控服务器删除成功" "服务器源和 WireGuard Peer 已移除"
-    runSubscriptionEventSyncIfEnabled "被控服务器删除"
+    runSubscriptionSyncAfterMutation "被控服务器删除"
+}
+
+changeSubscriptionSourceEnabledMenu() {
+    subscriptionRequireMainRole || return 1
+    local sourceId=
+    local source=
+    local enabled=
+    local targetEnabled=
+    local actionText=
+    local confirm=
+
+    userResultCard "被控服务器启用状态"
+    subscriptionActiveGroupRead -r '
+      .sources[]? | select(.role != "main") |
+      "ID:\(.id)  名称:\(.name)  当前状态:" + (if .enabled == true then "启用" else "停用" end)'
+    menuClose
+    autoRead subscription_source_enabled_id "请输入要启用或停用的被控服务器 ID:" sourceId
+    if [[ -z "${sourceId}" ]] || ! subscriptionSourceExists "${sourceId}" || subscriptionSourceIsMain "${sourceId}"; then
+        errorCard "被控服务器源 ID 无效"
+        return 1
+    fi
+    source=$(subscriptionActiveGroupRead -c --arg id "${sourceId}" 'first(.sources[]? | select(.id == $id and .role != "main"))') || return 1
+    enabled=$(jq -r '.enabled == true' <<<"${source}") || return 1
+    if [[ "${enabled}" == "true" ]]; then
+        targetEnabled=false
+        actionText="停用"
+    else
+        targetEnabled=true
+        actionText="启用"
+    fi
+    warnCard "${actionText}被控服务器" "目标：${sourceId}（$(jq -r '.name' <<<"${source}")）" "停用只影响后续同步和公网发布，不删除 Peer、Token 或历史状态"
+    autoConfirm subscription_source_enabled_confirm "确认${actionText} ${sourceId}？" n confirm
+    [[ "${confirm}" == "y" ]] || { coreCancelledStatusCard "服务器源状态未修改"; return 0; }
+    if ! setSubscriptionSourceEnabled "${sourceId}" "${targetEnabled}"; then
+        errorCard "被控服务器状态更新失败"
+        return 1
+    fi
+    successCard "被控服务器已${actionText}" "来源：${sourceId}"
+    runSubscriptionSyncAfterMutation "被控服务器${actionText}" || true
 }
 
 addSubscribeMenu() {
@@ -1040,16 +1053,18 @@ addSubscribeMenu() {
         menuItem 1 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
         menuItem 2 "完成被控接入" "粘贴接入回执；也兼容旧版被控凭据"
         menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
-        menuItem 4 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
-        menuReturnItem 5 "返回多服务器协同" "回到上级菜单"
+        menuItem 4 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
+        menuItem 5 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
+        menuReturnItem 6 "返回多服务器协同" "回到上级菜单"
         menuClose
         autoRead server_source_menu "请选择:" addSubscribeStatus
         case "${addSubscribeStatus}" in
         1) createSubscriptionWireGuardInviteMenu ;;
         2) addOtherSubscribe ;;
         3) manageSubscriptionPendingInvites ;;
-        4) removeSubscriptionControlledServerMenu ;;
-        5) return ;;
+        4) changeSubscriptionSourceEnabledMenu ;;
+        5) removeSubscriptionControlledServerMenu ;;
+        6) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
@@ -1088,9 +1103,7 @@ addOtherSubscribe() {
         else
             warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 查看协同状态 重试健康检查"
         fi
-        if ! runSubscriptionEventSyncIfEnabled "被控服务器接入"; then
-            warnCard "接入已保存，但自动同步异常" "本地接入提交已完成，可稍后手动同步"
-        fi
+        runSubscriptionSyncAfterMutation "被控服务器接入" || true
         return 0
     fi
     if [[ "${kind}" != "controlled" ]] || ! subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}"; then
@@ -1117,7 +1130,7 @@ addOtherSubscribe() {
         return 1
     fi
     successCard "旧版被控服务器已添加" "WireGuard 内网地址：${host}:${port}" "别名：${alias}" "已保存 Token 和 Peer，可继续测试被控连接或执行同步"
-    runSubscriptionEventSyncIfEnabled "被控服务器添加"
+    runSubscriptionSyncAfterMutation "被控服务器添加"
 }
 
 
@@ -1218,7 +1231,7 @@ setSubscriptionSourceControlTokenMenu() {
         return 1
     }
     successCard "被控服务器凭据已更新" "内网地址：${host}:${port}" "别名：${sourceId}" "Peer 公钥和 Token 已保存，可继续测试被控连接"
-    runSubscriptionEventSyncIfEnabled "被控服务器凭据更新"
+    runSubscriptionSyncAfterMutation "被控服务器凭据更新"
 }
 
 clearSubscriptionSourceSyncErrorMenu() {
@@ -1287,35 +1300,99 @@ setSubscriptionGroupSyncIntervalWithCron() {
     return 1
 }
 
-manageSubscriptionLocalSyncSettings() {
-    subscriptionRequireLocalPublisherRole || return 1
-    local syncStatus
+manageSubscriptionSyncDiagnostics() {
+    local role
+    local diagnosticStatus=
+    role=$(subscriptionCurrentRoleNormalized) || return 1
+    [[ "${role}" == "main" || "${role}" == "uninitialized" ]] || return 1
     while true; do
-        syncStatus=$(subscriptionActiveGroupRead -r '.sync') || return 1
-        echoContent title "\n┌─ 本机自动同步 ─────────────────────────────────────"
-        userResultCard "自动同步当前状态"
-        printf '%s\n' "${syncStatus}" | jq '{enabled, interval_minutes, event_enabled, quota_auto_apply, last_run, last_status}'
+        echoContent title "\n┌─ 同步状态与排障 ───────────────────────────────────"
+        menuItem 1 "查看最近同步结果与失败列表" "显示组状态和各来源最近同步结果"
+        menuItem 2 "检查本机服务与发布状态" "显示服务器角色和公网订阅服务状态"
+        if [[ "${role}" == "main" ]]; then
+            menuItem 3 "检查被控服务器健康" "请求所有启用的被控服务器健康检查"
+            menuItem 4 "查看本机同步计划" "预览本机 create/remove"
+            menuItem 5 "查看远端同步计划" "对启用来源执行 dry-run"
+            menuItem 6 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
+            menuItem 7 "清除指定服务器源同步错误" "清理指定来源最近同步错误"
+            menuReturnItem 8 "返回订阅同步" "回到上级菜单"
+        else
+            menuItem 3 "查看本机同步计划" "预览本机 create/remove"
+            menuItem 4 "查看自动同步定时任务" "显示当前 SyncSubscriptionGroups cron"
+            menuReturnItem 5 "返回订阅同步" "回到上级菜单"
+        fi
         menuClose
-        menuItem 1 "开启/关闭自动同步" "切换本机定时同步状态"
-        menuItem 2 "设置自动同步间隔" "设置 1-59 分钟间隔"
-        menuItem 3 "查看本机同步计划" "预览本机 create/remove"
-        menuItem 4 "立即执行本机同步" "只应用本机同步计划"
-        menuItem 5 "查看超限处理计划" "预览超额用户处理"
-        menuDangerItem 6 "执行超限处理" "停用超额用户并等待同步移除账号"
-        menuItem 7 "开启/关闭自动执行超限处理" "切换超限处理自动执行状态"
-        menuItem 8 "开启/关闭事件同步" "菜单变更后自动同步一次，cron 继续兜底"
-        menuItem 9 "查看定时任务" "显示当前 cron 配置"
-        menuReturnItem 10 "返回本机运行与维护" "回到上级菜单"
+        autoRead subscription_sync_diagnostics_menu "请选择:" diagnosticStatus
+        if [[ "${role}" == "main" ]]; then
+            case "${diagnosticStatus}" in
+            1) showSubscriptionGroupsStateSummary; showSubscriptionSourceSyncResults ;;
+            2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
+            3) showSubscriptionRemoteHealthPlan ;;
+            4) showSubscriptionLocalSyncPlan ;;
+            5) showSubscriptionRemoteSyncPlan ;;
+            6) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+            7) clearSubscriptionSourceSyncErrorMenu ;;
+            8) return ;;
+            *) coreSelectionErrorCard ;;
+            esac
+        else
+            case "${diagnosticStatus}" in
+            1) showSubscriptionGroupsStateSummary; showSubscriptionSourceSyncResults ;;
+            2) showSubscriptionServerRoleSummary; showSubscriptionServiceStatus ;;
+            3) showSubscriptionLocalSyncPlan ;;
+            4) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
+            5) return ;;
+            *) coreSelectionErrorCard ;;
+            esac
+        fi
+    done
+}
+
+manageSubscriptionSyncSettings() {
+    local role
+    local syncStatus
+    local enabledText
+    local returnText
+    local syncSettingsStatus=
+    local targetSyncEnabled
+    local interval=
+    role=$(subscriptionCurrentRoleNormalized) || {
+        subscriptionRequireLocalPublisherRole
+        return 1
+    }
+    [[ "${role}" == "main" || "${role}" == "uninitialized" ]] || {
+        subscriptionRequireLocalPublisherRole
+        return 1
+    }
+    [[ "${role}" == "main" ]] && returnText="返回主控维护与排障" || returnText="返回本机运行与维护"
+    while true; do
+        syncStatus=$(subscriptionActiveGroupRead -c '{enabled:(.sync.enabled == true), interval_minutes:(.sync.interval_minutes // 10), last_run:(.sync.last_run // ""), last_status:(.sync.last_status // "pending"), failure_count:((.sync.failures // []) | length)}') || return 1
+        [[ "$(jq -r '.enabled' <<<"${syncStatus}")" == "true" ]] && enabledText="开启" || enabledText="关闭"
+        echoContent title "\n┌─ 订阅同步 ─────────────────────────────────────────"
+        menuLine "自动同步：${enabledText}"
+        menuLine "同步间隔：$(jq -r '.interval_minutes' <<<"${syncStatus}") 分钟"
+        menuLine "最近结果：$(jq -r '.last_status' <<<"${syncStatus}") / $(jq -r 'if .last_run == "" then "未运行" else .last_run end' <<<"${syncStatus}")"
+        menuLine "失败数量：$(jq -r '.failure_count' <<<"${syncStatus}")"
+        menuItem 1 "立即完整同步" "同步本机和所有启用来源，成功后发布完整订阅"
+        menuItem 2 "开启/关闭自动同步" "同时控制菜单变更后的即时同步和 cron"
+        menuItem 3 "设置同步间隔" "设置 1-59 分钟间隔，不隐式开启自动同步"
+        menuItem 4 "状态与排障" "查看失败、健康、计划和定时任务"
+        menuItem 5 "用量与限额" "查看用量并处理超限订阅"
+        menuReturnItem 6 "${returnText}" "回到上级菜单"
         menuClose
-        autoRead subscription_local_sync_settings_menu "请选择:" localSyncSettingsStatus
-        case "${localSyncSettingsStatus}" in
-        1)
-            local targetSyncEnabled=true
-            subscriptionGroupSyncEnabled && targetSyncEnabled=false
-            setSubscriptionGroupSyncEnabledWithCron "${targetSyncEnabled}" && successCard "自动同步状态已切换" || errorCard "自动同步状态切换失败"
-            ;;
+        autoRead sync_settings_menu "请选择:" syncSettingsStatus
+        case "${syncSettingsStatus}" in
+        1) runSubscriptionGroupSync || true ;;
         2)
-            local interval=
+            targetSyncEnabled=true
+            subscriptionGroupSyncEnabled && targetSyncEnabled=false
+            if setSubscriptionGroupSyncEnabledWithCron "${targetSyncEnabled}"; then
+                successCard "自动同步状态已更新" "当前状态：$(if [[ "${targetSyncEnabled}" == "true" ]]; then printf '开启'; else printf '关闭'; fi)"
+            else
+                errorCard "自动同步状态切换失败"
+            fi
+            ;;
+        3)
             autoRead sync_interval_minutes "请输入同步间隔分钟:" interval
             if subscriptionGroupSyncIntervalValid "${interval}" && setSubscriptionGroupSyncIntervalWithCron "${interval}"; then
                 successCard "自动同步间隔已更新"
@@ -1323,107 +1400,9 @@ manageSubscriptionLocalSyncSettings() {
                 errorCard "自动同步间隔更新失败，间隔需为 1-59 分钟"
             fi
             ;;
-        3) showSubscriptionLocalSyncPlan ;;
-        4) runSubscriptionGroupSync || true ;;
-        5) showSubscriptionQuotaPlan ;;
-        6) executeSubscriptionQuotaPlanMenu ;;
-        7) toggleSubscriptionGroupQuotaAutoApplyEnabled && successCard "限额自动执行状态已切换" || errorCard "限额自动执行状态切换失败" ;;
-        8) toggleSubscriptionEventSyncEnabled && successCard "事件同步状态已切换" || errorCard "事件同步状态切换失败" ;;
-        9) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-        10) return ;;
-        *) coreSelectionErrorCard ;;
-        esac
-    done
-}
-
-manageSubscriptionSyncSettings() {
-    local role
-    role=$(subscriptionCurrentRoleNormalized) || {
-        subscriptionRequireLocalPublisherRole
-        return 1
-    }
-    if [[ "${role}" == "uninitialized" ]]; then
-        manageSubscriptionLocalSyncSettings
-        return $?
-    fi
-    subscriptionRequireMainRole || return 1
-    local syncStatus
-    while true; do
-        syncStatus=$(subscriptionActiveGroupRead -r '.sync')
-        echoContent title "\n┌─ 自动同步 ─────────────────────────────────────────"
-        menuLine "这里处理自动同步和超限策略。"
-        menuLine "建议先查看同步计划，再决定是否开启自动同步、调整间隔或执行超限处理。"
-        userResultCard "自动同步当前状态"
-        printf '%s\n' "${syncStatus}" | jq .
-        menuClose
-        echoContent title "\n┌─ 自动同步操作 ─────────────────────────────────────"
-        menuItem 1 "开启/关闭自动同步" "切换定时同步状态"
-        menuItem 2 "设置自动同步间隔" "设置 1-59 分钟间隔"
-        menuItem 3 "查看本机同步计划" "预览本机 create/remove"
-        menuItem 4 "查看远程同步计划" "预览远端同步计划"
-        menuItem 5 "立即执行同步" "立即应用同步计划"
-        menuItem 6 "查看超限处理计划" "预览超额用户处理"
-        menuDangerItem 7 "执行超限处理" "停用超额用户并等待同步移除账号"
-        menuItem 8 "开启/关闭远程同步" "切换远端同步状态"
-        menuItem 9 "开启/关闭自动执行超限处理" "切换超限处理自动执行状态"
-        menuItem 10 "开启/关闭事件同步" "菜单变更后自动同步一次，cron 继续兜底"
-        menuItem 11 "查看定时任务" "显示当前 cron 配置"
-        menuReturnItem 12 "返回主控维护与排障" "回到上级菜单"
-        menuClose
-        autoRead sync_settings_menu "请选择:" syncSettingsStatus
-        case "${syncSettingsStatus}" in
-        1)
-            local targetSyncEnabled=true
-            if subscriptionGroupSyncEnabled; then
-                targetSyncEnabled=false
-            fi
-            if setSubscriptionGroupSyncEnabledWithCron "${targetSyncEnabled}"; then
-                successCard "自动同步状态已切换"
-            else
-                errorCard "自动同步状态切换失败"
-            fi
-            ;;
-        2)
-            local interval=
-            autoRead sync_interval_minutes "请输入同步间隔分钟:" interval
-            if ! subscriptionGroupSyncIntervalValid "${interval}"; then
-                errorCard "输入有误，同步间隔需为 1-59 分钟"
-                continue
-            fi
-            if setSubscriptionGroupSyncIntervalWithCron "${interval}"; then
-                successCard "自动同步间隔已更新"
-            else
-                errorCard "自动同步间隔更新失败"
-            fi
-            ;;
-        3) showSubscriptionLocalSyncPlan ;;
-        4) showSubscriptionRemoteSyncPlan ;;
-        5) runSubscriptionGroupSync || true ;;
-        6) showSubscriptionQuotaPlan ;;
-        7) executeSubscriptionQuotaPlanMenu ;;
-        8)
-            if toggleSubscriptionGroupRemoteSyncEnabled; then
-                successCard "远程同步状态已切换"
-            else
-                errorCard "远程同步状态切换失败"
-            fi
-            ;;
-        9)
-            if toggleSubscriptionGroupQuotaAutoApplyEnabled; then
-                successCard "限额自动执行状态已切换"
-            else
-                errorCard "限额自动执行状态切换失败"
-            fi
-            ;;
-        10)
-            if toggleSubscriptionEventSyncEnabled; then
-                successCard "事件同步状态已切换"
-            else
-                errorCard "事件同步状态切换失败"
-            fi
-            ;;
-        11) crontab -l 2>/dev/null | grep 'SyncSubscriptionGroups' || true ;;
-        12) return ;;
+        4) manageSubscriptionSyncDiagnostics ;;
+        5) manageTrafficAndQuota ;;
+        6) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done

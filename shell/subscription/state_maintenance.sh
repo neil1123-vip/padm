@@ -12,7 +12,14 @@ subscriptionGroupsStateSummaryJson() {
         enabled_users: ([.user_groups[]? | select(.enabled == true)] | length),
         sources: ([.sources[]? | select(($localOnly | not) or .role == "main")] | length),
         enabled_remote_sources: (if $localOnly then 0 else ([.sources[]? | select(.role != "main" and .enabled == true)] | length) end),
-        sync: .sync,
+        sync: {
+          enabled: (.sync.enabled == true),
+          interval_minutes: (.sync.interval_minutes // 10),
+          quota_auto_apply: (.sync.quota_auto_apply // false),
+          last_run: (.sync.last_run // ""),
+          last_status: (.sync.last_status // "pending"),
+          failures: (.sync.failures // [])
+        },
         traffic_updated_at: ((.traffic.sources.main.updated_at // .traffic.admin.sources.main.updated_at // "") | if . == "" then "unknown" else . end)
       }'
 }
@@ -173,6 +180,10 @@ resetSubscriptionGroupsStateMenu() {
 
 manageSubscriptionStateBackups() {
     subscriptionRequireLocalPublisherRole || return 1
+    local role
+    local returnText
+    role=$(subscriptionCurrentRoleNormalized) || return 1
+    [[ "${role}" == "main" ]] && returnText="返回主控维护与排障" || returnText="返回本机运行与维护"
     while true; do
         echoContent title "\n┌─ 状态备份与恢复 ───────────────────────────────────"
         menuLine "这里只管理 groups.json 状态；恢复和重建都会先自动备份当前状态"
@@ -181,7 +192,7 @@ manageSubscriptionStateBackups() {
         menuItem 3 "查看已有备份" "列出可恢复的备份文件"
         menuItem 4 "恢复状态备份" "先备份当前状态，再用选定备份覆盖"
         menuDangerItem 5 "重建订阅状态" "先备份当前状态，再重置为空的默认订阅组"
-        menuReturnItem 6 "返回主控维护与排障" "回到上级菜单"
+        menuReturnItem 6 "${returnText}" "回到上级菜单"
         menuClose
         autoRead subscription_state_backup_menu "请选择:" subscriptionStateBackupStatus
         case "${subscriptionStateBackupStatus}" in

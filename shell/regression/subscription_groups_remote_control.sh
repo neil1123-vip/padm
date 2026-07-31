@@ -252,6 +252,7 @@ runRemoteControlHealthRegression() (
 
 runRemoteControlInlineRequestHelpersRegression() (
     local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
+    local wireGuardSource='{"id":"edge-wg","name":"Edge WG","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
     local requestResponse
     local healthResponse
     local curlArgsLog="${TMP_DIR}/remote-control-inline-request-curl-args.log"
@@ -264,8 +265,11 @@ runRemoteControlInlineRequestHelpersRegression() (
     : >"${curlChmodLog}"
     : >"${curlPayloadLog}"
 
+    [[ "$(subscriptionRemoteControlUrl "${source}" sync)" == "https://remote.example:443/s/control/sync" ]]
+    [[ "$(subscriptionRemoteControlUrl "${wireGuardSource}" sync)" == "http://10.77.0.2:39778/s/control/sync" ]]
+
     subscriptionRemoteControlUrl() {
-        return 97
+        printf 'https://control.example/%s\n' "$2"
     }
     subscriptionRemoteControlToken() {
         return 98
@@ -502,7 +506,7 @@ runRemoteControlInlineTokenConsumersRegression() (
     planResponse=$(subscriptionRemoteSyncPlanForSource "${remoteSourceJson}" "${desiredUsersBySourceJson}" 2>/dev/null || true)
     [[ -n "${planResponse}" ]] || return 1
     planResponse=$(jq -c . <<<"${planResponse}") || return 1
-    jq -e '.source_id == "edge-remote" and .status == "success" and .dry_run == true and .request.source_id == "edge-remote" and .request.dry_run == true and .request.desired_users[0].account == "sub_team_a" and .response.ok == true' <<<"${planResponse}" >/dev/null || return 1
+    jq -e '.source_id == "edge-remote" and .status == "success" and .dry_run == true and .request.dry_run == true and (.request | has("source_id") | not) and .request.desired_users[0].id == "team-a" and .request.desired_users[0].uuid == "11111111-1111-1111-1111-111111111111" and (.request | has("include_subscriptions") | not) and .response.ok == true' <<<"${planResponse}" >/dev/null || return 1
 
     syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
     [[ -n "${syncResult}" ]] || return 1
@@ -512,9 +516,13 @@ runRemoteControlInlineTokenConsumersRegression() (
     [[ -f "${statusLog}" ]] || return 1
     jq -s -e '
       length == 2 and
-      .[0].dry_run == true and (.[0] | has("include_subscriptions") | not) and
-      .[1].dry_run == false and .[1].include_subscriptions == true and
-      all(.[]; .source_id == "edge-remote" and .desired_users[0].account == "sub_team_a")
+      .[0].dry_run == true and .[1].dry_run == false and
+      all(.[];
+        (. | has("source_id") | not) and
+        (. | has("include_subscriptions") | not) and
+        .desired_users[0].id == "team-a" and
+        .desired_users[0].uuid == "11111111-1111-1111-1111-111111111111"
+      )
     ' "${requestPayloadLog}" >/dev/null || return 1
     grep -qx $'edge-remote\tsync' "${statusLog}" || return 1
     grep -qx $'status\tedge-remote\tsuccess' "${statusLog}" || return 1
@@ -708,12 +716,6 @@ runRemoteControlHandleInlineHelpersRegression() (
     healthResponse=$(handleSubscriptionControl health test-token | jq -c .)
     [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync","subscribe"]'* ]]
 
-    syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' | jq -c .)
-    [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":false'* ]]
-    [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
-    [[ "${syncResponse}" != *'"subscriptions"'* ]]
-    [[ -e "${syncLockMarker}" ]]
-
     showAccounts() {
         printf 'show\n' >>"${snapshotLog}"
         mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box"
@@ -724,6 +726,13 @@ runRemoteControlHandleInlineHelpersRegression() (
         printf 'name: sub_team_b\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/sub_team_b"
         printf '[{"tag":"sub_team_b"}]\n' >"${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/sub_team_b"
     }
+
+    syncResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}' | jq -c .)
+    [[ "${syncResponse}" == *'"ok":true'*'"dry_run":false'*'"changed":false'* ]]
+    [[ "${syncResponse}" == *'"create":[]'*'"remove":[]'* ]]
+    jq -e '.ok == true and (.subscriptions | has("sub_team_a"))' <<<"${syncResponse}" >/dev/null
+    [[ -e "${syncLockMarker}" ]]
+
     expectedDefault=$(printf 'vless://snapshot\n' | base64 | tr -d '\n')
     expectedDefaultB=$(printf 'trojan://snapshot-b\n' | base64 | tr -d '\n')
     syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false,"include_subscriptions":true}' | jq -c .)
@@ -736,11 +745,11 @@ runRemoteControlHandleInlineHelpersRegression() (
       .subscriptions.sub_team_b.clash_meta == "name: sub_team_b" and
       .subscriptions.sub_team_b.sing_box == [{"tag":"sub_team_b"}]
     ' <<<"${syncSnapshotResponse}" >/dev/null
-    [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "1" ]]
+    [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "2" ]]
 
     emptySnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":true}' | jq -c .)
     jq -e '.ok == true and .subscriptions == {}' <<<"${emptySnapshotResponse}" >/dev/null
-    [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "1" ]]
+    [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "2" ]]
 
     set +e
     invalidSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":"yes"}')
@@ -972,6 +981,9 @@ JSON
     }
 
     setupLightweightControlApplyFixtures() {
+        subscriptionControlRenderSubscribeAccounts() {
+            printf '{}\n'
+        }
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_team_a"],"remove":[]}'
         }
@@ -1490,6 +1502,16 @@ JSON
 {"inbounds":[{"settings":{"clients":[{"email":"sub_publish-vless","id":"77777777-7777-7777-7777-777777777777"}]}}]}
 JSON
         }
+        showAccounts() {
+            local id account
+            while IFS= read -r id; do
+                [[ -n "${id}" ]] || continue
+                account=$(subscriptionSyncAccountName "${id}") || return 1
+                printf 'vless://%s\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/default/${account}"
+                printf 'name: %s\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta/${account}"
+                printf '[{"tag":"%s"}]\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/${account}"
+            done < <(subscriptionGroupsStateRead -r '.groups[].user_groups[]? | select(.enabled == true) | .id')
+        }
         refreshRollbackStateBefore=$(normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)")
         refreshRollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
         refreshRollbackLocalBefore=$(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
@@ -1509,7 +1531,7 @@ JSON
         local refreshRollbackStatus=$?
         set -e
         [[ "${refreshRollbackStatus}" -eq 0 ]]
-        jq -e '.ok == true and .changed == true' "${responseFile}.refresh-rollback" >/dev/null
+        jq -e '.ok == true and .changed == true and (.subscriptions | has("sub_publish"))' "${responseFile}.refresh-rollback" >/dev/null
         jq -e 'any(.groups[0].user_groups[]; .id == "publish")' "$(subscriptionGroupsFile)" >/dev/null
         [[ "$(<"${configPath}02_VLESS_TCP_inbounds.json")" != "${refreshRollbackFirstBefore}" ]]
         diff -u "${refreshRollbackLocalExpected}" <(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
@@ -1581,7 +1603,7 @@ JSON
         unset -f cp
         [[ "${restoreFailureStatus}" -eq 0 ]]
         [[ "${reloadCalls}" -eq $((restoreFailureReloadBefore + 1)) ]]
-        jq -e '.ok == true and .changed == true' "${responseFile}.restore-failure" >/dev/null
+        jq -e '.ok == true and .changed == true and (.subscriptions | has("sub_restore_fail"))' "${responseFile}.restore-failure" >/dev/null
         mapfile -t restoreFailureBackupDirs < <(find "${restoreFailureRoot}" -maxdepth 1 -type d \( -name 'padm-subscription-output-backup.*' -o -name 'padm-subscription-sync-backup.*' \) -print)
         [[ "${#restoreFailureBackupDirs[@]}" == "0" ]]
         [[ "$(<"${restoreFailureLocalDir}/default/existing")" == "old local" ]]

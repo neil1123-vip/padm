@@ -150,8 +150,6 @@ writeDefaultSubscriptionGroupsState() {
         "last_run": "",
         "last_status": "pending",
         "failures": [],
-        "remote_enabled": true,
-        "event_enabled": true,
         "quota_auto_apply": false
       },
       "traffic": {
@@ -212,7 +210,7 @@ normalizeSubscriptionGroupsState() {
         .scheme = (if .role == "main" then "local" else (($source.scheme // $source.transport // .transport // "wireguard") | tostring) end) |
         .host = (($source.host // "") | tostring) |
         .port = (($source.port // 0) | tonumber? // 0) |
-        .enabled = (if $source.enabled == false then false else true end) |
+        .enabled = (if .role == "main" then true elif $source.enabled == false then false else true end) |
         .sync_status = (($source.sync_status // (if (($source.role // "") == "main") then "local" else "pending" end)) | tostring);
       def normalize_user_group:
         . as $user |
@@ -224,6 +222,17 @@ normalizeSubscriptionGroupsState() {
           traffic_limit_gb: (($user.traffic_limit_gb // 0) | tonumber? // 0),
           token: (($user.token // "") | tostring)
         } + (if (($user.uuid // "") | tostring) != "" then {uuid: ($user.uuid | tostring)} else {} end);
+      def normalize_sync:
+        (if type == "object" then . else {} end) as $sync |
+        (($sync.interval_minutes // 10) | tonumber? // 10) as $interval |
+        $sync + {
+          enabled: (if $sync.enabled == false then false else true end),
+          interval_minutes: (if (($interval | type) == "number") and ($interval == ($interval | floor)) and $interval >= 1 and $interval <= 59 then $interval else 10 end),
+          last_run: (($sync.last_run // "") | tostring),
+          last_status: (($sync.last_status // "pending") | tostring),
+          failures: (if ($sync.failures | type) == "array" then [$sync.failures[]? | tostring] else [] end),
+          quota_auto_apply: ($sync.quota_auto_apply == true)
+        };
       def normalize_traffic:
         . as $traffic |
         {
@@ -241,7 +250,7 @@ normalizeSubscriptionGroupsState() {
           sources: ([($group.sources // [])[]? | normalize_source | select(.id != "")] as $sources |
             if any($sources[]?; .role == "main") then $sources else [source_default] + $sources end),
           user_groups: [($group.user_groups // [])[]? | normalize_user_group | select(.id != "")],
-          sync: ({enabled:true, interval_minutes:10, last_run:"", last_status:"pending", failures:[], remote_enabled:true, event_enabled:true, quota_auto_apply:false} + ($group.sync // {})),
+          sync: (($group.sync // {}) | normalize_sync),
           traffic: (($group.traffic // {}) | normalize_traffic)
         };
       . as $state |
@@ -267,7 +276,21 @@ migrateSubscriptionGroupsStateUnlocked() {
     if [[ "${currentVersion}" == "${schemaVersion}" ]] && jq -e '
       type == "object" and (.groups | type == "array") and (.groups | length > 0) and
       (.active_group | type == "string" and length > 0) and (.active_group as $active | any(.groups[]?; .id == $active)) and
-      all(.groups[]; (.id // "") != "" and (.sources | type == "array") and any(.sources[]?; .role == "main") and (.user_groups | type == "array") and (.sync | type == "object") and (.sync | has("remote_enabled")) and (.sync | has("event_enabled")) and (.sync | has("quota_auto_apply")) and (.traffic | type == "object"))
+      all(.groups[];
+        (.id // "") != "" and
+        (.sources | type == "array") and
+        any(.sources[]?; .role == "main" and .enabled == true) and
+        all(.sources[]?; ((.enabled | type) == "boolean") and (.role != "main" or .enabled == true)) and
+        (.user_groups | type == "array") and
+        (.sync | type == "object") and
+        (.sync |
+          has("enabled") and (.enabled | type == "boolean") and
+          has("interval_minutes") and (.interval_minutes | type == "number" and . == floor and . >= 1 and . <= 59) and
+          has("last_run") and (.last_run | type == "string") and
+          has("last_status") and (.last_status | type == "string") and
+          has("failures") and (.failures | type == "array") and
+          has("quota_auto_apply") and (.quota_auto_apply | type == "boolean")) and
+        (.traffic | type == "object"))
     ' "${stateFile}" >/dev/null 2>&1; then
         return 0
     fi
@@ -545,22 +568,6 @@ toggleSubscriptionGroupSyncEnabled() {
     fi
 }
 
-subscriptionGroupRemoteSyncEnabled() {
-    subscriptionActiveGroupRead -e '(if .sync | has("remote_enabled") then .sync.remote_enabled else true end) == true' >/dev/null 2>&1
-}
-
-toggleSubscriptionGroupRemoteSyncEnabled() {
-    subscriptionActiveGroupWrite '.sync.remote_enabled = (if .sync | has("remote_enabled") then (.sync.remote_enabled | not) else false end)'
-}
-
-subscriptionEventSyncEnabled() {
-    subscriptionActiveGroupRead -e '(if .sync | has("event_enabled") then .sync.event_enabled else true end) == true' >/dev/null 2>&1
-}
-
-toggleSubscriptionEventSyncEnabled() {
-    subscriptionActiveGroupWrite '.sync.event_enabled = (if .sync | has("event_enabled") then (.sync.event_enabled | not) else false end)'
-}
-
 subscriptionGroupQuotaAutoApplyEnabled() {
     subscriptionActiveGroupRead -e '(.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
 }
@@ -611,6 +618,19 @@ setSubscriptionSourceCredential() {
     subscriptionActiveGroupWrite --arg id "${id}" --arg host "${host}" --argjson port "${port}" --arg token "${token}" '.sources |= map(if .id == $id and .role != "main" then .transport = "wireguard" | .scheme = "wireguard" | .host = $host | .port = $port | .control_token = $token else . end)'
 }
 
+setSubscriptionSourceEnabled() {
+    local id=$1
+    local enabled=$2
+    [[ "${enabled}" == "true" || "${enabled}" == "false" ]] || return 1
+    subscriptionActiveGroupWrite --arg id "${id}" --argjson enabled "${enabled}" '
+      if any(.sources[]?; .id == $id and .role != "main") then
+        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
+      else
+        error("remote subscription source not found")
+      end
+    '
+}
+
 setSubscriptionSourceSyncStatus() {
     local id=$1
     local status=$2
@@ -640,6 +660,10 @@ subscriptionSourceExists() {
 subscriptionSourceIsMain() {
     local id=$1
     subscriptionActiveGroupRead -e --arg id "${id}" 'any(.sources[]?; .id == $id and .role == "main")' >/dev/null 2>&1
+}
+
+subscriptionHasEnabledRemoteSources() {
+    subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .enabled == true)' >/dev/null 2>&1
 }
 
 clearSubscriptionSourceSyncError() {

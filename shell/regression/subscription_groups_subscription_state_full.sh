@@ -261,12 +261,43 @@ runSubscriptionGroupStateStructureMigrationRegression() {
     jq -e '
       .version == 2 and
       .active_group == "edge-group" and
-      (.groups[0].sync.remote_enabled == true) and
+      (.groups[0].sync.enabled == true) and
+      (.groups[0].sync.interval_minutes == 10) and
+      (.groups[0].sync.last_run == "") and
+      (.groups[0].sync.last_status == "pending") and
+      (.groups[0].sync.failures == []) and
+      ((.groups[0].sync | has("remote_enabled")) | not) and
+      ((.groups[0].sync | has("event_enabled")) | not) and
       (.groups[0].sync.quota_auto_apply == false) and
-      any(.groups[0].sources[]; .id == "main" and .role == "main") and
+      any(.groups[0].sources[]; .id == "main" and .role == "main" and .enabled == true) and
       any(.groups[0].sources[]; .id == "edge" and .scheme == "https" and .transport == "https" and .port == 443) and
       (.groups[0].user_groups[0].traffic_limit_gb == 1)
     ' "$(subscriptionGroupsFile)" >/dev/null
+
+    subscriptionGroupsStateWrite '
+      .groups[0].sources |= map(if .id == "edge" then .enabled = "invalid" else . end) |
+      .groups[0].sync = {
+        enabled: "invalid",
+        interval_minutes: "15",
+        last_run: 123,
+        last_status: null,
+        failures: "invalid",
+        quota_auto_apply: "invalid"
+      }'
+    ensureSubscriptionGroupsState
+    jq -e '
+      (.groups[0].sync.enabled == true) and
+      (.groups[0].sync.interval_minutes == 15) and
+      (.groups[0].sync.last_run == "123") and
+      (.groups[0].sync.last_status == "pending") and
+      (.groups[0].sync.failures == []) and
+      (.groups[0].sync.quota_auto_apply == false) and
+      any(.groups[0].sources[]; .id == "edge" and .enabled == true)
+    ' "$(subscriptionGroupsFile)" >/dev/null
+
+    subscriptionGroupsStateWrite '.groups[0].sync.interval_minutes = 60'
+    ensureSubscriptionGroupsState
+    jq -e '.groups[0].sync.interval_minutes == 10' "$(subscriptionGroupsFile)" >/dev/null
 
     (
         local summaryOutput
@@ -351,16 +382,18 @@ runSubscriptionGroupStateStructureSourceCredentialRegression() {
 runSubscriptionGroupStateStructureSourceStatusRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateSourceStatusFixture
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id edge --argjson enabled false '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-      else . end)'
+    subscriptionHasEnabledRemoteSources
+    setSubscriptionSourceEnabled edge false
     jq -e '.groups[0].sources[] | select(.id == "edge" and .enabled == false)' "$(subscriptionGroupsFile)" >/dev/null
-    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id main --argjson enabled false '
-      .groups |= map(if .id == $groupId then
-        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-      else . end)'
+    if subscriptionHasEnabledRemoteSources; then
+        return 1
+    fi
+    if setSubscriptionSourceEnabled main false >/dev/null 2>&1 || setSubscriptionSourceEnabled missing true >/dev/null 2>&1; then
+        return 1
+    fi
     jq -e '.groups[0].sources[] | select(.id == "main" and .enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
+    setSubscriptionSourceEnabled edge true
+    subscriptionHasEnabledRemoteSources
     clearSubscriptionSourceSyncError edge
     jq -e '(.groups[0].sources[] | select(.id == "edge") | has("last_sync_error")) | not' "$(subscriptionGroupsFile)" >/dev/null
 }
@@ -856,7 +889,7 @@ runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression() {
 {"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
 JSON
     restoreSubscriptionGroupsBackup "${legacyBackup}"
-    jq -e '.version == 2 and .active_group == "legacy" and any(.groups[0].sources[]; .role == "main") and (.groups[0].sync.remote_enabled == true)' "$(subscriptionGroupsFile)" >/dev/null
+    jq -e '.version == 2 and .active_group == "legacy" and any(.groups[0].sources[]; .role == "main" and .enabled == true) and (.groups[0].sync.enabled == true) and ((.groups[0].sync | has("remote_enabled")) | not)' "$(subscriptionGroupsFile)" >/dev/null
 
     menuBackup="${TMP_DIR}/legacy-menu-backup.json"
     jq '.active_group = "legacy" | .groups[0].id = "legacy" | .groups[0].name = "Legacy"' "$(subscriptionGroupsFile)" >"${menuBackup}"
@@ -1340,7 +1373,6 @@ JSON
     originalConfig=$(<"${syncConfigFile}")
 
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
     readInstallProtocolType() { return 0; }
@@ -1442,7 +1474,6 @@ JSON
     originalConfig=$(<"${syncConfigFile}")
 
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
     readInstallProtocolType() { return 0; }
@@ -1500,7 +1531,8 @@ JSON
 )
 
 runSubscriptionGroupSyncRemoteFailureRegression() (
-    local syncRoot="${TMP_DIR}/subscription-group-sync-remote-failure"
+    local remoteFailureMode=${1:-remote-failure}
+    local syncRoot="${TMP_DIR}/subscription-group-sync-${remoteFailureMode}"
     local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
     local syncLocalFile="${syncRoot}/subscribe_local/default/user"
     local syncPublicFile="${syncRoot}/subscribe/default/user"
@@ -1509,6 +1541,7 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
     local statusLog="${syncRoot}/status.log"
     local resultStatus="${syncRoot}/mark-status.log"
     local resultFailures="${syncRoot}/mark-failures.log"
+    local refreshLog="${syncRoot}/refresh.log"
     local originalConfig
     local syncStatus
 
@@ -1520,7 +1553,7 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
     export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
     TMPDIR="${syncRoot}/tmp"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":false,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
@@ -1530,8 +1563,8 @@ JSON
     originalConfig=$(<"${syncConfigFile}")
 
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    subscriptionRemoteScopeEnabled() { return 0; }
-    subscriptionGroupRemoteSyncEnabled() { return 0; }
+    subscriptionCurrentRoleNormalized() { printf 'main\n'; }
+    subscriptionRemoteScopeEnabled() { [[ "${remoteFailureMode}" != "control-disabled" ]]; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
     readInstallProtocolType() { return 0; }
@@ -1547,17 +1580,16 @@ JSON
     }
     subscriptionSyncReconcileLocalServices() {
         printf '%s\n' "${1:-<empty>}" >>"${reconcileLog}"
-        if [[ -z "${1:-}" ]]; then
-            printf 'new-local\n' >"${syncLocalFile}"
-            printf 'new-public\n' >"${syncPublicFile}"
-        fi
         return 0
     }
     runSubscriptionRemoteSync() {
         printf 'remote\n' >>"${remoteLog}"
         printf '{"failures":["被控服务器同步失败"],"snapshots":{"edge-a":null}}'
     }
-    refreshPublishedSubscriptions() { return 0; }
+    refreshPublishedSubscriptions() {
+        printf 'refresh\n' >>"${refreshLog}"
+        return 0
+    }
     subscriptionSyncMarkResult() {
         printf '%s\n' "$1" >"${resultStatus}"
         printf '%s\n' "$2" >"${resultFailures}"
@@ -1573,16 +1605,27 @@ JSON
     [[ "${syncStatus}" == "1" ]]
     [[ "$(<"${syncConfigFile}")" != "${originalConfig}" ]]
     grep -q 'sub_new-main' "${syncConfigFile}"
-    [[ "$(<"${syncLocalFile}")" == "new-local" ]]
-    [[ "$(<"${syncPublicFile}")" == "new-public" ]]
-    grep -qx 'remote' "${remoteLog}"
-    grep -q '被控服务器同步失败' "${resultFailures}"
+    [[ "$(<"${syncLocalFile}")" == "old-local" ]]
+    [[ "$(<"${syncPublicFile}")" == "old-public" ]]
+    [[ ! -e "${refreshLog}" ]]
+    if [[ "${remoteFailureMode}" == "control-disabled" ]]; then
+        [[ ! -e "${remoteLog}" ]]
+        grep -q '主控控制面已关闭，启用的被控服务器无法同步' "${resultFailures}"
+        jq -e '.groups[0].sources[] | select(.id == "edge-a" and .last_sync_error.type == "control_disabled")' "$(subscriptionGroupsFile)" >/dev/null
+    else
+        grep -qx 'remote' "${remoteLog}"
+        grep -q '被控服务器同步失败' "${resultFailures}"
+    fi
     grep -q '本机自动同步完成，但被控服务器同步失败，请查看失败列表' "${statusLog}"
     grep -qx 'partial' "${resultStatus}"
     if regressionFindHasMatches "${syncRoot}/tmp" -maxdepth 1 -type d \( -name 'padm-subscription-sync-backup.*' -o -name 'padm-subscription-output-backup.*' \); then
         return 1
     fi
 )
+
+runSubscriptionGroupSyncControlDisabledRegression() {
+    runSubscriptionGroupSyncRemoteFailureRegression control-disabled
+}
 
 runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
     local syncRoot="${TMP_DIR}/subscription-group-sync-remote-before-publish-refresh"
@@ -1609,8 +1652,8 @@ JSON
 JSON
 
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
+    subscriptionCurrentRoleNormalized() { printf 'main\n'; }
     subscriptionRemoteScopeEnabled() { return 0; }
-    subscriptionGroupRemoteSyncEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
     readInstallProtocolType() { return 0; }
@@ -1703,14 +1746,15 @@ runSubscriptionGroupSyncPublishRefreshInlineRegression() (
     TMPDIR="${syncRoot}/tmp"
     : >"${callLog}"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":false,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-disabled","name":"Edge Disabled","role":"secondary","scheme":"https","transport":"https","host":"edge.example.com","port":443,"enabled":false,"sync_status":"pending","control_token":"token-disabled"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[]}}]}
 JSON
 
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    subscriptionGroupRemoteSyncEnabled() { return 1; }
+    subscriptionCurrentRoleNormalized() { printf 'main\n'; }
+    subscriptionRemoteScopeEnabled() { return 0; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { return 0; }
     readInstallProtocolType() { return 0; }
@@ -1795,7 +1839,6 @@ JSON
         originalSubscriptionSyncCreateConfigBackups "$@"
     }
     subscriptionGroupQuotaAutoApplyEnabled() { return 1; }
-    subscriptionGroupRemoteSyncEnabled() { return 1; }
     collectSubscriptionTraffic() { return 0; }
     readInstallType() { coreInstallType=1; }
     readInstallProtocolType() { return 0; }
@@ -1837,6 +1880,7 @@ runSubscriptionGroupSyncRollbackSerialRegression() {
     runRegressionStep subscription-group-sync-apply-failure runSubscriptionGroupSyncApplyFailureRegression
     runRegressionStep subscription-group-sync-reconcile-rollback runSubscriptionGroupSyncReconcileRollbackRegression
     runRegressionStep subscription-group-sync-remote-failure runSubscriptionGroupSyncRemoteFailureRegression
+    runRegressionStep subscription-group-sync-control-disabled runSubscriptionGroupSyncControlDisabledRegression
     runRegressionStep subscription-group-sync-remote-before-publish-refresh runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression
 }
 

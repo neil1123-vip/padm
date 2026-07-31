@@ -12134,7 +12134,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         printf 'reload\n' >>"${callLog}"
         [[ "${mode}" != "reload-fail" ]]
     }
-    subscriptionEventSyncEnabled() {
+    subscriptionGroupSyncEnabled() {
         return 0
     }
     runSubscriptionGroupSync() {
@@ -12145,6 +12145,9 @@ runRemoveUserSubscriptionMenuFailureRegression() (
         printf '%s\n' "$*" >>"${successLog}"
     }
     statusCard() {
+        printf '%s\n' "$*" >>"${statusLog}"
+    }
+    warnCard() {
         printf '%s\n' "$*" >>"${statusLog}"
     }
     errorCard() {
@@ -12266,7 +12269,7 @@ runRemoveUserSubscriptionMenuFailureRegression() (
     grep -qx 'reload' "${callLog}"
     grep -qx 'sync:' "${callLog}"
     grep -q '用户订阅已删除' "${successLog}"
-    grep -q '订阅已删除，但自动同步失败' "${statusLog}"
+    grep -q '变更已保存，但后置完整同步失败' "${statusLog}"
 )
 
 runUserSubscriptionMenuMutationFailureRegression() (
@@ -12275,7 +12278,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
     local successLog="${root}/success.log"
     local statusLog="${root}/status.log"
     local errorLog="${root}/error.log"
-    local mode rc menuStep=0 syncMenuChoice=8
+    local mode rc menuStep=0
 
     mkdir -p "${root}"
     : >"${callLog}"
@@ -12313,14 +12316,6 @@ runUserSubscriptionMenuMutationFailureRegression() (
                 printf -v "${targetVar}" '9'
             fi
             ;;
-        sync_settings_menu)
-            menuStep=$((menuStep + 1))
-            if [[ "${menuStep}" == "1" ]]; then
-                printf -v "${targetVar}" "${syncMenuChoice}"
-            else
-                printf -v "${targetVar}" '12'
-            fi
-            ;;
         *) printf -v "${targetVar}" '' ;;
         esac
     }
@@ -12350,6 +12345,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf 'sync:%s\n' "$*" >>"${callLog}"
         [[ "${mode}" != "sync-fail" ]]
     }
+    subscriptionGroupSyncEnabled() { [[ "${mode}" != "auto-disabled" ]]; }
     selectUserSubscriptionId() {
         selectedUserSubscriptionId=team-a
     }
@@ -12374,18 +12370,6 @@ runUserSubscriptionMenuMutationFailureRegression() (
         printf 'toggle:%s\n' "$1" >>"${callLog}"
         [[ "${mode}" != "toggle-fail" ]]
     }
-    toggleSubscriptionGroupRemoteSyncEnabled() {
-        printf 'sync-toggle:remote\n' >>"${callLog}"
-        [[ "${mode}" != "sync-settings-fail" ]]
-    }
-    toggleSubscriptionGroupQuotaAutoApplyEnabled() {
-        printf 'sync-toggle:quota\n' >>"${callLog}"
-        [[ "${mode}" != "sync-settings-fail" ]]
-    }
-    toggleSubscriptionEventSyncEnabled() {
-        printf 'sync-toggle:event\n' >>"${callLog}"
-        [[ "${mode}" != "sync-settings-fail" ]]
-    }
     userResultCard() { return 0; }
     successCard() {
         printf '%s\n' "$*" >>"${successLog}"
@@ -12393,17 +12377,18 @@ runUserSubscriptionMenuMutationFailureRegression() (
     statusCard() {
         printf '%s\n' "$*" >>"${statusLog}"
     }
+    warnCard() {
+        printf '%s\n' "$*" >>"${statusLog}"
+    }
     errorCard() {
         printf '%s\n' "$*" >>"${errorLog}"
     }
 
-    mode=event-disabled
+    mode=auto-disabled
     resetLogs
-    subscriptionEventSyncEnabled() { return 1; }
-    runSubscriptionEventSyncIfEnabled "test-disabled" >/dev/null 2>&1
+    runSubscriptionSyncAfterMutation "test-disabled" >/dev/null 2>&1
     ! grep -q '^sync:' "${callLog}"
-    grep -q '等待手动/定时同步' "${statusLog}"
-    subscriptionEventSyncEnabled() { [[ "${mode}" != "event-disabled" ]]; }
+    grep -q '自动同步已关闭，等待手动完整同步' "${statusLog}"
 
     mode=service-install-fail
     resetLogs
@@ -12428,7 +12413,7 @@ runUserSubscriptionMenuMutationFailureRegression() (
 
     mode=success
     resetLogs
-    runSubscriptionEventSyncIfEnabled "test-enabled" >/dev/null 2>&1
+    runSubscriptionSyncAfterMutation "test-enabled" >/dev/null 2>&1
     grep -qx 'sync:' "${callLog}"
 
     mode=subscribe-fail
@@ -12493,27 +12478,15 @@ runUserSubscriptionMenuMutationFailureRegression() (
     grep -q '用户订阅状态切换失败' "${errorLog}"
     ! grep -q '用户订阅状态已切换' "${successLog}"
 
-    mode=sync-settings-fail
-    syncMenuChoice=8
+    mode=sync-fail
     resetLogs
-    manageSubscriptionSyncSettings >/dev/null 2>&1
-    grep -qx 'sync-toggle:remote' "${callLog}"
-    grep -q '远程同步状态切换失败' "${errorLog}"
-    ! grep -q '远程同步状态已切换' "${successLog}"
-
-    syncMenuChoice=9
-    resetLogs
-    manageSubscriptionSyncSettings >/dev/null 2>&1
-    grep -qx 'sync-toggle:quota' "${callLog}"
-    grep -q '限额自动执行状态切换失败' "${errorLog}"
-    ! grep -q '限额自动执行状态已切换' "${successLog}"
-
-    syncMenuChoice=10
-    resetLogs
-    manageSubscriptionSyncSettings >/dev/null 2>&1
-    grep -qx 'sync-toggle:event' "${callLog}"
-    grep -q '事件同步状态切换失败' "${errorLog}"
-    ! grep -q '事件同步状态已切换' "${successLog}"
+    set +e
+    runSubscriptionSyncAfterMutation "test-failure" >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "1" ]]
+    grep -qx 'sync:' "${callLog}"
+    grep -q '变更已保存，但后置完整同步失败' "${statusLog}"
 
     mode=success
     resetLogs
@@ -15139,6 +15112,10 @@ JSON
         grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
         jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
 
+        rm -f "${controlledRequestLog}"
+        stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" '{}'
+        jq -e --arg account "${controlledEmail}" '.account == $account' "${controlledRequestLog}" >/dev/null
+
         printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
         printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
         printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
@@ -15823,9 +15800,9 @@ runSubscriptionWireGuardMenuFlowRegression() (
     }
     autoRead() {
         local targetVar=$3
-        local input=
-        IFS= read -r input || input=
-        printf -v "${targetVar}" '%s' "${input}"
+        local readValue=
+        IFS= read -r readValue || readValue=
+        printf -v "${targetVar}" '%s' "${readValue}"
     }
     echoContent() { return 0; }
     menuSection() { return 0; }
@@ -15835,6 +15812,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     menuDangerItem() { return 0; }
     menuClose() { return 0; }
     statusCard() { recordMenuAction "statusCard:$1"; }
+    warnCard() { recordMenuAction "warnCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
     runSubscriptionGroupSync() { recordMenuAction "runSubscriptionGroupSync:$*"; }
@@ -15987,7 +15965,7 @@ main"; then
 2
 ${controlledCredential}
 edge-a
-5
+6
 5"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
@@ -16155,35 +16133,16 @@ edge-a
 
         if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-toggle; then
             resetMenuActions
-            toggleSubscriptionSourceMenu() {
-                subscriptionRequireMainRole || return 1
-                recordMenuAction toggleSubscriptionSourceMenu
-                local sourceId=
-                local sourceAction=
-                autoRead subscription_source_toggle_id "请输入被控服务器源ID:" sourceId
-                autoRead subscription_source_action "请输入操作[enable/disable]:" sourceAction
-                if [[ "${sourceAction}" == "enable" ]]; then
-                    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled true '
-                      .groups |= map(if .id == $groupId then
-                        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-                      else . end)'
-                elif [[ "${sourceAction}" == "disable" ]]; then
-                    subscriptionGroupsStateWrite --arg groupId "$(activeSubscriptionGroupId)" --arg id "${sourceId}" --argjson enabled false '
-                      .groups |= map(if .id == $groupId then
-                        .sources |= map(if .id == $id and .role != "main" then .enabled = $enabled else . end)
-                      else . end)'
-                else
-                    return 1
-                fi
-            }
             resetMenuActions
-            toggleSubscriptionSourceMenu <<<"edge-a
-disable"
+            changeSubscriptionSourceEnabledMenu <<<"edge-a
+y"
             subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == false)' >/dev/null
+            assertMenuAction 'runSubscriptionGroupSync:'
             resetMenuActions
-            toggleSubscriptionSourceMenu <<<"edge-a
-enable"
+            changeSubscriptionSourceEnabledMenu <<<"edge-a
+y"
             subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .enabled == true)' >/dev/null
+            assertMenuAction 'runSubscriptionGroupSync:'
         fi
 
         if wireGuardMenuPartSelected peer-source-control || wireGuardMenuPartSelected peer-source-control-clear-error; then
@@ -17273,10 +17232,6 @@ runMenuSmokeRegression() {
         subscriptionRequireMainRole || return 1
         recordMenuAction setSubscriptionSourceControlTokenMenu
     }
-    toggleSubscriptionSourceMenu() {
-        subscriptionRequireMainRole || return 1
-        recordMenuAction toggleSubscriptionSourceMenu
-    }
     clearSubscriptionSourceSyncErrorMenu() {
         subscriptionRequireMainRole || return 1
         recordMenuAction clearSubscriptionSourceSyncErrorMenu
@@ -17290,7 +17245,6 @@ runMenuSmokeRegression() {
     restoreSubscriptionGroupsBackupMenu() { recordMenuAction restoreSubscriptionGroupsBackupMenu; }
     resetSubscriptionGroupsStateMenu() { recordMenuAction resetSubscriptionGroupsStateMenu; }
     refreshSubscriptionGroupSyncCron() { recordMenuAction refreshSubscriptionGroupSyncCron; }
-    toggleSubscriptionEventSyncEnabled() { recordMenuAction toggleSubscriptionEventSyncEnabled; }
     subscriptionGroupSyncCronStatus() { recordMenuAction subscriptionGroupSyncCronStatus; }
     installUserCrontabContent() { return 0; }
     xrayInstalled() { return 0; }
@@ -17518,7 +17472,11 @@ n
 7"
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | any(.user_groups[]?; .id == "team-a" and .name == "team-a")' >/dev/null
         subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.enabled == false' >/dev/null
-        assertMenuAction 'runSubscriptionGroupSync:'
+        if assertMenuAction 'runSubscriptionGroupSync:'; then
+            printf 'menu-smoke failed: disabled auto sync still ran a full sync\n' >&2
+            return 1
+        fi
+        assertMenuAction 'statusCard:订阅变更已保存'
     fi
 
     if menuSmokePartSelected subscription-main-publish-sync || menuSmokePartSelected subscription-main-publish-sync-enable; then
@@ -17578,74 +17536,81 @@ n
         assertMenuAction showSubscriptionSourceSyncResults
         resetMenuActions
         output=
-        manageSubscriptionMainMaintenance <<<"9"
-        grep -q "刷新并查看运行总览" <<<"${output}"
-        grep -q "立即执行同步" <<<"${output}"
-        grep -q "查看运行状态" <<<"${output}"
-        grep -q "用量与限额" <<<"${output}"
-        grep -q "自动同步设置" <<<"${output}"
+        manageSubscriptionMainMaintenance <<<"4"
+        grep -q "订阅同步" <<<"${output}"
         grep -q "状态备份与恢复" <<<"${output}"
         grep -q "控制面与连接细节" <<<"${output}"
-        grep -q "清除同步错误" <<<"${output}"
-        if grep -q "兼容 WireGuard 控制面" <<<"${output}"; then
-            printf 'menu-smoke failed: main maintenance still shows compatibility entry\n' >&2
+        if grep -q "立即完整同步" <<<"${output}" || grep -q "用量与限额" <<<"${output}" || grep -q "清除同步错误" <<<"${output}"; then
+            printf 'menu-smoke failed: main maintenance still duplicates sync actions\n' >&2
             return 1
         fi
         resetMenuActions
         manageSubscriptionMainMaintenance <<<"1
-9"
-        assertMenuAction collectSubscriptionTraffic
-        assertMenuAction showSubscriptionTrafficOverview
-        resetMenuActions
-        manageSubscriptionMainMaintenance <<<"2
-9"
+1
+6
+4"
         assertMenuAction 'runSubscriptionGroupSync:'
         resetMenuActions
-        manageSubscriptionMainMaintenance <<<"3
-9"
+        output=
+        manageSubscriptionSyncSettings <<<"6"
+        grep -q "立即完整同步" <<<"${output}"
+        grep -q "开启/关闭自动同步" <<<"${output}"
+        grep -q "设置同步间隔" <<<"${output}"
+        grep -q "状态与排障" <<<"${output}"
+        grep -q "用量与限额" <<<"${output}"
+        if grep -q "事件同步" <<<"${output}" || grep -q "开启/关闭远程同步" <<<"${output}"; then
+            printf 'menu-smoke failed: unified sync menu still exposes legacy toggles\n' >&2
+            return 1
+        fi
+        resetMenuActions
+        manageSubscriptionSyncSettings <<<"4
+1
+8
+6"
         assertMenuAction showSubscriptionGroupsStateSummary
-        assertMenuAction showSubscriptionLocalSyncPlan
-        assertMenuAction subscriptionSyncPlan
-        assertMenuAction showSubscriptionRemoteSyncPlan
-        assertMenuAction subscriptionRemoteSyncPlan
         assertMenuAction showSubscriptionSourceSyncResults
         resetMenuActions
-        manageTrafficAndQuota <<<"1
+        manageSubscriptionSyncDiagnostics <<<"2
 8"
+        assertMenuAction showSubscriptionServiceStatus
+        resetMenuActions
+        manageSubscriptionSyncDiagnostics <<<"3
+8"
+        assertMenuAction showSubscriptionRemoteHealthPlan
+        assertMenuAction subscriptionRemoteControlHealthAll
+        resetMenuActions
+        manageSubscriptionSyncDiagnostics <<<"4
+8"
+        assertMenuAction showSubscriptionLocalSyncPlan
+        assertMenuAction subscriptionSyncPlan
+        resetMenuActions
+        manageSubscriptionSyncDiagnostics <<<"5
+8"
+        assertMenuAction showSubscriptionRemoteSyncPlan
+        assertMenuAction subscriptionRemoteSyncPlan
+        resetMenuActions
+        manageSubscriptionSyncDiagnostics <<<"7
+8"
+        assertMenuAction clearSubscriptionSourceSyncErrorMenu
+        resetMenuActions
+        manageTrafficAndQuota <<<"1
+9"
         assertMenuAction collectSubscriptionTraffic
         assertMenuAction showSubscriptionTrafficOverview
         resetMenuActions
         manageTrafficAndQuota <<<"6
-8"
+9"
         assertMenuAction showSubscriptionQuotaPlan
         assertMenuAction subscriptionQuotaDryRunPlan
         resetMenuActions
         manageTrafficAndQuota <<<"7
-8"
+9"
         assertMenuAction executeSubscriptionQuotaPlanMenu
         resetMenuActions
-        output=
-        manageSubscriptionMainMaintenance <<<"5
-12
+        manageTrafficAndQuota <<<"8
 9"
-        grep -q "开启/关闭自动同步" <<<"${output}"
-        grep -q "开启/关闭事件同步" <<<"${output}"
-        grep -q "查看定时任务" <<<"${output}"
-        resetMenuActions
-        manageSubscriptionSyncSettings <<<"5
-12"
-        assertMenuAction 'runSubscriptionGroupSync:'
-        resetMenuActions
-        manageSubscriptionSyncSettings <<<"10
-12"
-        assertMenuAction toggleSubscriptionEventSyncEnabled
-        resetMenuActions
-        output=
-        manageSubscriptionMainMaintenance <<<"6
-6
-9"
-        grep -q "查看当前状态摘要" <<<"${output}"
-        grep -q "重建订阅状态" <<<"${output}"
+        assertMenuAction 'successCard:限额自动执行状态已切换'
+        subscriptionGroupsStateRead -e '.groups[] | select(.id == "default") | .sync.quota_auto_apply == true' >/dev/null
         resetMenuActions
         manageSubscriptionMainControlDetails <<<"1
 7"
@@ -17758,7 +17723,7 @@ main-credential
         setSubscriptionSourceControlTokenMenu <<<"" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
-        toggleSubscriptionSourceMenu <<<"" || true
+        changeSubscriptionSourceEnabledMenu <<<"" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         clearSubscriptionSourceSyncErrorMenu <<<"" || true
@@ -17780,27 +17745,35 @@ main-credential
         grep -q "查看并处理已有订阅" <<<"${output}"
         resetMenuActions
         output=
-        manageTrafficAndQuota <<<"8"
+        manageTrafficAndQuota <<<"9"
         grep -q "查看用量总览" <<<"${output}"
         resetMenuActions
         setMenuSmokeRole controlled
-        manageTrafficAndQuota <<<"8" || true
+        manageTrafficAndQuota <<<"9" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         manageSubscriptionStateBackups <<<"6" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
-        manageSubscriptionSyncSettings <<<"12" || true
+        manageSubscriptionSyncSettings <<<"6" || true
         assertMenuAction 'errorCard:当前机器已初始化为被控'
         resetMenuActions
         setMenuSmokeRole uninitialized
-        manageTrafficAndQuota <<<"8"
+        manageTrafficAndQuota <<<"9"
         [[ -z "${actions}" ]]
         resetMenuActions
         manageSubscriptionStateBackups <<<"6"
         [[ -z "${actions}" ]]
         resetMenuActions
-        manageSubscriptionSyncSettings <<<"10"
+        output=
+        manageSubscriptionSyncSettings <<<"6"
+        grep -q "立即完整同步" <<<"${output}"
+        grep -q "状态与排障" <<<"${output}"
+        grep -q "用量与限额" <<<"${output}"
+        if grep -q "远端同步计划" <<<"${output}" || grep -q "事件同步" <<<"${output}"; then
+            printf 'menu-smoke failed: local sync menu exposes main-only or legacy actions\n' >&2
+            return 1
+        fi
         [[ -z "${actions}" ]]
     fi
 

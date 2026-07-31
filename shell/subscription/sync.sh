@@ -1099,7 +1099,11 @@ runSubscriptionGroupSyncUnlocked() {
     local groupsBackupFile=
     local localSyncReady=false
     local localSyncFailure=
-    local remoteSyncEnabled=false
+    local role
+    local enabledRemoteSources=false
+    local remoteSyncRequired=false
+    local sourceId
+    local controlStateWriteFailed=false
     local rc=0
     ensureSubscriptionGroupsState || return 1
     readInstallType
@@ -1197,16 +1201,36 @@ runSubscriptionGroupSyncUnlocked() {
         rc=1
     fi
 
-    if subscriptionRemoteScopeEnabled && subscriptionGroupRemoteSyncEnabled; then
-        remoteSyncEnabled=true
+    role=$(subscriptionCurrentRoleNormalized) || {
+        failures=$(jq '. + ["订阅服务器角色读取失败"]' <<<"${failures}")
+        subscriptionSyncMarkResult partial "${failures}" || true
+        return 1
+    }
+    if [[ "${role}" == "main" ]] && subscriptionHasEnabledRemoteSources; then
+        enabledRemoteSources=true
+        if subscriptionRemoteScopeEnabled; then
+            remoteSyncRequired=true
+        else
+            remoteFailures='["主控控制面已关闭，启用的被控服务器无法同步"]'
+            failures=$(jq -n --argjson failures "${failures}" --argjson remoteFailures "${remoteFailures}" '$failures + $remoteFailures')
+            while IFS= read -r sourceId; do
+                [[ -n "${sourceId}" ]] || continue
+                setSubscriptionSourceSyncFailure "${sourceId}" control_disabled "主控控制面已关闭" || controlStateWriteFailed=true
+            done < <(subscriptionActiveGroupRead -r '.sources[]? | select(.role != "main" and .enabled == true) | .id')
+            if [[ "${controlStateWriteFailed}" == "true" ]]; then
+                failures=$(jq '. + ["主控控制面关闭状态写入失败"]' <<<"${failures}")
+                remoteFailures=$(jq '. + ["主控控制面关闭状态写入失败"]' <<<"${remoteFailures}")
+            fi
+            rc=1
+        fi
     fi
 
-    if [[ "${localSyncReady}" != "true" && "${remoteSyncEnabled}" == "true" ]]; then
+    if [[ "${localSyncReady}" != "true" && "${remoteSyncRequired}" == "true" ]]; then
         failures=$(jq '. + ["本机同步未完成，已跳过被控服务器同步"]' <<<"${failures}")
         rc=1
     fi
 
-    if [[ "${localSyncReady}" == "true" && "${remoteSyncEnabled}" == "true" ]]; then
+    if [[ "${localSyncReady}" == "true" && "${remoteSyncRequired}" == "true" ]]; then
         statusCard "订阅同步" "正在同步被控服务器，请稍候"
         if ! remoteSyncResult=$(runSubscriptionRemoteSync) ||
             ! jq -e '.failures | type == "array"' <<<"${remoteSyncResult}" >/dev/null 2>&1 ||
@@ -1221,7 +1245,7 @@ runSubscriptionGroupSyncUnlocked() {
         fi
     fi
 
-    if [[ "${localSyncReady}" == "true" ]]; then
+    if [[ "${localSyncReady}" == "true" && "${remoteFailures}" == "[]" ]]; then
         subscribePort=
         subscribeType=
         subscribeDomain=
@@ -1259,12 +1283,12 @@ runSubscriptionGroupSyncUnlocked() {
             rc=1
         fi
         if [[ "${localSyncReady}" == "true" ]]; then
-            if [[ "${remoteSyncEnabled}" == "true" && "${remoteFailures}" != "[]" ]]; then
+            if [[ "${enabledRemoteSources}" == "true" && "${remoteFailures}" != "[]" ]]; then
                 statusCard "订阅同步" "本机自动同步完成，但被控服务器同步失败，请查看失败列表"
             else
                 statusCard "订阅同步" "本机自动同步完成，但部分步骤失败，请查看失败列表"
             fi
-        elif [[ "${remoteSyncEnabled}" == "true" ]]; then
+        elif [[ "${enabledRemoteSources}" == "true" ]]; then
             statusCard "订阅同步" "本机同步未完全完成，请先处理本机错误后再试被控服务器同步"
         else
             statusCard "订阅同步" "本机同步未完全完成，请先处理本机错误"

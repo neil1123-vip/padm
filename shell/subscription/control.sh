@@ -38,6 +38,19 @@ subscriptionRemoteSourceUsesWireGuard() {
     jq -e '(.transport // .scheme // "") == "wireguard"' <<<"${source}" >/dev/null 2>&1
 }
 
+subscriptionRemoteControlUrl() {
+    local source=$1
+    local endpoint=$2
+    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
+        subscriptionWireGuardControlUrl "${source}" "${endpoint}"
+    else
+        jq -er --arg endpoint "${endpoint}" '
+          select((.scheme == "https" or .scheme == "http") and (.host | type == "string" and length > 0) and (.port | type == "number")) |
+          .scheme + "://" + .host + ":" + (.port | tostring) + "/s/control/" + $endpoint
+        ' <<<"${source}"
+    fi
+}
+
 subscriptionRemoteWireGuardPeerStateFromSource() {
     local source=$1
     local sourceId
@@ -132,7 +145,7 @@ subscriptionRemoteControlRequest() {
     local body
     token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
     [[ -n "${token}" ]] || return 2
-    url=$(subscriptionWireGuardControlUrl "${source}" "${endpoint}") || return 1
+    url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
     if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
         maxTime=210
     else
@@ -189,11 +202,9 @@ subscriptionRemoteControlPayload() {
     local users
     sourceId=$(jq -r '.id' <<<"${source}")
     [[ -n "${desiredUsersBySource}" ]] || return 1
-    users=$(jq -c --arg sourceId "${sourceId}" '.[$sourceId] // []' <<<"${desiredUsersBySource}") || return 1
-    jq -n --arg sourceId "${sourceId}" --arg groupId "$(activeSubscriptionGroupId)" --argjson dryRun "${dryRun}" --argjson users "${users}" '
-      {version:1, group_id:$groupId, source_id:$sourceId, dry_run:$dryRun, desired_users:$users}
-      + if $dryRun then {} else {include_subscriptions:true} end
-    '
+    users=$(jq -c --arg sourceId "${sourceId}" '[.[$sourceId][]? | {id, uuid}]' <<<"${desiredUsersBySource}") || return 1
+    jq -n --argjson dryRun "${dryRun}" --argjson users "${users}" \
+        '{dry_run:$dryRun, desired_users:$users}'
 }
 
 subscriptionRemoteResponseErrorMessage() {
@@ -232,7 +243,7 @@ subscriptionRemoteControlHealth() {
             IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
         fi
     fi
-    url=$(subscriptionWireGuardControlUrl "${source}" health) || return 1
+    url=$(subscriptionRemoteControlUrl "${source}" health) || return 1
     curlArgs=(
         -sS
         --connect-timeout 5
@@ -1197,10 +1208,9 @@ subscriptionControlSyncResponse() {
     local dryRun=$2
     local changed=$3
     local desiredUsers=$4
-    local includeSubscriptions=$5
     local subscriptions
 
-    if [[ "${dryRun}" != "true" && "${includeSubscriptions}" == "true" ]]; then
+    if [[ "${dryRun}" != "true" ]]; then
         if subscriptions=$(subscriptionControlRenderSubscribeAccounts "${desiredUsers}"); then
             jq -n --argjson plan "${plan}" --argjson changed "${changed}" --argjson subscriptions "${subscriptions}" \
                 '{ok:true, dry_run:false, changed:$changed, plan:$plan, subscriptions:$subscriptions}'
@@ -1224,7 +1234,6 @@ subscriptionControlApplySyncUnlocked() {
     local configBackupDir=
     local outputBackupDir=
     local prepareFailureMessage=
-    local includeSubscriptions
     if ! jq -e '
       def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
@@ -1244,7 +1253,6 @@ subscriptionControlApplySyncUnlocked() {
         return 1
     fi
     dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
-    includeSubscriptions=$(jq -r '.include_subscriptions // false' <<<"${payload}")
     desiredUsers=$(jq '[.desired_users[]? | {id, uuid}]' <<<"${payload}") || {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
@@ -1262,7 +1270,7 @@ subscriptionControlApplySyncUnlocked() {
         return 1
     fi
     if jq -e '(.create | length == 0) and (.remove | length == 0)' <<<"${plan}" >/dev/null 2>&1; then
-        subscriptionControlSyncResponse "${plan}" "${dryRun}" false "${desiredUsers}" "${includeSubscriptions}"
+        subscriptionControlSyncResponse "${plan}" "${dryRun}" false "${desiredUsers}"
         return
     fi
     if [[ "${dryRun}" == "true" ]]; then
@@ -1324,7 +1332,7 @@ subscriptionControlApplySyncUnlocked() {
         fi
     fi
     subscriptionSyncReleaseLocalApplyBackups remove "${configBackupDir}" "${outputBackupDir}"
-    subscriptionControlSyncResponse "${plan}" false true "${desiredUsers}" "${includeSubscriptions}"
+    subscriptionControlSyncResponse "${plan}" false true "${desiredUsers}"
 }
 
 subscriptionControlApplySync() {

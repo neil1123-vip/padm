@@ -373,10 +373,17 @@ showSubscriptionTrafficOverview() {
 
 manageTrafficAndQuota() {
     subscriptionRequireLocalPublisherRole || return 1
+    local role
+    local returnText
+    local quotaAutoApplyText
+    role=$(subscriptionCurrentRoleNormalized) || return 1
+    [[ "${role}" == "main" ]] && returnText="返回主控订阅同步" || returnText="返回本机订阅同步"
     while true; do
+        subscriptionGroupQuotaAutoApplyEnabled && quotaAutoApplyText="开启" || quotaAutoApplyText="关闭"
         echoContent title "\n┌─ 流量与限额 ───────────────────────────────────────"
         menuLine "这里是用量治理台：先刷新统计，再看总览、预览并执行超限处理"
         menuLine "订阅额度在 发布订阅 中设置；这里不编辑订阅对象，只处理运行状态"
+        menuLine "自动执行超限处理：${quotaAutoApplyText}"
         menuItem 1 "刷新并显示总览" "采集本机账号流量，写入 groups.json 后显示治理摘要"
         menuItem 2 "查看用量总览" "显示全局、分享订阅、服务器源和最近同步摘要"
         menuItem 3 "查看分享订阅限额概览" "列出全部分享订阅、额度和状态"
@@ -384,7 +391,8 @@ manageTrafficAndQuota() {
         menuItem 5 "查看服务器流量" "显示各服务器源累计流量"
         menuItem 6 "预览超限处理" "查看将因超额而停用的分享订阅"
         menuDangerItem 7 "执行超限处理" "停用超额订阅并移除本机托管账号"
-        menuReturnItem 8 "返回主控维护与排障" "回到上级菜单"
+        menuItem 8 "开启/关闭自动执行超限处理" "切换同步前的自动限额事务"
+        menuReturnItem 9 "${returnText}" "回到上级菜单"
         menuClose
         autoRead traffic_quota_menu "请选择:" trafficQuotaStatus
         case "${trafficQuotaStatus}" in
@@ -395,7 +403,8 @@ manageTrafficAndQuota() {
         5) showSubscriptionSourcesTraffic ;;
         6) showSubscriptionQuotaPlan ;;
         7) executeSubscriptionQuotaPlanMenu ;;
-        8) return ;;
+        8) toggleSubscriptionGroupQuotaAutoApplyEnabled && successCard "限额自动执行状态已切换" || errorCard "限额自动执行状态切换失败" ;;
+        9) return ;;
         *) coreSelectionErrorCard ;;
         esac
     done
