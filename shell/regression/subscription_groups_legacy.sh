@@ -11885,55 +11885,6 @@ runSubscribeLocalRollbackRegression() (
     if [[ -n "${oldSubscribeSalt}" ]]; then subscribeSalt="${oldSubscribeSalt}"; else unset subscribeSalt; fi
 )
 
-runSubscriptionGroupsMigrationBackupRegression() (
-    local root="${TMP_DIR}/subscription-groups-migration-backup"
-    local groupsDir="${root}/subscribe_groups"
-    local backupsDir="${groupsDir}/backups"
-    local stateFile="${groupsDir}/groups.json"
-    local errorLog="${root}/error.log"
-    local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-    local oldTmpDir="${TMPDIR:-}"
-    local rc
-
-    source "${PROJECT_ROOT}/shell/subscription/groups.sh"
-    export PADM_SUBSCRIPTION_GROUPS_DIR="${groupsDir}"
-    TMPDIR="${root}"
-    REGRESSION_ERROR_CARD_LOG="${errorLog}"
-    mkdir -p "${groupsDir}"
-    cat >"${stateFile}" <<'JSON'
-{"version":1,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"本机","role":"main","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-
-    cp() {
-        return 1
-    }
-
-    set +e
-    migrateSubscriptionGroupsState >/dev/null 2>&1
-    rc=$?
-    set -e
-    unset -f cp
-    [[ "${rc}" == "1" ]]
-    [[ -f "${stateFile}" ]]
-    [[ "$(jq -r '.version' "${stateFile}")" == "1" ]]
-    if regressionFindHasMatches "${backupsDir}" -maxdepth 1 -type f -name 'groups-pre-migrate-*.json'; then
-        return 1
-    fi
-
-    jq '.version = 2 | .active_group = "missing" | .groups[0].sync.event_enabled = true' "${stateFile}" >"${stateFile}.tmp"
-    mv "${stateFile}.tmp" "${stateFile}"
-    migrateSubscriptionGroupsState
-    [[ "$(jq -r '.active_group' "${stateFile}")" == "default" ]]
-    set +e
-    subscriptionGroupRead missing -r '.id' >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" -ne 0 ]]
-
-    if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-    if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-)
-
 runSubscriptionGroupsBackupFailureRegression() (
     local root="${TMP_DIR}/subscription-groups-backup-failure"
     local groupsDir="${root}/subscribe_groups"
@@ -14910,7 +14861,7 @@ runRemoteSubscribeFetchRegression() {
     mkdir -p "${publicDir}/default" "${publicDir}/clashMeta" "${localDir}/sing-box" "${remoteTmpRoot}"
     mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"r1","name":"Remote 1","role":"secondary","scheme":"https","transport":"https","host":"remote1.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r2","name":"Remote 2","role":"secondary","scheme":"https","transport":"https","host":"remote2.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r3","name":"Remote 3","role":"secondary","scheme":"https","transport":"https","host":"remote3.example","port":443,"enabled":true,"sync_status":"success"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["r1","r2","r3"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"r1","name":"Remote 1","role":"secondary","scheme":"https","transport":"https","host":"remote1.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r2","name":"Remote 2","role":"secondary","scheme":"https","transport":"https","host":"remote2.example","port":443,"enabled":true,"sync_status":"success"},{"id":"r3","name":"Remote 3","role":"secondary","scheme":"https","transport":"https","host":"remote3.example","port":443,"enabled":true,"sync_status":"success"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["r1","r2","r3"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     : >"${fetchTmpMarker}"
     : >"${stageTmpMarker}"
@@ -15084,7 +15035,7 @@ JSON
         export PADM_SUBSCRIBE_LOCAL_DIR="${controlledLocal}"
         export PADM_SUBSCRIBE_DIR="${controlledPublic}"
         cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-wg","name":"Edge WG","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"wg.example.com","port":443,"enabled":true,"sync_status":"success","control_token":"token-edge"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["edge-wg"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-wg","name":"Edge WG","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"wg.example.com","port":443,"enabled":true,"sync_status":"success","control_token":"token-edge"}],"user_groups":[{"id":"team","name":"Team","enabled":true,"allowed_sources":["edge-wg"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
         printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
         printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
@@ -16383,7 +16334,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     subscriptionWireGuardPublicKey() { printf '%s\n' "${controlledPublicKeyA}"; }
     subscriptionControlEnsureToken() { return 0; }
     subscriptionControlToken() { printf '%s\n' "${receiptToken}"; }
-    testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,remote_enabled:true,event_enabled:true,quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
+    testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,interval_minutes:10,last_run:"",last_status:"pending",failures:[],remote_enabled:true,event_enabled:true,quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
     testWireGuardState=$(jq -cn --arg publicKey "${mainPublicKey}" '{enabled:true,role:"main",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"10.77.0.1/24",endpoint_host:"main.example.com",public_key:$publicKey,peers:[]}')
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     printf 'keep-config\n' >"${wireGuardConfig}"
@@ -16468,7 +16419,7 @@ runSubscriptionWireGuardInviteReceiptRegression() (
     wireGuardConfig="${root}/controlled-wg.conf"
     stateMarker="${root}/controlled-control.json"
     testWireGuardState=$(jq -cn '{enabled:false,role:"uninitialized",interface:"wg-padm",network:"10.77.0.0/24",listen_port:51820,control_port:39778,firewall_owned:false,address:"",endpoint_host:"",public_key:"",peers:[]}')
-    testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,remote_enabled:true,event_enabled:true,quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
+    testGroupsState=$(jq -cn '{version:2,active_group:"default",groups:[{id:"default",name:"Default",sources:[{id:"main",name:"Main",role:"main",scheme:"local",transport:"local",host:"127.0.0.1",port:0,enabled:true,sync_status:"local"}],user_groups:[],sync:{enabled:true,interval_minutes:10,last_run:"",last_status:"pending",failures:[],remote_enabled:true,event_enabled:true,quota_auto_apply:false},traffic:{global:{upload:0,download:0},admin:{upload:0,download:0,sources:{}},user_groups:{},sources:{}}}]}')
     printf '%s\n' "${testWireGuardState}" >"${stateMarker}"
     subscriptionWireGuardJoinInvite "${joinJson}" false
     subscriptionWireGuardReadState | jq -e --arg inviteId "$(jq -r '.invite_id' <<<"${joinJson}")" '.role == "controlled" and .address == $address and .join_invite_id == $inviteId and (.peers | length) == 1 and .peers[0].id == "main"' --arg address "$(jq -r '.address' <<<"${joinJson}")" >/dev/null
@@ -16890,7 +16841,7 @@ runTrafficAccountIdMapHelperRegression() (
     mkdir -p "${trafficRoot}/groups"
     export PADM_SUBSCRIPTION_GROUPS_DIR="${trafficRoot}/groups"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 
     subscriptionSyncAccountIdMapJsonFromIds() {

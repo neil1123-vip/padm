@@ -44,7 +44,6 @@ listRegressionSubscriptionTxChildSelectors() {
         sing-box-port-failure \
         subscribe-user-output-transaction \
         subscribe-local-rollback \
-        subscription-groups-migration-backup \
         subscription-groups-backup-failure \
         refresh-local-subscriptions-rollback \
         subscribe-return-failure \
@@ -354,7 +353,6 @@ registerRegressionFunctionLeaf sing-box-subscribe-write runRegressionSubscriptio
 registerRegressionFunctionLeaf subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 registerRegressionFunctionLeaf sing-box-port-failure runSingBoxPortFailureRegression
 registerRegressionFunctionLeaf subscribe-local-rollback runSubscribeLocalRollbackRegression
-registerRegressionFunctionLeaf subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegression
 registerRegressionFunctionLeaf subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
 registerRegressionFunctionLeaf refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
 registerRegressionFunctionLeaf subscribe-return-failure runSubscribeReturnFailureRegression

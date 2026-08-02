@@ -328,7 +328,7 @@ Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Re
 6. 旧版 `main` / `controlled` 凭据仅保留在明确命名的维护入口，用于更新已有连接；首次接入只接受邀请/回执。包含长期控制 Token 的回执或旧版被控凭据只通过可信通道传递。
 7. WireGuard 使用 UDP，控制 API 只在隧道内使用 HTTP，不需要 TLS 证书；客户端订阅继续单独使用公网 HTTPS。
 
-状态备份与恢复只作用于 `/etc/padm/subscribe_groups/groups.json`。恢复备份或重建状态前会自动创建当前状态备份，并要求输入 `yes`。
+状态备份与恢复只作用于 `/etc/padm/subscribe_groups/groups.json`。恢复备份或重建状态前会自动创建当前状态备份，并要求输入 `yes`；恢复仅接受当前 `version: 2` 结构，不会自动改写旧版或损坏的状态。
 
 ## 路由与访问控制
 

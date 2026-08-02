@@ -164,117 +164,13 @@ writeDefaultSubscriptionGroupsState() {
 EOF
 }
 
-backupSubscriptionGroupsStateForMigration() {
-    local backupDir
-    local backupFile
-    local stateFile
-    backupDir=$(subscriptionGroupsBackupDir)
-    stateFile=$(subscriptionGroupsFile)
-    [[ -f "${stateFile}" ]] || return 0
-    padmEnsureSafeDirectory "${backupDir}" || return 1
-    chmod 700 "${backupDir}" 2>/dev/null || return 1
-    backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
-    while [[ -e "${backupFile}" ]]; do
-        backupFile="${backupDir}/groups-pre-migrate-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
-    done
-    if ! backupManagedFileToPath "${stateFile}" "${backupFile}" 600; then
-        removeManagedFilesIfPresentIgnoreFailure "${backupFile}"
-        return 1
-    fi
-    printf '%s\n' "${backupFile}"
-}
-
-normalizeSubscriptionGroupsState() {
+validateSubscriptionGroupsState() {
+    local stateFile=$1
     local schemaVersion
     schemaVersion=$(subscriptionGroupsSchemaVersion)
-    jq --argjson schemaVersion "${schemaVersion}" '
-      def source_default:
-        {
-          id: "main",
-          name: "本机",
-          role: "main",
-          scheme: "local",
-          transport: "local",
-          host: "127.0.0.1",
-          port: 0,
-          enabled: true,
-          sync_status: "local"
-        };
-      def normalize_source:
-        . as $source |
-        source_default + ($source // {}) |
-        .id = (($source.id // "") | tostring) |
-        .name = (($source.name // $source.id // "") | tostring) |
-        .role = (if ($source.role // "") == "main" then "main" else "secondary" end) |
-        .transport = (if .role == "main" then "local" else (($source.transport // $source.scheme // "wireguard") | tostring) end) |
-        .scheme = (if .role == "main" then "local" else (($source.scheme // $source.transport // .transport // "wireguard") | tostring) end) |
-        .host = (($source.host // "") | tostring) |
-        .port = (($source.port // 0) | tonumber? // 0) |
-        .enabled = (if .role == "main" then true elif $source.enabled == false then false else true end) |
-        .sync_status = (($source.sync_status // (if (($source.role // "") == "main") then "local" else "pending" end)) | tostring);
-      def normalize_user_group:
-        . as $user |
-        {
-          id: (($user.id // "") | tostring),
-          name: (($user.name // $user.id // "") | tostring),
-          enabled: (if $user.enabled == false then false else true end),
-          allowed_sources: (if ($user.allowed_sources? | type) == "array" then $user.allowed_sources else ["main"] end),
-          traffic_limit_gb: (($user.traffic_limit_gb // 0) | tonumber? // 0),
-          token: (($user.token // "") | tostring)
-        } + (if (($user.uuid // "") | tostring) != "" then {uuid: ($user.uuid | tostring)} else {} end);
-      def normalize_sync:
-        (if type == "object" then . else {} end) as $sync |
-        (($sync.interval_minutes // 10) | tonumber? // 10) as $interval |
-        $sync + {
-          enabled: (if $sync.enabled == false then false else true end),
-          interval_minutes: (if (($interval | type) == "number") and ($interval == ($interval | floor)) and $interval >= 1 and $interval <= 59 then $interval else 10 end),
-          last_run: (($sync.last_run // "") | tostring),
-          last_status: (($sync.last_status // "pending") | tostring),
-          failures: (if ($sync.failures | type) == "array" then [$sync.failures[]? | tostring] else [] end),
-          quota_auto_apply: ($sync.quota_auto_apply == true)
-        };
-      def normalize_traffic:
-        . as $traffic |
-        {
-          global: (($traffic.global // {}) + {upload: (($traffic.global.upload // 0) | tonumber? // 0), download: (($traffic.global.download // 0) | tonumber? // 0)}),
-          admin: (($traffic.admin // {}) + {upload: (($traffic.admin.upload // 0) | tonumber? // 0), download: (($traffic.admin.download // 0) | tonumber? // 0), sources: (($traffic.admin.sources // {}) | objects // {})}),
-          user_groups: (($traffic.user_groups // {}) | objects // {}),
-          sources: (($traffic.sources // {}) | objects // {})
-        };
-      def normalize_group:
-        . as $group |
-        {
-          id: (($group.id // "default") | tostring),
-          name: (($group.name // "默认订阅组") | tostring),
-          admin: ({id:"admin", name:"我的订阅", enabled:true, allowed_sources:["*"], traffic_limit_gb:0, token:""} + ($group.admin // {})),
-          sources: ([($group.sources // [])[]? | normalize_source | select(.id != "")] as $sources |
-            if any($sources[]?; .role == "main") then $sources else [source_default] + $sources end),
-          user_groups: [($group.user_groups // [])[]? | normalize_user_group | select(.id != "")],
-          sync: (($group.sync // {}) | normalize_sync),
-          traffic: (($group.traffic // {}) | normalize_traffic)
-        };
-      . as $state |
-      {
-        version: $schemaVersion,
-        active_group: (($state.active_group // "default") | tostring),
-        groups: (if (($state.groups // []) | length) > 0 then [$state.groups[]? | normalize_group] else [({} | normalize_group)] end)
-      } |
-      . as $normalized |
-      if any($normalized.groups[]?; .id == $normalized.active_group) then $normalized else ($normalized | .active_group = (.groups[0].id // "default")) end
-    '
-}
-
-migrateSubscriptionGroupsStateUnlocked() {
-    local stateFile
-    local tmpFile
-    local currentVersion
-    local schemaVersion
-    local backupFile
-    stateFile=$(subscriptionGroupsFile)
-    schemaVersion=$(subscriptionGroupsSchemaVersion)
-    currentVersion=$(jq -r '.version // 0' "${stateFile}" 2>/dev/null || echo 0)
-    if [[ "${currentVersion}" == "${schemaVersion}" ]] && jq -e '
-      type == "object" and (.groups | type == "array") and (.groups | length > 0) and
+    jq -e --argjson schemaVersion "${schemaVersion}" '
+      type == "object" and .version == $schemaVersion and
+      (.groups | type == "array") and (.groups | length > 0) and
       (.active_group | type == "string" and length > 0) and (.active_group as $active | any(.groups[]?; .id == $active)) and
       all(.groups[];
         (.id // "") != "" and
@@ -291,22 +187,7 @@ migrateSubscriptionGroupsStateUnlocked() {
           has("failures") and (.failures | type == "array") and
           has("quota_auto_apply") and (.quota_auto_apply | type == "boolean")) and
         (.traffic | type == "object"))
-    ' "${stateFile}" >/dev/null 2>&1; then
-        return 0
-    fi
-    backupFile=$(backupSubscriptionGroupsStateForMigration) || return 1
-    padmCreateTempFileForTarget tmpFile "${stateFile}" migrate || return 1
-    if normalizeSubscriptionGroupsState <"${stateFile}" >"${tmpFile}"; then
-        commitGeneratedJsonFile "${tmpFile}" "${stateFile}" 600 || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-    else
-        padmRemoveCleanupPath "${tmpFile}"
-        return 1
-    fi
-    padmRemoveCleanupPath "${backupFile}"
-}
-
-migrateSubscriptionGroupsState() {
-    subscriptionGroupsWithLock migrateSubscriptionGroupsStateUnlocked "$@"
+    ' "${stateFile}" >/dev/null 2>&1
 }
 
 ensureSubscriptionGroupsStateUnlocked() {
@@ -324,10 +205,9 @@ ensureSubscriptionGroupsStateUnlocked() {
             return 1
         fi
         padmRemoveCleanupPath "${stageFile}"
-    elif [[ ! -f "${stateFile}" ]] || ! jq empty "${stateFile}" >/dev/null 2>&1; then
+    elif [[ ! -f "${stateFile}" ]] || ! validateSubscriptionGroupsState "${stateFile}"; then
         return 1
     fi
-    migrateSubscriptionGroupsState || return 1
     if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
         subscriptionGroupsSecureStateFiles 2>/dev/null || return 1
     fi
@@ -348,10 +228,10 @@ subscriptionGroupsStateReplaceUnlocked() {
     local targetFile=$2
     local tmpFile
     [[ -f "${sourceFile}" ]] || return 1
-    jq empty "${sourceFile}" >/dev/null 2>&1 || return 1
+    validateSubscriptionGroupsState "${sourceFile}" || return 1
     padmCreateTempFileForTarget tmpFile "${targetFile}" state || return 1
     cp "${sourceFile}" "${tmpFile}" || { padmRemoveCleanupPath "${tmpFile}"; return 1; }
-    if ! jq empty "${tmpFile}" >/dev/null 2>&1; then
+    if ! validateSubscriptionGroupsState "${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
         return 1
     fi
@@ -373,7 +253,6 @@ subscriptionGroupsStateWriteUnlocked() {
         return 1
     fi
     padmRemoveCleanupPath "${tmpFile}"
-    migrateSubscriptionGroupsState || return 1
     if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
         subscriptionGroupsSecureStateFiles 2>/dev/null || return 1
     fi
@@ -421,14 +300,6 @@ restoreSubscriptionGroupsBackupUnlocked() {
     stateFile=$(subscriptionGroupsFile)
     restoreBackupFile=$(createSubscriptionGroupsBackup) || return 1
     if ! subscriptionGroupsStateReplace "${backupFile}" "${stateFile}"; then
-        padmRemoveCleanupPath "${restoreBackupFile}"
-        return 1
-    fi
-    if ! migrateSubscriptionGroupsState; then
-        if ! subscriptionGroupsStateReplace "${restoreBackupFile}" "${stateFile}"; then
-            padmForgetCleanupPath "${restoreBackupFile}"
-            return 1
-        fi
         padmRemoveCleanupPath "${restoreBackupFile}"
         return 1
     fi

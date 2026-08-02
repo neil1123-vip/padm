@@ -1361,10 +1361,13 @@ handleSubscriptionControl() {
     local token=${2:-${PADM_CONTROL_TOKEN:-}}
     local payload=${3:-}
     local currentToken=
-    ensureSubscriptionGroupsState
     currentToken=$(subscriptionControlToken 2>/dev/null || true)
     if [[ -z "${currentToken}" || "${token}" != "${currentToken}" ]]; then
         jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
+        return 1
+    fi
+    if ! ensureSubscriptionGroupsState; then
+        jq -n '{ok:false, error:"invalid_state", error_detail:{type:"invalid_state", message:"订阅组状态版本或结构无效"}}'
         return 1
     fi
     if [[ "${endpoint}" == "health" ]]; then

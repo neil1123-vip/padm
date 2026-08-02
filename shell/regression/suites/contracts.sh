@@ -1114,7 +1114,7 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
     declare -F listRegressionSubscriptionStateChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureFoundationChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureChildSelectors >/dev/null
-    declare -F listRegressionSubscriptionStateStructureMigrationChildSelectors >/dev/null
+    declare -F listRegressionSubscriptionStateStructureValidationChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureSourceChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateQuotaTrafficChildSelectors >/dev/null
@@ -1161,10 +1161,10 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         subscription-state-structure-foundation-init-transaction
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureChildSelectors structure \
         subscription-state-structure-foundation \
-        subscription-state-structure-migration \
+        subscription-state-structure-validation \
         subscription-state-structure-source
-    subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureMigrationChildSelectors structure-migration \
-        subscription-state-structure-migration-serial
+    subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureValidationChildSelectors structure-validation \
+        subscription-state-structure-validation-serial
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateStructureSourceChildSelectors structure-source \
         subscription-state-structure-source-credential \
         subscription-state-structure-source-status \
@@ -1242,14 +1242,14 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
     ! grep -Eq '^runRegressionSubscriptionStateQuotaPartialSync\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureMigration\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateStructureValidation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureSource\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSelfReference\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateSyncRollbackSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureFoundationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureMigrationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    ! grep -Eq '^runRegressionSubscriptionStateStructureValidationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateStructureSourceIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
     ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
@@ -1263,7 +1263,7 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         runSubscriptionStateParallelChildRegressionIsolated \
         runSubscriptionStateParallelChildRegressionIsolatedSelector \
         listRegressionSubscriptionStateStructureFoundationChildSelectors \
-        listRegressionSubscriptionStateStructureMigrationChildSelectors \
+        listRegressionSubscriptionStateStructureValidationChildSelectors \
         listRegressionSubscriptionStateStructureSourceChildSelectors \
         listRegressionSubscriptionStateStructureChildSelectors \
         runRegressionSubscriptionStateStructure \
@@ -1365,8 +1365,8 @@ runSubscriptionStateStructureSourceChildStepsContract() {
     grep -qx 'dispatch:subscription-state-structure-source-serial' "${callLog}"
 }
 
-runSubscriptionStateStructureMigrationChildStepsContract() {
-    local callLog="${TMP_DIR}/subscription-state-structure-migration-sequential-helper.log"
+runSubscriptionStateStructureValidationChildStepsContract() {
+    local callLog="${TMP_DIR}/subscription-state-structure-validation-sequential-helper.log"
 
     runRegisteredRegressionMain() {
         printf 'dispatch:%s\n' "$1" >>"${callLog}"
@@ -1374,9 +1374,9 @@ runSubscriptionStateStructureMigrationChildStepsContract() {
 
     runSequentialSelectorListUsesFrameworkHelperAssertions \
         "${callLog}" \
-        'dispatch:subscription-state-structure-migration-serial' \
+        'dispatch:subscription-state-structure-validation-serial' \
         runFrameworkSequentialRegressionSelectorList \
-        listRegressionSubscriptionStateStructureMigrationChildSelectors
+        listRegressionSubscriptionStateStructureValidationChildSelectors
 }
 
 runSubscriptionStateQuotaTrafficChildStepsContract() {
@@ -1506,7 +1506,7 @@ runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
 
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure-foundation ' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure-migration ' "${suiteFile}" || return 1
+    ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure-validation ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-structure-source ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota ' "${suiteFile}" || return 1
     ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-traffic ' "${suiteFile}" || return 1
@@ -1542,13 +1542,13 @@ runSubscriptionStateNestedAggregateRunnerRegistrationContract() {
         subscription-state-structure-foundation \
         "$(printf '%s\n%s' "${PADM_REGRESSION_SELECTOR_RUNNER_ARGS["subscription-state-structure-foundation"]%%$'\n'*}" 'listRegressionSubscriptionStateStructureFoundationChildSelectors')"
     runAggregateRunnerRegistrationAssertions \
-        subscription-state-structure-migration \
+        subscription-state-structure-validation \
         sequential \
         runFrameworkSequentialRegressionSelectorList \
-        "$(listRegressionSubscriptionStateStructureMigrationChildSelectors)"
+        "$(listRegressionSubscriptionStateStructureValidationChildSelectors)"
     runAggregateRunnerRunnerArgsAssertions \
-        subscription-state-structure-migration \
-        'listRegressionSubscriptionStateStructureMigrationChildSelectors'
+        subscription-state-structure-validation \
+        'listRegressionSubscriptionStateStructureValidationChildSelectors'
     runAggregateRunnerRegistrationAssertions \
         subscription-state-structure-source \
         sequential \
@@ -1764,7 +1764,7 @@ runSubscriptionStateAggregatesSupportSourceOnlyExecutionContract() (
     [[ "${calls[0]}" =~ ^framework:list:.*/subscription-state-core-[0-9]+:listRegressionSubscriptionStateCoreChildSelectors:subscription-state-structure\ subscription-state-quota\ subscription-state-remote-restore$ ]] || return 1
     [[ "${calls[1]}" =~ ^framework:list:.*/subscription-state-default-[0-9]+:listRegressionSubscriptionStateChildSelectors:subscription-state-core\ subscription-state-support\ subscription-state-sync-rollback$ ]] || return 1
     [[ "${calls[2]}" =~ ^framework:list:.*/subscription-state-structure-foundation:listRegressionSubscriptionStateStructureFoundationChildSelectors:subscription-state-structure-foundation-add-remove\ subscription-state-structure-foundation-credential\ subscription-state-structure-foundation-normalize\ subscription-state-structure-foundation-init-transaction$ ]] || return 1
-    [[ "${calls[3]}" =~ ^framework:list:.*/subscription-state-structure:listRegressionSubscriptionStateStructureChildSelectors:subscription-state-structure-foundation\ subscription-state-structure-migration\ subscription-state-structure-source$ ]] || return 1
+    [[ "${calls[3]}" =~ ^framework:list:.*/subscription-state-structure:listRegressionSubscriptionStateStructureChildSelectors:subscription-state-structure-foundation\ subscription-state-structure-validation\ subscription-state-structure-source$ ]] || return 1
     [[ "${calls[4]}" =~ ^framework:list:.*/subscription-state-quota:listRegressionSubscriptionStateQuotaChildSelectors:subscription-state-quota-traffic\ subscription-state-quota-menu-tx\ subscription-state-quota-partial-sync$ ]] || return 1
     [[ "${calls[5]}" =~ ^framework:list:.*/subscription-state-remote-restore:listRegressionSubscriptionStateRemoteRestoreChildSelectors:subscription-state-remote-restore-self-reference\ subscription-state-remote-restore-state-write\ subscription-state-remote-restore-legacy-menu$ ]] || return 1
     [[ "${calls[6]}" =~ ^framework:list:.*/subscription-sync-rollback-failure:listRegressionSubscriptionStateSyncRollbackFailureChildSelectors:subscription-sync-rollback-config-restore-failure\ subscription-sync-restore-dir-failure\ subscription-sync-reload-rollback\ subscription-group-sync-rollback$ ]] || return 1
@@ -3721,7 +3721,6 @@ sing-box-subscribe-write runRegressionSubscriptionLegacyLeafWithCompat runSingBo
 subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 sing-box-port-failure runSingBoxPortFailureRegression
 subscribe-local-rollback runSubscribeLocalRollbackRegression
-subscription-groups-migration-backup runSubscriptionGroupsMigrationBackupRegression
 subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
 refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
 subscribe-return-failure runSubscribeReturnFailureRegression
@@ -3890,7 +3889,6 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
         sing-box-port-failure \
         subscribe-user-output-transaction \
         subscribe-local-rollback \
-        subscription-groups-migration-backup \
         subscription-groups-backup-failure \
         refresh-local-subscriptions-rollback \
         subscribe-return-failure \
@@ -5886,7 +5884,6 @@ subscribe-nginx-service-failure
 sing-box-port-failure
 subscribe-user-output-transaction
 subscribe-local-rollback
-subscription-groups-migration-backup
 subscription-groups-backup-failure
 refresh-local-subscriptions-rollback
 subscribe-return-failure
@@ -6603,7 +6600,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep subscription-state-support-child-steps runSubscriptionStateSupportChildStepsContract
     runRegressionStep subscription-state-serial-child-steps runSubscriptionStateSerialChildStepsContract
     runRegressionStep subscription-state-structure-source-child-steps runSubscriptionStateStructureSourceChildStepsContract
-    runRegressionStep subscription-state-structure-migration-child-steps runSubscriptionStateStructureMigrationChildStepsContract
+    runRegressionStep subscription-state-structure-validation-child-steps runSubscriptionStateStructureValidationChildStepsContract
     runRegressionStep subscription-state-quota-traffic-child-steps runSubscriptionStateQuotaTrafficChildStepsContract
     runRegressionStep subscription-state-quota-menu-tx-child-steps runSubscriptionStateQuotaMenuTransactionChildStepsContract
     runRegressionStep subscription-state-quota-partial-sync-child-steps runSubscriptionStateQuotaPartialSyncChildStepsContract

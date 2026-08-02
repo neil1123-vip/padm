@@ -841,7 +841,7 @@ subscription-state
 subscription
 remote-control
 ui-full
-subscription-state-structure-migration
+subscription-state-structure-validation
 subscription-group-sync-state-lock
 user-subscription-menu-mutation-failure
 wireguard-menu-flow-peer-source-control-toggle
@@ -881,3 +881,9 @@ subscription-remote-controlled
 - 被控 `/sync` 请求体现在只接受精确根字段 `dry_run`、`desired_users`，每个用户只接受 `id`、`uuid`；缺少 `dry_run` 或携带 `include_subscriptions`、旧用户元数据及其他额外字段均返回 `invalid_payload`。
 - 主控只把同时返回匹配的 `dry_run`、布尔 `changed` 和合法 `plan` 的成功响应视为成功；不再为缺失的 `changed` 或 `plan` 补默认值。
 - 非 WireGuard HTTPS 来源的三个公网订阅文件回退继续保留；它不属于旧控制 API 兼容。
+
+## `groups.json` 自动迁移退休记录（2026-08-02）
+
+- 主控状态摘要与两台被控的成功完整同步均已经过状态规范化入口，三份活动状态已落为当前 `version: 2` 结构；仓库首个公开提交也已使用 schema v2，没有公开版本会继续写入 v1。
+- 删除 v1/缺字段状态的宽松规范化、迁移前临时备份和替换后的二次迁移；读取、写入和恢复现在只接受当前结构，校验失败时保持原文件不变。
+- 普通手动备份、恢复、重建、状态锁和原子替换继续保留；未来确需升级 schema 时按新版本单独增加明确迁移，不保留无期限自动修复。
