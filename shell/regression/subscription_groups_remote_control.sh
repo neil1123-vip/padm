@@ -511,7 +511,7 @@ runRemoteControlInlineTokenConsumersRegression() (
     syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
     [[ -n "${syncResult}" ]] || return 1
     syncResult=$(jq -c . <<<"${syncResult}") || return 1
-    jq -e '.failures == [] and .snapshots == {}' <<<"${syncResult}" >/dev/null || return 1
+    jq -e '.failures == ["远程服务器源 edge-remote 未返回完整订阅快照"] and .snapshots["edge-remote"] == null' <<<"${syncResult}" >/dev/null || return 1
     [[ -f "${requestPayloadLog}" ]] || return 1
     [[ -f "${statusLog}" ]] || return 1
     jq -s -e '
@@ -525,9 +525,9 @@ runRemoteControlInlineTokenConsumersRegression() (
       )
     ' "${requestPayloadLog}" >/dev/null || return 1
     grep -qx $'edge-remote\tsync' "${statusLog}" || return 1
-    grep -qx $'status\tedge-remote\tsuccess' "${statusLog}" || return 1
+    grep -Fqx $'failure\tedge-remote\tinvalid_response\t未返回完整订阅快照' "${statusLog}" || return 1
     [[ ! -e "${healthLog}" ]] || return 1
-    ! grep -q '^failure	' "${statusLog}" || return 1
+    ! grep -q '^status	' "${statusLog}" || return 1
 )
 
 runRemoteControlInlineSyncRunnerRegression() (
@@ -676,8 +676,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     local invalidSnapshotStatus
     local syncSnapshotFailureStatus
     local subscribeResponse
-    local generationFailureResponse
-    local generationFailureStatus
+    local subscribeStatus
     local syncLockMarker="${controlRoot}/sync-lock-observed"
     local snapshotLog="${controlRoot}/snapshot.log"
     local expectedDefault
@@ -697,24 +696,13 @@ runRemoteControlHandleInlineHelpersRegression() (
     subscriptionControlValidateSyncPayload() {
         return 1
     }
-    subscriptionControlValidateSubscribePayload() {
-        return 1
-    }
-    subscriptionControlRenderSubscribe() {
-        return 97
-    }
     eval "$(declare -f subscriptionSyncPlanFromDesiredUsers | sed '1s/^subscriptionSyncPlanFromDesiredUsers/originalSubscriptionSyncPlanFromDesiredUsers/')"
-    eval "$(declare -f subscriptionControlRenderSubscribeAccount | sed '1s/^subscriptionControlRenderSubscribeAccount/originalSubscriptionControlRenderSubscribeAccount/')"
     subscriptionSyncPlanFromDesiredUsers() {
         [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] && : >"${syncLockMarker}"
         printf '{"create":[],"remove":[]}'
     }
-    subscriptionControlRenderSubscribeAccount() {
-        printf '{"ok":true,"account":"team_a","default":"","clash_meta":"","sing_box":[]}\n'
-    }
-
     healthResponse=$(handleSubscriptionControl health test-token | jq -c .)
-    [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync","subscribe"]'* ]]
+    [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync"]'* ]]
 
     showAccounts() {
         printf 'show\n' >>"${snapshotLog}"
@@ -758,8 +746,12 @@ runRemoteControlHandleInlineHelpersRegression() (
     [[ "${invalidSnapshotStatus}" -ne 0 ]]
     jq -e '.ok == false and .error == "invalid_payload"' <<<"${invalidSnapshotResponse}" >/dev/null
 
-    subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}' | jq -c .)
-    [[ "${subscribeResponse}" == *'"ok":true'*'"account":"team_a"'* ]]
+    set +e
+    subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}')
+    subscribeStatus=$?
+    set -e
+    [[ "${subscribeStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "unknown_endpoint"' <<<"${subscribeResponse}" >/dev/null
 
     showAccounts() {
         printf 'vless://secret-credential\n'
@@ -772,13 +764,7 @@ runRemoteControlHandleInlineHelpersRegression() (
     set -e
     [[ "${syncSnapshotFailureStatus}" -ne 0 ]]
     jq -e '.ok == false and .changed == false and .error == "generation_failed" and .error_detail.type == "generation_failed" and has("subscriptions") == false' <<<"${syncSnapshotResponse}" >/dev/null
-    set +e
-    generationFailureResponse=$(originalSubscriptionControlRenderSubscribeAccount team_a)
-    generationFailureStatus=$?
-    set -e
-    [[ "${generationFailureStatus}" -eq 1 ]]
-    jq -e '.ok == false and .error == "generation_failed" and .error_detail.type == "generation_failed" and .account == "team_a"' <<<"${generationFailureResponse}" >/dev/null
-    [[ "${generationFailureResponse}" != *secret-credential* && "${generationFailureResponse}" != *'private diagnostic'* ]]
+    [[ "${syncSnapshotResponse}" != *secret-credential* && "${syncSnapshotResponse}" != *'private diagnostic'* ]]
 
     mkdir -p "${configDir}"
     configPath="${configDir}/"
@@ -2083,26 +2069,18 @@ if [[ "${PADM_CONTROL_TOKEN:-}" != "${PADM_FAKE_SERVER_TOKEN:-}" ]]; then
     printf '{"ok":false,"error":"unauthorized","error_detail":{"type":"unauthorized","message":"控制 token 验证失败"}}\n'
     exit 1
 fi
-    if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
-        payload=$(cat)
-        if [[ -z "${payload}" ]]; then
-            if [[ "${endpoint}" == "sync" ]]; then
-                printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
-            else
-                printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"订阅请求体为空"}}\n'
-            fi
-            exit 1
-        fi
-        if [[ "${payload}" == "not-json" ]]; then
-            if [[ "${endpoint}" == "sync" ]]; then
-                printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
-            else
-                printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"订阅请求体格式不正确"}}\n'
-            fi
-            exit 1
-        fi
+if [[ "${endpoint}" == "sync" ]]; then
+    payload=$(cat)
+    if [[ -z "${payload}" ]]; then
+        printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
+        exit 1
     fi
-    case "${endpoint}:${mode}" in
+    if [[ "${payload}" == "not-json" ]]; then
+        printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
+        exit 1
+    fi
+fi
+case "${endpoint}:${mode}" in
 health:*)
     printf '{"ok":false,"error":"health_should_not_execute"}\n'
     exit 9
@@ -2130,18 +2108,6 @@ sync:timeout)
     sync:invalid)
         printf 'ui noise only\n'
         exit 0
-        ;;
-    subscribe:noise)
-        printf 'ui noise before subscribe\n'
-        printf '{"ok":false,"error":"first_json"}\n'
-        printf 'ui noise between json\n'
-        cat <<'JSON'
-{"ok":true,"default":"dmxlc3M6Ly91dWlkQGV4YW1wbGUuY29tOjQ0MyN0ZWFtLWE=","clash_meta":"proxies:\n- name: team-a\n","sing_box":[{"tag":"team-a"}]}
-JSON
-        ;;
-    subscribe:not-found)
-        printf '{"ok":false,"error":"not_found","error_detail":{"type":"not_found","message":"远端账号订阅输出不存在"}}\n'
-        exit 1
         ;;
     *)
         printf '{"ok":false,"error":"unexpected"}\n'
@@ -2297,14 +2263,10 @@ for _ in range(80):
 
 set_mode("noise")
 results["sync_success"] = request("POST", "sync", '{"desired_users":[]}')
-results["subscribe_success"] = request("POST", "subscribe", '{"account":"team_a"}')
-set_mode("not-found")
-results["subscribe_not_found"] = request("POST", "subscribe", '{"account":"missing"}')
+results["subscribe_removed"] = request("POST", "subscribe", '{"account":"team_a"}')
 results["health_unauthorized"] = request("GET", "health", token_override="wrong-token")
 results["sync_empty_payload"] = request("POST", "sync", "")
 results["sync_invalid_payload"] = request("POST", "sync", "not-json")
-results["subscribe_empty_payload"] = request("POST", "subscribe", "")
-results["subscribe_invalid_payload"] = request("POST", "subscribe", "not-json")
 results["sync_bad_content_length"] = raw_post("sync", "abc")
 results["sync_slow_body"] = slow_post("sync")
 
@@ -2343,15 +2305,12 @@ results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[]}
 print(json.dumps(results, ensure_ascii=False))
 PY
 
-    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync","subscribe"]' "${responseFile}" >/dev/null
+    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync"]' "${responseFile}" >/dev/null
     jq -e '.sync_success.status == 200 and .sync_success.body.ok == true and .sync_success.body.changed == true and (.sync_success.body.plan.create | length) == 0' "${responseFile}" >/dev/null
-    jq -e '.subscribe_success.status == 200 and .subscribe_success.body.ok == true and (.subscribe_success.body.default | @base64d) == "vless://uuid@example.com:443#team-a" and (.subscribe_success.body.clash_meta | contains("team-a")) and .subscribe_success.body.sing_box[0].tag == "team-a"' "${responseFile}" >/dev/null
-    jq -e '.subscribe_not_found.status == 404 and .subscribe_not_found.body.error == "not_found" and .subscribe_not_found.body.error_detail.type == "not_found"' "${responseFile}" >/dev/null
+    jq -e '.subscribe_removed.status == 404 and .subscribe_removed.body.error == "not_found"' "${responseFile}" >/dev/null
     jq -e '.health_unauthorized.status == 401' "${responseFile}" >/dev/null
     jq -e '.sync_empty_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_payload.status == 400' "${responseFile}" >/dev/null
-    jq -e '.subscribe_empty_payload.status == 400' "${responseFile}" >/dev/null
-    jq -e '.subscribe_invalid_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_bad_content_length.status == 400 and .sync_bad_content_length.body.error == "invalid_payload"' "${responseFile}" >/dev/null
     jq -e '.sync_slow_body.status == 408 and .sync_slow_body.body.error == "request_timeout"' "${responseFile}" >/dev/null
     jq -e '.sync_failed.status == 503 and .sync_failed.body.error == "script_failed" and .sync_failed.body.error_detail.type == "script_failed" and .sync_failed.body.exit_code == 7' "${responseFile}" >/dev/null

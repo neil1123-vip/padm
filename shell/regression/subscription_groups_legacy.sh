@@ -14991,10 +14991,6 @@ JSON
             ;;
         esac
     }
-    fetchRemoteControlledSubscribePayload() {
-        return 97
-    }
-
     if remoteSubscribeFetchPartSelected rollback; then
         writeRemoteSubscribeOldOutputs
         export PADM_FAKE_REMOTE_SUBSCRIBE_MODE=fetch-failure
@@ -15097,34 +15093,27 @@ JSON
             return 95
         }
         subscriptionRemoteControlRequest() {
-            local sourceJson=$1
-            local endpoint=$2
-            local payload=$3
-            [[ "${endpoint}" == "subscribe" ]]
-            [[ "$(jq -r '.id' <<<"${sourceJson}")" == "edge-wg" ]]
-            jq -e --arg account "${controlledEmail}" '.account == $account' <<<"${payload}" >/dev/null
-            printf '%s\n' "${payload}" >"${controlledRequestLog}"
-            printf '%s\n' '{"ok":true,"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}'
-        }
-        stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}"
-        jq -e --arg account "${controlledEmail}" '.account == $account' "${controlledRequestLog}" >/dev/null
-        grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
-        grep -qxF -- '- name: sub_team_edge-wg' "${controlledPublic}/clashMeta/${controlledEmailMd5}"
-        jq -e '.[0].tag == "old-local" and .[1].tag == "sub_team_edge-wg"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
-
-        rm -f "${controlledRequestLog}"
-        stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" '{}'
-        jq -e --arg account "${controlledEmail}" '.account == $account' "${controlledRequestLog}" >/dev/null
-
-        printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
-        printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
-        printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
-        rm -f "${controlledRequestLog}"
-        local syncSnapshots='{"edge-wg":{"sub_team":{"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}}}'
-        subscriptionRemoteControlRequest() {
             : >"${controlledRequestLog}"
             return 98
         }
+        if stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" 2>/dev/null; then
+            return 1
+        fi
+        [[ ! -e "${controlledRequestLog}" ]]
+        [[ "$(<"${controlledPublic}/default/${controlledEmailMd5}")" == "old-default" ]]
+        [[ "$(<"${controlledPublic}/clashMeta/${controlledEmailMd5}")" == "old-clash" ]]
+        jq -e '.[0].tag == "old-local"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+
+        rm -f "${controlledRequestLog}"
+        if stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" '{}' 2>/dev/null; then
+            return 1
+        fi
+        [[ ! -e "${controlledRequestLog}" ]]
+        [[ "$(<"${controlledPublic}/default/${controlledEmailMd5}")" == "old-default" ]]
+        [[ "$(<"${controlledPublic}/clashMeta/${controlledEmailMd5}")" == "old-clash" ]]
+        jq -e '.[0].tag == "old-local"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
+
+        local syncSnapshots='{"edge-wg":{"sub_team":{"default":"dmxlc3M6Ly91dWlkQHdnLmV4YW1wbGUuY29tOjQ0MyNzdWJfdGVhbQ==","clash_meta":"proxies:\n- name: sub_team\n","sing_box":[{"tag":"sub_team"}]}}}'
         stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" "${syncSnapshots}"
         [[ ! -e "${controlledRequestLog}" ]]
         grep -qxF 'vless://uuid@wg.example.com:443#sub_team_edge-wg' "${controlledPublic}/default/${controlledEmailMd5}"
@@ -15139,19 +15128,6 @@ JSON
             return 1
         fi
         [[ ! -e "${controlledRequestLog}" ]]
-        [[ "$(<"${controlledPublic}/default/${controlledEmailMd5}")" == "old-default" ]]
-        [[ "$(<"${controlledPublic}/clashMeta/${controlledEmailMd5}")" == "old-clash" ]]
-        jq -e '.[0].tag == "old-local"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null
-
-        printf 'old-default\n' >"${controlledPublic}/default/${controlledEmailMd5}"
-        printf 'old-clash\n' >"${controlledPublic}/clashMeta/${controlledEmailMd5}"
-        printf '[{"tag":"old-local"}]\n' >"${controlledLocal}/sing-box/${controlledEmail}"
-        subscriptionRemoteControlRequest() {
-            printf '%s\n' '{"ok":false,"error":"generation_failed"}'
-        }
-        if stageRemoteSubscribe "${controlledEmailMd5}" "${controlledEmail}" 2>/dev/null; then
-            return 1
-        fi
         [[ "$(<"${controlledPublic}/default/${controlledEmailMd5}")" == "old-default" ]]
         [[ "$(<"${controlledPublic}/clashMeta/${controlledEmailMd5}")" == "old-clash" ]]
         jq -e '.[0].tag == "old-local"' "${controlledLocal}/sing-box/${controlledEmail}" >/dev/null

@@ -832,7 +832,6 @@ stageRemoteSubscribe() {
         local decodedDefault=
         local singBoxSubscribe=
         local controlledResponse=
-        local controlledPayload=
         local usePublicFallback=false
         local clashFile="${tmpDir}/clash"
         local defaultFile="${tmpDir}/default"
@@ -858,16 +857,10 @@ stageRemoteSubscribe() {
                   | select(type == "object")
                   | . + {ok:true, account:$account}
                 ' <<<"${syncSnapshots}") || controlledResponse=
-            elif [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
-                controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') || controlledPayload=
-                [[ -n "${controlledPayload}" ]] && controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null) || controlledResponse=
-            else
+            elif [[ -z "${source}" ]] || ! subscriptionRemoteSourceUsesWireGuard "${source}"; then
                 usePublicFallback=true
             fi
-        elif [[ -n "${source}" ]] && subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            controlledPayload=$(jq -nc --arg account "${email}" '{account:$account}') || controlledPayload=
-            [[ -n "${controlledPayload}" ]] && controlledResponse=$(subscriptionRemoteControlRequest "${source}" subscribe "${controlledPayload}" 2>/dev/null) || controlledResponse=
-        else
+        elif [[ -z "${source}" ]] || ! subscriptionRemoteSourceUsesWireGuard "${source}"; then
             usePublicFallback=true
         fi
 
