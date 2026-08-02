@@ -28,7 +28,7 @@ subscriptionWireGuardConfigFile() {
 }
 
 subscriptionWireGuardNginxTestLog() {
-    padmFallbackTmpFilePath padm-wg-control-nginx-test.log
+    padmTmpFilePath padm-wg-control-nginx-test.log
 }
 
 subscriptionWireGuardDefaultListenPort() {

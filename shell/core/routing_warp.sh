@@ -27,7 +27,7 @@ readConfigWarpReg() {
     if ! warpRegConfigLooksValid "${configFile}"; then
         mkdir -p "${warpDir}" || return 1
         installWarpReg || return 1
-        padmCreateTempPathCompat tmpFile "${warpDir}/.config.XXXXXX" || return 1
+        padmCreateTempPath tmpFile "${warpDir}/.config.XXXXXX" || return 1
         if ! "${warpBinary}" >"${tmpFile}" 2>&1; then
             rm -f "${tmpFile}" "${configFile}" >/dev/null 2>&1 || true
             return 1

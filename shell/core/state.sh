@@ -608,7 +608,7 @@ cleanLastInstallationConfig() {
     cleanLastInstallationConfigApply "$@" || cleanStatus=$?
     if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
         local restoreErrorLog
-        restoreErrorLog=$(padmFallbackTmpFilePath padm-nginx-clean-restore.log)
+        restoreErrorLog=$(padmTmpFilePath padm-nginx-clean-restore.log)
         if ! PADM_NGINX_ERROR_LOG="${restoreErrorLog}" runCoreServiceActionAllowFailure handleNginx start restore; then
             rm -f -- "${restoreErrorLog}" >/dev/null 2>&1 || true
             errorCard "清空配置后 Nginx 原运行状态恢复失败，请手动检查 Nginx 服务"

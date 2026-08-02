@@ -164,23 +164,11 @@ padmCreateTempPath() {
     printf -v "${resultVar}" '%s' "${path}"
 }
 
-padmCreateTempPathCompat() {
-    local resultVar=$1
-    shift
-    if declare -F padmCreateTempPath >/dev/null 2>&1; then
-        padmCreateTempPath "${resultVar}" "$@"
-        return $?
-    fi
-    local path
-    path=$(mktemp "$@") || return 1
-    printf -v "${resultVar}" '%s' "${path}"
-}
-
 padmCreateTmpRootPath() {
     local resultVar=$1
     local template=$2
     shift 2
-    padmCreateTempPathCompat "${resultVar}" "$@" "$(padmFallbackTmpFilePath "${template}")"
+    padmCreateTempPath "${resultVar}" "$@" "$(padmTmpFilePath "${template}")"
 }
 
 padmCreateTempFileForTarget() {
@@ -197,16 +185,6 @@ padmCreateTempFileForTarget() {
 
 padmTmpFilePath() {
     local fileName=$1
-    local tmpBase="${TMPDIR:-/tmp}"
-    printf '%s\n' "${tmpBase%/}/${fileName}"
-}
-
-padmFallbackTmpFilePath() {
-    local fileName=$1
-    if declare -F padmTmpFilePath >/dev/null 2>&1; then
-        padmTmpFilePath "${fileName}"
-        return $?
-    fi
     local tmpBase="${TMPDIR:-/tmp}"
     printf '%s\n' "${tmpBase%/}/${fileName}"
 }

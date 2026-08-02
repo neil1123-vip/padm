@@ -7,7 +7,7 @@ PADM_THIRD_PARTY_TCP_SCRIPT_PATH="tcpx.sh"
 # 初始化 Nginx 证书验证配置
 entryHelperTmpPath() {
     local template=$1
-    padmFallbackTmpFilePath "${template}"
+    padmTmpFilePath "${template}"
 }
 
 singBoxVMessHTTPUpgradeNginxTestLog() {
@@ -365,7 +365,7 @@ installNginxStaticTemplate() {
     staticParent=$(dirname -- "${resolvedStaticPath}")
     staticName=$(basename -- "${resolvedStaticPath}")
     padmEnsureSafeDirectory "${staticParent}" || { errorCard "静态站点目录异常"; return 1; }
-    padmCreateTempPathCompat stageRoot -d "${staticParent}/.${staticName}.padm-template.XXXXXX" || {
+    padmCreateTempPath stageRoot -d "${staticParent}/.${staticName}.padm-template.XXXXXX" || {
         errorCard "静态站点模板暂存目录创建失败"
         return 1
     }
@@ -685,7 +685,7 @@ fi
 
 bbrTmpPath() {
     local template=$1
-    padmFallbackTmpFilePath "${template}"
+    padmTmpFilePath "${template}"
 }
 
 bbrSysctlLog() {
@@ -1280,7 +1280,7 @@ syncInstallDirectoryTree() {
     targetName=$(basename -- "${targetDir}")
     padmEnsureSafeDirectory "${targetParent}" || return 1
 
-    padmCreateTempPathCompat stageRoot -d "${targetParent}/.${targetName}.padm-stage.XXXXXX" || return 1
+    padmCreateTempPath stageRoot -d "${targetParent}/.${targetName}.padm-stage.XXXXXX" || return 1
     stageDir="${stageRoot}/${targetName}"
     if ! cp -a "${sourceDir}" "${stageDir}"; then
         cleanupInstallSyncPath "${stageRoot}"
@@ -1288,7 +1288,7 @@ syncInstallDirectoryTree() {
     fi
 
     if [[ -e "${targetDir}" || -L "${targetDir}" ]]; then
-        padmCreateTempPathCompat backupRoot -d "${targetParent}/.${targetName}.padm-backup.XXXXXX" || {
+        padmCreateTempPath backupRoot -d "${targetParent}/.${targetName}.padm-backup.XXXXXX" || {
             cleanupInstallSyncPath "${stageRoot}"
             return 1
         }

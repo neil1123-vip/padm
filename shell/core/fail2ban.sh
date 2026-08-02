@@ -30,7 +30,7 @@ fail2banNginxAccessLogFile() {
 }
 
 fail2banValidateLog() {
-    padmFallbackTmpFilePath padm-fail2ban-validate.log
+    padmTmpFilePath padm-fail2ban-validate.log
 }
 
 fail2banReloadServiceIfRunning() {

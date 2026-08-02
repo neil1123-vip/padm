@@ -67,8 +67,8 @@ versionCreateTempPath() {
     local template=${2:-padm-version.XXXXXX}
     local path
 
-    if declare -F padmCreateTempPathCompat >/dev/null 2>&1; then
-        padmCreateTempPathCompat "${resultVar}" "${TMPDIR:-/tmp}/${template}"
+    if declare -F padmCreateTempPath >/dev/null 2>&1; then
+        padmCreateTempPath "${resultVar}" "${TMPDIR:-/tmp}/${template}"
         return $?
     fi
 

@@ -403,11 +403,11 @@ accessControlManagedSingBoxFile() {
 }
 
 accessControlXrayTestLog() {
-    padmFallbackTmpFilePath padm-access-xray-test.log
+    padmTmpFilePath padm-access-xray-test.log
 }
 
 accessControlSingBoxTestLog() {
-    padmFallbackTmpFilePath padm-access-sing-box-test.log
+    padmTmpFilePath padm-access-sing-box-test.log
 }
 
 accessControlBackupCreate() {

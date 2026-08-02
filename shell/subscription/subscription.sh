@@ -157,7 +157,7 @@ writeSubscribeNginxConfig() {
     local tmpPath
     local backupPath=
     local nginxTestLog
-    nginxTestLog="$(padmFallbackTmpFilePath padm-subscribe-nginx-test.log)"
+    nginxTestLog="$(padmTmpFilePath padm-subscribe-nginx-test.log)"
     SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR=
     padmCreateTempFileForTarget tmpPath "${targetPath}" subscribe || return 1
     if ! cat >"${tmpPath}"; then
