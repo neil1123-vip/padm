@@ -874,3 +874,10 @@ subscription-remote-controlled
 - 退休后 WireGuard 被控必须在正式 `/sync` 中返回完整批量快照；字段缺失、`null` 或格式错误均阻止公网发布并保留旧订阅。非 WireGuard HTTPS 来源仍保留三个公网订阅文件回退。
 - 控制服务未启用请求日志，因此不能从现场日志独立证明升级后 `/subscribe` 调用数为 0；该残余风险由全量升级、成功完整同步和删除后的 404 回归共同约束。
 - 本次删除属于控制 API 破坏性变更，提交使用 major 标记；`shell/core/version.sh` 仍由发布自动化维护。
+
+## `/sync` 过渡兼容退休记录（2026-08-02）
+
+- 主控与全部被控已升级并完成一次成功的完整同步，本文前述混合版本过渡规则不再是当前运行合同。
+- 被控 `/sync` 请求体现在只接受精确根字段 `dry_run`、`desired_users`，每个用户只接受 `id`、`uuid`；缺少 `dry_run` 或携带 `include_subscriptions`、旧用户元数据及其他额外字段均返回 `invalid_payload`。
+- 主控只把同时返回匹配的 `dry_run`、布尔 `changed` 和合法 `plan` 的成功响应视为成功；不再为缺失的 `changed` 或 `plan` 补默认值。
+- 非 WireGuard HTTPS 来源的三个公网订阅文件回退继续保留；它不属于旧控制 API 兼容。

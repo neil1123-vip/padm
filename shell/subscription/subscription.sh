@@ -138,10 +138,6 @@ subscriptionPublishHasRemoteSources() {
     [[ -n "${sourceLines}" ]]
 }
 
-ensureSubscriptionControlNginxLocation() {
-    return 1
-}
-
 subscribeNginxConfigWriteError() {
     SUBSCRIBE_NGINX_CONFIG_WRITE_ERROR=$1
     return 1

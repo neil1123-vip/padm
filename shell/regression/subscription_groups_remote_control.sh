@@ -26,11 +26,8 @@ runRemoteControlConcurrencyRegression() (
 JSON
     }
     subscriptionRemoteControlPayload() {
-        local source=$1
         local dryRun=$2
-        local sourceId
-        sourceId=$(remoteControlRegressionSourceId "${source}")
-        printf '{"version":1,"group_id":"default","source_id":"%s","dry_run":%s,"desired_users":[]}\n' "${sourceId}" "${dryRun}"
+        printf '{"dry_run":%s,"desired_users":[]}\n' "${dryRun}"
     }
 
     subscriptionRemoteControlHealth() {
@@ -46,7 +43,7 @@ JSON
         local sourceId
         sourceId=$(remoteControlRegressionSourceId "${source}")
         [[ "${sourceId}" == "src0" ]] && sleep 0.01
-        printf '{"source_id":"%s","status":"success","dry_run":true,"request":{"source_id":"%s"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n' "${sourceId}" "${sourceId}"
+        printf '{"source_id":"%s","status":"success","dry_run":true,"request":{"source_id":"%s"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n' "${sourceId}" "${sourceId}"
     }
 
     healthResult=$(subscriptionRemoteControlHealthAll | jq -c .)
@@ -67,11 +64,8 @@ runRemoteControlAggregationFailureRegression() (
 JSON
     }
     subscriptionRemoteControlPayload() {
-        local source=$1
         local dryRun=$2
-        local sourceId
-        sourceId=$(remoteControlRegressionSourceId "${source}")
-        printf '{"version":1,"group_id":"default","source_id":"%s","dry_run":%s,"desired_users":[]}\n' "${sourceId}" "${dryRun}"
+        printf '{"dry_run":%s,"desired_users":[]}\n' "${dryRun}"
     }
 
     subscriptionRemoteControlHealth() {
@@ -92,13 +86,13 @@ JSON
         local source=$1
         case "$(remoteControlRegressionSourceId "${source}")" in
         edge-a)
-            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
             ;;
         edge-b)
             printf 'broken-plan-json\n'
             ;;
         *)
-            printf '{"source_id":"main","status":"success","dry_run":true,"request":{"source_id":"main"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            printf '{"source_id":"main","status":"success","dry_run":true,"request":{"source_id":"main"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
             ;;
         esac
     }
@@ -147,7 +141,7 @@ JSON
         local source=$1
         case "$(remoteControlRegressionSourceId "${source}")" in
         edge-a)
-            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
             ;;
         edge-b)
             printf 'broken-plan-json\n'
@@ -310,7 +304,7 @@ runRemoteControlInlineRequestHelpersRegression() (
         done
         case "$*" in
         *'https://control.example/sync'*)
-            printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
+            printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
             ;;
         *'https://control.example/health'*)
             printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
@@ -321,7 +315,7 @@ runRemoteControlInlineRequestHelpersRegression() (
         esac
     }
 
-    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[]}' 2>/dev/null || true)
+    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' 2>/dev/null || true)
     [[ -n "${requestResponse}" ]] || return 1
     requestResponse=$(jq -c . <<<"${requestResponse}") || return 1
     [[ "${requestResponse}" == *'"ok":true'* ]] || return 1
@@ -343,7 +337,7 @@ runRemoteControlInlineRequestHelpersRegression() (
     grep -q -- '--max-time 210' "${curlArgsLog}" || return 1
     grep -qF -- '--data-binary @-' "${curlArgsLog}" || return 1
     ! grep -qF 'desired_users' "${curlArgsLog}"
-    grep -qxF '{"desired_users":[]}' "${curlPayloadLog}" || return 1
+    grep -qxF '{"desired_users":[],"dry_run":false}' "${curlPayloadLog}" || return 1
     while IFS= read -r headerFile; do
         [[ -n "${headerFile}" ]] || continue
         [[ ! -e "${headerFile}" ]] || return 1
@@ -417,7 +411,7 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
         fi
         case "$*" in
         *'https://control.example/sync'*)
-            printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
+            printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
             ;;
         *'https://control.example/health'*)
             printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
@@ -428,7 +422,7 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
         esac
     }
 
-    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[]}' 2>/dev/null || true)
+    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' 2>/dev/null || true)
     [[ -n "${requestResponse}" ]] || return 1
     requestResponse=$(jq -c . <<<"${requestResponse}") || return 1
     [[ "${requestResponse}" == *'"ok":true'* ]] || return 1
@@ -463,6 +457,7 @@ runRemoteControlInlineTokenConsumersRegression() (
     local healthLog="${TMP_DIR}/remote-control-inline-token-consumers.health"
     local planResponse
     local syncResult
+    local responseMode=valid
 
     subscriptionRemoteControlToken() {
         return 96
@@ -488,10 +483,15 @@ runRemoteControlInlineTokenConsumersRegression() (
         local endpoint=$2
         local payload=$3
         [[ "${endpoint}" == "sync" ]]
-        jq -e '.source_id == "edge-remote" and (.desired_users | length) == 1 and .desired_users[0].account == "sub_team_a"' <<<"${payload}" >/dev/null
+        jq -e 'keys == ["desired_users", "dry_run"] and (.desired_users | length) == 1 and (.desired_users[0] | keys == ["id", "uuid"])' <<<"${payload}" >/dev/null
         printf '%s\n' "${payload}" >>"${requestPayloadLog}"
         printf '%s\t%s\n' "$(jq -r '.id' <<<"${sourceJson}")" "${endpoint}" >>"${statusLog}"
-        printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n'
+        case "${responseMode}" in
+        missing-changed) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:$dryRun,plan:{create:[],remove:[]}}' ;;
+        missing-plan) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:$dryRun,changed:false}' ;;
+        wrong-dry-run) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:($dryRun | not),changed:false,plan:{create:[],remove:[]}}' ;;
+        *) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:$dryRun,changed:false,plan:{create:[],remove:[]}}' ;;
+        esac
     }
     setSubscriptionSourceSyncStatus() {
         printf 'status\t%s\t%s\n' "$1" "$2" >>"${statusLog}"
@@ -508,6 +508,12 @@ runRemoteControlInlineTokenConsumersRegression() (
     planResponse=$(jq -c . <<<"${planResponse}") || return 1
     jq -e '.source_id == "edge-remote" and .status == "success" and .dry_run == true and .request.dry_run == true and (.request | has("source_id") | not) and .request.desired_users[0].id == "team-a" and .request.desired_users[0].uuid == "11111111-1111-1111-1111-111111111111" and (.request | has("include_subscriptions") | not) and .response.ok == true' <<<"${planResponse}" >/dev/null || return 1
 
+    for responseMode in missing-changed missing-plan wrong-dry-run; do
+        planResponse=$(subscriptionRemoteSyncPlanForSource "${remoteSourceJson}" "${desiredUsersBySourceJson}" 2>/dev/null || true)
+        jq -e '.status == "remote_error" and .error_detail.type == "invalid_response"' <<<"${planResponse}" >/dev/null || return 1
+    done
+    responseMode=valid
+
     syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
     [[ -n "${syncResult}" ]] || return 1
     syncResult=$(jq -c . <<<"${syncResult}") || return 1
@@ -515,8 +521,8 @@ runRemoteControlInlineTokenConsumersRegression() (
     [[ -f "${requestPayloadLog}" ]] || return 1
     [[ -f "${statusLog}" ]] || return 1
     jq -s -e '
-      length == 2 and
-      .[0].dry_run == true and .[1].dry_run == false and
+      length == 5 and
+      .[0].dry_run == true and .[4].dry_run == false and
       all(.[];
         (. | has("source_id") | not) and
         (. | has("include_subscriptions") | not) and
@@ -563,12 +569,12 @@ runRemoteControlInlineSyncRunnerRegression() (
         if [[ "${snapshotMode}" == "missing" ]]; then
             jq -n \
                 --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
-                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{}}' \
+                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{}}' \
                 '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
         else
             jq -n \
                 --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
-                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{"sub_team_a":{"default":"dmxlc3M6Ly9zbmFwc2hvdA==","clash_meta":"name: sub_team_a","sing_box":[]}}}' \
+                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{"sub_team_a":{"default":"dmxlc3M6Ly9zbmFwc2hvdA==","clash_meta":"name: sub_team_a","sing_box":[]}}}' \
                 '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
         fi
     }
@@ -635,7 +641,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
             [[ -f "${brokenStarted}" ]] || printf 'edge-broken-not-parallel\n' >>"${callLog}"
             jq -n \
                 --argjson request '{"source_id":"edge-slow","dry_run":false,"desired_users":[]}' \
-                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}' \
+                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}' \
                 '{source_id:"edge-slow", status:"success", dry_run:false, request:$request, response:$response}'
             ;;
         edge-broken)
@@ -672,8 +678,9 @@ runRemoteControlHandleInlineHelpersRegression() (
     local syncResponse
     local syncSnapshotResponse
     local emptySnapshotResponse
-    local invalidSnapshotResponse
-    local invalidSnapshotStatus
+    local invalidPayload
+    local invalidPayloadResponse
+    local invalidPayloadStatus
     local syncSnapshotFailureStatus
     local subscribeResponse
     local subscribeStatus
@@ -723,7 +730,7 @@ runRemoteControlHandleInlineHelpersRegression() (
 
     expectedDefault=$(printf 'vless://snapshot\n' | base64 | tr -d '\n')
     expectedDefaultB=$(printf 'trojan://snapshot-b\n' | base64 | tr -d '\n')
-    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false,"include_subscriptions":true}' | jq -c .)
+    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false}' | jq -c .)
     jq -e --arg expectedDefault "${expectedDefault}" --arg expectedDefaultB "${expectedDefaultB}" '
       .ok == true and .dry_run == false and .changed == false and
       .subscriptions.sub_team_a.default == $expectedDefault and
@@ -735,16 +742,21 @@ runRemoteControlHandleInlineHelpersRegression() (
     ' <<<"${syncSnapshotResponse}" >/dev/null
     [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "2" ]]
 
-    emptySnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":true}' | jq -c .)
+    emptySnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false}' | jq -c .)
     jq -e '.ok == true and .subscriptions == {}' <<<"${emptySnapshotResponse}" >/dev/null
     [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "2" ]]
 
-    set +e
-    invalidSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":"yes"}')
-    invalidSnapshotStatus=$?
-    set -e
-    [[ "${invalidSnapshotStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "invalid_payload"' <<<"${invalidSnapshotResponse}" >/dev/null
+    for invalidPayload in \
+        '{"desired_users":[]}' \
+        '{"desired_users":[],"dry_run":false,"include_subscriptions":true}' \
+        '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111","name":"Team A"}],"dry_run":false}'; do
+        set +e
+        invalidPayloadResponse=$(handleSubscriptionControl sync test-token "${invalidPayload}")
+        invalidPayloadStatus=$?
+        set -e
+        [[ "${invalidPayloadStatus}" -ne 0 ]]
+        jq -e '.ok == false and .error == "invalid_payload"' <<<"${invalidPayloadResponse}" >/dev/null
+    done
 
     set +e
     subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}')
@@ -759,7 +771,7 @@ runRemoteControlHandleInlineHelpersRegression() (
         return 1
     }
     set +e
-    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false,"include_subscriptions":true}')
+    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}')
     syncSnapshotFailureStatus=$?
     set -e
     [[ "${syncSnapshotFailureStatus}" -ne 0 ]]
@@ -2089,7 +2101,7 @@ sync:noise)
     printf 'ui noise before sync\n'
     printf '{"ok":false,"error":"first_json"}\n'
     printf 'ui noise between json\n'
-    printf '{"ok":true,"changed":true,"plan":{"create":[],"remove":[]}}\n'
+    printf '{"ok":true,"dry_run":false,"changed":true,"plan":{"create":[],"remove":[]}}\n'
     ;;
 sync:failed)
     printf 'ui noise before failed sync\n'
@@ -2262,7 +2274,7 @@ for _ in range(80):
     time.sleep(0.1)
 
 set_mode("noise")
-results["sync_success"] = request("POST", "sync", '{"desired_users":[]}')
+results["sync_success"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 results["subscribe_removed"] = request("POST", "subscribe", '{"account":"team_a"}')
 results["health_unauthorized"] = request("GET", "health", token_override="wrong-token")
 results["sync_empty_payload"] = request("POST", "sync", "")
@@ -2271,7 +2283,7 @@ results["sync_bad_content_length"] = raw_post("sync", "abc")
 results["sync_slow_body"] = slow_post("sync")
 
 set_mode("failed")
-results["sync_failed"] = request("POST", "sync", '{"desired_users":[]}')
+results["sync_failed"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 set_mode("timeout")
 try:
     os.remove(os.environ["PADM_TEST_CONTROL_STARTED_FILE"])
@@ -2279,7 +2291,7 @@ except FileNotFoundError:
     pass
 sync_holder = {}
 def run_slow_sync():
-    sync_holder["result"] = request("POST", "sync", '{"desired_users":[]}')
+    sync_holder["result"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 sync_thread = threading.Thread(target=run_slow_sync)
 sync_thread.start()
 for _ in range(100):
@@ -2291,7 +2303,7 @@ health_started = time.monotonic()
 results["health_during_sync"] = request("GET", "health")
 results["health_during_sync"]["elapsed"] = time.monotonic() - health_started
 busy_started = time.monotonic()
-results["sync_while_busy"] = request("POST", "sync", '{"desired_users":[]}')
+results["sync_while_busy"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 results["sync_while_busy"]["elapsed"] = time.monotonic() - busy_started
 sync_thread.join(timeout=10)
 assert not sync_thread.is_alive()
@@ -2300,7 +2312,7 @@ time.sleep(1.5)
 results["os_name"] = os.name
 results["timeout_descendant_survived"] = os.path.exists(os.environ["PADM_FAKE_CONTROL_DESCENDANT_FILE"])
 set_mode("invalid")
-results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[]}')
+results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 
 print(json.dumps(results, ensure_ascii=False))
 PY

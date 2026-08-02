@@ -1672,10 +1672,6 @@ JSON
         printf 'install-control\n' >>"${callLog}"
         return 0
     }
-    ensureSubscriptionControlNginxLocation() {
-        printf 'ensure-nginx-location\n' >>"${callLog}"
-        return 1
-    }
     serviceQueueRestart() {
         printf 'restart:%s\n' "$*" >>"${callLog}"
         return 0
@@ -1911,10 +1907,6 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
         }
         installSubscriptionControlService() {
             printf 'install\n' >>"${callLog}"
-            return 0
-        }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
             return 0
         }
         serviceQueueRestart() {

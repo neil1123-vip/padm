@@ -15734,8 +15734,11 @@ runSubscriptionWireGuardMenuFlowRegression() (
     local oldCurrentHost="${currentHost:-}"
     local oldNginxConfigPath="${nginxConfigPath:-}"
     local oldPath="${PATH}"
-    local controlledCredential updatedCredential failingCredential failingCredentialJson
+    local updatedCredential failingReceiptJson completedAlias
     local mainPublicKey controlledPublicKey updatedPublicKey failingPublicKey
+    local controlledToken='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    local failingToken='BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+    local bootstrapInvite bootstrapInviteJson
     local nginxFakeBin nginxTarget
     local mainStateSnapshot
     local wireGuardApplyShouldFail= installControlShouldFail= refreshControlShouldFail= serviceQueueShouldFail=
@@ -15760,10 +15763,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
     controlledPublicKey=$(printf 'abcdefghijklmnopqrstuvwxyz123456' | base64 -w 0)
     updatedPublicKey=$(printf 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456' | base64 -w 0)
     failingPublicKey=$(printf '01234567890123456789012345678901' | base64 -w 0)
-    controlledCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -cn --arg publicKey "${controlledPublicKey}" '{address:"10.77.0.2/24",public_key:$publicKey,control_port:39778,token:"token-a"}')")
     updatedCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -cn --arg publicKey "${updatedPublicKey}" '{address:"10.77.0.3/24",public_key:$publicKey,control_port:48779,token:"token-b"}')")
-    failingCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -cn --arg publicKey "${failingPublicKey}" '{address:"10.77.0.4/24",public_key:$publicKey,control_port:39778,token:"token-fail"}')")
-    failingCredentialJson=$(subscriptionWireGuardCredentialDecode "${failingCredential}")
 
     recordMenuAction() {
         actions+="$1"$'\n'
@@ -15882,6 +15882,7 @@ runSubscriptionWireGuardMenuFlowRegression() (
         originalSetSubscriptionSourceCredential "$@"
     }
     subscriptionRemoteControlHealthAll() { printf '[{"id":"edge-a","ok":true}]\n'; }
+    subscriptionRemoteControlHealth() { printf '{"ok":true}\n'; }
     userJsonCard() { recordMenuAction "userJsonCard:$1"; }
     subscribe() { recordMenuAction subscribe; }
 
@@ -15921,31 +15922,41 @@ main.example.com
         mainStateSnapshot=$(subscriptionWireGuardReadState)
     }
 
+    wireGuardMenuCreateReceiptJson() {
+        local alias=$1
+        local publicKey=$2
+        local token=$3
+        local outputVar=$4
+        local inviteCredential inviteJson __receiptJson
+        subscriptionWireGuardCreateInvite "${alias}" inviteCredential || return 1
+        inviteJson=$(subscriptionWireGuardCredentialDecode "${inviteCredential}") || return 1
+        __receiptJson=$(jq -cn \
+            --arg inviteId "$(jq -r '.invite_id' <<<"${inviteJson}")" \
+            --arg publicKey "${publicKey}" \
+            --arg token "${token}" \
+            '{version:1,kind:"receipt",invite_id:$inviteId,public_key:$publicKey,control_port:39778,token:$token}') || return 1
+        printf -v "${outputVar}" '%s' "${__receiptJson}"
+    }
+
     wireGuardMenuAddEdgePeer() {
-        local reservedCredentialJson
-        local reservedCredential
-        reservedCredentialJson=$(jq -n --arg publicKey "${updatedPublicKey}" '{address:"10.77.0.2/24",public_key:$publicKey,control_port:39778,token:"token-main",kind:"controlled"}')
-        reservedCredential=$(subscriptionWireGuardCredentialEncode controlled "$(jq -c 'del(.kind)' <<<"${reservedCredentialJson}")")
+        local receiptJson receiptCredential reservedInvite
         resetMenuActions
-        if addOtherSubscribe <<<"${reservedCredential}
-main"; then
+        if subscriptionWireGuardCreateInvite main reservedInvite >/dev/null 2>&1; then
             return 1
         fi
         assertMenuAction 'errorCard:main 是保留源 ID，不能作为被控服务器别名'
-        if subscriptionWireGuardAddPeerFromCredential main "${reservedCredentialJson}" >/dev/null 2>&1; then
-            return 1
-        fi
         subscriptionWireGuardReadState | jq -e 'any(.peers[]?; .id == "main") | not' >/dev/null
+        wireGuardMenuCreateReceiptJson edge-a "${controlledPublicKey}" "${controlledToken}" receiptJson
+        receiptCredential=$(subscriptionWireGuardCredentialEncode receipt "$(jq -c 'del(.version,.kind)' <<<"${receiptJson}")")
         resetMenuActions
         manageSubscriptionMultiServer <<<"2
 2
-${controlledCredential}
-edge-a
+${receiptCredential}
 6
 5"
         assertMenuAction 'runSubscriptionGroupSync:'
         subscriptionWireGuardReadState | jq -e --arg publicKey "${controlledPublicKey}" '.peers[] | select(.id == "edge-a" and .address == "10.77.0.2/24" and .public_key == $publicKey and .endpoint == "")' >/dev/null
-        subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == "token-a")' >/dev/null
+        subscriptionGroupsStateRead -e --arg token "${controlledToken}" '.groups[0].sources[] | select(.id == "edge-a" and .scheme == "wireguard" and .transport == "wireguard" and .host == "10.77.0.2" and .port == 39778 and .control_token == $token)' >/dev/null
     }
 
     if wireGuardMenuPartSelected bootstrap; then
@@ -15976,10 +15987,12 @@ SH
         grep -qxF 'old config' "${nginxTarget}"
         ! regressionFindHasMatches "$(dirname "${nginxTarget}")" -maxdepth 1 \( -name '.padm-control-wg.conf.nginx.*' -o -name '.padm-control-wg.conf.backup.*' \)
 
+        subscriptionWireGuardCreateInvite bootstrap-edge bootstrapInvite
+        bootstrapInviteJson=$(subscriptionWireGuardCredentialDecode "${bootstrapInvite}")
         wireGuardMenuResetFixture
         refreshControlShouldFail=true
         resetMenuActions
-        if initSubscriptionWireGuardControlled <<<"" >/dev/null 2>&1; then
+        if subscriptionWireGuardJoinInvite "${bootstrapInviteJson}" false >/dev/null 2>&1; then
             refreshControlShouldFail=
             return 1
         fi
@@ -16014,11 +16027,12 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
-        if subscriptionWireGuardAddPeerFromCredential "bad alias" "${failingCredentialJson}" >/dev/null 2>&1; then
+        if subscriptionWireGuardCreateInvite "bad alias" bootstrapInvite >/dev/null 2>&1; then
             return 1
         fi
+        wireGuardMenuCreateReceiptJson edge-fail "${failingPublicKey}" "${failingToken}" failingReceiptJson
         wireGuardApplyShouldFail=true
-        if subscriptionWireGuardAddPeerFromCredential "edge-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        if subscriptionWireGuardCompleteInvite "${failingReceiptJson}" completedAlias >/dev/null 2>&1; then
             wireGuardApplyShouldFail=
             return 1
         fi
@@ -16035,10 +16049,11 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
+        wireGuardMenuCreateReceiptJson edge-restore-fail "${failingPublicKey}" "${failingToken}" failingReceiptJson
         wireGuardApplyShouldFail=true
         restoreStateWriteShouldFail=true
         resetMenuActions
-        if subscriptionWireGuardAddPeerFromCredential "edge-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        if subscriptionWireGuardCompleteInvite "${failingReceiptJson}" completedAlias >/dev/null 2>&1; then
             wireGuardApplyShouldFail=
             restoreStateWriteShouldFail=
             return 1
@@ -16053,8 +16068,9 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
+        wireGuardMenuCreateReceiptJson edge-addfail "${failingPublicKey}" "${failingToken}" failingReceiptJson
         addSourceShouldFail=true
-        if subscriptionWireGuardAddPeerFromCredential "edge-addfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        if subscriptionWireGuardCompleteInvite "${failingReceiptJson}" completedAlias >/dev/null 2>&1; then
             addSourceShouldFail=
             return 1
         fi
@@ -16068,8 +16084,9 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
+        wireGuardMenuCreateReceiptJson edge-setfail "${failingPublicKey}" "${failingToken}" failingReceiptJson
         setCredentialShouldFail=true
-        if subscriptionWireGuardAddPeerFromCredential "edge-setfail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        if subscriptionWireGuardCompleteInvite "${failingReceiptJson}" completedAlias >/dev/null 2>&1; then
             setCredentialShouldFail=
             return 1
         fi
@@ -16086,10 +16103,11 @@ edge-a
         wireGuardMenuInitializeMain
         wireGuardMenuAddEdgePeer
 
+        wireGuardMenuCreateReceiptJson edge-groups-restore-fail "${failingPublicKey}" "${failingToken}" failingReceiptJson
         setCredentialShouldFail=true
         restoreGroupsWriteShouldFail=true
         resetMenuActions
-        if subscriptionWireGuardAddPeerFromCredential "edge-groups-restore-fail" "${failingCredentialJson}" >/dev/null 2>&1; then
+        if subscriptionWireGuardCompleteInvite "${failingReceiptJson}" completedAlias >/dev/null 2>&1; then
             setCredentialShouldFail=
             restoreGroupsWriteShouldFail=
             return 1
@@ -16989,17 +17007,6 @@ runMenuSmokeRegression() {
     local serviceQueueShouldFail=
     local wgChoice
     local wgAction
-    local wgActions=(
-        "1:initSubscriptionWireGuardMain"
-        "2:initSubscriptionWireGuardControlled"
-        "3:showSubscriptionWireGuardMainCredential"
-        "4:importSubscriptionWireGuardMainCredential"
-        "5:showSubscriptionWireGuardControlledCredential"
-        "6:showSubscriptionWireGuardPeers"
-        "7:testSubscriptionWireGuardControl"
-        "8:restartSubscriptionWireGuardControl"
-        "9:disableSubscriptionWireGuardControl"
-    )
     coreInstallType=${coreInstallType:-}
 
     menuSmokePartSelected() {
@@ -17024,6 +17031,7 @@ runMenuSmokeRegression() {
     menuRecommendedItem() { output+="$2 $3"$'\n'; }
     menuReturnItem() { output+="$2 $3"$'\n'; }
     statusCard() { recordMenuAction "statusCard:$1"; }
+    warnCard() { recordMenuAction "warnCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
     successCard() { recordMenuAction "successCard:$1"; }
     if menuSmokePartSelected core; then
@@ -17146,8 +17154,8 @@ runMenuSmokeRegression() {
     importSubscriptionWireGuardMainCredential() { recordMenuAction importSubscriptionWireGuardMainCredential; }
     subscriptionWireGuardImportMainCredentialJson() { recordMenuAction importSubscriptionWireGuardMainCredential; }
     subscriptionWireGuardCredentialDecode() {
-        [[ "$1" == "main-credential" ]] || return 1
-        jq -n '{version:1,kind:"main",endpoint_host:"main.example.com",listen_port:51820,network:"10.77.0.0/24",address:"10.77.0.1/24",public_key:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+        [[ "$1" == "invite-credential" ]] || return 1
+        jq -n '{version:1,kind:"invite",invite_id:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",alias:"edge-a",address:"10.77.0.2/24",network:"10.77.0.0/24",main_address:"10.77.0.1/24",endpoint_host:"main.example.com",listen_port:51820,main_public_key:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",expires_at:1770000000}'
     }
     initSubscriptionWireGuardMain() {
         recordMenuAction initSubscriptionWireGuardMain
@@ -17155,10 +17163,10 @@ runMenuSmokeRegression() {
             jq -n '{enabled:true, role:"main", address:"10.77.0.1/24", peers:[{id:"edge-a"}]}'
         }
     }
-    initSubscriptionWireGuardControlled() {
-        recordMenuAction initSubscriptionWireGuardControlled
+    subscriptionWireGuardJoinInvite() {
+        recordMenuAction subscriptionWireGuardJoinInvite
         subscriptionWireGuardReadState() {
-            jq -n '{enabled:true, role:"controlled", address:"10.77.0.2/24", peers:[{id:"main"}]}'
+            jq -n '{enabled:true, role:"controlled", address:"10.77.0.2/24", join_invite_id:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", peers:[{id:"main"}]}'
         }
     }
     showSubscriptionWireGuardPeers() { recordMenuAction showSubscriptionWireGuardPeers; }
@@ -17335,10 +17343,9 @@ n"
         resetMenuActions
         output=
         manageSubscriptionRoleSelection <<<"3
-main-credential"
-        assertMenuAction initSubscriptionWireGuardControlled
-        assertMenuAction importSubscriptionWireGuardMainCredential
-        assertMenuAction showSubscriptionWireGuardControlledCredential
+invite-credential"
+        assertMenuAction subscriptionWireGuardJoinInvite
+        assertMenuAction showSubscriptionWireGuardJoinReceipt
         assertMenuAction showSubscriptionWireGuardStatus
         setMenuSmokeRole main
         resetMenuActions
@@ -17643,11 +17650,11 @@ n
         assertMenuAction menu
         resetMenuActions
         manageSubscriptionControlledHome <<<"1
-main-credential
+invite-credential
+y
 4"
-        assertMenuAction initSubscriptionWireGuardControlled
-        assertMenuAction importSubscriptionWireGuardMainCredential
-        assertMenuAction showSubscriptionWireGuardControlledCredential
+        assertMenuAction subscriptionWireGuardJoinInvite
+        assertMenuAction showSubscriptionWireGuardJoinReceipt
         assertMenuAction showSubscriptionWireGuardStatus
         resetMenuActions
         output=

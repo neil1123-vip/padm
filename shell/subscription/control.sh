@@ -373,6 +373,7 @@ subscriptionRemoteSyncPlanForSource() {
     local sourceId
     local payload
     local response
+    local responsePlan
     local errorMessage
 
     sourceId=$(jq -r '.id' <<<"${source}")
@@ -384,7 +385,17 @@ subscriptionRemoteSyncPlanForSource() {
     else
         if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
             if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
-                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"success", dry_run:$dryRun, request:$payload, response:$response}'
+                responsePlan=$(jq -c '.plan' <<<"${response}") || return 1
+                if jq -e --argjson dryRun "${dryRun}" '
+                  (.dry_run == $dryRun) and
+                  (.changed | type == "boolean") and
+                  (.plan | type == "object")
+                ' <<<"${response}" >/dev/null 2>&1 && subscriptionSyncValidateAccountPlan "${responsePlan}"; then
+                    jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"success", dry_run:$dryRun, request:$payload, response:$response}'
+                else
+                    errorMessage="远端同步响应格式无效"
+                    jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"invalid_response", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
+                fi
             else
                 errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
                 jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
@@ -459,8 +470,8 @@ runSubscriptionRemoteSync() {
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 未配置控制 token"]' <<<"${failures}")
             ;;
         success)
-            changed=$(jq -r 'if (.response | has("changed")) then .response.changed else true end' <<<"${sourceResult}") || return 1
-            plan=$(jq -c '.response.plan // {create: [], remove: []}' <<<"${sourceResult}") || return 1
+            changed=$(jq -r '.response.changed' <<<"${sourceResult}") || return 1
+            plan=$(jq -c '.response.plan' <<<"${sourceResult}") || return 1
             if jq -e '.response | has("subscriptions")' <<<"${sourceResult}" >/dev/null 2>&1; then
                 expectedAccounts=$(jq -c --arg sourceId "${sourceId}" '[.[$sourceId][]?.account] | sort' <<<"${desiredUsersBySource}") || return 1
                 if sourceSnapshots=$(jq -ce --argjson expectedAccounts "${expectedAccounts}" '
@@ -1246,21 +1257,19 @@ subscriptionControlApplySyncUnlocked() {
       def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
       type == "object" and
-      (.desired_users? | type == "array") and
-      ((has("dry_run") | not) or (.dry_run | type == "boolean")) and
-      ((has("include_subscriptions") | not) or (.include_subscriptions | type == "boolean")) and
+      (keys == ["desired_users", "dry_run"]) and
+      (.desired_users | type == "array") and
+      (.dry_run | type == "boolean") and
       all(.desired_users[]?; type == "object" and
+        (keys == ["id", "uuid"]) and
         (.id | valid_id) and
-        (has("uuid") and (.uuid | valid_uuid)) and
-        ((has("name") | not) or (.name | type == "string")) and
-        ((has("account") | not) or (.account | type == "string")) and
-        ((has("traffic_limit_gb") | not) or ((.traffic_limit_gb | type) as $type | $type == "number" or $type == "string"))) and
+        (.uuid | valid_uuid)) and
       ([.desired_users[]?.id] | length) == ([.desired_users[]?.id] | unique | length)
     ' <<<"${payload}" >/dev/null 2>&1; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     fi
-    dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
+    dryRun=$(jq -r '.dry_run' <<<"${payload}")
     desiredUsers=$(jq '[.desired_users[]? | {id, uuid}]' <<<"${payload}") || {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
