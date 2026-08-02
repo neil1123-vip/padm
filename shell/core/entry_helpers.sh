@@ -655,7 +655,7 @@ updatePadm() {
     if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${remoteRef}" "${installPath}" RefreshScriptModules; then
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
         successCard "padm 管理脚本更新成功"
-        exit 0
+        exec "${installPath}"
     fi
 
     if [[ -f "${backupPath}" ]]; then

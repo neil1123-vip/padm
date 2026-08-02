@@ -2536,8 +2536,11 @@ runUpdatePadmSingleRefRegression() {
                     cat >"$2/install.sh" <<'EOF'
 #!/usr/bin/env bash
 ensureScriptModules() { :; }
-printf 'force:%s\n' "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" >"${PADM_UPDATE_SINGLE_REF_EXEC_LOG}"
-printf 'ref:%s\n' "${PADM_SCRIPT_MODULE_REF:-}" >>"${PADM_UPDATE_SINGLE_REF_EXEC_LOG}"
+printf 'mode:%s\n' "${1:-menu}" >>"${PADM_UPDATE_SINGLE_REF_EXEC_LOG}"
+if [[ "${1:-}" == "RefreshScriptModules" ]]; then
+    printf 'force:%s\n' "${PADM_FORCE_SCRIPT_MODULE_REFRESH:-}" >>"${PADM_UPDATE_SINGLE_REF_EXEC_LOG}"
+    printf 'ref:%s\n' "${PADM_SCRIPT_MODULE_REF:-}" >>"${PADM_UPDATE_SINGLE_REF_EXEC_LOG}"
+fi
 exit 0
 EOF
                     return 0
@@ -2552,8 +2555,7 @@ EOF
     ) >"${root}/run.log" 2>&1
 
     grep -q 'https://raw.githubusercontent.com/neil1123-vip/padm/1111111111111111111111111111111111111111/install.sh' "${downloadLog}"
-    grep -qx 'force:1' "${execLog}"
-    grep -qx 'ref:1111111111111111111111111111111111111111' "${execLog}"
+    [[ "$(<"${execLog}")" == $'mode:RefreshScriptModules\nforce:1\nref:1111111111111111111111111111111111111111\nmode:menu' ]]
     grep -q 'padm 管理脚本更新成功' "${successLog}"
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
