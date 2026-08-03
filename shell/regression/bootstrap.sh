@@ -197,6 +197,13 @@ subscribe() {
 }
 
 regressionNowMs() {
+    local epochRealtime=${EPOCHREALTIME:-}
+
+    if [[ -n "${epochRealtime}" ]]; then
+        epochRealtime=${epochRealtime/./}
+        printf '%s\n' "${epochRealtime:0:${#epochRealtime}-3}"
+        return
+    fi
     date +%s%3N 2>/dev/null || printf '%s000\n' "$(date +%s)"
 }
 

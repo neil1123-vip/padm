@@ -477,6 +477,79 @@ runNoCompatWrapperFunctionsAssertions() {
     return "${status}"
 }
 
+runFunctionLeafRegistrationAssertions() {
+    local suiteFile=$1
+    local legacySuiteFile=${2:-}
+    local suiteSource=$'\n'"$(<"${suiteFile}")"$'\n'
+    local legacySuiteSource=
+    local selector runner args expectedLine
+    local status=0
+
+    if [[ -n "${legacySuiteFile}" ]]; then
+        legacySuiteSource=$'\n'"$(<"${legacySuiteFile}")"$'\n'
+    fi
+
+    while read -r selector runner args; do
+        [[ -n "${selector}" && -n "${runner}" ]] || continue
+        expectedLine="registerRegressionFunctionLeaf ${selector} ${runner}${args:+ ${args}}"
+        [[ "${suiteSource}" == *$'\n'"${expectedLine}"$'\n'* ]] || status=1
+        [[ "${suiteSource}" != *$'\n'"registerRegressionScriptLeaf ${selector} "* ]] || status=1
+        if [[ -n "${legacySuiteFile}" ]]; then
+            [[ "${legacySuiteSource}" != *$'\n'"registerRegressionScriptLeaf ${selector} "* ]] || status=1
+            [[ "${legacySuiteSource}" != *$'\n'"registerRegressionFunctionLeaf ${selector} "* ]] || status=1
+        fi
+        [[ "${PADM_REGRESSION_SELECTOR_KIND[${selector}]:-}" == "function" ]] || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_RUNNER[${selector}]:-}" == "${runner}" ]] || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_RUNNER_ARGS[${selector}]:-}" == "${args:-}" ]] || status=1
+    done
+
+    return "${status}"
+}
+
+runSourcePatternAssertions() {
+    local sourceFile=$1
+
+    awk -F '\t' '
+        FNR == NR {
+            if (NF < 2) {
+                next
+            }
+            modes[++count] = $1
+            patterns[count] = substr($0, index($0, "\t") + 1)
+            next
+        }
+        {
+            for (i = 1; i <= count; i++) {
+                if (seen[i]) {
+                    continue
+                }
+                mode = modes[i]
+                pattern = patterns[i]
+                if ((mode == "fixed" || mode == "no-fixed") && index($0, pattern)) {
+                    seen[i] = 1
+                } else if ((mode == "line" || mode == "no-line") && $0 == pattern) {
+                    seen[i] = 1
+                } else if ((mode == "prefix" || mode == "no-prefix") && index($0, pattern) == 1) {
+                    seen[i] = 1
+                } else if ((mode == "regex" || mode == "no-regex") && $0 ~ pattern) {
+                    seen[i] = 1
+                }
+            }
+        }
+        END {
+            status = 0
+            for (i = 1; i <= count; i++) {
+                negative = modes[i] ~ /^no-/
+                if ((!negative && !seen[i]) || (negative && seen[i])) {
+                    printf "source assertion failed: %s: %s: %s\n", FILENAME, modes[i], patterns[i] > "/dev/stderr"
+                    status = 1
+                }
+            }
+            exit status
+        }
+    ' - "${sourceFile}"
+}
+
 runRegressionStepSequenceAssertionContract() (
     local fixtureFile="${TMP_DIR}/regression-step-sequence-assertion-fixture.sh"
 
@@ -490,6 +563,36 @@ EOF
     runRegressionStepSequenceAssertions "${fixtureFile}" runFixtureRegressionSequence first second
 
     if runRegressionStepSequenceAssertions "${fixtureFile}" runFixtureRegressionSequence second first; then
+        return 1
+    fi
+)
+
+runRegressionNativeClockContract() (
+    unset EPOCHREALTIME
+    EPOCHREALTIME=1234567890.123456
+
+    [[ "$(regressionNowMs)" == "1234567890123" ]]
+)
+
+runSourcePatternAssertionContract() (
+    local fixtureFile="${TMP_DIR}/source-pattern-assertion-fixture.txt"
+
+    printf '%s\n' 'alpha literal' beta42 prefix-tail >"${fixtureFile}"
+    runSourcePatternAssertions "${fixtureFile}" <<'EOF'
+fixed	literal
+line	beta42
+prefix	prefix-
+regex	^beta[0-9]+$
+no-fixed	missing literal
+no-line	missing-line
+no-prefix	missing-prefix
+no-regex	^missing[0-9]+$
+EOF
+
+    if runSourcePatternAssertions "${fixtureFile}" 2>/dev/null <<'EOF'
+no-fixed	literal
+EOF
+    then
         return 1
     fi
 )
@@ -990,18 +1093,12 @@ runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract() (
     local dispatcherFile="${PROJECT_ROOT}/shell/subscription_groups_regression.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local helperDir="${TMP_DIR}/pre-legacy-suite-collision-check"
-    local legacyNamesFile="${helperDir}/legacy.names"
     local suiteFilesFile="${helperDir}/pre-legacy-suites.txt"
     local collisionsFile="${helperDir}/collisions.txt"
     local relativeSuiteFile=
-    local suiteFile=
-    local functionName=
+    local -a suiteFiles=()
 
     mkdir -p "${helperDir}"
-
-    grep -E '^(runRegression|listRegression)[A-Za-z0-9_]+\(\)' "${legacyFile}" |
-        sed -E 's/\(\).*$//' |
-        sort -u >"${legacyNamesFile}"
 
     awk '
         /regression\/suites\/legacy\.sh/ { exit }
@@ -1013,18 +1110,26 @@ runPreLegacySuitesAvoidLegacyFunctionNameCollisionsContract() (
     : >"${collisionsFile}"
     while IFS= read -r relativeSuiteFile; do
         [[ -n "${relativeSuiteFile}" ]] || continue
-        suiteFile="${PROJECT_ROOT}/shell/${relativeSuiteFile}"
-        while IFS= read -r functionName; do
-            [[ -n "${functionName}" ]] || continue
-            if grep -qx "${functionName}" "${legacyNamesFile}"; then
-                printf '%s:%s\n' "${relativeSuiteFile}" "${functionName}" >>"${collisionsFile}"
-            fi
-        done < <(
-            grep -E '^(runRegression|listRegression)[A-Za-z0-9_]+\(\)' "${suiteFile}" |
-                sed -E 's/\(\).*$//' |
-                sort -u
-        )
+        suiteFiles+=("${PROJECT_ROOT}/shell/${relativeSuiteFile}")
     done <"${suiteFilesFile}"
+
+    awk '
+        FNR == NR {
+            if ($0 ~ /^(runRegression|listRegression)[A-Za-z0-9_]+\(\)/) {
+                name = $0
+                sub(/\(\).*/, "", name)
+                legacyNames[name] = 1
+            }
+            next
+        }
+        $0 ~ /^(runRegression|listRegression)[A-Za-z0-9_]+\(\)/ {
+            name = $0
+            sub(/\(\).*/, "", name)
+            if (name in legacyNames) {
+                print FILENAME ":" name
+            }
+        }
+    ' "${legacyFile}" "${suiteFiles[@]}" >"${collisionsFile}"
 
     ! grep -q '^regression/suites/legacy\.sh$' "${suiteFilesFile}"
     [[ ! -s "${collisionsFile}" ]]
@@ -1069,49 +1174,57 @@ runSubscriptionStateSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q 'source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"' "${suiteFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateCoreSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    grep -Eq '^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionSubscriptionState\(\)[[:space:]]*[({]' "${legacyFile}"
-    ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh' "${suiteFile}"
-    ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \\' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-support ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-serial ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-traffic ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-menu-tx ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-quota-partial-sync ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-remote-restore-serial ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-state-sync-rollback-serial ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-sync-rollback-failure-serial ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \\' "${suiteFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../framework/runtime.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_STATE_SUITE_DIR}/../subscription_groups_subscription_state_full.sh"
+no-regex	^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionState\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateCoreSuiteRoot\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateSuiteRoot\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]
+regex	^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]
+regex	^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]
+regex	^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]
+regex	^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]
+no-regex	registerRegressionScriptLeaf .*subscription_groups_subscription_state_full\.sh
+no-line	while read -r selector runner; do
+line	registerRegressionAggregateRunnerParallelWithArgs \
+line	registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \
+line	registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \
+no-regex	^registerRegressionFunctionLeaf subscription-state-support[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-state-serial[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-state-quota-traffic[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-state-quota-menu-tx[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-state-quota-partial-sync[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-state-remote-restore-serial[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-state-sync-rollback-serial[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-sync-rollback-failure-serial[[:space:]]
+line	registerRegressionFunctionLeaf subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression
+line	registerRegressionFunctionLeaf subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression
+line	registerRegressionFunctionLeaf subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
+line	registerRegressionFunctionLeaf subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
+line	registerRegressionFunctionLeaf subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression
+line	registerRegressionAggregateRunnerSequentialWithArgs \
+line	registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \
+EOF
+
+    runSourcePatternAssertions "${scriptFile}" <<'EOF'
+no-regex	^runRegressionSubscriptionStateCore\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionState\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateStructure\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateQuota\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateRemoteRestore\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateSyncRollback\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]
+no-regex	^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]
+EOF
+
+    runSourcePatternAssertions "${legacyFile}" <<'EOF'
+no-regex	^runRegressionSubscriptionState\(\)[[:space:]]*[({]
+EOF
 }
 
 runSubscriptionStateNoEmptyAggregateWrapperFunctionsContract() {
@@ -1125,10 +1238,6 @@ runSubscriptionStateNoEmptyAggregateWrapperFunctionsContract() {
 }
 
 runSubscriptionStateSelectorHelpersStayAlignedContract() (
-    local helperDir="${TMP_DIR}/subscription-state-selector-helpers"
-
-    mkdir -p "${helperDir}"
-
     declare -F listRegressionSubscriptionStateCoreChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateChildSelectors >/dev/null
     declare -F listRegressionSubscriptionStateStructureFoundationChildSelectors >/dev/null
@@ -1151,18 +1260,22 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
         local helperFn=$1
         local helperName=$2
         shift 2
-        local actualFile="${helperDir}/${helperName}.actual.txt"
-        local expectedFile="${helperDir}/${helperName}.expected.txt"
-        local sortedFile="${helperDir}/${helperName}.sorted.txt"
-        local uniqueFile="${helperDir}/${helperName}.unique.txt"
+        local actual expected selector
+        local -A seen=()
 
-        "${helperFn}" >"${actualFile}"
-        printf '%s\n' "$@" >"${expectedFile}"
+        actual=$("${helperFn}")
+        printf -v expected '%s\n' "$@"
+        expected=${expected%$'\n'}
+        [[ "${actual}" == "${expected}" ]] || return 1
 
-        cmp -s "${expectedFile}" "${actualFile}"
-        sort "${actualFile}" >"${sortedFile}"
-        sort -u "${actualFile}" >"${uniqueFile}"
-        cmp -s "${sortedFile}" "${uniqueFile}"
+        while IFS= read -r selector; do
+            [[ -n "${selector}" ]] || continue
+            [[ -z "${seen[${selector}]+x}" ]] || {
+                printf 'duplicate selector in %s: %s\n' "${helperName}" "${selector}" >&2
+                return 1
+            }
+            seen["${selector}"]=1
+        done <<<"${actual}"
     }
 
     subscriptionStateAssertSelectorList listRegressionSubscriptionStateCoreChildSelectors core \
@@ -1254,29 +1367,37 @@ runSubscriptionStateSelectorHelpersStayAlignedContract() (
 runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription_state.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_subscription_state_full.sh"
+    local suiteSpecs="${TMP_DIR}/subscription-state-suite-owned.specs"
+    local scriptSpecs="${TMP_DIR}/subscription-state-script-owned.specs"
     local functionName
 
-    ! grep -Eq '^runRegressionSubscriptionStateQuotaTraffic\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateQuotaMenuTransaction\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateQuotaPartialSync\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateSupport\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureValidation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureSource\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSelfReference\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateSyncRollbackSerial\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureFoundation\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureFoundationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureValidationIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateStructureSourceIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionSyncRollbackReloadRollbackIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
-    ! grep -Eq '^runRegressionSubscriptionGroupSyncRollbackIsolated\(\)[[:space:]]*[({]' "${suiteFile}" || return 1
+    : >"${suiteSpecs}"
+    : >"${scriptSpecs}"
+    for functionName in \
+        runRegressionSubscriptionStateQuotaTraffic \
+        runRegressionSubscriptionStateQuotaMenuTransaction \
+        runRegressionSubscriptionStateQuotaPartialSync \
+        runRegressionSubscriptionStateSupport \
+        runRegressionSubscriptionStateSerial \
+        runRegressionSubscriptionStateStructureValidation \
+        runRegressionSubscriptionStateStructureSource \
+        runRegressionSubscriptionStateRemoteRestoreSelfReference \
+        runRegressionSubscriptionStateRemoteRestoreSerial \
+        runRegressionSubscriptionStateSyncRollbackSerial \
+        runRegressionSubscriptionStateStructureFoundation \
+        runRegressionSubscriptionStateStructureFoundationIsolated \
+        runRegressionSubscriptionStateStructureValidationIsolated \
+        runRegressionSubscriptionStateStructureSourceIsolated \
+        runRegressionSubscriptionStateRemoteRestoreSelfReferenceIsolated \
+        runRegressionSubscriptionStateRemoteRestoreStateWriteIsolated \
+        runRegressionSubscriptionStateRemoteRestoreLegacyMenuIsolated \
+        runRegressionSubscriptionSyncRollbackConfigRestoreFailureIsolated \
+        runRegressionSubscriptionSyncRollbackRestoreDirFailureIsolated \
+        runRegressionSubscriptionSyncRollbackReloadRollbackIsolated \
+        runRegressionSubscriptionGroupSyncRollbackIsolated
+    do
+        printf 'no-regex\t^%s\\(\\)[[:space:]]*[({]\n' "${functionName}" >>"${suiteSpecs}"
+    done
 
     for functionName in \
         runSubscriptionStateParallelChildRegressionIsolated \
@@ -1301,9 +1422,12 @@ runSubscriptionStateNestedSelectorHelpersAreSuiteOwnedContract() {
         listRegressionSubscriptionStateSyncRollbackFailureChildSelectors \
         runRegressionSubscriptionStateSyncRollback
     do
-        grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${suiteFile}" || return 1
-        ! grep -Eq "^${functionName}\(\)[[:space:]]*[({]" "${scriptFile}" || return 1
+        printf 'regex\t^%s\\(\\)[[:space:]]*[({]\n' "${functionName}" >>"${suiteSpecs}"
+        printf 'no-regex\t^%s\\(\\)[[:space:]]*[({]\n' "${functionName}" >>"${scriptSpecs}"
     done
+
+    runSourcePatternAssertions "${suiteFile}" <"${suiteSpecs}"
+    runSourcePatternAssertions "${scriptFile}" <"${scriptSpecs}"
 }
 
 runSubscriptionStateNoStepWrapperFunctionsContract() {
@@ -1795,66 +1919,73 @@ runRemoteControlSuiteUsesFunctionRegistryContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q 'source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"' "${suiteFile}"
-    ! grep -Eq '^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]' "${suiteFile}"
-    grep -q '^runRegressionRemoteControlLegacyLeafWithCompat() ($' "${suiteFile}"
-    grep -q '^runRegressionRemoteControlLegacyTmpDirIsolationRegression() ($' "${suiteFile}"
-    ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionRemoteControlSmokeRefresh\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionRemoteControlSmokeRefreshApply\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionRemoteControlSmoke\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionRemoteControlContract\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionRemoteControlContractServiceInstall\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]' "${scriptFile}"
-    ! grep -Eq '^runRegressionRemoteControl\(\)[[:space:]]*[({]' "${legacyFile}"
-    ! grep -q 'registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh' "${suiteFile}"
-    ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf remote-control-smoke-core ' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-concurrency runRemoteControlConcurrencyRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-aggregation-failure runRemoteControlAggregationFailureRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-health runRemoteControlHealthRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlServerRefreshLightApplyPrepareRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlServerRefreshLightApplyFailureRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRemoteControlServerRefreshLightRestoreRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRemoteControlServerRefreshLightReconcileRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServerResponse$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlDeep$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf regression-remote-control-legacy-tmpdir-isolation runRegressionRemoteControlLegacyTmpDirIsolationRegression$' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateParallel remote-control-smoke \\' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateParallel remote-control-contract \\' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateParallel remote-control \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
+no-regex	^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]
+line	runRegressionRemoteControlLegacyLeafWithCompat() (
+line	runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
+no-regex	registerRegressionScriptLeaf .*subscription_groups_remote_control\.sh
+no-line	while read -r selector runner; do
+no-regex	^registerRegressionFunctionLeaf remote-control-smoke-core[[:space:]]
+line	registerRegressionFunctionLeaf remote-control-concurrency runRemoteControlConcurrencyRegression
+line	registerRegressionFunctionLeaf remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
+line	registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
+line	registerRegressionFunctionLeaf remote-control-health runRemoteControlHealthRegression
+line	registerRegressionFunctionLeaf remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
+line	registerRegressionFunctionLeaf remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression
+line	registerRegressionFunctionLeaf remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression
+line	registerRegressionFunctionLeaf remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression
+line	registerRegressionFunctionLeaf remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
+line	registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
+line	registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-prepare runRemoteControlServerRefreshLightApplyPrepareRegression
+line	registerRegressionFunctionLeaf remote-control-smoke-refresh-apply-failure runRemoteControlServerRefreshLightApplyFailureRegression
+line	registerRegressionFunctionLeaf remote-control-smoke-refresh-restore runRemoteControlServerRefreshLightRestoreRegression
+line	registerRegressionFunctionLeaf remote-control-smoke-refresh-reconcile runRemoteControlServerRefreshLightReconcileRegression
+line	registerRegressionFunctionLeaf remote-control-contract-service-install-success runRegressionRemoteControlContractServiceInstallSuccess
+line	registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl-fail runRegressionRemoteControlContractServiceInstallSystemctlFail
+line	registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionRemoteControlContractServiceInstallHealthFail
+line	registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRegressionRemoteControlContractServiceInstallHealthRollback
+line	registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction
+line	registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServerResponse
+line	registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlDeep
+line	registerRegressionFunctionLeaf regression-remote-control-legacy-tmpdir-isolation runRegressionRemoteControlLegacyTmpDirIsolationRegression
+no-line	registerRegressionAggregateParallel remote-control-smoke \
+no-line	registerRegressionAggregateParallel remote-control-contract \
+no-line	registerRegressionAggregateParallel remote-control \
+line	registerRegressionAggregateRunnerSequentialWithArgs \
+line	registerRegressionAggregateRunnerParallelWithArgs \
+no-line	registerRegressionAlias remote-control-light remote-control
+line	listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {
+line	listRegressionRemoteControlSmokeRefreshChildSelectors() {
+line	listRegressionRemoteControlSmokeChildSelectors() {
+line	listRegressionRemoteControlContractServiceInstallChildSelectors() {
+line	listRegressionRemoteControlContractChildSelectors() {
+fixed	remote-control-smoke-refresh-apply-basic
+fixed	remote-control-contract-service-install-token-transaction
+EOF
 
-    ! grep -q '^runParallelRemoteControlModes()' "${scriptFile}"
-    ! grep -q '^runParallelRemoteControlTotals()' "${scriptFile}"
-    ! grep -q 'PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "\${REMOTE_CONTROL_SCRIPT_PATH}"' "${scriptFile}"
-    grep -q '^listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionRemoteControlSmokeRefreshChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionRemoteControlSmokeChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionRemoteControlContractServiceInstallChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionRemoteControlContractChildSelectors() {$' "${suiteFile}"
-    ! grep -q '^listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {$' "${scriptFile}"
-    ! grep -q '^listRegressionRemoteControlSmokeRefreshChildSelectors() {$' "${scriptFile}"
-    ! grep -q '^listRegressionRemoteControlSmokeChildSelectors() {$' "${scriptFile}"
-    ! grep -q '^listRegressionRemoteControlContractServiceInstallChildSelectors() {$' "${scriptFile}"
-    ! grep -q '^listRegressionRemoteControlContractChildSelectors() {$' "${scriptFile}"
-    grep -q 'remote-control-smoke-refresh-apply-basic' "${suiteFile}"
-    grep -q 'remote-control-contract-service-install-token-transaction' "${suiteFile}"
+    runSourcePatternAssertions "${scriptFile}" <<'EOF'
+no-regex	^runRegressionRemoteControl\(\)[[:space:]]*[({]
+no-regex	^runRegressionRemoteControlSmokeRefresh\(\)[[:space:]]*[({]
+no-regex	^runRegressionRemoteControlSmokeRefreshApply\(\)[[:space:]]*[({]
+no-regex	^runRegressionRemoteControlSmoke\(\)[[:space:]]*[({]
+no-regex	^runRegressionRemoteControlContract\(\)[[:space:]]*[({]
+no-regex	^runRegressionRemoteControlContractServiceInstall\(\)[[:space:]]*[({]
+no-regex	^runRegressionRemoteControlSmokeCore\(\)[[:space:]]*[({]
+no-prefix	runParallelRemoteControlModes()
+no-prefix	runParallelRemoteControlTotals()
+no-fixed	PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_INTERNAL_CLI=1 bash "${REMOTE_CONTROL_SCRIPT_PATH}"
+no-line	listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {
+no-line	listRegressionRemoteControlSmokeRefreshChildSelectors() {
+no-line	listRegressionRemoteControlSmokeChildSelectors() {
+no-line	listRegressionRemoteControlContractServiceInstallChildSelectors() {
+no-line	listRegressionRemoteControlContractChildSelectors() {
+EOF
+
+    runSourcePatternAssertions "${legacyFile}" <<'EOF'
+no-regex	^runRegressionRemoteControl\(\)[[:space:]]*[({]
+EOF
 }
 
 runRemoteControlNoStepWrapperFunctionsContract() {
@@ -1888,11 +2019,12 @@ runRemoteControlPublicSelectorRetirementContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local usageLine
-    local usageSelectors
     local selector
+    local -a selectors=()
 
-    ! grep -q '^registerRegressionAlias remote-control-light remote-control$' "${suiteFile}" || return 1
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+no-line	registerRegressionAlias remote-control-light remote-control
+EOF
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control"]:-}" == "aggregate-runner" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-smoke"]:-}" == "aggregate-runner" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-contract"]:-}" == "aggregate-runner" ]] || return 1
@@ -1902,29 +2034,20 @@ runRemoteControlPublicSelectorRetirementContract() {
     [[ "${PADM_REGRESSION_SELECTOR_KIND["remote-control-deep"]:-}" == "function" ]] || return 1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["remote-control-light"]:-}" ]] || return 1
 
-    usageLine=$(grep -F 'usage: %s [' "${scriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
     for selector in "${!PADM_REGRESSION_SELECTOR_KIND[@]}"; do
         [[ "${selector}" == remote-control* ]] || continue
         [[ -n "${selector}" ]] || continue
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${scriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+        selectors+=("${selector}")
     done
 
-    ! grep -Eq '^[[:space:]]*remote-control-light\)$' "${scriptFile}" || return 1
-    ! grep -Fq 'remote-control-light|' "${scriptFile}" || return 1
-    ! grep -Eq '^[[:space:]]*remote-control\)$' "${legacyFile}" || return 1
+    runLegacyPublicSelectorRetirementAssertions "${scriptFile}" "${selectors[@]}"
+    runSourcePatternAssertions "${scriptFile}" <<'EOF'
+no-regex	^[[:space:]]*remote-control-light\)$
+no-fixed	remote-control-light|
+EOF
+    runSourcePatternAssertions "${legacyFile}" <<'EOF'
+no-regex	^[[:space:]]*remote-control\)$
+EOF
 }
 
 runLegacyRetiresSuiteOwnedWrappersContract() {
@@ -2302,39 +2425,41 @@ runFastSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/fast.sh"
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
 
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
-    grep -q '^listRegressionFastChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionFastOnlyChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionFastOnlyOutputChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionFastOnlyCoreChildSelectors() {$' "${suiteFile}"
-    ! grep -q '^runRegressionFastUiSmokeLightSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf fast ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf fast-only ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-only ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf fast-only-output ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-only-output ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf ui-smoke-light runRegressionUiSmokeSuiteRoot$' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-only-core ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf regression-fast-parallel-composition runRegressionFastParallelCompositionRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression$' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf fast-reality ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf fast-reality ' "${suiteFile}"
-    ! grep -q '^runRegressionFastRealitySuiteRoot() {$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
-    ! grep -q 'declare -f runRegressionFast' "${suiteFile}"
-    ! grep -q '^eval ' "${suiteFile}"
-    grep -q 'if \[\[ "\${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" \]\]; then' "${scriptFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"
+line	listRegressionFastChildSelectors() {
+line	listRegressionFastOnlyChildSelectors() {
+line	listRegressionFastOnlyOutputChildSelectors() {
+line	listRegressionFastOnlyCoreChildSelectors() {
+no-line	runRegressionFastUiSmokeLightSuiteRoot() {
+no-regex	^registerRegressionScriptLeaf fast[[:space:]]
+no-regex	^registerRegressionFunctionLeaf fast[[:space:]]
+line	registerRegressionAggregateRunnerParallelWithArgs \
+no-regex	^registerRegressionScriptLeaf fast-only[[:space:]]
+no-regex	^registerRegressionFunctionLeaf fast-only[[:space:]]
+no-regex	^registerRegressionScriptLeaf fast-only-output[[:space:]]
+no-regex	^registerRegressionFunctionLeaf fast-only-output[[:space:]]
+line	registerRegressionFunctionLeaf fast-only-safety runRegressionFastOnlySafety
+line	registerRegressionFunctionLeaf fast-only-output-auto-install runRegressionFastOnlyOutputAutoInstall
+line	registerRegressionFunctionLeaf fast-only-output-rest runRegressionFastOnlyOutputRest
+line	registerRegressionFunctionLeaf ui-smoke-light runRegressionUiSmokeSuiteRoot
+no-regex	^registerRegressionFunctionLeaf fast-only-core[[:space:]]
+line	registerRegressionAggregateRunnerSequentialWithArgs \
+line	registerRegressionFunctionLeaf regression-fast-parallel-composition runRegressionFastParallelCompositionRegression
+line	registerRegressionFunctionLeaf regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression
+line	registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression
+no-regex	^registerRegressionScriptLeaf fast-reality[[:space:]]
+no-regex	^registerRegressionFunctionLeaf fast-reality[[:space:]]
+no-line	runRegressionFastRealitySuiteRoot() {
+no-regex	^registerRegressionScriptLeaf platform-hot[[:space:]]
+no-regex	^registerRegressionFunctionLeaf platform-hot[[:space:]]
+no-fixed	declare -f runRegressionFast
+no-regex	^eval[[:space:]]
+EOF
+
+    runSourcePatternAssertions "${scriptFile}" <<'EOF'
+fixed	if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
+EOF
 }
 
 runFastNoEmptyLocalWrapperFunctionsContract() {
@@ -2344,36 +2469,34 @@ runFastNoEmptyLocalWrapperFunctionsContract() {
 
 runPlatformSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/platform.sh"
-    local status=0
 
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^runRegressionPlatformFastLeafWithCompat() ($' "${suiteFile}"
-    grep -q '^listRegressionPlatformHotChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionPlatformIoChildSelectors() {$' "${suiteFile}"
-    ! grep -Eq '^runRegressionPlatformSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionPlatformIoSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionPlatformUpdateSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionPlatformRefreshSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -Eq '^runRegressionPlatformRestSuiteRoot\(\)[[:space:]]*[({]' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf platform-hot ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf platform-io ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf platform-hot ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf platform-io ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-update runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-refresh runRegressionPlatformFastLeafWithCompat runRegressionPlatformRefresh$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf platform-rest runRegressionPlatformFastLeafWithCompat runRegressionPlatformRest$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression$' "${suiteFile}"
-    ! grep -q 'declare -f runRegressionPlatform' "${suiteFile}"
-    ! grep -q 'declare -f runRegressionPlatformIo' "${suiteFile}"
-    ! grep -q '^eval ' "${suiteFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_fast.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_PLATFORM_SUITE_DIR}/../subscription_groups_legacy.sh"
+line	runRegressionPlatformFastLeafWithCompat() (
+line	listRegressionPlatformHotChildSelectors() {
+line	listRegressionPlatformIoChildSelectors() {
+no-regex	^runRegressionPlatformSuiteRoot\(\)[[:space:]]*[({]
+no-regex	^runRegressionPlatformIoSuiteRoot\(\)[[:space:]]*[({]
+no-regex	^runRegressionPlatformUpdateSuiteRoot\(\)[[:space:]]*[({]
+no-regex	^runRegressionPlatformRefreshSuiteRoot\(\)[[:space:]]*[({]
+no-regex	^runRegressionPlatformRestSuiteRoot\(\)[[:space:]]*[({]
+no-regex	^registerRegressionScriptLeaf platform-hot[[:space:]]
+no-regex	^registerRegressionScriptLeaf platform-io[[:space:]]
+no-regex	^registerRegressionFunctionLeaf platform-hot[[:space:]]
+no-regex	^registerRegressionFunctionLeaf platform-io[[:space:]]
+line	registerRegressionAggregateRunnerSequentialWithArgs \
+line	registerRegressionAggregateRunnerParallelWithArgs \
+line	registerRegressionFunctionLeaf platform-update runRegressionPlatformFastLeafWithCompat runRegressionPlatformUpdate
+line	registerRegressionFunctionLeaf platform-refresh runRegressionPlatformFastLeafWithCompat runRegressionPlatformRefresh
+line	registerRegressionFunctionLeaf platform-rest runRegressionPlatformFastLeafWithCompat runRegressionPlatformRest
+line	registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
+no-fixed	declare -f runRegressionPlatform
+no-fixed	declare -f runRegressionPlatformIo
+no-regex	^eval[[:space:]]
+EOF
 
-    while read -r selector helper regression; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${helper} ${regression}\$" "${suiteFile}" || status=1
-    done <<'EOF'
+    runFunctionLeafRegistrationAssertions "${suiteFile}" <<'EOF'
 install-tools-certificate-dependency runRegressionPlatformLegacyLeafWithCompat runInstallToolsCertificateDependencyRegression
 install-tools-acme-result-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeResultFailureRegression
 install-tools-acme-commit-failure runRegressionPlatformLegacyLeafWithCompat runInstallToolsAcmeCommitFailureRegression
@@ -2393,8 +2516,6 @@ reality-scanner-unsafe-dir runRegressionPlatformLegacyLeafWithCompat runRealityS
 reality-scanner-binary runRegressionPlatformLegacyLeafWithCompat runRealityScannerBinaryRegression
 reality-scanner-download-failure runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression
 EOF
-
-    return "${status}"
 }
 
 runPlatformPublicSelectorRetirementContract() {
@@ -3441,17 +3562,31 @@ runCompositionLeafSelectorsUseSuiteLocalRegistryContract() {
     local selector
     local runner
     local suiteFile
+    local suiteSource
+    local expectedLine
+    local definitionPattern
     local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local legacySuiteSource=$'\n'"$(<"${legacySuiteFile}")"$'\n'
+    local legacyScriptSource=$'\n'"$(<"${legacyScriptFile}")"$'\n'
+    declare -A suiteSources=()
 
     while read -r selector runner suiteFile; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
-        grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${suiteFile}" || status=1
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
-        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
-        ! grep -Eq "^${runner}\\(\\)[[:space:]]*[({]" "${legacyScriptFile}" || status=1
+        if [[ -z "${suiteSources[${suiteFile}]+x}" ]]; then
+            suiteSources["${suiteFile}"]=$'\n'"$(<"${suiteFile}")"$'\n'
+        fi
+        suiteSource=${suiteSources["${suiteFile}"]}
+        expectedLine="registerRegressionFunctionLeaf ${selector} ${runner}"
+        definitionPattern=$'\n'"${runner}"'\(\)[[:space:]]*[\(\{]'
+
+        [[ "${suiteSource}" == *$'\n'"${expectedLine}"$'\n'* ]] || status=1
+        [[ "${suiteSource}" != *$'\n'"registerRegressionScriptLeaf ${selector} "* ]] || status=1
+        [[ "${suiteSource}" =~ ${definitionPattern} ]] || status=1
+        [[ "${legacySuiteSource}" != *$'\n'"registerRegressionScriptLeaf ${selector} "* ]] || status=1
+        [[ "${legacySuiteSource}" != *$'\n'"registerRegressionFunctionLeaf ${selector} "* ]] || status=1
+        [[ ! "${legacyScriptSource}" =~ ${definitionPattern} ]] || status=1
         [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
+        [[ "${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]:-}" == "${runner}" ]] || status=1
     done <<EOF
 regression-all-composition runRegressionAllCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
 regression-all-child-parallel-budget-composition runRegressionAllChildParallelBudgetCompositionRegression ${PROJECT_ROOT}/shell/regression/suites/all.sh
@@ -3509,15 +3644,8 @@ EOF
 runTransactionDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
-    local status=0
 
-    while read -r selector runner args; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}${args:+ ${args}}\$" "${suiteFile}" || status=1
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
-        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
-        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
-    done <<'EOF'
+    runFunctionLeafRegistrationAssertions "${suiteFile}" "${legacySuiteFile}" <<'EOF'
 cdn-address-write-transaction runRegressionTransactionLegacyLeafWithCompat runCdnAddressTransactionRegression
 subscribe-server-name runRegressionTransactionLegacyLeafWithCompat runSubscribeServerNameRegression
 subscribe-nginx-config-write runRegressionTransactionLegacyLeafWithCompat runSubscribeNginxConfigWriteRegression
@@ -3544,8 +3672,6 @@ clean-last-installation-acme-relative-home runCleanLastInstallationConfigResolve
 alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
 EOF
-
-    return "${status}"
 }
 
 runTransactionNoCompatWrapperFunctionsContract() {
@@ -3592,15 +3718,8 @@ EOF
 runTransactionCoreDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local legacySuiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
-    local status=0
 
-    while read -r selector runner; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${legacySuiteFile}" || status=1
-        ! grep -q "^registerRegressionFunctionLeaf ${selector} " "${legacySuiteFile}" || status=1
-        [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || status=1
-    done <<'EOF'
+    runFunctionLeafRegistrationAssertions "${suiteFile}" "${legacySuiteFile}" <<'EOF'
 core-rollback-result-message runCoreRollbackResultMessageRegression
 config-transaction runConfigTransactionRegression
 core-port-file-transaction runCorePortFileTransactionRegression
@@ -3639,8 +3758,6 @@ network-check-return-failure runNetworkCheckReturnFailureRegression
 sing-box-merge-config-transaction runSingBoxMergeConfigTransactionRegression
 reload-core-propagation runReloadCorePropagationRegression
 EOF
-
-    return "${status}"
 }
 
 runPlatformIoDirectLeafSelectorsUseFunctionRegistryContract() {
@@ -3680,12 +3797,8 @@ EOF
 
 runSubscriptionDirectLeafSelectorsUseFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
-    local status=0
 
-    while read -r selector runner args; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}${args:+ ${args}}\$" "${suiteFile}" || status=1
-    done <<'EOF'
+    runFunctionLeafRegistrationAssertions "${suiteFile}" <<'EOF'
 subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput
 subscription-output-profile-and-reality runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputProfileAndRealityRegression
 subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression
@@ -3699,8 +3812,6 @@ subscription-groups-backup-failure runSubscriptionGroupsBackupFailureRegression
 refresh-local-subscriptions-rollback runRefreshLocalSubscriptionsRollbackRegression
 subscribe-return-failure runSubscribeReturnFailureRegression
 EOF
-
-    return "${status}"
 }
 
 runSubscriptionNoCompatWrapperFunctionsContract() {
@@ -3764,32 +3875,37 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q 'source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionOutput() {$' "${suiteFile}"
-    grep -q '^runRegressionSubscriptionSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^runRegressionSubscriptionRemoteSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^runRegressionSubscriptionTxSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^runRegressionSubscriptionOutputSuiteRoot() {$' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-' "${suiteFile}"
-    ! grep -q '^runRegressionSubscription() {$' "${suiteFile}"
-    ! grep -q '^runRegressionSubscriptionRemote() {$' "${suiteFile}"
-    ! grep -q '^runRegressionSubscriptionTx() {$' "${suiteFile}"
-    ! grep -q '^runRegressionSubscription() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionSubscriptionRemote() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionSubscriptionTx() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionSubscriptionOutput() {$' "${legacyScriptFile}"
-    ! grep -q '^registerRegressionScriptLeaf subscription ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf subscription-remote ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-remote ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf subscription-tx ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-tx ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh"
+line	runRegressionSubscriptionOutput() {
+line	runRegressionSubscriptionSuiteRoot() {
+no-line	runRegressionSubscriptionRemoteSuiteRoot() {
+no-line	runRegressionSubscriptionTxSuiteRoot() {
+no-line	runRegressionSubscriptionOutputSuiteRoot() {
+fixed	runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-
+no-line	runRegressionSubscription() {
+no-line	runRegressionSubscriptionRemote() {
+no-line	runRegressionSubscriptionTx() {
+no-regex	^registerRegressionScriptLeaf subscription[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription[[:space:]]
+no-regex	^registerRegressionScriptLeaf subscription-remote[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-remote[[:space:]]
+no-regex	^registerRegressionScriptLeaf subscription-tx[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-tx[[:space:]]
+no-regex	^registerRegressionScriptLeaf subscription-write-transaction[[:space:]]
+no-regex	^registerRegressionFunctionLeaf subscription-write-transaction[[:space:]]
+no-prefix	registerRegressionFunctionLeaf regression-subscription-write-transaction-
+line	registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput
+line	registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \
+EOF
+
+    runSourcePatternAssertions "${legacyScriptFile}" <<'EOF'
+no-line	runRegressionSubscription() {
+no-line	runRegressionSubscriptionRemote() {
+no-line	runRegressionSubscriptionTx() {
+no-line	runRegressionSubscriptionOutput() {
+EOF
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription"]:-}" == "aggregate-runner" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote"]:-}" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-tx"]:-}" == "aggregate-runner" ]]
@@ -3860,14 +3976,7 @@ runUiPublicSelectorsUseFunctionRegistryContract() {
     ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}" || status=1
     ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}" || status=1
 
-    while read -r selector runner args; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        if [[ -n "${args:-}" ]]; then
-            grep -q "^registerRegressionFunctionLeaf ${selector} ${runner} ${args}\$" "${suiteFile}" || status=1
-        else
-            grep -q "^registerRegressionFunctionLeaf ${selector} ${runner}\$" "${suiteFile}" || status=1
-        fi
-    done <<'EOF'
+    runFunctionLeafRegistrationAssertions "${suiteFile}" <<'EOF' || status=1
 ui-smoke runRegressionUiSmokeSuiteRoot
 ui-full-core runRegressionUiLegacyLeafWithCompat runMenuSmokeFullCoreRegression
 ui-full-subscription-main-entry runRegressionUiLegacyLeafWithCompat runMenuSmokeFullSubscriptionMainEntryRegression
@@ -3915,15 +4024,44 @@ EOF
 runUiSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/ui.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
+    local suiteWrapperSpecs="${TMP_DIR}/ui-suite-wrapper.specs"
+    local legacyWrapperSpecs="${TMP_DIR}/ui-legacy-wrapper.specs"
     local wrapperName
 
-    grep -q 'source "\${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || return 1
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || return 1
-    grep -q '^runUiLeafSelectorListRegression() {$' "${suiteFile}" || return 1
-    ! grep -q '^runUiSelectorListRegression() {$' "${suiteFile}" || return 1
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	source "${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh"
+line	runUiLeafSelectorListRegression() {
+no-line	runUiSelectorListRegression() {
+line	listRegressionUiChildSelectors() {
+line	listRegressionUiAllProfileChildSelectors() {
+line	runRegressionUiSmokeSuiteRoot() {
+line	runRegressionUiSuiteRoot() {
+regex	^runRegressionUiParallelCompositionRegression\(\)[[:space:]]
+regex	^runRegressionUiLongTailSplitCompositionRegression\(\)[[:space:]]
+fixed	runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-parallel-
+no-regex	^registerRegressionScriptLeaf ui[[:space:]]
+no-regex	^registerRegressionFunctionLeaf ui[[:space:]]
+no-regex	^registerRegressionScriptLeaf menu-smoke[[:space:]]
+no-regex	^registerRegressionFunctionLeaf menu-smoke[[:space:]]
+no-regex	^registerRegressionScriptLeaf menu-smoke-full[[:space:]]
+no-regex	^registerRegressionFunctionLeaf menu-smoke-full[[:space:]]
+line	registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
+line	registerRegressionAggregateRunnerParallelWithArgs \
+line	registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \
+EOF
+
+    : >"${suiteWrapperSpecs}"
+    printf '%s\n' \
+        $'no-line\tlistRegressionUiChildSelectors() {' \
+        $'no-line\tlistRegressionUiAllProfileChildSelectors() {' \
+        $'no-line\trunRegressionUi() {' \
+        $'no-regex\t^runRegressionUiParallelCompositionRegression\\(\\)[[:space:]]' \
+        $'no-regex\t^runRegressionUiLongTailSplitCompositionRegression\\(\\)[[:space:]]' \
+        >"${legacyWrapperSpecs}"
     while read -r wrapperName; do
-        ! grep -q "^${wrapperName}() {$" "${suiteFile}" || return 1
-        ! grep -q "^${wrapperName}() {$" "${legacyScriptFile}" || return 1
+        printf 'no-line\t%s() {\n' "${wrapperName}" >>"${suiteWrapperSpecs}"
+        printf 'no-line\t%s() {\n' "${wrapperName}" >>"${legacyWrapperSpecs}"
     done <<'EOF'
 runRegressionMenuSmokeFull
 runRegressionUiFullSubscriptionMain
@@ -3937,27 +4075,9 @@ runSubscriptionWireGuardMenuFlowPeerRollbackApplyRegression
 runSubscriptionWireGuardMenuFlowPeerRollbackCredentialRegression
 runSubscriptionWireGuardMenuFlowPeerSourceControlRegression
 EOF
-    grep -q '^listRegressionUiChildSelectors() {$' "${suiteFile}" || return 1
-    grep -q '^listRegressionUiAllProfileChildSelectors() {$' "${suiteFile}" || return 1
-    grep -q '^runRegressionUiSmokeSuiteRoot() {$' "${suiteFile}" || return 1
-    grep -q '^runRegressionUiSuiteRoot() {$' "${suiteFile}" || return 1
-    grep -q '^runRegressionUiParallelCompositionRegression() ' "${suiteFile}" || return 1
-    grep -q '^runRegressionUiLongTailSplitCompositionRegression() ' "${suiteFile}" || return 1
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/ui-parallel-' "${suiteFile}" || return 1
-    ! grep -q '^listRegressionUiChildSelectors() {$' "${legacyScriptFile}" || return 1
-    ! grep -q '^listRegressionUiAllProfileChildSelectors() {$' "${legacyScriptFile}" || return 1
-    ! grep -q '^runRegressionUi() {$' "${legacyScriptFile}" || return 1
-    ! grep -q '^runRegressionUiParallelCompositionRegression() ' "${legacyScriptFile}" || return 1
-    ! grep -q '^runRegressionUiLongTailSplitCompositionRegression() ' "${legacyScriptFile}" || return 1
-    ! grep -q '^registerRegressionScriptLeaf ui ' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionFunctionLeaf ui ' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionScriptLeaf menu-smoke ' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionFunctionLeaf menu-smoke ' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionScriptLeaf menu-smoke-full ' "${suiteFile}" || return 1
-    ! grep -q '^registerRegressionFunctionLeaf menu-smoke-full ' "${suiteFile}" || return 1
-    grep -q '^registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot$' "${suiteFile}" || return 1
-    grep -q '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}" || return 1
-    grep -q '^registerRegressionAggregateRunnerParallel ui runRegressionUiSuiteRoot \\' "${suiteFile}" || return 1
+
+    runSourcePatternAssertions "${suiteFile}" <"${suiteWrapperSpecs}"
+    runSourcePatternAssertions "${legacyScriptFile}" <"${legacyWrapperSpecs}"
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-smoke"]:-}" == "function" ]] || return 1
     [[ "${PADM_REGRESSION_SELECTOR_KIND["ui-full"]:-}" == "aggregate-runner" ]] || return 1
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["menu-smoke"]:-}" ]] || return 1
@@ -4708,31 +4828,32 @@ runRoutingLegacyPublicSelectorRetirementContract() {
 runRoutingSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/routing.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
-    local status=0
 
-    grep -q 'source "\${REGRESSION_ROUTING_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}" || status=1
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}" || status=1
-    grep -q '^listRegressionRoutingCoreChildSelectors() {$' "${suiteFile}" || status=1
-    grep -q '^listRegressionRoutingHeavyChildSelectors() {$' "${suiteFile}" || status=1
-    grep -q '^listRegressionRoutingLightChildSelectors() {$' "${suiteFile}" || status=1
-    grep -q '^listRegressionRoutingChildSelectors() {$' "${suiteFile}" || status=1
-    grep -q '^runRegressionRoutingSuiteRoot() {$' "${suiteFile}" || status=1
-    grep -q '^runRegressionRoutingParallelCompositionRegression() ' "${suiteFile}" || status=1
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-' "${suiteFile}" || status=1
-    ! grep -q '^listRegressionRoutingCoreChildSelectors() {$' "${legacyScriptFile}" || status=1
-    ! grep -q '^listRegressionRoutingHeavyChildSelectors() {$' "${legacyScriptFile}" || status=1
-    ! grep -q '^listRegressionRoutingLightChildSelectors() {$' "${legacyScriptFile}" || status=1
-    ! grep -q '^listRegressionRoutingChildSelectors() {$' "${legacyScriptFile}" || status=1
-    ! grep -q '^runRegressionRouting() {$' "${legacyScriptFile}" || status=1
-    ! grep -q '^runRegressionRoutingParallelCompositionRegression() ' "${legacyScriptFile}" || status=1
-    ! grep -q '^registerRegressionScriptLeaf routing ' "${suiteFile}" || status=1
-    ! grep -q '^registerRegressionFunctionLeaf routing ' "${suiteFile}" || status=1
-    grep -q '^registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \\' "${suiteFile}" || status=1
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	source "${REGRESSION_ROUTING_SUITE_DIR}/../framework/runtime.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh"
+line	listRegressionRoutingCoreChildSelectors() {
+line	listRegressionRoutingHeavyChildSelectors() {
+line	listRegressionRoutingLightChildSelectors() {
+line	listRegressionRoutingChildSelectors() {
+line	runRegressionRoutingSuiteRoot() {
+regex	^runRegressionRoutingParallelCompositionRegression\(\)[[:space:]]
+fixed	runFrameworkParallelRegressionSelectorList "${TMP_DIR}/routing-parallel-
+no-regex	^registerRegressionScriptLeaf routing[[:space:]]
+no-regex	^registerRegressionFunctionLeaf routing[[:space:]]
+line	registerRegressionAggregateRunnerParallel routing runRegressionRoutingSuiteRoot \
+EOF
 
-    while read -r selector helper regression; do
-        ! grep -q "^registerRegressionScriptLeaf ${selector} " "${suiteFile}" || status=1
-        grep -q "^registerRegressionFunctionLeaf ${selector} ${helper} ${regression}\$" "${suiteFile}" || status=1
-    done <<'EOF'
+    runSourcePatternAssertions "${legacyScriptFile}" <<'EOF'
+no-line	listRegressionRoutingCoreChildSelectors() {
+no-line	listRegressionRoutingHeavyChildSelectors() {
+no-line	listRegressionRoutingLightChildSelectors() {
+no-line	listRegressionRoutingChildSelectors() {
+no-line	runRegressionRouting() {
+no-regex	^runRegressionRoutingParallelCompositionRegression\(\)[[:space:]]
+EOF
+
+    runFunctionLeafRegistrationAssertions "${suiteFile}" <<'EOF'
 routing-socks5-udp-associate runRegressionRoutingLegacyLeafWithCompat runSocks5UdpAssociateRegression
 routing-core runRegressionRoutingLegacyLeafWithCompat runRoutingRegression
 routing-core-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runRoutingCoreRejectsUnsafeConfigDirRegression
@@ -4750,8 +4871,6 @@ routing-dns-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runDNSRou
 routing-dns-restore-scope runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
 routing-port-panel runRegressionRoutingLegacyLeafWithCompat runPortAndPanelHelperRegression
 EOF
-
-    return "${status}"
 }
 
 runRoutingSelectorHelpersStayAlignedContract() (
@@ -5087,53 +5206,57 @@ runTransactionSuiteUsesFunctionRegistryContract() (
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/transaction.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q 'source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^listRegressionTransactionChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionSubscriptionChildSelectors() {$' "${suiteFile}"
-    ! grep -q '^runRegressionTransactionSubscriptionSuiteRoot() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionCoreSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionCoreChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionCoreHeavyChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionCoreMediumChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionCoreLightChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionTransactionSystemChildSelectors() {$' "${suiteFile}"
-    ! grep -q '^runRegressionTransactionSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionTransactionCoreSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionTransactionSystemSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^runRegressionTransactionSubscription() {$' "${suiteFile}"
-    grep -q '^runRegressionTransactionCoreParallelCompositionRegression() ' "${suiteFile}"
-    grep -q '^runRegressionTransactionSystemParallelCompositionRegression() ' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-system-parallel-' "${suiteFile}"
-    ! grep -q '^runRegressionTransactionCore() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionTransactionSubscription() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionTransactionSubscriptionSuiteRoot() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionCoreSelectorEntries() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionCoreSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionCoreChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionCoreHeavyChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionCoreMediumChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionCoreLightChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionSubscriptionChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionTransactionSystemChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionTransactionSystem() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionTransactionCoreParallelCompositionRegression() ' "${legacyScriptFile}"
-    ! grep -q '^runRegressionTransactionSystemParallelCompositionRegression() ' "${legacyScriptFile}"
-    ! grep -q '^runRegressionTransaction() {$' "${legacyScriptFile}"
-    ! grep -q '^registerRegressionScriptLeaf transaction ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf transaction ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf transaction-core ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf transaction-core ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf transaction-subscription ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf transaction-subscription ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf transaction-system ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf transaction-system ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	source "${REGRESSION_TRANSACTION_SUITE_DIR}/../framework/runtime.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh"
+line	listRegressionTransactionChildSelectors() {
+line	listRegressionTransactionSubscriptionChildSelectors() {
+no-line	runRegressionTransactionSubscriptionSuiteRoot() {
+line	listRegressionTransactionCoreSelectorEntries() {
+line	listRegressionTransactionCoreSelectors() {
+line	listRegressionTransactionCoreChildSelectors() {
+line	listRegressionTransactionCoreHeavyChildSelectors() {
+line	listRegressionTransactionCoreMediumChildSelectors() {
+line	listRegressionTransactionCoreLightChildSelectors() {
+line	listRegressionTransactionSystemChildSelectors() {
+no-line	runRegressionTransactionSuiteRoot() {
+line	runRegressionTransactionCoreSuiteRoot() {
+line	runRegressionTransactionSystemSuiteRoot() {
+no-line	runRegressionTransactionSubscription() {
+regex	^runRegressionTransactionCoreParallelCompositionRegression\(\)[[:space:]]
+regex	^runRegressionTransactionSystemParallelCompositionRegression\(\)[[:space:]]
+fixed	runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-core-parallel-
+fixed	runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-system-parallel-
+no-regex	^registerRegressionScriptLeaf transaction[[:space:]]
+no-regex	^registerRegressionFunctionLeaf transaction[[:space:]]
+no-regex	^registerRegressionScriptLeaf transaction-core[[:space:]]
+no-regex	^registerRegressionFunctionLeaf transaction-core[[:space:]]
+no-regex	^registerRegressionScriptLeaf transaction-subscription[[:space:]]
+no-regex	^registerRegressionFunctionLeaf transaction-subscription[[:space:]]
+no-regex	^registerRegressionScriptLeaf transaction-system[[:space:]]
+no-regex	^registerRegressionFunctionLeaf transaction-system[[:space:]]
+line	registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \
+line	registerRegressionAggregateRunnerSequentialWithArgs \
+line	registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \
+EOF
+
+    runSourcePatternAssertions "${legacyScriptFile}" <<'EOF'
+no-line	runRegressionTransactionCore() {
+no-line	runRegressionTransactionSubscription() {
+no-line	runRegressionTransactionSubscriptionSuiteRoot() {
+no-line	listRegressionTransactionCoreSelectorEntries() {
+no-line	listRegressionTransactionCoreSelectors() {
+no-line	listRegressionTransactionCoreChildSelectors() {
+no-line	listRegressionTransactionCoreHeavyChildSelectors() {
+no-line	listRegressionTransactionCoreMediumChildSelectors() {
+no-line	listRegressionTransactionCoreLightChildSelectors() {
+no-line	listRegressionTransactionSubscriptionChildSelectors() {
+no-line	listRegressionTransactionSystemChildSelectors() {
+no-line	runRegressionTransactionSystem() {
+no-regex	^runRegressionTransactionCoreParallelCompositionRegression\(\)[[:space:]]
+no-regex	^runRegressionTransactionSystemParallelCompositionRegression\(\)[[:space:]]
+no-line	runRegressionTransaction() {
+EOF
 )
 
 runTransactionNoEmptyAggregateWrapperFunctionsContract() {
@@ -5724,35 +5847,40 @@ runRuntimeSuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/runtime.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q 'source "\${REGRESSION_RUNTIME_SUITE_DIR}/../framework/runtime.sh"' "${suiteFile}"
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    grep -q '^listRegressionRuntimeLightChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionRuntimeHeavyChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionRuntimeChildSelectors() {$' "${suiteFile}"
-    grep -q '^runRegressionRuntimeSuiteRoot() {$' "${suiteFile}"
-    grep -q '^runRegressionRuntimeParallelCompositionRegression() ' "${suiteFile}"
-    grep -q 'runFrameworkParallelRegressionSelectorList "${TMP_DIR}/runtime-parallel-' "${suiteFile}"
-    ! grep -q '^listRegressionRuntimeLightChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionRuntimeHeavyChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionRuntimeChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionRuntime() {$' "${legacyScriptFile}"
-    ! grep -q '^runRegressionRuntimeParallelCompositionRegression() ' "${legacyScriptFile}"
-    ! grep -q '^registerRegressionScriptLeaf runtime ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf runtime ' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \\' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-core runRegressionRuntimeLegacyLeafWithCompat runRuntimeAndRealityRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runRegressionRuntimeLegacyLeafWithCompat runAutoReadUnsetAutoInstallRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-auto-install-reality-route runRegressionRuntimeLegacyLeafWithCompat runAutoInstallRealityRouteRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf runtime-tempdir runRegressionRuntimeLegacyLeafWithCompat runRuntimeTempDirRegression$' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-candidates-fast ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-candidates-full ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-stream-enable ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-stream-disable ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-config ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-profile-failure ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateRunnerSequential reality-candidates ' "${suiteFile}"
-    ! grep -q '^registerRegressionAggregateRunnerSequential reality-stream ' "${suiteFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	source "${REGRESSION_RUNTIME_SUITE_DIR}/../framework/runtime.sh"
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_RUNTIME_SUITE_DIR}/../subscription_groups_legacy.sh"
+line	listRegressionRuntimeLightChildSelectors() {
+line	listRegressionRuntimeHeavyChildSelectors() {
+line	listRegressionRuntimeChildSelectors() {
+line	runRegressionRuntimeSuiteRoot() {
+regex	^runRegressionRuntimeParallelCompositionRegression\(\)[[:space:]]
+fixed	runFrameworkParallelRegressionSelectorList "${TMP_DIR}/runtime-parallel-
+no-regex	^registerRegressionScriptLeaf runtime[[:space:]]
+no-regex	^registerRegressionFunctionLeaf runtime[[:space:]]
+line	registerRegressionAggregateRunnerParallel runtime runRegressionRuntimeSuiteRoot \
+line	registerRegressionFunctionLeaf runtime-core runRegressionRuntimeLegacyLeafWithCompat runRuntimeAndRealityRegression
+line	registerRegressionFunctionLeaf runtime-autoread-unset-auto-install runRegressionRuntimeLegacyLeafWithCompat runAutoReadUnsetAutoInstallRegression
+line	registerRegressionFunctionLeaf runtime-auto-install-reality-route runRegressionRuntimeLegacyLeafWithCompat runAutoInstallRealityRouteRegression
+line	registerRegressionFunctionLeaf runtime-tempdir runRegressionRuntimeLegacyLeafWithCompat runRuntimeTempDirRegression
+no-regex	^registerRegressionFunctionLeaf reality-candidates-fast[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-asn-scan-plan[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-candidates-full[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-stream-enable[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-stream-disable[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-config[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-profile-failure[[:space:]]
+no-regex	^registerRegressionAggregateRunnerSequential reality-candidates[[:space:]]
+no-regex	^registerRegressionAggregateRunnerSequential reality-stream[[:space:]]
+EOF
+
+    runSourcePatternAssertions "${legacyScriptFile}" <<'EOF'
+no-line	listRegressionRuntimeLightChildSelectors() {
+no-line	listRegressionRuntimeHeavyChildSelectors() {
+no-line	listRegressionRuntimeChildSelectors() {
+no-line	runRegressionRuntime() {
+no-regex	^runRegressionRuntimeParallelCompositionRegression\(\)[[:space:]]
+EOF
 }
 
 runRuntimeLeavesUseCompatHelperContract() (
@@ -5807,28 +5935,33 @@ runRealitySuiteUsesFunctionRegistryContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/reality.sh"
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q 'PADM_REGRESSION_SOURCE_ONLY=1 source "\${REGRESSION_REALITY_SUITE_DIR}/../subscription_groups_legacy.sh"' "${suiteFile}"
-    ! grep -q '^runRegressionRealityCandidatesSuiteRoot() {$' "${suiteFile}"
-    ! grep -q '^runRegressionRealityStreamSuiteRoot() {$' "${suiteFile}"
-    grep -q '^listRegressionRealitySuiteCandidatesChildSelectors() {$' "${suiteFile}"
-    grep -q '^listRegressionRealitySuiteStreamChildSelectors() {$' "${suiteFile}"
-    ! grep -Eq '^runRegressionRealityCandidates\(\)[[:space:]]*[({]' "${legacyScriptFile}"
-    ! grep -Eq '^runRegressionRealityStream\(\)[[:space:]]*[({]' "${legacyScriptFile}"
-    ! grep -q '^listRegressionRealitySuiteCandidatesChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^listRegressionRealitySuiteStreamChildSelectors() {$' "${legacyScriptFile}"
-    ! grep -q '^registerRegressionScriptLeaf reality-candidates ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-candidates ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf reality-stream ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf reality-stream ' "${suiteFile}"
-    ! grep -q '^while read -r selector runner; do$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-fast runRegressionRealityLegacyLeafWithCompat runRealityCandidateFastRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-asn-scan-plan runRegressionRealityLegacyLeafWithCompat runRealityAsnScanPlanRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-candidates-full runRegressionRealityLegacyLeafWithCompat runRealityCandidateFullRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-enable runRegressionRealityLegacyLeafWithCompat runRealityStreamEnableRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-stream-disable runRegressionRealityLegacyLeafWithCompat runRealityStreamDisableRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-config runRegressionRealityLegacyLeafWithCompat runRealityConfigRegression$' "${suiteFile}"
-    grep -q '^registerRegressionFunctionLeaf reality-profile-failure runRegressionRealityLegacyLeafWithCompat runRealityProfileFailureRegression$' "${suiteFile}"
-    grep -q '^registerRegressionAggregateRunnerSequentialWithArgs \\' "${suiteFile}"
+    runSourcePatternAssertions "${suiteFile}" <<'EOF'
+fixed	PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REALITY_SUITE_DIR}/../subscription_groups_legacy.sh"
+no-line	runRegressionRealityCandidatesSuiteRoot() {
+no-line	runRegressionRealityStreamSuiteRoot() {
+line	listRegressionRealitySuiteCandidatesChildSelectors() {
+line	listRegressionRealitySuiteStreamChildSelectors() {
+no-regex	^registerRegressionScriptLeaf reality-candidates[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-candidates[[:space:]]
+no-regex	^registerRegressionScriptLeaf reality-stream[[:space:]]
+no-regex	^registerRegressionFunctionLeaf reality-stream[[:space:]]
+no-line	while read -r selector runner; do
+line	registerRegressionFunctionLeaf reality-candidates-fast runRegressionRealityLegacyLeafWithCompat runRealityCandidateFastRegression
+line	registerRegressionFunctionLeaf reality-asn-scan-plan runRegressionRealityLegacyLeafWithCompat runRealityAsnScanPlanRegression
+line	registerRegressionFunctionLeaf reality-candidates-full runRegressionRealityLegacyLeafWithCompat runRealityCandidateFullRegression
+line	registerRegressionFunctionLeaf reality-stream-enable runRegressionRealityLegacyLeafWithCompat runRealityStreamEnableRegression
+line	registerRegressionFunctionLeaf reality-stream-disable runRegressionRealityLegacyLeafWithCompat runRealityStreamDisableRegression
+line	registerRegressionFunctionLeaf reality-config runRegressionRealityLegacyLeafWithCompat runRealityConfigRegression
+line	registerRegressionFunctionLeaf reality-profile-failure runRegressionRealityLegacyLeafWithCompat runRealityProfileFailureRegression
+line	registerRegressionAggregateRunnerSequentialWithArgs \
+EOF
+
+    runSourcePatternAssertions "${legacyScriptFile}" <<'EOF'
+no-regex	^runRegressionRealityCandidates\(\)[[:space:]]*[({]
+no-regex	^runRegressionRealityStream\(\)[[:space:]]*[({]
+no-line	listRegressionRealitySuiteCandidatesChildSelectors() {
+no-line	listRegressionRealitySuiteStreamChildSelectors() {
+EOF
 }
 
 runRealityLegacyPublicSelectorRetirementContract() {
@@ -6532,6 +6665,8 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
 runRegressionDispatcherContracts() {
     runRegressionStep regression-dispatcher-registry-only runRegressionDispatcherRegistryOnlyContract
     runRegressionStep regression-step-sequence-assertion runRegressionStepSequenceAssertionContract
+    runRegressionStep regression-native-clock runRegressionNativeClockContract
+    runRegressionStep source-pattern-assertion runSourcePatternAssertionContract
     runRegressionStep regression-dispatcher-step-coverage-assertion runRegressionDispatcherStepCoverageAssertionContract
     runRegressionStep contract-helper-adoption-assertion runContractHelperAdoptionAssertionContract
     runRegressionStep regression-registry-retires-script-selector-kind runRegressionRegistryRetiresScriptSelectorKindContract
