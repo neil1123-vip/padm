@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+
+if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" && "${1:-}" == "--reuse" &&
+    "${PADM_REGRESSION_LEGACY_FIXTURES_LOADED:-}" == "1" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+PADM_REGRESSION_LEGACY_FIXTURES_LOADED=1
+
 set -euo pipefail
 
 REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)

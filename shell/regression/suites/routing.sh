@@ -3,7 +3,7 @@
 REGRESSION_ROUTING_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=/dev/null
 source "${REGRESSION_ROUTING_SUITE_DIR}/../framework/runtime.sh"
-PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh"
+PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
 
 listRegressionRoutingCoreChildSelectors() {
     printf '%s\n' \
