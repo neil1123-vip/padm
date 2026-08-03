@@ -137,6 +137,7 @@ writeDefaultSubscriptionGroupsState() {
           "name": "本机",
           "role": "main",
           "scheme": "local",
+          "transport": "local",
           "host": "127.0.0.1",
           "port": 0,
           "enabled": true,
@@ -169,24 +170,82 @@ validateSubscriptionGroupsState() {
     local schemaVersion
     schemaVersion=$(subscriptionGroupsSchemaVersion)
     jq -e --argjson schemaVersion "${schemaVersion}" '
-      type == "object" and .version == $schemaVersion and
-      (.groups | type == "array") and (.groups | length > 0) and
+      def exact($required; $optional):
+        type == "object" and
+        ((keys - ($required + $optional)) | length == 0) and
+        (. as $object | all($required[]; . as $key | $object | has($key)));
+      def nonempty_string: type == "string" and length > 0;
+      def count: type == "number" and . == floor and . >= 0;
+      def allowed_sources:
+        type == "array" and length > 0 and all(.[]; nonempty_string);
+      def principal($optional):
+        exact(["id", "name", "enabled", "allowed_sources", "traffic_limit_gb", "token"]; $optional) and
+        (.id | nonempty_string) and (.name | nonempty_string) and
+        (.enabled | type == "boolean") and (.allowed_sources | allowed_sources) and
+        (.traffic_limit_gb | count) and (.token | type == "string") and
+        ((has("uuid") | not) or (.uuid | type == "string" and test("^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")));
+      def sync_plan:
+        exact(["create", "remove"]; []) and
+        (.create | type == "array" and all(.[]?; nonempty_string)) and
+        (.remove | type == "array" and all(.[]?; nonempty_string));
+      def sync_error:
+        exact(["type", "message"]; []) and
+        (.type | nonempty_string) and (.message | nonempty_string);
+      def source:
+        if .role == "main" then
+          exact(["id", "name", "role", "scheme", "transport", "host", "port", "enabled", "sync_status"]; []) and
+          .id == "main" and .scheme == "local" and .transport == "local" and
+          (.name | nonempty_string) and (.host | nonempty_string) and
+          .port == 0 and .enabled == true and .sync_status == "local"
+        else
+          exact(["id", "name", "role", "scheme", "transport", "host", "port", "enabled", "sync_status"];
+            ["control_token", "last_sync_changed", "last_sync_plan", "last_sync_error"]) and
+          .role == "secondary" and .scheme == "wireguard" and .transport == "wireguard" and
+          (.id | nonempty_string) and (.name | nonempty_string) and (.host | nonempty_string) and
+          (.port | type == "number" and . == floor and . >= 1 and . <= 65535) and
+          (.enabled | type == "boolean") and
+          (.sync_status == "pending" or .sync_status == "success" or .sync_status == "failed") and
+          ((has("control_token") | not) or (.control_token | nonempty_string)) and
+          ((has("last_sync_changed") | not) or (.last_sync_changed | type == "boolean")) and
+          ((has("last_sync_plan") | not) or (.last_sync_plan | sync_plan)) and
+          ((has("last_sync_error") | not) or (.last_sync_error | sync_error))
+        end;
+      def traffic_total:
+        exact(["upload", "download"]; []) and (.upload | count) and (.download | count);
+      def source_traffic:
+        exact(["upload", "download"]; ["counters", "updated_at"]) and
+        (.upload | count) and (.download | count) and
+        ((has("counters") | not) or
+          (.counters | type == "object" and all(to_entries[]?; (.key | nonempty_string) and (.value | traffic_total)))) and
+        ((has("updated_at") | not) or (.updated_at | type == "string"));
+      def source_traffic_map:
+        type == "object" and all(to_entries[]?; (.key | nonempty_string) and (.value | source_traffic));
+      def scoped_traffic:
+        exact(["upload", "download", "sources"]; []) and
+        (.upload | count) and (.download | count) and (.sources | source_traffic_map);
+
+      exact(["version", "active_group", "groups"]; []) and .version == $schemaVersion and
+      (.groups | type == "array" and length > 0) and
       (.active_group | type == "string" and length > 0) and (.active_group as $active | any(.groups[]?; .id == $active)) and
       all(.groups[];
-        (.id // "") != "" and
-        (.sources | type == "array") and
-        any(.sources[]?; .role == "main" and .enabled == true) and
-        all(.sources[]?; ((.enabled | type) == "boolean") and (.role != "main" or .enabled == true)) and
-        (.user_groups | type == "array") and
-        (.sync | type == "object") and
+        exact(["id", "name", "admin", "sources", "user_groups", "sync", "traffic"]; []) and
+        (.id | nonempty_string) and (.name | nonempty_string) and
+        (.admin | principal([])) and
+        (.sources | type == "array" and length > 0 and all(.[]; source) and ([.[] | select(.role == "main")] | length == 1)) and
+        (.user_groups | type == "array" and all(.[]; principal(["uuid"]))) and
         (.sync |
-          has("enabled") and (.enabled | type == "boolean") and
-          has("interval_minutes") and (.interval_minutes | type == "number" and . == floor and . >= 1 and . <= 59) and
-          has("last_run") and (.last_run | type == "string") and
-          has("last_status") and (.last_status | type == "string") and
-          has("failures") and (.failures | type == "array") and
-          has("quota_auto_apply") and (.quota_auto_apply | type == "boolean")) and
-        (.traffic | type == "object"))
+          exact(["enabled", "interval_minutes", "last_run", "last_status", "failures", "quota_auto_apply"]; []) and
+          (.enabled | type == "boolean") and
+          (.interval_minutes | type == "number" and . == floor and . >= 1 and . <= 59) and
+          (.last_run | type == "string") and
+          (.last_status == "pending" or .last_status == "success" or .last_status == "partial") and
+          (.failures | type == "array" and all(.[]; type == "string")) and
+          (.quota_auto_apply | type == "boolean")) and
+        (.traffic |
+          exact(["global", "admin", "user_groups", "sources"]; []) and
+          (.global | traffic_total) and (.admin | scoped_traffic) and
+          (.user_groups | type == "object" and all(to_entries[]?; (.key | nonempty_string) and (.value | scoped_traffic))) and
+          (.sources | source_traffic_map)))
     ' "${stateFile}" >/dev/null 2>&1
 }
 
