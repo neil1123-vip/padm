@@ -135,23 +135,33 @@ runLegacyPublicSelectorRetirementAssertions() (
     local usageLine
     local usageSelectors
     local selector
+    local selectorLines
 
     usageLine=$(grep -F 'usage: %s [' "${legacyFile}" || true)
     usageSelectors="${usageLine#*[}"
     usageSelectors="${usageSelectors%%]*}"
+    printf -v selectorLines '%s\n' "$@"
+
+    awk -v selectors="${selectorLines}" '
+        BEGIN {
+            count = split(selectors, list, "\n")
+            for (i = 1; i <= count; i++) {
+                if (length(list[i])) {
+                    forbidden[list[i] ")"] = 1
+                }
+            }
+        }
+        {
+            line = $0
+            sub(/^[[:space:]]+/, "", line)
+            if (line in forbidden) {
+                exit 1
+            }
+        }
+    ' "${legacyFile}" || return 1
 
     for selector in "$@"; do
         [[ -n "${selector}" ]] || continue
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyFile}" || return 1
         [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
     done
 )
@@ -793,13 +803,17 @@ runRegressionStepSequenceHelperAdoptionContract() {
         runPlatformRestChildStepsContract \
         runFastOnlyOutputAutoInstallChildStepsContract \
         runFastOnlySafetyChildStepsContract \
-        runFastOnlyOutputRestChildStepsContract \
-        runTargetedBatchHelpersChildStepsContract; do
+        runFastOnlyOutputRestChildStepsContract; do
         runContractHelperAdoptionAssertions \
             "${contractsFile}" \
             "${functionName}" \
             runRegressionStepSequenceAssertions || return 1
     done
+
+    runContractHelperAdoptionAssertions \
+        "${PROJECT_ROOT}/shell/regression/suites/legacy.sh" \
+        runRegressionTargetedBatchHelpers \
+        runParallelRegressionRunners || return 1
 
     awk '
         /^runRealitySuiteChildStepsContract\(\) \{$/ { in_fn = 1 }
@@ -2115,65 +2129,20 @@ runRemoteControlNoCompatWrapperFunctionsContract() {
         runRemoteControlDeepCompatRegression
 }
 
-runRemoteControlSmokeCoreNoCompatHelperContract() (
-    local callLog="${TMP_DIR}/remote-control-smoke-core-no-compat.log"
-
-    : >"${callLog}"
-
-    runRegressionRemoteControlLegacyLeafWithCompat() {
-        printf '%s\n' "$1" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-smoke-core
-
-    [[ ! -s "${callLog}" ]]
-)
-
-runRemoteControlSmokeRefreshNoCompatHelperContract() (
-    local callLog="${TMP_DIR}/remote-control-smoke-refresh-no-compat.log"
-
-    : >"${callLog}"
-
-    runRegressionRemoteControlLegacyLeafWithCompat() {
-        printf '%s\n' "$1" >>"${callLog}"
-    }
-
+runRemoteControlDirectLeavesAvoidCompatHelperContract() {
     local selector
     for selector in \
-        remote-control-smoke-refresh-apply-basic \
-        remote-control-smoke-refresh-apply-prepare \
-        remote-control-smoke-refresh-apply-failure \
+        $(listRegressionRemoteControlSmokeCoreChildSelectors) \
+        $(listRegressionRemoteControlSmokeRefreshApplyChildSelectors) \
         remote-control-smoke-refresh-restore \
-        remote-control-smoke-refresh-reconcile
+        remote-control-smoke-refresh-reconcile \
+        $(listRegressionRemoteControlContractServiceInstallChildSelectors)
     do
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+        [[ "${PADM_REGRESSION_SELECTOR_KIND[${selector}]:-}" == "function" ]] || return 1
+        [[ "${PADM_REGRESSION_SELECTOR_RUNNER[${selector}]:-}" != "runRegressionRemoteControlLegacyLeafWithCompat" ]] || return 1
+        [[ "${PADM_REGRESSION_SELECTOR_RUNNER_ARGS[${selector}]:-}" != *runRegressionRemoteControlLegacyLeafWithCompat* ]] || return 1
     done
-
-    [[ ! -s "${callLog}" ]]
-)
-
-runRemoteControlContractServiceInstallNoCompatHelperContract() (
-    local callLog="${TMP_DIR}/remote-control-contract-service-install-no-compat.log"
-
-    : >"${callLog}"
-
-    runRegressionRemoteControlLegacyLeafWithCompat() {
-        printf '%s\n' "$1" >>"${callLog}"
-    }
-
-    local selector
-    for selector in \
-        remote-control-contract-service-install-success \
-        remote-control-contract-service-install-systemctl-fail \
-        remote-control-contract-service-install-health-fail \
-        remote-control-contract-service-install-health-rollback \
-        remote-control-contract-service-install-token-transaction
-    do
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
-    done
-
-    [[ ! -s "${callLog}" ]]
-)
+}
 
 runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/remote_control.sh"
@@ -3277,21 +3246,39 @@ runTargetedBatchHelpersLegacyRetirementContract() {
         '|targeted-batch-helpers|'
 }
 
-runTargetedBatchHelpersChildStepsContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/legacy.sh"
-    runRegressionStepSequenceAssertions "${suiteFile}" runRegressionTargetedBatchHelpers \
-        core-invalid-input-retry-menu \
-        core-selection-retry-action \
-        sync-configured-managed-users-helper \
-        sync-append-local-user-batch \
-        traffic-configured-accounts-helper \
-        traffic-account-id-map-helper \
-        subscription-remote-sources-no-reverse-decode \
-        core-rollback-result-message \
-        config-transaction \
-        padm-bbr-managed-cleanup \
-        alone-nginx-backup-manual-check
-}
+runTargetedBatchHelpersChildStepsContract() (
+    local callLog="${TMP_DIR}/targeted-batch-helpers-parallel-pairs.log"
+    local expectedLog="${TMP_DIR}/targeted-batch-helpers-parallel-pairs.expected.log"
+
+    runParallelRegressionRunners() {
+        local orchestrationRoot=$1
+        shift
+
+        [[ "${orchestrationRoot}" == "${TMP_DIR}"/targeted-batch-helpers-parallel-* ]] || return 1
+        while [[ $# -gt 0 ]]; do
+            printf '%s %s\n' "$1" "$2" >>"${callLog}"
+            shift 2
+        done
+    }
+
+    : >"${callLog}"
+    runRegressionTargetedBatchHelpers
+    cat <<'EOF' >"${expectedLog}"
+core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression
+core-selection-retry-action runCoreSelectionRetryActionRegression
+sync-configured-managed-users-helper runSyncConfiguredManagedUsersHelperRegression
+sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression
+traffic-configured-accounts-helper runTrafficConfiguredAccountsHelperRegression
+traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression
+subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
+core-rollback-result-message runCoreRollbackResultMessageRegression
+config-transaction runConfigTransactionRegression
+padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression
+alone-nginx-backup-manual-check runNginxBackupManualCheckRegression
+EOF
+
+    cmp -s "${expectedLog}" "${callLog}"
+)
 
 runPlatformSuiteUsesSuiteLocalHelpersContract() (
     local callLog="${TMP_DIR}/platform-suite-root-dispatch.log"
@@ -3489,27 +3476,12 @@ EOF
 runCompositionLeafSelectorsLegacyPublicRetirementContract() {
     local legacyScriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
     local selector
-    local usageLine
-    local usageSelectors
+    local -a selectors=()
 
-    usageLine=$(grep -F 'usage: %s [' "${legacyScriptFile}" || true)
-    usageSelectors="${usageLine#*[}"
-    usageSelectors="${usageSelectors%%]*}"
-
-    while read -r selector; do
+    while IFS= read -r selector; do
         [[ -n "${selector}" ]] || continue
         [[ "${PADM_REGRESSION_SELECTOR_KIND["${selector}"]:-}" == "function" ]] || return 1
-        ! awk -v sel="${selector}" '
-            {
-                line = $0
-                sub(/^[[:space:]]+/, "", line)
-                if (line == sel ")") {
-                    found = 1
-                }
-            }
-            END { exit(found ? 0 : 1) }
-        ' "${legacyScriptFile}" || return 1
-        [[ -z "${usageLine}" || "|${usageSelectors}|" != *"|${selector}|"* ]] || return 1
+        selectors+=("${selector}")
     done <<'EOF'
 regression-all-composition
 regression-all-child-parallel-budget-composition
@@ -3530,6 +3502,8 @@ regression-selector-dispatch-composition
 regression-parallel-selector-limit-composition
 regression-parallel-selector-slot-refill-composition
 EOF
+
+    runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" "${selectors[@]}"
 }
 
 runTransactionDirectLeafSelectorsUseFunctionRegistryContract() {
@@ -5508,6 +5482,8 @@ runAllAggregateRunnerUsesFrameworkSelectorHelperContract() (
         return 97
     }
 
+    runRegressionAllSelectorSuiteRoot() { :; }
+
     runAggregateRunnerUsesFrameworkSelectorHelperAssertions \
         "${callLog}" \
         'framework:list:jobs='"${PADM_REGRESSION_ALL_PARALLEL_JOBS:-5}"':'"${TMP_DIR}"'/all-parallel-[0-9][0-9]*:listRegressionAllParallelChildSelectors:subscription ui transaction-core routing runtime remote-control-smoke remote-control-contract-service-install' \
@@ -6301,18 +6277,31 @@ runParallelSelectorCollectsExitedChildWithoutRcContract() (
 )
 
 runTransactionCoreCompatibleDispatcherLeavesExecutionContract() (
+    local callLog="${TMP_DIR}/transaction-core-compatible-dispatch.log"
+    local selectorsFile="${TMP_DIR}/transaction-core-compatible-selectors"
     local selector
 
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
-    done <<'EOF'
+    runCoreRollbackResultMessageRegression() { printf 'core-rollback-result-message\n' >>"${callLog}"; }
+    runCorePortFileTransactionRegression() { printf 'core-port-file-transaction\n' >>"${callLog}"; }
+    runEntryHelperConfigRegression() { printf 'entry-helper-config\n' >>"${callLog}"; }
+    runUserConfigWriteRegression() { printf 'user-config-write\n' >>"${callLog}"; }
+    runRemoveUserRegression() { printf 'remove-user\n' >>"${callLog}"; }
+
+    : >"${callLog}"
+    cat <<'EOF' >"${selectorsFile}"
 core-rollback-result-message
 core-port-file-transaction
 entry-helper-config
 user-config-write
 remove-user
 EOF
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${selector}"
+    done <"${selectorsFile}"
+
+    cmp -s "${selectorsFile}" "${callLog}"
 )
 
 runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract() (
@@ -6552,9 +6541,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep remote-control-leaves-use-compat-helper runRemoteControlLeavesUseCompatHelperContract
     runRegressionStep remote-control-no-compat-wrapper-functions runRemoteControlNoCompatWrapperFunctionsContract
     runRegressionStep remote-control-no-step-wrapper-functions runRemoteControlNoStepWrapperFunctionsContract
-    runRegressionStep remote-control-smoke-core-no-compat-helper runRemoteControlSmokeCoreNoCompatHelperContract
-    runRegressionStep remote-control-smoke-refresh-no-compat-helper runRemoteControlSmokeRefreshNoCompatHelperContract
-    runRegressionStep remote-control-contract-service-install-no-compat-helper runRemoteControlContractServiceInstallNoCompatHelperContract
+    runRegressionStep remote-control-direct-leaves-avoid-compat-helper runRemoteControlDirectLeavesAvoidCompatHelperContract
     runRegressionStep remote-control-legacy-tmpdir-isolation-guard-registered runRemoteControlLegacyTmpDirIsolationGuardRegisteredContract
     runRegressionStep remote-control-smoke-core-child-steps runRemoteControlSmokeCoreChildStepsContract
     runRegressionStep remote-control-aggregate-runner-registration runRemoteControlAggregateRunnerRegistrationContract
