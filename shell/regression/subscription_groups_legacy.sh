@@ -16579,7 +16579,7 @@ JSON
 
     subscriptionSyncConfiguredManagedUsers() {
         printf '%s\n' "$#" >"${helperLog}"
-        printf '["sub_team_a-main","sub_team_b-main","ops"]\n'
+        printf '["sub_team_a-main","sub_team_b-main"]\n'
     }
 
     currentManaged=$(subscriptionSyncCurrentManagedUsers \
