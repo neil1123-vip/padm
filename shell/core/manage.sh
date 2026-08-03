@@ -2428,10 +2428,6 @@ renderAllSubscribeUserOutputs() {
                 fi
             done <<<"${publishAccounts}"
         fi
-        if [[ "${remoteScopeEnabled}" == "true" && "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
-            subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .enabled == true and .transport != "wireguard")' >/dev/null 2>&1
-            SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
-        fi
     else
         if ! subscriptionPublishAccounts "${localBase}" >/dev/null 2>&1; then
             return 1

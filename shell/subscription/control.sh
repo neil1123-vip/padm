@@ -33,22 +33,10 @@ subscriptionRemoteSourceSelfReference() {
     [[ -n "${selfHost}" && "${sourceHost}" == "${selfHost}" ]]
 }
 
-subscriptionRemoteSourceUsesWireGuard() {
-    local source=$1
-    jq -e '(.transport // .scheme // "") == "wireguard"' <<<"${source}" >/dev/null 2>&1
-}
-
 subscriptionRemoteControlUrl() {
     local source=$1
     local endpoint=$2
-    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        subscriptionWireGuardControlUrl "${source}" "${endpoint}"
-    else
-        jq -er --arg endpoint "${endpoint}" '
-          select((.scheme == "https" or .scheme == "http") and (.host | type == "string" and length > 0) and (.port | type == "number")) |
-          .scheme + "://" + .host + ":" + (.port | tostring) + "/s/control/" + $endpoint
-        ' <<<"${source}"
-    fi
+    subscriptionWireGuardControlUrl "${source}" "${endpoint}"
 }
 
 subscriptionRemoteWireGuardPeerStateFromSource() {
@@ -82,7 +70,6 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
     local endpoint=
     local handshake=0
     local tryIndex
-    subscriptionRemoteSourceUsesWireGuard "${source}" || return 0
     peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
     [[ -n "${peerState}" ]] || return 0
     [[ "${baselineHandshake}" =~ ^[0-9]+$ ]] || baselineHandshake=0
@@ -162,19 +149,13 @@ subscriptionRemoteControlRequest() {
         -w '\n%{http_code}'
         "${url}"
     )
-    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
-        if [[ -n "${peerState}" ]]; then
-            IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
-        fi
+    peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+    if [[ -n "${peerState}" ]]; then
+        IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
     if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null); then
-        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || return 1
-        else
-            return 1
-        fi
+        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+        response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || return 1
     fi
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
@@ -237,11 +218,9 @@ subscriptionRemoteControlHealth() {
         jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
         return 0
     fi
-    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
-        if [[ -n "${peerState}" ]]; then
-            IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
-        fi
+    peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+    if [[ -n "${peerState}" ]]; then
+        IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
     url=$(subscriptionRemoteControlUrl "${source}" health) || return 1
     curlArgs=(
@@ -253,16 +232,11 @@ subscriptionRemoteControlHealth() {
         "${url}"
     )
     response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
-        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
-                jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
-                return 0
-            }
-        else
+        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+        response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
             jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
             return 0
-        fi
+        }
     }
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
@@ -497,7 +471,7 @@ runSubscriptionRemoteSync() {
                     failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${snapshotError}" '. + ["远程服务器源 " + $sourceId + " " + $errorMessage]' <<<"${failures}") || return 1
                     snapshotInvalid=true
                 fi
-            elif subscriptionRemoteSourceUsesWireGuard "${source}"; then
+            else
                 snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
                 snapshotError="未返回完整订阅快照"
                 failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${snapshotError}" '. + ["远程服务器源 " + $sourceId + " " + $errorMessage]' <<<"${failures}") || return 1

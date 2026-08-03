@@ -245,8 +245,8 @@ runRemoteControlHealthRegression() (
 )
 
 runRemoteControlInlineRequestHelpersRegression() (
-    local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
-    local wireGuardSource='{"id":"edge-wg","name":"Edge WG","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
+    local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
+    local legacySource='{"id":"edge-legacy","name":"Edge Legacy","control_token":"token","scheme":"https","transport":"https","host":"remote.example","port":443}'
     local requestResponse
     local healthResponse
     local curlArgsLog="${TMP_DIR}/remote-control-inline-request-curl-args.log"
@@ -259,8 +259,8 @@ runRemoteControlInlineRequestHelpersRegression() (
     : >"${curlChmodLog}"
     : >"${curlPayloadLog}"
 
-    [[ "$(subscriptionRemoteControlUrl "${source}" sync)" == "https://remote.example:443/s/control/sync" ]]
-    [[ "$(subscriptionRemoteControlUrl "${wireGuardSource}" sync)" == "http://10.77.0.2:39778/s/control/sync" ]]
+    [[ "$(subscriptionRemoteControlUrl "${source}" sync)" == "http://10.77.0.2:39778/s/control/sync" ]]
+    ! subscriptionRemoteControlUrl "${legacySource}" sync >/dev/null 2>&1
 
     subscriptionRemoteControlUrl() {
         printf 'https://control.example/%s\n' "$2"
@@ -270,9 +270,6 @@ runRemoteControlInlineRequestHelpersRegression() (
     }
     subscriptionRemoteControlCurlOnce() {
         return 99
-    }
-    subscriptionRemoteSourceUsesWireGuard() {
-        return 1
     }
     subscriptionWireGuardControlUrl() {
         printf 'https://control.example/%s\n' "$2"
@@ -368,9 +365,6 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
     subscriptionRemoteWireGuardPeerReadyState() {
         return 99
     }
-    subscriptionRemoteSourceUsesWireGuard() {
-        return 0
-    }
     subscriptionWireGuardReadState() {
         printf '{"peers":[{"id":"edge-remote","public_key":"pub-edge"}]}\n'
     }
@@ -465,9 +459,6 @@ runRemoteControlInlineTokenConsumersRegression() (
     subscriptionRemoteSourceSelfReference() {
         return 1
     }
-    subscriptionRemoteSourceUsesWireGuard() {
-        return 0
-    }
     subscriptionRemoteControlHealth() {
         printf 'health\n' >>"${healthLog}"
         printf '{"ok":true}\n'
@@ -537,7 +528,7 @@ runRemoteControlInlineTokenConsumersRegression() (
 )
 
 runRemoteControlInlineSyncRunnerRegression() (
-    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
+    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
     local desiredUsersBySourceJson='{"edge-remote":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
     local statusLog="${TMP_DIR}/remote-control-inline-sync-runner.status"
     local sourceResultLog="${TMP_DIR}/remote-control-inline-sync-runner.calls"
@@ -641,7 +632,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
             [[ -f "${brokenStarted}" ]] || printf 'edge-broken-not-parallel\n' >>"${callLog}"
             jq -n \
                 --argjson request '{"source_id":"edge-slow","dry_run":false,"desired_users":[]}' \
-                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}' \
+                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{}}' \
                 '{source_id:"edge-slow", status:"success", dry_run:false, request:$request, response:$response}'
             ;;
         edge-broken)
@@ -661,7 +652,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
     [[ -n "${syncResult}" ]] || return 1
     syncResult=$(jq -c . <<<"${syncResult}") || return 1
     jq -e '.failures | length == 1 and (.[0] | contains("edge-broken"))' <<<"${syncResult}" >/dev/null || return 1
-    jq -e '.snapshots["edge-broken"] == null and (.snapshots | has("edge-broken")) and (.snapshots | has("edge-slow") | not)' <<<"${syncResult}" >/dev/null || return 1
+    jq -e '.snapshots == {"edge-slow":{},"edge-broken":null}' <<<"${syncResult}" >/dev/null || return 1
     grep -qx 'edge-slow-start' "${callLog}" || return 1
     grep -qx 'edge-broken-start' "${callLog}" || return 1
     ! grep -qx 'edge-broken-not-parallel' "${callLog}" || return 1

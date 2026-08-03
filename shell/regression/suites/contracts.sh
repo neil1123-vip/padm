@@ -577,6 +577,7 @@ runAggregateRunnerRegistrationAssertionContract() (
 
 runAggregateRunnerUsesSuiteLocalHelperAssertionContract() (
     local callLog="${TMP_DIR}/aggregate-suite-local-helper.log"
+    local status
 
     runRegressionRuntime() {
         printf 'legacy-runtime\n' >>"${callLog}"
@@ -589,7 +590,11 @@ runAggregateRunnerUsesSuiteLocalHelperAssertionContract() (
 
     runAggregateRunnerUsesSuiteLocalHelperAssertions runtime "${callLog}" 'suite-runtime' 'legacy-runtime'
 
-    if runAggregateRunnerUsesSuiteLocalHelperAssertions runtime "${callLog}" 'suite-tls' 'legacy-runtime'; then
+    set +e
+    runAggregateRunnerUsesSuiteLocalHelperAssertions runtime "${callLog}" 'suite-tls' 'legacy-runtime'
+    status=$?
+    set -e
+    if (( status == 0 )); then
         return 1
     fi
 )
@@ -2730,6 +2735,9 @@ runFastOnlyOutputAutoInstallChildStepsContract() {
     local scriptFile="${PROJECT_ROOT}/shell/regression/subscription_groups_fast.sh"
     runRegressionStepSequenceAssertions "${scriptFile}" runRegressionFastOnlyOutputAutoInstall \
         auto-install-generated-identity \
+        random-uuid-entropy-fallback \
+        auto-install-uuid-validation \
+        auto-install-user-validation \
         auto-install-empty-defaults \
         auto-install-missing-required-no-stdin \
         auto-install-tls-domain-missing-returns \
@@ -2901,7 +2909,7 @@ runTransactionSubscriptionChildStepsContract() {
     grep -qx 'dispatch:subscribe-user-output-transaction' "${callLog}"
     grep -qx 'dispatch:remove-user-subscription-menu-failure' "${callLog}"
     grep -qx 'dispatch:user-subscription-menu-mutation-failure' "${callLog}"
-    grep -qx 'dispatch:remote-subscribe-fetch' "${callLog}"
+    grep -qx 'dispatch:remote-subscribe-snapshots' "${callLog}"
 }
 
 runTransactionSuiteChildStepsContract() {
@@ -3544,7 +3552,7 @@ subscribe-salt-write-transaction runRegressionTransactionLegacyLeafWithCompat ru
 subscribe-user-output-transaction runRegressionTransactionLegacyLeafWithCompat runSubscribeUserOutputTransactionRegression
 remove-user-subscription-menu-failure runRegressionTransactionLegacyLeafWithCompat runRemoveUserSubscriptionMenuFailureRegression
 user-subscription-menu-mutation-failure runRegressionTransactionLegacyLeafWithCompat runUserSubscriptionMenuMutationFailureRegression
-remote-subscribe-fetch runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeFetchRegression
+remote-subscribe-snapshots runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeSnapshotRegression
 nginx-service-failure runNginxServiceFailureRegression
 uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
@@ -3578,7 +3586,7 @@ runTransactionNoCompatWrapperFunctionsContract() {
         runSubscribeUserOutputTransactionCompatRegression \
         runRemoveUserSubscriptionMenuFailureCompatRegression \
         runUserSubscriptionMenuMutationFailureCompatRegression \
-        runRemoteSubscribeFetchCompatRegression
+        runRemoteSubscribeSnapshotCompatRegression
 }
 
 runTransactionSubscriptionLeavesUseCompatHelperContract() (
@@ -3601,7 +3609,7 @@ runSubscribeSaltWriteTransactionRegression
 runSubscribeUserOutputTransactionRegression
 runRemoveUserSubscriptionMenuFailureRegression
 runUserSubscriptionMenuMutationFailureRegression
-runRemoteSubscribeFetchRegression
+runRemoteSubscribeSnapshotRegression
 EOF
 
     cmp -s "${TMP_DIR}/transaction-subscription-compat-helper.expected.log" "${callLog}"
@@ -3709,14 +3717,6 @@ subscription-output-profile-and-reality runRegressionSubscriptionLegacyLeafWithC
 subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression
 subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsVlessVmessTrojanRegression
 subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
-subscription-remote-unique runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchUniqueRegression
-subscription-remote-rollback runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchRollbackRegression
-subscription-remote-merge runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchMergeRegression
-subscription-remote-disabled-source runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchDisabledSourceRegression
-subscription-remote-controlled runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchControlledRegression
-subscription-remote-append-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchAppendFailureRegression
-subscription-remote-commit-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchCommitFailureRegression
-subscription-remote-idempotent runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchIdempotentRegression
 sing-box-subscribe-write runRegressionSubscriptionLegacyLeafWithCompat runSingBoxSubscribeWriteRegression
 subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 sing-box-port-failure runSingBoxPortFailureRegression
@@ -3738,14 +3738,6 @@ runSubscriptionNoCompatWrapperFunctionsContract() {
         runRegressionSubscriptionOutputPublishAccountsAndRemoteHintCompatRegression \
         runRegressionSubscriptionOutputTlsVlessVmessTrojanCompatRegression \
         runRegressionSubscriptionOutputTlsAnyHysteriaTuicNaiveCompatRegression \
-        runRemoteSubscribeFetchUniqueCompatRegression \
-        runRemoteSubscribeFetchRollbackCompatRegression \
-        runRemoteSubscribeFetchMergeCompatRegression \
-        runRemoteSubscribeFetchDisabledSourceCompatRegression \
-        runRemoteSubscribeFetchControlledCompatRegression \
-        runRemoteSubscribeFetchAppendFailureCompatRegression \
-        runRemoteSubscribeFetchCommitFailureCompatRegression \
-        runRemoteSubscribeFetchIdempotentCompatRegression \
         runSingBoxSubscribeWriteCompatRegression
 }
 
@@ -3766,7 +3758,6 @@ runSubscriptionCompositionLeafSelectorsUseFunctionRegistryContract() {
     done <<'EOF'
 regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
 regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
-regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
 EOF
 
     return "${status}"
@@ -3820,18 +3811,14 @@ runSubscriptionSuiteUsesFunctionRegistryContract() {
     ! grep -q '^registerRegressionFunctionLeaf subscription-remote ' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-tx ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-tx ' "${suiteFile}"
-    ! grep -q '^registerRegressionScriptLeaf subscription-remote-fetch ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch-' "${suiteFile}"
     ! grep -q '^registerRegressionScriptLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf subscription-write-transaction ' "${suiteFile}"
     ! grep -q '^registerRegressionFunctionLeaf regression-subscription-write-transaction-' "${suiteFile}"
     grep -q '^registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput$' "${suiteFile}"
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}"
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription"]:-}" == "aggregate-runner" ]]
-    [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote"]:-}" == "aggregate-runner" ]]
+    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote"]:-}" ]]
     [[ "${PADM_REGRESSION_SELECTOR_KIND["subscription-tx"]:-}" == "aggregate-runner" ]]
-    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote-fetch"]:-}" ]]
     [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-write-transaction"]:-}" ]]
 }
 
@@ -3858,27 +3845,18 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
     local subscriptionRemoteLeafLine
 
     grep -q '^registerRegressionAggregateRunnerParallel subscription runRegressionSubscriptionSuiteRoot \\' "${suiteFile}" || return 1
-    [[ "$(grep -c '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}")" -ge 2 ]] || return 1
+    [[ "$(grep -c '^registerRegressionAggregateRunnerParallelWithArgs \\' "${suiteFile}")" -eq 1 ]] || return 1
 
     subscriptionRemoteLeafLine=$(grep -F 'subscription remote leaf selectors: ' "${legacyScriptFile}" || true)
     [[ -z "${subscriptionRemoteLeafLine}" ]] || return 1
 
     runLegacyPublicSelectorRetirementAssertions "${legacyScriptFile}" \
         subscription \
-        subscription-remote \
         subscription-tx \
         subscription-output-profile-and-reality \
         subscription-output-publish-accounts-and-remote-hint \
         subscription-output-tls-vless-vmess-trojan \
         subscription-output-tls-any-hysteria-tuic-naive \
-        subscription-remote-unique \
-        subscription-remote-rollback \
-        subscription-remote-merge \
-        subscription-remote-disabled-source \
-        subscription-remote-controlled \
-        subscription-remote-append-failure \
-        subscription-remote-commit-failure \
-        subscription-remote-idempotent \
         sing-box-subscribe-write \
         cdn-address-write-transaction \
         subscribe-local-output-transaction \
@@ -3896,8 +3874,7 @@ runSubscriptionLegacyPublicSelectorRetirementContract() {
         user-subscription-menu-mutation-failure \
         regression-subscription-parallel-composition \
         regression-subscription-output-parallel-composition \
-        regression-subscription-tx-parallel-composition \
-        regression-subscription-remote-parallel-composition
+        regression-subscription-tx-parallel-composition
 }
 
 runUiPublicSelectorsUseFunctionRegistryContract() {
@@ -5092,7 +5069,7 @@ subscribe-salt-write-transaction
 subscribe-user-output-transaction
 remove-user-subscription-menu-failure
 user-subscription-menu-mutation-failure
-remote-subscribe-fetch
+remote-subscribe-snapshots
 EOF
 )
 
@@ -5855,21 +5832,6 @@ runSubscriptionSelectorHelpersStayAlignedContract() (
         listRegressionSubscriptionHeavyChildSelectors
 )
 
-runSubscriptionRemoteRegisteredChildSelectorsAlignedContract() (
-    runRegisteredChildSelectorsAlignedAssertions \
-        listRegressionSubscriptionRemoteChildSelectors \
-        "${TMP_DIR}/subscription-remote-registered-child-selectors" <<'EOF'
-subscription-remote-unique
-subscription-remote-rollback
-subscription-remote-merge
-subscription-remote-disabled-source
-subscription-remote-controlled
-subscription-remote-append-failure
-subscription-remote-commit-failure
-subscription-remote-idempotent
-EOF
-)
-
 runSubscriptionTxRegisteredChildSelectorsAlignedContract() (
     runRegisteredChildSelectorsAlignedAssertions \
         listRegressionSubscriptionTxChildSelectors \
@@ -5905,25 +5867,6 @@ runSubscriptionAggregateRunnerRegistrationContract() {
         parallel \
         runRegressionSubscriptionSuiteRoot \
         "${expectedChildren}"
-}
-
-runSubscriptionRemoteAggregateRunnerRegistrationContract() {
-    local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
-
-    [[ -z "${PADM_REGRESSION_SELECTOR_KIND["subscription-remote-fetch"]:-}" ]]
-    ! grep -q '^registerRegressionScriptLeaf subscription-remote-fetch ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch ' "${suiteFile}"
-    ! grep -q '^registerRegressionFunctionLeaf subscription-remote-fetch-' "${suiteFile}"
-
-    runParallelAggregateRunnerWithArgsRegistrationAssertions \
-        "${suiteFile}" \
-        subscription-remote \
-        runSubscriptionSelectorListRegression \
-        listRegressionSubscriptionRemoteChildSelectors \
-        '^subscription-remote-parallel$' \
-        '^listRegressionSubscriptionRemoteChildSelectors$' \
-        '^4$' \
-        '^PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS$'
 }
 
 runSubscriptionTxAggregateRunnerRegistrationContract() {
@@ -5977,13 +5920,11 @@ runSubscriptionSelectorHelpersAreSuiteOwnedContract() {
     local suiteFile="${PROJECT_ROOT}/shell/regression/suites/subscription.sh"
     local legacyFile="${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh"
 
-    grep -q '^listRegressionSubscriptionRemoteChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionSubscriptionTxChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionSubscriptionLightChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionSubscriptionHeavyChildSelectors() {$' "${suiteFile}" || return 1
     grep -q '^listRegressionSubscriptionChildSelectors() {$' "${suiteFile}" || return 1
 
-    ! grep -q '^listRegressionSubscriptionRemoteChildSelectors() {$' "${legacyFile}" || return 1
     ! grep -q '^listRegressionSubscriptionTxChildSelectors() {$' "${legacyFile}" || return 1
     ! grep -q '^listRegressionSubscriptionLightChildSelectors() {$' "${legacyFile}" || return 1
     ! grep -q '^listRegressionSubscriptionHeavyChildSelectors() {$' "${legacyFile}" || return 1
@@ -6066,12 +6007,6 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
             subscription-output-tls-any-hysteria-tuic-naive
     }
 
-    listRegressionSubscriptionRemoteChildSelectors() {
-        printf '%s\n' \
-            subscription-remote-unique \
-            subscription-remote-merge
-    }
-
     listRegressionSubscriptionTxChildSelectors() {
         printf '%s\n' \
             sing-box-subscribe-write \
@@ -6085,16 +6020,13 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
     }
 
     listRegressionSubscriptionHeavyChildSelectors() {
-        printf '%s\n' \
-            subscription-tx \
-            subscription-remote
+        printf '%s\n' subscription-tx
     }
 
     listRegressionSubscriptionChildSelectors() {
         printf '%s\n' \
             subscription-output \
             subscription-state \
-            subscription-remote \
             subscription-tx
     }
 
@@ -6109,18 +6041,16 @@ runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract() (
 
     runRemoteSubscribeSourcesAvoidReverseDecodeRegression() { :; }
 
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-tx
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-output
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription
     PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all runRegisteredRegressionMain subscription
 
     grep -qx 'framework:jobs='"${PADM_REGRESSION_SUBSCRIPTION_OUTPUT_PARALLEL_JOBS:-2}"':'"${TMP_DIR}"'/subscription-output-parallel-[0-9][0-9]* subscription-output-profile-and-reality subscription-output-profile-and-reality subscription-output-publish-accounts-and-remote-hint subscription-output-publish-accounts-and-remote-hint subscription-output-tls-vless-vmess-trojan subscription-output-tls-vless-vmess-trojan subscription-output-tls-any-hysteria-tuic-naive subscription-output-tls-any-hysteria-tuic-naive' "${callLog}"
-    grep -qx 'framework:jobs='"${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-4}"':'"${TMP_DIR}"'/subscription-remote-parallel-[0-9][0-9]* subscription-remote-unique subscription-remote-unique subscription-remote-merge subscription-remote-merge' "${callLog}"
     grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-tx-parallel-[0-9][0-9]* sing-box-subscribe-write sing-box-subscribe-write subscribe-user-output-transaction subscribe-user-output-transaction' "${callLog}"
-    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-[0-9][0-9]* subscription-output subscription-output subscription-state subscription-state subscription-remote subscription-remote subscription-tx subscription-tx' "${callLog}"
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-[0-9][0-9]* subscription-output subscription-output subscription-state subscription-state subscription-tx subscription-tx' "${callLog}"
     grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-light-[0-9][0-9]* subscription-output subscription-output subscription-state subscription-state' "${callLog}"
-    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-heavy-[0-9][0-9]* subscription-tx subscription-tx subscription-remote subscription-remote' "${callLog}"
+    grep -qx 'framework:jobs=:'"${TMP_DIR}"'/subscription-parallel-heavy-[0-9][0-9]* subscription-tx subscription-tx' "${callLog}"
     ! grep -q '^legacy-helper:' "${callLog}"
 )
 
@@ -6742,10 +6672,8 @@ runRegressionDispatcherContracts() {
     runRegressionStep subscription-no-empty-aggregate-wrapper-functions runSubscriptionNoEmptyAggregateWrapperFunctionsContract
     runRegressionStep subscription-selector-helpers-stay-aligned runSubscriptionSelectorHelpersStayAlignedContract
     runRegressionStep subscription-output-child-steps runSubscriptionOutputChildStepsContract
-    runRegressionStep subscription-remote-registered-child-selectors-aligned runSubscriptionRemoteRegisteredChildSelectorsAlignedContract
     runRegressionStep subscription-tx-registered-child-selectors-aligned runSubscriptionTxRegisteredChildSelectorsAlignedContract
     runRegressionStep subscription-aggregate-runner-registration runSubscriptionAggregateRunnerRegistrationContract
-    runRegressionStep subscription-remote-aggregate-runner-registration runSubscriptionRemoteAggregateRunnerRegistrationContract
     runRegressionStep subscription-tx-aggregate-runner-registration runSubscriptionTxAggregateRunnerRegistrationContract
     runRegressionStep subscription-aggregate-runners-use-suite-local-helpers runSubscriptionAggregateRunnersUseSuiteLocalHelpersContract
     runRegressionStep subscription-aggregate-runners-use-framework-selector-helper runSubscriptionAggregateRunnersUseFrameworkSelectorHelperContract

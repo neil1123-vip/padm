@@ -20,18 +20,6 @@ listRegressionSubscriptionOutputChildSelectors() {
         subscription-output-tls-any-hysteria-tuic-naive
 }
 
-listRegressionSubscriptionRemoteChildSelectors() {
-    printf '%s\n' \
-        subscription-remote-unique \
-        subscription-remote-rollback \
-        subscription-remote-merge \
-        subscription-remote-disabled-source \
-        subscription-remote-controlled \
-        subscription-remote-append-failure \
-        subscription-remote-commit-failure \
-        subscription-remote-idempotent
-}
-
 listRegressionSubscriptionTxChildSelectors() {
     printf '%s\n' \
         sing-box-subscribe-write \
@@ -58,16 +46,13 @@ listRegressionSubscriptionLightChildSelectors() {
 }
 
 listRegressionSubscriptionHeavyChildSelectors() {
-    printf '%s\n' \
-        subscription-tx \
-        subscription-remote
+    printf '%s\n' subscription-tx
 }
 
 listRegressionSubscriptionChildSelectors() {
     printf '%s\n' \
         subscription-output \
         subscription-state \
-        subscription-remote \
         subscription-tx
 }
 
@@ -94,11 +79,8 @@ runRegressionSubscriptionSuiteRoot() {
     if [[ "${PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE:-}" == "all" ]]; then
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-light-${BASHPID:-$$}" \
             listRegressionSubscriptionLightChildSelectors
-        (
-            export PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS="${PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS:-2}"
-            runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
-                listRegressionSubscriptionHeavyChildSelectors
-        )
+        runFrameworkParallelRegressionSelectorList "${TMP_DIR}/subscription-parallel-heavy-${BASHPID:-$$}" \
+            listRegressionSubscriptionHeavyChildSelectors
         return
     fi
 
@@ -178,57 +160,6 @@ runRegressionSubscriptionOutput() {
     fi
     runRegressionStep subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression
 }
-
-runRegressionSubscriptionRemoteParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-subscription-remote-parallel-composition.log"
-
-    : >"${callLog}"
-
-    runRegressionAllSelector() {
-        local selector=$1
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "subscription-remote-unique" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/subscription-remote-merge-started" ]] && break
-                sleep 0.05
-            done
-        elif [[ "${selector}" == "subscription-remote-merge" ]]; then
-            : >"${TMP_DIR}/subscription-remote-merge-started"
-        fi
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
-
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done < <(listRegressionSubscriptionRemoteChildSelectors)
-    awk '
-        $0 == "subscription-remote-unique-start" { uniqueStart = NR }
-        $0 == "subscription-remote-merge-start" { mergeStart = NR }
-        $0 == "subscription-remote-unique-finish" { uniqueFinish = NR }
-        END { exit !(uniqueStart && mergeStart && uniqueFinish && mergeStart < uniqueFinish) }
-    ' "${callLog}"
-    ! grep -qx 'subscription-remote-start' "${callLog}"
-    ! grep -qx 'subscription-remote-finish' "${callLog}"
-
-    : >"${callLog}"
-    rm -f "${TMP_DIR}/subscription-remote-merge-started"
-    PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-remote
-    awk '
-        $0 == "subscription-remote-unique-finish" { firstFinish = NR }
-        $0 == "subscription-remote-rollback-start" { secondStart = NR }
-        $0 == "subscription-remote-rollback-finish" { secondFinish = NR }
-        $0 == "subscription-remote-merge-start" { thirdStart = NR }
-        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
-    ' "${callLog}"
-)
 
 runRegressionSubscriptionTxParallelCompositionRegression() (
     set -euo pipefail
@@ -326,12 +257,10 @@ runRegressionSubscriptionParallelCompositionRegression() (
         $0 == "subscription-output-finish" { outputFinish = NR }
         $0 == "subscription-state-finish" { stateFinish = NR }
         $0 == "subscription-tx-start" { writeStart = NR }
-        $0 == "subscription-remote-start" { remoteStart = NR }
         END {
-            exit !(outputStart && stateStart && outputFinish && stateFinish && writeStart && remoteStart &&
+            exit !(outputStart && stateStart && outputFinish && stateFinish && writeStart &&
                 stateStart < outputFinish &&
-                outputFinish < writeStart && stateFinish < writeStart &&
-                outputFinish < remoteStart && stateFinish < remoteStart)
+                outputFinish < writeStart && stateFinish < writeStart)
         }
     ' "${callLog}"
 )
@@ -341,14 +270,6 @@ registerRegressionFunctionLeaf subscription-output-profile-and-reality runRegres
 registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression
 registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsVlessVmessTrojanRegression
 registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
-registerRegressionFunctionLeaf subscription-remote-unique runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchUniqueRegression
-registerRegressionFunctionLeaf subscription-remote-rollback runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchRollbackRegression
-registerRegressionFunctionLeaf subscription-remote-merge runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchMergeRegression
-registerRegressionFunctionLeaf subscription-remote-disabled-source runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchDisabledSourceRegression
-registerRegressionFunctionLeaf subscription-remote-controlled runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchControlledRegression
-registerRegressionFunctionLeaf subscription-remote-append-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchAppendFailureRegression
-registerRegressionFunctionLeaf subscription-remote-commit-failure runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchCommitFailureRegression
-registerRegressionFunctionLeaf subscription-remote-idempotent runRegressionSubscriptionLegacyLeafWithCompat runRemoteSubscribeFetchIdempotentRegression
 registerRegressionFunctionLeaf sing-box-subscribe-write runRegressionSubscriptionLegacyLeafWithCompat runSingBoxSubscribeWriteRegression
 registerRegressionFunctionLeaf subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 registerRegressionFunctionLeaf sing-box-port-failure runSingBoxPortFailureRegression
@@ -359,18 +280,7 @@ registerRegressionFunctionLeaf subscribe-return-failure runSubscribeReturnFailur
 registerRegressionFunctionLeaf regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-output-parallel-composition runRegressionSubscriptionOutputParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
-registerRegressionFunctionLeaf regression-subscription-remote-parallel-composition runRegressionSubscriptionRemoteParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-legacy-tmpdir-isolation runRegressionSubscriptionLegacyTmpDirIsolationRegression
-
-registerRegressionAggregateRunnerParallelWithArgs \
-    subscription-remote \
-    runSubscriptionSelectorListRegression \
-    subscription-remote-parallel \
-    listRegressionSubscriptionRemoteChildSelectors \
-    4 \
-    PADM_REGRESSION_SUBSCRIPTION_REMOTE_PARALLEL_JOBS \
-    -- \
-    $(listRegressionSubscriptionRemoteChildSelectors)
 
 registerRegressionAggregateRunnerParallelWithArgs \
     subscription-tx \
