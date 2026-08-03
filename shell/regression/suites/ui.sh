@@ -225,22 +225,22 @@ listRegressionUiChildSelectors() {
 
 listRegressionUiAllProfileChildSelectors() {
     printf '%s\n' \
-        ui-full-subscription-main-publish-sync \
-        wireguard-menu-flow-peer-rollback-apply \
         wireguard-menu-flow-peer-rollback-credential \
+        wireguard-menu-flow-peer-rollback-apply \
         wireguard-menu-flow-peer-rollback-source \
-        ui-full-subscription-main-publish-user \
-        ui-full-subscription-main-publish-service \
+        wireguard-menu-flow-bootstrap \
         wireguard-menu-flow-peer-add-update \
         wireguard-menu-flow-peer-source-control \
-        ui-full-subscription-main-maintenance \
         wireguard-menu-flow-control-restore \
-        wireguard-menu-flow-bootstrap \
-        ui-full-subscription-main-entry \
+        ui-full-subscription-main-publish-sync \
+        ui-full-subscription-main-maintenance \
+        ui-full-subscription-main-publish-user \
         ui-full-subscription-controlled \
+        ui-full-subscription-main-publish-service \
+        ui-smoke \
+        ui-full-subscription-main-entry \
         ui-full-core \
         ui-full-core-maintenance \
-        ui-smoke \
         wireguard-restore-runner
 }
 

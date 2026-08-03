@@ -8169,7 +8169,7 @@ runUninstallWireGuardCleanupRegression() (
     local oldWireGuardDir="${PADM_WIREGUARD_CONTROL_DIR:-}"
     PADM_WIREGUARD_CONTROL_DIR="${targetDir}/state"
     mkdir -p "${PADM_WIREGUARD_CONTROL_DIR}" "${targetDir}/etc-wireguard" "${targetDir}/systemd"
-    subscriptionWireGuardWriteState '.enabled = true'
+    subscriptionWireGuardWriteState '.'
     printf 'private\n' >"$(subscriptionWireGuardPrivateKeyFile)"
     printf 'public\n' >"$(subscriptionWireGuardPublicKeyFile)"
     printf 'keep\n' >"${PADM_WIREGUARD_CONTROL_DIR}/unmanaged"
