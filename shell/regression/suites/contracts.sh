@@ -5575,6 +5575,61 @@ runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract() (
     ' "${callLog}"
 )
 
+runFrameworkParallelInterruptCleansChildrenContract() (
+    set -euo pipefail
+    local childPidFile="${TMP_DIR}/framework-parallel-interrupt-child.pid"
+    local orchestrationPid=
+    local childPid=
+    local leafPid=
+    local startSeconds=${SECONDS}
+    local status=0
+
+    cleanupInterruptFixture() {
+        trap - EXIT INT TERM
+        [[ -z "${orchestrationPid}" ]] || kill -TERM -- "-${orchestrationPid}" 2>/dev/null || true
+        [[ -z "${orchestrationPid}" ]] || wait "${orchestrationPid}" 2>/dev/null || true
+        [[ -z "${childPid}" ]] || kill -KILL "${childPid}" 2>/dev/null || true
+        [[ -z "${leafPid}" ]] || kill -KILL "${leafPid}" 2>/dev/null || true
+    }
+
+    runRegisteredRegressionMain() {
+        sleep 30 &
+        printf '%s %s\n' "${BASHPID:-$$}" "$!" >"${childPidFile}"
+        wait
+    }
+
+    trap cleanupInterruptFixture EXIT
+    : >"${childPidFile}"
+    set -m
+    PADM_REGRESSION_PARALLEL_JOBS=1 PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/framework-parallel-interrupt" fixture &
+    orchestrationPid=$!
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        [[ -s "${childPidFile}" ]] && break
+        sleep 0.05
+    done
+    [[ -s "${childPidFile}" ]]
+    read -r childPid leafPid <"${childPidFile}"
+
+    kill -TERM -- "-${orchestrationPid}"
+    set +e
+    wait "${orchestrationPid}"
+    status=$?
+    set -e
+    orchestrationPid=
+    [[ "${status}" -eq 143 ]]
+    (( SECONDS - startSeconds < 5 ))
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        ! kill -0 "${childPid}" 2>/dev/null && ! kill -0 "${leafPid}" 2>/dev/null && break
+        sleep 0.05
+    done
+    ! kill -0 "${childPid}" 2>/dev/null
+    ! kill -0 "${leafPid}" 2>/dev/null
+    childPid=
+    leafPid=
+    trap - EXIT INT TERM
+)
+
 runFrameworkParallelSelectorListBuildsPairDispatchContract() (
     set -euo pipefail
     local callLog="${TMP_DIR}/framework-parallel-selector-list.log"
@@ -6582,6 +6637,7 @@ runRegressionDispatcherContracts() {
     runRegressionStep all-public-selector-retirement runAllPublicSelectorRetirementContract
     runRegressionStep framework-parallel-selector-supports-selector-only-limit runFrameworkParallelSelectorSupportsSelectorOnlyLimitContract
     runRegressionStep framework-parallel-selector-supports-selector-only-slot-refill runFrameworkParallelSelectorSupportsSelectorOnlySlotRefillContract
+    runRegressionStep framework-parallel-interrupt-cleans-children runFrameworkParallelInterruptCleansChildrenContract
     runRegressionStep framework-parallel-selector-list-builds-pair-dispatch runFrameworkParallelSelectorListBuildsPairDispatchContract
     runRegressionStep framework-parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract
     runRegressionStep fast-platform-supports-source-only runFastPlatformSourceOnlyExecutionContract

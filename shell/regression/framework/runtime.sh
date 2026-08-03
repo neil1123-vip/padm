@@ -5,7 +5,25 @@ if [[ "${PADM_REGRESSION_FRAMEWORK_RUNTIME_LOADED:-}" == "1" ]]; then
 fi
 PADM_REGRESSION_FRAMEWORK_RUNTIME_LOADED=1
 
-runParallelRegressionRunners() {
+cleanupRegressionProcessGroups() {
+    local pid
+
+    trap - EXIT INT TERM
+    for pid in "$@"; do
+        [[ -n "${pid}" ]] || continue
+        kill -TERM -- "-${pid}" >/dev/null 2>&1 || true
+    done
+    for pid in "$@"; do
+        [[ -n "${pid}" ]] || continue
+        kill -KILL -- "-${pid}" >/dev/null 2>&1 || true
+    done
+    for pid in "$@"; do
+        [[ -n "${pid}" ]] || continue
+        wait "${pid}" 2>/dev/null || true
+    done
+}
+
+runParallelRegressionRunners() (
     local orchestrationRoot=$1
     shift
     local -a labels=()
@@ -30,6 +48,11 @@ runParallelRegressionRunners() {
         shift 2
     done
 
+    set -m
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'cleanupRegressionProcessGroups "${pids[@]}"' EXIT
+
     case $- in
     *e*) hadErrexit=1 ;;
     esac
@@ -38,6 +61,7 @@ runParallelRegressionRunners() {
     for i in "${!runners[@]}"; do
         (
             trap - EXIT INT TERM
+            set +m
             set -e
             runRegressionStep "total:${labels[$i]}" "${runners[$i]}"
         ) >"${logs[$i]}" 2>&1 &
@@ -47,6 +71,7 @@ runParallelRegressionRunners() {
     for i in "${!pids[@]}"; do
         wait "${pids[$i]}"
         statuses[$i]=$?
+        pids[$i]=
     done
     if (( hadErrexit )); then
         set -e
@@ -61,10 +86,11 @@ runParallelRegressionRunners() {
         fi
     done
 
+    trap - EXIT INT TERM
     return "${status}"
-}
+)
 
-runFrameworkParallelRegressionSelectors() {
+runFrameworkParallelRegressionSelectors() (
     local orchestrationRoot=$1
     shift
     local -a rawArgs=("$@")
@@ -152,6 +178,11 @@ runFrameworkParallelRegressionSelectors() {
         maxJobs=${#selectors[@]}
     fi
 
+    set -m
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'cleanupRegressionProcessGroups "${pids[@]}"' EXIT
+
     case $- in
     *e*) hadErrexit=1 ;;
     esac
@@ -162,6 +193,7 @@ runFrameworkParallelRegressionSelectors() {
             i=${nextIndex}
             (
                 trap - EXIT INT TERM
+                set +m
                 rc=0
                 set +e
                 runRegressionStep "${labels[$i]}" "${selectorRunner}" "${selectors[$i]}"
@@ -180,6 +212,7 @@ runFrameworkParallelRegressionSelectors() {
             if [[ "${completed[$i]:-0}" -eq 0 && -f "${rcFiles[$i]}" ]]; then
                 statuses[$i]=$(<"${rcFiles[$i]}")
                 wait "${pids[$i]}" >/dev/null 2>&1
+                pids[$i]=
                 completed[$i]=1
                 [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
                 if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
@@ -190,6 +223,7 @@ runFrameworkParallelRegressionSelectors() {
             elif [[ "${completed[$i]:-0}" -eq 0 ]] && ! kill -0 "${pids[$i]}" 2>/dev/null; then
                 wait "${pids[$i]}"
                 statuses[$i]=$?
+                pids[$i]=
                 completed[$i]=1
                 [[ -f "${logs[$i]}" ]] && cat "${logs[$i]}"
                 if [[ "${statuses[$i]}" -ne 0 && "${status}" -eq 0 ]]; then
@@ -209,8 +243,9 @@ runFrameworkParallelRegressionSelectors() {
         set +e
     fi
 
+    trap - EXIT INT TERM
     return "${status}"
-}
+)
 
 runFrameworkParallelRegressionSelectorList() {
     local orchestrationRoot=$1
