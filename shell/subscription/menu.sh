@@ -74,39 +74,27 @@ runSubscriptionMainControllerWizard() {
 }
 
 runSubscriptionControlledWizard() {
-    local credential= credentialJson kind state existingInviteId replaceConfirmed=false confirmReplace=
-    subscriptionWireGuardReadSecret credential "请粘贴主控邀请或旧版主控接入凭据:" || return 1
-    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || { errorCard "主控邀请或接入凭据无效"; return 1; }
-    kind=$(jq -r '.kind' <<<"${credentialJson}") || return 1
-    case "${kind}" in
-    invite)
-        state=$(subscriptionWireGuardReadState) || { errorCard "WireGuard 状态读取失败"; return 1; }
-        if [[ "$(jq -r '.role' <<<"${state}")" == "controlled" ]]; then
-            existingInviteId=$(jq -r '.join_invite_id // empty' <<<"${state}") || return 1
-            if [[ "${existingInviteId}" != "$(jq -r '.invite_id' <<<"${credentialJson}")" ]]; then
-                warnCard "当前被控已接入其他主控" "替换会重写本机 WireGuard 主控 Peer；失败时恢复旧状态"
-                autoConfirm subscription_replace_controller "确认替换现有主控？" n confirmReplace
-                [[ "${confirmReplace}" == "y" ]] || { statusCard "已取消替换主控"; return 1; }
-                replaceConfirmed=true
-            fi
-        fi
-        subscriptionWireGuardJoinInvite "${credentialJson}" "${replaceConfirmed}" || return 1
-        successCard "被控已按邀请完成初始化" "内网地址由主控预留，无需手工填写" "控制 API 只在 WireGuard 隧道内使用 HTTP，不需要 TLS 证书"
-        showSubscriptionWireGuardJoinReceipt
-        showSubscriptionWireGuardStatus
-        ;;
-    main)
-        initSubscriptionWireGuardControlled || return 1
-        subscriptionWireGuardImportMainCredentialJson "${credentialJson}" || return 1
-        successCard "旧版主控接入凭据已导入" "继续使用兼容流程，将被控接入凭据交回主控"
-        showSubscriptionWireGuardControlledCredential
-        showSubscriptionWireGuardStatus
-        ;;
-    *)
-        errorCard "请粘贴主控邀请或旧版主控接入凭据"
+    local credential= credentialJson state existingInviteId replaceConfirmed=false confirmReplace=
+    subscriptionWireGuardReadSecret credential "请粘贴主控邀请:" || return 1
+    credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || { errorCard "主控邀请无效"; return 1; }
+    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "invite" ]]; then
+        errorCard "请粘贴主控邀请"
         return 1
-        ;;
-    esac
+    fi
+    state=$(subscriptionWireGuardReadState) || { errorCard "WireGuard 状态读取失败"; return 1; }
+    if [[ "$(jq -r '.role' <<<"${state}")" == "controlled" ]]; then
+        existingInviteId=$(jq -r '.join_invite_id // empty' <<<"${state}") || return 1
+        if [[ "${existingInviteId}" != "$(jq -r '.invite_id' <<<"${credentialJson}")" ]]; then
+            warnCard "当前被控已接入其他主控" "替换会重写本机 WireGuard 主控 Peer；失败时恢复旧状态"
+            autoConfirm subscription_replace_controller "确认替换现有主控？" n confirmReplace
+            [[ "${confirmReplace}" == "y" ]] || { statusCard "已取消替换主控"; return 1; }
+            replaceConfirmed=true
+        fi
+    fi
+    subscriptionWireGuardJoinInvite "${credentialJson}" "${replaceConfirmed}" || return 1
+    successCard "被控已按邀请完成初始化" "内网地址由主控预留，无需手工填写" "控制 API 只在 WireGuard 隧道内使用 HTTP，不需要 TLS 证书"
+    showSubscriptionWireGuardJoinReceipt
+    showSubscriptionWireGuardStatus
 }
 
 ensureSubscriptionServiceForSharedLinks() {
@@ -279,7 +267,7 @@ manageSubscriptionControlledHome() {
         showSubscriptionServerRoleSummary
         menuLine "这里集中处理被控侧的接入、状态查看和必要维护。"
         menuLine "建议先完成接入主控，再查看本机状态；只有需要修复时再进入维护页。"
-        menuItem 1 "接入主控" "粘贴主控邀请或旧版凭据，完成接入并生成对应回执"
+        menuItem 1 "接入主控" "粘贴主控邀请，完成接入并生成对应回执"
         menuItem 2 "查看本机状态" "查看角色、地址、Peer、WireGuard 和最近同步结果"
         menuItem 3 "被控维护与排障" "更新主控凭据、查看控制面细节，或重启/关闭被控控制面"
         menuReturnItem 4 "返回主菜单" "回到 padm 管理面板"
@@ -377,7 +365,7 @@ manageSubscriptionMainControlDetails() {
         menuLine "这里处理主控控制面的状态、连接和恢复动作。"
         menuLine "建议先查看凭据、Peer 和连接状态，再决定是否重启或关闭控制面。"
         showSubscriptionWireGuardStatus
-        menuItem 1 "显示旧版主控凭据" "仅用于与旧版被控兼容"
+        menuItem 1 "显示旧版主控凭据" "仅用于维护已有连接，不用于首次接入"
         menuItem 2 "查看 Peer 和连接状态" "查看 WireGuard peer 和被控列表"
         menuItem 3 "测试被控连接" "请求所有被控健康检查"
         menuItem 4 "查看控制面地址" "显示 WireGuard 内网 health/sync 地址"
@@ -426,7 +414,7 @@ manageSubscriptionControlledMaintenance() {
         echoContent title "\n┌─ 被控维护与排障 ───────────────────────────────────"
         menuLine "这里处理被控侧的控制面维护和故障恢复。"
         menuLine "建议先在 查看本机状态 确认当前接入，再按需更新凭据或重启控制面。"
-        menuItem 1 "导入/更新主控接入凭据" "重新导入主控接入凭据，更新本机接入配置"
+        menuItem 1 "导入/更新主控接入凭据" "仅更新已有连接的主控端点或身份"
         menuItem 2 "显示接入回执/旧版被控凭据" "显式显示包含长期控制 Token 的接入秘密"
         menuItem 3 "查看控制面与 Peer 细节" "显示 WireGuard 状态以及与主控的 Peer 连接细节"
         menuItem 4 "重写配置并重启被控控制面" "重写配置并重启 WireGuard 和控制服务"
@@ -1051,7 +1039,7 @@ addSubscribeMenu() {
         menuLine "这里管理主控上的被控服务器源。"
         menuLine "推荐按 创建邀请 -> 被控导入 -> 完成接入 的顺序操作。"
         menuItem 1 "创建被控邀请" "输入一次别名，自动预留 WireGuard 地址"
-        menuItem 2 "完成被控接入" "粘贴接入回执；也兼容旧版被控凭据"
+        menuItem 2 "完成被控接入" "粘贴接入回执，自动使用预留别名和地址"
         menuItem 3 "查看/取消待完成邀请" "按别名查看状态或释放预留地址"
         menuItem 4 "启用/停用被控服务器" "保留凭据，只调整该来源是否参加同步和发布"
         menuItem 5 "移除被控服务器" "删除已有被控来源和 WireGuard Peer"
@@ -1074,63 +1062,34 @@ addSubscribeMenu() {
 addOtherSubscribe() {
     local credential=
     local credentialJson=
-    local kind=
-    local host=
-    local port=
-    local alias=
     local completedAlias= source= health=
     echoContent title "\n┌─ 完成被控接入 ─────────────────────────────────────"
-    menuLine "粘贴新接入回执即可自动使用预留别名和地址；旧版被控凭据仍会询问别名。"
+    menuLine "粘贴接入回执，自动使用创建邀请时预留的别名和地址。"
     menuClose
-    subscriptionWireGuardReadSecret credential "请粘贴接入回执或旧版被控凭据:" || return 1
+    subscriptionWireGuardReadSecret credential "请粘贴接入回执:" || return 1
     if [[ -z "${credential}" ]]; then
-        errorCard "被控接入凭据不可为空"
+        errorCard "接入回执不可为空"
         return 1
     fi
     credentialJson=$(subscriptionWireGuardCredentialDecode "${credential}") || {
-        errorCard "被控接入凭据无效，请复制被控端完整输出"
+        errorCard "接入回执无效，请复制被控端完整输出"
         return 1
     }
-    kind=$(jq -r '.kind' <<<"${credentialJson}") || return 1
-    if [[ "${kind}" == "receipt" ]]; then
-        subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
-        source=$(subscriptionActiveGroupRead -c --arg id "${completedAlias}" 'first(.sources[]? | select(.id == $id)) // empty') || true
-        if [[ -n "${source}" ]]; then
-            health=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null || true)
-        fi
-        if [[ -n "${health}" ]] && jq -e '.ok == true' <<<"${health}" >/dev/null 2>&1; then
-            successCard "被控接入已完成" "别名：${completedAlias}" "WireGuard 与控制服务健康检查通过"
-        else
-            warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 查看协同状态 重试健康检查"
-        fi
-        runSubscriptionSyncAfterMutation "被控服务器接入" || true
-        return 0
-    fi
-    if [[ "${kind}" != "controlled" ]] || ! subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}"; then
-        errorCard "请粘贴接入回执或旧版被控凭据"
+    if [[ "$(jq -r '.kind' <<<"${credentialJson}")" != "receipt" ]]; then
+        errorCard "请粘贴接入回执"
         return 1
     fi
-    host=$(subscriptionWireGuardAddressHost "$(jq -r '.address' <<<"${credentialJson}")")
-    port=$(jq -r '.control_port' <<<"${credentialJson}")
-    autoRead subscription_source_alias "请输入被控服务器别名[英文/数字/短横线，例 hk-1]:" alias
-    if ! subscriptionWireGuardValidAlias "${alias}"; then
-        errorCard "别名只能使用 1 到 64 个英文、数字、短横线或下划线"
-        return 1
+    subscriptionWireGuardCompleteInvite "${credentialJson}" completedAlias || return 1
+    source=$(subscriptionActiveGroupRead -c --arg id "${completedAlias}" 'first(.sources[]? | select(.id == $id)) // empty') || true
+    if [[ -n "${source}" ]]; then
+        health=$(subscriptionRemoteControlHealth "${source}" 2>/dev/null || true)
     fi
-    if [[ "${alias,,}" == "main" ]]; then
-        errorCard "main 是保留源 ID，不能作为被控服务器别名"
-        return 1
+    if [[ -n "${health}" ]] && jq -e '.ok == true' <<<"${health}" >/dev/null 2>&1; then
+        successCard "被控接入已完成" "别名：${completedAlias}" "WireGuard 与控制服务健康检查通过"
+    else
+        warnCard "接入已保存，但暂不可达" "别名：${completedAlias}" "Peer、服务器源和 Token 已保留；可稍后从 查看协同状态 重试健康检查"
     fi
-    if subscriptionRemoteSourceSelfReference "$(jq -n --arg host "${host}" '{host:$host}')"; then
-        errorCard "被控服务器指向当前主控 WireGuard 地址，已拒绝添加，避免递归同步"
-        return 1
-    fi
-    if ! subscriptionWireGuardAddPeerFromCredential "${alias}" "${credentialJson}"; then
-        errorCard "被控服务器添加失败"
-        return 1
-    fi
-    successCard "旧版被控服务器已添加" "WireGuard 内网地址：${host}:${port}" "别名：${alias}" "已保存 Token 和 Peer，可继续测试被控连接或执行同步"
-    runSubscriptionSyncAfterMutation "被控服务器添加"
+    runSubscriptionSyncAfterMutation "被控服务器接入" || true
 }
 
 
@@ -1188,7 +1147,7 @@ setSubscriptionSourceControlTokenMenu() {
     local matches=
     echoContent title "\n┌─ 更新被控服务器凭据 ───────────────────────────────"
     menuLine "这里更新一个被控服务器的接入凭据。"
-    menuLine "建议先在被控执行 接入主控，再把新的本机被控接入凭据粘贴到这里；系统会自动更新地址、端口和 Token。"
+    menuLine "仅用于更新已有被控连接；首次接入请使用邀请和回执。系统会更新地址、端口和 Token。"
     menuClose
     subscriptionWireGuardReadSecret credential "请粘贴被控接入凭据:" || return 1
     if [[ -z "${credential}" ]]; then

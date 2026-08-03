@@ -232,7 +232,7 @@ commitXrayGeoFilesFromStage() {
         padmRemoveCleanupPath "${versionStage}"
         return 1
     fi
-    padmCreateTempPath backupDir -d "$(padmFallbackTmpFilePath padm-xray-geo-backup.XXXXXX)" || {
+    padmCreateTempPath backupDir -d "$(padmTmpFilePath padm-xray-geo-backup.XXXXXX)" || {
         padmRemoveCleanupPath "${geositeStage}"
         padmRemoveCleanupPath "${geoipStage}"
         padmRemoveCleanupPath "${versionStage}"
@@ -671,7 +671,7 @@ validateXrayConfigStrictWithBinary() {
 
 coreTmpFilePath() {
     local fileName=$1
-    padmFallbackTmpFilePath "${fileName}"
+    padmTmpFilePath "${fileName}"
 }
 
 singBoxConfigInstalled() {

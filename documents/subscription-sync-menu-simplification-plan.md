@@ -841,7 +841,7 @@ subscription-state
 subscription
 remote-control
 ui-full
-subscription-state-structure-migration
+subscription-state-structure-validation
 subscription-group-sync-state-lock
 user-subscription-menu-mutation-failure
 wireguard-menu-flow-peer-source-control-toggle
@@ -865,3 +865,25 @@ subscription-remote-controlled
 执行这些项目会写入并重启真实 VPS，需另行取得生产操作授权。当前已完成本地实现、自动验收、任务分支独立提交和 `main` 快进合并；推送、发布与生产部署均未执行。
 
 现场前置检查结果：工作区内没有 A/B/C 主机清单；本机 `ssh -G a`、`ssh -G b`、`ssh -G c` 均只展开为同名字面主机，没有可用地址映射；当前沙箱无法读取用户 `.ssh` 目录。未发起任何 SSH 连接。继续验收需要用户提供或确认 A/B/C 的访问方式、指定 `v2.3.5` 兼容节点，并明确授权上述生产可见操作。
+
+## `/subscribe` 退休记录（2026-08-02）
+
+- `v2.4.0` 已推送，主控与全部被控均已升级。
+- 用户已在主控执行“立即完整同步”；订阅组状态为 `success`，`main` 为 `local`，`hk-1` 与 `b` 均为 `success`，两台远端的创建和删除计划均为 0。
+- 用户已明确授权删除旧 `/s/control/subscribe` endpoint、能力声明、单账号渲染器和主控逐账号回退。
+- 退休后 WireGuard 被控必须在正式 `/sync` 中返回完整批量快照；字段缺失、`null` 或格式错误均阻止公网发布并保留旧订阅。非 WireGuard HTTPS 来源仍保留三个公网订阅文件回退。
+- 控制服务未启用请求日志，因此不能从现场日志独立证明升级后 `/subscribe` 调用数为 0；该残余风险由全量升级、成功完整同步和删除后的 404 回归共同约束。
+- 本次删除属于控制 API 破坏性变更，提交使用 major 标记；`shell/core/version.sh` 仍由发布自动化维护。
+
+## `/sync` 过渡兼容退休记录（2026-08-02）
+
+- 主控与全部被控已升级并完成一次成功的完整同步，本文前述混合版本过渡规则不再是当前运行合同。
+- 被控 `/sync` 请求体现在只接受精确根字段 `dry_run`、`desired_users`，每个用户只接受 `id`、`uuid`；缺少 `dry_run` 或携带 `include_subscriptions`、旧用户元数据及其他额外字段均返回 `invalid_payload`。
+- 主控只把同时返回匹配的 `dry_run`、布尔 `changed` 和合法 `plan` 的成功响应视为成功；不再为缺失的 `changed` 或 `plan` 补默认值。
+- 非 WireGuard HTTPS 来源的三个公网订阅文件回退继续保留；它不属于旧控制 API 兼容。
+
+## `groups.json` 自动迁移退休记录（2026-08-02）
+
+- 主控状态摘要与两台被控的成功完整同步均已经过状态规范化入口，三份活动状态已落为当前 `version: 2` 结构；仓库首个公开提交也已使用 schema v2，没有公开版本会继续写入 v1。
+- 删除 v1/缺字段状态的宽松规范化、迁移前临时备份和替换后的二次迁移；读取、写入和恢复现在只接受当前结构，校验失败时保持原文件不变。
+- 普通手动备份、恢复、重建、状态锁和原子替换继续保留；未来确需升级 schema 时按新版本单独增加明确迁移，不保留无期限自动修复。

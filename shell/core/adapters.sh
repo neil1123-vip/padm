@@ -9,7 +9,7 @@ fi
 
 adapterTmpPath() {
     local template=$1
-    padmFallbackTmpFilePath "${template}"
+    padmTmpFilePath "${template}"
 }
 
 adapterNginxRepoTemplate() {

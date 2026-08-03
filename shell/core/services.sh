@@ -4,7 +4,7 @@ SERVICE_ACTIONS=
 SERVICE_QUEUE_ALLOW_FAILURE=
 
 xrayStartTestLog() {
-    padmFallbackTmpFilePath padm-xray-start-test.log
+    padmTmpFilePath padm-xray-start-test.log
 }
 
 xraySystemdStart() {

@@ -62,19 +62,19 @@ listRegressionRemoteControlContractChildSelectors() {
         remote-control-contract-server-response
 }
 
-runRegressionRemoteControlDeepStateRollbackNormalizationRegression() (
+runRegressionRemoteControlDeepStateRollbackStabilityRegression() (
     set -euo pipefail
-    local beforeFile="${TMP_DIR}/remote-control-deep-rollback-normalized.before.json"
-    local afterFile="${TMP_DIR}/remote-control-deep-rollback-normalized.after.json"
+    local beforeFile="${TMP_DIR}/remote-control-deep-rollback-stable.before.json"
+    local afterFile="${TMP_DIR}/remote-control-deep-rollback-stable.after.json"
 
     mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 
-    normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)" | jq -S -c . >"${beforeFile}"
+    jq -S -c . "$(subscriptionGroupsFile)" >"${beforeFile}"
     subscriptionGroupsStateWrite '.groups |= .'
-    normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)" | jq -S -c . >"${afterFile}"
+    jq -S -c . "$(subscriptionGroupsFile)" >"${afterFile}"
 
     cmp -s "${beforeFile}" "${afterFile}"
 )
@@ -113,7 +113,7 @@ registerRegressionFunctionLeaf remote-control-contract-service-install-health-ro
 registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionRemoteControlContractServiceInstallTokenTransaction
 registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlContractServerResponse
 registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlLegacyLeafWithCompat runRegressionRemoteControlDeep
-registerRegressionFunctionLeaf regression-remote-control-deep-state-rollback-normalization runRegressionRemoteControlDeepStateRollbackNormalizationRegression
+registerRegressionFunctionLeaf regression-remote-control-deep-state-rollback-stability runRegressionRemoteControlDeepStateRollbackStabilityRegression
 registerRegressionFunctionLeaf regression-remote-control-legacy-tmpdir-isolation runRegressionRemoteControlLegacyTmpDirIsolationRegression
 
 listRegressionRemoteControlChildSelectors() {

@@ -26,11 +26,8 @@ runRemoteControlConcurrencyRegression() (
 JSON
     }
     subscriptionRemoteControlPayload() {
-        local source=$1
         local dryRun=$2
-        local sourceId
-        sourceId=$(remoteControlRegressionSourceId "${source}")
-        printf '{"version":1,"group_id":"default","source_id":"%s","dry_run":%s,"desired_users":[]}\n' "${sourceId}" "${dryRun}"
+        printf '{"dry_run":%s,"desired_users":[]}\n' "${dryRun}"
     }
 
     subscriptionRemoteControlHealth() {
@@ -46,7 +43,7 @@ JSON
         local sourceId
         sourceId=$(remoteControlRegressionSourceId "${source}")
         [[ "${sourceId}" == "src0" ]] && sleep 0.01
-        printf '{"source_id":"%s","status":"success","dry_run":true,"request":{"source_id":"%s"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n' "${sourceId}" "${sourceId}"
+        printf '{"source_id":"%s","status":"success","dry_run":true,"request":{"source_id":"%s"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n' "${sourceId}" "${sourceId}"
     }
 
     healthResult=$(subscriptionRemoteControlHealthAll | jq -c .)
@@ -67,11 +64,8 @@ runRemoteControlAggregationFailureRegression() (
 JSON
     }
     subscriptionRemoteControlPayload() {
-        local source=$1
         local dryRun=$2
-        local sourceId
-        sourceId=$(remoteControlRegressionSourceId "${source}")
-        printf '{"version":1,"group_id":"default","source_id":"%s","dry_run":%s,"desired_users":[]}\n' "${sourceId}" "${dryRun}"
+        printf '{"dry_run":%s,"desired_users":[]}\n' "${dryRun}"
     }
 
     subscriptionRemoteControlHealth() {
@@ -92,13 +86,13 @@ JSON
         local source=$1
         case "$(remoteControlRegressionSourceId "${source}")" in
         edge-a)
-            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
             ;;
         edge-b)
             printf 'broken-plan-json\n'
             ;;
         *)
-            printf '{"source_id":"main","status":"success","dry_run":true,"request":{"source_id":"main"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            printf '{"source_id":"main","status":"success","dry_run":true,"request":{"source_id":"main"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
             ;;
         esac
     }
@@ -147,7 +141,7 @@ JSON
         local source=$1
         case "$(remoteControlRegressionSourceId "${source}")" in
         edge-a)
-            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
+            printf '{"source_id":"edge-a","status":"success","dry_run":true,"request":{"source_id":"edge-a"},"response":{"ok":true,"dry_run":true,"changed":false,"plan":{"create":[],"remove":[]}}}\n'
             ;;
         edge-b)
             printf 'broken-plan-json\n'
@@ -251,8 +245,8 @@ runRemoteControlHealthRegression() (
 )
 
 runRemoteControlInlineRequestHelpersRegression() (
-    local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
-    local wireGuardSource='{"id":"edge-wg","name":"Edge WG","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
+    local source='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
+    local legacySource='{"id":"edge-legacy","name":"Edge Legacy","control_token":"token","scheme":"https","transport":"https","host":"remote.example","port":443}'
     local requestResponse
     local healthResponse
     local curlArgsLog="${TMP_DIR}/remote-control-inline-request-curl-args.log"
@@ -265,8 +259,8 @@ runRemoteControlInlineRequestHelpersRegression() (
     : >"${curlChmodLog}"
     : >"${curlPayloadLog}"
 
-    [[ "$(subscriptionRemoteControlUrl "${source}" sync)" == "https://remote.example:443/s/control/sync" ]]
-    [[ "$(subscriptionRemoteControlUrl "${wireGuardSource}" sync)" == "http://10.77.0.2:39778/s/control/sync" ]]
+    [[ "$(subscriptionRemoteControlUrl "${source}" sync)" == "http://10.77.0.2:39778/s/control/sync" ]]
+    ! subscriptionRemoteControlUrl "${legacySource}" sync >/dev/null 2>&1
 
     subscriptionRemoteControlUrl() {
         printf 'https://control.example/%s\n' "$2"
@@ -276,9 +270,6 @@ runRemoteControlInlineRequestHelpersRegression() (
     }
     subscriptionRemoteControlCurlOnce() {
         return 99
-    }
-    subscriptionRemoteSourceUsesWireGuard() {
-        return 1
     }
     subscriptionWireGuardControlUrl() {
         printf 'https://control.example/%s\n' "$2"
@@ -310,7 +301,7 @@ runRemoteControlInlineRequestHelpersRegression() (
         done
         case "$*" in
         *'https://control.example/sync'*)
-            printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
+            printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
             ;;
         *'https://control.example/health'*)
             printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
@@ -321,7 +312,7 @@ runRemoteControlInlineRequestHelpersRegression() (
         esac
     }
 
-    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[]}' 2>/dev/null || true)
+    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' 2>/dev/null || true)
     [[ -n "${requestResponse}" ]] || return 1
     requestResponse=$(jq -c . <<<"${requestResponse}") || return 1
     [[ "${requestResponse}" == *'"ok":true'* ]] || return 1
@@ -343,7 +334,7 @@ runRemoteControlInlineRequestHelpersRegression() (
     grep -q -- '--max-time 210' "${curlArgsLog}" || return 1
     grep -qF -- '--data-binary @-' "${curlArgsLog}" || return 1
     ! grep -qF 'desired_users' "${curlArgsLog}"
-    grep -qxF '{"desired_users":[]}' "${curlPayloadLog}" || return 1
+    grep -qxF '{"desired_users":[],"dry_run":false}' "${curlPayloadLog}" || return 1
     while IFS= read -r headerFile; do
         [[ -n "${headerFile}" ]] || continue
         [[ ! -e "${headerFile}" ]] || return 1
@@ -373,9 +364,6 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
     }
     subscriptionRemoteWireGuardPeerReadyState() {
         return 99
-    }
-    subscriptionRemoteSourceUsesWireGuard() {
-        return 0
     }
     subscriptionWireGuardReadState() {
         printf '{"peers":[{"id":"edge-remote","public_key":"pub-edge"}]}\n'
@@ -417,7 +405,7 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
         fi
         case "$*" in
         *'https://control.example/sync'*)
-            printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
+            printf '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]}}\n200'
             ;;
         *'https://control.example/health'*)
             printf '{"ok":true,"version":"test","capabilities":["health","sync"]}\n200'
@@ -428,7 +416,7 @@ runRemoteControlInlineWireGuardPeerHelpersRegression() (
         esac
     }
 
-    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[]}' 2>/dev/null || true)
+    requestResponse=$(subscriptionRemoteControlRequest "${source}" sync '{"desired_users":[],"dry_run":false}' 2>/dev/null || true)
     [[ -n "${requestResponse}" ]] || return 1
     requestResponse=$(jq -c . <<<"${requestResponse}") || return 1
     [[ "${requestResponse}" == *'"ok":true'* ]] || return 1
@@ -463,15 +451,13 @@ runRemoteControlInlineTokenConsumersRegression() (
     local healthLog="${TMP_DIR}/remote-control-inline-token-consumers.health"
     local planResponse
     local syncResult
+    local responseMode=valid
 
     subscriptionRemoteControlToken() {
         return 96
     }
     subscriptionRemoteSourceSelfReference() {
         return 1
-    }
-    subscriptionRemoteSourceUsesWireGuard() {
-        return 0
     }
     subscriptionRemoteControlHealth() {
         printf 'health\n' >>"${healthLog}"
@@ -488,10 +474,15 @@ runRemoteControlInlineTokenConsumersRegression() (
         local endpoint=$2
         local payload=$3
         [[ "${endpoint}" == "sync" ]]
-        jq -e '.source_id == "edge-remote" and (.desired_users | length) == 1 and .desired_users[0].account == "sub_team_a"' <<<"${payload}" >/dev/null
+        jq -e 'keys == ["desired_users", "dry_run"] and (.desired_users | length) == 1 and (.desired_users[0] | keys == ["id", "uuid"])' <<<"${payload}" >/dev/null
         printf '%s\n' "${payload}" >>"${requestPayloadLog}"
         printf '%s\t%s\n' "$(jq -r '.id' <<<"${sourceJson}")" "${endpoint}" >>"${statusLog}"
-        printf '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}\n'
+        case "${responseMode}" in
+        missing-changed) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:$dryRun,plan:{create:[],remove:[]}}' ;;
+        missing-plan) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:$dryRun,changed:false}' ;;
+        wrong-dry-run) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:($dryRun | not),changed:false,plan:{create:[],remove:[]}}' ;;
+        *) jq -cn --argjson dryRun "$(jq -r '.dry_run' <<<"${payload}")" '{ok:true,dry_run:$dryRun,changed:false,plan:{create:[],remove:[]}}' ;;
+        esac
     }
     setSubscriptionSourceSyncStatus() {
         printf 'status\t%s\t%s\n' "$1" "$2" >>"${statusLog}"
@@ -508,15 +499,21 @@ runRemoteControlInlineTokenConsumersRegression() (
     planResponse=$(jq -c . <<<"${planResponse}") || return 1
     jq -e '.source_id == "edge-remote" and .status == "success" and .dry_run == true and .request.dry_run == true and (.request | has("source_id") | not) and .request.desired_users[0].id == "team-a" and .request.desired_users[0].uuid == "11111111-1111-1111-1111-111111111111" and (.request | has("include_subscriptions") | not) and .response.ok == true' <<<"${planResponse}" >/dev/null || return 1
 
+    for responseMode in missing-changed missing-plan wrong-dry-run; do
+        planResponse=$(subscriptionRemoteSyncPlanForSource "${remoteSourceJson}" "${desiredUsersBySourceJson}" 2>/dev/null || true)
+        jq -e '.status == "remote_error" and .error_detail.type == "invalid_response"' <<<"${planResponse}" >/dev/null || return 1
+    done
+    responseMode=valid
+
     syncResult=$(runSubscriptionRemoteSync 2>/dev/null || true)
     [[ -n "${syncResult}" ]] || return 1
     syncResult=$(jq -c . <<<"${syncResult}") || return 1
-    jq -e '.failures == [] and .snapshots == {}' <<<"${syncResult}" >/dev/null || return 1
+    jq -e '.failures == ["远程服务器源 edge-remote 未返回完整订阅快照"] and .snapshots["edge-remote"] == null' <<<"${syncResult}" >/dev/null || return 1
     [[ -f "${requestPayloadLog}" ]] || return 1
     [[ -f "${statusLog}" ]] || return 1
     jq -s -e '
-      length == 2 and
-      .[0].dry_run == true and .[1].dry_run == false and
+      length == 5 and
+      .[0].dry_run == true and .[4].dry_run == false and
       all(.[];
         (. | has("source_id") | not) and
         (. | has("include_subscriptions") | not) and
@@ -525,13 +522,13 @@ runRemoteControlInlineTokenConsumersRegression() (
       )
     ' "${requestPayloadLog}" >/dev/null || return 1
     grep -qx $'edge-remote\tsync' "${statusLog}" || return 1
-    grep -qx $'status\tedge-remote\tsuccess' "${statusLog}" || return 1
+    grep -Fqx $'failure\tedge-remote\tinvalid_response\t未返回完整订阅快照' "${statusLog}" || return 1
     [[ ! -e "${healthLog}" ]] || return 1
-    ! grep -q '^failure	' "${statusLog}" || return 1
+    ! grep -q '^status	' "${statusLog}" || return 1
 )
 
 runRemoteControlInlineSyncRunnerRegression() (
-    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"https","host":"remote.example","port":443}'
+    local remoteSourceJson='{"id":"edge-remote","name":"Edge Remote","control_token":"token","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778}'
     local desiredUsersBySourceJson='{"edge-remote":[{"id":"team-a","name":"Team A","uuid":"11111111-1111-1111-1111-111111111111","traffic_limit_gb":1,"account":"sub_team_a"}]}'
     local statusLog="${TMP_DIR}/remote-control-inline-sync-runner.status"
     local sourceResultLog="${TMP_DIR}/remote-control-inline-sync-runner.calls"
@@ -563,12 +560,12 @@ runRemoteControlInlineSyncRunnerRegression() (
         if [[ "${snapshotMode}" == "missing" ]]; then
             jq -n \
                 --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
-                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{}}' \
+                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{}}' \
                 '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
         else
             jq -n \
                 --argjson request '{"source_id":"edge-remote","dry_run":false,"desired_users":[{"id":"team-a","account":"sub_team_a"}]}' \
-                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{"sub_team_a":{"default":"dmxlc3M6Ly9zbmFwc2hvdA==","clash_meta":"name: sub_team_a","sing_box":[]}}}' \
+                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{"sub_team_a":{"default":"dmxlc3M6Ly9zbmFwc2hvdA==","clash_meta":"name: sub_team_a","sing_box":[]}}}' \
                 '{source_id:"edge-remote", status:"success", dry_run:false, request:$request, response:$response}'
         fi
     }
@@ -635,7 +632,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
             [[ -f "${brokenStarted}" ]] || printf 'edge-broken-not-parallel\n' >>"${callLog}"
             jq -n \
                 --argjson request '{"source_id":"edge-slow","dry_run":false,"desired_users":[]}' \
-                --argjson response '{"ok":true,"changed":false,"plan":{"create":[],"remove":[]}}' \
+                --argjson response '{"ok":true,"dry_run":false,"changed":false,"plan":{"create":[],"remove":[]},"subscriptions":{}}' \
                 '{source_id:"edge-slow", status:"success", dry_run:false, request:$request, response:$response}'
             ;;
         edge-broken)
@@ -655,7 +652,7 @@ runRemoteControlInlineSyncParallelRunnerRegression() (
     [[ -n "${syncResult}" ]] || return 1
     syncResult=$(jq -c . <<<"${syncResult}") || return 1
     jq -e '.failures | length == 1 and (.[0] | contains("edge-broken"))' <<<"${syncResult}" >/dev/null || return 1
-    jq -e '.snapshots["edge-broken"] == null and (.snapshots | has("edge-broken")) and (.snapshots | has("edge-slow") | not)' <<<"${syncResult}" >/dev/null || return 1
+    jq -e '.snapshots == {"edge-slow":{},"edge-broken":null}' <<<"${syncResult}" >/dev/null || return 1
     grep -qx 'edge-slow-start' "${callLog}" || return 1
     grep -qx 'edge-broken-start' "${callLog}" || return 1
     ! grep -qx 'edge-broken-not-parallel' "${callLog}" || return 1
@@ -672,12 +669,14 @@ runRemoteControlHandleInlineHelpersRegression() (
     local syncResponse
     local syncSnapshotResponse
     local emptySnapshotResponse
-    local invalidSnapshotResponse
-    local invalidSnapshotStatus
+    local invalidPayload
+    local invalidPayloadResponse
+    local invalidPayloadStatus
+    local invalidStateResponse
+    local invalidStateStatus
     local syncSnapshotFailureStatus
     local subscribeResponse
-    local generationFailureResponse
-    local generationFailureStatus
+    local subscribeStatus
     local syncLockMarker="${controlRoot}/sync-lock-observed"
     local snapshotLog="${controlRoot}/snapshot.log"
     local expectedDefault
@@ -697,24 +696,23 @@ runRemoteControlHandleInlineHelpersRegression() (
     subscriptionControlValidateSyncPayload() {
         return 1
     }
-    subscriptionControlValidateSubscribePayload() {
-        return 1
-    }
-    subscriptionControlRenderSubscribe() {
-        return 97
-    }
     eval "$(declare -f subscriptionSyncPlanFromDesiredUsers | sed '1s/^subscriptionSyncPlanFromDesiredUsers/originalSubscriptionSyncPlanFromDesiredUsers/')"
-    eval "$(declare -f subscriptionControlRenderSubscribeAccount | sed '1s/^subscriptionControlRenderSubscribeAccount/originalSubscriptionControlRenderSubscribeAccount/')"
     subscriptionSyncPlanFromDesiredUsers() {
         [[ "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" == "1" ]] && : >"${syncLockMarker}"
         printf '{"create":[],"remove":[]}'
     }
-    subscriptionControlRenderSubscribeAccount() {
-        printf '{"ok":true,"account":"team_a","default":"","clash_meta":"","sing_box":[]}\n'
-    }
-
     healthResponse=$(handleSubscriptionControl health test-token | jq -c .)
-    [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync","subscribe"]'* ]]
+    [[ "${healthResponse}" == *'"ok":true'*'"version":"test"'*'"capabilities":["health","sync"]'* ]]
+
+    jq '.version = 1' "$(subscriptionGroupsFile)" >"$(subscriptionGroupsFile).tmp"
+    mv "$(subscriptionGroupsFile).tmp" "$(subscriptionGroupsFile)"
+    set +e
+    invalidStateResponse=$(handleSubscriptionControl health test-token)
+    invalidStateStatus=$?
+    set -e
+    [[ "${invalidStateStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "invalid_state" and .error_detail.type == "invalid_state"' <<<"${invalidStateResponse}" >/dev/null
+    writeDefaultSubscriptionGroupsState "$(subscriptionGroupsFile)"
 
     showAccounts() {
         printf 'show\n' >>"${snapshotLog}"
@@ -735,7 +733,7 @@ runRemoteControlHandleInlineHelpersRegression() (
 
     expectedDefault=$(printf 'vless://snapshot\n' | base64 | tr -d '\n')
     expectedDefaultB=$(printf 'trojan://snapshot-b\n' | base64 | tr -d '\n')
-    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false,"include_subscriptions":true}' | jq -c .)
+    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","uuid":"22222222-2222-2222-2222-222222222222"}],"dry_run":false}' | jq -c .)
     jq -e --arg expectedDefault "${expectedDefault}" --arg expectedDefaultB "${expectedDefaultB}" '
       .ok == true and .dry_run == false and .changed == false and
       .subscriptions.sub_team_a.default == $expectedDefault and
@@ -747,19 +745,28 @@ runRemoteControlHandleInlineHelpersRegression() (
     ' <<<"${syncSnapshotResponse}" >/dev/null
     [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "2" ]]
 
-    emptySnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":true}' | jq -c .)
+    emptySnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false}' | jq -c .)
     jq -e '.ok == true and .subscriptions == {}' <<<"${emptySnapshotResponse}" >/dev/null
     [[ "$(wc -l <"${snapshotLog}" | tr -d ' ')" == "2" ]]
 
-    set +e
-    invalidSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[],"dry_run":false,"include_subscriptions":"yes"}')
-    invalidSnapshotStatus=$?
-    set -e
-    [[ "${invalidSnapshotStatus}" -ne 0 ]]
-    jq -e '.ok == false and .error == "invalid_payload"' <<<"${invalidSnapshotResponse}" >/dev/null
+    for invalidPayload in \
+        '{"desired_users":[]}' \
+        '{"desired_users":[],"dry_run":false,"include_subscriptions":true}' \
+        '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111","name":"Team A"}],"dry_run":false}'; do
+        set +e
+        invalidPayloadResponse=$(handleSubscriptionControl sync test-token "${invalidPayload}")
+        invalidPayloadStatus=$?
+        set -e
+        [[ "${invalidPayloadStatus}" -ne 0 ]]
+        jq -e '.ok == false and .error == "invalid_payload"' <<<"${invalidPayloadResponse}" >/dev/null
+    done
 
-    subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}' | jq -c .)
-    [[ "${subscribeResponse}" == *'"ok":true'*'"account":"team_a"'* ]]
+    set +e
+    subscribeResponse=$(handleSubscriptionControl subscribe test-token '{"account":"team_a"}')
+    subscribeStatus=$?
+    set -e
+    [[ "${subscribeStatus}" -ne 0 ]]
+    jq -e '.ok == false and .error == "unknown_endpoint"' <<<"${subscribeResponse}" >/dev/null
 
     showAccounts() {
         printf 'vless://secret-credential\n'
@@ -767,24 +774,18 @@ runRemoteControlHandleInlineHelpersRegression() (
         return 1
     }
     set +e
-    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false,"include_subscriptions":true}')
+    syncSnapshotResponse=$(handleSubscriptionControl sync test-token '{"desired_users":[{"id":"team-a","uuid":"11111111-1111-1111-1111-111111111111"}],"dry_run":false}')
     syncSnapshotFailureStatus=$?
     set -e
     [[ "${syncSnapshotFailureStatus}" -ne 0 ]]
     jq -e '.ok == false and .changed == false and .error == "generation_failed" and .error_detail.type == "generation_failed" and has("subscriptions") == false' <<<"${syncSnapshotResponse}" >/dev/null
-    set +e
-    generationFailureResponse=$(originalSubscriptionControlRenderSubscribeAccount team_a)
-    generationFailureStatus=$?
-    set -e
-    [[ "${generationFailureStatus}" -eq 1 ]]
-    jq -e '.ok == false and .error == "generation_failed" and .error_detail.type == "generation_failed" and .account == "team_a"' <<<"${generationFailureResponse}" >/dev/null
-    [[ "${generationFailureResponse}" != *secret-credential* && "${generationFailureResponse}" != *'private diagnostic'* ]]
+    [[ "${syncSnapshotResponse}" != *secret-credential* && "${syncSnapshotResponse}" != *'private diagnostic'* ]]
 
     mkdir -p "${configDir}"
     configPath="${configDir}/"
     singBoxConfigPath=
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":0,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"event_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":0,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     desiredBySource=$(subscriptionRemoteDesiredUsersBySource '[{"id":"edge"}]')
     jq -e '.["edge"][0].uuid == "22222222-2222-2222-2222-222222222222"' <<<"${desiredBySource}" >/dev/null
@@ -940,7 +941,7 @@ runRemoteControlServerRefreshRegression() (
 
     defaultRemoteControlGroupsStateJson() {
         cat <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     }
 
@@ -1142,7 +1143,7 @@ JSON
                 [[ "${reconcileCalls}" == "1" ]]
 
                 (
-                    setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":5,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"local-only","name":"Local Only","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1,"download":2,"sources":{}},"local-only":{"upload":3,"download":4,"sources":{}}},"sources":{}}}]}'
+                    setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":5,"token":"","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"local-only","name":"Local Only","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1,"download":2,"sources":{}},"local-only":{"upload":3,"download":4,"sources":{}}},"sources":{}}}]}'
                     subscriptionSyncApplyAccountPlanTransaction() { return 0; }
                     originalSubscriptionControlApplyAccountPlan '{"create":[],"remove":["sub_team_a"]}' '[]'
                     jq -e '
@@ -1154,7 +1155,7 @@ JSON
                 )
 
                 (
-                    setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Preserved Name","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":5,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}'
+                    setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Preserved Name","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":5,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}'
                     subscriptionSyncApplyAccountPlanTransaction() { return 0; }
                     originalSubscriptionControlApplyAccountPlan \
                         '{"create":["sub_team_a"],"remove":["sub_team_a"]}' \
@@ -1166,6 +1167,7 @@ JSON
                         "enabled":true,
                         "allowed_sources":["main"],
                         "traffic_limit_gb":5,
+                        "token":"",
                         "uuid":"33333333-3333-3333-3333-333333333333"
                       }]
                     ' <<<"${virtualGroupsState}" >/dev/null
@@ -1245,7 +1247,7 @@ JSON
                 local restoreFailureStateWriteCalls=0
                 local restoreFailureResponse
                 local restoreFailureStatus
-                setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":false,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"00000000-0000-0000-0000-000000000000"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}'
+                setVirtualSubscriptionGroupsState '{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":false,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"00000000-0000-0000-0000-000000000000"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}'
                 subscriptionSyncPlanFromAccounts() {
                     printf '{"create":["sub_team_a"],"remove":[]}'
                 }
@@ -1408,7 +1410,7 @@ JSON
         useRealSubscriptionGroupsState
         mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
         cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 
         mkdir -p "${rollbackRoot}/xray"
@@ -1421,13 +1423,13 @@ JSON
 {"inbounds":[{"settings":{"clients":[]}}]}
 JSON
         cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
         coreInstallType=1
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_rollback"],"remove":[]}'
         }
-        rollbackStateBefore=$(normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)")
+        rollbackStateBefore=$(jq -c . "$(subscriptionGroupsFile)")
         rollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
         rollbackSecondBefore=$(<"${configPath}03_VLESS_WS_inbounds.json")
         subscriptionControlApplyAccountPlan() {
@@ -1490,14 +1492,14 @@ JSON
         printf 'old local default\n' >"${refreshRollbackLocalDir}/default/existing"
         printf 'old public default\n' >"${refreshRollbackPublicDir}/default/existing-md5"
         cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
         coreInstallType=1
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_publish"],"remove":[]}'
         }
         subscriptionControlApplyAccountPlan() {
-            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"77777777-7777-7777-7777-777777777777"}])'
+            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"publish","name":"Publish","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"77777777-7777-7777-7777-777777777777"}])'
             cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_publish-vless","id":"77777777-7777-7777-7777-777777777777"}]}}]}
 JSON
@@ -1512,7 +1514,7 @@ JSON
                 printf '[{"tag":"%s"}]\n' "${account}" >"${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box/${account}"
             done < <(subscriptionGroupsStateRead -r '.groups[].user_groups[]? | select(.enabled == true) | .id')
         }
-        refreshRollbackStateBefore=$(normalizeSubscriptionGroupsState <"$(subscriptionGroupsFile)")
+        refreshRollbackStateBefore=$(jq -c . "$(subscriptionGroupsFile)")
         refreshRollbackFirstBefore=$(<"${configPath}02_VLESS_TCP_inbounds.json")
         refreshRollbackLocalBefore=$(find "${refreshRollbackLocalDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
         refreshRollbackPublicBefore=$(find "${refreshRollbackPublicDir}" -type f -printf '%P\t' -exec cat {} \; | sort)
@@ -1570,14 +1572,14 @@ JSON
         printf 'old local\n' >"${restoreFailureLocalDir}/default/existing"
         printf 'old public\n' >"${restoreFailurePublicDir}/default/existing-md5"
         cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
         coreInstallType=1
         subscriptionSyncPlanFromAccounts() {
             printf '{"create":["sub_restore_fail"],"remove":[]}'
         }
         subscriptionControlApplyAccountPlan() {
-            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"88888888-8888-8888-8888-888888888888"}])'
+            subscriptionGroupsStateWrite '.groups |= map(.user_groups += [{"id":"restore-fail","name":"Restore Fail","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"88888888-8888-8888-8888-888888888888"}])'
             cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_restore_fail-vless","id":"88888888-8888-8888-8888-888888888888"}]}}]}
 JSON
@@ -2083,26 +2085,18 @@ if [[ "${PADM_CONTROL_TOKEN:-}" != "${PADM_FAKE_SERVER_TOKEN:-}" ]]; then
     printf '{"ok":false,"error":"unauthorized","error_detail":{"type":"unauthorized","message":"控制 token 验证失败"}}\n'
     exit 1
 fi
-    if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
-        payload=$(cat)
-        if [[ -z "${payload}" ]]; then
-            if [[ "${endpoint}" == "sync" ]]; then
-                printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
-            else
-                printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"订阅请求体为空"}}\n'
-            fi
-            exit 1
-        fi
-        if [[ "${payload}" == "not-json" ]]; then
-            if [[ "${endpoint}" == "sync" ]]; then
-                printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
-            else
-                printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"订阅请求体格式不正确"}}\n'
-            fi
-            exit 1
-        fi
+if [[ "${endpoint}" == "sync" ]]; then
+    payload=$(cat)
+    if [[ -z "${payload}" ]]; then
+        printf '{"ok":false,"error":"empty_payload","error_detail":{"type":"empty_payload","message":"同步请求体为空"}}\n'
+        exit 1
     fi
-    case "${endpoint}:${mode}" in
+    if [[ "${payload}" == "not-json" ]]; then
+        printf '{"ok":false,"error":"invalid_payload","error_detail":{"type":"invalid_payload","message":"同步请求体格式不正确"}}\n'
+        exit 1
+    fi
+fi
+case "${endpoint}:${mode}" in
 health:*)
     printf '{"ok":false,"error":"health_should_not_execute"}\n'
     exit 9
@@ -2111,7 +2105,7 @@ sync:noise)
     printf 'ui noise before sync\n'
     printf '{"ok":false,"error":"first_json"}\n'
     printf 'ui noise between json\n'
-    printf '{"ok":true,"changed":true,"plan":{"create":[],"remove":[]}}\n'
+    printf '{"ok":true,"dry_run":false,"changed":true,"plan":{"create":[],"remove":[]}}\n'
     ;;
 sync:failed)
     printf 'ui noise before failed sync\n'
@@ -2130,18 +2124,6 @@ sync:timeout)
     sync:invalid)
         printf 'ui noise only\n'
         exit 0
-        ;;
-    subscribe:noise)
-        printf 'ui noise before subscribe\n'
-        printf '{"ok":false,"error":"first_json"}\n'
-        printf 'ui noise between json\n'
-        cat <<'JSON'
-{"ok":true,"default":"dmxlc3M6Ly91dWlkQGV4YW1wbGUuY29tOjQ0MyN0ZWFtLWE=","clash_meta":"proxies:\n- name: team-a\n","sing_box":[{"tag":"team-a"}]}
-JSON
-        ;;
-    subscribe:not-found)
-        printf '{"ok":false,"error":"not_found","error_detail":{"type":"not_found","message":"远端账号订阅输出不存在"}}\n'
-        exit 1
         ;;
     *)
         printf '{"ok":false,"error":"unexpected"}\n'
@@ -2296,20 +2278,16 @@ for _ in range(80):
     time.sleep(0.1)
 
 set_mode("noise")
-results["sync_success"] = request("POST", "sync", '{"desired_users":[]}')
-results["subscribe_success"] = request("POST", "subscribe", '{"account":"team_a"}')
-set_mode("not-found")
-results["subscribe_not_found"] = request("POST", "subscribe", '{"account":"missing"}')
+results["sync_success"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
+results["subscribe_removed"] = request("POST", "subscribe", '{"account":"team_a"}')
 results["health_unauthorized"] = request("GET", "health", token_override="wrong-token")
 results["sync_empty_payload"] = request("POST", "sync", "")
 results["sync_invalid_payload"] = request("POST", "sync", "not-json")
-results["subscribe_empty_payload"] = request("POST", "subscribe", "")
-results["subscribe_invalid_payload"] = request("POST", "subscribe", "not-json")
 results["sync_bad_content_length"] = raw_post("sync", "abc")
 results["sync_slow_body"] = slow_post("sync")
 
 set_mode("failed")
-results["sync_failed"] = request("POST", "sync", '{"desired_users":[]}')
+results["sync_failed"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 set_mode("timeout")
 try:
     os.remove(os.environ["PADM_TEST_CONTROL_STARTED_FILE"])
@@ -2317,7 +2295,7 @@ except FileNotFoundError:
     pass
 sync_holder = {}
 def run_slow_sync():
-    sync_holder["result"] = request("POST", "sync", '{"desired_users":[]}')
+    sync_holder["result"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 sync_thread = threading.Thread(target=run_slow_sync)
 sync_thread.start()
 for _ in range(100):
@@ -2329,7 +2307,7 @@ health_started = time.monotonic()
 results["health_during_sync"] = request("GET", "health")
 results["health_during_sync"]["elapsed"] = time.monotonic() - health_started
 busy_started = time.monotonic()
-results["sync_while_busy"] = request("POST", "sync", '{"desired_users":[]}')
+results["sync_while_busy"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 results["sync_while_busy"]["elapsed"] = time.monotonic() - busy_started
 sync_thread.join(timeout=10)
 assert not sync_thread.is_alive()
@@ -2338,20 +2316,17 @@ time.sleep(1.5)
 results["os_name"] = os.name
 results["timeout_descendant_survived"] = os.path.exists(os.environ["PADM_FAKE_CONTROL_DESCENDANT_FILE"])
 set_mode("invalid")
-results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[]}')
+results["sync_invalid_response"] = request("POST", "sync", '{"desired_users":[],"dry_run":false}')
 
 print(json.dumps(results, ensure_ascii=False))
 PY
 
-    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync","subscribe"]' "${responseFile}" >/dev/null
+    jq -e '.health_ready.status == 200 and .health_ready.body.ok == true and .health_ready.body.version == "test" and .health_ready.body.capabilities == ["health","sync"]' "${responseFile}" >/dev/null
     jq -e '.sync_success.status == 200 and .sync_success.body.ok == true and .sync_success.body.changed == true and (.sync_success.body.plan.create | length) == 0' "${responseFile}" >/dev/null
-    jq -e '.subscribe_success.status == 200 and .subscribe_success.body.ok == true and (.subscribe_success.body.default | @base64d) == "vless://uuid@example.com:443#team-a" and (.subscribe_success.body.clash_meta | contains("team-a")) and .subscribe_success.body.sing_box[0].tag == "team-a"' "${responseFile}" >/dev/null
-    jq -e '.subscribe_not_found.status == 404 and .subscribe_not_found.body.error == "not_found" and .subscribe_not_found.body.error_detail.type == "not_found"' "${responseFile}" >/dev/null
+    jq -e '.subscribe_removed.status == 404 and .subscribe_removed.body.error == "not_found"' "${responseFile}" >/dev/null
     jq -e '.health_unauthorized.status == 401' "${responseFile}" >/dev/null
     jq -e '.sync_empty_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_payload.status == 400' "${responseFile}" >/dev/null
-    jq -e '.subscribe_empty_payload.status == 400' "${responseFile}" >/dev/null
-    jq -e '.subscribe_invalid_payload.status == 400' "${responseFile}" >/dev/null
     jq -e '.sync_bad_content_length.status == 400 and .sync_bad_content_length.body.error == "invalid_payload"' "${responseFile}" >/dev/null
     jq -e '.sync_slow_body.status == 408 and .sync_slow_body.body.error == "request_timeout"' "${responseFile}" >/dev/null
     jq -e '.sync_failed.status == 503 and .sync_failed.body.error == "script_failed" and .sync_failed.body.error_detail.type == "script_failed" and .sync_failed.body.exit_code == 7' "${responseFile}" >/dev/null

@@ -7,67 +7,38 @@ SUBSCRIPTION_STATE_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && p
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 writeSubscriptionStateDefaultFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-}
-
-writeSubscriptionStateLegacyEdgeGroupFixture() {
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{
-  "version": 1,
-  "active_group": "edge-group",
-  "groups": [
-    {
-      "id": "edge-group",
-      "name": "Edge Group",
-      "sources": [
-        {"id": "edge", "name": "Edge", "scheme": "https", "host": "example.com", "port": "443", "enabled": true, "sync_status": "failed", "last_sync_error": {"type": "unreachable", "message": "old"}}
-      ],
-      "user_groups": [
-        {"id": "team-a", "name": "Team A", "enabled": true, "allowed_sources": ["edge"], "traffic_limit_gb": "1", "uuid": "11111111-1111-1111-1111-111111111111"}
-      ],
-      "sync": {"enabled": true},
-      "traffic": {"user_groups": {"team-a": {"upload": 1, "download": 2, "sources": {"edge": {"upload": 1, "download": 2}}}}, "sources": {"edge": {"upload": 1, "download": 2}}, "admin": {"sources": {"edge": {"upload": 0, "download": 0}}}}
-    }
-  ]
-}
-JSON
-}
-
-writeSubscriptionStateMigratedEdgeGroupFixture() {
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"edge-group","groups":[{"id":"edge-group","name":"Edge Group","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","scheme":"https","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{"edge":{"upload":0,"download":0}}},"user_groups":{"team-a":{"upload":1,"download":2,"sources":{"edge":{"upload":1,"download":2}}}},"sources":{"edge":{"upload":1,"download":2}}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 }
 
 writeSubscriptionStateSourceCredentialFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 }
 
 writeSubscriptionStateSourceStatusFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"https","transport":"wireguard","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 }
 
 writeSubscriptionStateSourceRemoveFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"https","transport":"wireguard","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1,"download":2,"sources":{"edge":{"upload":1,"download":2}}}},"sources":{"edge":{"upload":1,"download":2}}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge","name":"Edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"example.com","port":443,"enabled":true,"sync_status":"failed","last_sync_error":{"type":"unreachable","message":"old"}}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["edge"],"traffic_limit_gb":1,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1,"download":2,"sources":{"edge":{"upload":1,"download":2}}}},"sources":{"edge":{"upload":1,"download":2}}}}]}
 JSON
 }
 
 writeSubscriptionStateStructureFoundationFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"remote_enabled":true,"quota_auto_apply":false},"traffic":{"admin":{"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 }
 
 prepareSubscriptionStateQuotaUsageFixture() {
     mkdir -p "$(subscriptionGroupsDir)"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":2097152,"download":1048576,"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"},"remote-edge":{"upload":1048576,"download":0,"updated_at":"2026-06-10 10:01:00"}}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":2097152,"download":1048576,"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"},"remote-edge":{"upload":1048576,"download":0,"updated_at":"2026-06-10 10:01:00"}}}}]}
 JSON
 }
 
@@ -254,117 +225,40 @@ runSubscriptionGroupStateStructureFoundationSerialRegression() {
     runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
 }
 
-runSubscriptionGroupStateStructureMigrationRegression() {
+runSubscriptionGroupStateStructureValidationRegression() {
+    local beforeSnapshot
+    local invalidFilter
+    local invalidSnapshot
+    local stateFile
     mkdir -p "$(subscriptionGroupsDir)"
-    writeSubscriptionStateLegacyEdgeGroupFixture
+    stateFile=$(subscriptionGroupsFile)
+    writeDefaultSubscriptionGroupsState "${stateFile}"
     ensureSubscriptionGroupsState
-    jq -e '
-      .version == 2 and
-      .active_group == "edge-group" and
-      (.groups[0].sync.enabled == true) and
-      (.groups[0].sync.interval_minutes == 10) and
-      (.groups[0].sync.last_run == "") and
-      (.groups[0].sync.last_status == "pending") and
-      (.groups[0].sync.failures == []) and
-      ((.groups[0].sync | has("remote_enabled")) | not) and
-      ((.groups[0].sync | has("event_enabled")) | not) and
-      (.groups[0].sync.quota_auto_apply == false) and
-      any(.groups[0].sources[]; .id == "main" and .role == "main" and .enabled == true) and
-      any(.groups[0].sources[]; .id == "edge" and .scheme == "https" and .transport == "https" and .port == 443) and
-      (.groups[0].user_groups[0].traffic_limit_gb == 1)
-    ' "$(subscriptionGroupsFile)" >/dev/null
 
-    subscriptionGroupsStateWrite '
-      .groups[0].sources |= map(if .id == "edge" then .enabled = "invalid" else . end) |
-      .groups[0].sync = {
-        enabled: "invalid",
-        interval_minutes: "15",
-        last_run: 123,
-        last_status: null,
-        failures: "invalid",
-        quota_auto_apply: "invalid"
-      }'
-    ensureSubscriptionGroupsState
-    jq -e '
-      (.groups[0].sync.enabled == true) and
-      (.groups[0].sync.interval_minutes == 15) and
-      (.groups[0].sync.last_run == "123") and
-      (.groups[0].sync.last_status == "pending") and
-      (.groups[0].sync.failures == []) and
-      (.groups[0].sync.quota_auto_apply == false) and
-      any(.groups[0].sources[]; .id == "edge" and .enabled == true)
-    ' "$(subscriptionGroupsFile)" >/dev/null
+    invalidSnapshot=$(jq '.version = 1' "${stateFile}")
+    printf '%s\n' "${invalidSnapshot}" >"${stateFile}"
+    if ensureSubscriptionGroupsState >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${stateFile}")" == "${invalidSnapshot}" ]]
 
-    subscriptionGroupsStateWrite '.groups[0].sync.interval_minutes = 60'
-    ensureSubscriptionGroupsState
-    jq -e '.groups[0].sync.interval_minutes == 10' "$(subscriptionGroupsFile)" >/dev/null
-
-    (
-        local summaryOutput
-        menuLine() { printf 'menu:%s\n' "$*"; }
-        summaryOutput=$(showSubscriptionGroupsStateSummary)
-        [[ "${summaryOutput}" == *"当前组：Edge Group(edge-group)"* ]]
-        [[ "${summaryOutput}" == *"分享订阅：1 个，启用 1 个"* ]]
-        [[ "${summaryOutput}" == *"服务器源：1 个，启用远端 0 个"* ]]
-    )
-
-    (
-        local resetRoot="${TMP_DIR}/subscription-groups-reset-failure"
-        local resetGroupsDir="${resetRoot}/groups"
-        local resetStateFile="${resetGroupsDir}/groups.json"
-        local resetErrorLog="${resetRoot}/error.log"
-        local resetCurrentBackup
-        local resetBeforeSnapshot
-        local resetStatus
-        local oldGroupsDir="${PADM_SUBSCRIPTION_GROUPS_DIR:-}"
-        local oldTmpDir="${TMPDIR:-}"
-
-        export PADM_SUBSCRIPTION_GROUPS_DIR="${resetGroupsDir}"
-        TMPDIR="${resetRoot}"
-        REGRESSION_ERROR_CARD_LOG="${resetErrorLog}"
-        mkdir -p "${resetGroupsDir}"
-        cat >"${resetStateFile}" <<'JSON'
-{"version":2,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-        resetBeforeSnapshot=$(<"${resetStateFile}")
-        resetCurrentBackup="${resetGroupsDir}/backups/groups-current.json"
-
-        showSubscriptionGroupsStateSummary() { return 0; }
-        autoRead() {
-            local targetVar=$3
-            printf -v "${targetVar}" '%s' "yes"
-        }
-        createSubscriptionGroupsBackup() {
-            mkdir -p "${resetGroupsDir}/backups" || return 1
-            cp "${resetStateFile}" "${resetCurrentBackup}" || return 1
-            printf '%s\n' "${resetCurrentBackup}"
-        }
-        migrateSubscriptionGroupsState() {
-            return 1
-        }
-
-        : >"${resetErrorLog}"
-        set +e
-        resetSubscriptionGroupsStateMenu >/dev/null 2>&1
-        resetStatus=$?
-        set -e
-        unset -f showSubscriptionGroupsStateSummary
-        unset -f statusCard
-        unset -f successCard
-        unset -f autoRead
-        unset -f createSubscriptionGroupsBackup
-        unset -f migrateSubscriptionGroupsState
-        [[ "${resetStatus}" == "1" ]]
-        [[ "$(<"${resetStateFile}")" == "${resetBeforeSnapshot}" ]]
-        grep -q '订阅状态重建失败，已恢复旧状态' "${resetErrorLog}"
-        [[ -f "${resetCurrentBackup}" ]]
-        if regressionFindHasMatches "${resetGroupsDir}" -maxdepth 1 -type f -name '.groups.json.reset.*'; then
+    for invalidFilter in \
+        '.unexpected = true' \
+        'del(.groups[0].admin)' \
+        'del(.groups[0].sources[0].transport)' \
+        '.groups[0].sync.remote_enabled = true'; do
+        writeDefaultSubscriptionGroupsState "${stateFile}"
+        beforeSnapshot=$(<"${stateFile}")
+        if subscriptionGroupsStateWrite "${invalidFilter}" >/dev/null 2>&1; then
             return 1
         fi
+        [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
+    done
 
-        if [[ -n "${oldGroupsDir}" ]]; then export PADM_SUBSCRIPTION_GROUPS_DIR="${oldGroupsDir}"; else unset PADM_SUBSCRIPTION_GROUPS_DIR; fi
-        if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-    )
+    if subscriptionGroupsStateWrite '.groups[0].sync.interval_minutes = 60' >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
 }
 
 runSubscriptionGroupStateStructureSourceCredentialRegression() {
@@ -508,7 +402,7 @@ runSubscriptionGroupStateStructureSourceRegression() {
 
 runSubscriptionGroupStateStructureSerialRegression() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
-    runRegressionStep subscription-state-structure-migration runSubscriptionGroupStateStructureMigrationRegression
+    runRegressionStep subscription-state-structure-validation runSubscriptionGroupStateStructureValidationRegression
     runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
 }
 
@@ -602,7 +496,7 @@ runSubscriptionGroupStateQuotaTransactionRollbackRegression() {
         quotaTxStateFile=$(subscriptionGroupsFile)
         quotaTxBackupDir="$(subscriptionGroupsBackupDir)"
         cat >"${quotaTxStateFile}" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{"team-a":{"upload":1073741824,"download":1,"sources":{"main":{"upload":1073741824,"download":1}}}},"sources":{"main":{"upload":2097152,"download":1048576,"updated_at":"2026-06-10 10:00:00"}}}}]}
 JSON
         quotaTxPlan=$(subscriptionQuotaDryRunPlan)
         createSubscriptionGroupsBackup() {
@@ -656,7 +550,7 @@ runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression() {
         quotaPartialStateFile=$(subscriptionGroupsFile)
         quotaPartialBackupDir=$(subscriptionGroupsBackupDir)
         cat >"${quotaPartialStateFile}" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"token":"","uuid":"11111111-1111-1111-1111-111111111111"},{"id":"team-b","name":"Team B","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":1,"token":"","uuid":"22222222-2222-2222-2222-222222222222"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
         createSubscriptionGroupsBackup() {
             local backupFile="${quotaPartialBackupDir}/groups-current.json"
@@ -795,7 +689,7 @@ prepareSubscriptionRemoteRestoreSelfReferenceFixture() {
 JSON
     mkdir -p "$(subscriptionGroupsDir)"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":false,"sync_status":"pending","control_token":"token-def"},{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.1","port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["self-ref"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":false,"sync_status":"pending","control_token":"token-def"},{"id":"self-ref","name":"SelfRef","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.1","port":39778,"enabled":true,"sync_status":"pending","control_token":"token"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["self-ref"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
 }
 
@@ -883,13 +777,16 @@ runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateDefaultFixture
 
-    local legacyBackup menuBackup
+    local beforeSnapshot legacyBackup menuBackup
     legacyBackup="${TMP_DIR}/legacy-groups-backup.json"
     cat >"${legacyBackup}" <<'JSON'
 {"version":1,"active_group":"legacy","groups":[{"id":"legacy","name":"Legacy","sources":[],"user_groups":[],"sync":{"enabled":true},"traffic":{}}]}
 JSON
-    restoreSubscriptionGroupsBackup "${legacyBackup}"
-    jq -e '.version == 2 and .active_group == "legacy" and any(.groups[0].sources[]; .role == "main" and .enabled == true) and (.groups[0].sync.enabled == true) and ((.groups[0].sync | has("remote_enabled")) | not)' "$(subscriptionGroupsFile)" >/dev/null
+    beforeSnapshot=$(<"$(subscriptionGroupsFile)")
+    if restoreSubscriptionGroupsBackup "${legacyBackup}" >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"$(subscriptionGroupsFile)")" == "${beforeSnapshot}" ]]
 
     menuBackup="${TMP_DIR}/legacy-menu-backup.json"
     jq '.active_group = "legacy" | .groups[0].id = "legacy" | .groups[0].name = "Legacy"' "$(subscriptionGroupsFile)" >"${menuBackup}"
@@ -1363,7 +1260,7 @@ runSubscriptionGroupSyncApplyFailureRegression() (
     export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
     TMPDIR="${syncRoot}/tmp"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
@@ -1464,7 +1361,7 @@ runSubscriptionGroupSyncReconcileRollbackRegression() (
     export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
     TMPDIR="${syncRoot}/tmp"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
@@ -1553,7 +1450,7 @@ runSubscriptionGroupSyncRemoteFailureRegression() (
     export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
     TMPDIR="${syncRoot}/tmp"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"https","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":false,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-a","name":"Edge A","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":true,"sync_status":"pending","control_token":"token-a"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[{"email":"sub_old-main"}]}}]}
@@ -1645,7 +1542,7 @@ runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
     TMPDIR="${syncRoot}/tmp"
     : >"${callLog}"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"real-sync-6","name":"Real Sync 6","enabled":true,"allowed_sources":["edge-b"],"traffic_limit_gb":0,"uuid":"3004d897-c06d-45a1-aa64-3d3266ca63d5"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-b","name":"Edge B","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.2","port":39778,"enabled":true,"sync_status":"pending","control_token":"token-b"}],"user_groups":[{"id":"real-sync-6","name":"Real Sync 6","enabled":true,"allowed_sources":["edge-b"],"traffic_limit_gb":0,"token":"","uuid":"3004d897-c06d-45a1-aa64-3d3266ca63d5"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[]}}]}
@@ -1671,10 +1568,6 @@ JSON
     installSubscriptionControlService() {
         printf 'install-control\n' >>"${callLog}"
         return 0
-    }
-    ensureSubscriptionControlNginxLocation() {
-        printf 'ensure-nginx-location\n' >>"${callLog}"
-        return 1
     }
     serviceQueueRestart() {
         printf 'restart:%s\n' "$*" >>"${callLog}"
@@ -1746,7 +1639,7 @@ runSubscriptionGroupSyncPublishRefreshInlineRegression() (
     TMPDIR="${syncRoot}/tmp"
     : >"${callLog}"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-disabled","name":"Edge Disabled","role":"secondary","scheme":"https","transport":"https","host":"edge.example.com","port":443,"enabled":false,"sync_status":"pending","control_token":"token-disabled"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"edge-disabled","name":"Edge Disabled","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"edge.example.com","port":443,"enabled":false,"sync_status":"pending","control_token":"token-disabled"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[]}}]}
@@ -1827,7 +1720,7 @@ runSubscriptionGroupSyncSingleConfigBackupRegression() (
     export PADM_SUBSCRIBE_DIR="${syncRoot}/subscribe"
     TMPDIR="${syncRoot}/tmp"
     cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"remote_enabled":false,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     cat >"${syncConfigFile}" <<'JSON'
 {"inbounds":[{"settings":{"clients":[]}}]}
@@ -1913,10 +1806,6 @@ runSubscriptionSyncReconcileEarlyExitRegression() (
             printf 'install\n' >>"${callLog}"
             return 0
         }
-        ensureSubscriptionControlNginxLocation() {
-            printf 'ensure\n' >>"${callLog}"
-            return 0
-        }
         serviceQueueRestart() {
             printf 'restart:%s\n' "$1" >>"${callLog}"
             return 0
@@ -1963,7 +1852,7 @@ runSubscriptionGroupsRestoreFailureRegression() (
     TMPDIR="${root}"
     mkdir -p "${groupsDir}"
     cat >"${stateFile}" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"remote_enabled":true,"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
+{"version":2,"active_group":"default","groups":[{"id":"default","name":"默认订阅组","admin":{"id":"admin","name":"我的订阅","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"本机","role":"main","transport":"local","scheme":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
 JSON
     beforeSnapshot=$(<"${stateFile}")
     cp "${stateFile}" "${currentBackup}"
@@ -1974,16 +1863,12 @@ JSON
     createSubscriptionGroupsBackup() {
         printf '%s\n' "${currentBackup}"
     }
-    migrateSubscriptionGroupsState() {
-        return 1
-    }
 
     set +e
     restoreSubscriptionGroupsBackup "${targetBackup}" >/dev/null 2>&1
     rc=$?
     set -e
     unset -f createSubscriptionGroupsBackup
-    unset -f migrateSubscriptionGroupsState
     [[ "${rc}" == "1" ]]
     [[ "$(<"${stateFile}")" == "${beforeSnapshot}" ]]
     [[ ! -e "${currentBackup}" ]]
@@ -2012,8 +1897,8 @@ runRegressionSubscriptionStateStructureFoundationSerial() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
 }
 
-runRegressionSubscriptionStateStructureMigrationSerial() {
-    runRegressionStep subscription-state-structure-migration-serial runSubscriptionGroupStateStructureMigrationRegression
+runRegressionSubscriptionStateStructureValidationSerial() {
+    runRegressionStep subscription-state-structure-validation-serial runSubscriptionGroupStateStructureValidationRegression
 }
 
 runRegressionSubscriptionStateStructureSourceCredential() {

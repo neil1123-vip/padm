@@ -729,7 +729,7 @@ writeCheckPortOpenNginxConfig() {
     local backupPath="${targetPath}.bak"
     local targetDir
     local nginxTestLog
-    nginxTestLog="$(padmFallbackTmpFilePath padm-check-port-open-nginx-test.log)"
+    nginxTestLog="$(padmTmpFilePath padm-check-port-open-nginx-test.log)"
     CHECK_PORT_OPEN_NGINX_CONFIG_ERROR=
     if ! validPortNumber "${port}" || ! padmIsValidHostName "${domain}"; then
         CHECK_PORT_OPEN_NGINX_CONFIG_ERROR="端口检测 Nginx 监听端口或域名不合法"

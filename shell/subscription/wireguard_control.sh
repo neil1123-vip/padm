@@ -28,7 +28,7 @@ subscriptionWireGuardConfigFile() {
 }
 
 subscriptionWireGuardNginxTestLog() {
-    padmFallbackTmpFilePath padm-wg-control-nginx-test.log
+    padmTmpFilePath padm-wg-control-nginx-test.log
 }
 
 subscriptionWireGuardDefaultListenPort() {
@@ -1228,7 +1228,7 @@ subscriptionWireGuardCreateInviteUnlocked() {
         if [[ "${cleanPending}" != "${currentPending}" ]]; then
             subscriptionWireGuardWriteState --argjson pendingInvites "${cleanPending}" '.pending_invites = $pendingInvites' || return 1
         fi
-        [[ "$(jq -r '.network | split("/")[1]' <<<"${state}")" == "24" ]] && errorCard "WireGuard 邀请地址池已耗尽" || errorCard "当前 WireGuard 网络不是受支持的 /24" "请使用旧版主控/被控凭据流程"
+        [[ "$(jq -r '.network | split("/")[1]' <<<"${state}")" == "24" ]] && errorCard "WireGuard 邀请地址池已耗尽" || errorCard "当前 WireGuard 网络不是受支持的 /24" "请修正主控 WireGuard 网络后重试"
         return 1
     }
     inviteId=
@@ -1583,65 +1583,6 @@ initSubscriptionWireGuardMain() {
     padmRunPortAllowTransaction initSubscriptionWireGuardMainApply "$@"
 }
 
-initSubscriptionWireGuardControlled() {
-    local address=
-    local controlPort
-    local publicKey
-    local previousState
-    local role
-    subscriptionWireGuardReadPreviousState previousState "WireGuard 状态读取失败" || return 1
-    role=$(jq -r '.role' <<<"${previousState}") || return 1
-    if [[ "${role}" == "main" ]]; then
-        errorCard "当前机器已初始化为主控" "第一版只支持星型拓扑，主控不能再作为被控"
-        return 1
-    fi
-    if [[ "${role}" == "uninitialized" ]]; then
-        subscriptionControlledTransitionPreflight || return 1
-    fi
-    installSubscriptionWireGuardTools || { errorCard "WireGuard 安装失败"; return 1; }
-    subscriptionWireGuardEnsureKeys || { errorCard "WireGuard 密钥生成失败"; return 1; }
-    controlPort=$(subscriptionWireGuardDefaultControlPort)
-    autoRead wg_controlled_address "请输入本机 WireGuard 内网地址[默认 10.77.0.2/24]：" address
-    [[ -n "${address}" ]] || address="10.77.0.2/24"
-    if ! subscriptionWireGuardValidIPv4Cidr "${address}"; then
-        errorCard "WireGuard 内网地址格式无效" "示例：10.77.0.2/24"
-        return 1
-    fi
-    publicKey=$(subscriptionWireGuardPublicKey) || {
-        errorCard "WireGuard 公钥读取失败"
-        return 1
-    }
-    subscriptionWireGuardValidPublicKeyValue "${publicKey}" || {
-        errorCard "WireGuard 公钥无效"
-        return 1
-    }
-    subscriptionWireGuardWriteState \
-      --arg address "${address}" \
-      --arg publicKey "${publicKey}" \
-      --argjson controlPort "${controlPort}" \
-      '.enabled = true | .role = "controlled" | .address = $address | .public_key = $publicKey | .control_port = $controlPort | del(.join_invite_id)' || {
-        errorCard "WireGuard 被控状态写入失败"
-        return 1
-      }
-    applySubscriptionWireGuardService || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控服务启动失败" || return 1
-        errorCard "WireGuard 被控服务启动失败"
-        return 1
-    }
-    subscriptionWireGuardWaitForAddress "${address}" || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控地址就绪失败" || return 1
-        errorCard "WireGuard 被控地址就绪失败"
-        return 1
-    }
-    [[ -f "$(subscriptionWireGuardStateFile)" && -f "$(subscriptionWireGuardConfigFile)" ]] || {
-        subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard 被控配置未落地" || return 1
-        errorCard "WireGuard 被控配置未落地"
-        return 1
-    }
-    subscriptionWireGuardInstallControlPlane "${previousState}" "被控" || return 1
-    successCard "WireGuard 被控已初始化" "接口：$(subscriptionWireGuardInterface)" "内网地址：${address}" "控制面：WireGuard 内网 ${controlPort} 端口" "无需安装公网订阅服务；把被控接入凭据交回主控即可"
-}
-
 showSubscriptionWireGuardMainCredential() {
     local state
     local payload
@@ -1669,7 +1610,7 @@ showSubscriptionWireGuardMainCredential() {
         errorCard "主控状态不完整，无法导出接入凭据" "请先修复/重启 WireGuard 控制面"
         return 1
     }
-    statusCard "本机主控接入凭据" "主控接入凭据：$(subscriptionWireGuardCredentialEncode main "${payload}")" "用途：复制到被控服务器导入" "凭据只包含 WireGuard 入网信息，不包含公网订阅地址"
+    statusCard "本机主控接入凭据" "主控接入凭据：$(subscriptionWireGuardCredentialEncode main "${payload}")" "用途：维护已有被控连接；首次接入请创建邀请" "凭据只包含 WireGuard 入网信息，不包含公网订阅地址"
 }
 
 subscriptionWireGuardImportMainCredentialJsonUnlocked() {
@@ -1680,7 +1621,7 @@ subscriptionWireGuardImportMainCredentialJsonUnlocked() {
     currentState=$(subscriptionWireGuardReadState) || return 1
     [[ "${currentState}" == "${expectedState}" ]] || { errorCard "WireGuard 状态已变化" "请重新导入主控凭据"; return 1; }
     if [[ "$(jq -r '.role' <<<"${currentState}")" != "controlled" ]]; then
-        errorCard "请先初始化本机为被控" "第一版星型拓扑要求被控导入主控凭据"
+        errorCard "当前机器不是被控" "请先使用主控邀请完成接入"
         return 1
     fi
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
@@ -1720,7 +1661,7 @@ importSubscriptionWireGuardMainCredential() {
     fi
     subscriptionWireGuardImportMainCredentialJson "${credentialJson}" || return 1
     endpoint="$(jq -r '.endpoint_host' <<<"${credentialJson}"):$(jq -r '.listen_port' <<<"${credentialJson}")"
-    successCard "主控接入凭据已导入" "主控端点：${endpoint}" "下一步：查看本机被控接入凭据，并复制回主控添加"
+    successCard "主控接入凭据已导入" "主控端点：${endpoint}" "如身份信息发生变化，请在主控更新这个已有被控连接"
 }
 
 showSubscriptionWireGuardControlledCredential() {
@@ -1730,7 +1671,7 @@ showSubscriptionWireGuardControlledCredential() {
     local token
     state=$(subscriptionWireGuardReadState)
     if [[ "$(jq -r '.role' <<<"${state}")" != "controlled" ]]; then
-        errorCard "本机还不是被控" "请先初始化本机为被控，并导入主控接入凭据"
+        errorCard "本机还不是被控" "请先使用主控邀请完成接入"
         return 1
     fi
     subscriptionControlEnsureToken || {
@@ -1755,69 +1696,7 @@ showSubscriptionWireGuardControlledCredential() {
         errorCard "被控状态不完整，无法导出接入凭据" "请先修复/重启 WireGuard 控制面"
         return 1
     }
-    statusCard "本机被控接入凭据" "被控接入凭据：$(subscriptionWireGuardCredentialEncode controlled "${payload}")" "用途：复制到主控服务器添加被控" "控制接口只通过 WireGuard 内网访问" "无需安装公网订阅服务"
-}
-
-subscriptionWireGuardAddPeerFromCredentialUnlocked() {
-    local alias=$1
-    local credentialJson=$2
-    local address
-    local host
-    local publicKey
-    local controlPort
-    local token
-    local previousState
-    local previousGroupsState
-    if [[ "$(subscriptionWireGuardRole)" != "main" ]]; then
-        errorCard "只有主控可以添加被控服务器" "第一版只支持一台主控管理多台被控"
-        return 1
-    fi
-    subscriptionWireGuardValidAlias "${alias}" || return 1
-    [[ "${alias,,}" != "main" ]] || {
-        errorCard "main 是保留源 ID，不能作为被控服务器别名"
-        return 1
-    }
-    [[ "$(jq -r '.kind' <<<"${credentialJson}")" == "controlled" ]] || return 1
-    subscriptionWireGuardValidateControlledCredentialJson "${credentialJson}" || return 1
-    address=$(jq -r '.address' <<<"${credentialJson}")
-    host=$(subscriptionWireGuardAddressHost "${address}")
-    publicKey=$(jq -r '.public_key' <<<"${credentialJson}")
-    controlPort=$(jq -r '.control_port' <<<"${credentialJson}")
-    token=$(jq -r '.token' <<<"${credentialJson}")
-    subscriptionWireGuardReadPreviousStateAndGroups previousState previousGroupsState "" "订阅组状态读取失败" || return 1
-    subscriptionWireGuardPeerIdentityAvailable "${previousState}" "${alias}" "${address}" "${publicKey}" || {
-        errorCard "WireGuard 被控地址或公钥与现有 Peer 冲突"
-        return 1
-    }
-    subscriptionWireGuardWriteState \
-      --arg id "${alias}" \
-      --arg address "${address}" \
-      --arg publicKey "${publicKey}" \
-      'if any(.peers[]?; .id == $id) then .peers |= map(if .id == $id then .address = $address | .public_key = $publicKey | .enabled = true else . end) else .peers += [{id:$id, name:$id, address:$address, public_key:$publicKey, endpoint:"", enabled:true}] end' || return 1
-    if ! applySubscriptionWireGuardService; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "WireGuard 被控服务器服务应用失败" || return 1
-        return 1
-    fi
-    if ! addSubscriptionSourceState "${alias}" "${alias}" "${host}" "${controlPort}"; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源状态写入失败" || return 1
-        return 1
-    fi
-    if ! setSubscriptionSourceCredential "${alias}" "${host}" "${controlPort}" "${token}"; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "订阅来源凭据写入失败" || return 1
-        return 1
-    fi
-    if ! subscriptionWireGuardWriteState --arg id "${alias}" --arg host "${host}" '
-      if has("pending_invites") then
-        .pending_invites = [.pending_invites[]? | select(.alias != $id and (.address | split("/")[0]) != $host)]
-      else . end
-    '; then
-        subscriptionWireGuardRestoreStateAndGroupsOrReport "${previousState}" "${previousGroupsState}" "待完成邀请清理失败" || return 1
-        return 1
-    fi
-}
-
-subscriptionWireGuardAddPeerFromCredential() {
-    subscriptionGroupsWithLock subscriptionWireGuardAddPeerFromCredentialUnlocked "$@"
+    statusCard "本机被控接入凭据" "被控接入凭据：$(subscriptionWireGuardCredentialEncode controlled "${payload}")" "用途：在主控更新已有被控连接；首次接入请使用回执" "控制接口只通过 WireGuard 内网访问" "无需安装公网订阅服务"
 }
 
 subscriptionWireGuardUpdatePeerFromCredentialUnlocked() {

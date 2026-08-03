@@ -29,7 +29,7 @@ listRegressionTransactionSubscriptionChildSelectors() {
         subscribe-user-output-transaction \
         remove-user-subscription-menu-failure \
         user-subscription-menu-mutation-failure \
-        remote-subscribe-fetch
+        remote-subscribe-snapshots
 }
 
 listRegressionTransactionCoreSelectorEntries() {
@@ -474,7 +474,7 @@ registerRegressionFunctionLeaf subscribe-salt-write-transaction runRegressionTra
 registerRegressionFunctionLeaf subscribe-user-output-transaction runRegressionTransactionLegacyLeafWithCompat runSubscribeUserOutputTransactionRegression
 registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRegressionTransactionLegacyLeafWithCompat runRemoveUserSubscriptionMenuFailureRegression
 registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runRegressionTransactionLegacyLeafWithCompat runUserSubscriptionMenuMutationFailureRegression
-registerRegressionFunctionLeaf remote-subscribe-fetch runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeFetchRegression
+registerRegressionFunctionLeaf remote-subscribe-snapshots runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeSnapshotRegression
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
 registerRegressionFunctionLeaf uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 registerRegressionFunctionLeaf clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression

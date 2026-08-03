@@ -15,7 +15,7 @@ validateVlessEncryptionConfig() {
     local xrayConfigDir
     xrayBinary=$(manageXrayBinaryPath)
     xrayConfigDir=$(manageXrayConfigDir)
-    "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(padmFallbackTmpFilePath padm-xray-test.log)" 2>&1
+    "${xrayBinary}" -test -confdir "${xrayConfigDir}" >"$(padmTmpFilePath padm-xray-test.log)" 2>&1
 }
 
 manageXrayBinaryPath() {
@@ -383,7 +383,7 @@ setVlessRealityEncryption() {
         fi
         echoContent title "\n┌─ $(xrayConfigValidationFailureTitle) ─────────────────────────────────"
         menuLine "已回滚本次 VLESS Encryption 修改"
-        menuLine "排查日志：$(padmFallbackTmpFilePath padm-xray-test.log)"
+        menuLine "排查日志：$(padmTmpFilePath padm-xray-test.log)"
         menuClose
         return 1
     fi
@@ -680,7 +680,7 @@ unInstallSingBox() {
     }
     if [[ -n "${singBoxConfigPath}" ]]; then
         if [[ -x "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" ]]; then
-            validationLog=$(padmFallbackTmpFilePath padm-sing-box-uninstall.log)
+            validationLog=$(padmTmpFilePath padm-sing-box-uninstall.log)
             if ! singBoxMergeConfigForValidation "${PADM_SINGBOX_BINARY:-/etc/padm/sing-box/sing-box}" "${validationLog}" check; then
                 singBoxProtocolUninstallRollback "${uninstallBackupDir}" "${serviceWasRunning}" "${serviceWasEnabled}" false "sing-box 配置校验失败"
                 return 1
@@ -795,7 +795,7 @@ traditionalTlsHasH2Fallback() {
 }
 
 traditionalTlsAlpnTestLog() {
-    padmFallbackTmpFilePath padm-alpn-xray-test.log
+    padmTmpFilePath padm-alpn-xray-test.log
 }
 
 restoreTraditionalTlsAlpnBackup() {
@@ -1630,7 +1630,7 @@ unInstall() {
     unInstallApply "$@" || uninstallStatus=$?
     if [[ "${nginxWasRunning}" == "true" ]] && ! nginxRunning; then
         local restoreErrorLog
-        restoreErrorLog=$(padmFallbackTmpFilePath padm-nginx-uninstall-restore.log)
+        restoreErrorLog=$(padmTmpFilePath padm-nginx-uninstall-restore.log)
         if ! PADM_NGINX_ERROR_LOG="${restoreErrorLog}" runCoreServiceActionAllowFailure handleNginx start restore; then
             rm -f -- "${restoreErrorLog}" >/dev/null 2>&1 || true
             errorCard "卸载后 Nginx 原运行状态恢复失败，请手动检查 Nginx 服务"
@@ -2428,10 +2428,6 @@ renderAllSubscribeUserOutputs() {
                 fi
             done <<<"${publishAccounts}"
         fi
-        if [[ "${remoteScopeEnabled}" == "true" && "${SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE}" != "0" ]]; then
-            subscriptionActiveGroupRead -e 'any(.sources[]?; .role != "main" and .enabled == true and .transport != "wireguard")' >/dev/null 2>&1
-            SUBSCRIPTION_PUBLISH_ACCOUNTS_HAS_REMOTE=$?
-        fi
     else
         if ! subscriptionPublishAccounts "${localBase}" >/dev/null 2>&1; then
             return 1
@@ -3114,7 +3110,7 @@ validateXHTTPConfigUpdate() {
 }
 
 xhttpConfigTestLog() {
-    padmFallbackTmpFilePath padm-xhttp-test.log
+    padmTmpFilePath padm-xhttp-test.log
 }
 
 commitXHTTPConfigUpdate() {
@@ -3607,7 +3603,7 @@ validateTuicConfigUpdate() {
 }
 
 tuicConfigTestLog() {
-    padmFallbackTmpFilePath padm-tuic-test.log
+    padmTmpFilePath padm-tuic-test.log
 }
 
 commitTuicConfigUpdate() {

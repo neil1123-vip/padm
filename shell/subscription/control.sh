@@ -33,22 +33,10 @@ subscriptionRemoteSourceSelfReference() {
     [[ -n "${selfHost}" && "${sourceHost}" == "${selfHost}" ]]
 }
 
-subscriptionRemoteSourceUsesWireGuard() {
-    local source=$1
-    jq -e '(.transport // .scheme // "") == "wireguard"' <<<"${source}" >/dev/null 2>&1
-}
-
 subscriptionRemoteControlUrl() {
     local source=$1
     local endpoint=$2
-    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        subscriptionWireGuardControlUrl "${source}" "${endpoint}"
-    else
-        jq -er --arg endpoint "${endpoint}" '
-          select((.scheme == "https" or .scheme == "http") and (.host | type == "string" and length > 0) and (.port | type == "number")) |
-          .scheme + "://" + .host + ":" + (.port | tostring) + "/s/control/" + $endpoint
-        ' <<<"${source}"
-    fi
+    subscriptionWireGuardControlUrl "${source}" "${endpoint}"
 }
 
 subscriptionRemoteWireGuardPeerStateFromSource() {
@@ -82,7 +70,6 @@ subscriptionRemoteWireGuardWaitForPeerEndpointFromSource() {
     local endpoint=
     local handshake=0
     local tryIndex
-    subscriptionRemoteSourceUsesWireGuard "${source}" || return 0
     peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
     [[ -n "${peerState}" ]] || return 0
     [[ "${baselineHandshake}" =~ ^[0-9]+$ ]] || baselineHandshake=0
@@ -146,7 +133,7 @@ subscriptionRemoteControlRequest() {
     token=$(jq -r '.control_token // empty' <<<"${source}") || return 1
     [[ -n "${token}" ]] || return 2
     url=$(subscriptionRemoteControlUrl "${source}" "${endpoint}") || return 1
-    if [[ "${endpoint}" == "sync" || "${endpoint}" == "subscribe" ]]; then
+    if [[ "${endpoint}" == "sync" ]]; then
         maxTime=210
     else
         maxTime=15
@@ -162,19 +149,13 @@ subscriptionRemoteControlRequest() {
         -w '\n%{http_code}'
         "${url}"
     )
-    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
-        if [[ -n "${peerState}" ]]; then
-            IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
-        fi
+    peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+    if [[ -n "${peerState}" ]]; then
+        IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
     if ! response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null); then
-        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || return 1
-        else
-            return 1
-        fi
+        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+        response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" <<<"${payload}" 2>/dev/null) || return 1
     fi
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
@@ -237,11 +218,9 @@ subscriptionRemoteControlHealth() {
         jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"missing_token", error_detail:{type:"missing_token", message:"未配置控制 token"}}'
         return 0
     fi
-    if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-        peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
-        if [[ -n "${peerState}" ]]; then
-            IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
-        fi
+    peerState=$(subscriptionRemoteWireGuardPeerStateFromSource "${source}" 2>/dev/null || true)
+    if [[ -n "${peerState}" ]]; then
+        IFS=$'\t' read -r peerPublicKey baselineEndpoint baselineHandshake <<<"${peerState}"
     fi
     url=$(subscriptionRemoteControlUrl "${source}" health) || return 1
     curlArgs=(
@@ -253,16 +232,11 @@ subscriptionRemoteControlHealth() {
         "${url}"
     )
     response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
-        if subscriptionRemoteSourceUsesWireGuard "${source}"; then
-            subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
-            response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
-                jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
-                return 0
-            }
-        else
+        subscriptionRemoteWireGuardWaitForPeerEndpointFromSource "${source}" "" "" "${baselineEndpoint}" "${baselineHandshake}" >/dev/null 2>&1 || true
+        response=$(subscriptionRemoteControlCurl "${token}" "${curlArgs[@]}" 2>/dev/null) || {
             jq -n --arg id "$(jq -r '.id' <<<"${source}")" --arg name "$(jq -r '.name' <<<"${source}")" '{id:$id, name:$name, ok:false, status:"unreachable", error_detail:{type:"unreachable", message:"不可达或健康检查失败"}}'
             return 0
-        fi
+        }
     }
     statusCode=${response##*$'\n'}
     body=${response%$'\n'*}
@@ -373,6 +347,7 @@ subscriptionRemoteSyncPlanForSource() {
     local sourceId
     local payload
     local response
+    local responsePlan
     local errorMessage
 
     sourceId=$(jq -r '.id' <<<"${source}")
@@ -384,7 +359,17 @@ subscriptionRemoteSyncPlanForSource() {
     else
         if response=$(subscriptionRemoteControlRequest "${source}" sync "${payload}" 2>/dev/null); then
             if jq -e '.ok == true' <<<"${response}" >/dev/null 2>&1; then
-                jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"success", dry_run:$dryRun, request:$payload, response:$response}'
+                responsePlan=$(jq -c '.plan' <<<"${response}") || return 1
+                if jq -e --argjson dryRun "${dryRun}" '
+                  (.dry_run == $dryRun) and
+                  (.changed | type == "boolean") and
+                  (.plan | type == "object")
+                ' <<<"${response}" >/dev/null 2>&1 && subscriptionSyncValidateAccountPlan "${responsePlan}"; then
+                    jq -n --arg sourceId "${sourceId}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"success", dry_run:$dryRun, request:$payload, response:$response}'
+                else
+                    errorMessage="远端同步响应格式无效"
+                    jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"invalid_response", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
+                fi
             else
                 errorMessage=$(subscriptionRemoteResponseErrorMessage "${response}")
                 jq -n --arg sourceId "${sourceId}" --arg errorMessage "${errorMessage}" --argjson payload "${payload}" --argjson response "${response}" --argjson dryRun "${dryRun}" '{source_id:$sourceId, status:"remote_error", error:$errorMessage, error_detail:{type:"remote_error", message:$errorMessage}, dry_run:$dryRun, request:$payload, response:$response}'
@@ -414,6 +399,7 @@ runSubscriptionRemoteSync() {
     local sources
     local desiredUsersBySource='{}'
     local sourceId
+    local source
     local sourceResult
     local syncResults
     local status
@@ -426,6 +412,7 @@ runSubscriptionRemoteSync() {
     local sourceSnapshots
     local expectedAccounts
     local snapshotInvalid
+    local snapshotError
     sources=$(subscriptionRemoteControlSources) || return 1
     if jq -e 'length > 0' <<<"${sources}" >/dev/null 2>&1; then
         desiredUsersBySource=$(subscriptionRemoteDesiredUsersBySource "${sources}") || return 1
@@ -440,9 +427,11 @@ runSubscriptionRemoteSync() {
     while IFS= read -r sourceResult; do
         sourceId=$(jq -r '.source_id // empty' <<<"${sourceResult}") || return 1
         [[ -n "${sourceId}" ]] || return 1
+        source=$(jq -ce --arg sourceId "${sourceId}" '.[] | select(.id == $sourceId)' <<<"${sources}") || return 1
         status=$(jq -r '.status // empty' <<<"${sourceResult}") || return 1
         stateWriteFailed=false
         snapshotInvalid=false
+        snapshotError=
         case "${status}" in
         self_reference)
             errorMessage=$(jq -r '.error_detail.message // "服务器源指向当前订阅服务，已跳过以避免递归同步"' <<<"${sourceResult}") || return 1
@@ -455,8 +444,8 @@ runSubscriptionRemoteSync() {
             failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 未配置控制 token"]' <<<"${failures}")
             ;;
         success)
-            changed=$(jq -r 'if (.response | has("changed")) then .response.changed else true end' <<<"${sourceResult}") || return 1
-            plan=$(jq -c '.response.plan // {create: [], remove: []}' <<<"${sourceResult}") || return 1
+            changed=$(jq -r '.response.changed' <<<"${sourceResult}") || return 1
+            plan=$(jq -c '.response.plan' <<<"${sourceResult}") || return 1
             if jq -e '.response | has("subscriptions")' <<<"${sourceResult}" >/dev/null 2>&1; then
                 expectedAccounts=$(jq -c --arg sourceId "${sourceId}" '[.[$sourceId][]?.account] | sort' <<<"${desiredUsersBySource}") || return 1
                 if sourceSnapshots=$(jq -ce --argjson expectedAccounts "${expectedAccounts}" '
@@ -478,12 +467,18 @@ runSubscriptionRemoteSync() {
                     snapshots=$(jq -c --arg sourceId "${sourceId}" --argjson sourceSnapshots "${sourceSnapshots}" '. + {($sourceId):$sourceSnapshots}' <<<"${snapshots}") || return 1
                 else
                     snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
-                    failures=$(jq --arg sourceId "${sourceId}" '. + ["远程服务器源 " + $sourceId + " 返回的订阅快照格式无效"]' <<<"${failures}") || return 1
+                    snapshotError="返回的订阅快照格式无效"
+                    failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${snapshotError}" '. + ["远程服务器源 " + $sourceId + " " + $errorMessage]' <<<"${failures}") || return 1
                     snapshotInvalid=true
                 fi
+            else
+                snapshots=$(jq -c --arg sourceId "${sourceId}" '. + {($sourceId):null}' <<<"${snapshots}") || return 1
+                snapshotError="未返回完整订阅快照"
+                failures=$(jq --arg sourceId "${sourceId}" --arg errorMessage "${snapshotError}" '. + ["远程服务器源 " + $sourceId + " " + $errorMessage]' <<<"${failures}") || return 1
+                snapshotInvalid=true
             fi
             if [[ "${snapshotInvalid}" == "true" ]]; then
-                setSubscriptionSourceSyncFailure "${sourceId}" invalid_response "返回的订阅快照格式无效" || stateWriteFailed=true
+                setSubscriptionSourceSyncFailure "${sourceId}" invalid_response "${snapshotError}" || stateWriteFailed=true
             else
                 setSubscriptionSourceSyncStatus "${sourceId}" success "${changed}" "${plan}" || stateWriteFailed=true
             fi
@@ -589,7 +584,7 @@ from threading import Lock
 SCRIPT_PATH = ${scriptPathLiteral}
 TOKEN_FILE = ${tokenFileLiteral}
 VERSION = ${scriptVersionLiteral}
-CAPABILITIES = ["health", "sync", "subscribe"]
+CAPABILITIES = ["health", "sync"]
 PORT = $(subscriptionControlPort)
 MAX_BODY_SIZE = 256 * 1024
 CONTROL_REQUEST_LOCK = Lock()
@@ -686,15 +681,13 @@ class Handler(BaseHTTPRequestHandler):
         error = body.get("error", "")
         if error == "unauthorized":
             return 401
-        if endpoint in ("sync", "subscribe") and error in ("invalid_payload", "empty_payload"):
+        if endpoint == "sync" and error in ("invalid_payload", "empty_payload"):
             return 400
-        if endpoint == "subscribe" and error == "not_found":
-            return 404
         if endpoint == "health":
             return 503
         if error in ("script_timeout", "script_failed", "script_exec_failed", "invalid_response"):
             return 503
-        if endpoint in ("sync", "subscribe"):
+        if endpoint == "sync":
             return 503
         return 500
 
@@ -776,7 +769,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         endpoint = self.endpoint()
-        if endpoint not in ("sync", "subscribe"):
+        if endpoint != "sync":
             self.respond(404, {"ok": False, "error": "not_found"})
             return
         if not self.authorized():
@@ -1238,21 +1231,19 @@ subscriptionControlApplySyncUnlocked() {
       def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
       def valid_uuid: type == "string" and test("^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$");
       type == "object" and
-      (.desired_users? | type == "array") and
-      ((has("dry_run") | not) or (.dry_run | type == "boolean")) and
-      ((has("include_subscriptions") | not) or (.include_subscriptions | type == "boolean")) and
+      (keys == ["desired_users", "dry_run"]) and
+      (.desired_users | type == "array") and
+      (.dry_run | type == "boolean") and
       all(.desired_users[]?; type == "object" and
+        (keys == ["id", "uuid"]) and
         (.id | valid_id) and
-        (has("uuid") and (.uuid | valid_uuid)) and
-        ((has("name") | not) or (.name | type == "string")) and
-        ((has("account") | not) or (.account | type == "string")) and
-        ((has("traffic_limit_gb") | not) or ((.traffic_limit_gb | type) as $type | $type == "number" or $type == "string"))) and
+        (.uuid | valid_uuid)) and
       ([.desired_users[]?.id] | length) == ([.desired_users[]?.id] | unique | length)
     ' <<<"${payload}" >/dev/null 2>&1; then
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
     fi
-    dryRun=$(jq -r 'if has("dry_run") then .dry_run else true end' <<<"${payload}")
+    dryRun=$(jq -r '.dry_run' <<<"${payload}")
     desiredUsers=$(jq '[.desired_users[]? | {id, uuid}]' <<<"${payload}") || {
         jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"同步请求体格式不正确"}}'
         return 1
@@ -1344,15 +1335,17 @@ handleSubscriptionControl() {
     local token=${2:-${PADM_CONTROL_TOKEN:-}}
     local payload=${3:-}
     local currentToken=
-    local account=
-    ensureSubscriptionGroupsState
     currentToken=$(subscriptionControlToken 2>/dev/null || true)
     if [[ -z "${currentToken}" || "${token}" != "${currentToken}" ]]; then
         jq -n '{ok:false, error:"unauthorized", error_detail:{type:"unauthorized", message:"控制 token 验证失败"}}'
         return 1
     fi
+    if ! ensureSubscriptionGroupsState; then
+        jq -n '{ok:false, error:"invalid_state", error_detail:{type:"invalid_state", message:"订阅组状态版本或结构无效"}}'
+        return 1
+    fi
     if [[ "${endpoint}" == "health" ]]; then
-        jq -n --arg version "$(getScriptVersion)" '{ok:true, version:$version, capabilities:["health","sync","subscribe"]}'
+        jq -n --arg version "$(getScriptVersion)" '{ok:true, version:$version, capabilities:["health","sync"]}'
     elif [[ "${endpoint}" == "sync" ]]; then
         if [[ -z "${payload}" ]]; then
             payload=$(cat)
@@ -1362,92 +1355,11 @@ handleSubscriptionControl() {
             return 1
         fi
         subscriptionControlApplySync "${payload}"
-    elif [[ "${endpoint}" == "subscribe" ]]; then
-        if [[ -z "${payload}" ]]; then
-            payload=$(cat)
-        fi
-        if [[ -z "${payload}" ]]; then
-            jq -n '{ok:false, error:"empty_payload", error_detail:{type:"empty_payload", message:"订阅请求体为空"}}'
-            return 1
-        fi
-        if ! jq -e '
-          def valid_id: type == "string" and length > 0 and test("^[A-Za-z0-9_-]+$");
-          type == "object" and (.account? | valid_id)
-        ' <<<"${payload}" >/dev/null 2>&1; then
-            jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
-            return 1
-        fi
-        account=$(jq -r '.account' <<<"${payload}") || {
-            jq -n '{ok:false, error:"invalid_payload", error_detail:{type:"invalid_payload", message:"订阅请求体格式不正确"}}'
-            return 1
-        }
-        subscriptionControlRenderSubscribeAccount "${account}"
     else
         jq -n '{ok:false, error:"unknown_endpoint", error_detail:{type:"unknown_endpoint", message:"未知控制端点"}}'
         return 1
     fi
 }
-
-subscriptionControlRenderSubscribeAccount() (
-    local account=$1
-    local subscribeRoot=
-    local localBase=
-    local defaultFile=
-    local clashFile=
-    local singBoxFile=
-    local defaultContent=
-    local clashContent=
-    local singBoxContent='[]'
-
-    [[ -n "${account}" ]] || return 1
-    padmCreateTmpRootPath subscribeRoot padm-control-subscribe.XXXXXX -d || return 1
-    export PADM_SUBSCRIBE_LOCAL_DIR="${subscribeRoot}/subscribe_local"
-    export PADM_SUBSCRIBE_DIR="${subscribeRoot}/subscribe"
-    mkdir -p "${PADM_SUBSCRIBE_LOCAL_DIR}/default" "${PADM_SUBSCRIBE_LOCAL_DIR}/clashMeta" "${PADM_SUBSCRIBE_LOCAL_DIR}/sing-box" || {
-        padmRemoveCleanupPath "${subscribeRoot}"
-        return 1
-    }
-    if ! showAccounts >/dev/null 2>&1; then
-        padmRemoveCleanupPath "${subscribeRoot}"
-        jq -n --arg account "${account}" '{ok:false, error:"generation_failed", error_detail:{type:"generation_failed", message:"远端账号订阅输出生成失败"}, account:$account}'
-        return 1
-    fi
-
-    localBase=$(subscribeLocalBaseDir)
-    defaultFile="${localBase}/default/${account}"
-    clashFile="${localBase}/clashMeta/${account}"
-    singBoxFile="${localBase}/sing-box/${account}"
-
-    if [[ ! -f "${defaultFile}" && ! -f "${clashFile}" && ! -f "${singBoxFile}" ]]; then
-        padmRemoveCleanupPath "${subscribeRoot}"
-        jq -n --arg account "${account}" '{ok:false, error:"not_found", error_detail:{type:"not_found", message:"远端账号订阅输出不存在"}, account:$account}'
-        return 1
-    fi
-
-    if [[ -f "${defaultFile}" ]]; then
-        defaultContent=$(base64 <"${defaultFile}" | tr -d '\n') || {
-            padmRemoveCleanupPath "${subscribeRoot}"
-            jq -n --arg account "${account}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端默认订阅输出编码失败"}, account:$account}'
-            return 1
-        }
-    fi
-    [[ -f "${clashFile}" ]] && clashContent=$(<"${clashFile}")
-    if [[ -f "${singBoxFile}" ]]; then
-        singBoxContent=$(jq -c . "${singBoxFile}" 2>/dev/null) || {
-            padmRemoveCleanupPath "${subscribeRoot}"
-            jq -n --arg account "${account}" '{ok:false, error:"invalid_response", error_detail:{type:"invalid_response", message:"远端 sing-box 订阅输出损坏"}, account:$account}'
-            return 1
-        }
-    fi
-
-    padmRemoveCleanupPath "${subscribeRoot}"
-    jq -n \
-        --arg account "${account}" \
-        --arg default "${defaultContent}" \
-        --arg clashMeta "${clashContent}" \
-        --argjson singBox "${singBoxContent}" \
-        '{ok:true, account:$account, default:$default, clash_meta:$clashMeta, sing_box:$singBox}'
-)
 
 subscriptionControlRenderSubscribeAccounts() (
     local desiredUsers=$1

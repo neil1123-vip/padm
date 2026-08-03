@@ -301,7 +301,7 @@ The subscription system is role-based instead of one flat menu.
 | --- | --- | --- |
 | 🟡 Uninitialized | `This server is the controller` / `This server is controlled` | Decide this server's subscription role first. |
 | 🟢 Controller | `Publish subscriptions` / `Multi-server coordination` / `Controller maintenance & troubleshooting` | Create user subscriptions, publish links, add controlled servers, run sync, and handle quotas. |
-| 🔵 Controlled | `Join controller` / `View local status` / `Controlled maintenance & troubleshooting` | Import controller credentials, provide this server's nodes to the controller, and view WireGuard/sync state. |
+| 🔵 Controlled | `Join controller` / `View local status` / `Controlled maintenance & troubleshooting` | Paste a controller invite, provide this server's nodes to the controller, and view WireGuard/sync state. |
 
 Controller and local-only modes now share one `Subscription sync` menu under maintenance: run a full sync, enable/disable automatic sync, set the interval, open status/troubleshooting, or manage usage and quotas. The automatic-sync switch controls both immediate sync after configuration changes and cron; manual full sync remains available when it is off.
 
@@ -325,10 +325,10 @@ Recommended multi-server flow:
 3. Back on the controller, use `Add/remove controlled server` -> `Complete controlled-server join` and paste the receipt. The reserved alias drives the peer, source, and control-token transaction, followed by a health check for that source only.
 4. To temporarily exclude one controlled server, use `Enable/disable controlled server`. Disabling preserves its peer, token, and history; the next full sync removes that source's nodes from the public subscription.
 5. Pending invites can be viewed or cancelled by alias. Invites and receipts are bearer secrets, so normal status, health output, and pending lists never show their complete values. Cancel and recreate a lost invite.
-6. Legacy `main` / `controlled` credentials remain available through explicitly named compatibility actions. Receipts and legacy controlled credentials contain long-lived control tokens and must travel through a trusted channel.
+6. Legacy `main` / `controlled` credentials remain only in explicitly named maintenance actions for existing links; first-time joins accept invites and receipts only. Receipts and legacy controlled credentials contain long-lived control tokens and must travel through a trusted channel.
 7. WireGuard uses UDP and the control API uses HTTP only inside the tunnel, so this join flow needs no TLS certificate. Public client subscriptions continue to use HTTPS separately.
 
-State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`.
+State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`; restore accepts only the current `version: 2` structure and never rewrites legacy or damaged state automatically.
 
 ## Routing and Access Control
 

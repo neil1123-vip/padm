@@ -34,9 +34,9 @@ listRegressionSubscriptionStateStructureFoundationChildSelectors() {
         subscription-state-structure-foundation-init-transaction
 }
 
-listRegressionSubscriptionStateStructureMigrationChildSelectors() {
+listRegressionSubscriptionStateStructureValidationChildSelectors() {
     printf '%s\n' \
-        subscription-state-structure-migration-serial
+        subscription-state-structure-validation-serial
 }
 
 listRegressionSubscriptionStateStructureSourceChildSelectors() {
@@ -50,7 +50,7 @@ listRegressionSubscriptionStateStructureSourceChildSelectors() {
 listRegressionSubscriptionStateStructureChildSelectors() {
     printf '%s\n' \
         subscription-state-structure-foundation \
-        subscription-state-structure-migration \
+        subscription-state-structure-validation \
         subscription-state-structure-source
 }
 
@@ -267,8 +267,8 @@ runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression() 
         subscription-state-structure-foundation)
             runRegressionSubscriptionStateStructureParallelIsolationProbe structure-foundation
             ;;
-        subscription-state-structure-migration)
-            runRegressionSubscriptionStateStructureParallelIsolationProbe structure-migration
+        subscription-state-structure-validation)
+            runRegressionSubscriptionStateStructureParallelIsolationProbe structure-validation
             ;;
         subscription-state-structure-source)
             runRegressionSubscriptionStateStructureParallelIsolationProbe structure-source
@@ -281,7 +281,7 @@ runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression() 
 
     runRegressionSubscriptionStateStructure
 
-    for selector in structure-foundation structure-migration structure-source; do
+    for selector in structure-foundation structure-validation structure-source; do
         grep -q "^${selector}|start|" "${callLog}"
         grep -q "^${selector}|finish|" "${callLog}"
     done
@@ -382,12 +382,12 @@ registerRegressionFunctionLeaf subscription-state-structure-foundation-normalize
 registerRegressionFunctionLeaf subscription-state-structure-foundation-init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
 registerRegressionFunctionLeaf subscription-state-structure-foundation-serial runRegressionSubscriptionStateStructureFoundationSerial
 registerRegressionAggregateRunnerSequentialWithArgs \
-    subscription-state-structure-migration \
+    subscription-state-structure-validation \
     runFrameworkSequentialRegressionSelectorList \
-    listRegressionSubscriptionStateStructureMigrationChildSelectors \
+    listRegressionSubscriptionStateStructureValidationChildSelectors \
     -- \
-    $(listRegressionSubscriptionStateStructureMigrationChildSelectors)
-registerRegressionFunctionLeaf subscription-state-structure-migration-serial runRegressionSubscriptionStateStructureMigrationSerial
+    $(listRegressionSubscriptionStateStructureValidationChildSelectors)
+registerRegressionFunctionLeaf subscription-state-structure-validation-serial runRegressionSubscriptionStateStructureValidationSerial
 registerRegressionAggregateRunnerSequentialWithArgs \
     subscription-state-structure-source \
     runFrameworkSequentialRegressionSelectorList \

@@ -527,3 +527,10 @@ git diff --exit-code main -- shell/core/version.sh
 | 中 | 第 3 轮虽列出 selector 和 MSYS2 环境要求，但没有给出可直接执行的 Windows 包装命令，也没有把版本文件不变做成命令门 | 增加仓库内 `TMPDIR/HOME`、固定 MSYS2 PATH、失败即停的 PowerShell/Bash 包装，并用 `git diff --exit-code main -- shell/core/version.sh` 检查版本文件 |
 
 五轮审计后，计划仍只复用现有凭据编码、groups 锁、单源健康检查、状态写入和恢复入口。没有新增公网服务、TLS 流程、数据库、锁文件、依赖或版本写入。
+
+## 旧首次接入兼容退休记录（2026-08-02）
+
+- 所有主控与被控均已升级，首次接入统一为“主控创建邀请 -> 被控导入邀请并生成回执 -> 主控完成回执”。
+- 被控角色向导只接受 `invite`，主控完成接入只接受 `receipt`；地址和别名均来自主控预留，不再开放旧凭据手工填写路径。
+- 旧 `initSubscriptionWireGuardControlled()` 与 `subscriptionWireGuardAddPeerFromCredential()` 已删除。
+- `main` / `controlled` 凭据编解码、显示、导入和已有 Peer/Token 更新仍保留，仅用于维护现有连接，不再承担首次接入。
