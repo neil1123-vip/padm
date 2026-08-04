@@ -452,7 +452,6 @@ showSubscriptionWireGuardControlledAccessCredential() {
 # 订阅与用户入口
 manageSubscription() {
     local role
-    progressCard "1" "订阅与用户"
     if [[ -z "${configPath}" ]]; then
         errorCard "未安装"
         exit 0
