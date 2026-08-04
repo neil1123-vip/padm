@@ -249,6 +249,45 @@ validateSubscriptionGroupsState() {
     ' "${stateFile}" >/dev/null 2>&1
 }
 
+backupSubscriptionGroupsStateForV3Upgrade() {
+    local stateFile=$1
+    local backupDir backupFile
+    backupDir=$(subscriptionGroupsBackupDir) || return 1
+    padmEnsureSafeDirectory "${backupDir}" || return 1
+    chmod 700 "${backupDir}" 2>/dev/null || return 1
+    backupFile="${backupDir}/groups-pre-v3-upgrade-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    while [[ -e "${backupFile}" ]]; do
+        backupFile="${backupDir}/groups-pre-v3-upgrade-$(date '+%Y%m%d%H%M%S')-${BASHPID:-$$}-${RANDOM}.json"
+    done
+    backupManagedFileToPath "${stateFile}" "${backupFile}" 600 || return 1
+    printf '%s\n' "${backupFile}"
+}
+
+upgradeSubscriptionGroupsV24State() {
+    local stateFile=$1
+    local stageFile
+    padmCreateTempFileForTarget stageFile "${stateFile}" v3-upgrade || return 1
+    if ! jq '
+      .groups |= map(
+        .sources |= map(
+          if .role == "main" and (has("transport") | not) then .transport = "local" else . end
+        ) |
+        .sync |= del(.remote_enabled, .event_enabled)
+      )
+    ' "${stateFile}" >"${stageFile}" || ! validateSubscriptionGroupsState "${stageFile}"; then
+        padmRemoveCleanupPath "${stageFile}"
+        return 1
+    fi
+    if ! backupSubscriptionGroupsStateForV3Upgrade "${stateFile}" >/dev/null; then
+        padmRemoveCleanupPath "${stageFile}"
+        return 1
+    fi
+    if ! commitGeneratedFile "${stageFile}" "${stateFile}" 600; then
+        padmRemoveCleanupPath "${stageFile}"
+        return 1
+    fi
+}
+
 ensureSubscriptionGroupsStateUnlocked() {
     local stateDir
     local stateFile
@@ -264,7 +303,9 @@ ensureSubscriptionGroupsStateUnlocked() {
             return 1
         fi
         padmRemoveCleanupPath "${stageFile}"
-    elif [[ ! -f "${stateFile}" ]] || ! validateSubscriptionGroupsState "${stateFile}"; then
+    elif [[ ! -f "${stateFile}" ]]; then
+        return 1
+    elif ! validateSubscriptionGroupsState "${stateFile}" && ! upgradeSubscriptionGroupsV24State "${stateFile}"; then
         return 1
     fi
     if declare -F subscriptionGroupsSecureStateFiles >/dev/null 2>&1; then
