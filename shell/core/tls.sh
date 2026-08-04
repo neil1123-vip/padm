@@ -496,7 +496,7 @@ installCronTLS() {
 # 定时任务更新geo文件
 installCronUpdateGeo() {
     if [[ "${coreInstallType}" == "1" ]]; then
-        if crontab -l | grep -q "UpdateGeo"; then
+        if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
             errorCard "已添加自动更新定时任务，请不要重复添加"
             exit 0
         fi
