@@ -365,7 +365,7 @@ manageSubscriptionMainControlDetails() {
         menuLine "这里处理主控控制面的状态、连接和恢复动作。"
         menuLine "建议先查看凭据、Peer 和连接状态，再决定是否重启或关闭控制面。"
         showSubscriptionWireGuardStatus
-        menuItem 1 "显示旧版主控凭据" "仅用于维护已有连接，不用于首次接入"
+        menuItem 1 "显示主控维护凭据" "仅用于维护已有连接，不用于首次接入"
         menuItem 2 "查看 Peer 和连接状态" "查看 WireGuard peer 和被控列表"
         menuItem 3 "测试被控连接" "请求所有被控健康检查"
         menuItem 4 "查看控制面地址" "显示 WireGuard 内网 health/sync 地址"
