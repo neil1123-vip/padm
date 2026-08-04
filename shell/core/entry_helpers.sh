@@ -654,7 +654,11 @@ updatePadm() {
     successCard "更新入口已下载，正在重新打开新版脚本"
     if PADM_FORCE_SCRIPT_MODULE_REFRESH=1 PADM_SCRIPT_MODULE_REF="${remoteRef}" "${installPath}" RefreshScriptModules; then
         removeManagedFilesIfPresentIgnoreFailure "${backupPath}"
-        successCard "padm 管理脚本更新成功"
+        if "${installPath}" RefreshSubscriptionControlService; then
+            successCard "padm 管理脚本更新成功"
+        else
+            errorCard "padm 管理脚本已更新，但订阅控制服务自动刷新失败，请在控制面维护中重试"
+        fi
         exec "${installPath}"
     fi
 

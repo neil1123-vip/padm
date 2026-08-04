@@ -2566,8 +2566,61 @@ EOF
     ) >"${root}/run.log" 2>&1
 
     grep -q 'https://raw.githubusercontent.com/neil1123-vip/padm/1111111111111111111111111111111111111111/install.sh' "${downloadLog}"
-    [[ "$(<"${execLog}")" == $'mode:RefreshScriptModules\nforce:1\nref:1111111111111111111111111111111111111111\nmode:menu' ]]
+    [[ "$(<"${execLog}")" == $'mode:RefreshScriptModules\nforce:1\nref:1111111111111111111111111111111111111111\nmode:RefreshSubscriptionControlService\nmode:menu' ]]
     grep -q 'padm 管理脚本更新成功' "${successLog}"
+
+    local handlerSource commandLog commandStatus serviceState installStatus
+    handlerSource=$(awk '/^handleScriptCommand\(\)/,/^}/ { print }' "${PROJECT_ROOT}/install.sh")
+    eval "${handlerSource}"
+    commandLog="${root}/control-refresh-command.log"
+    cronName=RefreshSubscriptionControlService
+    serviceState=missing
+    installStatus=0
+    command() {
+        if [[ "${1:-}" == "-v" && "${2:-}" == "systemctl" ]]; then
+            [[ "${serviceState}" != "missing" ]]
+            return
+        fi
+        builtin command "$@"
+    }
+    systemctl() {
+        if [[ "${1:-}" == "is-active" ]]; then
+            [[ "${serviceState}" == "active" ]]
+        elif [[ "${1:-}" == "is-enabled" ]]; then
+            [[ "${serviceState}" == "enabled" ]]
+        else
+            return 1
+        fi
+    }
+    installSubscriptionControlService() {
+        printf 'install\n' >>"${commandLog}"
+        if [[ "${installStatus}" -ne 0 ]]; then
+            SUBSCRIPTION_CONTROL_INSTALL_ERROR="旧控制服务已恢复"
+            return "${installStatus}"
+        fi
+    }
+    errorCard() { printf 'error:%s\n' "$*" >>"${commandLog}"; }
+
+    : >"${commandLog}"
+    (handleScriptCommand)
+    [[ ! -s "${commandLog}" ]]
+    serviceState=disabled
+    (handleScriptCommand)
+    [[ ! -s "${commandLog}" ]]
+    serviceState=active
+    (handleScriptCommand)
+    [[ "$(<"${commandLog}")" == "install" ]]
+    : >"${commandLog}"
+    serviceState=enabled
+    (handleScriptCommand)
+    [[ "$(<"${commandLog}")" == "install" ]]
+    : >"${commandLog}"
+    serviceState=active
+    installStatus=23
+    commandStatus=0
+    (handleScriptCommand) || commandStatus=$?
+    [[ "${commandStatus}" == "1" ]]
+    [[ "$(<"${commandLog}")" == $'install\nerror:旧控制服务已恢复' ]]
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 

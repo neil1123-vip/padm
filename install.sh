@@ -739,7 +739,8 @@ initScriptRuntime() {
     parseInstallArgs "$@"
     autoInstallValidateRequiredInputs || exit 1
     initVar "$1"
-    if [[ "${cronName}" == "RefreshScriptModules" ]]; then
+    if [[ "${cronName}" == "RefreshScriptModules" ||
+        "${cronName}" == "RefreshSubscriptionControlService" ]]; then
         return 0
     fi
     checkSystem
@@ -754,6 +755,16 @@ initScriptRuntime() {
 
 handleScriptCommand() {
     if [[ "${cronName}" == "RefreshScriptModules" ]]; then
+        exit 0
+    elif [[ "${cronName}" == "RefreshSubscriptionControlService" ]]; then
+        if command -v systemctl >/dev/null 2>&1 &&
+            { systemctl is-active --quiet padm-subscription-control.service ||
+                systemctl is-enabled --quiet padm-subscription-control.service; }; then
+            if ! installSubscriptionControlService; then
+                [[ -n "${SUBSCRIPTION_CONTROL_INSTALL_ERROR:-}" ]] && errorCard "${SUBSCRIPTION_CONTROL_INSTALL_ERROR}"
+                exit 1
+            fi
+        fi
         exit 0
     elif [[ "${cronName}" == "RenewTLS" ]]; then
         renewalTLS
