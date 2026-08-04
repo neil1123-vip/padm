@@ -226,35 +226,23 @@ runSubscriptionGroupStateStructureFoundationSerialRegression() {
 }
 
 runSubscriptionGroupStateStructureValidationRegression() {
-    local backupFile
     local beforeSnapshot
     local invalidFilter
     local invalidSnapshot
-    local legacySnapshot
     local stateFile
     mkdir -p "$(subscriptionGroupsDir)"
     stateFile=$(subscriptionGroupsFile)
     writeDefaultSubscriptionGroupsState "${stateFile}"
     ensureSubscriptionGroupsState
 
-    legacySnapshot=$(jq '
-      .groups[0].sources[0] |= del(.transport) |
-      .groups[0].user_groups = [{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["main"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}] |
-      .groups[0].sync.remote_enabled = true |
-      .groups[0].sync.event_enabled = true
-    ' "${stateFile}")
-    printf '%s\n' "${legacySnapshot}" >"${stateFile}"
-    ensureSubscriptionGroupsState
-    validateSubscriptionGroupsState "${stateFile}"
-    subscriptionActiveEnabledUsersJson | jq -e 'length == 1 and .[0].id == "team-a"' >/dev/null
-    jq -e '
-      .groups[0].sources[0].transport == "local" and
-      (.groups[0].sync | has("remote_enabled") | not) and
-      (.groups[0].sync | has("event_enabled") | not)
-    ' "${stateFile}" >/dev/null
-    backupFile=$(find "$(subscriptionGroupsBackupDir)" -maxdepth 1 -type f -name 'groups-pre-v3-upgrade-*.json' | head -n 1)
-    [[ -n "${backupFile}" && "$(<"${backupFile}")" == "${legacySnapshot}" ]]
+    invalidSnapshot=$(jq '.groups[0].sources[0] |= del(.transport)' "${stateFile}")
+    printf '%s\n' "${invalidSnapshot}" >"${stateFile}"
+    if ensureSubscriptionGroupsState >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${stateFile}")" == "${invalidSnapshot}" ]]
 
+    writeDefaultSubscriptionGroupsState "${stateFile}"
     invalidSnapshot=$(jq '.version = 1' "${stateFile}")
     printf '%s\n' "${invalidSnapshot}" >"${stateFile}"
     if ensureSubscriptionGroupsState >/dev/null 2>&1; then
