@@ -1,16 +1,28 @@
-# padm
+<h1 align="center">padm</h1>
 
-[English](documents/en/README_EN.md)
+<p align="center"><strong>✨ 面向 Xray-core / sing-box 的一站式安装与长期运维脚本</strong></p>
+<p align="center">🚀 节点安装 · 🔗 订阅发布 · 🌐 多服务器协同 · 🧭 路由控制 · 🔐 证书维护 · ⚙️ 核心升级</p>
+<p align="center"><a href="documents/en/README_EN.md">🌍 English</a></p>
 
-padm 是面向 Xray-core / sing-box 的一键安装与日常运维脚本。它把节点安装、订阅发布、用户订阅组、多服务器协同、路由控制、证书维护和核心升级收敛到同一个菜单入口，目标是让服务器从“能装起来”走到“能长期维护”。
+<p align="center">
+  <a href="#快速选择">🚀 快速选择</a> ·
+  <a href="#安装">📦 安装</a> ·
+  <a href="#协议选择">🧭 协议选择</a> ·
+  <a href="#订阅与用户">🔗 订阅与用户</a>
+  <br>
+  <a href="#路由与访问控制">🧱 路由控制</a> ·
+  <a href="#核心与服务">⚙️ 核心服务</a> ·
+  <a href="#参数参考">📋 参数参考</a> ·
+  <a href="#验收与回归">✅ 验收回归</a>
+</p>
 
-当前推荐主线是：
+---
 
-- 🧭 直连或有域名：`VLESS Reality Vision`
-- 🌐 CDN / 反代：`VLESS Reality XHTTP`
-- 📍 无域名：无域名 Reality
-- 🛡️ 明确需要 TLS 指纹抗性：`NaiveProxy`
-- 🧰 旧客户端或迁移：传统 TLS 兼容协议
+> **✨ 一句话选协议**
+>
+> 🧭 直连/有域名 `Reality Vision` · 🌐 CDN/反代 `Reality XHTTP`
+>
+> 📍 无域名 `Reality` · 🛡️ TLS 指纹抗性 `NaiveProxy`
 
 ## 快速选择
 
@@ -23,9 +35,10 @@ padm 是面向 Xray-core / sing-box 的一键安装与日常运维脚本。它�
 | 📍 没有域名 | `安装与重装` -> `无域名 Reality` | 使用服务器 IP 或自定义 entry-host，不需要本机证书。 |
 | 🛡️ 需要 TLS 指纹抗性 | `安装与重装` -> `TLS 指纹抗性 NaiveProxy` | 需要真实域名和可信证书，不是无域名 Reality 的替代品。 |
 | 🧰 已有旧客户端或迁移需求 | `安装与重装` -> `传统 TLS 兼容安装` | 仅在明确需要 WS/TLS、VMess、Trojan 等旧形态时使用。 |
-| 🔗 安装完成后拿订阅 | `订阅与用户` | 未初始化时先选择这台机器作为主控或被控。 |
+| 🔗 安装完成后拿订阅 | `订阅与用户` | 未初始化时可选择本机单独使用、这台作为主控或这台作为被控。 |
 
-⚠️ 不要一开始就进入自定义协议组合、CDN 入口细调、多服务器同步或危险实验开关，除非你明确知道客户端、网络和运维目标需要什么。
+> [!TIP]
+> **第一次使用：** 优先走上面的推荐路径。只有明确了解客户端、网络和运维目标时，再进入自定义协议组合、CDN 入口细调、多服务器同步或危险实验开关。
 
 ## 安装
 
@@ -113,9 +126,10 @@ padm 面向 Linux 服务器运行。代码会识别 Debian、Ubuntu、RHEL/CentO
 | 架构 | `x86_64/amd64`、`aarch64/arm64`。 |
 | 基础命令 | 入口下载至少需要 `curl` 或 `wget`；完整包刷新需要 `tar`。 |
 | 常用依赖 | 脚本会按功能安装或使用 `jq`、`nginx`、`acme.sh`、WireGuard tools、Fail2ban 等组件。 |
-| 服务管理 | 优先使用 systemd；Alpine/OpenRC 路径有专门处理。 |
+| 服务管理 | 核心服务优先使用 systemd；Alpine/OpenRC 路径有专门处理。主控/被控订阅控制服务目前要求 systemd 和 `python3`。 |
 
-CentOS / RHEL 系系统如果 SELinux 处于 Enforcing，脚本会提示先手动关闭后再继续。
+> [!IMPORTANT]
+> **CentOS / RHEL：** SELinux 处于 Enforcing 时，脚本会提示先手动关闭后再继续。
 
 ## 主菜单
 
@@ -177,7 +191,7 @@ padm 不是单个超长 Bash 文件，而是“自刷新入口 + 分模块运行
 公网订阅和服务器间控制面是两套地址体系：
 
 - 🌍 客户端订阅走 `/s/default/...`、`/s/clashMeta/...`、`/s/sing-box...` 等 HTTPS 路径。
-- 🔒 主控/被控控制接口走 `/s/control/...`，预期只在 WireGuard 内网中访问。
+- 🔒 主控/被控控制接口走 `/s/control/...`，只通过 WireGuard 内网访问，不提供公网 HTTP/HTTPS 来源回退。
 
 ## 协议选择
 
@@ -262,7 +276,10 @@ Reality entry 按 `--entry-host`、`--domain`、`/etc/padm/reality_entry_host`�
 
 未传 `--reality-target` 时，脚本会进入目标站选择器。自动选择优先使用已有 A/B 实测结果；没有结果时实测内置候选并选择可用目标；仍无可用结果时回退 `www.ibm.com:443`。Reality 目标站检测结果写入 `/etc/padm/reality_targets_results.tsv`，评分包括 TLS 1.3、`X25519MLKEM768`、证书链长度、网络匹配、CDN 风险和检测时间。
 
-`协议与入口` -> `REALITY 管理` 可查看当前目标、运行 `xray tls ping`、刷新目标库、运行 RealiTLScanner、切换实测结果、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。RealiTLScanner 是高级功能，云端扫描可能导致 VPS 被标记；脚本会在执行前提示确认。
+`协议与入口` -> `REALITY 管理` 可查看当前目标、运行 `xray tls ping`、刷新目标库、运行 RealiTLScanner、切换实测结果、查看 PQC/ML-DSA-65 状态和配置 443 共存分流。
+
+> [!WARNING]
+> **扫描风险：** RealiTLScanner 是高级功能，云端扫描可能导致 VPS 被标记；脚本会在执行前提示确认。
 
 ## XHTTP 与 CDN
 
@@ -299,7 +316,7 @@ Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Re
 
 | 状态 | 菜单形态 | 适合做什么 |
 | --- | --- | --- |
-| 🟡 未初始化 | `这台作为主控` / `这台作为被控` | 先决定这台服务器的订阅角色。 |
+| 🟡 未初始化 | `本机单独使用` / `这台作为主控` / `这台作为被控` | 单机可直接管理本机订阅；需要多服务器时再选择主控或被控。 |
 | 🟢 主控 | `发布订阅` / `多服务器协同` / `主控维护与排障` | 创建用户订阅、发布订阅链接、添加被控服务器、执行同步和限额治理。 |
 | 🔵 被控 | `接入主控` / `查看本机状态` / `被控维护与排障` | 粘贴主控邀请、提供本机节点给主控、查看 WireGuard 与同步状态。 |
 
@@ -310,7 +327,7 @@ Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Re
 - 修改任一被控的 Reality 目标等节点配置后，自动同步开启时会重新生成本机节点、拉取全部启用来源并发布完整组；外层 HTTPS 订阅地址不变，其他服务器节点仍会保留。
 - 被控服务器不提供主动同步菜单，只响应主控的认证同步请求。
 
-主控创建分享订阅推荐流程：
+本机或主控创建分享订阅推荐流程：
 
 1. 进入 `发布订阅` -> `安装/更新订阅服务`。
 2. 进入 `发布订阅` -> `新建并发布订阅`，使用英文、数字或短横线 ID，例如 `team-a`。
@@ -328,7 +345,7 @@ Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Re
 6. 旧版 `main` / `controlled` 凭据仅保留在明确命名的维护入口，用于更新已有连接；首次接入只接受邀请/回执。包含长期控制 Token 的回执或旧版被控凭据只通过可信通道传递。
 7. WireGuard 使用 UDP，控制 API 只在隧道内使用 HTTP，不需要 TLS 证书；客户端订阅继续单独使用公网 HTTPS。
 
-状态备份与恢复只作用于 `/etc/padm/subscribe_groups/groups.json`。恢复备份或重建状态前会自动创建当前状态备份，并要求输入 `yes`；恢复仅接受当前 `version: 2` 结构，不会自动改写旧版或损坏的状态。
+状态备份与恢复只作用于 `/etc/padm/subscribe_groups/groups.json`。恢复备份或重建状态前会自动创建当前状态备份，并要求输入 `yes`；状态加载与恢复仅接受当前精确的 `version: 2` 结构，旧版结构以及含额外、缺失或无效字段的状态会被拒绝，不会自动改写。
 
 ## 路由与访问控制
 
@@ -342,11 +359,12 @@ Reality Vision、Reality gRPC 和 Reality XHTTP 不依赖本机静态站点。Re
 
 Xray 访问控制使用 routing + blackhole/direct；sing-box 使用 remote rule_set、domain_suffix/domain 和 ip_cidr。直连例外会放在阻断规则之前，适合系统更新、证书签发或必须直连的客户端服务。区域阻断属于危险操作，可能影响系统更新、证书申请和应用连接。
 
-🛟 写入访问控制前会快照相关规则文件；写入后会执行 Xray 和 sing-box 校验；失败自动回滚并提示日志路径。
+> [!NOTE]
+> **安全写入：** 修改访问控制前会快照相关规则文件；写入后会执行 Xray 和 sing-box 校验，失败自动回滚并提示日志路径。
 
 ## 核心与服务
 
-`核心与服务` 会展示 Xray-core / sing-box 当前版本、最新稳定版、最新预发布版、服务状态、配置校验结果和 Xray Geo 数据状态。
+`核心与服务` 会展示 Xray-core / sing-box 当前版本、服务状态、配置校验与兼容性结果以及 Xray Geo 数据状态；最新稳定版和预发布版只在升级、回退或兼容性检查时按需获取。
 
 升级或回退核心时，脚本先下载目标版本到临时目录，用目标二进制校验当前配置；校验通过后才替换 `/etc/padm/xray/xray` 或 `/etc/padm/sing-box/sing-box` 并重启服务。若新核心启动失败，会尝试恢复旧二进制。
 
@@ -361,7 +379,7 @@ Xray `geosite.dat` / `geoip.dat` 维护也在这里。
 
 `系统与脚本` 负责 padm 自身和宿主机辅助项：
 
-- 🔄 更新 padm 脚本。
+- 🔄 更新 padm 脚本；若订阅控制服务已启用或正在运行，会同步刷新并重启。刷新失败不会回滚脚本更新，界面会提示从控制面维护入口重试。
 - 🧾 查看入口校验、版本、ref 和 manifest。
 - 🛡️ 管理 Fail2ban 防护，包含 SSH 和 `/s/control/` 的基础防护入口。
 - 🚀 查看或启用网络优化 / BBR。
@@ -382,7 +400,8 @@ net.ipv4.tcp_congestion_control = bbr
 - 🧭 Reality Vision：`VLESS Encryption + XTLS Vision`
 - 🌐 Reality XHTTP：`VLESS Encryption + XTLS Vision + XHTTP XMUX`
 
-⚠️ default VLESS 分享链接会携带 experimental encryption 字段；Clash/Mihomo/sing-box 订阅暂不写入该字段，避免误导客户端兼容性。这个功能属于高级实验，不建议新手默认开启。
+> [!CAUTION]
+> **兼容性提醒：** default VLESS 分享链接会携带 experimental encryption 字段；Clash/Mihomo/sing-box 订阅暂不写入该字段。该功能属于高级实验，不建议新手默认开启。
 
 ## 参数参考
 
@@ -391,6 +410,9 @@ net.ipv4.tcp_congestion_control = bbr
 | `--install-type` | `install`、`custom`、`reality` | 无自动参数时进入交互菜单；传其它安装参数但不传本参数时默认 `custom` | 安装类型。 |
 | `--core` | `xray`、`sing-box`、`1`、`2` | `xray` | `1` 等同 `xray`，`2` 等同 `sing-box`。 |
 | `--protocols` | 当前公开协议编号，逗号分隔 | 无固定默认 | 自定义安装协议，例如 `1` 或 `1,2,21`；旧版 `0..13/20` 编号已废弃。 |
+| `--list-protocols` | 无 | 输出后退出 | 列出可安装的公网节点能力。 |
+| `--list-capabilities` | 无 | 输出后退出 | 列出公网节点、内部能力和上游已知能力。 |
+| `--show-risky-protocols` | 无 | 输出后退出 | 列出带风险提示的高级公网节点能力。 |
 | `--domain` | 域名 | TLS 安装时必须提供或交互输入 | TLS 证书域名；也是 Reality entry 的第二优先级，但 Reality 不为其申请证书。 |
 | `--entry-host` | 域名或 IP | 优先于 `--domain`、历史 entry、`currentHost` 和公网 IP | Reality 客户端实际连接地址。 |
 | `--reality-target` | `host[:port]` | 未传时进入目标站选择器；兜底 `www.ibm.com:443` | Reality 伪装目标站。 |

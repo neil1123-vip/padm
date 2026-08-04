@@ -1,16 +1,28 @@
-# padm
+<h1 align="center">padm</h1>
 
-[中文](../../README.md)
+<p align="center"><strong>✨ One workflow for Xray-core / sing-box installation and long-term operations</strong></p>
+<p align="center">🚀 Node setup · 🔗 Subscription publishing · 🌐 Multi-server coordination · 🧭 Routing · 🔐 Certificates · ⚙️ Core upgrades</p>
+<p align="center"><a href="../../README.md">🌍 中文</a></p>
 
-padm is a one-click installation and daily operations script for Xray-core and sing-box. It brings node installation, subscription publishing, user subscription groups, multi-server coordination, routing controls, certificate maintenance, and core upgrades into one menu-driven workflow, so a server can move from "installed" to "maintainable".
+<p align="center">
+  <a href="#quick-choice">🚀 Quick choice</a> ·
+  <a href="#installation">📦 Installation</a> ·
+  <a href="#protocol-selection">🧭 Protocols</a> ·
+  <a href="#subscriptions-and-users">🔗 Subscriptions</a>
+  <br>
+  <a href="#routing-and-access-control">🧱 Routing</a> ·
+  <a href="#cores-and-services">⚙️ Core services</a> ·
+  <a href="#flag-reference">📋 Flags</a> ·
+  <a href="#validation-and-regression">✅ Validation</a>
+</p>
 
-The current recommended paths are:
+---
 
-- 🧭 Direct connection or own domain: `VLESS Reality Vision`
-- 🌐 CDN / reverse proxy: `VLESS Reality XHTTP`
-- 📍 No domain: no-domain Reality
-- 🛡️ Explicit TLS fingerprint-resistance requirement: `NaiveProxy`
-- 🧰 Legacy clients or migration: traditional TLS compatibility protocols
+> **✨ Pick a protocol in one glance**
+>
+> 🧭 Direct/own domain `Reality Vision` · 🌐 CDN/reverse proxy `Reality XHTTP`
+>
+> 📍 No domain `Reality` · 🛡️ TLS fingerprint resistance `NaiveProxy`
 
 ## Quick Choice
 
@@ -23,9 +35,10 @@ For first-time use, you do not need to understand every protocol up front. Run t
 | 📍 No domain | `Install & reinstall` -> `No-domain Reality` | Uses the server IP or a custom entry host; no local certificate is required. |
 | 🛡️ Need TLS fingerprint resistance | `Install & reinstall` -> `TLS fingerprint resistance NaiveProxy` | Requires a real domain and trusted certificate; not a replacement for no-domain Reality. |
 | 🧰 Legacy clients or migration | `Install & reinstall` -> `Traditional TLS compatibility install` | Use only when WS/TLS, VMess, Trojan, or similar legacy shapes are explicitly needed. |
-| 🔗 Get subscriptions after installation | `Subscriptions & users` | If uninitialized, choose whether this server is the controller or a controlled server first. |
+| 🔗 Get subscriptions after installation | `Subscriptions & users` | If uninitialized, choose local-only use, controller mode, or controlled mode. |
 
-⚠️ Avoid custom protocol combinations, CDN entry tuning, multi-server synchronization, and dangerous experimental switches at the beginning unless you know the client, network shape, and maintenance goal require them.
+> [!TIP]
+> **First run:** Follow the recommended paths above. Open custom protocol combinations, CDN entry tuning, multi-server synchronization, or dangerous experiments only when the client, network, and maintenance goal require them.
 
 ## Installation
 
@@ -113,9 +126,10 @@ padm is designed for Linux servers. The code detects Debian, Ubuntu, RHEL/CentOS
 | Architecture | `x86_64/amd64`, `aarch64/arm64`. |
 | Basic commands | Entry download needs at least `curl` or `wget`; full bundle refresh needs `tar`. |
 | Common dependencies | The script installs or uses `jq`, `nginx`, `acme.sh`, WireGuard tools, Fail2ban, and related tools as features require. |
-| Service management | systemd is preferred; Alpine/OpenRC paths are handled separately. |
+| Service management | Core services prefer systemd; Alpine/OpenRC paths are handled separately. The controller/controlled subscription control service currently requires systemd and `python3`. |
 
-On CentOS / RHEL-like systems, if SELinux is Enforcing, the script asks you to disable it manually before continuing.
+> [!IMPORTANT]
+> **CentOS / RHEL:** If SELinux is Enforcing, the script asks you to disable it manually before continuing.
 
 ## Main Menu
 
@@ -177,7 +191,7 @@ These paths are the actual state sources padm reads, writes, and validates. Star
 Public subscriptions and server-to-server control use different address families:
 
 - 🌍 Client subscriptions use HTTPS paths such as `/s/default/...`, `/s/clashMeta/...`, and `/s/sing-box...`.
-- 🔒 Controller/controlled control APIs use `/s/control/...` and are intended to be reachable only inside the WireGuard private network.
+- 🔒 Controller/controlled control APIs use `/s/control/...` only inside the WireGuard private network; there is no public HTTP/HTTPS source fallback.
 
 ## Protocol Selection
 
@@ -262,7 +276,10 @@ Reality entry selection is `--entry-host`, then `--domain`, `/etc/padm/reality_e
 
 When `--reality-target` is omitted, the script opens the target selector. Automatic selection prefers existing A/B measured results; if none exist, it probes built-in candidates; if no usable result is found, it falls back to `www.ibm.com:443`. Reality target measurements are written to `/etc/padm/reality_targets_results.tsv`, including TLS 1.3, `X25519MLKEM768`, certificate-chain length, network match, CDN risk, and check time.
 
-`Protocols & entry` -> `REALITY management` can show the current target, run `xray tls ping`, refresh the target library, run RealiTLScanner, switch from measured results, view PQC/ML-DSA-65 status, and configure 443 coexistence splitting. RealiTLScanner is advanced; cloud scanning may cause the VPS to be flagged, so the script asks for confirmation first.
+`Protocols & entry` -> `REALITY management` can show the current target, run `xray tls ping`, refresh the target library, run RealiTLScanner, switch from measured results, view PQC/ML-DSA-65 status, and configure 443 coexistence splitting.
+
+> [!WARNING]
+> **Scanning risk:** RealiTLScanner is advanced; cloud scanning may cause the VPS to be flagged, so the script asks for confirmation first.
 
 ## XHTTP and CDN
 
@@ -299,7 +316,7 @@ The subscription system is role-based instead of one flat menu.
 
 | State | Menu shape | What it is for |
 | --- | --- | --- |
-| 🟡 Uninitialized | `This server is the controller` / `This server is controlled` | Decide this server's subscription role first. |
+| 🟡 Uninitialized | `Use this server locally` / `This server is the controller` / `This server is controlled` | A single server can manage local subscriptions directly; choose controller or controlled mode only for multi-server use. |
 | 🟢 Controller | `Publish subscriptions` / `Multi-server coordination` / `Controller maintenance & troubleshooting` | Create user subscriptions, publish links, add controlled servers, run sync, and handle quotas. |
 | 🔵 Controlled | `Join controller` / `View local status` / `Controlled maintenance & troubleshooting` | Paste a controller invite, provide this server's nodes to the controller, and view WireGuard/sync state. |
 
@@ -310,7 +327,7 @@ Controller and local-only modes now share one `Subscription sync` menu under mai
 - After changing a controlled server's Reality target or other node configuration, enabled automatic sync regenerates local nodes, fetches every enabled source, and publishes the complete group. The outer HTTPS subscription URL stays unchanged and nodes from the other servers remain present.
 - Controlled servers do not expose an active-sync menu; they only answer authenticated sync requests from the controller.
 
-Recommended flow for controller-side shared subscriptions:
+Recommended flow for local-only or controller-side shared subscriptions:
 
 1. Open `Publish subscriptions` -> `Install/update subscription service`.
 2. Open `Publish subscriptions` -> `Create and publish subscription`, using an ID such as `team-a`.
@@ -328,7 +345,7 @@ Recommended multi-server flow:
 6. Legacy `main` / `controlled` credentials remain only in explicitly named maintenance actions for existing links; first-time joins accept invites and receipts only. Receipts and legacy controlled credentials contain long-lived control tokens and must travel through a trusted channel.
 7. WireGuard uses UDP and the control API uses HTTP only inside the tunnel, so this join flow needs no TLS certificate. Public client subscriptions continue to use HTTPS separately.
 
-State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`; restore accepts only the current `version: 2` structure and never rewrites legacy or damaged state automatically.
+State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. Before restoring a backup or rebuilding state, the script creates a current-state backup and requires typing `yes`; state loading and restore accept only the current exact `version: 2` structure. Legacy structures and states with extra, missing, or invalid fields are rejected rather than rewritten.
 
 ## Routing and Access Control
 
@@ -342,11 +359,12 @@ State backup and restore only affect `/etc/padm/subscribe_groups/groups.json`. B
 
 Xray access control uses routing + blackhole/direct; sing-box uses remote rule sets, domain_suffix/domain, and ip_cidr. Direct exceptions are placed before blocking rules and are useful for system updates, certificate issuance, or client services that must stay direct. Regional blocking is dangerous and may affect system updates, certificate issuance, and application connectivity.
 
-🛟 Before writing access-control changes, the script snapshots related rule files. After writing, it validates Xray and sing-box configs. Failed validation rolls back and prints the log path.
+> [!NOTE]
+> **Safe writes:** Before changing access control, the script snapshots related rule files. It then validates Xray and sing-box configs; failed validation rolls back and prints the log path.
 
 ## Cores and Services
 
-`Cores & services` shows Xray-core / sing-box current versions, latest stable and prerelease versions, service state, config validation result, and Xray Geo data state.
+`Cores & services` shows Xray-core / sing-box current versions, service state, configuration validation and compatibility results, and Xray Geo data state. Latest stable and prerelease versions are fetched on demand only during upgrade, rollback, or compatibility checks.
 
 When upgrading or rolling back a core, the script downloads the target version into a temporary directory and validates the current configuration with the target binary before replacing `/etc/padm/xray/xray` or `/etc/padm/sing-box/sing-box` and restarting the service. If the new core fails to start, it attempts to restore the previous binary.
 
@@ -361,7 +379,7 @@ Xray `geosite.dat` / `geoip.dat` maintenance also lives here.
 
 `System & script` handles padm itself and host-level helper features:
 
-- 🔄 Update the padm script.
+- 🔄 Update the padm script; if the subscription control service is enabled or running, the update also refreshes and restarts it. A refresh failure does not roll back the script update and prompts you to retry from control-plane maintenance.
 - 🧾 Inspect entry validation, version, ref, and manifest.
 - 🛡️ Manage Fail2ban protection, including basic SSH and `/s/control/` protection.
 - 🚀 Inspect or enable network optimization / BBR.
@@ -382,7 +400,8 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 - 🧭 Reality Vision: `VLESS Encryption + XTLS Vision`
 - 🌐 Reality XHTTP: `VLESS Encryption + XTLS Vision + XHTTP XMUX`
 
-⚠️ Default VLESS share links include the experimental encryption field; Clash/Mihomo/sing-box subscriptions intentionally do not include it to avoid misleading compatibility assumptions. This is an advanced experiment and is not recommended as a default for new users.
+> [!CAUTION]
+> **Compatibility:** Default VLESS share links include the experimental encryption field; Clash/Mihomo/sing-box subscriptions intentionally omit it. This is an advanced experiment and is not recommended as a default for new users.
 
 ## Flag Reference
 
@@ -391,6 +410,9 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 | `--install-type` | `install`, `custom`, `reality` | Opens the interactive menu when no automation flags are passed; defaults to `custom` when other install flags are passed | Installation type. |
 | `--core` | `xray`, `sing-box`, `1`, `2` | `xray` | `1` maps to `xray`, `2` maps to `sing-box`. |
 | `--protocols` | comma-separated current public protocol IDs | No fixed default | Custom install protocols, such as `1` or `1,2,21`; old `0..13/20` IDs are deprecated. |
+| `--list-protocols` | None | Print and exit | List installable public node capabilities. |
+| `--list-capabilities` | None | Print and exit | List public nodes, internal capabilities, and known upstream capabilities. |
+| `--show-risky-protocols` | None | Print and exit | List advanced public node capabilities with risk notices. |
 | `--domain` | domain | Required or prompted for TLS installs | TLS certificate domain; also the second Reality entry priority, but Reality does not request a certificate for it. |
 | `--entry-host` | domain or IP | Before `--domain`, saved entry, `currentHost`, and public IP | Address Reality clients actually connect to. |
 | `--reality-target` | `host[:port]` | Opens selector when omitted; fallback `www.ibm.com:443` | Reality camouflage target. |
