@@ -325,7 +325,7 @@ manageSubscriptionMultiServer() {
         menuLine "建议先完成主控建链，再继续添加被控、更新凭据和查看协同状态。"
         menuItem 1 "主控建链向导" "初始化主控、复制主控凭据、添加被控并检查健康"
         menuItem 2 "添加/移除被控服务器" "创建邀请、完成接入、管理待完成邀请或移除被控"
-        menuItem 3 "更新被控服务器凭据" "被控重建后粘贴新凭据更新 Token 和内网地址"
+        menuItem 3 "更新被控服务器凭据" "修复已有连接：被控重建后粘贴新凭据，更新内网地址、公钥、控制端口和 Token"
         menuItem 4 "查看协同状态" "连续查看主控凭据、服务器源、健康检查和最近同步结果"
         menuReturnItem 5 "返回主控首页" "回到上级菜单"
         menuClose
