@@ -1729,17 +1729,13 @@ selectRollbackVersion() {
 }
 
 xrayVersionManageMenu() {
-    echoContent title "\n┌─ Xray-core 生命周期 ────────────────────────────────"
-    menuItem 1 "升级稳定版" "下载最新稳定版，校验后替换"
-    menuItem 2 "预发布验证/升级" "下载校验一次，确认后直接替换"
-    menuItem 3 "回退稳定版" "选择最近稳定版本回退"
-    menuItem 4 "配置体检" "当前校验 + 严格检查 + 升级风险扫描"
-    menuItem 5 "更新 Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 6 "查看 Geo 状态" "查看文件、版本和自动更新状态"
-    menuItem 7 "设置 Geo 自动更新" "每天凌晨更新 Xray Geo 数据"
-    menuItem 8 "服务控制" "启动、停止、重启 Xray"
-    menuItem 9 "日志管理" "查看或调整 Xray 日志"
-    menuReturnItem 10 "返回核心与服务" "回到核心生命周期管理"
+    echoContent title "\n┌─ Xray-core 版本管理 ────────────────────────────────"
+    menuLine "这里管理 Xray-core 版本和一键配置体检；Geo 数据、服务和日志请使用上级菜单。"
+    menuItem 1 "升级稳定版" "下载并校验最新稳定版后替换"
+    menuItem 2 "升级预发布版" "下载并校验预发布版，适合验证新能力"
+    menuItem 3 "回退稳定版" "选择最近的稳定版本回退"
+    menuItem 4 "配置体检" "校验当前配置、严格模式和升级兼容性"
+    menuReturnItem 5 "返回核心与服务" "回到核心与服务"
     menuClose
     autoRead xray_lifecycle_menu "请选择:" selectXrayType
     case "${selectXrayType}" in
@@ -1758,12 +1754,7 @@ xrayVersionManageMenu() {
         upgradeXrayCore false "${version}"
         ;;
     4) showXrayConfigHealthCheck ;;
-    5) updateGeoSite ;;
-    6) showXrayGeoStatus ;;
-    7) installCronUpdateGeo ;;
-    8) coreServiceControlMenu xray ;;
-    9) checkLog 1 ;;
-    10) coreVersionManageMenu ;;
+    5) coreVersionManageMenu ;;
     *) coreInvalidInputRetryMenu xrayVersionManageMenu ;;
     esac
 }
@@ -2806,10 +2797,18 @@ coreConfigMaintenanceMenu() {
 }
 
 coreLogsMenu() {
+    local logStatus=
     echoContent title "\n┌─ 核心日志 ─────────────────────────────────────────"
     menuItem 1 "Xray 日志管理" "查看 access/error 或调整日志"
-    menuItem 2 "sing-box 实时日志" "tail -f box.log"
-    menuReturnItem 3 "返回核心与服务" "回到核心生命周期管理"
+    menuItem 2 "sing-box 实时日志" "实时查看 box.log"
+    if [[ -f "$(singBoxLogConfigFile)" && "$(jq -r .log.disabled "$(singBoxLogConfigFile)")" == "false" ]]; then
+        menuItem 3 "关闭 sing-box 调试日志" "停止记录调试日志"
+        logStatus=true
+    else
+        menuItem 3 "开启 sing-box 调试日志" "记录调试日志并实时查看"
+        logStatus=false
+    fi
+    menuReturnItem 4 "返回核心与服务" "回到核心与服务菜单"
     menuClose
     autoRead core_logs_menu "请选择:" selectLogs
     case "${selectLogs}" in
@@ -2819,7 +2818,15 @@ coreLogsMenu() {
         touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
         tail -f /etc/padm/sing-box/conf/box.log
         ;;
-    3) coreVersionManageMenu ;;
+    3)
+        singBoxLog "${logStatus}" || return 1
+        if [[ "${logStatus}" == "false" ]]; then
+            mkdir -p /etc/padm/sing-box/conf
+            touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
+            tail -f /etc/padm/sing-box/conf/box.log
+        fi
+        ;;
+    4) coreVersionManageMenu ;;
     *) coreInvalidInputRetryMenu coreLogsMenu ;;
     esac
 }
@@ -2850,9 +2857,9 @@ coreVersionManageMenu() {
     echoContent title "\n┌─ 核心与服务 ───────────────────────────────────────"
     menuLine "这里维护 Xray-core / sing-box 二进制、配置校验、服务状态和日志"
     menuLine "协议入口去 协议与入口；脚本更新和 BBR 去 系统与脚本"
-    menuItem 1 "Xray-core 生命周期" "升级、回退、校验、服务、日志"
-    menuItem 2 "sing-box 生命周期" "升级、回退、校验、服务、日志"
-    menuItem 3 "配置校验与数据维护" "校验配置，维护 Xray Geo 数据"
+    menuItem 1 "Xray-core 版本管理" "升级、回退或执行配置体检"
+    menuItem 2 "sing-box 版本管理" "升级、回退或验证预发布版"
+    menuItem 3 "配置校验与数据维护" "校验配置与兼容性，维护 Xray Geo 数据"
     menuItem 4 "核心服务控制" "统一启动、停止、重启服务"
     menuItem 5 "核心日志" "查看 Xray / sing-box 日志"
     menuReturnItem 6 "返回主菜单" "回到 padm 管理面板"
@@ -2870,23 +2877,13 @@ coreVersionManageMenu() {
 }
 
 singBoxVersionManageMenu() {
-    echoContent title "\n┌─ sing-box 生命周期 ─────────────────────────────────"
-    menuItem 1 "升级稳定版" "下载最新稳定版，校验后替换"
-    menuItem 2 "检查预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
-    menuItem 3 "升级预发布版" "下载 prerelease，适合验证新能力"
-    menuItem 4 "回退稳定版" "选择最近稳定版本回退"
-    menuItem 5 "校验配置" "执行 sing-box merge + check"
-    menuItem 6 "兼容体检" "扫描 1.13/1.14 已知迁移风险"
-    local logStatus=
-    if [[ -f "$(singBoxLogConfigFile)" && "$(jq -r .log.disabled "$(singBoxLogConfigFile)")" == "false" ]]; then
-        menuItem 7 "关闭 debug 日志" "停止写入 sing-box debug 日志"
-        logStatus=true
-    else
-        menuItem 7 "启用 debug 日志" "开启 sing-box debug 日志"
-        logStatus=false
-    fi
-    menuItem 8 "查看日志" "tail -f 查看 sing-box 日志"
-    menuReturnItem 9 "返回核心与服务" "回到核心生命周期管理"
+    echoContent title "\n┌─ sing-box 版本管理 ─────────────────────────────────"
+    menuLine "这里管理 sing-box 版本；配置校验、迁移体检和日志请使用上级菜单。"
+    menuItem 1 "升级稳定版" "下载并校验最新稳定版后替换"
+    menuItem 2 "检查预发布兼容性" "仅检查最新预发布版，不替换当前版本"
+    menuItem 3 "升级预发布版" "下载并校验预发布版，适合验证新能力"
+    menuItem 4 "回退稳定版" "选择最近的稳定版本回退"
+    menuReturnItem 5 "返回核心与服务" "回到核心与服务"
     menuClose
     autoRead singbox_lifecycle_menu "请选择:" selectSingBoxType
     case "${selectSingBoxType}" in
@@ -2905,28 +2902,7 @@ singBoxVersionManageMenu() {
         fi
         upgradeSingBoxCore false "${version}"
         ;;
-    5)
-        local logFile
-        logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
-        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
-            singBoxConfigValidationCard "通过"
-        else
-            singBoxConfigValidationCard "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
-        fi
-        ;;
-    6) showSingBoxCompatibilityAudit ;;
-    7)
-        singBoxLog ${logStatus}
-        if [[ "${logStatus}" == "false" ]]; then
-            tail -f /etc/padm/sing-box/conf/box.log
-        fi
-        ;;
-    8)
-        mkdir -p /etc/padm/sing-box/conf
-        touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
-        tail -f /etc/padm/sing-box/conf/box.log
-        ;;
-    9) coreVersionManageMenu ;;
+    5) coreVersionManageMenu ;;
     *) coreInvalidInputRetryMenu singBoxVersionManageMenu ;;
     esac
 }

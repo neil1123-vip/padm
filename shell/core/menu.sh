@@ -224,7 +224,7 @@ menu() {
     menuItem 3 "协议与入口" "REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口"
     menuItem 4 "站点与证书" "传统 TLS fallback 站点、302、ALPN 和 TLS 证书"
     menuItem 5 "路由与访问控制" "分流、BT、域名/IP 阻断、直连例外和区域阻断"
-    menuItem 6 "核心与服务" "Xray/sing-box 生命周期、配置校验、服务控制和日志"
+    menuItem 6 "核心与服务" "Xray/sing-box 版本管理、配置校验、服务控制和日志"
     menuItem 7 "系统与脚本" "更新 padm、网络优化和宿主机辅助项"
     menuDangerItem 8 "高级/危险操作" "卸载和实验性高风险开关"
     menuLine "新人建议：1 安装与重装里先看怎么选；安装后 2 查看订阅"

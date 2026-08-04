@@ -871,7 +871,7 @@ showInstallArgsHelp() {
 │ 协议与入口: REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口
 │ 站点与证书: 传统 TLS fallback 站点、302、ALPN 和证书
 │ 路由与访问控制: 分流、BT、域名/IP 阻断、直连例外和区域阻断
-│ 核心与服务: Xray/sing-box 生命周期、配置校验、服务控制和日志
+│ 核心与服务: Xray/sing-box 版本管理、配置校验、服务控制和日志
 │ 系统与脚本: 更新 padm、网络优化和宿主机辅助项
 ├─ 正式子命令
 │ bash install.sh InstallSubscription --domain subscribe.example.com --subscribe-port 39778 --install-nginx yes

@@ -2187,6 +2187,8 @@ runMenuSmokeLightRegression() {
     bbrInstall() { recordMenuAction bbrInstall; }
     upgradeXrayCore() { recordMenuAction "upgradeXrayCore:$*"; }
     showXrayConfigHealthCheck() { recordMenuAction showXrayConfigHealthCheck; }
+    checkSingBoxPrereleaseCompatibility() { recordMenuAction checkSingBoxPrereleaseCompatibility; }
+    upgradeSingBoxCore() { recordMenuAction "upgradeSingBoxCore:$*"; }
 
     installMenu <<<"6"
     assertMenuAction selectCoreInstall
@@ -2234,14 +2236,23 @@ runMenuSmokeLightRegression() {
     output=
     xrayVersionManageMenu <<<"2"
     assertMenuAction 'upgradeXrayCore:true'
-    grep -q '预发布验证/升级' <<<"${output}"
+    grep -q '升级预发布版' <<<"${output}"
     ! grep -q '检查预发布兼容性' <<<"${output}"
-    ! grep -q '升级预发布版' <<<"${output}"
     resetMenuActions
     output=
     xrayVersionManageMenu <<<"4"
     assertMenuAction showXrayConfigHealthCheck
     grep -q '配置体检' <<<"${output}"
+    resetMenuActions
+    output=
+    singBoxVersionManageMenu <<<"2"
+    assertMenuAction checkSingBoxPrereleaseCompatibility
+    ! assertMenuAction 'upgradeSingBoxCore:true'
+    grep -q '检查预发布兼容性' <<<"${output}"
+    resetMenuActions
+    output=
+    singBoxVersionManageMenu <<<"3"
+    assertMenuAction 'upgradeSingBoxCore:true'
     [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
     [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
@@ -6275,7 +6286,7 @@ runSingBoxLogMenuDisableReturnRegression() {
             [[ "$1" == "true" ]]
         }
 
-        singBoxVersionManageMenu <<<"7"
+        coreLogsMenu <<<"3"
     )
 }
 
