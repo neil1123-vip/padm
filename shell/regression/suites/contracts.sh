@@ -6571,9 +6571,9 @@ runRegressionSelectorDispatchCompositionRegression() (
             "${PADM_REGRESSION_TRANSACTION_CORE_RESOURCE_PROFILE:-}" >>"${callLog}"
     }
 
-    runRegressionAllSelector subscription-state
-    runRegressionAllSelector remote-control
-    runRegressionAllSelector routing
+    runRegressionAllSelectorSuiteRoot subscription-state
+    runRegressionAllSelectorSuiteRoot remote-control
+    runRegressionAllSelectorSuiteRoot routing
 
     grep -qx 'selector=subscription-state suppress=1 jobs= ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=' "${callLog}"
     grep -qx 'selector=remote-control suppress=1 jobs= ui_profile= subscription_profile= routing_profile= runtime_profile= transaction_core_profile=' "${callLog}"
