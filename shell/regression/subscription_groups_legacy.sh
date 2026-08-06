@@ -7168,6 +7168,16 @@ runSingBoxProtocolReloadFailureRegression() (
 
     mkdir -p "${root}"
     : >"${callLog}"
+    currentProtocolHasAny() { return 1; }
+    set +e
+    (singBoxTuicInstall >/dev/null 2>&1)
+    tuicRc=$?
+    (singBoxHysteria2Install >/dev/null 2>&1)
+    hysteriaRc=$?
+    set -e
+    [[ "${tuicRc}" == "1" ]]
+    [[ "${hysteriaRc}" == "1" ]]
+
     currentProtocolHasAny() { return 0; }
     installSingBox() {
         printf 'install:%s\n' "$*" >>"${callLog}"
