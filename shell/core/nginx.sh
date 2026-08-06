@@ -237,7 +237,7 @@ realityStreamApplyServicesOrRollback() {
     local rollbackMessage
     local restoreServiceStatus=0
     if reloadCore; then
-        serviceQueueRestart nginx
+        serviceQueueRefresh nginx
         if serviceQueueApply; then
             removeRealityStreamBackup "${backupDir}"
             return 0
@@ -250,7 +250,7 @@ realityStreamApplyServicesOrRollback() {
         return 1
     fi
     reloadCore || restoreServiceStatus=1
-    serviceQueueRestart nginx
+    serviceQueueRefresh nginx
     serviceQueueApply || restoreServiceStatus=1
     removeRealityStreamBackup "${backupDir}"
     local rollbackMessage
@@ -1098,10 +1098,6 @@ EOF
         [[ -n "${ALONE_NGINX_CONFIG_ERROR:-}" ]] || aloneNginxConfigRecoveredErrorCard
         return 1
     fi
-    if ! runCoreServiceActionAllowFailure handleNginx stop; then
-        errorCard "Nginx 服务停止失败，已取消更新重定向配置"
-        return 1
-    fi
 }
 
 # 移除 Nginx 302 配置
@@ -1123,7 +1119,7 @@ checkNginx302() {
     fi
     errorCard "302重定向设置失败，请仔细检查是否和示例相同"
     backupNginxConfig restoreBackup || return 1
-    serviceQueueRestart nginx
+    serviceQueueRefresh nginx
     if ! serviceQueueApply; then
         errorCard "Nginx 302 回滚配置重载失败" "请手动检查 Nginx 当前运行配置"
         return 1

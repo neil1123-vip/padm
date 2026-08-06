@@ -878,16 +878,16 @@ manageTraditionalTlsRedirect() {
             backupNginxConfig restoreBackup
             return 1
         fi
-        serviceQueueRestart nginx
+        serviceQueueRefresh nginx
         if ! serviceQueueApply; then
             backupNginxConfig restoreBackup || return 1
-            serviceQueueRestart nginx
+            serviceQueueRefresh nginx
             serviceQueueApply || return 1
             return 1
         fi
         if [[ -z $(pgrep -f "nginx") ]]; then
             backupNginxConfig restoreBackup
-            serviceQueueStart nginx
+            serviceQueueRefresh nginx
             serviceQueueApply || return 1
             return 1
         fi
@@ -899,7 +899,15 @@ manageTraditionalTlsRedirect() {
         if ! ensureTraditionalTlsFallbackNginxConfig; then
             return 1
         fi
+        backupNginxConfig backup || return 1
         removeNginx302 || return 1
+        serviceQueueRefresh nginx
+        if ! serviceQueueApply; then
+            backupNginxConfig restoreBackup || return 1
+            serviceQueueRefresh nginx
+            serviceQueueApply || return 1
+            return 1
+        fi
         successCard "移除302重定向成功"
         exit 0
     elif [[ "${redirectStatus}" == "3" ]]; then

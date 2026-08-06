@@ -162,6 +162,7 @@ listRegressionTransactionCoreLightChildSelectors() {
 listRegressionTransactionSystemChildSelectors() {
     printf '%s\n' \
         nginx-service-failure \
+        nginx-service-refresh \
         uninstall-nginx-cleanup \
         clean-agent-nginx-managed-remove \
         fail2ban-managed-cleanup \
@@ -380,6 +381,7 @@ runRegressionTransactionSystemParallelCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
     runNginxServiceFailureRegression() { runRegressionAllSelector nginx-service-failure; }
+    runNginxServiceRefreshRegression() { runRegressionAllSelector nginx-service-refresh; }
     runUninstallNginxCleanupRegression() { runRegressionAllSelector uninstall-nginx-cleanup; }
     runCleanAgentNginxManagedRemovalRegression() { runRegressionAllSelector clean-agent-nginx-managed-remove; }
     runFail2banManagedCleanupRegression() { runRegressionAllSelector fail2ban-managed-cleanup; }
@@ -476,6 +478,7 @@ registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRegressi
 registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runRegressionTransactionLegacyLeafWithCompat runUserSubscriptionMenuMutationFailureRegression
 registerRegressionFunctionLeaf remote-subscribe-snapshots runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeSnapshotRegression
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
+registerRegressionFunctionLeaf nginx-service-refresh runNginxServiceRefreshRegression
 registerRegressionFunctionLeaf uninstall-nginx-cleanup runUninstallNginxCleanupRegression
 registerRegressionFunctionLeaf clean-agent-nginx-managed-remove runCleanAgentNginxManagedRemovalRegression
 registerRegressionFunctionLeaf fail2ban-managed-cleanup runFail2banManagedCleanupRegression

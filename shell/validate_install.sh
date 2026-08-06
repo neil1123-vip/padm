@@ -221,7 +221,7 @@ check_sing_box() {
 }
 
 check_sing_box_compatibility_audit() {
-    local statusFile warnFile summary compatLog
+    local statusFile warnFile summary compatLog scanRc
 
     if [[ ! -x /etc/padm/sing-box/sing-box ]]; then
         warn "未安装 sing-box，跳过兼容体检摘要"
@@ -237,15 +237,17 @@ check_sing_box_compatibility_audit() {
         return
     }
 
-    # 只读验收只输出摘要，不把历史兼容风险直接升级成 FAIL。
     (
         # shellcheck source=/dev/null
         source /etc/padm/shell/core/bootstrap.sh
         statusFile=$(coreTmpFilePath padm-sing-box-compat-audit.status)
         warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
-        collectSingBoxCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-sing-box-compat-audit.log)" "${warnFile}"
+        scanRc=0
+        collectSingBoxCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-sing-box-compat-audit.log)" "${warnFile}" || scanRc=$?
         summary=$(summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}")
-        if singBoxCompatibilityAuditHasFailures "${statusFile}"; then
+        if [[ "${scanRc}" -eq 2 ]]; then
+            printf 'WARN:无法检查当前配置\n'
+        elif [[ "${scanRc}" -ne 0 ]]; then
             printf 'WARN:%s\n' "${summary}"
             printf 'LOG:%s\n' "$(coreTmpFilePath padm-sing-box-compat-audit.log)"
         elif [[ -s "${warnFile}" ]]; then
@@ -269,7 +271,8 @@ check_sing_box_compatibility_audit() {
 }
 
 check_xray_compatibility_audit() {
-    local statusFile warnFile summary strictLog compatLog
+    local statusFile warnFile summary validateLog strictLog compatLog
+    local validateRc strictRc scanRc
 
     if [[ ! -x /etc/padm/xray/xray ]]; then
         warn "未安装 Xray，跳过兼容体检摘要"
@@ -290,13 +293,26 @@ check_xray_compatibility_audit() {
         source /etc/padm/shell/core/bootstrap.sh
         statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
         warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
-        collectXrayCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-xray-compat-audit.log)" "${warnFile}"
-        summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
+        validateLog=$(coreTmpFilePath padm-core-xray-test.log)
         strictLog=$(coreTmpFilePath padm-core-xray-strict-test.log)
-        if ! validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}"; then
-            printf 'WARN:STRICT_FAIL %s\n' "${strictLog}"
+        validateRc=0
+        strictRc=0
+        scanRc=0
+        validateXrayConfigWithBinary /etc/padm/xray/xray "${validateLog}" || validateRc=$?
+        if [[ "${validateRc}" -eq 0 ]]; then
+            validateXrayConfigStrictWithBinary /etc/padm/xray/xray "${strictLog}" || strictRc=$?
         fi
-        if xrayCompatibilityAuditHasFailures "${statusFile}"; then
+        collectXrayCompatibilityFindings "${statusFile}" "$(coreTmpFilePath padm-xray-compat-audit.log)" "${warnFile}" || scanRc=$?
+        summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
+        if [[ "${validateRc}" -eq 2 ]]; then
+            printf 'WARN:CURRENT_UNAVAILABLE %s\n' "${validateLog}"
+        elif [[ "${validateRc}" -ne 0 ]]; then
+            printf 'WARN:CURRENT_FAIL %s\n' "${validateLog}"
+        elif [[ "${strictRc}" -ne 0 ]]; then
+            printf 'WARN:STRICT_FAIL %s\n' "${strictLog}"
+        elif [[ "${scanRc}" -eq 2 ]]; then
+            printf 'WARN:无法检查升级风险扫描\n'
+        elif [[ "${scanRc}" -ne 0 ]]; then
             printf 'WARN:%s\n' "${summary}"
             printf 'LOG:%s\n' "$(coreTmpFilePath padm-xray-compat-audit.log)"
         elif [[ -s "${warnFile}" ]]; then
@@ -315,6 +331,11 @@ check_xray_compatibility_audit() {
         fi
         if grep -q '^WARN:STRICT_FAIL ' "${compatLog}"; then
             warn "Xray 严格模式校验失败：$(sed -n 's/^WARN:STRICT_FAIL //p' "${compatLog}" | head -n 1)"
+        fi
+        if grep -q '^WARN:CURRENT_FAIL ' "${compatLog}"; then
+            warn "Xray 当前配置检查失败：$(sed -n 's/^WARN:CURRENT_FAIL //p' "${compatLog}" | head -n 1)"
+        elif grep -q '^WARN:CURRENT_UNAVAILABLE ' "${compatLog}"; then
+            warn "Xray 当前配置无法检查：$(sed -n 's/^WARN:CURRENT_UNAVAILABLE //p' "${compatLog}" | head -n 1)"
         fi
     else
         warn "Xray 兼容体检摘要执行失败，已跳过"

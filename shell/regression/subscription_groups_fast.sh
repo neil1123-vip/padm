@@ -678,7 +678,7 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
         printf 'restored-wireguard\n' >"$(subscriptionWireGuardConfigFile)"
     }
     nginxRunning() { [[ "${nginxRuntimeState}" == "true" ]]; }
-    serviceQueueRestart() { actions+="queue:$1:restart"$'\n'; }
+    serviceQueueRefresh() { actions+="queue:$1:refresh"$'\n'; }
     serviceQueueApply() {
         actions+="queue-apply"$'\n'
         nginxRuntimeState=false
@@ -706,7 +706,7 @@ runSubscriptionWireGuardNginxDisableLifecycleRegression() (
     [[ ! -e "${nginxTarget}" ]]
     [[ "${nginxRuntimeState}" == "true" ]]
     grep -qx 'stop-wireguard' <<<"${actions}"
-    grep -qx 'queue:nginx:restart' <<<"${actions}"
+    grep -qx 'queue:nginx:refresh' <<<"${actions}"
     grep -qx 'queue-apply' <<<"${actions}"
 
     resetWireGuardNginxDisableFixture
@@ -2177,7 +2177,10 @@ runMenuSmokeLightRegression() {
     autoRead() {
         local targetVar=$3
         local input=
-        IFS= read -r input || input=
+        if ! IFS= read -r input; then
+            printf -v "${targetVar}" '%s' ""
+            return 1
+        fi
         printf -v "${targetVar}" '%s' "${input}"
     }
     selectCoreInstall() { recordMenuAction selectCoreInstall; }
@@ -2185,8 +2188,14 @@ runMenuSmokeLightRegression() {
     updatePadm() { recordMenuAction "updatePadm:$*"; }
     showPadmScriptInstallStatus() { recordMenuAction showPadmScriptInstallStatus; }
     bbrInstall() { recordMenuAction bbrInstall; }
+    xrayInstalled() { return 0; }
+    singBoxInstalled() { return 0; }
     upgradeXrayCore() { recordMenuAction "upgradeXrayCore:$*"; }
     showXrayConfigHealthCheck() { recordMenuAction showXrayConfigHealthCheck; }
+    showXrayCompatibilityAudit() { recordMenuAction showXrayCompatibilityAudit; }
+    checkXrayPrereleaseCompatibility() { recordMenuAction checkXrayPrereleaseCompatibility; }
+    showSingBoxConfigValidation() { recordMenuAction showSingBoxConfigValidation; }
+    showSingBoxCompatibilityAudit() { recordMenuAction showSingBoxCompatibilityAudit; }
     checkSingBoxPrereleaseCompatibility() { recordMenuAction checkSingBoxPrereleaseCompatibility; }
     upgradeSingBoxCore() { recordMenuAction "upgradeSingBoxCore:$*"; }
 
@@ -2242,17 +2251,24 @@ runMenuSmokeLightRegression() {
     output=
     xrayVersionManageMenu <<<"4"
     assertMenuAction showXrayConfigHealthCheck
-    grep -q '配置体检' <<<"${output}"
+    grep -q '检查当前配置' <<<"${output}"
+    grep -q '扫描升级风险' <<<"${output}"
+    grep -q '试跑预发布版' <<<"${output}"
     resetMenuActions
     output=
     singBoxVersionManageMenu <<<"2"
-    assertMenuAction checkSingBoxPrereleaseCompatibility
-    ! assertMenuAction 'upgradeSingBoxCore:true'
-    grep -q '检查预发布兼容性' <<<"${output}"
+    assertMenuAction 'upgradeSingBoxCore:true'
+    grep -q '升级预发布版' <<<"${output}"
     resetMenuActions
     output=
-    singBoxVersionManageMenu <<<"3"
-    assertMenuAction 'upgradeSingBoxCore:true'
+    singBoxVersionManageMenu <<<"4"
+    assertMenuAction showSingBoxConfigValidation
+    grep -q '检查当前配置' <<<"${output}"
+    grep -q '扫描升级风险' <<<"${output}"
+    grep -q '试跑预发布版' <<<"${output}"
+    resetMenuActions
+    singBoxVersionManageMenu <<<"6"
+    assertMenuAction checkSingBoxPrereleaseCompatibility
     [[ "$(protocolMenuDescription 5)" == "推荐；sing-box / tcp / tls" ]]
     [[ "$(protocolMenuDescription 4)" == "推荐；sing-box / tcp / tls" ]]
     coreInstallType="${oldCoreInstallType}"
@@ -5624,8 +5640,50 @@ runCoreRunningFallsBackToServiceStateRegression() {
             [[ "$1" == "is-active" && "$2" == "--quiet" && ( "$3" == "xray.service" || "$3" == "sing-box.service" ) ]]
         }
         singBoxMergedConfigFile() { printf '%s\n' "/etc/padm/sing-box/conf/config.json"; }
+        serviceInstalled xray
+        serviceInstalled sing-box
         xrayRunning
         singBoxRunning
+        serviceRunning xray
+        serviceRunning sing-box
+
+        rm -f "${PADM_XRAY_SYSTEMD_SERVICE_FILE}" "${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
+        : >"${PADM_XRAY_OPENRC_SERVICE_FILE}"
+        : >"${PADM_SINGBOX_OPENRC_SERVICE_FILE}"
+        padmCommandExists() { [[ "$1" == "rc-service" ]]; }
+        rc-service() {
+            [[ "$1" == "xray" || "$1" == "sing-box" ]]
+            [[ "$2" == "status" ]]
+        }
+        serviceRunning xray
+        serviceRunning sing-box
+
+        rm -f "${PADM_XRAY_OPENRC_SERVICE_FILE}" "${PADM_SINGBOX_OPENRC_SERVICE_FILE}"
+        PADM_XRAY_BINARY="${root}/xray"
+        PADM_SINGBOX_BINARY="${root}/sing-box"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${PADM_XRAY_BINARY}"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${PADM_SINGBOX_BINARY}"
+        chmod +x "${PADM_XRAY_BINARY}" "${PADM_SINGBOX_BINARY}"
+        serviceInstalled xray
+        serviceInstalled sing-box
+        ! serviceRunning xray
+        ! serviceRunning sing-box
+
+        rm -f "${PADM_XRAY_BINARY}" "${PADM_SINGBOX_BINARY}"
+        ! serviceInstalled xray
+        ! serviceInstalled sing-box
+        ! serviceInstalled unknown
+        ! serviceRunning unknown
+
+        nginxServiceInstalled() { return 0; }
+        nginxRunning() { return 0; }
+        serviceInstalled nginx
+        serviceRunning nginx
+        nginxServiceInstalled() { return 1; }
+        padmCommandExists() { return 1; }
+        nginxRunning() { return 1; }
+        ! serviceInstalled nginx
+        ! serviceRunning nginx
     )
 }
 
@@ -5979,20 +6037,30 @@ runSingBoxCompatibilityAuditRegression() {
         export PADM_SINGBOX_BINARY="${TMP_DIR}/fake-sing-box-bin"
         mkdir -p "${root}/conf/config"
         singBoxConfigPath="${root}/conf/config/"
-        printf '#!/usr/bin/env bash\nexit 0\n' >"${PADM_SINGBOX_BINARY}"
-        chmod +x "${PADM_SINGBOX_BINARY}"
         cat >"${root}/conf/config.json" <<'JSON'
 {"dns":{"servers":[{"address":"local","strategy":"ipv4_only"}],"rules":[{"outbound":"legacy-out"}]},"outbounds":[{"type":"wireguard","tag":"legacy-wg"},{"type":"block","tag":"legacy-block"}],"endpoints":[{"type":"wireguard","tag":"new-endpoint"}]}
 JSON
-        local statusFile warnFile logFile
+        local statusFile warnFile logFile rc=0 jqLog="${root}/jq.log"
+        jq() {
+            printf 'jq\n' >>"${jqLog}"
+            command jq "$@"
+        }
         statusFile=$(coreTmpFilePath padm-sing-box-compat-audit.status)
         warnFile=$(coreTmpFilePath padm-sing-box-compat-audit.warn)
         logFile=$(coreTmpFilePath padm-sing-box-compat-audit.log)
-        collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+        collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+        [[ "${rc}" == "1" ]]
+        [[ "$(wc -l <"${jqLog}")" == "1" ]]
         grep -q '^fail:' "${statusFile}"
         grep -q '旧 WireGuard outbound' "${logFile}"
         grep -q 'legacy special outbound' "${logFile}"
         grep -q '旧 DNS server 格式' "${logFile}"
+
+        rm -f "${root}/conf/config.json"
+        rc=0
+        collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+        [[ "${rc}" == "2" ]]
+        grep -q '未检测到 sing-box 配置' "${logFile}"
     )
 }
 
@@ -6000,30 +6068,109 @@ runSingBoxPrereleaseDryRunRegression() {
     (
         set -euo pipefail
         local root="${TMP_DIR}/singbox-prerelease"
-        export PADM_SINGBOX_BINARY="${TMP_DIR}/fake-sing-box-bin"
+        local downloadDir="${root}/download"
+        local downloadLog="${root}/download.log"
+        local validateLog="${root}/validate.log"
+        local installLog="${root}/install.log"
+        local statusLog="${root}/status.log"
+        local reportLog="${root}/prerelease.log"
+        local confirmUpgrade=false
+        local rc=0
+        export PADM_SINGBOX_BINARY="${root}/missing-current-sing-box"
         singBoxConfigPath="${root}/conf/config/"
         mkdir -p "${root}/conf/config"
-        printf '#!/usr/bin/env bash\nif [[ \"$1\" == \"version\" ]]; then echo \"sing-box version 1.13.13\"; fi\n' >"${PADM_SINGBOX_BINARY}"
-        chmod +x "${PADM_SINGBOX_BINARY}"
         printf '{"inbounds":[]}\n' >"${root}/conf/config.json"
         downloadSingBoxReleaseBinaryToTemp() {
-            local _version=$1
+            local _version=$1 binaryVersion=${PADM_FAKE_SINGBOX_DOWNLOAD_VERSION:-$1}
             local _outVar=$2
             local _tmpVar=${3:-}
-            printf -v "${_outVar}" '%s' "${PADM_SINGBOX_BINARY}"
-            [[ -n "${_tmpVar}" ]] && printf -v "${_tmpVar}" '%s' "${TMP_DIR}/fake-download"
+            mkdir -p "${downloadDir}"
+            cat >"${downloadDir}/sing-box" <<EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "version" ]]; then
+    printf 'sing-box version ${binaryVersion#v}\n'
+fi
+EOF
+            chmod +x "${downloadDir}/sing-box"
+            printf 'download:%s\n' "${_version}" >>"${downloadLog}"
+            printf -v "${_outVar}" '%s' "${downloadDir}/sing-box"
+            [[ -n "${_tmpVar}" ]] && printf -v "${_tmpVar}" '%s' "${downloadDir}"
         }
         validateSingBoxConfigWithBinary() {
             local binary=$1
             local logFile=$2
             printf 'checked %s\n' "${binary}" >"${logFile}"
-            [[ "${binary}" == "${PADM_SINGBOX_BINARY}" ]]
+            printf 'validate:%s\n' "${binary}" >>"${validateLog}"
+            [[ -x "${binary}" ]]
         }
-        REGRESSION_STATUS_CARD_LOG="${root}/status.log"
+        REGRESSION_STATUS_CARD_LOG="${statusLog}"
         : >"${REGRESSION_STATUS_CARD_LOG}"
-        checkSingBoxPrereleaseCompatibility "v1.14.0-alpha.test" "${TMP_DIR}/prerelease.log"
+        : >"${downloadLog}"
+        : >"${validateLog}"
+        : >"${installLog}"
+        printf '#!/usr/bin/env bash\nexit 0\n' >"${root}/current-sing-box"
+        chmod +x "${root}/current-sing-box"
+        export PADM_SINGBOX_BINARY="${root}/current-sing-box"
+        showSingBoxConfigValidation "${root}/current-check.log"
+        grep -q 'sing-box 当前配置检查' "${statusLog}"
+        grep -q '通过' "${statusLog}"
+        rm -f "${root}/current-sing-box"
+        export PADM_SINGBOX_BINARY="${root}/missing-current-sing-box"
+        checkSingBoxPrereleaseCompatibility "v1.14.0-alpha.test" "${reportLog}"
         grep -q '目标版本: v1.14.0-alpha.test' "${REGRESSION_STATUS_CARD_LOG}"
-        grep -q 'checked' "${TMP_DIR}/prerelease.log"
+        grep -q '\[本地升级风险扫描\]' "${reportLog}"
+        grep -q '\[目标二进制配置校验\]' "${reportLog}"
+        [[ ! -e "${downloadDir}" ]]
+        ! compgen -G "${reportLog}.*" >/dev/null
+
+        confirmCoreUpgrade() { [[ "${confirmUpgrade}" == "true" ]]; }
+        installDownloadedSingBoxBinary() {
+            printf '%s:%s\n' "$1" "${2:-}" >>"${installLog}"
+            [[ -n "${2:-}" ]]
+            padmRemoveCleanupPath "$2"
+        }
+
+        upgradeSingBoxCore true "v1.14.0-alpha.test"
+        [[ "$(grep -c '^download:' "${downloadLog}")" == "2" ]]
+        [[ ! -s "${installLog}" ]]
+        [[ ! -e "${downloadDir}" ]]
+
+        confirmUpgrade=true
+        upgradeSingBoxCore true "v1.14.0-alpha.test"
+        [[ "$(grep -c '^download:' "${downloadLog}")" == "3" ]]
+        grep -q '^v1.14.0-alpha.test:.*/download$' "${installLog}"
+        [[ ! -e "${downloadDir}" ]]
+
+        export PADM_FAKE_SINGBOX_DOWNLOAD_VERSION=v1.13.13
+        : >"${validateLog}"
+        rc=0
+        checkSingBoxPrereleaseCompatibility "v1.14.0-alpha.test" "${reportLog}" || rc=$?
+        [[ "${rc}" == "1" ]]
+        [[ ! -s "${validateLog}" ]]
+        grep -q '下载二进制版本不匹配' "${statusLog}"
+        [[ ! -e "${downloadDir}" ]]
+        unset PADM_FAKE_SINGBOX_DOWNLOAD_VERSION
+
+        cat >"${root}/conf/config.json" <<'JSON'
+{"outbounds":[{"type":"wireguard"}]}
+JSON
+        : >"${downloadLog}"
+        coreLatestReleaseTag() {
+            printf 'version-fetch\n' >>"${root}/network.log"
+            printf 'v1.14.0-alpha.test\n'
+        }
+        rc=0
+        checkSingBoxPrereleaseCompatibility "" "${reportLog}" || rc=$?
+        [[ "${rc}" == "1" ]]
+        [[ ! -s "${downloadLog}" ]]
+        [[ ! -e "${root}/network.log" ]]
+
+        printf '{"inbounds":[]}\n' >"${root}/conf/config.json"
+        coreLatestReleaseTag() { printf 'null\n'; }
+        rc=0
+        checkSingBoxPrereleaseCompatibility "" "${reportLog}" || rc=$?
+        [[ "${rc}" == "1" ]]
+        grep -q '无法获取预发布版本' "${statusLog}"
     )
 }
 
@@ -6046,6 +6193,9 @@ else
     printf 'normal-ok\n'
 fi
 printf '%s\n' "${XRAY_JSON_STRICT:-false}" >>"${PADM_XRAY_HEALTH_CALL_LOG:-/dev/null}"
+if [[ "${PADM_FAKE_XRAY_FAIL_MODE:-}" == "${XRAY_JSON_STRICT:-normal}" ]]; then
+    exit 1
+fi
 exit 0
 EOF
         chmod +x "${PADM_XRAY_BINARY}"
@@ -6058,9 +6208,34 @@ EOF
         showXrayConfigHealthCheck
         grep -qx 'false' "${callLog}"
         grep -qx 'true' "${callLog}"
-        grep -q '当前配置: 通过' "${statusLog}"
+        grep -q 'Xray 当前配置检查' "${statusLog}"
+        grep -q '运行检查: 通过' "${statusLog}"
         grep -q '严格检查: 通过' "${statusLog}"
-        grep -q '升级兼容: 通过（FAIL=0 WARN=0 PASS=1）' "${statusLog}"
+
+        export PADM_FAKE_XRAY_FAIL_MODE=true
+        : >"${statusLog}"
+        showXrayConfigHealthCheck
+        grep -q '需关注' "${statusLog}"
+        grep -q '严格检查未通过' "${statusLog}"
+
+        export PADM_FAKE_XRAY_FAIL_MODE=normal
+        : >"${statusLog}"
+        local rc=0
+        showXrayConfigHealthCheck || rc=$?
+        [[ "${rc}" == "1" ]]
+        grep -q '运行检查未通过' "${statusLog}"
+        unset PADM_FAKE_XRAY_FAIL_MODE
+
+        printf 'stale\n' >"${TMP_DIR}/xray-missing.log"
+        validateXrayConfigWithBinary "${root}/missing-xray" "${TMP_DIR}/xray-missing.log" || rc=$?
+        [[ "${rc}" == "2" ]]
+        ! grep -q stale "${TMP_DIR}/xray-missing.log"
+        grep -q '二进制不存在' "${TMP_DIR}/xray-missing.log"
+        rc=0
+        runXrayConfigValidation "${PADM_XRAY_BINARY}" unknown "${TMP_DIR}/xray-invalid-mode.log" || rc=$?
+        [[ "${rc}" == "1" ]]
+        grep -q '未知校验模式' "${TMP_DIR}/xray-invalid-mode.log"
+        [[ -z "${XRAY_JSON_STRICT+x}" ]]
     )
 }
 
@@ -6072,25 +6247,46 @@ runXrayCompatibilityAuditRegression() {
         export PADM_XRAY_BINARY="${xrayRoot}/xray"
         export PADM_XRAY_CONF_DIR="${xrayRoot}/conf"
         mkdir -p "${PADM_XRAY_CONF_DIR}"
-        printf '#!/usr/bin/env bash\nexit 0\n' >"${PADM_XRAY_BINARY}"
-        chmod +x "${PADM_XRAY_BINARY}"
         cat >"${PADM_XRAY_CONF_DIR}/07_VLESS_vision_reality_inbounds.json" <<'JSON'
 {"inbounds":[{"streamSettings":{"network":"xhttp"},"settings":{"clients":[{"email":"sub-x"}]}}],"echForceQuery":true}
 JSON
         cat >"${PADM_XRAY_CONF_DIR}/00_reverse.json" <<'JSON'
 {"reverse":{"bridges":[]}}
 JSON
-        local statusFile warnFile logFile summary
+        local statusFile warnFile logFile summary rc=0 jqLog="${root}/jq.log"
+        jq() {
+            printf 'jq\n' >>"${jqLog}"
+            command jq "$@"
+        }
         statusFile=$(coreTmpFilePath padm-xray-compat-audit.status)
         warnFile=$(coreTmpFilePath padm-xray-compat-audit.warn)
         logFile=$(coreTmpFilePath padm-xray-compat-audit.log)
-        collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
+        collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+        [[ "${rc}" == "1" ]]
+        [[ "$(wc -l <"${jqLog}")" == "2" ]]
         summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
         [[ "${summary}" == 'FAIL=1 WARN=3 PASS=0' ]]
         grep -q '^\[WARN\].*settings\.clients/accounts' "${logFile}"
         grep -q '^\[WARN\].*echForceQuery' "${logFile}"
         grep -q '^\[FAIL\].*legacy reverse' "${logFile}"
         grep -q 'trustedXForwardedFor' "${logFile}"
+
+        command() {
+            if [[ "${1:-}" == "-v" && "${2:-}" == "jq" ]]; then
+                return 1
+            fi
+            builtin command "$@"
+        }
+        rc=0
+        collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+        [[ "${rc}" == "1" ]]
+        grep -q '缺少 jq' "${logFile}"
+        unset -f command
+
+        mkdir -p "${root}/status-dir"
+        rc=0
+        collectXrayCompatibilityFindings "${root}/status-dir" "${logFile}" "${warnFile}" 2>/dev/null || rc=$?
+        [[ "${rc}" == "1" ]]
     )
 }
 
@@ -6203,21 +6399,36 @@ EOF
             local binary=$1
             local logFile=$2
             printf 'checked:normal:%s\n' "${binary}" >"${logFile}"
+            printf 'normal\n' >>"${root}/validation-calls.log"
             [[ -x "${binary}" ]]
         }
         validateXrayConfigStrictWithBinary() {
             local binary=$1
             local logFile=$2
             printf 'checked:strict:%s\n' "${binary}" >"${logFile}"
-            [[ -x "${binary}" ]]
+            printf 'strict\n' >>"${root}/validation-calls.log"
+            [[ -x "${binary}" && "${PADM_FAKE_XRAY_STRICT_FAIL:-false}" != "true" ]]
         }
         checkXrayPrereleaseCompatibility "v26.6.1" "${TMP_DIR}/xray-prerelease.log"
-        grep -q '\[普通模式校验\]' "${TMP_DIR}/xray-prerelease.log"
-        grep -q '\[严格模式校验\]' "${TMP_DIR}/xray-prerelease.log"
+        grep -q '\[本地升级风险扫描\]' "${TMP_DIR}/xray-prerelease.log"
+        grep -q '\[运行校验\]' "${TMP_DIR}/xray-prerelease.log"
+        grep -q '\[严格校验\]' "${TMP_DIR}/xray-prerelease.log"
         grep -q 'checked:normal:' "${TMP_DIR}/xray-prerelease.log"
         grep -q 'checked:strict:' "${TMP_DIR}/xray-prerelease.log"
         grep -q '仅执行 dry-run，未替换本机二进制' "${statusLog}"
         [[ ! -e "${downloadDir}" ]]
+        ! compgen -G "${TMP_DIR}/xray-prerelease.log.*" >/dev/null
+
+        export PADM_FAKE_XRAY_STRICT_FAIL=true
+        set +e
+        checkXrayPrereleaseCompatibility "v26.6.1" "${TMP_DIR}/xray-prerelease.log"
+        mismatchRc=$?
+        set -e
+        [[ "${mismatchRc}" == "1" ]]
+        grep -q '严格校验失败' "${statusLog}"
+        [[ ! -e "${downloadDir}" ]]
+        ! compgen -G "${TMP_DIR}/xray-prerelease.log.*" >/dev/null
+        unset PADM_FAKE_XRAY_STRICT_FAIL
 
         downloadXrayReleaseBinaryToTempDir() {
             printf 'second-download:%s\n' "$1" >>"${downloadLog}"
@@ -6258,15 +6469,45 @@ EOF
         [[ ! -e "${downloadDir}" ]]
 
         PADM_FAKE_XRAY_DOWNLOAD_VERSION=v26.6.1
+        : >"${root}/validation-calls.log"
+        local serviceCountBefore
+        serviceCountBefore=$(wc -l <"${serviceLog}")
         set +e
         upgradeXrayCore true "v26.6.2"
         mismatchRc=$?
         set -e
         [[ "${mismatchRc}" == "1" ]]
-        grep -q '^目标版本: v26.6.2$' "$(coreTmpFilePath padm-core-xray-upgrade-test.log)"
-        grep -q '^实际版本: v26.6.1$' "$(coreTmpFilePath padm-core-xray-upgrade-test.log)"
-        [[ "$(tail -n 1 "${serviceLog}")" == "stop" ]]
-        grep -q '^Xray-core:' "${finalizeLog}"
+        grep -q '下载二进制版本不匹配' "${statusLog}"
+        [[ ! -s "${root}/validation-calls.log" ]]
+        [[ "$(wc -l <"${serviceLog}")" == "${serviceCountBefore}" ]]
+        [[ ! -s "${finalizeLog}" ]]
+        [[ ! -e "${downloadDir}" ]]
+        unset PADM_FAKE_XRAY_DOWNLOAD_VERSION
+
+        cat >"${PADM_XRAY_CONF_DIR}/00_log.json" <<'JSON'
+{"reverse":{"bridges":[]}}
+JSON
+        : >"${downloadLog}"
+        coreLatestReleaseTag() {
+            printf 'version-fetch\n' >>"${root}/network.log"
+            printf 'v26.6.3\n'
+        }
+        set +e
+        checkXrayPrereleaseCompatibility "" "${TMP_DIR}/xray-prerelease.log"
+        mismatchRc=$?
+        set -e
+        [[ "${mismatchRc}" == "1" ]]
+        [[ ! -s "${downloadLog}" ]]
+        [[ ! -e "${root}/network.log" ]]
+
+        printf '{"log":{}}\n' >"${PADM_XRAY_CONF_DIR}/00_log.json"
+        coreLatestReleaseTag() { printf 'null\n'; }
+        set +e
+        checkXrayPrereleaseCompatibility "" "${TMP_DIR}/xray-prerelease.log"
+        mismatchRc=$?
+        set -e
+        [[ "${mismatchRc}" == "1" ]]
+        grep -q '无法获取预发布版本' "${statusLog}"
     )
 }
 

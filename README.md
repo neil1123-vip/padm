@@ -142,7 +142,7 @@ padm 主菜单按任务对象分组，一个功能只放在一个主要入口里
 | 🧭 协议与入口 | REALITY、XHTTP、Hysteria2、Tuic、入口端口和 CDN 入口地址。 |
 | 🔐 站点与证书 | 传统 TLS fallback 站点、302 重定向、ALPN 诊断/修复和本机 TLS 证书。 |
 | 🧱 路由与访问控制 | WARP、IPv6、Socks5、DNS/hosts、BT 阻断、域名/IP 阻断、直连例外和区域阻断。 |
-| ⚙️ 核心与服务 | Xray-core / sing-box 版本、升级/回退、配置校验、服务启停、日志和 Geo 数据。 |
+| ⚙️ 核心与服务 | Xray-core / sing-box 生命周期、服务运行态、日志诊断和 Xray Geo 数据；首页只读本地状态。 |
 | 🧰 系统与脚本 | 更新 padm、查看脚本安装状态、Fail2ban 防护、网络优化 / BBR。 |
 | ⚠️ 高级/危险操作 | 卸载脚本和 VLESS Encryption 实验等高风险开关。 |
 
@@ -364,16 +364,24 @@ Xray 访问控制使用 routing + blackhole/direct；sing-box 使用 remote rule
 
 ## 核心与服务
 
-`核心与服务` 会展示 Xray-core / sing-box 当前版本、服务状态、配置校验与兼容性结果以及 Xray Geo 数据状态；最新稳定版和预发布版只在升级、回退或兼容性检查时按需获取。
+`核心与服务` 首页只读取本地版本、配置、服务和 Xray Geo 状态，不执行配置检查或访问网络。即使尚未安装核心，也可以进入页面查看状态和执行不依赖本机二进制的只读扫描；远端版本只在明确升级、回退或试跑预发布版时获取。
+
+首页固定为 6 个入口：
+
+1. Xray-core 生命周期
+2. sing-box 生命周期
+3. 服务运行态
+4. 日志与诊断
+5. Xray Geo 数据
+6. 返回主菜单
+
+`安装与重装` 只在主菜单提供；不再有独立的“配置健康与兼容”页面。两个核心生命周期页使用相同顺序，并统一提供“检查当前配置”“扫描升级风险”“试跑预发布版”。结果显示为“通过”“需关注”“失败”或“无法检查”。前两项只读且不联网；预发布版试跑不会替换二进制或操作服务。
+
+Xray 的“检查当前配置”内部依次执行运行检查和严格检查：运行检查失败显示“失败”，仅严格阶段未通过显示“需关注”。sing-box 会先合并分片配置，再执行 `sing-box check -c /etc/padm/sing-box/conf/config.json`。技术阶段和日志路径只在结果详情中显示。
 
 升级或回退核心时，脚本先下载目标版本到临时目录，用目标二进制校验当前配置；校验通过后才替换 `/etc/padm/xray/xray` 或 `/etc/padm/sing-box/sing-box` 并重启服务。若新核心启动失败，会尝试恢复旧二进制。
 
-校验方式：
-
-- Xray：`xray -test -confdir /etc/padm/xray/conf`
-- sing-box：先合并分片配置，再执行 `sing-box check -c /etc/padm/sing-box/conf/config.json`
-
-Xray `geosite.dat` / `geoip.dat` 维护也在这里。
+Nginx 只在当前协议、站点或订阅配置确实依赖它时可启动、停止、重启或平滑 reload；已安装但不属于 padm 当前依赖的 Nginx 只读。Nginx 配置仍由协议、站点和订阅入口管理，服务页只负责状态与动作。Xray `geosite.dat` / `geoip.dat` 的更新、状态和定时任务统一位于 `Xray Geo 数据`。
 
 ## 系统与脚本
 
@@ -460,6 +468,25 @@ bash shell/subscription_groups_regression.sh transaction-core
 bash shell/subscription_groups_regression.sh remote-control-contract
 bash shell/subscription_groups_regression.sh remote-control-smoke
 bash shell/subscription_groups_regression.sh subscription-state
+```
+
+核心与服务重构的聚焦回归：
+
+```bash
+bash shell/subscription_groups_regression.sh ui-full-core
+bash shell/subscription_groups_regression.sh ui-full-core-maintenance
+bash shell/subscription_groups_regression.sh xray-strict-validation
+bash shell/subscription_groups_regression.sh xray-compat-audit
+bash shell/subscription_groups_regression.sh xray-compat-trusted-xff
+bash shell/subscription_groups_regression.sh xray-configured-validation-path
+bash shell/subscription_groups_regression.sh xray-prerelease-dry-run
+bash shell/subscription_groups_regression.sh singbox-compat-audit
+bash shell/subscription_groups_regression.sh singbox-prerelease-dry-run
+bash shell/subscription_groups_regression.sh core-running-service-state
+bash shell/subscription_groups_regression.sh service-queue-apply-propagation
+bash shell/subscription_groups_regression.sh reload-core-propagation
+bash shell/subscription_groups_regression.sh nginx-service-failure
+bash shell/subscription_groups_regression.sh nginx-service-refresh
 ```
 
 推荐的 harness 结构验证集：

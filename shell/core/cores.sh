@@ -623,50 +623,65 @@ xrayConfigInstalled() {
 
 coreXrayCurrentVersion() {
     if xrayInstalled; then
-        "$(coreXrayBinaryPath)" --version 2>/dev/null | awk 'NR==1 {print "v"$2}'
+        xrayBinaryVersion "$(coreXrayBinaryPath)"
     else
         echo "未安装"
     fi
+}
+
+xrayBinaryVersion() {
+    "${1}" --version 2>/dev/null | awk 'NR == 1 && $1 == "Xray" { print "v"$2; exit }'
 }
 
 getSingBoxCurrentVersion() {
     if singBoxInstalled; then
-        "$(coreSingBoxBinaryPath)" version 2>/dev/null | awk '/sing-box version/ {print "v"$3; exit}'
+        singBoxBinaryVersion "$(coreSingBoxBinaryPath)"
     else
         echo "未安装"
     fi
 }
 
-coreServiceState() {
-    local serviceName=$1
-    local runningFn=$2
-    if "${runningFn}"; then
-        echo "运行中"
-    elif [[ -f "/etc/systemd/system/${serviceName}.service" || -f "/etc/init.d/${serviceName}" ]]; then
-        echo "已停止"
+singBoxBinaryVersion() {
+    "${1}" version 2>/dev/null | awk 'NR == 1 && $1 == "sing-box" && $2 == "version" { print "v"$3; exit }'
+}
+
+runXrayConfigValidation() {
+    local binary=$1
+    local mode=$2
+    local logFile=$3
+    local configDir
+    configDir=$(coreXrayConfigDir)
+
+    : >"${logFile}" || return 1
+    printf '核心: Xray\n二进制: %s\n配置目录: %s\n阶段: %s\n' "${binary}" "${configDir}" "${mode}" >>"${logFile}" || return 1
+    case "${mode}" in
+    normal | strict) ;;
+    *)
+        printf '失败: 未知校验模式\n' >>"${logFile}"
+        return 1
+        ;;
+    esac
+    if [[ ! -x "${binary}" ]]; then
+        printf '无法检查: 二进制不存在或不可执行\n' >>"${logFile}"
+        return 2
+    fi
+    if [[ ! -d "${configDir}" ]]; then
+        printf '无法检查: 配置目录不存在\n' >>"${logFile}"
+        return 2
+    fi
+    if [[ "${mode}" == "strict" ]]; then
+        XRAY_JSON_STRICT=true "${binary}" -test -confdir "${configDir}" >>"${logFile}" 2>&1
     else
-        echo "未安装服务"
+        "${binary}" -test -confdir "${configDir}" >>"${logFile}" 2>&1
     fi
 }
 
 validateXrayConfigWithBinary() {
-    local binary=${1:-/etc/padm/xray/xray}
-    local logFile=${2:-$(coreTmpFilePath padm-core-xray-test.log)}
-    local configDir
-    configDir=$(coreXrayConfigDir)
-    [[ -x "${binary}" ]] || return 1
-    [[ -d "${configDir}" ]] || return 1
-    "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1
+    runXrayConfigValidation "${1:-/etc/padm/xray/xray}" normal "${2:-$(coreTmpFilePath padm-core-xray-test.log)}"
 }
 
 validateXrayConfigStrictWithBinary() {
-    local binary=${1:-/etc/padm/xray/xray}
-    local logFile=${2:-$(coreTmpFilePath padm-core-xray-strict-test.log)}
-    local configDir
-    configDir=$(coreXrayConfigDir)
-    [[ -x "${binary}" ]] || return 1
-    [[ -d "${configDir}" ]] || return 1
-    XRAY_JSON_STRICT=true "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1
+    runXrayConfigValidation "${1:-/etc/padm/xray/xray}" strict "${2:-$(coreTmpFilePath padm-core-xray-strict-test.log)}"
 }
 
 coreTmpFilePath() {
@@ -684,21 +699,30 @@ singBoxConfigInstalled() {
 validateSingBoxConfigWithBinary() {
     local binary=${1:-/etc/padm/sing-box/sing-box}
     local logFile=${2:-$(coreTmpFilePath padm-core-sing-box-test.log)}
-    [[ -x "${binary}" ]] || return 1
-    singBoxConfigInstalled || return 2
+
+    : >"${logFile}" || return 1
+    printf '核心: sing-box\n二进制: %s\n配置目录: %s\n阶段: 当前配置检查\n' "${binary}" "$(singBoxConfigShardDir)" >>"${logFile}" || return 1
+    if [[ ! -x "${binary}" ]]; then
+        printf '无法检查: 二进制不存在或不可执行\n' >>"${logFile}"
+        return 2
+    fi
+    if ! singBoxConfigInstalled; then
+        printf '无法检查: 配置不存在\n' >>"${logFile}"
+        return 2
+    fi
     singBoxMergeConfigForValidation "${binary}" "${logFile}" check || { appendSingBoxCompatibilityHints "${logFile}"; return 1; }
 }
 
 singBoxCompatibilityAuditCard() {
-    statusCard "sing-box 兼容体检" "$@"
+    statusCard "sing-box 升级风险扫描" "$@"
 }
 
 singBoxPrereleaseCompatibilityCard() {
-    statusCard "sing-box 预发布兼容检查" "$@"
+    statusCard "sing-box 预发布版试跑" "$@"
 }
 
 xrayCompatibilityAuditCard() {
-    statusCard "Xray 兼容体检" "$@"
+    statusCard "Xray 升级风险扫描" "$@"
 }
 
 xrayStrictValidationCard() {
@@ -706,15 +730,15 @@ xrayStrictValidationCard() {
 }
 
 xrayPrereleaseCompatibilityCard() {
-    statusCard "Xray 预发布兼容检查" "$@"
+    statusCard "Xray 预发布版试跑" "$@"
 }
 
 xrayConfigValidationCard() {
-    statusCard "Xray 配置校验" "$@"
+    statusCard "Xray 当前配置检查" "$@"
 }
 
 singBoxConfigValidationCard() {
-    statusCard "sing-box 配置校验" "$@"
+    statusCard "sing-box 当前配置检查" "$@"
 }
 
 skipTlsCertificateStatusCard() {
@@ -748,64 +772,63 @@ singBoxCompatibilityAuditWarn() {
     local warnFile=$1
     local logFile=$2
     local message=$3
-    printf '%s\n' "${message}" >>"${warnFile}"
-    printf '[WARN] %s\n' "${message}" >>"${logFile}"
+    printf '%s\n' "${message}" >>"${warnFile}" &&
+        printf '[WARN] %s\n' "${message}" >>"${logFile}"
 }
 
 singBoxCompatibilityAuditFail() {
     local statusFile=$1
     local logFile=$2
     local message=$3
-    singBoxCompatibilityAuditStatusAdd "${statusFile}" fail "${message}"
-    printf '[FAIL] %s\n' "${message}" >>"${logFile}"
+    singBoxCompatibilityAuditStatusAdd "${statusFile}" fail "${message}" &&
+        printf '[FAIL] %s\n' "${message}" >>"${logFile}"
 }
 
 singBoxCompatibilityAuditPass() {
     local statusFile=$1
     local logFile=$2
     local message=$3
-    singBoxCompatibilityAuditStatusAdd "${statusFile}" pass "${message}"
-    printf '[PASS] %s\n' "${message}" >>"${logFile}"
+    singBoxCompatibilityAuditStatusAdd "${statusFile}" pass "${message}" &&
+        printf '[PASS] %s\n' "${message}" >>"${logFile}"
 }
 
 singBoxCompatibilityAuditScanJsonFile() {
     local file=$1
     local statusFile=$2
     local logFile=$3
+    local finding findings=
 
-    if ! jq empty "${file}" >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}"
+    if ! findings=$(jq -r '
+        [
+            if any(.outbounds[]?; .type? == "wireguard") then "wireguard-outbound" else empty end,
+            if any(.outbounds[]?; .type? == "block" or .type? == "dns") then "special-outbound" else empty end,
+            if any(.. | objects; has("domain_strategy")) then "domain-strategy" else empty end,
+            if any(.. | objects | select(.dns? and ((.dns.rules? // []) | type == "array")) | .dns.rules[]?; has("outbound")) then "dns-rule-outbound" else empty end,
+            if any(
+                .. | objects | select(.dns? and ((.dns.servers? // []) | type == "array")) | .dns.servers[]?;
+                type == "string" or (type == "object" and (has("address") or has("detour") or has("strategy")) and (has("type") | not))
+            ) then "dns-server-format" else empty end,
+            if any(
+                .. | objects | select(.dns? and ((.dns.rules? // []) | type == "array")) | .dns.rules[]?;
+                ((has("ip_version") or has("query_type")) and (has("rule_set_ip_cidr_accept_empty") or has("ip_is_private"))) or
+                ((has("ip_version") or has("query_type")) and ((.rule_set // []) | tostring | test("query_type")))
+            ) then "dns-rule-mix" else empty end
+        ] | unique[]
+    ' "${file}" 2>>"${logFile}"); then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}" || return 1
         return 0
     fi
 
-    if jq -e '.outbounds[]? | select(.type? == "wireguard")' "${file}" >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 WireGuard outbound，请改用 endpoints[type=wireguard]：${file}"
-    fi
-    if jq -e '.outbounds[]? | select(.type? == "block" or .type? == "dns")' "${file}" >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy special outbound，请改用 route action：${file}"
-    fi
-    if jq -e '.. | objects | select(has("domain_strategy"))' "${file}" >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 domain_strategy，请迁移到 domain_resolver/default_domain_resolver：${file}"
-    fi
-    if jq -e '.. | objects | select(.dns? and ((.dns.rules? // []) | type == "array")) | .dns.rules[]? | select(has("outbound"))' "${file}" >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}"
-    fi
-    if jq -e '
-        .. | objects | select(.dns? and ((.dns.servers? // []) | type == "array")) | .dns.servers[]? |
-        select(type == "string" or (type == "object" and (has("address") or has("detour") or has("strategy")) and (has("type") | not)))
-    ' "${file}" >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}"
-    fi
-    if jq -e '
-        .. | objects | select(.dns? and ((.dns.rules? // []) | type == "array")) |
-        .dns.rules[]? |
-        select(
-            ((has("ip_version") or has("query_type")) and (has("rule_set_ip_cidr_accept_empty") or has("ip_is_private"))) or
-            ((has("ip_version") or has("query_type")) and ((.rule_set // []) | tostring | test("query_type")))
-        )
-    ' "${file}" >/dev/null 2>&1; then
-        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}"
-    fi
+    while IFS= read -r finding; do
+        case "${finding}" in
+        wireguard-outbound) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 WireGuard outbound，请改用 endpoints[type=wireguard]：${file}" || return 1 ;;
+        special-outbound) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy special outbound，请改用 route action：${file}" || return 1 ;;
+        domain-strategy) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 domain_strategy，请迁移到 domain_resolver/default_domain_resolver：${file}" || return 1 ;;
+        dns-rule-outbound) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS rule outbound，请迁移到 domain_resolver 或 route resolve：${file}" || return 1 ;;
+        dns-server-format) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到旧 DNS server 格式，请迁移到 typed DNS servers：${file}" || return 1 ;;
+        dns-rule-mix) singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 1.14 不兼容的 DNS 规则混搭，请检查 ip_version/query_type 与 legacy address filter：${file}" || return 1 ;;
+        esac
+    done <<<"${findings}"
 }
 
 collectSingBoxCompatibilityFindings() {
@@ -814,42 +837,42 @@ collectSingBoxCompatibilityFindings() {
     local warnFile=$3
     local file foundJson=false mergedFile shardDir
 
-    singBoxCompatibilityAuditReset "${statusFile}"
-    singBoxCompatibilityAuditReset "${warnFile}"
-    : >"${logFile}"
-    printf 'sing-box 兼容体检\n' >>"${logFile}"
+    singBoxCompatibilityAuditReset "${statusFile}" || return 1
+    singBoxCompatibilityAuditReset "${warnFile}" || return 1
+    : >"${logFile}" || return 1
+    printf '核心: sing-box\n配置目录: %s\n阶段: 升级风险扫描\n' "$(singBoxConfigShardDir)" >>"${logFile}" || return 1
 
-    if ! singBoxInstalled; then
-        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 二进制，跳过兼容体检"
-        return 0
-    fi
     if ! singBoxConfigInstalled; then
-        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 配置，跳过兼容体检"
-        return 0
+        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 sing-box 配置" || return 1
+        return 2
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        singBoxCompatibilityAuditFail "${statusFile}" "${logFile}" "缺少 jq，无法扫描 sing-box 配置" || return 1
+        return 1
     fi
 
     mergedFile=$(singBoxMergedConfigFile)
     shardDir=$(singBoxConfigShardDir)
-    while IFS= read -r file; do
+    if [[ -f "${mergedFile}" ]]; then
+        foundJson=true
+        singBoxCompatibilityAuditScanJsonFile "${mergedFile}" "${statusFile}" "${logFile}" || return 1
+    fi
+    for file in "${shardDir}"*.json; do
         [[ -f "${file}" ]] || continue
         foundJson=true
-        singBoxCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}"
-    done < <(
-        [[ -f "${mergedFile}" ]] && printf '%s\n' "${mergedFile}"
-        for file in "${shardDir}"*.json; do
-            [[ -f "${file}" ]] || continue
-            printf '%s\n' "${file}"
-        done
-    )
+        singBoxCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" || return 1
+    done
 
     if [[ "${foundJson}" != "true" ]]; then
-        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件"
-        return 0
+        singBoxCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 sing-box JSON 配置文件" || return 1
+        return 2
     fi
 
     if [[ ! -s "${statusFile}" ]]; then
-        singBoxCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到 1.13/1.14 已知兼容风险"
+        singBoxCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到 1.13/1.14 已知兼容风险" || return 1
     fi
+    singBoxCompatibilityAuditHasFailures "${statusFile}" && return 1
+    return 0
 }
 
 singBoxCompatibilityAuditHasFailures() {
@@ -868,28 +891,36 @@ summarizeSingBoxCompatibilityAudit() {
     printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
 }
 
-singBoxCompatibilityAuditOverviewSummary() {
-    local statusFile warnFile logFile
-    statusFile=$(singBoxCompatibilityAuditStatusFile)
-    warnFile=$(singBoxCompatibilityAuditWarnFile)
-    logFile=$(singBoxCompatibilityAuditLog)
-    collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
-    summarizeSingBoxCompatibilityAudit "${statusFile}" "${warnFile}"
-}
-
 showSingBoxCompatibilityAudit() {
     local logFile=${1:-$(singBoxCompatibilityAuditLog)}
     local statusFile=${2:-$(singBoxCompatibilityAuditStatusFile)}
     local warnFile=${3:-$(singBoxCompatibilityAuditWarnFile)}
 
-    collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
-    if singBoxCompatibilityAuditHasFailures "${statusFile}"; then
-        singBoxCompatibilityAuditCard "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 legacy DNS / WireGuard / special outbounds / domain_strategy"
+    local rc=0
+    collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+    if [[ "${rc}" -eq 2 ]]; then
+        singBoxCompatibilityAuditCard "无法检查" "未检测到 sing-box 配置" "排查日志: ${logFile}"
+    elif [[ "${rc}" -ne 0 ]]; then
+        singBoxCompatibilityAuditCard "失败" "排查日志: ${logFile}" "重点检查 JSON / legacy DNS / WireGuard / special outbounds / domain_strategy"
     elif [[ -s "${warnFile}" ]]; then
-        singBoxCompatibilityAuditCard "未发现明确风险" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
+        singBoxCompatibilityAuditCard "需关注" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
     else
         singBoxCompatibilityAuditCard "通过" "未发现 1.13/1.14 已知兼容风险"
     fi
+    return "${rc}"
+}
+
+showSingBoxConfigValidation() {
+    local logFile=${1:-$(coreTmpFilePath padm-core-sing-box-test.log)}
+    local rc=0
+
+    validateSingBoxConfigWithBinary "$(coreSingBoxBinaryPath)" "${logFile}" || rc=$?
+    case "${rc}" in
+    0) singBoxConfigValidationCard "通过" ;;
+    2) singBoxConfigValidationCard "无法检查" "缺少 sing-box 二进制或配置" "排查日志: ${logFile}" ;;
+    *) singBoxConfigValidationCard "失败" "排查日志: ${logFile}" ;;
+    esac
+    return "${rc}"
 }
 
 downloadSingBoxReleaseBinaryToTemp() {
@@ -920,32 +951,77 @@ downloadSingBoxReleaseBinaryToTemp() {
 checkSingBoxPrereleaseCompatibility() {
     local version=${1:-}
     local logFile=${2:-$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)}
-    local downloadedBinary=
-    local downloadTmpDir=
-    local resolvedVersion=
+    local retainedTmpDirVar=${3:-}
+    local downloadedBinary= downloadTmpDir= resolvedVersion= actualVersion=
+    local riskStatus="${logFile}.risk.status"
+    local riskLog="${logFile}.risk.log"
+    local riskWarn="${logFile}.risk.warn"
+    local validateLog="${logFile}.validate"
+    local scanRc=0 validateRc=0
 
-    resolvedVersion=${version:-$(coreLatestReleaseTag SagerNet/sing-box true)}
-    checkVersionNotEmpty "${resolvedVersion}"
-    if ! singBoxInstalled; then
-        singBoxPrereleaseCompatibilityCard "跳过" "未检测到 sing-box 二进制"
-        return 0
+    : >"${logFile}" || return 1
+    collectSingBoxCompatibilityFindings "${riskStatus}" "${riskLog}" "${riskWarn}" || scanRc=$?
+    {
+        printf '核心: sing-box\n配置目录: %s\n阶段: 预发布版试跑\n' "$(singBoxConfigShardDir)"
+        printf '\n[本地升级风险扫描]\n'
+        cat "${riskLog}" 2>/dev/null || true
+    } >"${logFile}" || { removeManagedFilesIfPresentIgnoreFailure "${riskStatus}" "${riskLog}" "${riskWarn}"; return 1; }
+    removeManagedFilesIfPresentIgnoreFailure "${riskStatus}" "${riskLog}" "${riskWarn}"
+    if [[ "${scanRc}" -eq 2 ]]; then
+        singBoxPrereleaseCompatibilityCard "无法检查" "未检测到 sing-box 配置" "排查日志: ${logFile}"
+        return 2
     fi
-    if ! singBoxConfigInstalled; then
-        singBoxPrereleaseCompatibilityCard "跳过" "未检测到 sing-box 配置"
-        return 0
-    fi
-    if ! downloadSingBoxReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
-        singBoxPrereleaseCompatibilityCard "失败" "预发布二进制下载失败"
+    if [[ "${scanRc}" -ne 0 ]]; then
+        singBoxPrereleaseCompatibilityCard "失败" "本地升级风险扫描未通过" "排查日志: ${logFile}"
         return 1
     fi
-    if validateSingBoxConfigWithBinary "${downloadedBinary}" "${logFile}"; then
-        singBoxPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "仅执行 dry-run，未替换本机二进制"
-        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
-        return 0
+
+    if [[ -n "${version}" ]]; then
+        resolvedVersion=${version}
+    else
+        resolvedVersion=$(coreLatestReleaseTag SagerNet/sing-box true 2>/dev/null || true)
     fi
-    singBoxPrereleaseCompatibilityCard "失败" "目标版本: ${resolvedVersion}" "排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
-    [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
-    return 1
+    if [[ -z "${resolvedVersion}" || "${resolvedVersion}" == "null" ]]; then
+        printf '\n失败: 无法获取目标版本\n' >>"${logFile}"
+        singBoxPrereleaseCompatibilityCard "失败" "无法获取预发布版本" "排查日志: ${logFile}"
+        return 1
+    fi
+    printf '\n目标版本: %s\n' "${resolvedVersion}" >>"${logFile}" || return 1
+    if ! downloadSingBoxReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
+        printf '失败: 预发布二进制下载失败\n' >>"${logFile}"
+        singBoxPrereleaseCompatibilityCard "失败" "预发布二进制下载失败" "排查日志: ${logFile}"
+        return 1
+    fi
+    actualVersion=$(singBoxBinaryVersion "${downloadedBinary}" || true)
+    printf '目标二进制: %s\n实际版本: %s\n' "${downloadedBinary}" "${actualVersion:-无法解析}" >>"${logFile}" || true
+    if [[ -z "${actualVersion}" || "${actualVersion#v}" != "${resolvedVersion#v}" ]]; then
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        singBoxPrereleaseCompatibilityCard "失败" "下载二进制版本不匹配" "目标版本: ${resolvedVersion}" "实际版本: ${actualVersion:-无法解析}" "排查日志: ${logFile}"
+        return 1
+    fi
+    validateSingBoxConfigWithBinary "${downloadedBinary}" "${validateLog}" || validateRc=$?
+    {
+        printf '\n[目标二进制配置校验]\n'
+        cat "${validateLog}" 2>/dev/null || true
+    } >>"${logFile}"
+    removeManagedFilesIfPresentIgnoreFailure "${validateLog}"
+    if [[ "${validateRc}" -ne 0 ]]; then
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        if [[ "${validateRc}" -eq 2 ]]; then
+            singBoxPrereleaseCompatibilityCard "无法检查" "配置在试跑期间不可用" "排查日志: ${logFile}"
+            return 2
+        fi
+        singBoxPrereleaseCompatibilityCard "失败" "目标二进制无法加载当前配置" "排查日志: ${logFile}"
+        return 1
+    fi
+    if [[ -n "${retainedTmpDirVar}" ]]; then
+        printf -v "${retainedTmpDirVar}" '%s' "${downloadTmpDir}"
+        singBoxPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "预检通过，确认后安装本次已校验文件"
+    else
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        singBoxPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "仅执行 dry-run，未替换本机二进制"
+    fi
+    return 0
 }
 
 appendXrayCompatibilityHints() {
@@ -988,24 +1064,24 @@ xrayCompatibilityAuditWarn() {
     local warnFile=$1
     local logFile=$2
     local message=$3
-    printf '%s\n' "${message}" >>"${warnFile}"
-    printf '[WARN] %s\n' "${message}" >>"${logFile}"
+    printf '%s\n' "${message}" >>"${warnFile}" &&
+        printf '[WARN] %s\n' "${message}" >>"${logFile}"
 }
 
 xrayCompatibilityAuditFail() {
     local statusFile=$1
     local logFile=$2
     local message=$3
-    xrayCompatibilityAuditStatusAdd "${statusFile}" fail "${message}"
-    printf '[FAIL] %s\n' "${message}" >>"${logFile}"
+    xrayCompatibilityAuditStatusAdd "${statusFile}" fail "${message}" &&
+        printf '[FAIL] %s\n' "${message}" >>"${logFile}"
 }
 
 xrayCompatibilityAuditPass() {
     local statusFile=$1
     local logFile=$2
     local message=$3
-    xrayCompatibilityAuditStatusAdd "${statusFile}" pass "${message}"
-    printf '[PASS] %s\n' "${message}" >>"${logFile}"
+    xrayCompatibilityAuditStatusAdd "${statusFile}" pass "${message}" &&
+        printf '[PASS] %s\n' "${message}" >>"${logFile}"
 }
 
 xrayCompatibilityAuditScanJsonFile() {
@@ -1013,44 +1089,41 @@ xrayCompatibilityAuditScanJsonFile() {
     local statusFile=$2
     local logFile=$3
     local warnFile=$4
+    local finding findings=
 
-    if ! jq empty "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}"
+    if ! findings=$(jq -r '
+        [
+            if any(.. | objects; has("settings") and (.settings | type == "object") and ((.settings | has("clients")) or (.settings | has("accounts")))) then "settings-alias" else empty end,
+            if any(.. | objects; has("echForceQuery")) then "ech-force-query" else empty end,
+            if (type == "object" and has("reverse")) then "legacy-reverse" else empty end,
+            if any(
+                .inbounds[]?;
+                ((.streamSettings.network? == "ws") or
+                 (.streamSettings.network? == "httpupgrade") or
+                 (.streamSettings.network? == "xhttp") or
+                 (.streamSettings.wsSettings? != null) or
+                 (.streamSettings.httpupgradeSettings? != null) or
+                 (.streamSettings.xhttpSettings? != null)) and
+                ((((.streamSettings.sockopt.trustedXForwardedFor? // .sockopt.trustedXForwardedFor?) // "") | tostring | length) == 0)
+            ) then "trusted-xff" else empty end,
+            if any(.inbounds[]?; .protocol? == "tunnel") then "tunnel-inbound" else empty end,
+            if any(.outbounds[]?; .protocol? == "dns") then "dns-outbound" else empty end
+        ] | unique[]
+    ' "${file}" 2>>"${logFile}"); then
+        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "JSON 无法解析：${file}" || return 1
         return 0
     fi
 
-    if jq -e '
-        .. | objects |
-        select(has("settings") and (.settings | type == "object") and (.settings | has("clients") or has("accounts")))
-    ' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到兼容别名 settings.clients/accounts；当前预发布仍兼容，建议后续迁移到 users：${file}"
-    fi
-    if jq -e '.. | objects | select(has("echForceQuery"))' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 echForceQuery；Xray 26.5.9 起该字段不再控制 ECH，配置 ECH 时将强制查询：${file}"
-    fi
-    if jq -e 'type == "object" and has("reverse")' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy reverse；Xray 26.5.9 起会拒绝该配置，请迁移到 VLESS Reverse Proxy：${file}"
-    fi
-    if jq -e '
-        .inbounds[]? |
-        select(
-            (.streamSettings.network? == "ws") or
-            (.streamSettings.network? == "httpupgrade") or
-            (.streamSettings.network? == "xhttp") or
-            (.streamSettings.wsSettings? != null) or
-            (.streamSettings.httpupgradeSettings? != null) or
-            (.streamSettings.xhttpSettings? != null)
-        ) |
-        select((((.streamSettings.sockopt.trustedXForwardedFor? // .sockopt.trustedXForwardedFor?) // "") | tostring | length) == 0)
-    ' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 XHTTP/WS/HTTPUpgrade 入站未设置 trustedXForwardedFor；如前置 CDN/反代请专项复核：${file}"
-    fi
-    if jq -e '.inbounds[]? | select(.protocol? == "tunnel")' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 tunnel inbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}"
-    fi
-    if jq -e '.outbounds[]? | select(.protocol? == "dns")' "${file}" >/dev/null 2>&1; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 DNS outbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}"
-    fi
+    while IFS= read -r finding; do
+        case "${finding}" in
+        settings-alias) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到兼容别名 settings.clients/accounts；当前预发布仍兼容，建议后续迁移到 users：${file}" || return 1 ;;
+        ech-force-query) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 echForceQuery；Xray 26.5.9 起该字段不再控制 ECH，配置 ECH 时将强制查询：${file}" || return 1 ;;
+        legacy-reverse) xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "检测到 legacy reverse；Xray 26.5.9 起会拒绝该配置，请迁移到 VLESS Reverse Proxy：${file}" || return 1 ;;
+        trusted-xff) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 XHTTP/WS/HTTPUpgrade 入站未设置 trustedXForwardedFor；如前置 CDN/反代请专项复核：${file}" || return 1 ;;
+        tunnel-inbound) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 tunnel inbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}" || return 1 ;;
+        dns-outbound) xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "检测到 DNS outbound；Xray 26.5.9+ 已调整相关字段，请复核 network/address/port 新 schema：${file}" || return 1 ;;
+        esac
+    done <<<"${findings}"
 }
 
 collectXrayCompatibilityFindings() {
@@ -1059,35 +1132,37 @@ collectXrayCompatibilityFindings() {
     local warnFile=$3
     local file foundJson=false configDir
 
-    xrayCompatibilityAuditReset "${statusFile}"
-    xrayCompatibilityAuditReset "${warnFile}"
-    : >"${logFile}"
-    printf 'Xray 兼容体检\n' >>"${logFile}"
+    xrayCompatibilityAuditReset "${statusFile}" || return 1
+    xrayCompatibilityAuditReset "${warnFile}" || return 1
+    : >"${logFile}" || return 1
+    printf '核心: Xray\n配置目录: %s\n阶段: 升级风险扫描\n' "$(coreXrayConfigDir)" >>"${logFile}" || return 1
 
-    if ! xrayInstalled; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 Xray 二进制，跳过兼容体检"
-        return 0
-    fi
     if ! xrayConfigInstalled; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 Xray 配置，跳过兼容体检"
-        return 0
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未检测到 Xray 配置" || return 1
+        return 2
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        xrayCompatibilityAuditFail "${statusFile}" "${logFile}" "缺少 jq，无法扫描 Xray 配置" || return 1
+        return 1
     fi
 
     configDir=$(coreXrayConfigDir)
-    while IFS= read -r file; do
+    for file in "${configDir}"/*.json; do
         [[ -f "${file}" ]] || continue
         foundJson=true
-        xrayCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" "${warnFile}"
-    done < <(find "${configDir}" -maxdepth 1 -type f -name '*.json' | sort)
+        xrayCompatibilityAuditScanJsonFile "${file}" "${statusFile}" "${logFile}" "${warnFile}" || return 1
+    done
 
     if [[ "${foundJson}" != "true" ]]; then
-        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 Xray JSON 配置文件"
-        return 0
+        xrayCompatibilityAuditWarn "${warnFile}" "${logFile}" "未找到 Xray JSON 配置文件" || return 1
+        return 2
     fi
 
     if [[ ! -s "${statusFile}" ]] && [[ ! -s "${warnFile}" ]]; then
-        xrayCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到当前预发布已知兼容风险"
+        xrayCompatibilityAuditPass "${statusFile}" "${logFile}" "未检测到当前预发布已知兼容风险" || return 1
     fi
+    xrayCompatibilityAuditHasFailures "${statusFile}" && return 1
+    return 0
 }
 
 xrayCompatibilityAuditHasFailures() {
@@ -1106,28 +1181,23 @@ summarizeXrayCompatibilityAudit() {
     printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
 }
 
-xrayCompatibilityAuditOverviewSummary() {
-    local statusFile warnFile logFile
-    statusFile=$(xrayCompatibilityAuditStatusFile)
-    warnFile=$(xrayCompatibilityAuditWarnFile)
-    logFile=$(xrayCompatibilityAuditLog)
-    collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
-    summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}"
-}
-
 showXrayCompatibilityAudit() {
     local logFile=${1:-$(xrayCompatibilityAuditLog)}
     local statusFile=${2:-$(xrayCompatibilityAuditStatusFile)}
     local warnFile=${3:-$(xrayCompatibilityAuditWarnFile)}
 
-    collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}"
-    if xrayCompatibilityAuditHasFailures "${statusFile}"; then
-        xrayCompatibilityAuditCard "发现潜在升级风险" "排查日志: ${logFile}" "重点检查 JSON 解析 / legacy reverse"
+    local rc=0
+    collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+    if [[ "${rc}" -eq 2 ]]; then
+        xrayCompatibilityAuditCard "无法检查" "未检测到 Xray 配置" "排查日志: ${logFile}"
+    elif [[ "${rc}" -ne 0 ]]; then
+        xrayCompatibilityAuditCard "失败" "排查日志: ${logFile}" "重点检查 JSON 解析 / legacy reverse"
     elif [[ -s "${warnFile}" ]]; then
-        xrayCompatibilityAuditCard "发现需关注项" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
+        xrayCompatibilityAuditCard "需关注" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
     else
         xrayCompatibilityAuditCard "通过" "未检测到当前预发布已知兼容风险"
     fi
+    return "${rc}"
 }
 
 downloadXrayReleaseBinaryToTemp() {
@@ -1158,12 +1228,16 @@ showXrayStrictValidation() {
     local logFile=${1:-$(coreTmpFilePath padm-core-xray-strict-test.log)}
 
     if ! xrayInstalled; then
-        xrayStrictValidationCard "跳过" "未检测到 Xray 二进制"
-        return 0
+        : >"${logFile}"
+        printf '无法检查: 未检测到 Xray 二进制\n' >>"${logFile}"
+        xrayStrictValidationCard "无法检查" "未检测到 Xray 二进制"
+        return 2
     fi
     if ! xrayConfigInstalled; then
-        xrayStrictValidationCard "跳过" "未检测到 Xray 配置"
-        return 0
+        : >"${logFile}"
+        printf '无法检查: 未检测到 Xray 配置\n' >>"${logFile}"
+        xrayStrictValidationCard "无法检查" "未检测到 Xray 配置"
+        return 2
     fi
     if validateXrayConfigStrictWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
         xrayStrictValidationCard "通过"
@@ -1175,108 +1249,138 @@ showXrayStrictValidation() {
 }
 
 showXrayConfigHealthCheck() {
-    local binary validateLog strictLog statusFile warnFile compatLog summary
-    local strictResult compatibilityResult
+    local binary validateLog strictLog
+    local validateRc=0 strictRc=0
 
     if ! xrayInstalled; then
-        statusCard "Xray 配置体检" "跳过" "未检测到 Xray 二进制"
-        return 0
+        xrayConfigValidationCard "无法检查" "未检测到 Xray 二进制"
+        return 2
     fi
     if ! xrayConfigInstalled; then
-        statusCard "Xray 配置体检" "跳过" "未检测到 Xray 配置"
-        return 0
+        xrayConfigValidationCard "无法检查" "未检测到 Xray 配置"
+        return 2
     fi
 
     binary=$(coreXrayBinaryPath)
     validateLog=$(coreTmpFilePath padm-core-xray-test.log)
     strictLog=$(coreTmpFilePath padm-core-xray-strict-test.log)
-    statusFile=$(xrayCompatibilityAuditStatusFile)
-    warnFile=$(xrayCompatibilityAuditWarnFile)
-    compatLog=$(xrayCompatibilityAuditLog)
 
-    if ! validateXrayConfigWithBinary "${binary}" "${validateLog}"; then
-        statusCard "Xray 配置体检" "当前配置: 失败" "排查日志: ${validateLog}"
-        return 1
+    validateXrayConfigWithBinary "${binary}" "${validateLog}" || validateRc=$?
+    if [[ "${validateRc}" -ne 0 ]]; then
+        if [[ "${validateRc}" -eq 2 ]]; then
+            xrayConfigValidationCard "无法检查" "运行检查缺少前提" "排查日志: ${validateLog}"
+        else
+            xrayConfigValidationCard "失败" "运行检查未通过" "排查日志: ${validateLog}"
+        fi
+        return "${validateRc}"
     fi
 
-    if validateXrayConfigStrictWithBinary "${binary}" "${strictLog}"; then
-        strictResult="通过"
-    else
+    validateXrayConfigStrictWithBinary "${binary}" "${strictLog}" || strictRc=$?
+    if [[ "${strictRc}" -eq 1 ]]; then
         appendXrayCompatibilityHints "${strictLog}"
-        strictResult="需关注，日志: ${strictLog}"
+        xrayConfigValidationCard "需关注" "运行检查: 通过" "严格检查未通过，日志: ${strictLog}"
+        return 0
     fi
-
-    collectXrayCompatibilityFindings "${statusFile}" "${compatLog}" "${warnFile}"
-    summary=$(summarizeXrayCompatibilityAudit "${statusFile}" "${warnFile}")
-    if xrayCompatibilityAuditHasFailures "${statusFile}"; then
-        compatibilityResult="升级阻断（${summary}），日志: ${compatLog}"
-    elif [[ -s "${warnFile}" ]]; then
-        compatibilityResult="迁移提醒（${summary}），日志: ${compatLog}"
-    else
-        compatibilityResult="通过（${summary}）"
+    if [[ "${strictRc}" -eq 2 ]]; then
+        xrayConfigValidationCard "无法检查" "严格检查缺少前提" "排查日志: ${strictLog}"
+        return 2
     fi
-
-    statusCard "Xray 配置体检" "当前配置: 通过" "严格检查: ${strictResult}" "升级兼容: ${compatibilityResult}"
+    xrayConfigValidationCard "通过" "运行检查: 通过" "严格检查: 通过"
 }
 
 checkXrayPrereleaseCompatibility() {
     local version=${1:-}
     local logFile=${2:-$(coreTmpFilePath padm-core-xray-prerelease-audit.log)}
     local retainedTmpDirVar=${3:-}
-    local downloadedBinary=
-    local downloadTmpDir=
-    local resolvedVersion=
-    local validateLog strictLog completionMessage="仅执行 dry-run，未替换本机二进制"
+    local downloadedBinary= downloadTmpDir= resolvedVersion= actualVersion=
+    local riskStatus="${logFile}.risk.status"
+    local riskLog="${logFile}.risk.log"
+    local riskWarn="${logFile}.risk.warn"
+    local validateLog="${logFile}.validate"
+    local strictLog="${logFile}.strict"
+    local scanRc=0 validateRc=0 strictRc=0
+    local completionMessage="仅执行 dry-run，未替换本机二进制"
 
-    resolvedVersion=${version:-$(coreLatestReleaseTag XTLS/Xray-core true)}
-    checkVersionNotEmpty "${resolvedVersion}"
-    if ! xrayInstalled; then
-        xrayPrereleaseCompatibilityCard "跳过" "未检测到 Xray 二进制"
-        return 0
-    fi
-    if ! xrayConfigInstalled; then
-        xrayPrereleaseCompatibilityCard "跳过" "未检测到 Xray 配置"
-        return 0
-    fi
-    if ! downloadXrayReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
-        xrayPrereleaseCompatibilityCard "失败" "预发布二进制下载失败"
-        return 1
-    fi
-
-    validateLog="${logFile}.validate"
-    strictLog="${logFile}.strict"
-    if ! validateXrayConfigWithBinary "${downloadedBinary}" "${validateLog}"; then
-        cat "${validateLog}" >"${logFile}"
-        appendXrayCompatibilityHints "${logFile}"
-        xrayPrereleaseCompatibilityCard "失败" "目标版本: ${resolvedVersion}" "普通校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
-        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
-        return 1
-    fi
-    if ! validateXrayConfigStrictWithBinary "${downloadedBinary}" "${strictLog}"; then
-        {
-            printf '[普通模式校验]\n'
-            cat "${validateLog}"
-            printf '\n[严格模式校验]\n'
-            cat "${strictLog}"
-        } >"${logFile}"
-        appendXrayCompatibilityHints "${logFile}"
-        xrayPrereleaseCompatibilityCard "失败" "目标版本: ${resolvedVersion}" "严格模式校验失败，排查日志: ${logFile}" "仅执行 dry-run，未替换本机二进制"
-        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
-        return 1
-    fi
+    : >"${logFile}" || return 1
+    collectXrayCompatibilityFindings "${riskStatus}" "${riskLog}" "${riskWarn}" || scanRc=$?
     {
-        printf '[普通模式校验]\n'
-        cat "${validateLog}"
-        printf '\n[严格模式校验]\n'
-        cat "${strictLog}"
-    } >"${logFile}"
+        printf '核心: Xray\n配置目录: %s\n阶段: 预发布版试跑\n' "$(coreXrayConfigDir)"
+        printf '\n[本地升级风险扫描]\n'
+        cat "${riskLog}" 2>/dev/null || true
+    } >"${logFile}" || { removeManagedFilesIfPresentIgnoreFailure "${riskStatus}" "${riskLog}" "${riskWarn}"; return 1; }
+    removeManagedFilesIfPresentIgnoreFailure "${riskStatus}" "${riskLog}" "${riskWarn}"
+    if [[ "${scanRc}" -eq 2 ]]; then
+        xrayPrereleaseCompatibilityCard "无法检查" "未检测到 Xray 配置" "排查日志: ${logFile}"
+        return 2
+    fi
+    if [[ "${scanRc}" -ne 0 ]]; then
+        xrayPrereleaseCompatibilityCard "失败" "本地升级风险扫描未通过" "排查日志: ${logFile}"
+        return 1
+    fi
+
+    if [[ -n "${version}" ]]; then
+        resolvedVersion=${version}
+    else
+        resolvedVersion=$(coreLatestReleaseTag XTLS/Xray-core true 2>/dev/null || true)
+    fi
+    if [[ -z "${resolvedVersion}" || "${resolvedVersion}" == "null" ]]; then
+        printf '\n失败: 无法获取目标版本\n' >>"${logFile}"
+        xrayPrereleaseCompatibilityCard "失败" "无法获取预发布版本" "排查日志: ${logFile}"
+        return 1
+    fi
+    printf '\n目标版本: %s\n' "${resolvedVersion}" >>"${logFile}" || return 1
+    if ! downloadXrayReleaseBinaryToTemp "${resolvedVersion}" downloadedBinary downloadTmpDir; then
+        printf '失败: 预发布二进制下载失败\n' >>"${logFile}"
+        xrayPrereleaseCompatibilityCard "失败" "预发布二进制下载失败" "排查日志: ${logFile}"
+        return 1
+    fi
+    actualVersion=$(xrayBinaryVersion "${downloadedBinary}" || true)
+    printf '目标二进制: %s\n实际版本: %s\n' "${downloadedBinary}" "${actualVersion:-无法解析}" >>"${logFile}" || true
+    if [[ -z "${actualVersion}" || "${actualVersion#v}" != "${resolvedVersion#v}" ]]; then
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        xrayPrereleaseCompatibilityCard "失败" "下载二进制版本不匹配" "目标版本: ${resolvedVersion}" "实际版本: ${actualVersion:-无法解析}" "排查日志: ${logFile}"
+        return 1
+    fi
+
+    validateXrayConfigWithBinary "${downloadedBinary}" "${validateLog}" || validateRc=$?
+    {
+        printf '\n[运行校验]\n'
+        cat "${validateLog}" 2>/dev/null || true
+    } >>"${logFile}"
+    if [[ "${validateRc}" -ne 0 ]]; then
+        removeManagedFilesIfPresentIgnoreFailure "${validateLog}" "${strictLog}"
+        appendXrayCompatibilityHints "${logFile}"
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        if [[ "${validateRc}" -eq 2 ]]; then
+            xrayPrereleaseCompatibilityCard "无法检查" "配置在试跑期间不可用" "排查日志: ${logFile}"
+            return 2
+        fi
+        xrayPrereleaseCompatibilityCard "失败" "运行校验失败" "目标版本: ${resolvedVersion}" "排查日志: ${logFile}"
+        return 1
+    fi
+    validateXrayConfigStrictWithBinary "${downloadedBinary}" "${strictLog}" || strictRc=$?
+    {
+        printf '\n[严格校验]\n'
+        cat "${strictLog}" 2>/dev/null || true
+    } >>"${logFile}"
+    removeManagedFilesIfPresentIgnoreFailure "${validateLog}" "${strictLog}"
+    if [[ "${strictRc}" -ne 0 ]]; then
+        appendXrayCompatibilityHints "${logFile}"
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
+        if [[ "${strictRc}" -eq 2 ]]; then
+            xrayPrereleaseCompatibilityCard "无法检查" "配置在试跑期间不可用" "排查日志: ${logFile}"
+            return 2
+        fi
+        xrayPrereleaseCompatibilityCard "失败" "严格校验失败" "目标版本: ${resolvedVersion}" "排查日志: ${logFile}"
+        return 1
+    fi
     if [[ -n "${retainedTmpDirVar}" ]]; then
         printf -v "${retainedTmpDirVar}" '%s' "${downloadTmpDir}"
         completionMessage="预检通过，确认后安装本次已校验文件"
     else
-        padmRemoveCleanupPath "${downloadTmpDir}"
+        [[ -n "${downloadTmpDir}" ]] && padmRemoveCleanupPath "${downloadTmpDir}"
     fi
-    xrayPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "已通过普通校验和严格模式校验" "${completionMessage}"
+    xrayPrereleaseCompatibilityCard "通过" "目标版本: ${resolvedVersion}" "已通过运行校验和严格校验" "${completionMessage}"
     return 0
 }
 
@@ -1291,106 +1395,6 @@ appendSingBoxCompatibilityHints() {
             printf -- '- sing-box 1.14 将移除旧 DNS server 格式与旧 domain_strategy；请使用 typed DNS servers 与 domain_resolver/default_domain_resolver。\n'
         } >>"${logFile}"
     fi
-}
-
-coreValidationStateWithPaths() {
-    local core=$1
-    local binary=$2
-    local configDir=$3
-    local logFile=$4
-    if [[ "${core}" == "xray" ]]; then
-        if [[ -x "${binary}" && -d "${configDir}" ]] && "${binary}" -test -confdir "${configDir}" >"${logFile}" 2>&1; then
-            echo "通过"
-        else
-            echo "失败，查看 ${logFile}"
-        fi
-    elif [[ "${core}" == "sing-box" ]]; then
-        coreValidationState sing-box
-    fi
-}
-
-coreValidationState() {
-    local core=$1
-    local logFile
-    if [[ "${core}" == "xray" ]]; then
-        logFile=$(coreTmpFilePath padm-core-xray-test.log)
-        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
-            echo "通过"
-        else
-            echo "失败，查看 ${logFile}"
-        fi
-    elif [[ "${core}" == "sing-box" ]]; then
-        logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
-        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
-            echo "通过"
-        else
-            echo "失败，查看 ${logFile}"
-        fi
-    fi
-}
-
-coreDisplayState() {
-    case $1 in
-    *运行中* | *通过* | *已安装* | *已设置*) uiStyle ok "$1" ;;
-    *失败* | *缺失* | *为空*) uiStyle danger "$1" ;;
-    *未安装* | *未设置* | *未运行* | *未安装配置*) uiStyle muted "$1" ;;
-    *) uiStyle value "$1" ;;
-    esac
-}
-
-showCoreStatusOverview() {
-    local xrayConfigDir
-    local xrayDir
-    local xrayBinary
-    local xrayVersion="未安装"
-    local singBoxVersion="未安装"
-    local geoStatus="未安装"
-    local geoVersion=""
-    local geoCron="未设置"
-
-    xrayConfigDir=$(coreXrayConfigDir)
-    xrayDir=$(dirname "${xrayConfigDir}")
-    xrayBinary=$(coreXrayBinaryPath)
-
-    if [[ -x "${xrayBinary}" ]]; then
-        xrayVersion=$("${xrayBinary}" --version 2>/dev/null | awk 'NR==1 {print "v"$2}')
-    fi
-    singBoxVersion=$(getSingBoxCurrentVersion)
-
-    if [[ -s "${xrayDir}/geosite.dat" && -s "${xrayDir}/geoip.dat" ]]; then
-        geoStatus="已安装"
-        geoVersion=$(xrayGeoDisplayVersion "${xrayDir}")
-    elif [[ -x "${xrayBinary}" ]]; then
-        geoStatus="缺失或为空"
-    fi
-    if crontab -l 2>/dev/null | grep -q "UpdateGeo"; then
-        geoCron="已设置"
-    fi
-
-    echoContent title "\n┌─ 核心状态总览 ─────────────────────────────────────"
-    menuLine "Xray-core: $(coreDisplayState "${xrayVersion}")"
-    menuLine "Xray 服务: $(coreDisplayState "$(coreServiceState xray xrayRunning)")"
-    if [[ -x "${xrayBinary}" ]]; then
-        menuLine "Xray 配置: $(coreDisplayState "$(coreValidationStateWithPaths xray "${xrayBinary}" "${xrayConfigDir}" "$(coreTmpFilePath padm-core-xray-test.log)")")"
-        if xrayConfigInstalled; then
-            menuLine "Xray 兼容: $(coreDisplayState "$(xrayCompatibilityAuditOverviewSummary)")"
-        fi
-        if [[ -n "${geoVersion}" ]]; then
-            menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / $(coreDisplayState "${geoVersion}") / 自动更新 $(coreDisplayState "${geoCron}")"
-        else
-            menuLine "Xray Geo: $(coreDisplayState "${geoStatus}") / 自动更新 $(coreDisplayState "${geoCron}")"
-        fi
-    fi
-    menuLine "sing-box: $(coreDisplayState "${singBoxVersion}")"
-    menuLine "sing-box 服务: $(coreDisplayState "$(coreServiceState sing-box singBoxRunning)")"
-    if singBoxConfigInstalled; then
-        menuLine "sing-box 配置: $(coreDisplayState "$(coreValidationState sing-box)")"
-        menuLine "sing-box 兼容: $(coreDisplayState "$(singBoxCompatibilityAuditOverviewSummary)")"
-    elif singBoxInstalled; then
-        menuLine "sing-box 配置: $(coreDisplayState "未安装配置")"
-    fi
-    menuMutedLine "最新版本会在升级或回退时按需获取"
-    menuClose
 }
 
 runCoreServiceActionAllowFailure() {
@@ -1507,10 +1511,12 @@ finalizeFailedSingBoxBinaryInstall() {
 installDownloadedXrayBinary() {
     local version=$1
     local tmpDir=${2:-}
-    local oldBinary backupBinary newBinary logFile installedVersion
+    local oldBinary backupBinary newBinary logFile installedVersion actualVersion
     local newServiceRunning=false
+    local reusedPreparedDir=false
     local rc
     logFile=$(coreTmpFilePath padm-core-xray-upgrade-test.log)
+    [[ -n "${tmpDir}" ]] && reusedPreparedDir=true
     if [[ -z "${tmpDir}" ]]; then
         padmCreateTempPath tmpDir -d /etc/padm/tmp.xray.XXXXXX || return 1
         downloadXrayReleaseBinaryToTempDir "${version}" "${tmpDir}"
@@ -1530,9 +1536,23 @@ installDownloadedXrayBinary() {
         errorCard "Xray-core 已校验临时文件不可用"
         return 1
     fi
+    if [[ "${reusedPreparedDir}" == "true" ]]; then
+        actualVersion=$(xrayBinaryVersion "${newBinary}" || true)
+        if [[ -z "${actualVersion}" || "${actualVersion#v}" != "${version#v}" ]]; then
+            padmRemoveCleanupPath "${tmpDir}"
+            statusCard "Xray-core 更新失败" "已校验二进制版本发生变化" "目标版本: ${version}" "实际版本: ${actualVersion:-无法解析}"
+            return 1
+        fi
+    fi
     if xrayConfigInstalled && ! validateXrayConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
         xrayConfigValidationFailureCard "已取消升级" "排查日志: ${logFile}"
+        return 1
+    fi
+    if [[ "${reusedPreparedDir}" == "true" ]] && xrayConfigInstalled && ! validateXrayConfigStrictWithBinary "${newBinary}" "${logFile}"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        appendXrayCompatibilityHints "${logFile}"
+        xrayConfigValidationFailureCard "已取消升级" "严格校验失败，排查日志: ${logFile}"
         return 1
     fi
 
@@ -1585,23 +1605,42 @@ installDownloadedXrayBinary() {
 
 installDownloadedSingBoxBinary() {
     local version=$1
-    local tmpDir oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup
+    local tmpDir=${2:-}
+    local oldBinary backupBinary extractedDir newBinary logFile cronetPath cronetBackup actualVersion
+    local reusedPreparedDir=false
     local rc
     logFile=$(coreTmpFilePath padm-core-sing-box-upgrade-test.log)
-    padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
-    downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
-    rc=$?
-    if [[ "${rc}" -ne 0 ]]; then
-        padmRemoveCleanupPath "${tmpDir}"
-        case "${rc}" in
-        2) errorCard "sing-box 解压失败" ;;
-        3) errorCard "sing-box 资产中缺少 libcronet.so" ;;
-        4) errorCard "sing-box 资产中未找到 sing-box 二进制" ;;
-        esac
-        return 1
+    if [[ -n "${tmpDir}" ]]; then
+        reusedPreparedDir=true
+    else
+        padmCreateTempPath tmpDir -d /etc/padm/tmp.sing-box.XXXXXX || return 1
+        downloadSingBoxReleaseBinaryToTempDir "${version}" "${tmpDir}"
+        rc=$?
+        if [[ "${rc}" -ne 0 ]]; then
+            padmRemoveCleanupPath "${tmpDir}"
+            case "${rc}" in
+            2) errorCard "sing-box 解压失败" ;;
+            3) errorCard "sing-box 资产中缺少 libcronet.so" ;;
+            4) errorCard "sing-box 资产中未找到 sing-box 二进制" ;;
+            esac
+            return 1
+        fi
     fi
     extractedDir="${tmpDir}/sing-box-${version/v/}${singBoxCoreCPUVendor}"
     newBinary="${extractedDir}/sing-box"
+    if ! coreExtractedFileIsRegular "${newBinary}" || [[ ! -x "${newBinary}" ]] || ! coreExtractedFileIsRegular "${extractedDir}/libcronet.so"; then
+        padmRemoveCleanupPath "${tmpDir}"
+        errorCard "sing-box 已校验临时文件不可用"
+        return 1
+    fi
+    if [[ "${reusedPreparedDir}" == "true" ]]; then
+        actualVersion=$(singBoxBinaryVersion "${newBinary}" || true)
+        if [[ -z "${actualVersion}" || "${actualVersion#v}" != "${version#v}" ]]; then
+            padmRemoveCleanupPath "${tmpDir}"
+            statusCard "sing-box 更新失败" "已校验二进制版本发生变化" "目标版本: ${version}" "实际版本: ${actualVersion:-无法解析}"
+            return 1
+        fi
+    fi
     if singBoxConfigInstalled && ! validateSingBoxConfigWithBinary "${newBinary}" "${logFile}"; then
         padmRemoveCleanupPath "${tmpDir}"
         statusCard "sing-box 配置校验失败" "已取消升级" "排查日志: ${logFile}"
@@ -1674,8 +1713,11 @@ upgradeXrayCore() {
     local channel="稳定版"
     local preparedDir=
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
-    version=${version:-$(coreLatestReleaseTag XTLS/Xray-core "${prerelease}")}
-    checkVersionNotEmpty "${version}"
+    [[ -n "${version}" ]] || version=$(coreLatestReleaseTag XTLS/Xray-core "${prerelease}" || true)
+    if [[ -z "${version}" || "${version}" == "null" ]]; then
+        errorCard "无法获取 Xray-core 目标版本"
+        return 1
+    fi
     if [[ "${prerelease}" == "true" ]]; then
         if ! checkXrayPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-xray-prerelease-audit.log)" preparedDir; then
             return 1
@@ -1693,16 +1735,24 @@ upgradeSingBoxCore() {
     local prerelease=${1:-false}
     local version=${2:-}
     local channel="稳定版"
+    local preparedDir=
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
-    version=${version:-$(coreLatestReleaseTag SagerNet/sing-box "${prerelease}")}
-    checkVersionNotEmpty "${version}"
+    [[ -n "${version}" ]] || version=$(coreLatestReleaseTag SagerNet/sing-box "${prerelease}" || true)
+    if [[ -z "${version}" || "${version}" == "null" ]]; then
+        errorCard "无法获取 sing-box 目标版本"
+        return 1
+    fi
     if [[ "${prerelease}" == "true" ]]; then
-        if ! checkSingBoxPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)"; then
+        if ! checkSingBoxPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)" preparedDir; then
             return 1
         fi
     fi
-    confirmCoreUpgrade "sing-box" "${version}" "${channel}" || { coreCancelledStatusCard "未更新 sing-box"; return 0; }
-    installDownloadedSingBoxBinary "${version}"
+    if ! confirmCoreUpgrade "sing-box" "${version}" "${channel}"; then
+        [[ -n "${preparedDir}" ]] && padmRemoveCleanupPath "${preparedDir}"
+        coreCancelledStatusCard "未更新 sing-box"
+        return 0
+    fi
+    installDownloadedSingBoxBinary "${version}" "${preparedDir}"
 }
 
 selectRollbackVersion() {
@@ -1726,37 +1776,6 @@ selectRollbackVersion() {
     else
         printf '%s\n' "${version}"
     fi
-}
-
-xrayVersionManageMenu() {
-    echoContent title "\n┌─ Xray-core 版本管理 ────────────────────────────────"
-    menuLine "这里管理 Xray-core 版本和一键配置体检；Geo 数据、服务和日志请使用上级菜单。"
-    menuItem 1 "升级稳定版" "下载并校验最新稳定版后替换"
-    menuItem 2 "升级预发布版" "下载并校验预发布版，适合验证新能力"
-    menuItem 3 "回退稳定版" "选择最近的稳定版本回退"
-    menuItem 4 "配置体检" "校验当前配置、严格模式和升级兼容性"
-    menuReturnItem 5 "返回核心与服务" "回到核心与服务"
-    menuClose
-    autoRead xray_lifecycle_menu "请选择:" selectXrayType
-    case "${selectXrayType}" in
-    1) upgradeXrayCore false ;;
-    2) upgradeXrayCore true ;;
-    3)
-        local version
-        local rollbackStatus=0
-        selectRollbackVersion XTLS/Xray-core "Xray-core" version || rollbackStatus=$?
-        if [[ "${rollbackStatus}" -eq 1 ]]; then
-            coreInvalidInputRetryMenu xrayVersionManageMenu
-            return
-        elif [[ "${rollbackStatus}" -ne 0 ]]; then
-            return "${rollbackStatus}"
-        fi
-        upgradeXrayCore false "${version}"
-        ;;
-    4) showXrayConfigHealthCheck ;;
-    5) coreVersionManageMenu ;;
-    *) coreInvalidInputRetryMenu xrayVersionManageMenu ;;
-    esac
 }
 
 updateGeoSite() {
@@ -2695,216 +2714,6 @@ singBoxInstallApply() {
 
 singBoxInstall() {
     runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction singBoxInstallApply "$@"
-}
-
-
-coreServiceControlMenu() {
-    local core=$1
-    local serviceName=$core
-    local title=$core
-    if [[ "${core}" == "xray" ]]; then
-        title="Xray-core"
-    fi
-    echoContent title "\n┌─ ${title} 服务控制 ─────────────────────────────────"
-    menuItem 1 "启动" "启动 ${serviceName} 服务"
-    menuItem 2 "停止" "停止 ${serviceName} 服务"
-    menuItem 3 "重启" "重启 ${serviceName} 服务"
-    menuReturnItem 4 "返回" "回到核心菜单"
-    menuClose
-    autoRead core_service_control "请选择:" selectServiceAction
-    case "${selectServiceAction}" in
-    1) coreServiceControlAction "${serviceName}" start ;;
-    2) coreServiceControlAction "${serviceName}" stop ;;
-    3) coreServiceControlAction "${serviceName}" restart ;;
-    4) coreVersionManageMenu ;;
-    *) coreInvalidInputRetryMenu coreServiceControlMenu "${core}" ;;
-    esac
-}
-
-coreServiceControlAction() {
-    local serviceName=$1
-    local action=$2
-    local actionName=$action
-    case "${action}" in
-    start)
-        actionName="启动"
-        serviceQueueStart "${serviceName}"
-        ;;
-    stop)
-        actionName="停止"
-        serviceQueueStop "${serviceName}"
-        ;;
-    restart)
-        actionName="重启"
-        serviceQueueRestart "${serviceName}"
-        ;;
-    *)
-        errorCard "服务操作不支持: ${action}"
-        return 1
-        ;;
-    esac
-    if ! serviceQueueApply; then
-        errorCard "${serviceName} 服务${actionName}失败"
-        return 1
-    fi
-}
-
-coreConfigMaintenanceMenu() {
-    echoContent title "\n┌─ 配置校验与数据维护 ───────────────────────────────"
-    menuItem 1 "校验 Xray 配置" "执行 xray -test -confdir"
-    menuItem 2 "严格模式校验 Xray" "执行 XRAY_JSON_STRICT=true xray -test"
-    menuItem 3 "Xray 兼容体检" "扫描 users/ECH 迁移提醒及 legacy reverse 风险"
-    menuItem 4 "检查 Xray 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
-    menuItem 5 "校验 sing-box 配置" "执行 merge + check"
-    menuItem 6 "sing-box 兼容体检" "扫描 1.13/1.14 迁移风险并输出提示"
-    menuItem 7 "检查 sing-box 预发布兼容性" "只校验最新 prerelease，不替换本机二进制"
-    menuItem 8 "更新 Xray Geo 数据" "更新 geosite.dat / geoip.dat"
-    menuItem 9 "查看 Xray Geo 状态" "查看文件、版本和自动更新状态"
-    menuItem 10 "设置 Xray Geo 自动更新" "每天凌晨更新规则数据"
-    menuReturnItem 11 "返回核心与服务" "回到核心生命周期管理"
-    menuClose
-    autoRead core_config_maintenance "请选择:" selectMaintenance
-    case "${selectMaintenance}" in
-    1)
-        local logFile
-        logFile=$(coreTmpFilePath padm-core-xray-test.log)
-        if validateXrayConfigWithBinary "$(coreXrayBinaryPath)" "${logFile}"; then
-            xrayConfigValidationCard "通过"
-        else
-            xrayConfigValidationCard "失败" "排查日志: ${logFile}"
-        fi
-        ;;
-    2) showXrayStrictValidation ;;
-    3) showXrayCompatibilityAudit ;;
-    4) checkXrayPrereleaseCompatibility ;;
-    5)
-        local logFile
-        logFile=$(coreTmpFilePath padm-core-sing-box-test.log)
-        if validateSingBoxConfigWithBinary /etc/padm/sing-box/sing-box "${logFile}"; then
-            singBoxConfigValidationCard "通过"
-        else
-            singBoxConfigValidationCard "失败" "排查日志: ${logFile}" "如日志包含 legacy/deprecated/domain_resolver，查看日志底部的 padm 兼容性提示"
-        fi
-        ;;
-    6) showSingBoxCompatibilityAudit ;;
-    7) checkSingBoxPrereleaseCompatibility ;;
-    8) updateGeoSite ;;
-    9) showXrayGeoStatus ;;
-    10) installCronUpdateGeo ;;
-    11) coreVersionManageMenu ;;
-    *) coreInvalidInputRetryMenu coreConfigMaintenanceMenu ;;
-    esac
-}
-
-coreLogsMenu() {
-    local logStatus=
-    echoContent title "\n┌─ 核心日志 ─────────────────────────────────────────"
-    menuItem 1 "Xray 日志管理" "查看 access/error 或调整日志"
-    menuItem 2 "sing-box 实时日志" "实时查看 box.log"
-    if [[ -f "$(singBoxLogConfigFile)" && "$(jq -r .log.disabled "$(singBoxLogConfigFile)")" == "false" ]]; then
-        menuItem 3 "关闭 sing-box 调试日志" "停止记录调试日志"
-        logStatus=true
-    else
-        menuItem 3 "开启 sing-box 调试日志" "记录调试日志并实时查看"
-        logStatus=false
-    fi
-    menuReturnItem 4 "返回核心与服务" "回到核心与服务菜单"
-    menuClose
-    autoRead core_logs_menu "请选择:" selectLogs
-    case "${selectLogs}" in
-    1) checkLog 1 ;;
-    2)
-        mkdir -p /etc/padm/sing-box/conf
-        touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
-        tail -f /etc/padm/sing-box/conf/box.log
-        ;;
-    3)
-        singBoxLog "${logStatus}" || return 1
-        if [[ "${logStatus}" == "false" ]]; then
-            mkdir -p /etc/padm/sing-box/conf
-            touch /etc/padm/sing-box/conf/box.log >/dev/null 2>&1
-            tail -f /etc/padm/sing-box/conf/box.log
-        fi
-        ;;
-    4) coreVersionManageMenu ;;
-    *) coreInvalidInputRetryMenu coreLogsMenu ;;
-    esac
-}
-
-coreAllServicesMenu() {
-    echoContent title "\n┌─ 核心服务控制 ─────────────────────────────────────"
-    menuItem 1 "Xray 服务" "启动、停止、重启 Xray"
-    menuItem 2 "sing-box 服务" "启动、停止、重启 sing-box"
-    menuReturnItem 3 "返回核心与服务" "回到核心生命周期管理"
-    menuClose
-    autoRead core_services_menu "请选择:" selectCoreService
-    case "${selectCoreService}" in
-    1) coreServiceControlMenu xray ;;
-    2) coreServiceControlMenu sing-box ;;
-    3) coreVersionManageMenu ;;
-    *) coreInvalidInputRetryMenu coreAllServicesMenu ;;
-    esac
-}
-
-coreVersionManageMenu() {
-    readInstallType
-    if ! xrayInstalled && ! singBoxInstalled; then
-        errorCard "没有检测到安装目录，请执行脚本安装内容"
-        menu
-        exit 0
-    fi
-    showCoreStatusOverview
-    echoContent title "\n┌─ 核心与服务 ───────────────────────────────────────"
-    menuLine "这里维护 Xray-core / sing-box 二进制、配置校验、服务状态和日志"
-    menuLine "协议入口去 协议与入口；脚本更新和 BBR 去 系统与脚本"
-    menuItem 1 "Xray-core 版本管理" "升级、回退或执行配置体检"
-    menuItem 2 "sing-box 版本管理" "升级、回退或验证预发布版"
-    menuItem 3 "配置校验与数据维护" "校验配置与兼容性，维护 Xray Geo 数据"
-    menuItem 4 "核心服务控制" "统一启动、停止、重启服务"
-    menuItem 5 "核心日志" "查看 Xray / sing-box 日志"
-    menuReturnItem 6 "返回主菜单" "回到 padm 管理面板"
-    menuClose
-    autoRead core_manage_menu "请选择:" selectCore
-    case "${selectCore}" in
-    1) xrayVersionManageMenu ;;
-    2) singBoxVersionManageMenu ;;
-    3) coreConfigMaintenanceMenu ;;
-    4) coreAllServicesMenu ;;
-    5) coreLogsMenu ;;
-    6) menu ;;
-    *) coreInvalidInputRetryMenu coreVersionManageMenu ;;
-    esac
-}
-
-singBoxVersionManageMenu() {
-    echoContent title "\n┌─ sing-box 版本管理 ─────────────────────────────────"
-    menuLine "这里管理 sing-box 版本；配置校验、迁移体检和日志请使用上级菜单。"
-    menuItem 1 "升级稳定版" "下载并校验最新稳定版后替换"
-    menuItem 2 "检查预发布兼容性" "仅检查最新预发布版，不替换当前版本"
-    menuItem 3 "升级预发布版" "下载并校验预发布版，适合验证新能力"
-    menuItem 4 "回退稳定版" "选择最近的稳定版本回退"
-    menuReturnItem 5 "返回核心与服务" "回到核心与服务"
-    menuClose
-    autoRead singbox_lifecycle_menu "请选择:" selectSingBoxType
-    case "${selectSingBoxType}" in
-    1) upgradeSingBoxCore false ;;
-    2) checkSingBoxPrereleaseCompatibility ;;
-    3) upgradeSingBoxCore true ;;
-    4)
-        local version
-        local rollbackStatus=0
-        selectRollbackVersion SagerNet/sing-box "sing-box" version || rollbackStatus=$?
-        if [[ "${rollbackStatus}" -eq 1 ]]; then
-            coreInvalidInputRetryMenu singBoxVersionManageMenu
-            return
-        elif [[ "${rollbackStatus}" -ne 0 ]]; then
-            return "${rollbackStatus}"
-        fi
-        upgradeSingBoxCore false "${version}"
-        ;;
-    5) coreVersionManageMenu ;;
-    *) coreInvalidInputRetryMenu singBoxVersionManageMenu ;;
-    esac
 }
 
 

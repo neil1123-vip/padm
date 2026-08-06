@@ -6164,9 +6164,12 @@ runServiceQueueApplyPropagationRegression() (
         printf 'sing-box:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceCallsFile}"
         return 1
     }
+    errorCard() { :; }
+    serviceRunning() { return 0; }
     SERVICE_ACTIONS=
     SERVICE_QUEUE_ALLOW_FAILURE=previous
-    serviceQueueStart nginx
+    serviceQueueStop nginx
+    serviceQueueStop xray
     serviceQueueStop xray
     serviceQueueStop sing-box
     set +e
@@ -6174,11 +6177,53 @@ runServiceQueueApplyPropagationRegression() (
     local queueRc=$?
     set -e
     [[ "${queueRc}" == "1" ]]
-    grep -qx 'nginx:start:true' "${serviceCallsFile}"
+    grep -qx 'nginx:stop:true' "${serviceCallsFile}"
     grep -qx 'xray:stop:true' "${serviceCallsFile}"
+    [[ "$(grep -c '^xray:stop:true$' "${serviceCallsFile}")" == "1" ]]
     grep -qx 'sing-box:stop:true' "${serviceCallsFile}"
     [[ -z "${SERVICE_ACTIONS}" ]]
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
+
+    : >"${serviceCallsFile}"
+    serviceQueueStart xray
+    serviceQueueApply >/dev/null 2>&1
+    [[ ! -s "${serviceCallsFile}" ]]
+    serviceRunning() { return 1; }
+    serviceQueueStop xray
+    serviceQueueApply >/dev/null 2>&1
+    [[ ! -s "${serviceCallsFile}" ]]
+
+    serviceRunning() { return 0; }
+    handleXray() {
+        printf 'xray:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceCallsFile}"
+        [[ "$1" == "stop" ]] && return 1
+        return 0
+    }
+    SERVICE_ACTIONS=
+    serviceQueueRestart xray
+    set +e
+    serviceQueueApply >/dev/null 2>&1
+    local restartRc=$?
+    set -e
+    [[ "${restartRc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceCallsFile}"
+    grep -qx 'xray:start:true' "${serviceCallsFile}"
+
+    : >"${serviceCallsFile}"
+    serviceRunning() { return 0; }
+    serviceQueueAdd unknown start
+    serviceQueueStop xray
+    set +e
+    serviceQueueApply >/dev/null 2>&1
+    local unknownRc=$?
+    set -e
+    [[ "${unknownRc}" == "1" ]]
+    grep -qx 'xray:stop:true' "${serviceCallsFile}"
+    [[ -z "${SERVICE_ACTIONS}" ]]
+    set +e
+    runServiceAction nginx invalid >/dev/null 2>&1
+    [[ "$?" == "1" ]]
+    set -e
 
     readLastInstallationConfig() { return 0; }
     unInstallSubscribe() { return 0; }
@@ -6292,12 +6337,12 @@ runCoreInstallServiceActionFailureRegression() (
     refreshSubscriptionWireGuardNginxControl() {
         printf 'wg-refresh\n' >>"${callLog}"
         [[ "${mode}" != "wg-refresh-fail" ]] || return 1
-        serviceQueueRestart nginx
+        serviceQueueRefresh nginx
     }
-    serviceQueueRestart() {
-        printf 'queueRestart:%s\n' "$*" >>"${callLog}"
+    serviceQueueRefresh() {
+        printf 'queueRefresh:%s\n' "$*" >>"${callLog}"
         SERVICE_ACTIONS="${SERVICE_ACTIONS}
-$1:restart"
+$1:refresh"
     }
     serviceQueueStart() { printf 'queueStart:%s\n' "$*" >>"${callLog}"; return 0; }
     serviceQueueApply() {
@@ -6445,7 +6490,7 @@ $1:restart"
     [[ "${rc}" == "1" ]]
     ! grep -q '^nginx:' "${serviceLog}"
     ! grep -q '^wg-refresh$' "${callLog}"
-    ! grep -q '^queueRestart:nginx$' "${callLog}"
+    ! grep -q '^queueRefresh:nginx$' "${callLog}"
     grep -qx 'initXrayConfig:custom 3' "${callLog}"
     ! grep -q '^cleanup:' "${callLog}"
     [[ "${nginxRuntimeState}" == "true" ]]
@@ -6461,7 +6506,7 @@ $1:restart"
         [[ "${rc}" == "1" ]]
         ! grep -q '^nginx:' "${serviceLog}"
         ! grep -q '^wg-refresh$' "${callLog}"
-        ! grep -q '^queueRestart:nginx$' "${callLog}"
+        ! grep -q '^queueRefresh:nginx$' "${callLog}"
         grep -q '^installXray:' "${callLog}"
         if [[ "${mode}" == "xray-service-fail" ]]; then
             grep -q '^installXrayService:' "${callLog}"
@@ -7954,6 +7999,13 @@ exit 0
 SH
     cat >"${fakeBin}/nginx" <<'SH'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >>"${PADM_FAKE_NGINX_ACTIONS:-/dev/null}"
+if [[ "$1" == "-t" ]]; then
+    exit "${PADM_FAKE_NGINX_TEST_RC:-0}"
+fi
+if [[ "$1" == "-s" && "$2" == "reload" ]]; then
+    exit "${PADM_FAKE_NGINX_RELOAD_RC:-0}"
+fi
 if [[ "$1" == "-s" && "$2" == "stop" ]]; then
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
 fi
@@ -7965,6 +8017,20 @@ SH
     source "${PROJECT_ROOT}/shell/core/protocols.sh"
     source "${PROJECT_ROOT}/shell/core/services.sh"
     errorCard() { return 0; }
+    nginxConfigPath="${serviceTmp}/nginx-reasons/"
+    mkdir -p "${nginxConfigPath}"
+    realityStreamSplitConfFile() { printf '%s\n' "${serviceTmp}/missing-reality-stream.conf"; }
+    subscriptionWireGuardControlEnabled() { return 1; }
+    selectCustomInstallType=
+    currentInstallProtocolType=
+    [[ -z "$(nginxRuntimeReasons)" ]]
+    currentInstallProtocolType=","
+    [[ -z "$(nginxRuntimeReasons)" ]]
+    currentInstallProtocolType=",1,"
+    [[ -z "$(nginxRuntimeReasons)" ]]
+    currentInstallProtocolType=",21,"
+    [[ "$(nginxRuntimeReasons)" == "当前协议入口" ]]
+    currentInstallProtocolType=
     export PADM_NGINX_ERROR_LOG="${serviceTmp}/nginx-error.log"
     eval "$(declare -f updateSELinuxHTTPPortT | sed '1s/^updateSELinuxHTTPPortT/originalUpdateSELinuxHTTPPortT/')"
     journalctl() { printf '31300 Permission denied\n'; }
@@ -7995,7 +8061,7 @@ SH
         printf 'nginx: master process nginx\n'
     }
     release=centos
-    selectCustomInstallType=
+    selectCustomInstallType=",21,"
     btDomain=
     SERVICE_QUEUE_ALLOW_FAILURE=true
     export PADM_FAKE_NGINX_STATE_FILE="${serviceTmp}/nginx-running"
@@ -8003,10 +8069,20 @@ SH
     export PADM_FAKE_SYSTEMCTL_ACTIONS="${serviceTmp}/systemctl-actions"
     export PADM_FAKE_SYSTEMCTL_RETRY_MARKER="${serviceTmp}/selinux-retry"
     export PADM_FAKE_NGINX_FORCE_KILL_LOG="${serviceTmp}/nginx-force-kill"
+    export PADM_FAKE_NGINX_ACTIONS="${serviceTmp}/nginx-actions"
     xargs() { printf '%s\n' "$*" >>"${PADM_FAKE_NGINX_FORCE_KILL_LOG}"; }
 
     printf 'false\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1 && return 1
+    local noExitMarker="${serviceTmp}/nginx-no-exit"
+    SERVICE_QUEUE_ALLOW_FAILURE=
+    (
+        set +e
+        PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=false handleNginx start >/dev/null 2>&1
+        printf 'reached\n' >"${noExitMarker}"
+    )
+    [[ -e "${noExitMarker}" ]]
+    SERVICE_QUEUE_ALLOW_FAILURE=true
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     if PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=true handleNginx stop >/dev/null 2>&1; then
         return 1
@@ -8016,6 +8092,17 @@ SH
     PADM_FAKE_SYSTEMCTL_START_RC=0 PADM_FAKE_SYSTEMCTL_START_STATE=true handleNginx start >/dev/null 2>&1
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
     PADM_FAKE_SYSTEMCTL_STOP_RC=0 PADM_FAKE_SYSTEMCTL_STOP_STATE=false handleNginx stop >/dev/null 2>&1
+
+    : >"${PADM_FAKE_NGINX_ACTIONS}"
+    printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
+    if PADM_FAKE_NGINX_TEST_RC=1 handleNginx reload >/dev/null 2>&1; then
+        return 1
+    fi
+    grep -qx -- '-t' "${PADM_FAKE_NGINX_ACTIONS}"
+    ! grep -q -- '-s reload' "${PADM_FAKE_NGINX_ACTIONS}"
+    : >"${PADM_FAKE_NGINX_ACTIONS}"
+    PADM_FAKE_NGINX_TEST_RC=0 handleNginx reload >/dev/null 2>&1
+    [[ "$(<"${PADM_FAKE_NGINX_ACTIONS}")" == $'-t\n-s reload' ]]
 
     : >"${PADM_FAKE_NGINX_FORCE_KILL_LOG}"
     printf 'true\n' >"${PADM_FAKE_NGINX_STATE_FILE}"
@@ -8164,7 +8251,87 @@ SH
     [[ "$(grep -c '^start xray.service$' "${xrayStartLimitLog}")" == "2" ]] || return 1
     grep -qx 'xrayRunning:running:25:0.1' "${xrayWaitLog}" || return 1
     [[ "$(<"${xrayRunningState}")" == "true" ]] || return 1
+
+    local xrayNoExitMarker="${serviceTmp}/xray-no-exit"
+    SERVICE_QUEUE_ALLOW_FAILURE=
+    xrayRunning() { return 1; }
+    xraySystemdStart() { return 1; }
+    waitForServiceState() { return 1; }
+    (
+        set +e
+        handleXray start >/dev/null 2>&1
+        printf 'reached\n' >"${xrayNoExitMarker}"
+    )
+    [[ -e "${xrayNoExitMarker}" ]]
+
+    local singBoxNoExitMarker="${serviceTmp}/sing-box-no-exit"
+    export PADM_SINGBOX_SYSTEMD_SERVICE_FILE="${serviceTmp}/sing-box.service"
+    : >"${PADM_SINGBOX_SYSTEMD_SERVICE_FILE}"
+    singBoxRunning() { return 1; }
+    singBoxMergeConfig() { return 1; }
+    (
+        set +e
+        handleSingBox start >/dev/null 2>&1
+        printf 'reached\n' >"${singBoxNoExitMarker}"
+    )
+    [[ -e "${singBoxNoExitMarker}" ]]
     rm -rf "${serviceTmp}"
+)
+
+runNginxServiceRefreshRegression() (
+    set -euo pipefail
+    local root="${TMP_DIR}/nginx-service-refresh"
+    local actionLog="${root}/actions.log"
+    local nginxState=running
+    local nginxRequired=false
+    local nginxTestRc=0
+
+    rm -rf "${root}"
+    mkdir -p "${root}"
+    source "${PROJECT_ROOT}/shell/core/services.sh"
+    errorCard() { return 0; }
+    menuLine() { return 0; }
+    uiStyle() { printf '%s' "${2:-}"; }
+    nginxRunning() { [[ "${nginxState}" == "running" ]]; }
+    nginxRuntimeRequired() { [[ "${nginxRequired}" == "true" ]]; }
+    nginx() {
+        printf 'nginx:%s\n' "$*" >>"${actionLog}"
+        [[ "$1" != "-t" ]] || return "${nginxTestRc}"
+        return 0
+    }
+    eval "$(declare -f handleNginx | sed '1s/^handleNginx/originalHandleNginx/')"
+    handleNginx() {
+        if [[ "$1" == "start" ]]; then
+            printf 'start\n' >>"${actionLog}"
+            return 0
+        fi
+        originalHandleNginx "$@"
+    }
+    export PADM_NGINX_ERROR_LOG="${root}/nginx-error.log"
+
+    : >"${actionLog}"
+    nginxTestRc=1
+    if runServiceAction nginx refresh >/dev/null 2>&1; then
+        return 1
+    fi
+    [[ "$(<"${actionLog}")" == 'nginx:-t' ]]
+
+    : >"${actionLog}"
+    nginxTestRc=0
+    nginxState=running
+    runServiceAction nginx refresh >/dev/null 2>&1
+    [[ "$(<"${actionLog}")" == $'nginx:-t\nnginx:-s reload' ]]
+
+    : >"${actionLog}"
+    nginxState=stopped
+    nginxRequired=true
+    runServiceAction nginx refresh >/dev/null 2>&1
+    [[ "$(<"${actionLog}")" == $'nginx:-t\nstart' ]]
+
+    : >"${actionLog}"
+    nginxRequired=false
+    runServiceAction nginx refresh >/dev/null 2>&1
+    [[ "$(<"${actionLog}")" == 'nginx:-t' ]]
 )
 
 
@@ -11000,31 +11167,17 @@ SH
     (
         local serviceLog="${TMP_DIR}/nginx-alone-service.log"
         local errorLog="${TMP_DIR}/nginx-alone-error.log"
-        local rcFile="${TMP_DIR}/nginx-alone-redirect.rc"
-        local shellRc
         : >"${serviceLog}"
         : >"${errorLog}"
-        rm -f "${rcFile}"
         errorCard() { printf '%s\n' "$*" >>"${errorLog}"; }
         handleNginx() {
             printf 'nginx:%s:%s\n' "$1" "${SERVICE_QUEUE_ALLOW_FAILURE:-}" >>"${serviceLog}"
-            [[ "${SERVICE_QUEUE_ALLOW_FAILURE:-}" == "true" ]] && return 1
-            exit 0
+            return 1
         }
         SERVICE_QUEUE_ALLOW_FAILURE=previous
-        set +e
-        (
-            set +e
-            updateRedirectNginxConf >/dev/null 2>&1
-            printf '%s\n' "$?" >"${rcFile}"
-        )
-        shellRc=$?
-        set -e
-        [[ "${shellRc}" == "0" ]]
-        [[ -s "${rcFile}" ]]
-        [[ "$(<"${rcFile}")" == "1" ]]
-        grep -qx 'nginx:stop:true' "${serviceLog}"
-        grep -q 'Nginx 服务停止失败' "${errorLog}"
+        updateRedirectNginxConf >/dev/null 2>&1
+        [[ ! -s "${serviceLog}" ]]
+        [[ ! -s "${errorLog}" ]]
         [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     )
 
@@ -11149,14 +11302,14 @@ SH
         currentHost=example.com
         currentPort=443
         curl() { printf '%s\n' "$*" >>"${curlLog}"; printf '200'; }
-        serviceQueueRestart() { printf 'restart\n' >>"${serviceLog}"; }
+        serviceQueueRefresh() { printf 'refresh\n' >>"${serviceLog}"; }
         serviceQueueApply() { printf 'apply\n' >>"${serviceLog}"; }
         if checkNginx302 2>/dev/null; then
             return 1
         fi
         [[ "$(<"${targetPath}")" == "backup config" ]]
         [[ ! -e "${PADM_ALONE_NGINX_BACKUP_FILE}" ]]
-        grep -qx 'restart' "${serviceLog}"
+        grep -qx 'refresh' "${serviceLog}"
         grep -qx 'apply' "${serviceLog}"
         grep -q -- '--connect-timeout 5' "${curlLog}"
         grep -q -- '--max-time 15' "${curlLog}"
@@ -12512,8 +12665,8 @@ SH
         return 0
     }
 
-    serviceQueueRestart() {
-        printf 'restart:%s:%s\n' "$*" "${serviceMode}" >>"${serviceLog}"
+    serviceQueueRefresh() {
+        printf 'refresh:%s:%s\n' "$*" "${serviceMode}" >>"${serviceLog}"
         return 0
     }
 
@@ -12619,7 +12772,7 @@ EOF
     [[ "$(<"${stateFile}")" == "${originalState}" ]]
     [[ "$(<"${streamConf}")" == "${originalStreamConf}" ]]
     [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
-    grep -q '^restart:nginx:service-fail$' "${serviceLog}"
+    [[ "$(grep -c '^refresh:nginx:service-fail$' "${serviceLog}")" == "2" ]]
     ! grep -q '^refresh$' "${serviceLog}"
     if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
@@ -12654,6 +12807,7 @@ EOF
     [[ ! -e "${streamConf}" ]]
     grep -qx 'deny:443:tcp' "${firewallLog}"
     ! grep -q 'padm stream include start' "${nginxMainConf}"
+    grep -qx 'refresh:nginx:success' "${serviceLog}"
     if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream-disable.*'; then
         return 1
     fi
@@ -12727,7 +12881,7 @@ SH
     export PADM_FAKE_REALITY_STREAM_CP_MODE=success
     AUTO_INSTALL=true
     coreInstallType=1
-    currentInstallProtocolType=",7,12"
+    currentInstallProtocolType=",1,2"
     AUTO_REALITY_STREAM_ENABLE=y
     AUTO_REALITY_STREAM_DOMAINS="site.example.com"
     AUTO_REALITY_STREAM_DEFAULT_PROTOCOL=1
@@ -12746,6 +12900,7 @@ SH
             builtin command "$@"
         }
         nginx() { return 127; }
+        autoRead() { printf -v "$3" 'y'; }
         installNginxTools() {
             : >"${nginxInstallMarker}"
             exit 17
@@ -12765,8 +12920,8 @@ SH
         return 0
     }
 
-    serviceQueueRestart() {
-        printf 'restart:%s:%s\n' "$*" "${serviceMode}" >>"${serviceLog}"
+    serviceQueueRefresh() {
+        printf 'refresh:%s:%s\n' "$*" "${serviceMode}" >>"${serviceLog}"
         return 0
     }
 
@@ -12900,7 +13055,7 @@ EOF
     [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
     [[ ! -e "${stateFile}" ]]
     [[ ! -e "${streamConf}" ]]
-    grep -q '^restart:nginx:service-fail$' "${serviceLog}"
+    [[ "$(grep -c '^refresh:nginx:service-fail$' "${serviceLog}")" == "2" ]]
     ! grep -q '^refresh$' "${serviceLog}"
     grep -qx 'allow:443:tcp' "${firewallLog}"
     grep -qx 'rollback' "${firewallLog}"
@@ -12920,16 +13075,18 @@ EOF
     if [[ "${enableStatus}" -eq 0 ]]; then
         return 1
     fi
-    [[ "$(<"${visionFile}")" == "${originalVision}" ]]
+    [[ "$(<"${visionFile}")" != "${originalVision}" ]]
+    jq -e '.inbounds[0].listen == "127.0.0.1" and .inbounds[0].port == 2443' "${visionFile}" >/dev/null
     [[ "$(<"${xhttpFile}")" == "${originalXHTTP}" ]]
     [[ "$(<"${nginxMainConf}")" == "${originalNginxConf}" ]]
     [[ ! -e "${stateFile}" ]]
     [[ ! -e "${streamConf}" ]]
-    grep -q '已回滚本次修改' "${errorLog}"
-    grep -q '恢复旧配置后服务应用仍失败' "${errorLog}"
-    if regressionFindHasMatches "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -name 'padm-reality-stream.*'; then
-        return 1
-    fi
+    keptBackup=$(find "${streamTmpRoot}" -mindepth 1 -maxdepth 1 -type d -name 'padm-reality-stream.*' -print -quit)
+    [[ -n "${keptBackup}" && -d "${keptBackup}" ]]
+    [[ "$(<"${keptBackup}/vision.json")" == "${originalVision}" ]]
+    grep -q 'Reality 443 共存分流服务应用失败，且回滚失败' "${errorLog}"
+    grep -Fq "备份目录: ${keptBackup}" "${errorLog}"
+    removeRealityStreamBackup "${keptBackup}"
     export PADM_FAKE_REALITY_STREAM_CP_MODE=success
 
     writeRealityStreamEnableFixture
@@ -12958,6 +13115,7 @@ EOF
     jq -e '.enabled == true and .firewall_owned == true and .default_protocol == "vision" and .protocols.vision.restore_port == 443 and .protocols.vision.internal_port == 2443' "${stateFile}" >/dev/null
     grep -qx 'allow:443:tcp' "${firewallLog}"
     ! grep -qx 'rollback' "${firewallLog}"
+    grep -q '^refresh:nginx:success$' "${serviceLog}"
     selectCustomInstallType=1
     nginxConfigPath="${streamDir}/no-subscription/"
     subscriptionWireGuardControlEnabled() { return 1; }
@@ -16449,6 +16607,7 @@ runSubscriptionWireGuardRestoreRunnerRegression() (
 
 runCoreInvalidInputRetryMenuRegression() (
     local actions=
+    local menuHandler
 
     recordMenuAction() {
         actions+="$1"$'\n'
@@ -16468,21 +16627,20 @@ runCoreInvalidInputRetryMenuRegression() (
     assertMenuAction 'errorCard:输入有误，请重新输入'
     assertMenuAction 'sampleMenu:alpha beta'
 
-    [[ "$(grep -cF 'coreInvalidInputRetryMenu xrayVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "2" ]]
-    [[ "$(grep -cF 'coreInvalidInputRetryMenu singBoxVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "2" ]]
-    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreServiceControlMenu "${core}"' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
-    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreConfigMaintenanceMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
-    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreLogsMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
-    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreAllServicesMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
-    [[ "$(grep -cF 'coreInvalidInputRetryMenu coreVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh")" == "1" ]]
-
-    ! grep -qF 'coreInvalidInputErrorCard; xrayVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
-    ! grep -qF 'coreInvalidInputErrorCard; singBoxVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
-    ! grep -qF 'coreInvalidInputErrorCard; coreServiceControlMenu "${core}"' "${PROJECT_ROOT}/shell/core/cores.sh"
-    ! grep -qF 'coreInvalidInputErrorCard; coreConfigMaintenanceMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
-    ! grep -qF 'coreInvalidInputErrorCard; coreLogsMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
-    ! grep -qF 'coreInvalidInputErrorCard; coreAllServicesMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
-    ! grep -qF 'coreInvalidInputErrorCard; coreVersionManageMenu' "${PROJECT_ROOT}/shell/core/cores.sh"
+    for menuHandler in \
+        xrayVersionManageMenu \
+        singBoxVersionManageMenu \
+        coreServiceControlMenu \
+        coreConfigMaintenanceMenu \
+        coreLogsMenu \
+        coreAllServicesMenu \
+        coreVersionManageMenu; do
+        [[ "$(grep -cE "^${menuHandler}\\(\\)" "${PROJECT_ROOT}/shell/core/menu.sh")" == "1" ]]
+        ! grep -qE "^${menuHandler}\\(\\)" "${PROJECT_ROOT}/shell/core/cores.sh"
+        ! grep -qE "coreInvalidInputRetryMenu[[:space:]]+${menuHandler}" \
+            "${PROJECT_ROOT}/shell/core/menu.sh" "${PROJECT_ROOT}/shell/core/cores.sh"
+    done
+    [[ "$(grep -cE '^xrayGeoDataMenu\(\)' "${PROJECT_ROOT}/shell/core/menu.sh")" == "1" ]]
 )
 
 runCoreSelectionRetryActionRegression() (
@@ -16704,7 +16862,10 @@ runMenuSmokeLightRegression() {
     autoRead() {
         local targetVar=$3
         local input=
-        IFS= read -r input || input=
+        if ! IFS= read -r input; then
+            printf -v "${targetVar}" '%s' ""
+            return 1
+        fi
         printf -v "${targetVar}" '%s' "${input}"
     }
     selectCoreInstall() { recordMenuAction selectCoreInstall; }
@@ -16767,11 +16928,17 @@ runMenuSmokeLightRegression() {
 
 runMenuSmokeRegression() {
     local actions=
+    local output= menuItems=
     local menuSmokePart="${1:-all}"
     local oldConfigPath="${configPath:-}"
     local oldCoreInstallType="${coreInstallType:-}"
     local oldRealityPageSize="${REALITY_TARGET_PAGE_SIZE:-}"
     local serviceQueueShouldFail=
+    local serviceActionShouldFail=
+    local checkActionShouldFail=
+    local xrayInstalledState=true singBoxInstalledState=true serviceInstalledState=true
+    local xrayRunningState=true singBoxRunningState=false nginxRunningState=true
+    local nginxReasonsMock="当前协议入口"
     local wgChoice
     local wgAction
     coreInstallType=${coreInstallType:-}
@@ -16788,15 +16955,21 @@ runMenuSmokeRegression() {
     resetMenuActions() {
         actions=
     }
+    resetMenuRender() {
+        output=
+        menuItems=
+    }
+    eval "$(declare -f menu | sed '1s/^menu /originalCoreMainMenu /')"
     menu() { recordMenuAction menu; }
     uiStyle() { printf '%s' "$2"; }
     menuLine() { output+="$*"$'\n'; }
     menuMutedLine() { output+="$*"$'\n'; }
-    menuItem() { output+="$2 $3"$'\n'; }
-    menuDangerItem() { output+="$2 $3"$'\n'; }
+    menuSection() { output+="$*"$'\n'; }
+    menuItem() { output+="$2 $3"$'\n'; menuItems+="$2"$'\n'; }
+    menuDangerItem() { output+="$2 $3"$'\n'; menuItems+="$2"$'\n'; }
     menuClose() { return 0; }
-    menuRecommendedItem() { output+="$2 $3"$'\n'; }
-    menuReturnItem() { output+="$2 $3"$'\n'; }
+    menuRecommendedItem() { output+="$2 $3"$'\n'; menuItems+="$2"$'\n'; }
+    menuReturnItem() { output+="$2 $3"$'\n'; menuItems+="$2"$'\n'; }
     statusCard() { recordMenuAction "statusCard:$1"; }
     warnCard() { recordMenuAction "warnCard:$1"; }
     errorCard() { recordMenuAction "errorCard:$1"; }
@@ -16836,16 +17009,16 @@ runMenuSmokeRegression() {
         assertMenuAction 'statusCard:Xray 配置校验失败'
         resetMenuActions
         xrayPrereleaseCompatibilityCard "通过"
-        assertMenuAction 'statusCard:Xray 预发布兼容检查'
+        assertMenuAction 'statusCard:Xray 预发布版试跑'
         resetMenuActions
         singBoxPrereleaseCompatibilityCard "通过"
-        assertMenuAction 'statusCard:sing-box 预发布兼容检查'
+        assertMenuAction 'statusCard:sing-box 预发布版试跑'
         resetMenuActions
         xrayConfigValidationCard "通过"
-        assertMenuAction 'statusCard:Xray 配置校验'
+        assertMenuAction 'statusCard:Xray 当前配置检查'
         resetMenuActions
         singBoxConfigValidationCard "通过"
-        assertMenuAction 'statusCard:sing-box 配置校验'
+        assertMenuAction 'statusCard:sing-box 当前配置检查'
         resetMenuActions
         skipTlsCertificateStatusCard "检测到宝塔面板/1Panel"
         assertMenuAction 'statusCard:跳过 TLS 证书'
@@ -16878,7 +17051,10 @@ runMenuSmokeRegression() {
     autoRead() {
         local targetVar=$3
         local input=
-        IFS= read -r input || input=
+        if ! IFS= read -r input; then
+            printf -v "${targetVar}" '%s' ""
+            return 1
+        fi
         printf -v "${targetVar}" '%s' "${input}"
     }
     autoConfirm() {
@@ -16998,11 +17174,66 @@ runMenuSmokeRegression() {
     refreshSubscriptionGroupSyncCron() { recordMenuAction refreshSubscriptionGroupSyncCron; }
     subscriptionGroupSyncCronStatus() { recordMenuAction subscriptionGroupSyncCronStatus; }
     installUserCrontabContent() { return 0; }
-    xrayInstalled() { return 0; }
-    singBoxInstalled() { return 0; }
-    getSingBoxCurrentVersion() { printf 'v1.0.0\n'; }
-    xrayRunning() { return 0; }
-    singBoxRunning() { return 1; }
+    xrayInstalled() { [[ "${xrayInstalledState}" == "true" ]]; }
+    singBoxInstalled() { [[ "${singBoxInstalledState}" == "true" ]]; }
+    getSingBoxCurrentVersion() {
+        if singBoxInstalled; then
+            printf 'v1.0.0\n'
+        else
+            printf '未安装\n'
+        fi
+    }
+    xrayRunning() { [[ "${xrayRunningState}" == "true" ]]; }
+    singBoxRunning() { [[ "${singBoxRunningState}" == "true" ]]; }
+    serviceInstalled() { [[ "${serviceInstalledState}" == "true" ]]; }
+    serviceRunning() {
+        case "$1" in
+        xray) [[ "${xrayRunningState}" == "true" ]] ;;
+        sing-box) [[ "${singBoxRunningState}" == "true" ]] ;;
+        nginx) [[ "${nginxRunningState}" == "true" ]] ;;
+        *) return 1 ;;
+        esac
+    }
+    nginxRuntimeReasons() {
+        [[ -n "${nginxReasonsMock}" ]] || return 0
+        printf '%s\n' "${nginxReasonsMock}"
+    }
+    runServiceAction() {
+        recordMenuAction "runServiceAction:$1:$2"
+        [[ "${serviceActionShouldFail}" != "$1:$2" ]]
+    }
+    upgradeXrayCore() { recordMenuAction "upgradeXrayCore:$*"; }
+    upgradeSingBoxCore() { recordMenuAction "upgradeSingBoxCore:$*"; }
+    showXrayConfigHealthCheck() {
+        recordMenuAction showXrayConfigHealthCheck
+        [[ "${checkActionShouldFail}" != "showXrayConfigHealthCheck" ]]
+    }
+    showXrayCompatibilityAudit() {
+        recordMenuAction showXrayCompatibilityAudit
+        [[ "${checkActionShouldFail}" != "showXrayCompatibilityAudit" ]]
+    }
+    checkXrayPrereleaseCompatibility() {
+        recordMenuAction checkXrayPrereleaseCompatibility
+        [[ "${checkActionShouldFail}" != "checkXrayPrereleaseCompatibility" ]]
+    }
+    showSingBoxConfigValidation() {
+        recordMenuAction showSingBoxConfigValidation
+        [[ "${checkActionShouldFail}" != "showSingBoxConfigValidation" ]]
+    }
+    showSingBoxCompatibilityAudit() {
+        recordMenuAction showSingBoxCompatibilityAudit
+        [[ "${checkActionShouldFail}" != "showSingBoxCompatibilityAudit" ]]
+    }
+    checkSingBoxPrereleaseCompatibility() {
+        recordMenuAction checkSingBoxPrereleaseCompatibility
+        [[ "${checkActionShouldFail}" != "checkSingBoxPrereleaseCompatibility" ]]
+    }
+    updateGeoSite() { recordMenuAction updateGeoSite; }
+    showXrayGeoStatus() { recordMenuAction showXrayGeoStatus; }
+    installCronUpdateGeo() { recordMenuAction installCronUpdateGeo; }
+    checkLog() { recordMenuAction "checkLog:$*"; }
+    singBoxLog() { recordMenuAction "singBoxLog:$*"; }
+    checkNginxConfig() { recordMenuAction checkNginxConfig; }
     validateXrayConfigWithBinary() { return 0; }
     singBoxConfigInstalled() { return 1; }
     crontab() { return 1; }
@@ -17041,10 +17272,41 @@ runMenuSmokeRegression() {
     printf 'geoip' >"${geoOverviewDir}/geoip.dat"
     printf 'geosite' >"${geoOverviewDir}/geosite.dat"
     printf 'v20260513' >"${geoOverviewDir}/geo.version"
-    local output=
+    output=
     if menuSmokePartSelected core; then
+        resetMenuActions
+        resetMenuRender
         PADM_XRAY_DIR="${geoOverviewDir}" PADM_XRAY_BINARY="${geoOverviewDir}/xray" PADM_SINGBOX_BINARY="${geoOverviewDir}/missing-sing-box" showCoreStatusOverview
         [[ "${output}" == *"Xray Geo:"*"版本 v20260513"* ]]
+        ! assertMenuAction unexpected-network-version-fetch
+
+        xrayInstalledState=false
+        singBoxInstalledState=false
+        serviceInstalledState=false
+        resetMenuActions
+        resetMenuRender
+        PADM_XRAY_DIR="${TMP_DIR}/missing-xray" \
+            PADM_XRAY_BINARY="${TMP_DIR}/missing-xray/xray" \
+            PADM_SINGBOX_BINARY="${TMP_DIR}/missing-sing-box" \
+            coreVersionManageMenu <<<"6"
+        [[ "${menuItems}" == $'Xray-core 生命周期\nsing-box 生命周期\n服务运行态\n日志与诊断\nXray Geo 数据\n返回主菜单\n' ]]
+        ! grep -qxF '安装与重装' <<<"${menuItems}"
+        ! grep -qF '配置健康与兼容' <<<"${menuItems}"
+        ! assertMenuAction unexpected-network-version-fetch
+        xrayInstalledState=true
+        singBoxInstalledState=true
+        serviceInstalledState=true
+
+        resetMenuActions
+        resetMenuRender
+        local menuSmokePwd=$PWD
+        originalCoreMainMenu <<<'6
+6'
+        cd "${menuSmokePwd}" || return 1
+        [[ "$(grep -c '^安装与重装$' <<<"${menuItems}")" == "2" ]]
+        ! assertMenuAction unexpected-network-version-fetch
+
+        resetMenuRender
         customSingBoxInstall() { recordMenuAction "customSingBoxInstall:$*"; }
         installMenu <<<"7"
         assertMenuAction menu
@@ -17528,40 +17790,149 @@ y
     fi
 
     if menuSmokePartSelected core-maintenance; then
+        local expectedLifecycleItems=$'升级稳定版\n升级预发布版\n回退稳定版\n检查当前配置\n扫描升级风险\n试跑预发布版\n返回核心与服务\n'
+        local xrayLifecycleItems=
+
         resetMenuActions
-        coreVersionManageMenu <<<"6"
-        assertMenuAction menu
-        if assertMenuAction unexpected-network-version-fetch; then
-            printf 'menu-smoke failed: core menu fetched release versions while rendering overview\n' >&2
-            return 1
-        fi
+        resetMenuRender
+        xrayVersionManageMenu <<<"7"
+        xrayLifecycleItems=${menuItems}
+        [[ "${xrayLifecycleItems}" == "${expectedLifecycleItems}" ]]
+        ! grep -Eq '普通模式|严格模式' <<<"${output}"
+        [[ -z "${actions}" ]]
+
         resetMenuActions
-        coreConfigMaintenanceMenu <<<"3"
-        assertMenuAction 'statusCard:Xray 兼容体检'
+        resetMenuRender
+        singBoxVersionManageMenu <<<"7"
+        [[ "${menuItems}" == "${xrayLifecycleItems}" ]]
+        [[ -z "${actions}" ]]
+
         resetMenuActions
-        coreConfigMaintenanceMenu <<<"4"
-        assertMenuAction 'statusCard:Xray 预发布兼容检查'
+        resetMenuRender
+        xrayVersionManageMenu <<<'4
+5
+6
+7'
+        assertMenuAction showXrayConfigHealthCheck
+        assertMenuAction showXrayCompatibilityAudit
+        assertMenuAction checkXrayPrereleaseCompatibility
+
         resetMenuActions
+        resetMenuRender
+        singBoxVersionManageMenu <<<'4
+5
+6
+7'
+        assertMenuAction showSingBoxConfigValidation
+        assertMenuAction showSingBoxCompatibilityAudit
+        assertMenuAction checkSingBoxPrereleaseCompatibility
+
+        checkActionShouldFail=showXrayConfigHealthCheck
+        resetMenuActions
+        resetMenuRender
+        xrayVersionManageMenu <<<'4
+7'
+        checkActionShouldFail=
+        assertMenuAction showXrayConfigHealthCheck
+        [[ "$(grep -c '^升级稳定版$' <<<"${menuItems}")" == "2" ]]
+
+        resetMenuActions
+        resetMenuRender
+        xrayVersionManageMenu <<<'invalid
+still-invalid
+7'
+        [[ "$(grep -cF 'errorCard:输入有误，请重新输入' <<<"${actions}")" == "2" ]]
+        [[ "$(grep -c '^升级稳定版$' <<<"${menuItems}")" == "3" ]]
+        xrayVersionManageMenu </dev/null
+
+        xrayInstalledState=false
+        resetMenuActions
+        resetMenuRender
+        xrayVersionManageMenu <<<'1
+5
+6
+7'
+        ! grep -q '^upgradeXrayCore:' <<<"${actions}"
+        assertMenuAction 'statusCard:Xray-core 生命周期'
+        assertMenuAction showXrayCompatibilityAudit
+        assertMenuAction checkXrayPrereleaseCompatibility
+        xrayInstalledState=true
+
+        resetMenuActions
+        resetMenuRender
         coreConfigMaintenanceMenu <<<"6"
-        assertMenuAction 'statusCard:sing-box 兼容体检'
-        if assertMenuAction unexpected-network-version-fetch; then
-            printf 'menu-smoke failed: core maintenance fetched release versions while rendering compatibility entries\n' >&2
-            return 1
-        fi
+        [[ "${menuItems}" == $'Xray-core 生命周期\nsing-box 生命周期\n服务运行态\n日志与诊断\nXray Geo 数据\n返回主菜单\n' ]]
+        ! assertMenuAction showXrayCompatibilityAudit
+        ! assertMenuAction checkXrayPrereleaseCompatibility
+        ! assertMenuAction showSingBoxCompatibilityAudit
+        ! assertMenuAction checkSingBoxPrereleaseCompatibility
+        ! assertMenuAction unexpected-network-version-fetch
+
         resetMenuActions
-        coreServiceControlMenu xray <<<"3"
-        assertMenuAction 'serviceQueueRestart:xray'
-        assertMenuAction serviceQueueApply
-        serviceQueueShouldFail=true
+        resetMenuRender
+        coreServiceControlMenu xray <<<'3
+4'
+        assertMenuAction 'runServiceAction:xray:restart'
+
+        serviceActionShouldFail=sing-box:restart
         resetMenuActions
-        if coreServiceControlMenu sing-box <<<"3" >/dev/null 2>&1; then
-            serviceQueueShouldFail=
-            return 1
-        fi
-        serviceQueueShouldFail=
-        assertMenuAction 'serviceQueueRestart:sing-box'
-        assertMenuAction serviceQueueApply
+        resetMenuRender
+        coreServiceControlMenu sing-box <<<'3
+4'
+        serviceActionShouldFail=
+        assertMenuAction 'runServiceAction:sing-box:restart'
         assertMenuAction 'errorCard:sing-box 服务重启失败'
+        [[ "$(grep -c '^启动$' <<<"${menuItems}")" == "2" ]]
+
+        resetMenuActions
+        resetMenuRender
+        coreServiceControlMenu xray <<<'2
+
+4'
+        assertMenuAction 'statusCard:已取消'
+        ! assertMenuAction 'runServiceAction:xray:stop'
+
+        nginxReasonsMock=
+        resetMenuActions
+        resetMenuRender
+        coreAllServicesMenu <<<'3
+4'
+        assertMenuAction 'statusCard:Nginx 服务'
+        ! grep -q '^runServiceAction:nginx:' <<<"${actions}"
+
+        nginxReasonsMock="订阅发布"
+        nginxRunningState=false
+        resetMenuActions
+        resetMenuRender
+        coreServiceControlMenu nginx <<<'4
+5'
+        assertMenuAction 'statusCard:Nginx reload'
+        ! assertMenuAction 'runServiceAction:nginx:reload'
+        grep -q '^reload（不可用）$' <<<"${menuItems}"
+
+        nginxRunningState=true
+        resetMenuActions
+        resetMenuRender
+        coreServiceControlMenu nginx <<<'4
+5'
+        assertMenuAction 'runServiceAction:nginx:reload'
+
+        resetMenuActions
+        resetMenuRender
+        coreLogsMenu <<<'4
+5'
+        assertMenuAction checkNginxConfig
+
+        resetMenuActions
+        resetMenuRender
+        xrayGeoDataMenu <<<'1
+2
+3
+4'
+        assertMenuAction updateGeoSite
+        assertMenuAction showXrayGeoStatus
+        assertMenuAction installCronUpdateGeo
+        [[ "$(grep -c '^更新 Xray Geo 数据$' <<<"${menuItems}")" == "4" ]]
     fi
 
     configPath="${oldConfigPath}"

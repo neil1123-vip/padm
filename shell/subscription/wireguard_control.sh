@@ -904,7 +904,7 @@ ensureSubscriptionWireGuardNginx() {
 }
 
 refreshSubscriptionWireGuardNginxControl() {
-    ensureSubscriptionWireGuardNginx && ensureSubscriptionWireGuardNginxConfig && serviceQueueRestart nginx
+    ensureSubscriptionWireGuardNginx && ensureSubscriptionWireGuardNginxConfig && serviceQueueRefresh nginx
 }
 
 subscriptionWireGuardWaitForAddress() {
@@ -1936,15 +1936,13 @@ disableSubscriptionWireGuardControl() {
             errorCard "WireGuard Nginx 控制面配置移除失败"
             return 1
         }
-        if [[ "${nginxWasRunning}" == "true" ]]; then
-            serviceQueueRestart nginx
-            serviceQueueApply || {
-                SERVICE_ACTIONS="${previousServiceActions}"
-                subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
-                errorCard "WireGuard Nginx 控制面重载失败"
-                return 1
-            }
-        fi
+        serviceQueueRefresh nginx
+        serviceQueueApply || {
+            SERVICE_ACTIONS="${previousServiceActions}"
+            subscriptionWireGuardRestoreStateOrReport "${previousState}" "WireGuard Nginx 控制面重载失败" "${nginxBackupDir}" "${nginxWasRunning}" || return 1
+            errorCard "WireGuard Nginx 控制面重载失败"
+            return 1
+        }
     fi
     if [[ "${role}" == "main" && "${firewallOwned}" == "true" ]] &&
         ! denyPort "${listenPort}" udp; then

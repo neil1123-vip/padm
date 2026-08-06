@@ -142,7 +142,7 @@ padm groups the main menu by task object. Each feature has one primary home:
 | 🧭 Protocols & entry | REALITY, XHTTP, Hysteria2, Tuic, entry ports, and CDN entry addresses. |
 | 🔐 Sites & certificates | Traditional TLS fallback sites, 302 redirects, ALPN diagnostics/repair, and local TLS certificates. |
 | 🧱 Routing & access control | WARP, IPv6, Socks5, DNS/hosts, BT blocking, domain/IP blocking, direct exceptions, and regional blocking. |
-| ⚙️ Cores & services | Xray-core / sing-box versions, upgrade/rollback, config validation, service control, logs, and Geo data. |
+| ⚙️ Cores & services | Xray-core / sing-box lifecycles, service state, log diagnostics, and Xray Geo data; the home view reads local state only. |
 | 🧰 System & script | Update padm, inspect script installation state, manage Fail2ban protection, and network optimization / BBR. |
 | ⚠️ Advanced / dangerous operations | Uninstall and high-risk experimental switches such as VLESS Encryption. |
 
@@ -364,16 +364,24 @@ Xray access control uses routing + blackhole/direct; sing-box uses remote rule s
 
 ## Cores and Services
 
-`Cores & services` shows Xray-core / sing-box current versions, service state, configuration validation and compatibility results, and Xray Geo data state. Latest stable and prerelease versions are fetched on demand only during upgrade, rollback, or compatibility checks.
+The `Cores & services` home view reads only local version, configuration, service, and Xray Geo state. It does not validate configurations or access the network while rendering. The page remains available when neither core is installed, including read-only scans that do not require a local binary. Remote version data is fetched only for an explicit upgrade, rollback, or prerelease trial.
+
+The home view always has six entries:
+
+1. Xray-core lifecycle
+2. sing-box lifecycle
+3. Service state
+4. Logs and diagnostics
+5. Xray Geo data
+6. Return to the main menu
+
+`Install & reinstall` exists only in the main menu, and there is no separate configuration-health page. Both lifecycle pages use the same order and expose `Check current configuration`, `Scan upgrade risks`, and `Trial the prerelease`. Results are `Passed`, `Needs attention`, `Failed`, or `Unable to check`. The first two actions are read-only and offline; a prerelease trial neither replaces the binary nor operates the service.
+
+Xray's current-configuration check runs the normal and strict stages internally. A normal-stage failure is `Failed`; a strict-only failure is `Needs attention`. sing-box merges its configuration fragments and then runs `sing-box check -c /etc/padm/sing-box/conf/config.json`. Technical stages and log paths appear only in result details.
 
 When upgrading or rolling back a core, the script downloads the target version into a temporary directory and validates the current configuration with the target binary before replacing `/etc/padm/xray/xray` or `/etc/padm/sing-box/sing-box` and restarting the service. If the new core fails to start, it attempts to restore the previous binary.
 
-Validation commands:
-
-- Xray: `xray -test -confdir /etc/padm/xray/conf`
-- sing-box: merge fragment configs first, then run `sing-box check -c /etc/padm/sing-box/conf/config.json`
-
-Xray `geosite.dat` / `geoip.dat` maintenance also lives here.
+Nginx can be started, stopped, restarted, or smoothly reloaded only when the current protocol, site, or subscription configuration depends on it. An installed Nginx instance with no current padm dependency is read-only. Protocol, site, and subscription menus continue to own Nginx configuration; the service view owns only state and actions. Xray `geosite.dat` / `geoip.dat` updates, status, and scheduling live under `Xray Geo data`.
 
 ## System and Script
 
@@ -460,6 +468,25 @@ bash shell/subscription_groups_regression.sh transaction-core
 bash shell/subscription_groups_regression.sh remote-control-contract
 bash shell/subscription_groups_regression.sh remote-control-smoke
 bash shell/subscription_groups_regression.sh subscription-state
+```
+
+Focused Cores & services regressions:
+
+```bash
+bash shell/subscription_groups_regression.sh ui-full-core
+bash shell/subscription_groups_regression.sh ui-full-core-maintenance
+bash shell/subscription_groups_regression.sh xray-strict-validation
+bash shell/subscription_groups_regression.sh xray-compat-audit
+bash shell/subscription_groups_regression.sh xray-compat-trusted-xff
+bash shell/subscription_groups_regression.sh xray-configured-validation-path
+bash shell/subscription_groups_regression.sh xray-prerelease-dry-run
+bash shell/subscription_groups_regression.sh singbox-compat-audit
+bash shell/subscription_groups_regression.sh singbox-prerelease-dry-run
+bash shell/subscription_groups_regression.sh core-running-service-state
+bash shell/subscription_groups_regression.sh service-queue-apply-propagation
+bash shell/subscription_groups_regression.sh reload-core-propagation
+bash shell/subscription_groups_regression.sh nginx-service-failure
+bash shell/subscription_groups_regression.sh nginx-service-refresh
 ```
 
 Recommended harness structure checks:
