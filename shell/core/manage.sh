@@ -721,11 +721,11 @@ unInstallSingBox() {
 cleanUp() {
     if [[ "$1" == "xrayDel" ]]; then
         runCoreServiceActionAllowFailure handleXray stop || { errorCard "Xray 服务停止失败，已取消清理旧核心"; return 1; }
-        cleanCoreInstallDirectory /etc/padm/xray "Xray" || return 1
+        cleanCoreInstallDirectory "$(coreXrayInstallDir)" "Xray" || return 1
     elif [[ "$1" == "singBoxDel" ]]; then
         runCoreServiceActionAllowFailure handleSingBox stop || { errorCard "sing-box 服务停止失败，已取消清理旧核心"; return 1; }
-        removeManagedFileIfPresent /etc/padm/sing-box/conf/config.json || { errorCard "sing-box 主配置清理失败"; return 1; }
-        cleanDirectoryContent /etc/padm/sing-box/conf/config || { errorCard "sing-box 分片配置清理失败"; return 1; }
+        removeManagedFileIfPresent "$(singBoxMergedConfigFile)" || { errorCard "sing-box 主配置清理失败"; return 1; }
+        cleanDirectoryContent "$(singBoxConfigShardDir)" || { errorCard "sing-box 分片配置清理失败"; return 1; }
     fi
 }
 

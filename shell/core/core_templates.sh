@@ -165,6 +165,37 @@ coreTemplateRestoreServiceState() {
     fi
 }
 
+coreSwitchCleanupBackupCreate() {
+    local resultVar=$1
+    local core=$2
+    local targetPath
+    local -a targets=()
+
+    case "${core}" in
+    xray)
+        targets=("$(singBoxMergedConfigFile)" "$(singBoxConfigShardDir)")
+        ;;
+    sing-box)
+        targets=("$(coreXrayInstallDir)")
+        ;;
+    *) return 1 ;;
+    esac
+
+    for targetPath in "${targets[@]}"; do
+        if [[ -e "${targetPath}" || -L "${targetPath}" ]]; then
+            adapterCreateManagedRollbackBackup "${resultVar}" "${targets[@]}"
+            return $?
+        fi
+    done
+    printf -v "${resultVar}" '%s' ''
+}
+
+coreSwitchConfigTransaction() {
+    local PADM_CORE_SWITCH_TRANSACTION_ACTIVE=true
+    local PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR=
+    coreInstallConfigTransaction "$@"
+}
+
 coreInstallConfigTransaction() {
     local PADM_CORE_INSTALL_TRANSACTION_ACTIVE=true
     local PADM_CORE_INSTALL_SERVICE_BACKUP_DIR=
@@ -189,7 +220,9 @@ coreTemplateConfigTransaction() {
     local xrayRestartRunning=false
     local singBoxRestartRunning=false
     local configRestored=true
+    local cleanupRestored=true
     local serviceRestored=true
+    local restoreBackupDir=
     local title="Xray 配置初始化"
     [[ "${core}" == "sing-box" ]] && title="sing-box 配置初始化"
     [[ "${core}" == "xray" ]] && xrayRestartRunning=true
@@ -199,6 +232,12 @@ coreTemplateConfigTransaction() {
         errorCard "${title}备份失败，已取消修改"
         return 1
     }
+    if [[ "${PADM_CORE_SWITCH_TRANSACTION_ACTIVE:-}" == "true" ]] &&
+        ! coreSwitchCleanupBackupCreate PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR "${core}"; then
+        padmRemoveCleanupPath "${backupDir}"
+        errorCard "旧核心备份失败，已取消核心切换"
+        return 1
+    fi
     if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] && xrayRunning; then
         xrayWasRunning=true
     fi
@@ -212,6 +251,9 @@ coreTemplateConfigTransaction() {
         if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" ]]; then
             padmRemoveCleanupPath "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}"
         fi
+        if [[ -n "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR:-}" ]]; then
+            padmRemoveCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
+        fi
         padmRemoveCleanupPath "${backupDir}"
         return 0
     fi
@@ -220,6 +262,7 @@ coreTemplateConfigTransaction() {
         padmRemoveCleanupPath "${backupDir}"
     else
         configRestored=false
+        restoreBackupDir=${backupDir}
         padmForgetCleanupPath "${backupDir}"
     fi
     if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" &&
@@ -228,7 +271,16 @@ coreTemplateConfigTransaction() {
             "${PADM_CORE_INSTALL_SERVICE_NAME}" "${PADM_CORE_INSTALL_SERVICE_WAS_ENABLED:-false}"; then
         serviceRestored=false
     fi
-    if [[ "${configRestored}" == "true" ]]; then
+    if [[ -n "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR:-}" ]]; then
+        if adapterRestoreManagedRollbackBackup "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"; then
+            padmRemoveCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
+        else
+            cleanupRestored=false
+            restoreBackupDir=${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}
+            padmForgetCleanupPath "${PADM_CORE_SWITCH_CLEANUP_BACKUP_DIR}"
+        fi
+    fi
+    if [[ "${configRestored}" == "true" && "${cleanupRestored}" == "true" ]]; then
         if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&
             ! coreTemplateRestoreServiceState xray "${xrayWasRunning}" "${xrayRestartRunning}"; then
             serviceRestored=false
@@ -241,6 +293,8 @@ coreTemplateConfigTransaction() {
 
     if [[ "${configRestored}" != "true" ]]; then
         errorCard "${title}失败，且旧配置恢复失败，请手动检查备份目录: ${backupDir}"
+    elif [[ "${cleanupRestored}" != "true" ]]; then
+        errorCard "${title}失败，旧核心配置恢复失败，请手动检查备份目录: ${restoreBackupDir}"
     elif [[ "${serviceRestored}" != "true" ]]; then
         errorCard "${title}失败，旧配置已恢复，但核心服务运行状态恢复失败"
     else

@@ -2392,7 +2392,7 @@ installXrayRealityApply() {
 }
 
 installXrayReality() {
-    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction xray padmRunPortAllowTransaction installXrayRealityApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction installXrayRealityApply "$@"
 }
 
 # 安装 sing-box Reality
@@ -2418,7 +2418,7 @@ installSingBoxRealityApply() {
 }
 
 installSingBoxReality() {
-    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction sing-box padmRunPortAllowTransaction installSingBoxRealityApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction installSingBoxRealityApply "$@"
 }
 
 # Xray-core个性化安装
@@ -2524,7 +2524,7 @@ customXrayInstallApply() {
 }
 
 customXrayInstall() {
-    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction xray padmRunPortAllowTransaction customXrayInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction customXrayInstallApply "$@"
 }
 
 
@@ -2607,7 +2607,7 @@ customSingBoxInstallApply() {
 }
 
 customSingBoxInstall() {
-    runCoreInstallRestoringNginxOnFailure coreInstallConfigTransaction sing-box padmRunPortAllowTransaction customSingBoxInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction customSingBoxInstallApply "$@"
 }
 
 
@@ -2688,7 +2688,7 @@ xrayCoreInstallApply() {
 }
 
 xrayCoreInstall() {
-    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction xrayCoreInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction xray padmRunPortAllowTransaction xrayCoreInstallApply "$@"
 }
 
 
@@ -2727,7 +2727,7 @@ singBoxInstallApply() {
 }
 
 singBoxInstall() {
-    runCoreInstallRestoringNginxOnFailure padmRunPortAllowTransaction singBoxInstallApply "$@"
+    runCoreInstallRestoringNginxOnFailure coreSwitchConfigTransaction sing-box padmRunPortAllowTransaction singBoxInstallApply "$@"
 }
 
 

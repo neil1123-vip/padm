@@ -7497,6 +7497,50 @@ runCoreCleanupFailurePropagationRegression() (
     ! grep -q '/etc/padm/xray' "${rmLog}"
     [[ "$(<"${queueLog}")" == $'restart:sing-box\napply\npersist\ncheck\ncleanup' ]]
     [[ -e "${reachedFile}" ]]
+
+    (
+        local switchRoot="${root}/switch-rollback"
+        local oldCoreDir="${switchRoot}/xray"
+        local switchLog="${switchRoot}/switch.log"
+        local xrayServiceRunning=true
+        local switchRc
+
+        mkdir -p "${oldCoreDir}"
+        printf 'old-core\n' >"${oldCoreDir}/state"
+        : >"${switchLog}"
+        PADM_XRAY_BINARY="${oldCoreDir}/xray"
+        rm() { command rm "$@"; }
+        coreTemplateConfigBackupCreate() {
+            printf -v "$1" '%s' "${switchRoot}/config-backup"
+        }
+        checkLogBackupRestore() {
+            printf 'config-restore\n' >>"${switchLog}"
+        }
+        xrayRunning() { [[ "${xrayServiceRunning}" == "true" ]]; }
+        singBoxRunning() { return 1; }
+        handleXray() {
+            if [[ "$1" == "start" && -f "${oldCoreDir}/state" ]]; then
+                printf 'xray:start:restored\n' >>"${switchLog}"
+                xrayServiceRunning=true
+                return 0
+            fi
+            printf 'xray:%s:missing\n' "$1" >>"${switchLog}"
+            return 1
+        }
+        failingSwitch() {
+            xrayServiceRunning=false
+            mv "${oldCoreDir}" "${oldCoreDir}.removed"
+            return 7
+        }
+
+        set +e
+        coreSwitchConfigTransaction sing-box failingSwitch >/dev/null 2>&1
+        switchRc=$?
+        set -e
+        [[ "${switchRc}" == "7" ]]
+        [[ "$(<"${oldCoreDir}/state")" == "old-core" ]]
+        [[ "$(<"${switchLog}")" == $'config-restore\nxray:start:restored' ]]
+    )
 )
 
 runReloadCorePropagationRegression() (
