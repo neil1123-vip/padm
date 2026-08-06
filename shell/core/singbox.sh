@@ -344,7 +344,8 @@ singBoxTuicInstallApply() {
     selectCustomInstallType=",31,"
     initSingBoxConfig custom 2 true || return 1
     installSingBoxService 3 || return 1
-    reloadCore || return 1
+    serviceQueueRestart sing-box
+    serviceQueueApply || return 1
     showAccounts 4
 }
 
@@ -365,7 +366,8 @@ singBoxHysteria2InstallApply() {
     selectCustomInstallType=",3,"
     initSingBoxConfig custom 2 true || return 1
     installSingBoxService 3 || return 1
-    reloadCore || return 1
+    serviceQueueRestart sing-box
+    serviceQueueApply || return 1
     showAccounts 4
 }
 

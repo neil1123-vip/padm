@@ -7218,6 +7218,14 @@ runSingBoxProtocolReloadFailureRegression() (
     }
     reloadCore() {
         printf 'reload\n' >>"${callLog}"
+        return 99
+    }
+    serviceQueueRestart() {
+        printf 'restart:%s\n' "$1" >>"${callLog}"
+        return 0
+    }
+    serviceQueueApply() {
+        printf 'apply\n' >>"${callLog}"
         return 1
     }
     showAccounts() {
@@ -7232,7 +7240,10 @@ runSingBoxProtocolReloadFailureRegression() (
     [[ "${tuicRc}" == "1" ]]
     grep -qx 'transaction:sing-box' "${callLog}"
     grep -qx 'config:custom 2 true' "${callLog}"
-    grep -qx 'reload' "${callLog}"
+    grep -qx 'restart:sing-box' "${callLog}"
+    grep -qx 'apply' "${callLog}"
+    ! grep -qx 'reload' "${callLog}"
+    ! grep -qx 'restart:xray' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
 
     : >"${callLog}"
@@ -7244,7 +7255,10 @@ runSingBoxProtocolReloadFailureRegression() (
     [[ "${hysteriaRc}" == "1" ]]
     grep -qx 'transaction:sing-box' "${callLog}"
     grep -qx 'config:custom 2 true' "${callLog}"
-    grep -qx 'reload' "${callLog}"
+    grep -qx 'restart:sing-box' "${callLog}"
+    grep -qx 'apply' "${callLog}"
+    ! grep -qx 'reload' "${callLog}"
+    ! grep -qx 'restart:xray' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
 
     (
