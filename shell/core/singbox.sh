@@ -332,12 +332,90 @@ EOF
 }
 
 
-# sing-box TUIC 安装
-singBoxTuicInstallApply() {
-    if ! protocolSelectionNeedsCertificate "${currentInstallProtocolType:-}"; then
-        errorCard "由于需要依赖证书，如安装 Tuic，请先安装带有 TLS 标识协议"
+# 检查 sing-box TLS 入站是否已有可复用的本机证书。
+singBoxLocalCertificateAvailable() {
+    local tlsDir
+
+    collectTLSProfile || return 1
+    [[ -n "${tlsCertDomain:-}" ]] || return 1
+    tlsDir=$(tlsManagedDir) || return 1
+    tlsCertificatePairExists "${tlsDir}" "${tlsCertDomain}"
+}
+
+singBoxInstallLocalTLSCertificate() {
+    local nginxWasRunning=false xrayWasRunning=false singBoxWasRunning=false
+    local selectCoreType=
+
+    installAcmeTool || return 1
+    nginxRunning && nginxWasRunning=true
+    xrayRunning && xrayWasRunning=true
+    singBoxRunning && singBoxWasRunning=true
+    statusCard "本机 TLS 证书" \
+        "Reality 不使用本机证书，现有核心配置保持不变" \
+        "先申请或复用证书，成功后再继续安装"
+
+    # 只借用域名和 ACME 流程，避免 initTLSNginxConfig 触发 Xray 端口改动。
+    if ! initTLSNginxConfig 1; then
+        restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" ||
+            errorCard "TLS 初始化失败，且服务恢复失败"
         return 1
     fi
+
+    if ! installTLS 2; then
+        restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" ||
+            errorCard "TLS 证书申请失败，且服务恢复失败"
+        return 1
+    fi
+    if ! singBoxLocalCertificateAvailable; then
+        errorCard "TLS 证书申请完成但文件校验失败" "请检查 /etc/padm/tls/"
+        restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" ||
+            errorCard "TLS 证书文件校验失败，且服务恢复失败"
+        return 1
+    fi
+    if ! installCronTLS 3; then
+        restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" ||
+            errorCard "TLS 续签任务配置失败，且服务恢复失败"
+        return 1
+    fi
+    restoreServicesAfterTLSRenewal "${nginxWasRunning}" "${xrayWasRunning}" "${singBoxWasRunning}" || {
+        errorCard "TLS 证书已准备，但服务恢复失败"
+        return 1
+    }
+    return 0
+}
+
+singBoxEnsureTLSDependency() {
+    local protocolName=$1
+    local allowCertificateInstall=${2:-false}
+    local confirm
+
+    if protocolSelectionNeedsCertificate "${currentInstallProtocolType:-}" ||
+        singBoxLocalCertificateAvailable; then
+        return 0
+    fi
+
+    if [[ "${allowCertificateInstall}" == "true" ]] &&
+        protocolSelectionOnlyRealityNoDomain "${currentInstallProtocolType:-}"; then
+        statusCard "${protocolName} 证书依赖" \
+            "当前仅有 Reality；将直接申请本机 TLS 证书，现有 Reality 配置保持不变"
+        autoConfirm singbox_tls_certificate "是否直接申请本机 TLS 证书？" y confirm
+        if [[ "${confirm}" != "y" ]]; then
+            coreCancelledStatusCard "${protocolName} 安装未开始" "Reality 配置和证书均未修改"
+            return 1
+        fi
+        singBoxInstallLocalTLSCertificate || return 1
+        return 0
+    fi
+
+    errorCard "${protocolName} 需要本机 TLS 证书" \
+        "当前配置没有可复用的证书；请先安装带有 TLS 标识的协议或准备证书后再试" \
+        "Reality target/SNI 是外部伪装目标，不是本机证书"
+    return 1
+}
+
+# sing-box TUIC 安装
+singBoxTuicInstallApply() {
+    singBoxEnsureTLSDependency Tuic || return 1
 
     totalProgress=5
     installSingBox 1 || return 1
@@ -350,16 +428,14 @@ singBoxTuicInstallApply() {
 }
 
 singBoxTuicInstall() {
+    singBoxEnsureTLSDependency Tuic true || return 1
     coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxTuicInstallApply "$@"
 }
 
 
 # sing-box Hysteria2 安装
 singBoxHysteria2InstallApply() {
-    if ! protocolSelectionNeedsCertificate "${currentInstallProtocolType:-}"; then
-        errorCard "由于需要依赖证书，如安装 Hysteria2，请先安装带有 TLS 标识协议"
-        return 1
-    fi
+    singBoxEnsureTLSDependency Hysteria2 || return 1
 
     totalProgress=5
     installSingBox 1 || return 1
@@ -372,6 +448,7 @@ singBoxHysteria2InstallApply() {
 }
 
 singBoxHysteria2Install() {
+    singBoxEnsureTLSDependency Hysteria2 true || return 1
     coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxHysteria2InstallApply "$@"
 }
 

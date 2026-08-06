@@ -7190,6 +7190,70 @@ runSingBoxProtocolReloadFailureRegression() (
     mkdir -p "${root}"
     : >"${callLog}"
     : >"${anyTlsLog}"
+
+    (
+        local dependencyRoot="${root}/reality-tls"
+        local certificateLog="${dependencyRoot}/certificate.log"
+        local transactionLog="${dependencyRoot}/transaction.log"
+        local xrayLog="${dependencyRoot}/xray.log"
+        local certificateAvailable=false confirmValue=y rc
+
+        mkdir -p "${dependencyRoot}"
+        : >"${certificateLog}"
+        : >"${transactionLog}"
+        : >"${xrayLog}"
+        coreInstallType=1
+        selectCoreType=1
+        currentInstallProtocolType=',1,'
+        protocolSelectionNeedsCertificate() { return 1; }
+        singBoxLocalCertificateAvailable() { [[ "${certificateAvailable}" == "true" ]]; }
+        autoConfirm() { printf -v "$4" '%s' "${confirmValue}"; }
+        installAcmeTool() { printf 'acme\n' >>"${certificateLog}"; }
+        nginxRunning() { return 0; }
+        xrayRunning() { return 0; }
+        singBoxRunning() { return 1; }
+        initTLSNginxConfig() {
+            [[ -z "${selectCoreType}" ]] || return 1
+            printf 'init\n' >>"${certificateLog}"
+        }
+        installTLS() {
+            printf 'tls\n' >>"${certificateLog}"
+            certificateAvailable=true
+        }
+        installCronTLS() { printf 'cron\n' >>"${certificateLog}"; }
+        restoreServicesAfterTLSRenewal() { printf 'restore:%s\n' "$*" >>"${certificateLog}"; }
+        customXrayInstall() { printf '%s\n' "$*" >>"${xrayLog}"; return 1; }
+        coreInstallConfigTransaction() { printf 'transaction:%s\n' "$1" >>"${transactionLog}"; }
+
+        certificateAvailable=true
+        singBoxHysteria2Install >/dev/null 2>&1
+        grep -qx 'transaction:sing-box' "${transactionLog}"
+        [[ ! -s "${certificateLog}" && ! -s "${xrayLog}" ]]
+        [[ "${currentInstallProtocolType}" == ',1,' ]]
+
+        : >"${certificateLog}"
+        : >"${transactionLog}"
+        certificateAvailable=false
+        confirmValue=y
+        singBoxHysteria2Install >/dev/null 2>&1
+        grep -qx 'transaction:sing-box' "${transactionLog}"
+        [[ "$(tr '\n' ',' <"${certificateLog}")" == 'acme,init,tls,cron,restore:true true false,' ]]
+        [[ ! -s "${xrayLog}" ]]
+        [[ "${selectCoreType}" == "1" && "${currentInstallProtocolType}" == ',1,' ]]
+
+        : >"${certificateLog}"
+        : >"${transactionLog}"
+        certificateAvailable=false
+        confirmValue=n
+        set +e
+        singBoxHysteria2Install >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+        [[ ! -s "${certificateLog}" && ! -s "${transactionLog}" && ! -s "${xrayLog}" ]]
+        [[ "${currentInstallProtocolType}" == ',1,' ]]
+    )
+
     currentInstallProtocolType=',4,'
     installSingBox() {
         printf 'install:%s\n' "$*" >>"${anyTlsLog}"
