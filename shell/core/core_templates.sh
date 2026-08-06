@@ -167,6 +167,9 @@ coreTemplateRestoreServiceState() {
 
 coreInstallConfigTransaction() {
     local PADM_CORE_INSTALL_TRANSACTION_ACTIVE=true
+    local PADM_CORE_INSTALL_SERVICE_BACKUP_DIR=
+    local PADM_CORE_INSTALL_SERVICE_NAME=
+    local PADM_CORE_INSTALL_SERVICE_WAS_ENABLED=false
     coreTemplateConfigTransaction "$@"
 }
 
@@ -206,6 +209,9 @@ coreTemplateConfigTransaction() {
     local PADM_CORE_TEMPLATE_TRANSACTION_ACTIVE=true
     "${operation}" "$@" || rc=$?
     if [[ "${rc}" == "0" ]]; then
+        if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" ]]; then
+            padmRemoveCleanupPath "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}"
+        fi
         padmRemoveCleanupPath "${backupDir}"
         return 0
     fi
@@ -215,6 +221,12 @@ coreTemplateConfigTransaction() {
     else
         configRestored=false
         padmForgetCleanupPath "${backupDir}"
+    fi
+    if [[ -n "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR:-}" &&
+        -n "${PADM_CORE_INSTALL_SERVICE_NAME:-}" ]] &&
+        ! restoreCoreStartupServiceInstall "${PADM_CORE_INSTALL_SERVICE_BACKUP_DIR}" \
+            "${PADM_CORE_INSTALL_SERVICE_NAME}" "${PADM_CORE_INSTALL_SERVICE_WAS_ENABLED:-false}"; then
+        serviceRestored=false
     fi
     if [[ "${configRestored}" == "true" ]]; then
         if [[ "${core}" == "xray" || "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]] &&

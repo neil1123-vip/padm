@@ -349,7 +349,7 @@ singBoxTuicInstallApply() {
 }
 
 singBoxTuicInstall() {
-    padmRunPortAllowTransaction singBoxTuicInstallApply "$@"
+    coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxTuicInstallApply "$@"
 }
 
 
@@ -370,7 +370,7 @@ singBoxHysteria2InstallApply() {
 }
 
 singBoxHysteria2Install() {
-    padmRunPortAllowTransaction singBoxHysteria2InstallApply "$@"
+    coreInstallConfigTransaction sing-box padmRunPortAllowTransaction singBoxHysteria2InstallApply "$@"
 }
 
 

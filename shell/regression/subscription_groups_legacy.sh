@@ -7179,6 +7179,13 @@ runSingBoxProtocolReloadFailureRegression() (
     [[ "${hysteriaRc}" == "1" ]]
 
     currentProtocolHasAny() { return 0; }
+    coreInstallConfigTransaction() {
+        local core=$1
+        local operation=$2
+        shift 2
+        printf 'transaction:%s\n' "${core}" >>"${callLog}"
+        "${operation}" "$@"
+    }
     installSingBox() {
         printf 'install:%s\n' "$*" >>"${callLog}"
         return 0
@@ -7205,6 +7212,7 @@ runSingBoxProtocolReloadFailureRegression() (
     tuicRc=$?
     set -e
     [[ "${tuicRc}" == "1" ]]
+    grep -qx 'transaction:sing-box' "${callLog}"
     grep -qx 'config:custom 2 true' "${callLog}"
     grep -qx 'reload' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
@@ -7216,9 +7224,54 @@ runSingBoxProtocolReloadFailureRegression() (
     hysteriaRc=$?
     set -e
     [[ "${hysteriaRc}" == "1" ]]
+    grep -qx 'transaction:sing-box' "${callLog}"
     grep -qx 'config:custom 2 true' "${callLog}"
     grep -qx 'reload' "${callLog}"
     [[ ! -e "${reachedFile}" ]]
+
+    (
+        local transactionRoot="${root}/transaction"
+        local configBackup="${transactionRoot}/config-backup"
+        local serviceBackup="${transactionRoot}/service-backup"
+        local transactionLog="${transactionRoot}/transaction.log"
+        local transactionRc
+        mkdir -p "${transactionRoot}"
+        # Reload the original transaction after the caller-order mock above.
+        source "${PROJECT_ROOT}/shell/core/core_templates.sh"
+        coreTemplateConfigBackupCreate() {
+            printf -v "$1" '%s' "${configBackup}"
+            return 0
+        }
+        checkLogBackupRestore() {
+            printf 'config-restore\n' >>"${transactionLog}"
+            return 0
+        }
+        padmRemoveCleanupPath() {
+            printf 'cleanup:%s\n' "$1" >>"${transactionLog}"
+            return 0
+        }
+        padmForgetCleanupPath() {
+            printf 'forget:%s\n' "$1" >>"${transactionLog}"
+            return 0
+        }
+        xrayRunning() { return 1; }
+        singBoxRunning() { return 1; }
+        restoreCoreStartupServiceInstall() {
+            printf 'service-restore:%s:%s\n' "$2" "$3" >>"${transactionLog}"
+            return 0
+        }
+        failingInstall() {
+            coreInstallServiceBackupFinalize "${serviceBackup}" sing-box false
+            return 7
+        }
+        set +e
+        coreInstallConfigTransaction sing-box failingInstall >/dev/null 2>&1
+        transactionRc=$?
+        set -e
+        [[ "${transactionRc}" == "7" ]]
+        grep -qx 'config-restore' "${transactionLog}"
+        grep -qx 'service-restore:sing-box:false' "${transactionLog}"
+    )
 )
 
 runGeoUpdateReloadFailureRegression() (

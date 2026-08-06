@@ -1914,6 +1914,20 @@ failCoreStartupServiceInstall() {
     return 1
 }
 
+coreInstallServiceBackupFinalize() {
+    local backupDir=$1
+    local serviceName=$2
+    local serviceWasEnabled=$3
+    [[ -n "${backupDir}" ]] || return 0
+    if [[ "${PADM_CORE_INSTALL_TRANSACTION_ACTIVE:-}" == "true" ]]; then
+        PADM_CORE_INSTALL_SERVICE_BACKUP_DIR=${backupDir}
+        PADM_CORE_INSTALL_SERVICE_NAME=${serviceName}
+        PADM_CORE_INSTALL_SERVICE_WAS_ENABLED=${serviceWasEnabled}
+    else
+        padmRemoveCleanupPath "${backupDir}"
+    fi
+}
+
 
 # sing-box开机自启
 installSingBoxService() {
@@ -1964,7 +1978,7 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box 开机自启配置失败"
             return 1
         fi
-        padmRemoveCleanupPath "${serviceBackupDir}"
+        coreInstallServiceBackupFinalize "${serviceBackupDir}" sing-box "${serviceWasEnabled}"
     elif [[ "${release}" == "alpine" ]]; then
         serviceFile=${PADM_SINGBOX_OPENRC_SERVICE_FILE:-/etc/init.d/sing-box}
         coreStartupServiceEnabled sing-box && serviceWasEnabled=true
@@ -1977,7 +1991,7 @@ EOF
             failCoreStartupServiceInstall "${serviceBackupDir}" sing-box "${serviceWasEnabled}" "sing-box 开机自启配置失败"
             return 1
         fi
-        padmRemoveCleanupPath "${serviceBackupDir}"
+        coreInstallServiceBackupFinalize "${serviceBackupDir}" sing-box "${serviceWasEnabled}"
     fi
 
     successCard "配置sing-box开机启动完毕"
