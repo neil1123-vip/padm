@@ -334,7 +334,7 @@ EOF
 
 # sing-box TUIC 安装
 singBoxTuicInstallApply() {
-    if ! currentProtocolHasAny 3 5 21 22 23 24 25 27 28 29 31; then
+    if ! protocolSelectionNeedsCertificate "${currentInstallProtocolType:-}"; then
         errorCard "由于需要依赖证书，如安装 Tuic，请先安装带有 TLS 标识协议"
         return 1
     fi
@@ -355,7 +355,7 @@ singBoxTuicInstall() {
 
 # sing-box Hysteria2 安装
 singBoxHysteria2InstallApply() {
-    if ! currentProtocolHasAny 3 5 21 22 23 24 25 27 28 29 31; then
+    if ! protocolSelectionNeedsCertificate "${currentInstallProtocolType:-}"; then
         errorCard "由于需要依赖证书，如安装 Hysteria2，请先安装带有 TLS 标识协议"
         return 1
     fi

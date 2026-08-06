@@ -7164,11 +7164,29 @@ runSingBoxProtocolReloadFailureRegression() (
     local root="${TMP_DIR}/sing-box-protocol-reload-failure"
     local reachedFile="${root}/accounts"
     local callLog="${root}/calls.log"
+    local anyTlsLog="${root}/anytls.log"
     local tuicRc hysteriaRc
 
     mkdir -p "${root}"
     : >"${callLog}"
-    currentProtocolHasAny() { return 1; }
+    : >"${anyTlsLog}"
+    currentInstallProtocolType=',4,'
+    installSingBox() {
+        printf 'install:%s\n' "$*" >>"${anyTlsLog}"
+        return 1
+    }
+    set +e
+    (singBoxTuicInstallApply >/dev/null 2>&1)
+    tuicRc=$?
+    (singBoxHysteria2InstallApply >/dev/null 2>&1)
+    hysteriaRc=$?
+    set -e
+    [[ "${tuicRc}" == "1" ]]
+    [[ "${hysteriaRc}" == "1" ]]
+    [[ "$(wc -l <"${anyTlsLog}" | tr -d ' ')" == "2" ]]
+
+    currentInstallProtocolType=
+    protocolSelectionNeedsCertificate() { return 1; }
     set +e
     (singBoxTuicInstall >/dev/null 2>&1)
     tuicRc=$?
@@ -7178,7 +7196,7 @@ runSingBoxProtocolReloadFailureRegression() (
     [[ "${tuicRc}" == "1" ]]
     [[ "${hysteriaRc}" == "1" ]]
 
-    currentProtocolHasAny() { return 0; }
+    protocolSelectionNeedsCertificate() { return 0; }
     coreInstallConfigTransaction() {
         local core=$1
         local operation=$2
