@@ -3642,6 +3642,7 @@ runCoreTemplateReturnFailureRegression() (
     local xrayServiceRunning=true
 
     mkdir -p "${xrayRoot}" "${singBoxRoot}" "${nginxRoot}"
+    PADM_XRAY_BINARY="${root}/xray-install/xray"
     configPath="${xrayRoot}/"
     singBoxConfigPath="${singBoxRoot}/"
     nginxConfigPath="${nginxRoot}/"
@@ -7044,7 +7045,7 @@ runSingBoxManagedCleanupRegression() (
     [[ "${SERVICE_QUEUE_ALLOW_FAILURE}" == "previous" ]]
     grep -qx 'handle:stop:true' "${serviceLog}"
     grep -qx 'rm:-f -- /etc/padm/sing-box/conf/config.json' "${rmLog}"
-    grep -qx 'clean-dir:/etc/padm/sing-box/conf/config' "${cleanupLog}"
+    grep -qx 'clean-dir:/etc/padm/sing-box/conf/config/' "${cleanupLog}"
 )
 
 runSingBoxLogTransactionRegression() (
