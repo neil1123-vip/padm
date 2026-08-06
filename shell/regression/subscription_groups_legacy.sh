@@ -4541,7 +4541,9 @@ runLegacyCoreUpgradeKeepsExistingBinaryRegression() (
     local xrayBinary="${root}/xray/xray"
     local singBoxBinary="${root}/sing-box/sing-box"
     local callLog="${root}/calls.log"
+    local queryLog="${root}/queries.log"
     local rmLog="${root}/rm.log"
+    local rc
 
     mkdir -p "$(dirname "${xrayBinary}")" "$(dirname "${singBoxBinary}")"
     cat >"${xrayBinary}" <<'EOF'
@@ -4557,7 +4559,9 @@ EOF
     PADM_XRAY_BINARY="${xrayBinary}"
     PADM_SINGBOX_BINARY="${singBoxBinary}"
     : >"${callLog}"
+    : >"${queryLog}"
     : >"${rmLog}"
+    lastInstallationConfig=
 
     readInstallType() { return 0; }
     errorCard() { return 0; }
@@ -4591,6 +4595,22 @@ EOF
     grep -qx 'upgrade-sing-box:v1.2.3' "${callLog}"
     ! grep -q -- "${xrayBinary}" "${rmLog}"
     ! grep -q -- "${singBoxBinary}" "${rmLog}"
+
+    lastInstallationConfig=true
+    coreLatestReleaseTag() { printf 'query\n' >>"${queryLog}"; return 1; }
+    autoRead() { printf 'prompt\n' >>"${queryLog}"; return 1; }
+    set +e
+    installSingBox 1 >/dev/null 2>&1
+    rc=$?
+    set -e
+    [[ "${rc}" == "0" ]]
+    [[ ! -s "${queryLog}" ]]
+
+    lastInstallationConfig=
+    autoRead() { printf 'prompt\n' >>"${queryLog}"; printf -v "$3" 'n'; }
+    : >"${queryLog}"
+    installSingBox 1 >/dev/null 2>&1
+    [[ "$(<"${queryLog}")" == "prompt" ]]
 )
 
 runSingBoxDownloadArtifactsCleanupRegression() (

@@ -413,13 +413,12 @@ installSingBoxApply() {
     else
         successCard "当前版本:$(getSingBoxCurrentVersion)"
 
-        version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}") || exit 1
-        checkVersionNotEmpty "${version}"
-        successCard "最新版本:${version}"
-
         if [[ -z "${lastInstallationConfig:-}" ]]; then
             autoRead singbox_reinstall "是否更新、升级？[y/n]:" reInstallSingBoxStatus
             if [[ "${reInstallSingBoxStatus}" == "y" ]]; then
+                version=$(coreLatestReleaseTag SagerNet/sing-box "${prereleaseStatus}") || exit 1
+                checkVersionNotEmpty "${version}"
+                successCard "最新版本:${version}"
                 installDownloadedSingBoxBinary "${version}" || exit 1
             fi
         fi
