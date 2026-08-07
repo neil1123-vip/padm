@@ -2881,7 +2881,9 @@ runFastOnlyOutputRestChildStepsContract() {
         subscribe-local-cleanup \
         subscription-output-random-user \
         show-accounts-optional-step \
+        subscription-account-port-fallback \
         show-accounts-xray-singbox-assist \
+        xray-vmess-httpupgrade-subscription-path \
         show-accounts-singbox-reality-grpc \
         trojan-grpc-account-template-filename \
         trojan-fallback-subscribe-entry \

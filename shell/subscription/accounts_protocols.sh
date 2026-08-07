@@ -316,9 +316,12 @@ showVmessHTTPUpgradeAccounts() {
         subscribeSectionTitle "VMess HTTPUpgrade TLS" "兼容旧客户端，不作为新手推荐"
         local path="${currentPath}vws"
         if [[ ${coreInstallType} == "1" ]]; then
-            path="/${currentPath}vws"
+            path="/${currentPath}"
             if [[ -n "${singBoxVMessHTTPUpgradePath}" ]]; then
                 path="${singBoxVMessHTTPUpgradePath}"
+            elif [[ -f "${configPath}11_VMess_HTTPUpgrade_inbounds.json" ]]; then
+                path=$(jq -r '.inbounds[0].streamSettings.httpupgradeSettings.path // empty' "${configPath}11_VMess_HTTPUpgrade_inbounds.json")
+                path=${path:-/${currentPath}}
             fi
         elif [[ "${coreInstallType}" == "2" ]]; then
             path="${singBoxVMessHTTPUpgradePath}"

@@ -914,6 +914,8 @@ readConfigHostPathUUID() {
                 currentPath=$(echo "${path}" | awk -F "[w][s]" '{print $1}')
             elif [[ $(echo "${fallback}" | jq -r .dest) == 31299 ]]; then
                 currentPath=$(echo "${path}" | awk -F "[v][w][s]" '{print $1}')
+            elif [[ $(echo "${fallback}" | jq -r .dest) == 31306 ]]; then
+                currentPath=${path}
             fi
 
             # 尝试读取alpn h2 Path

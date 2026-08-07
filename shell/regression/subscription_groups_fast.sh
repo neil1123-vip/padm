@@ -5187,6 +5187,51 @@ EOF
     )
 }
 
+runXrayVmessHTTPUpgradeSubscriptionPathRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/xray-vmess-httpupgrade-subscription-path"
+        local captureLog="${root}/capture.log"
+        configPath="${root}/xray/"
+        singBoxConfigPath=
+        nginxConfigPath="${root}/nginx/"
+        mkdir -p "${configPath}" "${nginxConfigPath}"
+
+        cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
+{"inbounds":[{"port":443,"settings":{"clients":[{"id":"11111111-1111-1111-1111-111111111111","email":"front-user"}],"fallbacks":[{"path":"/padm","dest":31306,"xver":1},{"path":"/padmvws","dest":31299,"xver":1}]},"streamSettings":{"tlsSettings":{"certificates":[{"certificateFile":"/etc/padm/tls/example.com.crt"}]}}}]}
+JSON
+        cat >"${configPath}05_VMess_WS_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"id":"22222222-2222-2222-2222-222222222222","email":"ws-user"}]}}]}
+JSON
+        cat >"${configPath}11_VMess_HTTPUpgrade_inbounds.json" <<'JSON'
+{"inbounds":[{"settings":{"clients":[{"id":"33333333-3333-3333-3333-333333333333","email":"httpupgrade-user"}]},"streamSettings":{"httpupgradeSettings":{"path":"/padm"}}}]}
+JSON
+
+        coreInstallType=1
+        frontingType=02_VLESS_TCP_inbounds
+        currentInstallProtocolType=,22,23,27,
+        corePortDefaultFile() { return 0; }
+        resolveInstalledTLSDomain() { printf 'example.com'; }
+        readConfigHostPathUUID
+        [[ "${currentPath}" == "padm" ]]
+
+        currentCDNAddress=cdn.example.com
+        subscribeSectionTitle() { return 0; }
+        subscribeAccountTitle() { return 0; }
+        defaultBase64Code() {
+            printf '%s|%s\n' "$1" "$6" >>"${captureLog}"
+        }
+        showVmessHTTPUpgradeAccounts >/dev/null
+        showVmessWsAccounts >/dev/null
+
+        grep -qx 'vmessHTTPUpgrade|/padm' "${captureLog}"
+        grep -qx 'vmessws|/padmvws' "${captureLog}"
+    )
+}
+
 runShowAccountsSingBoxRealityGrpcRegression() {
     (
         set -euo pipefail
@@ -6842,6 +6887,7 @@ runRegressionFastOnlyOutputRest() {
     runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression
     runRegressionStep subscription-account-port-fallback runSubscriptionAccountPortFallbackRegression
     runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression
+    runRegressionStep xray-vmess-httpupgrade-subscription-path runXrayVmessHTTPUpgradeSubscriptionPathRegression
     runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression
     runRegressionStep trojan-grpc-account-template-filename runTrojanGrpcAccountUsesTemplateFilenameRegression
     runRegressionStep trojan-fallback-subscribe-entry runTrojanFallbackSubscribeUsesTlsEntryRegression
