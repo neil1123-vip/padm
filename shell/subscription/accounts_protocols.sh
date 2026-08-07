@@ -23,7 +23,7 @@ showVlessTcpAccounts() {
 
             subscribeAccountTitle "${email}"
             echo
-            defaultBase64Code vlesstcp "${currentDefaultPort}${singBoxVLESSVisionPort}" "${email}" "${accountId}" || return 1
+            defaultBase64Code vlesstcp "${currentDefaultPort:-${singBoxVLESSVisionPort}}" "${email}" "${accountId}" || return 1
         done
     fi
 
@@ -133,7 +133,7 @@ showTrojanAccounts() {
             IFS=$'\037' read -r email _ password _ _ _ <<<"$(subscriptionAccountProfile "${user}")"
             subscribeAccountTitle "${email}"
 
-            defaultBase64Code trojan "${currentDefaultPort}${singBoxTrojanPort}" "${email}" "${password}" || return 1
+            defaultBase64Code trojan "${currentDefaultPort:-${singBoxTrojanPort}}" "${email}" "${password}" || return 1
         done
     fi
 }

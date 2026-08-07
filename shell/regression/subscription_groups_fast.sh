@@ -4525,6 +4525,57 @@ runShowAccountsOptionalStepRegression() {
     )
 }
 
+runSubscriptionAccountPortFallbackRegression() {
+    (
+        set -euo pipefail
+        # shellcheck source=/dev/null
+        source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
+
+        local root="${TMP_DIR}/subscription-account-port-fallback"
+        local captureLog="${root}/capture.log"
+        mkdir -p "${root}"
+        : >"${captureLog}"
+        configPath="${root}/config/"
+        currentHost=example.com
+        currentProtocolHas() { [[ "$1" == "27" || "$1" == "28" ]]; }
+        subscribeSectionTitle() { return 0; }
+        subscribeAccountTitle() { return 0; }
+        defaultBase64Code() {
+            printf '%s|%s\n' "$1" "$2" >>"${captureLog}"
+        }
+        jq() {
+            case "$*" in
+            *02_VLESS_TCP_inbounds.json*)
+                printf '[{"email":"vless-user","id":"vless-id"}]\n'
+                ;;
+            *28_trojan_TCP_direct_inbounds.json*)
+                printf '[{"email":"trojan-user","password":"trojan-pass"}]\n'
+                ;;
+            *)
+                command jq "$@"
+                ;;
+            esac
+        }
+
+        coreInstallType=1
+        currentDefaultPort=443
+        singBoxVLESSVisionPort=10890
+        singBoxTrojanPort=10990
+        showVlessTcpAccounts
+        showTrojanAccounts
+        grep -qx 'vlesstcp|443' "${captureLog}"
+        grep -qx 'trojan|443' "${captureLog}"
+
+        : >"${captureLog}"
+        coreInstallType=2
+        currentDefaultPort=
+        showVlessTcpAccounts
+        showTrojanAccounts
+        grep -qx 'vlesstcp|10890' "${captureLog}"
+        grep -qx 'trojan|10990' "${captureLog}"
+    )
+}
+
 runInitSubscribeLocalConfigCleansAllFormatsRegression() {
     (
         set -euo pipefail
@@ -6789,6 +6840,7 @@ runRegressionFastOnlyOutputRest() {
     runRegressionStep subscribe-local-cleanup runInitSubscribeLocalConfigCleansAllFormatsRegression
     runRegressionStep subscription-output-random-user runSubscriptionOutputRandomUserRegression
     runRegressionStep show-accounts-optional-step runShowAccountsOptionalStepRegression
+    runRegressionStep subscription-account-port-fallback runSubscriptionAccountPortFallbackRegression
     runRegressionStep show-accounts-xray-singbox-assist runShowAccountsXrayWithSingBoxAssistRegression
     runRegressionStep show-accounts-singbox-reality-grpc runShowAccountsSingBoxRealityGrpcRegression
     runRegressionStep trojan-grpc-account-template-filename runTrojanGrpcAccountUsesTemplateFilenameRegression
