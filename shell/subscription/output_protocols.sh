@@ -6,6 +6,26 @@ singBoxSubscribeAppendFilter() {
     jq -nr "$@" "${objectFilter} | \". += [\" + (. | tojson) + \"]\""
 }
 
+vlessEncryptionForConfig() {
+    local configFile=$1
+    local inboundIndex=$2
+    local stateFile=${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}
+    local configDecryption stateDecryption encryption
+
+    if [[ "${coreInstallType}" != "1" || ! -f "${configFile}" || ! -f "${stateFile}" ]]; then
+        printf 'none\n'
+        return
+    fi
+    configDecryption=$(jq -r ".inbounds[${inboundIndex}].settings.decryption // empty" "${configFile}" 2>/dev/null || true)
+    stateDecryption=$(jq -r '.decryption // empty' "${stateFile}" 2>/dev/null || true)
+    if [[ -z "${configDecryption}" || "${configDecryption}" == "none" || "${configDecryption}" != "${stateDecryption}" ]]; then
+        printf 'none\n'
+        return
+    fi
+    encryption=$(jq -r '.encryption // empty' "${stateFile}" 2>/dev/null || true)
+    printf '%s\n' "${encryption:-none}"
+}
+
 emitVlessTcpSubscribeOutput() {
     local port=$1
     local email=$2
@@ -132,15 +152,11 @@ emitVlessXHTTPSubscribeOutput() {
     local add=$4
     local path=$5
     local user=$6
-    local vlessEncryption=none
-    local vlessEncryptionStateFile=${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}
+    local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
+    local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
+    local vlessEncryption
     local defaultLink xhttpHost xhttpMode
-    if [[ "${coreInstallType}" == "1" && -f "${vlessEncryptionStateFile}" ]]; then
-        vlessEncryption=$(jq -r '.encryption // "none"' "${vlessEncryptionStateFile}" 2>/dev/null)
-    fi
-    if [[ -z "${vlessEncryption}" || "${vlessEncryption}" == "null" ]]; then
-        vlessEncryption=none
-    fi
+    vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0)
     path=$(xrayRealityXHTTPSetting path "${path}")
     xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}")
     xhttpMode=$(xrayRealityXHTTPSetting mode auto)
@@ -356,14 +372,10 @@ emitVlessRealitySubscribeOutput() {
     local realitySNI=${xrayVLESSRealitySNI}
     local publicKey=${currentRealityPublicKey:-}
     local realityMldsa65Verify=${currentRealityMldsa65Verify:-}
-    local vlessEncryption=none
-    local vlessEncryptionStateFile=${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}
-    if [[ "${coreInstallType}" == "1" && -f "${vlessEncryptionStateFile}" ]]; then
-        vlessEncryption=$(jq -r '.encryption // "none"' "${vlessEncryptionStateFile}" 2>/dev/null)
-    fi
-    if [[ -z "${vlessEncryption}" || "${vlessEncryption}" == "null" ]]; then
-        vlessEncryption=none
-    fi
+    local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
+    local realityConfigFile=${PADM_VLESS_REALITY_CONFIG_FILE:-${xrayConfigDir%/}/07_VLESS_vision_reality_inbounds.json}
+    local vlessEncryption
+    vlessEncryption=$(vlessEncryptionForConfig "${realityConfigFile}" 1)
 
     if [[ "${coreInstallType}" == "2" ]]; then
         realitySNI=${singBoxVLESSRealityVisionSNI}

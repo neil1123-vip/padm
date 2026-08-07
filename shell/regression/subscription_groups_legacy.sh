@@ -14713,6 +14713,37 @@ realityEntryHost="node.example.com"
 xrayVLESSRealitySNI="www.microsoft.com"
 currentRealityPublicKey="pubkey"
 currentRealityMldsa65Verify=""
+
+local visionOutputConfigDir="${TMP_DIR}/vision-output-conf"
+local visionOutputPreviousConfigPath="${configPath:-}"
+mkdir -p "${visionOutputConfigDir}"
+configPath="${visionOutputConfigDir}/"
+cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'EOF'
+{"inbounds":[{"port":443},{"settings":{"clients":[{"email":"fixture","id":"fixture"}],"decryption":"none"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443"}}}]}
+EOF
+printf '%s\n' '{"enabled":true,"encryption":"stale-encryption","decryption":"stale-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+readInstallProtocolType
+[[ -z "${currentRealityMldsa65Verify}" ]]
+realityEntryHost="node.example.com"
+xrayVLESSRealitySNI="www.microsoft.com"
+currentRealityPublicKey="pubkey"
+defaultBase64Code vlessReality 443 user-a-stale uuid-a "" ""
+grep -qxF "vless://uuid-a@node.example.com:443?encryption=none&security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a-stale" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-stale"
+! grep -q 'pqv=null' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-stale" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+
+cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'EOF'
+{"inbounds":[{"port":443},{"settings":{"clients":[{"email":"fixture","id":"fixture"}],"decryption":"active-decryption"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443"}}}]}
+EOF
+printf '%s\n' '{"enabled":true,"encryption":"active-encryption","decryption":"active-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+readInstallProtocolType
+realityEntryHost="node.example.com"
+defaultBase64Code vlessReality 443 user-a-active uuid-a "" ""
+grep -qxF "vless://uuid-a@node.example.com:443?encryption=active-encryption&security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a-active" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-active"
+rm -f "${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+configPath="${visionOutputPreviousConfigPath}"
+
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 defaultBase64Code vlessReality 443 user-a-main uuid-a "" ""
 expectedVisionLink=$(serializeVlessRealityVisionLink "uuid-a" "node.example.com" "443" "www.microsoft.com" "pubkey" "" "user-a-main")
 assertCapturedSubscribeOutputs "user-a-main" "${expectedVisionLink}" "node.example.com" "www.microsoft.com" "tcp" "vless"
