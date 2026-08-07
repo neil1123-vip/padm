@@ -10,20 +10,26 @@ vlessEncryptionForConfig() {
     local configFile=$1
     local inboundIndex=$2
     local stateFile=${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}
-    local configDecryption stateDecryption encryption
+    local configDecryption encryption
 
-    if [[ "${coreInstallType}" != "1" || ! -f "${configFile}" || ! -f "${stateFile}" ]]; then
+    if [[ "${coreInstallType}" != "1" || ! -f "${configFile}" ]]; then
         printf 'none\n'
         return
     fi
-    configDecryption=$(jq -r ".inbounds[${inboundIndex}].settings.decryption // empty" "${configFile}" 2>/dev/null || true)
-    stateDecryption=$(jq -r '.decryption // empty' "${stateFile}" 2>/dev/null || true)
-    if [[ -z "${configDecryption}" || "${configDecryption}" == "none" || "${configDecryption}" != "${stateDecryption}" ]]; then
+    configDecryption=$(jq -er ".inbounds[${inboundIndex}].settings.decryption // \"none\" | select(type == \"string\")" "${configFile}" 2>/dev/null) || return 1
+    if [[ -z "${configDecryption}" || "${configDecryption}" == "none" ]]; then
         printf 'none\n'
         return
     fi
-    encryption=$(jq -r '.encryption // empty' "${stateFile}" 2>/dev/null || true)
-    printf '%s\n' "${encryption:-none}"
+    encryption=$(jq -er --arg decryption "${configDecryption}" '
+        select(.enabled == true and
+            .decryption == $decryption and
+            (.encryption | type) == "string" and
+            .encryption != "" and
+            .encryption != "none") |
+        .encryption
+    ' "${stateFile}" 2>/dev/null) || return 1
+    printf '%s\n' "${encryption}"
 }
 
 emitVlessTcpSubscribeOutput() {
@@ -156,7 +162,10 @@ emitVlessXHTTPSubscribeOutput() {
     local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
     local vlessEncryption
     local defaultLink xhttpHost xhttpMode
-    vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0)
+    if ! vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0); then
+        errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
+        return 1
+    fi
     path=$(xrayRealityXHTTPSetting path "${path}")
     xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}")
     xhttpMode=$(xrayRealityXHTTPSetting mode auto)
@@ -375,7 +384,10 @@ emitVlessRealitySubscribeOutput() {
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local realityConfigFile=${PADM_VLESS_REALITY_CONFIG_FILE:-${xrayConfigDir%/}/07_VLESS_vision_reality_inbounds.json}
     local vlessEncryption
-    vlessEncryption=$(vlessEncryptionForConfig "${realityConfigFile}" 1)
+    if ! vlessEncryption=$(vlessEncryptionForConfig "${realityConfigFile}" 1); then
+        errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
+        return 1
+    fi
 
     if [[ "${coreInstallType}" == "2" ]]; then
         realitySNI=${singBoxVLESSRealityVisionSNI}

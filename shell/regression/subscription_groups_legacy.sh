@@ -14702,6 +14702,8 @@ runRealityConfigRegression() {
 runSubscriptionOutputProfileAndRealityRegression() {
     rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
     export REGRESSION_ECHO_LOG="${SUBSCRIBE_CAPTURE_DIR}/screen.log"
+    export REGRESSION_ERROR_CARD_LOG="${TMP_DIR}/subscription-output-encryption-errors.log"
+    : >"${REGRESSION_ERROR_CARD_LOG}"
 local profileEmail profileId profilePassword profileName profileUuid
 IFS=$'\037' read -r profileEmail profileId profilePassword _ profileName profileUuid <<<"$(subscriptionAccountProfile '{"email":"user-main","id":"uuid-main","password":"pass-main"}')"
 [[ "${profileEmail}" == "user-main" && "${profileId}" == "uuid-main" && "${profilePassword}" == "pass-main" && "${profileName}" == "user-main" && "${profileUuid}" == "uuid-main" ]]
@@ -14734,12 +14736,37 @@ grep -qxF "vless://uuid-a@node.example.com:443?encryption=none&security=reality&
 cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'EOF'
 {"inbounds":[{"port":443},{"settings":{"clients":[{"email":"fixture","id":"fixture"}],"decryption":"active-decryption"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443"}}}]}
 EOF
+printf '%s\n' '{"enabled":true,"encryption":"stale-encryption","decryption":"stale-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+! defaultBase64Code vlessReality 443 user-a-mismatch uuid-a "" ""
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-mismatch" ]]
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-mismatch" ]]
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-mismatch" ]]
+grep -q 'VLESS Encryption 配置与状态不一致' "${REGRESSION_ERROR_CARD_LOG}"
+
 printf '%s\n' '{"enabled":true,"encryption":"active-encryption","decryption":"active-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
 rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 readInstallProtocolType
 realityEntryHost="node.example.com"
 defaultBase64Code vlessReality 443 user-a-active uuid-a "" ""
 grep -qxF "vless://uuid-a@node.example.com:443?encryption=active-encryption&security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a-active" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-active"
+(
+    cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'EOF'
+{"inbounds":[{"port":443},{"settings":{"clients":[{"email":"fixture","id":"fixture"}],"decryption":"active-decryption"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443","mldsa65Seed":"seed-old","mldsa65Verify":"pqv-old"}}}]}
+EOF
+    readInstallProtocolType
+    [[ "${currentRealityMldsa65Seed}" == "seed-old" && "${currentRealityMldsa65Verify}" == "pqv-old" ]]
+
+    local singBoxVisionConfigDir="${TMP_DIR}/sing-box-vision-output-conf"
+    mkdir -p "${singBoxVisionConfigDir}"
+    cat >"${singBoxVisionConfigDir}/07_VLESS_vision_reality_inbounds.json" <<'EOF'
+{"inbounds":[{"listen_port":443,"tls":{"server_name":"www.microsoft.com","reality":{"handshake":{"server":"www.microsoft.com","server_port":443},"private_key":"sing-box-private"}}}]}
+EOF
+    coreInstallType=2
+    configPath="${singBoxVisionConfigDir}/"
+    readInstallProtocolType
+    [[ -z "${currentRealityMldsa65Seed}" && -z "${currentRealityMldsa65Verify}" ]]
+)
 rm -f "${PADM_VLESS_ENCRYPTION_STATE_FILE}"
 configPath="${visionOutputPreviousConfigPath}"
 
@@ -14764,11 +14791,18 @@ rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
 local oldConfigPath="${configPath:-}"
 configPath="${TMP_DIR}/xhttp-subscription-conf/"
 mkdir -p "${configPath}"
+xrayVLESSRealityXHTTPSNI="www.microsoft.com"
+currentRealityXHTTPPublicKey="pubkey"
+cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
+{"inbounds":[{"settings":{"decryption":"active-decryption"},"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
+EOF
+! defaultBase64Code vlessXHTTP 443 user-a-xhttp-missing-state uuid-a "cdn.example.com" "/ignored"
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-missing-state" ]]
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-missing-state" ]]
+
 cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
 {"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
 EOF
-xrayVLESSRealityXHTTPSNI="www.microsoft.com"
-currentRealityXHTTPPublicKey="pubkey"
 defaultBase64Code vlessXHTTP 443 user-a-xhttp uuid-a "cdn.example.com" "/ignored"
 expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp" none "front.example.com" "packet-up")
 grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp"
@@ -14801,6 +14835,7 @@ EOF
 ! defaultBase64Code vlessXHTTP 443 user-bad-mode uuid-a "cdn.example.com" "/ignored"
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-bad-mode" ]]
 configPath="${oldConfigPath}"
+unset REGRESSION_ERROR_CARD_LOG
 }
 
 runSubscriptionOutputPublishAccountsAndRemoteHintRegression() {

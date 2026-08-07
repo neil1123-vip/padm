@@ -207,6 +207,8 @@ readInstallProtocolType() {
 
     currentRealityPrivateKey=
     currentRealityPublicKey=
+    currentRealityMldsa65Seed=
+    currentRealityMldsa65Verify=
 
     realityTargetHost=
     realityTargetPort=
