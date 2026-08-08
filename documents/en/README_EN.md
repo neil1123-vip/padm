@@ -409,7 +409,7 @@ Disabling it only removes padm's own sysctl file and attempts to restore the pre
 - 🌐 Reality XHTTP: `VLESS Encryption + XTLS Vision + XHTTP XMUX`
 
 > [!CAUTION]
-> **Compatibility:** Default VLESS share links include the experimental encryption field; Clash/Mihomo/sing-box subscriptions intentionally omit it. This is an advanced experiment and is not recommended as a default for new users.
+> **Compatibility:** Default VLESS share links and Mihomo (formerly Clash.Meta) subscriptions include the experimental encryption field and require Mihomo v1.19.13 or later. The sing-box upstream does not support this field yet, so sing-box subscriptions still omit it. This is an advanced experiment and is not recommended as a default for new users.
 
 ## Flag Reference
 

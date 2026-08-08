@@ -75,9 +75,9 @@ refreshVlessEncryptionSubscriptions() {
             errorCard "刷新 VLESS Encryption 公网订阅失败"
             return 1
         fi
-        successCard "已刷新 default 公网订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段"
+        successCard "已刷新公网订阅；default/Mihomo 已写入 encryption，sing-box 因上游不支持仍省略"
     else
-        refreshLocalSubscriptions "VLESS Encryption" "已刷新本地 default 订阅；Clash/Mihomo/sing-box 订阅未写入实验 encryption 字段" || return 1
+        refreshLocalSubscriptions "VLESS Encryption" "已刷新本地订阅；default/Mihomo 已写入 encryption，sing-box 因上游不支持仍省略" || return 1
     fi
 }
 
@@ -416,7 +416,7 @@ manageVlessEncryptionExperiment() {
     echoContent title "\n┌─ VLESS Encryption 实验功能 ─────────────────────────"
     menuLine "最佳性能组合：Reality Vision 使用 VLESS Encryption + XTLS Vision"
     menuLine "CDN 场景：Reality XHTTP 使用 VLESS Encryption + XTLS Vision + XHTTP XMUX"
-    menuLine "启用后可能只有部分客户端可用；Clash/Mihomo/sing-box 订阅不保证兼容"
+    menuLine "启用后可能只有部分客户端可用；需 Mihomo v1.19.13+，sing-box 暂不支持"
     menuLine "默认推荐仍是 Reality Vision，不建议新手启用"
     vlessEncryptionStateSummary
     menuDangerItem 1 "启用实验开关" "优先应用到 Reality XHTTP，否则应用到 Reality Vision"
@@ -428,8 +428,8 @@ manageVlessEncryptionExperiment() {
     1)
         warnCard \
             "这是实验功能，可能只有部分客户端可用" \
-            "启用后 default VLESS 链接会携带新的 encryption 参数" \
-            "Clash/Mihomo/sing-box 订阅不保证兼容"
+            "启用后 default VLESS 链接和 Mihomo 订阅会携带 encryption 参数" \
+            "需 Mihomo v1.19.13+；sing-box 订阅因上游不支持仍省略"
         autoConfirm vless_encryption_confirm "确认承担兼容性风险并启用 VLESS Encryption？" n confirmVlessEncryption
         if [[ "${confirmVlessEncryption}" == "y" ]]; then
             setVlessRealityEncryption enable && successCard "VLESS Encryption 实验开关已启用"

@@ -409,7 +409,7 @@ net.ipv4.tcp_congestion_control = bbr
 - 🌐 Reality XHTTP：`VLESS Encryption + XTLS Vision + XHTTP XMUX`
 
 > [!CAUTION]
-> **兼容性提醒：** default VLESS 分享链接会携带 experimental encryption 字段；Clash/Mihomo/sing-box 订阅暂不写入该字段。该功能属于高级实验，不建议新手默认开启。
+> **兼容性提醒：** default VLESS 分享链接和 Mihomo（原 Clash.Meta）订阅会携带 experimental encryption 字段；需 Mihomo v1.19.13+。sing-box 上游尚不支持该字段，因此 sing-box 订阅仍会省略。该功能属于高级实验，不建议新手默认开启。
 
 ## 参数参考
 

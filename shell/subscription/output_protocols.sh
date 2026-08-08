@@ -160,11 +160,14 @@ emitVlessXHTTPSubscribeOutput() {
     local user=$6
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local xhttpConfigFile=${PADM_VLESS_XHTTP_CONFIG_FILE:-${xrayConfigDir%/}/12_VLESS_XHTTP_inbounds.json}
-    local vlessEncryption
+    local vlessEncryption mihomoEncryption=
     local defaultLink xhttpHost xhttpMode
     if ! vlessEncryption=$(vlessEncryptionForConfig "${xhttpConfigFile}" 0); then
         errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
         return 1
+    fi
+    if [[ "${vlessEncryption}" != "none" ]]; then
+        mihomoEncryption=$(serializeYamlString "${vlessEncryption}") || return 1
     fi
     path=$(xrayRealityXHTTPSetting path "${path}")
     xhttpHost=$(xrayRealityXHTTPSetting host "${xrayVLESSRealityXHTTPSNI}")
@@ -199,7 +202,8 @@ emitVlessXHTTPSubscribeOutput() {
     server: ${add}
     port: ${port}
     uuid: ${id}
-    udp: true
+${mihomoEncryption:+    encryption: ${mihomoEncryption}
+}    udp: true
     tls: true
     network: xhttp
     client-fingerprint: chrome
@@ -383,10 +387,13 @@ emitVlessRealitySubscribeOutput() {
     local realityMldsa65Verify=${currentRealityMldsa65Verify:-}
     local xrayConfigDir=${configPath:-${PADM_XRAY_CONF_DIR:-/etc/padm/xray/conf}}
     local realityConfigFile=${PADM_VLESS_REALITY_CONFIG_FILE:-${xrayConfigDir%/}/07_VLESS_vision_reality_inbounds.json}
-    local vlessEncryption
+    local vlessEncryption mihomoEncryption=
     if ! vlessEncryption=$(vlessEncryptionForConfig "${realityConfigFile}" 1); then
         errorCard "订阅输出生成失败" "VLESS Encryption 配置与状态不一致，请重新启用或关闭实验功能后重试"
         return 1
+    fi
+    if [[ "${vlessEncryption}" != "none" ]]; then
+        mihomoEncryption=$(serializeYamlString "${vlessEncryption}") || return 1
     fi
 
     if [[ "${coreInstallType}" == "2" ]]; then
@@ -406,7 +413,8 @@ emitVlessRealitySubscribeOutput() {
     server: ${entryHost}
     port: ${port}
     uuid: ${id}
-    network: tcp
+${mihomoEncryption:+    encryption: ${mihomoEncryption}
+}    network: tcp
     tls: true
     udp: true
     flow: xtls-rprx-vision

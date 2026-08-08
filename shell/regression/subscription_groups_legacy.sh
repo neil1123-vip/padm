@@ -14731,6 +14731,8 @@ xrayVLESSRealitySNI="www.microsoft.com"
 currentRealityPublicKey="pubkey"
 defaultBase64Code vlessReality 443 user-a-stale uuid-a "" ""
 grep -qxF "vless://uuid-a@node.example.com:443?encryption=none&security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a-stale" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-stale"
+! grep -q '^    encryption:' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-stale"
+jq -e '.[0] | has("encryption") | not' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-stale" >/dev/null
 ! grep -q 'pqv=null' "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-stale" "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
 cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'EOF'
@@ -14750,6 +14752,8 @@ readInstallProtocolType
 realityEntryHost="node.example.com"
 defaultBase64Code vlessReality 443 user-a-active uuid-a "" ""
 grep -qxF "vless://uuid-a@node.example.com:443?encryption=active-encryption&security=reality&type=tcp&sni=www.microsoft.com&fp=chrome&pbk=pubkey&sid=6ba85179e30d4fc2&flow=xtls-rprx-vision#user-a-active" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-active"
+grep -qx '    encryption: "active-encryption"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-active"
+jq -e '.[0] | has("encryption") | not' "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-active" >/dev/null
 (
     cat >"${configPath}07_VLESS_vision_reality_inbounds.json" <<'EOF'
 {"inbounds":[{"port":443},{"settings":{"clients":[{"email":"fixture","id":"fixture"}],"decryption":"active-decryption"},"streamSettings":{"realitySettings":{"serverNames":["www.microsoft.com"],"publicKey":"pubkey","privateKey":"priv","target":"www.microsoft.com:443","mldsa65Seed":"seed-old","mldsa65Verify":"pqv-old"}}}]}
@@ -14800,6 +14804,16 @@ EOF
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-missing-state" ]]
 [[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-missing-state" ]]
 
+printf '%s\n' '{"enabled":true,"encryption":"active-encryption","decryption":"active-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+defaultBase64Code vlessXHTTP 443 user-a-xhttp-active uuid-a "cdn.example.com" "/ignored"
+expectedXHTTPLink=$(serializeVlessRealityXHTTPLink "uuid-a" "cdn.example.com" "443" "www.microsoft.com" "/custom-xhttp" "pubkey" "user-a-xhttp-active" active-encryption "front.example.com" "packet-up")
+grep -qxF "${expectedXHTTPLink}" "${SUBSCRIBE_CAPTURE_DIR}/default/user-a-xhttp-active"
+grep -qx '    encryption: "active-encryption"' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp-active"
+[[ ! -e "${SUBSCRIBE_CAPTURE_DIR}/sing-box/user-a-xhttp-active" ]]
+rm -f "${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+rm -rf "${SUBSCRIBE_CAPTURE_DIR}"
+
 cat >"${configPath}12_VLESS_XHTTP_inbounds.json" <<'EOF'
 {"inbounds":[{"streamSettings":{"xhttpSettings":{"host":"front.example.com","path":"/custom-xhttp","mode":"packet-up"}}}]}
 EOF
@@ -14813,6 +14827,7 @@ grep -qx "    servername: www.microsoft.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta
 grep -qx "      path: /custom-xhttp" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "      host: front.example.com" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 grep -qx "      mode: packet-up" "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
+! grep -q '^    encryption:' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q 'flow: xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/clashMeta/user-a-xhttp"
 ! grep -q '&flow=xtls-rprx-vision' "${SUBSCRIBE_CAPTURE_DIR}/screen.log"
 
