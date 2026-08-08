@@ -12045,10 +12045,34 @@ runSubscribeReturnFailureRegression() (
     [[ ! -e "${publicDir}/default/stale" ]]
     [[ -n "${renderTarget}" && ! -e "${renderTarget}" ]]
 
+    local fullSyncCalls=0
+    subscriptionRemoteScopeEnabled() { return 0; }
+    subscriptionHasEnabledRemoteSources() { return 0; }
+    runSubscriptionGroupSync() {
+        fullSyncCalls=$((fullSyncCalls + 1))
+        return 0
+    }
+    renderCalls=0
+    refreshPublishedSubscriptions >/dev/null 2>&1
+    [[ "${fullSyncCalls}" == "1" ]]
+    [[ "${renderCalls}" == "0" ]]
+
+    renderCalls=0
+    refreshPublishedSubscriptions '{}' >/dev/null 2>&1
+    [[ "${fullSyncCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+
+    SUBSCRIPTION_GROUPS_LOCK_HELD=1
+    renderCalls=0
+    refreshPublishedSubscriptions >/dev/null 2>&1
+    [[ "${fullSyncCalls}" == "1" ]]
+    [[ "${renderCalls}" == "1" ]]
+    unset SUBSCRIPTION_GROUPS_LOCK_HELD
+
     readNginxSubscribe() { return 1; }
     showAccountsCalls=0
     renderCalls=0
-    if refreshPublishedSubscriptions >/dev/null 2>&1; then
+    if refreshPublishedSubscriptions '{}' >/dev/null 2>&1; then
         return 1
     fi
     [[ "${showAccountsCalls}" == "0" ]]

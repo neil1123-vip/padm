@@ -2801,6 +2801,13 @@ subscribe() {
 refreshPublishedSubscriptions() {
     local remoteSnapshots=${1:-}
     readInstallProtocolType
+    if [[ ( -z "${remoteSnapshots}" || "${remoteSnapshots}" == "null" ) &&
+        "${SUBSCRIPTION_GROUPS_LOCK_HELD:-}" != "1" ]] &&
+        subscriptionRemoteScopeEnabled &&
+        subscriptionHasEnabledRemoteSources; then
+        runSubscriptionGroupSync
+        return $?
+    fi
     subscriptionGroupsWithLock generateSubscribeOutputsUnlocked false false "" "" "${remoteSnapshots}"
 }
 
