@@ -7822,7 +7822,11 @@ JSON
 
     reloadCore() { printf 'reload\n' >>"${reloadLog}"; return 0; }
     subscribe() {
-        printf 'subscribe\n' >"${subscribeMarker}"
+        printf 'subscribe-unexpected\n' >"${subscribeMarker}"
+        return 1
+    }
+    refreshPublishedSubscriptions() {
+        printf 'refresh-published\n' >"${subscribeMarker}"
         return 1
     }
     readNginxSubscribe() {
@@ -7839,11 +7843,11 @@ JSON
     [[ ! -e "${vlessState}" ]]
     [[ ! -e "${vlessConfig}.vlessenc.bak" ]]
     [[ ! -e "${vlessState}.bak" ]]
-    [[ -e "${subscribeMarker}" ]]
+    grep -qx 'refresh-published' "${subscribeMarker}"
     [[ "$(wc -l <"${reloadLog}" | tr -d ' ')" == "2" ]]
 
     reloadCore() { return 0; }
-    subscribe() { return 1; }
+    refreshPublishedSubscriptions() { return 1; }
     readNginxSubscribe() {
         subscribePort=443
         nginxConfigPath="${root}/nginx/"
@@ -8081,7 +8085,11 @@ JSON
         nginxConfigPath="${TMP_DIR}/nginx-refresh/"
     }
     subscribe() {
-        printf 'subscribe:%s\n' "$*" >>"${refreshFailureLog}"
+        printf 'subscribe-unexpected:%s\n' "$*" >>"${refreshFailureLog}"
+        return 1
+    }
+    refreshPublishedSubscriptions() {
+        printf 'refresh-published\n' >>"${refreshFailureLog}"
         return 1
     }
     showAccounts() {
@@ -8093,7 +8101,14 @@ JSON
     if refreshXHTTPSubscriptions >/dev/null 2>&1; then
         return 1
     fi
-    grep -qx 'subscribe:renew' "${refreshFailureLog}"
+    grep -qx 'refresh-published' "${refreshFailureLog}"
+    ! grep -q '^subscribe-unexpected:' "${refreshFailureLog}"
+
+    : >"${refreshFailureLog}"
+    if refreshTuicSubscriptions >/dev/null 2>&1; then
+        return 1
+    fi
+    grep -qx 'refresh-published' "${refreshFailureLog}"
 
     readNginxSubscribe() {
         subscribePort=
@@ -13946,7 +13961,7 @@ runReleaseWorkflowVersionRegression() {
     [[ "${result}" == "v1.3.0 false" ]]
 }
 
-runRealityConfigVlessEncryptionRegression() {
+runRealityConfigVlessEncryptionRegression() (
     local fakeXrayBinary="${TMP_DIR}/fake-xray-vlessenc"
     local vlessConfigDir="${TMP_DIR}/vlessenc-xray-conf"
     local vlessConfigFile="${vlessConfigDir}/07_VLESS_vision_reality_inbounds.json"
@@ -13961,6 +13976,7 @@ runRealityConfigVlessEncryptionRegression() {
     local vlessEnabledState
     local xhttpOriginalConfig
     local vlessValidateMode=success
+    refreshPublishedSubscriptions() { return 0; }
     mkdir -p "${vlessTmpRoot}"
     : >"${vlessTmpMarker}"
     TMPDIR="${vlessTmpRoot}"
@@ -14094,7 +14110,7 @@ JSON
     [[ ! -e "${vlessTmpRoot}/relative-vless-state.json" ]]
     unset PADM_XRAY_BINARY PADM_XRAY_CONF_DIR PADM_VLESS_REALITY_CONFIG_FILE PADM_VLESS_XHTTP_CONFIG_FILE PADM_VLESS_ENCRYPTION_STATE_FILE PADM_FAKE_XRAY_VALIDATE_MODE PADM_FAKE_VLESSENC_TMP_MARKER
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-}
+)
 
 runRealityConfigScannerRegression() {
     local scannerCandidatesFile="${TMP_DIR}/reality-config-scanner-candidates.txt"
@@ -14579,12 +14595,13 @@ JSON
     ! grep -q '^green REALITY 目标站 已更新为' "${statusLog}"
 )
 
-runXHTTPDownloadSettingsRegression() {
+runXHTTPDownloadSettingsRegression() (
     local xhttpConfigFile="${TMP_DIR}/xhttp-download-settings.json"
     local oldConfigFile="${PADM_XHTTP_CONFIG_FILE:-}"
     local oldCoreInstallType="${coreInstallType:-}"
     local oldAutoInstall="${AUTO_INSTALL:-}"
     local oldAutoInstallType="${AUTO_INSTALL_TYPE:-}"
+    refreshXHTTPSubscriptions() { return 0; }
     AUTO_INSTALL=
     AUTO_INSTALL_TYPE=
     cat >"${xhttpConfigFile}" <<'JSON'
@@ -14638,7 +14655,7 @@ auto
     else
         unset AUTO_INSTALL_TYPE
     fi
-}
+)
 
 runRealityConfigRefreshSubscriptionRegression() {
     local oldNginxConfigPath="${nginxConfigPath:-}"

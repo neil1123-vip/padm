@@ -71,7 +71,7 @@ vlessEncryptionStateSummary() {
 refreshVlessEncryptionSubscriptions() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        if ! subscribe renew >/dev/null; then
+        if ! refreshPublishedSubscriptions >/dev/null; then
             errorCard "刷新 VLESS Encryption 公网订阅失败"
             return 1
         fi
@@ -3033,7 +3033,7 @@ xhttpSettingsSummary() {
 refreshXHTTPSubscriptions() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        if ! subscribe renew >/dev/null; then
+        if ! refreshPublishedSubscriptions >/dev/null; then
             errorCard "刷新 XHTTP 公网订阅失败"
             return 1
         fi
@@ -3595,7 +3595,7 @@ tuicSettingsSummary() {
 refreshTuicSubscriptions() {
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        if ! subscribe renew >/dev/null; then
+        if ! refreshPublishedSubscriptions >/dev/null; then
             errorCard "刷新 Tuic 公网订阅失败"
             return 1
         fi
