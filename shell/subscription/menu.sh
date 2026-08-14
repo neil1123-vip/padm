@@ -140,16 +140,20 @@ runSubscriptionSyncAfterMutation() {
     return 1
 }
 
-subscriptionRequireMainRole() {
+subscriptionRequireRole() {
+    local expectedRole=$1
+    local otherRole=$2
+    local otherMessage=$3
+    local otherHint=$4
     local role
     role=$(subscriptionCurrentRoleNormalized) || {
         errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)"
         return 1
     }
     case "${role}" in
-    main) return 0 ;;
-    controlled)
-        errorCard "当前机器已初始化为被控" "请进入 被控首页 -> 接入主控 / 查看本机状态 / 被控维护与排障"
+    "${expectedRole}") return 0 ;;
+    "${otherRole}")
+        errorCard "${otherMessage}" "${otherHint}"
         return 1
         ;;
     *)
@@ -159,23 +163,14 @@ subscriptionRequireMainRole() {
     esac
 }
 
+subscriptionRequireMainRole() {
+    subscriptionRequireRole main controlled \
+        "当前机器已初始化为被控" "请进入 被控首页 -> 接入主控 / 查看本机状态 / 被控维护与排障"
+}
+
 subscriptionRequireControlledRole() {
-    local role
-    role=$(subscriptionCurrentRoleNormalized) || {
-        errorCard "WireGuard 控制面状态损坏或不可读" "请先修复 $(subscriptionWireGuardStateFile)"
-        return 1
-    }
-    case "${role}" in
-    controlled) return 0 ;;
-    main)
-        errorCard "当前机器已初始化为主控" "请进入 主控首页 -> 发布订阅 / 多服务器协同 / 主控维护与排障"
-        return 1
-        ;;
-    *)
-        errorCard "当前机器还没完成角色初始化" "请先进入 订阅与用户 选择 这台作为主控 或 这台作为被控"
-        return 1
-        ;;
-    esac
+    subscriptionRequireRole controlled main \
+        "当前机器已初始化为主控" "请进入 主控首页 -> 发布订阅 / 多服务器协同 / 主控维护与排障"
 }
 
 manageSubscriptionRoleSelection() {
