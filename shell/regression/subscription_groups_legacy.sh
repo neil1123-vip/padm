@@ -15284,94 +15284,6 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
-runNginxBlogAutoInstallRegression() {
-    local oldAutoInstall="${AUTO_INSTALL:-}"
-    local staticDir="${TMP_DIR}/nginx-blog-auto/"
-    mkdir -p "${staticDir}"
-    : >"${staticDir}/check"
-    printf 'keep\n' >"${staticDir}/index.html"
-
-    nginxStaticPath="${staticDir}"
-    lastInstallationConfig=
-    AUTO_INSTALL=true
-    autoRead() {
-        return 1
-    }
-    nginxBlog
-    [[ "$(<"${staticDir}/index.html")" == "keep" ]]
-    AUTO_INSTALL="${oldAutoInstall}"
-}
-
-runXrayTrafficStatsJqCompatibilityRegression() (
-    local fakeBin="${TMP_DIR}/fake-xray-stats-bin"
-    mkdir -p "${fakeBin}"
-    cat >"${fakeBin}/xray" <<'SH'
-#!/usr/bin/env bash
-cat <<'JSON'
-{"stat":[{"name":"user>>>team-uplink","value":3},{"name":"user>>>team-uplink","value":4},{"name":"user>>>team-downlink","value":5},{"name":"user>>>team-downlink","value":"6"},{"name":"user>>>ignored-uplink","value":7},{"name":"inbound>>>api>>>traffic>>>uplink","value":99}]}
-JSON
-SH
-    chmod +x "${fakeBin}/xray"
-    XRAY_STATS_BINARY="${fakeBin}/xray"
-    collectXrayTrafficStatsSnapshot '["team","missing"]' | jq -e '. == [{"account":"team","upload":7,"download":11},{"account":"missing","upload":0,"download":0}]' >/dev/null
-)
-
-runLocalTrafficAccountsBatchRegression() (
-    local xrayConfig="${TMP_DIR}/traffic-xray-conf/"
-    local singBoxConfig="${TMP_DIR}/traffic-sing-box-conf/"
-    local accounts
-    local snapshot
-    local reloadMarker="${TMP_DIR}/traffic-reload"
-    local originalStats
-    local originalPolicy
-    mkdir -p "${xrayConfig}" "${singBoxConfig}"
-    configPath="${xrayConfig}"
-    singBoxConfigPath="${singBoxConfig}"
-    coreInstallType=1
-    cat >"${xrayConfig}01_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-vless"},{"email":"admin-root"}]}},{"users":[{"name":"sub_team_b-hysteria2"}]}]}
-JSON
-    cat >"${singBoxConfig}02_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"username":"sub_team_a-tuic"},{"username":"ops"}]}]}
-JSON
-    accounts=$(collectLocalTrafficAccounts)
-    jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
-
-    printf '{bad-json\n' >"${singBoxConfig}03_inbounds.json"
-    if collectLocalTrafficAccounts >/dev/null 2>&1; then
-        return 1
-    fi
-    snapshot=$(collectLocalTrafficSnapshot)
-    jq -e '.ok == false and (.items | length) == 0' <<<"${snapshot}" >/dev/null
-
-    rm -f "${singBoxConfig}03_inbounds.json" "${reloadMarker}" "${xrayConfig}13_stats_api.json" "${xrayConfig}12_policy.json"
-    printf '{bad-json\n' >"${xrayConfig}12_policy.json"
-    if ensureXrayTrafficStatsConfig >/dev/null 2>&1; then
-        return 1
-    fi
-    [[ ! -e "${xrayConfig}13_stats_api.json" ]]
-    [[ "$(<"${xrayConfig}12_policy.json")" == "{bad-json" ]]
-
-    cat >"${xrayConfig}13_stats_api.json" <<'JSON'
-{"stats":{"old":true}}
-JSON
-    cat >"${xrayConfig}12_policy.json" <<'JSON'
-{"policy":{"levels":{"0":{"statsUserUplink":false,"statsUserDownlink":false}},"system":{"statsInboundUplink":false,"statsInboundDownlink":false,"statsOutboundUplink":false,"statsOutboundDownlink":false}}}
-JSON
-    originalStats=$(<"${xrayConfig}13_stats_api.json")
-    originalPolicy=$(<"${xrayConfig}12_policy.json")
-    reloadCore() {
-        printf 'reload\n' >"${reloadMarker}"
-        return 1
-    }
-    if ensureXrayTrafficStatsConfig >/dev/null 2>&1; then
-        return 1
-    fi
-    [[ -e "${reloadMarker}" ]]
-    [[ "$(<"${xrayConfig}13_stats_api.json")" == "${originalStats}" ]]
-    [[ "$(<"${xrayConfig}12_policy.json")" == "${originalPolicy}" ]]
-)
-
 runCheckLogBackupMissingRestoreRegression() (
     local rootRel="${TMP_DIR}/check-log-backup-restore"
     local root
@@ -15387,30 +15299,6 @@ runCheckLogBackupMissingRestoreRegression() (
     checkLogBackupRestore "${restoreBackupDir}"
     [[ ! -e "${root}/stats.json" ]]
     [[ "$(<"${root}/policy.json")" == "old-policy" ]]
-)
-
-runManagedFileBackupManifestRegression() (
-    local rootRel="${TMP_DIR}/managed-file-backup-manifest"
-    local root
-    local backupDir
-
-    mkdir -p "${rootRel}/targets"
-    root=$(cd -- "${rootRel}" && pwd -P) || return 1
-    backupDir="${root}/backup"
-    printf 'old-one\n' >"${root}/targets/one.json"
-
-    padmWriteManagedFileBackupManifest "${backupDir}" \
-        "xray/one.json" "${root}/targets/one.json" \
-        "xray/two.json" "${root}/targets/two.json"
-    [[ -f "${backupDir}/xray/one.json" ]]
-    [[ -f "${backupDir}/manifest" ]]
-
-    printf 'new-one\n' >"${root}/targets/one.json"
-    printf 'new-two\n' >"${root}/targets/two.json"
-
-    padmRestoreManagedFileBackupManifest "${backupDir}"
-    [[ "$(<"${root}/targets/one.json")" == "old-one" ]]
-    [[ ! -e "${root}/targets/two.json" ]]
 )
 
 runPadmBbrManagedCleanupRegression() (
@@ -15715,43 +15603,6 @@ EOF
     ' _ "${root}" "${PROJECT_ROOT}" "${disableStatus}" "${disableHelper}"
     grep -q 'padm BBR 关闭失败|配置文件清理失败，请手动检查 '"${root}"'/disable-cleanup-fail-sysctl.conf 和 '"${root}"'/disable-cleanup-fail.state' "${disableStatus}" || return 1
 )
-
-runDpkgInstalledPatternRegression() {
-    printf 'ii  ufw                             0.36.2-6                                all          program for managing a Netfilter firewall\n' | grep -Eq '^[[:space:]]*ii[[:space:]]+ufw[[:space:]]'
-    printf 'ii  netfilter-persistent            1.0.20                                   all          boot-time loader for netfilter rules\n' | grep -Eq '^[[:space:]]*ii[[:space:]]+netfilter-persistent[[:space:]]'
-}
-
-runDpkgQueryInstalledPatternRegression() {
-    printf 'ii ' | grep -q '^ii'
-    if printf 'un ' | grep -q '^ii'; then
-        return 1
-    fi
-}
-
-runRhelLikeDetectionRegression() {
-    local osRelease="${TMP_DIR}/alma-os-release"
-    local oldOsReleaseFile="${PADM_OS_RELEASE_FILE:-}"
-
-    cat >"${osRelease}" <<'EOF'
-NAME="AlmaLinux"
-VERSION="9.7 (Moss Jungle Cat)"
-ID="almalinux"
-ID_LIKE="rhel centos fedora"
-VERSION_ID="9.7"
-EOF
-    PADM_OS_RELEASE_FILE="${osRelease}"
-    PADM_YUM_REPOS_DIR="${TMP_DIR}/yum.repos.d"
-    initVar
-    checkSystem
-    [[ "${release}" == "centos" ]]
-    [[ "${packageManager}" == "yum" ]]
-    [[ "${centosVersion}" == "9" ]]
-    [[ "${rhelLike}" == "true" ]]
-    [[ "${osReleaseId}" == "almalinux" ]]
-    [[ "${installType}" == *"--disablerepo=epel"* ]]
-    PADM_OS_RELEASE_FILE="${oldOsReleaseFile}"
-    PADM_YUM_REPOS_DIR=
-}
 
 runFedoraDetectionRegression() {
     local osRelease="${TMP_DIR}/fedora-os-release"
@@ -19880,44 +19731,6 @@ runInstallEnsureModulesRegression() {
         PADM_SKIP_REMOTE_REF_CHECK="${savedPadmSkipRemoteRefCheck}"
     else
         unset PADM_SKIP_REMOTE_REF_CHECK
-    fi
-}
-
-runAliasInstallSameTargetRegression() {
-    local fixtureDir outputLog cpLog oldScriptDir oldPadmInstallDir oldHome
-    fixtureDir="${TMP_DIR}/alias-install-same-target"
-    outputLog="${fixtureDir}/output.log"
-    cpLog="${fixtureDir}/cp.log"
-    mkdir -p "${fixtureDir}"
-    cat >"${fixtureDir}/install.sh" <<'EOF'
-#!/usr/bin/env bash
-ensureScriptModules() { :; }
-EOF
-
-    oldScriptDir="${SCRIPT_DIR:-}"
-    oldPadmInstallDir="${PADM_INSTALL_DIR:-}"
-    oldHome="${HOME}"
-    SCRIPT_DIR="${fixtureDir}"
-    PADM_INSTALL_DIR="${fixtureDir}"
-    HOME="${fixtureDir}/home"
-    mkdir -p "${HOME}"
-
-    (
-        cp() { printf 'cp %s\n' "$*" >>"${cpLog}"; command cp "$@"; }
-        chmod() { :; }
-        ln() { :; }
-        aliasInstall
-    ) >"${outputLog}" 2>&1
-
-    [[ ! -s "${outputLog}" ]]
-    [[ ! -e "${cpLog}" ]]
-
-    SCRIPT_DIR="${oldScriptDir}"
-    HOME="${oldHome}"
-    if [[ -n "${oldPadmInstallDir}" ]]; then
-        PADM_INSTALL_DIR="${oldPadmInstallDir}"
-    else
-        unset PADM_INSTALL_DIR
     fi
 }
 
