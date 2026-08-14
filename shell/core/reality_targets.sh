@@ -466,16 +466,6 @@ realityTargetCachedNetworkSummary() {
     esac
 }
 
-removeRealityTargetResultLine() {
-    local target=$1
-    local resultsFile stagedFile
-    resultsFile=$(realityTargetManagedResultsFile) || return 1
-    [[ -f "${resultsFile}" ]] || return 0
-    padmCreateTempFileForTarget stagedFile "${resultsFile}" reality || return 1
-    awk -F'\t' -v target="${target}" '$1 != target' "${resultsFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    commitGeneratedFile "${stagedFile}" "${resultsFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-}
-
 removeRealityTargetCandidateLine() {
     local target=$1
     local parsed host candidatesFile stagedFile

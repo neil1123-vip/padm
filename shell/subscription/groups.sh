@@ -490,14 +490,6 @@ setSubscriptionGroupSyncEnabled() {
     subscriptionActiveGroupWrite --argjson enabled "${enabled}" '.sync.enabled = $enabled'
 }
 
-toggleSubscriptionGroupSyncEnabled() {
-    if subscriptionGroupSyncEnabled; then
-        setSubscriptionGroupSyncEnabled false
-    else
-        setSubscriptionGroupSyncEnabled true
-    fi
-}
-
 subscriptionGroupQuotaAutoApplyEnabled() {
     subscriptionActiveGroupRead -e '(.sync.quota_auto_apply // false) == true' >/dev/null 2>&1
 }

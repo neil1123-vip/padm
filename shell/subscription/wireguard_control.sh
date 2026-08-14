@@ -1723,10 +1723,6 @@ subscriptionWireGuardUpdatePeerFromCredentialUnlocked() {
        end'
 }
 
-subscriptionWireGuardUpdatePeerFromCredential() {
-    subscriptionGroupsWithLock subscriptionWireGuardUpdatePeerFromCredentialUnlocked "$@"
-}
-
 subscriptionWireGuardUpdatePeerAndCredentialUnlocked() {
     local id=$1
     local credentialJson=$2

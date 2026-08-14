@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-acmeHomeDir() {
-    local homeDir="${HOME:-/root}"
-    printf '%s\n' "${homeDir%/}/.acme.sh"
-}
-
 acmeAccountFile() {
     printf '%s\n' "$(acmeHomeDir)/account.conf"
 }

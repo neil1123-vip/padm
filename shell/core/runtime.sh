@@ -1347,13 +1347,6 @@ validateGitHubReleaseTag() {
     [[ "$1" =~ ^[A-Za-z0-9._+-]{1,128}$ ]]
 }
 
-githubReleaseAssetDirectUrl() {
-    local repo=$1
-    local version=$2
-    local assetName=$3
-    printf 'https://github.com/%s/releases/download/%s/%s\n' "${repo}" "${version}" "${assetName}"
-}
-
 githubReleaseAssetPinnedDigest() {
     case "$1:$2:$3" in
     badafans/warp-reg:v1.0:main-linux-amd64)
