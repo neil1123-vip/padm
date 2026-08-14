@@ -404,10 +404,6 @@ runSubscriptionGroupStateStructureSourceSerialRegression() {
     runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
 }
 
-runSubscriptionGroupStateStructureSourceRegression() {
-    runSubscriptionGroupStateStructureSourceSerialRegression
-}
-
 runSubscriptionGroupStateStructureSerialRegression() {
     runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
     runRegressionStep subscription-state-structure-validation runSubscriptionGroupStateStructureValidationRegression
@@ -461,10 +457,6 @@ runSubscriptionGroupStateQuotaTrafficSerialRegression() {
     runRegressionStep subscription-state-quota-traffic-summary runSubscriptionGroupStateQuotaTrafficSummaryRegression
     runRegressionStep subscription-state-quota-traffic-invalid-input runSubscriptionGroupStateQuotaTrafficInvalidInputRegression
     runRegressionStep subscription-state-quota-traffic-apply runSubscriptionGroupStateQuotaTrafficApplyRegression
-}
-
-runSubscriptionGroupStateQuotaTrafficRegression() {
-    runSubscriptionGroupStateQuotaTrafficSerialRegression
 }
 
 runSubscriptionGroupStateQuotaMenuPreviewFailureRegression() {
@@ -539,10 +531,6 @@ JSON
 runSubscriptionGroupStateQuotaMenuTransactionSerialRegression() {
     runRegressionStep subscription-state-quota-menu-preview-fail runSubscriptionGroupStateQuotaMenuPreviewFailureRegression
     runRegressionStep subscription-state-quota-menu-tx-rollback runSubscriptionGroupStateQuotaTransactionRollbackRegression
-}
-
-runSubscriptionGroupStateQuotaMenuTransactionRegression() {
-    runSubscriptionGroupStateQuotaMenuTransactionSerialRegression
 }
 
 runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression() {
@@ -674,10 +662,6 @@ runSubscriptionGroupStateQuotaPartialSyncSerialRegression() {
     runRegressionStep subscription-state-quota-partial-sync-apply-failure runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression
     runRegressionStep subscription-state-quota-partial-sync-plan runSubscriptionGroupStateQuotaPartialSyncPlanRegression
     runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
-}
-
-runSubscriptionGroupStateQuotaPartialSyncRegression() {
-    runSubscriptionGroupStateQuotaPartialSyncSerialRegression
 }
 
 runSubscriptionGroupStateQuotaSerialRegression() {
@@ -821,18 +805,6 @@ JSON
         [[ "${menuOutput}" == *"menu:"* ]]
     )
     jq -e '.version == 2 and .active_group == "legacy" and .groups[0].id == "legacy"' "$(subscriptionGroupsFile)" >/dev/null
-}
-
-runSubscriptionGroupStateRemoteRestoreSerialRegression() {
-    runRegressionStep subscription-state-remote-restore-self-reference runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression
-    runRegressionStep subscription-state-remote-restore-state-write runSubscriptionGroupStateRemoteRestoreStateWriteRegression
-    runRegressionStep subscription-state-remote-restore-legacy-menu runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression
-}
-
-runSubscriptionGroupStateRegression() {
-    runRegressionStep subscription-state-structure-serial runSubscriptionGroupStateStructureSerialRegression
-    runRegressionStep subscription-state-quota-serial runSubscriptionGroupStateQuotaSerialRegression
-    runRegressionStep subscription-state-remote-restore-serial runSubscriptionGroupStateRemoteRestoreSerialRegression
 }
 
 runSubscriptionSyncTempDirRegression() (
@@ -1785,13 +1757,6 @@ runSubscriptionGroupSyncRollbackSerialRegression() {
     runRegressionStep subscription-group-sync-remote-before-publish-refresh runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression
 }
 
-runSubscriptionSyncRollbackFailureSerialRegression() {
-    runRegressionStep subscription-sync-rollback-config-restore-failure runSubscriptionSyncRollbackConfigRestoreFailureRegression
-    runRegressionStep subscription-sync-restore-dir-failure runSubscriptionSyncRollbackRestoreDirFailureRegression
-    runRegressionStep subscription-sync-reload-rollback runSubscriptionSyncRollbackReloadRollbackRegression
-    runRegressionStep subscription-group-sync-rollback-serial runSubscriptionGroupSyncRollbackSerialRegression
-}
-
 runSubscriptionSyncReconcileEarlyExitRegression() (
     local root="${TMP_DIR}/subscription-sync-reconcile-early-exit"
     local callLog="${root}/calls.log"
@@ -2001,32 +1966,8 @@ runRegressionSubscriptionStateRemoteRestoreLegacyMenu() {
     runRegressionStep subscription-state-remote-restore-legacy-menu runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression
 }
 
-runRegressionSubscriptionStateRemoteRestoreSerial() {
-    runRegressionStep subscription-state-remote-restore-serial runSubscriptionGroupStateRemoteRestoreSerialRegression
-}
-
 runRegressionSubscriptionSyncTempDir() {
     runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
-}
-
-runRegressionSubscriptionSyncRestorePairFailureMessage() {
-    runRegressionStep subscription-sync-restore-pair-failure-message runSubscriptionSyncRestorePairFailureMessageRegression
-}
-
-runRegressionSubscriptionSyncAppendRestoreFailureDetail() {
-    runRegressionStep subscription-sync-append-restore-failure-detail runSubscriptionSyncAppendRestoreFailureDetailRegression
-}
-
-runRegressionSubscriptionSyncSingleRestoreResultMessage() {
-    runRegressionStep subscription-sync-single-restore-result-message runSubscriptionSyncSingleRestoreResultMessageRegression
-}
-
-runRegressionSubscriptionSyncRollbackResultMessage() {
-    runRegressionStep subscription-sync-rollback-result-message runSubscriptionSyncRollbackResultMessageRegression
-}
-
-runRegressionSubscriptionStateSyncRollbackSerial() {
-    runRegressionStep subscription-sync-rollback-failure-serial runSubscriptionSyncRollbackFailureSerialRegression
 }
 
 runRegressionSubscriptionSyncRollbackConfigRestoreFailure() {

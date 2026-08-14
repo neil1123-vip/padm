@@ -2337,40 +2337,6 @@ PY
     jq -e '.sync_invalid_response.status == 503 and .sync_invalid_response.body.error == "invalid_response" and .sync_invalid_response.body.error_detail.type == "invalid_response"' "${responseFile}" >/dev/null
 )
 
-runRegressionRemoteControlSmokeCoreSteps() {
-    runRegressionStep remote-control-concurrency runRemoteControlConcurrencyRegression
-    runRegressionStep remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
-    runRegressionStep remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
-    runRegressionStep remote-control-sources-parsed-once runRemoteControlSourcesParsedOnceRegression
-    runRegressionStep remote-control-health runRemoteControlHealthRegression
-    runRegressionStep remote-control-inline-request-helpers runRemoteControlInlineRequestHelpersRegression
-    runRegressionStep remote-control-inline-wireguard-peer-helpers runRemoteControlInlineWireGuardPeerHelpersRegression
-    runRegressionStep remote-control-inline-token-consumers runRemoteControlInlineTokenConsumersRegression
-    runRegressionStep remote-control-inline-sync-runner runRemoteControlInlineSyncRunnerRegression
-    runRegressionStep remote-control-inline-sync-parallel-runner runRemoteControlInlineSyncParallelRunnerRegression
-    runRegressionStep remote-control-handle-inline-helpers runRemoteControlHandleInlineHelpersRegression
-}
-
-runRegressionRemoteControlSmokeRefreshApplyBasicSteps() {
-    runRegressionStep remote-control-server-refresh-light-apply-basic runRemoteControlServerRefreshLightApplyBasicRegression
-}
-
-runRegressionRemoteControlSmokeRefreshApplyPrepareSteps() {
-    runRegressionStep remote-control-server-refresh-light-apply-prepare runRemoteControlServerRefreshLightApplyPrepareRegression
-}
-
-runRegressionRemoteControlSmokeRefreshApplyFailureSteps() {
-    runRegressionStep remote-control-server-refresh-light-apply-failure runRemoteControlServerRefreshLightApplyFailureRegression
-}
-
-runRegressionRemoteControlSmokeRefreshRestoreSteps() {
-    runRegressionStep remote-control-server-refresh-light-restore runRemoteControlServerRefreshLightRestoreRegression
-}
-
-runRegressionRemoteControlSmokeRefreshReconcileSteps() {
-    runRegressionStep remote-control-server-refresh-light-reconcile runRemoteControlServerRefreshLightReconcileRegression
-}
-
 runRegressionRemoteControlContractServiceInstallSuccessSteps() {
     runRegressionStep remote-control-service-install-success runSubscriptionControlServiceInstallSuccessRegression
 }
