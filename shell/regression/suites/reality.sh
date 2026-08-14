@@ -43,13 +43,13 @@ registerRegressionFunctionLeaf reality-config runRegressionRealityLegacyLeafWith
 registerRegressionFunctionLeaf reality-profile-failure runRegressionRealityLegacyLeafWithCompat runRealityProfileFailureRegression
 registerRegressionFunctionLeaf regression-reality-legacy-tmpdir-isolation runRegressionRealityLegacyTmpDirIsolationRegression
 
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     reality-candidates \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionRealitySuiteCandidatesChildSelectors \
     -- \
     $(listRegressionRealitySuiteCandidatesChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     reality-stream \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionRealitySuiteStreamChildSelectors \

@@ -312,5 +312,5 @@ registerRegressionFunctionLeaf regression-all-composition runRegressionAllCompos
 registerRegressionFunctionLeaf regression-all-child-parallel-budget-composition runRegressionAllChildParallelBudgetCompositionRegression
 registerRegressionFunctionLeaf regression-all-resource-layer-composition runRegressionAllResourceLayerCompositionRegression
 
-registerRegressionAggregateRunnerSequential all runRegressionAllSuiteRoot \
+registerRegressionAggregateRunner sequential all runRegressionAllSuiteRoot \
     $(listRegressionAllChildSelectors)

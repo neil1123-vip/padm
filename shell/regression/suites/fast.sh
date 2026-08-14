@@ -197,7 +197,7 @@ registerRegressionFunctionLeaf regression-fast-parallel-composition runRegressio
 registerRegressionFunctionLeaf regression-fast-only-parallel-composition runRegressionFastOnlyParallelCompositionRegression
 registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runRegressionFastOnlyOutputParallelCompositionRegression
 
-registerRegressionAggregateRunnerParallelWithArgs \
+registerRegressionAggregateRunnerWithArgs parallel \
     fast-only-output \
     runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" \
@@ -205,7 +205,7 @@ registerRegressionAggregateRunnerParallelWithArgs \
     -- \
     $(listRegressionFastOnlyOutputChildSelectors)
 
-registerRegressionAggregateRunnerParallelWithArgs \
+registerRegressionAggregateRunnerWithArgs parallel \
     fast-only \
     runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" \
@@ -213,14 +213,14 @@ registerRegressionAggregateRunnerParallelWithArgs \
     -- \
     $(listRegressionFastOnlyChildSelectors)
 
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     fast-only-core \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionFastOnlyCoreChildSelectors \
     -- \
     $(listRegressionFastOnlyCoreChildSelectors)
 
-registerRegressionAggregateRunnerParallelWithArgs \
+registerRegressionAggregateRunnerWithArgs parallel \
     fast \
     runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" \
@@ -234,7 +234,7 @@ listRegressionFastRealityChildSelectors() {
         reality-candidates-fast
 }
 
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     fast-reality \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionFastRealityChildSelectors \

@@ -22,7 +22,7 @@ runRegressionRegistryRunnerArgsContract() (
     registerRegressionFunctionLeaf contract-runner-args-function runContractFunctionFixture alpha beta
     registerRegressionFunctionLeaf contract-runner-args-child-a true
     registerRegressionFunctionLeaf contract-runner-args-child-b true
-    registerRegressionAggregateRunnerSequentialWithArgs \
+    registerRegressionAggregateRunnerWithArgs sequential \
         contract-runner-args-sequential \
         runContractSequentialFixture \
         one \
@@ -30,7 +30,7 @@ runRegressionRegistryRunnerArgsContract() (
         -- \
         contract-runner-args-child-a \
         contract-runner-args-child-b
-    registerRegressionAggregateRunnerParallelWithArgs \
+    registerRegressionAggregateRunnerWithArgs parallel \
         contract-runner-args-parallel \
         runContractParallelFixture \
         three \
@@ -38,6 +38,16 @@ runRegressionRegistryRunnerArgsContract() (
         -- \
         contract-runner-args-child-a \
         contract-runner-args-child-b
+
+    if registerRegressionAggregateRunnerWithArgs sequential \
+        contract-runner-args-sequential \
+        runContractSequentialFixture \
+        one \
+        two \
+        -- \
+        contract-runner-args-child-a 2>/dev/null; then
+        return 1
+    fi
 
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain contract-runner-args-function
     PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain contract-runner-args-sequential

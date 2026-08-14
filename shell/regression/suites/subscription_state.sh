@@ -381,14 +381,14 @@ registerRegressionFunctionLeaf subscription-state-structure-foundation-credentia
 registerRegressionFunctionLeaf subscription-state-structure-foundation-normalize runRegressionSubscriptionStateStructureFoundationNormalize
 registerRegressionFunctionLeaf subscription-state-structure-foundation-init-transaction runRegressionSubscriptionStateStructureFoundationInitTransaction
 registerRegressionFunctionLeaf subscription-state-structure-foundation-serial runRegressionSubscriptionStateStructureFoundationSerial
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-structure-validation \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateStructureValidationChildSelectors \
     -- \
     $(listRegressionSubscriptionStateStructureValidationChildSelectors)
 registerRegressionFunctionLeaf subscription-state-structure-validation-serial runRegressionSubscriptionStateStructureValidationSerial
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-structure-source \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateStructureSourceChildSelectors \
@@ -411,7 +411,7 @@ registerRegressionFunctionLeaf subscription-state-quota-partial-sync-plan runReg
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-config runRegressionSubscriptionStateQuotaPartialSyncConfig
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-serial runRegressionSubscriptionStateQuotaPartialSyncSerial
 registerRegressionFunctionLeaf subscription-state-quota-serial runRegressionSubscriptionStateQuotaSerial
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-remote-restore-self-reference \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors \
@@ -422,49 +422,49 @@ registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-serial runRegressionSubscriptionStateRemoteRestoreSelfReferenceSerial
 registerRegressionFunctionLeaf subscription-state-remote-restore-state-write runRegressionSubscriptionStateRemoteRestoreStateWrite
 registerRegressionFunctionLeaf subscription-state-remote-restore-legacy-menu runRegressionSubscriptionStateRemoteRestoreLegacyMenu
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-serial \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateSerialChildSelectors \
     -- \
     $(listRegressionSubscriptionStateSerialChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-quota-traffic \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateQuotaTrafficChildSelectors \
     -- \
     $(listRegressionSubscriptionStateQuotaTrafficChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-quota-menu-tx \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors \
     -- \
     $(listRegressionSubscriptionStateQuotaMenuTransactionChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-quota-partial-sync \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateQuotaPartialSyncChildSelectors \
     -- \
     $(listRegressionSubscriptionStateQuotaPartialSyncChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-remote-restore-serial \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors \
     -- \
     $(listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-support \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateSupportChildSelectors \
     -- \
     $(listRegressionSubscriptionStateSupportChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-sync-rollback-serial \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors \
     -- \
     $(listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors)
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     subscription-sync-rollback-failure-serial \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionSubscriptionStateSyncRollbackFailureSerialChildSelectors \
@@ -508,7 +508,7 @@ listRegressionSubscriptionStateChildSelectors() {
         subscription-state-sync-rollback
 }
 
-registerRegressionAggregateRunnerParallelWithArgs \
+registerRegressionAggregateRunnerWithArgs parallel \
     subscription-state-structure-foundation \
     runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/subscription-state-structure-foundation" \
@@ -516,26 +516,26 @@ registerRegressionAggregateRunnerParallelWithArgs \
     -- \
     $(listRegressionSubscriptionStateStructureFoundationChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-state-structure runRegressionSubscriptionStateStructure \
+registerRegressionAggregateRunner parallel subscription-state-structure runRegressionSubscriptionStateStructure \
     $(listRegressionSubscriptionStateStructureChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-state-quota runRegressionSubscriptionStateQuota \
+registerRegressionAggregateRunner parallel subscription-state-quota runRegressionSubscriptionStateQuota \
     $(listRegressionSubscriptionStateQuotaChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \
+registerRegressionAggregateRunner parallel subscription-state-remote-restore runRegressionSubscriptionStateRemoteRestore \
     $(listRegressionSubscriptionStateRemoteRestoreChildSelectors)
 
-registerRegressionAggregateRunnerParallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \
+registerRegressionAggregateRunner parallel subscription-state-sync-rollback runRegressionSubscriptionStateSyncRollback \
     $(listRegressionSubscriptionStateSyncRollbackFailureChildSelectors)
 
-registerRegressionAggregateRunnerParallelWithArgs \
+registerRegressionAggregateRunnerWithArgs parallel \
     subscription-state-core \
     runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/subscription-state-core-${BASHPID:-$$}" \
     listRegressionSubscriptionStateCoreChildSelectors \
     -- \
     $(listRegressionSubscriptionStateCoreChildSelectors)
-registerRegressionAggregateRunnerParallelWithArgs \
+registerRegressionAggregateRunnerWithArgs parallel \
     subscription-state \
     runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/subscription-state-default-${BASHPID:-$$}" \

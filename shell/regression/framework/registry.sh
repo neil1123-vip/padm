@@ -11,7 +11,6 @@ declare -Ag PADM_REGRESSION_SELECTOR_RUNNER=()
 declare -Ag PADM_REGRESSION_SELECTOR_RUNNER_ARGS=()
 declare -Ag PADM_REGRESSION_SELECTOR_CHILDREN=()
 declare -Ag PADM_REGRESSION_SELECTOR_MODE=()
-declare -Ag PADM_REGRESSION_SELECTOR_ALIAS=()
 
 registerRegressionSelector() {
     local selector=$1
@@ -35,22 +34,32 @@ registerRegressionFunctionLeaf() {
     PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]=$(printf '%s\n' "$@")
 }
 
-registerRegressionAggregateRunnerParallel() {
-    local selector=$1
-    local runner=$2
-    shift 2
+registerRegressionAggregateRunner() {
+    local mode=$1
+    local selector=$2
+    local runner=$3
+    shift 3
+
+    case "${mode}" in
+    parallel|sequential) ;;
+    *)
+        printf 'unknown regression aggregate runner mode: %s\n' "${mode}" >&2
+        return 2
+        ;;
+    esac
 
     registerRegressionSelector "${selector}" || return 1
     PADM_REGRESSION_SELECTOR_KIND["${selector}"]=aggregate-runner
-    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=parallel
+    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=${mode}
     PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=${runner}
     PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
 }
 
-registerRegressionAggregateRunnerParallelWithArgs() {
-    local selector=$1
-    local runner=$2
-    shift 2
+registerRegressionAggregateRunnerWithArgs() {
+    local mode=$1
+    local selector=$2
+    local runner=$3
+    shift 3
     local arg
     local -a runnerArgs=()
     local -a children=()
@@ -68,80 +77,13 @@ registerRegressionAggregateRunnerParallelWithArgs() {
         runnerArgs+=("${arg}")
     done
 
-    registerRegressionAggregateRunnerParallel "${selector}" "${runner}" "${children[@]}"
+    registerRegressionAggregateRunner "${mode}" "${selector}" "${runner}" "${children[@]}" || return 1
     PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]=$(printf '%s\n' "${runnerArgs[@]}")
-}
-
-registerRegressionAggregateRunnerSequential() {
-    local selector=$1
-    local runner=$2
-    shift 2
-
-    registerRegressionSelector "${selector}" || return 1
-    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=aggregate-runner
-    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=sequential
-    PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]=${runner}
-    PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
-}
-
-registerRegressionAggregateRunnerSequentialWithArgs() {
-    local selector=$1
-    local runner=$2
-    shift 2
-    local arg
-    local -a runnerArgs=()
-    local -a children=()
-    local parseChildren=0
-
-    for arg in "$@"; do
-        if (( parseChildren )); then
-            children+=("${arg}")
-            continue
-        fi
-        if [[ "${arg}" == "--" ]]; then
-            parseChildren=1
-            continue
-        fi
-        runnerArgs+=("${arg}")
-    done
-
-    registerRegressionAggregateRunnerSequential "${selector}" "${runner}" "${children[@]}"
-    PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]=$(printf '%s\n' "${runnerArgs[@]}")
-}
-
-registerRegressionAggregateParallel() {
-    local selector=$1
-    shift
-
-    registerRegressionSelector "${selector}" || return 1
-    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=aggregate
-    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=parallel
-    PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
-}
-
-registerRegressionAggregateSequential() {
-    local selector=$1
-    shift
-
-    registerRegressionSelector "${selector}" || return 1
-    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=aggregate
-    PADM_REGRESSION_SELECTOR_MODE["${selector}"]=sequential
-    PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]=$(printf '%s\n' "$@")
-}
-
-registerRegressionAlias() {
-    local selector=$1
-    local target=$2
-
-    registerRegressionSelector "${selector}" || return 1
-    PADM_REGRESSION_SELECTOR_KIND["${selector}"]=alias
-    PADM_REGRESSION_SELECTOR_ALIAS["${selector}"]=${target}
 }
 
 validateRegressionRegistry() {
     local selector
     local kind
-    local target
     local children
     local child
 
@@ -161,23 +103,6 @@ validateRegressionRegistry() {
                     return 1
                 fi
             done <<<"${children}"
-            ;;
-        aggregate)
-            children=${PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]:-}
-            while IFS= read -r child; do
-                [[ -n "${child}" ]] || continue
-                if [[ -z "${PADM_REGRESSION_SELECTOR_KIND[${child}]:-}" ]]; then
-                    printf 'missing child selector for %s: %s\n' "${selector}" "${child}" >&2
-                    return 1
-                fi
-            done <<<"${children}"
-            ;;
-        alias)
-            target=${PADM_REGRESSION_SELECTOR_ALIAS["${selector}"]:-}
-            if [[ -z "${target}" || -z "${PADM_REGRESSION_SELECTOR_KIND[${target}]:-}" ]]; then
-                printf 'missing alias target for %s: %s\n' "${selector}" "${target}" >&2
-                return 1
-            fi
             ;;
         *)
             printf 'unknown selector kind for %s: %s\n' "${selector}" "${kind}" >&2
@@ -206,10 +131,9 @@ runRegisteredRegressionSelector() {
     local child
     local runnerArgs
     local -a runnerArgv=()
-    local -a childPairs=()
 
     case "${kind}" in
-    function)
+    function|aggregate-runner)
         runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
         runnerArgs=${PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]:-}
         while IFS= read -r child; do
@@ -217,32 +141,6 @@ runRegisteredRegressionSelector() {
             runnerArgv+=("${child}")
         done <<<"${runnerArgs}"
         "${runner}" "${runnerArgv[@]}"
-        ;;
-    aggregate-runner)
-        runner=${PADM_REGRESSION_SELECTOR_RUNNER["${selector}"]}
-        runnerArgs=${PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]:-}
-        while IFS= read -r child; do
-            [[ -n "${child}" ]] || continue
-            runnerArgv+=("${child}")
-        done <<<"${runnerArgs}"
-        "${runner}" "${runnerArgv[@]}"
-        ;;
-    aggregate)
-        if [[ "${PADM_REGRESSION_SELECTOR_MODE[${selector}]}" == "parallel" ]]; then
-            while IFS= read -r child; do
-                [[ -n "${child}" ]] || continue
-                childPairs+=("${child}" "${child}")
-            done <<<"${PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]}"
-            runParallelRegressionSelectors "${TMP_DIR}/${selector}-parallel-${BASHPID:-$$}" "${childPairs[@]}"
-        else
-            while IFS= read -r child; do
-                [[ -n "${child}" ]] || continue
-                PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${child}"
-            done <<<"${PADM_REGRESSION_SELECTOR_CHILDREN["${selector}"]}"
-        fi
-        ;;
-    alias)
-        PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain "${PADM_REGRESSION_SELECTOR_ALIAS["${selector}"]}"
         ;;
     *)
         printf 'unknown regression selector: %s\n' "${selector}" >&2

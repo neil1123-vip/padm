@@ -495,20 +495,20 @@ registerRegressionFunctionLeaf clean-last-installation-acme-relative-home runCle
 registerRegressionFunctionLeaf alone-nginx-write-transaction runAloneNginxConfigWriteTransactionRegression
 registerRegressionFunctionLeaf alone-nginx-update-transaction runAloneNginxUpdateTransactionRegression
 
-registerRegressionAggregateRunnerParallel transaction-system runRegressionTransactionSystemSuiteRoot \
+registerRegressionAggregateRunner parallel transaction-system runRegressionTransactionSystemSuiteRoot \
     $(listRegressionTransactionSystemChildSelectors)
 
-registerRegressionAggregateRunnerParallel transaction-core runRegressionTransactionCoreSuiteRoot \
+registerRegressionAggregateRunner parallel transaction-core runRegressionTransactionCoreSuiteRoot \
     $(listRegressionTransactionCoreChildSelectors)
 
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     transaction-subscription \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionTransactionSubscriptionChildSelectors \
     -- \
     $(listRegressionTransactionSubscriptionChildSelectors)
 
-registerRegressionAggregateRunnerSequentialWithArgs \
+registerRegressionAggregateRunnerWithArgs sequential \
     transaction \
     runFrameworkSequentialRegressionSelectorList \
     listRegressionTransactionChildSelectors \
