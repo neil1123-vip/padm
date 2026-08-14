@@ -70,41 +70,22 @@ menuMutedLine() {
     echoContent muted "│ $1"
 }
 
-menuItem() {
-    local number=$1
-    local title=$2
-    local desc=${3:-}
+menuItemWithStyle() {
+    local style=$1
+    local number=$2
+    local title=$3
+    local desc=${4:-}
     printf -v number '%2s' "${number}"
-    local line="│ $(uiStyle number "${number}.") $(uiStyle text "${title}")"
+    local line="│ $(uiStyle number "${number}.") $(uiStyle "${style}" "${title}")"
     if [[ -n "${desc}" ]]; then
         line+="  $(uiStyle value "${desc}")"
     fi
     uiPrintLine "${line}"
 }
 
-menuRecommendedItem() {
-    local number=$1
-    local title=$2
-    local desc=${3:-}
-    printf -v number '%2s' "${number}"
-    local line="│ $(uiStyle number "${number}.") $(uiStyle recommended "${title}")"
-    if [[ -n "${desc}" ]]; then
-        line+="  $(uiStyle value "${desc}")"
-    fi
-    uiPrintLine "${line}"
-}
-
-menuReturnItem() {
-    local number=$1
-    local title=$2
-    local desc=${3:-}
-    printf -v number '%2s' "${number}"
-    local line="│ $(uiStyle number "${number}.") $(uiStyle cyan "${title}")"
-    if [[ -n "${desc}" ]]; then
-        line+="  $(uiStyle value "${desc}")"
-    fi
-    uiPrintLine "${line}"
-}
+menuItem() { menuItemWithStyle text "$@"; }
+menuRecommendedItem() { menuItemWithStyle recommended "$@"; }
+menuReturnItem() { menuItemWithStyle cyan "$@"; }
 
 menuDangerItem() {
     local number=$1

@@ -2,7 +2,6 @@
 set -euo pipefail
 
 REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-SUBSCRIPTION_STATE_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 writeSubscriptionStateDefaultFixture() {

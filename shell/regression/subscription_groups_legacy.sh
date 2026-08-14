@@ -9,8 +9,6 @@ PADM_REGRESSION_LEGACY_FIXTURES_LOADED=1
 set -euo pipefail
 
 REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-REGRESSION_ENTRY_SCRIPT_PATH="${REGRESSION_ENTRY_DIR}/subscription_groups_regression.sh"
-REGRESSION_LEGACY_SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 # shellcheck source=/dev/null
 source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 
@@ -1059,17 +1057,46 @@ JSON
     grep -q '核心重载失败，且回滚失败' "${statusLog}"
 )
 
-runAccessControlRejectsUnsafeBackupDirRegression() (
-    local root="${TMP_DIR}/access-control-unsafe-backup"
+runRoutingRejectsUnsafeDirRegression() (
+    local routing=$1
+    local dirType=$2
+    local backupDirVar backupCreateFn backupCleanupFn backupRestoreFn configFile
+    local root="${TMP_DIR}/${routing}-unsafe-${dirType}"
     local rmLog="${root}/rm.log"
+    local backupDir="${root}/backup"
     local rc
+
+    case "${routing}" in
+    access-control)
+        backupDirVar=PADM_ACCESS_CONTROL_BACKUP_DIR
+        backupCreateFn=accessControlBackupCreate
+        backupCleanupFn=accessControlBackupCleanup
+        backupRestoreFn=accessControlBackupRestore
+        configFile=09_routing.json
+        ;;
+    dns-routing)
+        backupDirVar=PADM_DNS_ROUTING_BACKUP_DIR
+        backupCreateFn=dnsRoutingBackupCreate
+        backupCleanupFn=dnsRoutingBackupCleanup
+        backupRestoreFn=dnsRoutingBackupRestore
+        configFile=11_dns.json
+        ;;
+    *) return 1 ;;
+    esac
 
     mkdir -p "${root}"
     : >"${rmLog}"
-    PADM_ACCESS_CONTROL_BACKUP_DIR=relative-backup
-    configPath="${root}/xray/"
     singBoxConfigPath=
-    mkdir -p "${configPath}"
+    if [[ "${dirType}" == "backup" ]]; then
+        printf -v "${backupDirVar}" '%s' relative-backup
+        configPath="${root}/xray/"
+        mkdir -p "${configPath}"
+    elif [[ "${dirType}" == "config" ]]; then
+        configPath=relative-config/
+        printf -v "${backupDirVar}" '%s' "${backupDir}"
+    else
+        return 1
+    fi
 
     rm() {
         printf 'rm:%s\n' "$*" >>"${rmLog}"
@@ -1077,64 +1104,59 @@ runAccessControlRejectsUnsafeBackupDirRegression() (
     }
 
     set +e
-    accessControlBackupCreate >/dev/null 2>&1
+    "${backupCreateFn}" >/dev/null 2>&1
     rc=$?
     set -e
     [[ "${rc}" == "1" ]]
     [[ ! -s "${rmLog}" ]]
 
-    set +e
-    accessControlBackupCleanup >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
-
-    mkdir -p "${root}/relative-backup/xray"
-    printf 'old\n' >"${root}/relative-backup/xray/09_routing.json"
-    (
-        cd "${root}"
+    if [[ "${dirType}" == "backup" ]]; then
         set +e
-        accessControlBackupRestore >/dev/null 2>&1
+        "${backupCleanupFn}" >/dev/null 2>&1
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
-    )
+        [[ ! -s "${rmLog}" ]]
+
+        mkdir -p "${root}/relative-backup/xray"
+        printf 'old\n' >"${root}/relative-backup/xray/${configFile}"
+        (
+            cd "${root}"
+            set +e
+            "${backupRestoreFn}" >/dev/null 2>&1
+            rc=$?
+            set -e
+            [[ "${rc}" == "1" ]]
+        )
+    else
+        [[ ! -s "${rmLog}" ]]
+        [[ ! -e "${backupDir}" ]]
+
+        mkdir -p "${backupDir}/xray"
+        printf 'old\n' >"${backupDir}/xray/${configFile}"
+        set +e
+        "${backupRestoreFn}" >/dev/null 2>&1
+        rc=$?
+        set -e
+        [[ "${rc}" == "1" ]]
+    fi
     [[ ! -s "${rmLog}" ]]
 )
 
+runAccessControlRejectsUnsafeBackupDirRegression() (
+    runRoutingRejectsUnsafeDirRegression access-control backup
+)
+
 runAccessControlRejectsUnsafeConfigDirRegression() (
-    local root="${TMP_DIR}/access-control-unsafe-config"
-    local rmLog="${root}/rm.log"
-    local rc
+    runRoutingRejectsUnsafeDirRegression access-control config
+)
 
-    mkdir -p "${root}/unsafe-config"
-    : >"${rmLog}"
-    configPath="relative-config/"
-    singBoxConfigPath=
-    PADM_ACCESS_CONTROL_BACKUP_DIR="${root}/backup"
+runDNSRoutingRejectsUnsafeBackupDirRegression() (
+    runRoutingRejectsUnsafeDirRegression dns-routing backup
+)
 
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${rmLog}"
-        command rm "$@"
-    }
-
-    set +e
-    accessControlBackupCreate >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
-    [[ ! -e "${PADM_ACCESS_CONTROL_BACKUP_DIR}" ]]
-
-    mkdir -p "${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray"
-    printf 'old\n' >"${PADM_ACCESS_CONTROL_BACKUP_DIR}/xray/09_routing.json"
-    set +e
-    accessControlBackupRestore >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
+runDNSRoutingRejectsUnsafeConfigDirRegression() (
+    runRoutingRejectsUnsafeDirRegression dns-routing config
 )
 
 runBTRoutingFailureReturnRegression() (
@@ -2222,84 +2244,6 @@ JSON
         [[ -f "${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json" ]]
         grep -q 'DNS 分流核心重载失败，且旧配置恢复失败' "${errorLog}"
     )
-)
-
-runDNSRoutingRejectsUnsafeBackupDirRegression() (
-    local root="${TMP_DIR}/dns-routing-unsafe-backup"
-    local rmLog="${root}/rm.log"
-    local rc
-
-    mkdir -p "${root}"
-    : >"${rmLog}"
-    PADM_DNS_ROUTING_BACKUP_DIR=relative-backup
-    configPath="${root}/xray/"
-    singBoxConfigPath=
-    mkdir -p "${configPath}"
-
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${rmLog}"
-        command rm "$@"
-    }
-
-    set +e
-    dnsRoutingBackupCreate >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
-
-    set +e
-    dnsRoutingBackupCleanup >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
-
-    mkdir -p "${root}/relative-backup/xray"
-    printf 'old\n' >"${root}/relative-backup/xray/11_dns.json"
-    (
-        cd "${root}"
-        set +e
-        dnsRoutingBackupRestore >/dev/null 2>&1
-        rc=$?
-        set -e
-        [[ "${rc}" == "1" ]]
-    )
-    [[ ! -s "${rmLog}" ]]
-)
-
-runDNSRoutingRejectsUnsafeConfigDirRegression() (
-    local root="${TMP_DIR}/dns-routing-unsafe-config"
-    local rmLog="${root}/rm.log"
-    local rc
-
-    mkdir -p "${root}"
-    : >"${rmLog}"
-    configPath="relative-config/"
-    singBoxConfigPath=
-    PADM_DNS_ROUTING_BACKUP_DIR="${root}/backup"
-
-    rm() {
-        printf 'rm:%s\n' "$*" >>"${rmLog}"
-        command rm "$@"
-    }
-
-    set +e
-    dnsRoutingBackupCreate >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
-    [[ ! -e "${PADM_DNS_ROUTING_BACKUP_DIR}" ]]
-
-    mkdir -p "${PADM_DNS_ROUTING_BACKUP_DIR}/xray"
-    printf 'old\n' >"${PADM_DNS_ROUTING_BACKUP_DIR}/xray/11_dns.json"
-    set +e
-    dnsRoutingBackupRestore >/dev/null 2>&1
-    rc=$?
-    set -e
-    [[ "${rc}" == "1" ]]
-    [[ ! -s "${rmLog}" ]]
 )
 
 runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression() (

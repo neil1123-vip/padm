@@ -466,18 +466,6 @@ realityTargetCachedNetworkSummary() {
     esac
 }
 
-removeRealityTargetCandidateLine() {
-    local target=$1
-    local parsed host candidatesFile stagedFile
-    parsed=$(parseHostPort "${target}" 443)
-    host=${parsed%:*}
-    candidatesFile=$(realityTargetManagedCandidatesFile 2>/dev/null || true)
-    [[ -n "${candidatesFile}" && -f "${candidatesFile}" ]] || return 0
-    padmCreateTempFileForTarget stagedFile "${candidatesFile}" reality || return 1
-    awk -F'|' -v host="${host}" '$1 != host' "${candidatesFile}" >"${stagedFile}" || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-    commitGeneratedFile "${stagedFile}" "${candidatesFile}" 644 || { padmRemoveCleanupPath "${stagedFile}"; return 1; }
-}
-
 removeRealityTargetFromUnifiedLibrary() {
     local target=$1
     local targetsFile

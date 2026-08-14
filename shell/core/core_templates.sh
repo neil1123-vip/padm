@@ -9,16 +9,20 @@ xrayTemplateConfigFile() {
     padmManagedFilePath "$(xrayTemplateConfigDir)" "$1"
 }
 
-removeXrayTemplateConfigFiles() {
-    local fileName
-    local targetFile
-    local status=0
+removeCoreTemplateConfigFiles() {
+    local fileResolver=$1
+    shift
+    local fileName targetFile status=0
 
     for fileName in "$@"; do
-        targetFile=$(xrayTemplateConfigFile "${fileName}") || return 1
+        targetFile=$("${fileResolver}" "${fileName}") || return 1
         removeManagedFileIfPresent "${targetFile}" || status=1
     done
     return "${status}"
+}
+
+removeXrayTemplateConfigFiles() {
+    removeCoreTemplateConfigFiles xrayTemplateConfigFile "$@"
 }
 
 singBoxTemplateConfigDir() {
@@ -30,15 +34,7 @@ singBoxTemplateConfigFile() {
 }
 
 removeSingBoxTemplateConfigFiles() {
-    local fileName
-    local targetFile
-    local status=0
-
-    for fileName in "$@"; do
-        targetFile=$(singBoxTemplateConfigFile "${fileName}") || return 1
-        removeManagedFileIfPresent "${targetFile}" || status=1
-    done
-    return "${status}"
+    removeCoreTemplateConfigFiles singBoxTemplateConfigFile "$@"
 }
 
 coreTemplateValidateManualAccountName() {
