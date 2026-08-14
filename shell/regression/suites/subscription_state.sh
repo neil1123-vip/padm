@@ -171,25 +171,34 @@ runRegressionSubscriptionStateSyncRollback() {
             listRegressionSubscriptionStateSyncRollbackFailureChildSelectors
 }
 
-runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegression() (
+runRegressionSubscriptionStateParallelIsolationCompositionContract() (
     set -euo pipefail
-    local callLog="${TMP_DIR}/regression-subscription-state-remote-restore-parallel-isolation-composition.log"
-    local startMarker="${TMP_DIR}/subscription-state-remote-restore-state-write-started"
+    local contractName=$1
+    local suiteRunner=$2
+    local selectorListFn=$3
+    local selectorPrefix=$4
+    local waitingSelector=$5
+    local signalingSelector=$6
+    local callLog="${TMP_DIR}/regression-subscription-state-${contractName}-parallel-isolation-composition.log"
+    local startMarker="${TMP_DIR}/subscription-state-${contractName}-parallel-started"
+    local fullSelector selector
+    local -a selectors=()
 
+    mapfile -t selectors < <("${selectorListFn}")
     : >"${callLog}"
     rm -f "${startMarker}"
 
-    runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe() {
+    runRegressionSubscriptionStateParallelIsolationProbe() {
         local selector=$1
 
         printf '%s|start|tmp=%s|groups=%s\n' \
             "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
-        if [[ "${selector}" == "remote-restore-self-reference" ]]; then
+        if [[ "${selector}" == "${waitingSelector}" ]]; then
             for _ in 1 2 3 4 5 6 7 8 9 10; do
                 [[ -f "${startMarker}" ]] && break
                 sleep 0.05
             done
-        elif [[ "${selector}" == "remote-restore-state-write" ]]; then
+        elif [[ "${selector}" == "${signalingSelector}" ]]; then
             : >"${startMarker}"
         fi
         printf '%s|finish|tmp=%s|groups=%s\n' \
@@ -197,35 +206,23 @@ runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegressio
     }
 
     runRegisteredRegressionMain() {
-        case "$1" in
-        subscription-state-remote-restore-self-reference)
-            runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe remote-restore-self-reference
-            ;;
-        subscription-state-remote-restore-state-write)
-            runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe remote-restore-state-write
-            ;;
-        subscription-state-remote-restore-legacy-menu)
-            runRegressionSubscriptionStateRemoteRestoreParallelIsolationProbe remote-restore-legacy-menu
-            ;;
-        *)
-            return 1
-            ;;
-        esac
+        runRegressionSubscriptionStateParallelIsolationProbe "${1#"${selectorPrefix}"}"
     }
 
-    runRegressionSubscriptionStateRemoteRestore
+    "${suiteRunner}"
 
-    for selector in remote-restore-self-reference remote-restore-state-write remote-restore-legacy-menu; do
+    for fullSelector in "${selectors[@]}"; do
+        selector=${fullSelector#"${selectorPrefix}"}
         grep -q "^${selector}|start|" "${callLog}"
         grep -q "^${selector}|finish|" "${callLog}"
     done
-    awk -F'[|=]' '
-        $1 == "remote-restore-self-reference" && $2 == "start" { selfStart = NR }
-        $1 == "remote-restore-state-write" && $2 == "start" { stateWriteStart = NR }
-        $1 == "remote-restore-self-reference" && $2 == "finish" { selfFinish = NR }
-        END { exit !(selfStart && stateWriteStart && selfFinish && stateWriteStart < selfFinish) }
+    awk -F'[|=]' -v waiting="${waitingSelector}" -v signaling="${signalingSelector}" '
+        $1 == waiting && $2 == "start" { waitingStart = NR }
+        $1 == signaling && $2 == "start" { signalingStart = NR }
+        $1 == waiting && $2 == "finish" { waitingFinish = NR }
+        END { exit !(waitingStart && signalingStart && waitingFinish && signalingStart < waitingFinish) }
     ' "${callLog}"
-    awk -F'[|=]' '
+    awk -F'[|=]' -v expected="${#selectors[@]}" '
         $2 == "start" {
             tmp[$4] = 1
             groups[$6] = 1
@@ -233,146 +230,7 @@ runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegressio
                 bad = 1
             }
         }
-        END { exit !(length(tmp) == 3 && length(groups) == 3 && !bad) }
-    ' "${callLog}"
-)
-
-runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-subscription-state-structure-parallel-isolation-composition.log"
-    local startMarker="${TMP_DIR}/subscription-state-structure-source-started"
-
-    : >"${callLog}"
-    rm -f "${startMarker}"
-
-    runRegressionSubscriptionStateStructureParallelIsolationProbe() {
-        local selector=$1
-
-        printf '%s|start|tmp=%s|groups=%s\n' \
-            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
-        if [[ "${selector}" == "structure-foundation" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${startMarker}" ]] && break
-                sleep 0.05
-            done
-        elif [[ "${selector}" == "structure-source" ]]; then
-            : >"${startMarker}"
-        fi
-        printf '%s|finish|tmp=%s|groups=%s\n' \
-            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
-    }
-
-    runRegisteredRegressionMain() {
-        case "$1" in
-        subscription-state-structure-foundation)
-            runRegressionSubscriptionStateStructureParallelIsolationProbe structure-foundation
-            ;;
-        subscription-state-structure-validation)
-            runRegressionSubscriptionStateStructureParallelIsolationProbe structure-validation
-            ;;
-        subscription-state-structure-source)
-            runRegressionSubscriptionStateStructureParallelIsolationProbe structure-source
-            ;;
-        *)
-            return 1
-            ;;
-        esac
-    }
-
-    runRegressionSubscriptionStateStructure
-
-    for selector in structure-foundation structure-validation structure-source; do
-        grep -q "^${selector}|start|" "${callLog}"
-        grep -q "^${selector}|finish|" "${callLog}"
-    done
-    awk -F'[|=]' '
-        $1 == "structure-foundation" && $2 == "start" { foundationStart = NR }
-        $1 == "structure-source" && $2 == "start" { sourceStart = NR }
-        $1 == "structure-foundation" && $2 == "finish" { foundationFinish = NR }
-        END { exit !(foundationStart && sourceStart && foundationFinish && sourceStart < foundationFinish) }
-    ' "${callLog}"
-    awk -F'[|=]' '
-        $2 == "start" {
-            tmp[$4] = 1
-            groups[$6] = 1
-            if (index($6, $4 "/groups") != 1) {
-                bad = 1
-            }
-        }
-        END { exit !(length(tmp) == 3 && length(groups) == 3 && !bad) }
-    ' "${callLog}"
-)
-
-runRegressionSubscriptionStateSyncRollbackParallelIsolationCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-subscription-state-sync-rollback-parallel-isolation-composition.log"
-    local startMarker="${TMP_DIR}/subscription-state-sync-rollback-reload-started"
-
-    : >"${callLog}"
-    rm -f "${startMarker}"
-
-    runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe() {
-        local selector=$1
-
-        printf '%s|start|tmp=%s|groups=%s\n' \
-            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
-        if [[ "${selector}" == "sync-rollback-config-restore-failure" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${startMarker}" ]] && break
-                sleep 0.05
-            done
-        elif [[ "${selector}" == "sync-reload-rollback" ]]; then
-            : >"${startMarker}"
-        fi
-        printf '%s|finish|tmp=%s|groups=%s\n' \
-            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
-    }
-
-    runRegisteredRegressionMain() {
-        case "$1" in
-        subscription-sync-rollback-config-restore-failure)
-            runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe sync-rollback-config-restore-failure
-            ;;
-        subscription-sync-restore-dir-failure)
-            runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe sync-restore-dir-failure
-            ;;
-        subscription-sync-reload-rollback)
-            runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe sync-reload-rollback
-            ;;
-        subscription-group-sync-rollback)
-            runRegressionSubscriptionStateSyncRollbackParallelIsolationProbe group-sync-rollback
-            ;;
-        *)
-            return 1
-            ;;
-        esac
-    }
-
-    runRegressionSubscriptionStateSyncRollback
-
-    for selector in \
-        sync-rollback-config-restore-failure \
-        sync-restore-dir-failure \
-        sync-reload-rollback \
-        group-sync-rollback; do
-        grep -q "^${selector}|start|" "${callLog}"
-        grep -q "^${selector}|finish|" "${callLog}"
-    done
-    awk -F'[|=]' '
-        $1 == "sync-rollback-config-restore-failure" && $2 == "start" { firstStart = NR }
-        $1 == "sync-reload-rollback" && $2 == "start" { reloadStart = NR }
-        $1 == "sync-rollback-config-restore-failure" && $2 == "finish" { firstFinish = NR }
-        END { exit !(firstStart && reloadStart && firstFinish && reloadStart < firstFinish) }
-    ' "${callLog}"
-    awk -F'[|=]' '
-        $2 == "start" {
-            tmp[$4] = 1
-            groups[$6] = 1
-            if (index($6, $4 "/groups") != 1) {
-                bad = 1
-            }
-        }
-        END { exit !(length(tmp) == 4 && length(groups) == 4 && !bad) }
+        END { exit !(length(tmp) == expected && length(groups) == expected && !bad) }
     ' "${callLog}"
 )
 
@@ -490,9 +348,33 @@ registerRegressionFunctionLeaf subscription-group-sync-remote-failure runRegress
 registerRegressionFunctionLeaf subscription-group-sync-state-lock runRegressionSubscriptionGroupSyncUsesStateLock
 registerRegressionFunctionLeaf subscription-sync-reconcile-early-exit runRegressionSubscriptionSyncReconcileEarlyExit
 registerRegressionFunctionLeaf subscription-groups-restore-failure runRegressionSubscriptionGroupsRestoreFailure
-registerRegressionFunctionLeaf regression-subscription-state-remote-restore-parallel-isolation-composition runRegressionSubscriptionStateRemoteRestoreParallelIsolationCompositionRegression
-registerRegressionFunctionLeaf regression-subscription-state-structure-parallel-isolation-composition runRegressionSubscriptionStateStructureParallelIsolationCompositionRegression
-registerRegressionFunctionLeaf regression-subscription-state-sync-rollback-parallel-isolation-composition runRegressionSubscriptionStateSyncRollbackParallelIsolationCompositionRegression
+registerRegressionFunctionLeaf \
+    regression-subscription-state-remote-restore-parallel-isolation-composition \
+    runRegressionSubscriptionStateParallelIsolationCompositionContract \
+    remote-restore \
+    runRegressionSubscriptionStateRemoteRestore \
+    listRegressionSubscriptionStateRemoteRestoreChildSelectors \
+    subscription-state- \
+    remote-restore-self-reference \
+    remote-restore-state-write
+registerRegressionFunctionLeaf \
+    regression-subscription-state-structure-parallel-isolation-composition \
+    runRegressionSubscriptionStateParallelIsolationCompositionContract \
+    structure \
+    runRegressionSubscriptionStateStructure \
+    listRegressionSubscriptionStateStructureChildSelectors \
+    subscription-state- \
+    structure-foundation \
+    structure-source
+registerRegressionFunctionLeaf \
+    regression-subscription-state-sync-rollback-parallel-isolation-composition \
+    runRegressionSubscriptionStateParallelIsolationCompositionContract \
+    sync-rollback \
+    runRegressionSubscriptionStateSyncRollback \
+    listRegressionSubscriptionStateSyncRollbackFailureChildSelectors \
+    subscription- \
+    sync-rollback-config-restore-failure \
+    sync-reload-rollback
 
 listRegressionSubscriptionStateCoreChildSelectors() {
     printf '%s\n' \
