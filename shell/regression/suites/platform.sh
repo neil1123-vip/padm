@@ -49,44 +49,6 @@ listRegressionPlatformIoChildSelectors() {
         reality-scanner-download-failure
 }
 
-runRegressionPlatformHotParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-platform-hot-parallel-composition.log"
-
-    : >"${callLog}"
-    rm -f "${TMP_DIR}/platform-refresh-started"
-
-    runRegressionAllSelector() {
-        local selector=$1
-
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "platform-update" ]]; then
-            printf 'update-start\n' >>"${callLog}"
-        elif [[ "${selector}" == "platform-refresh" ]]; then
-            printf 'refresh-start\n' >>"${callLog}"
-            : >"${TMP_DIR}/platform-refresh-started"
-        fi
-        while [[ ! -f "${TMP_DIR}/platform-refresh-started" ]]; do
-            sleep 0.05
-            [[ "${selector}" == "platform-update" ]] || break
-        done
-        if [[ "${selector}" == "platform-update" ]]; then
-            printf 'update-finish\n' >>"${callLog}"
-        fi
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegisteredRegressionMain platform-hot
-    grep -qx 'update-start' "${callLog}"
-    grep -qx 'refresh-start' "${callLog}"
-    awk '
-        $0 == "update-start" { updateStart = NR }
-        $0 == "refresh-start" { refreshStart = NR }
-        $0 == "update-finish" { updateFinish = NR }
-        END { exit !(updateStart && refreshStart && updateFinish && refreshStart < updateFinish) }
-    ' "${callLog}"
-)
-
 runRegressionPlatformFastHelperIsolationRegression() (
     set -euo pipefail
     local legacyBody fastBody
@@ -125,7 +87,7 @@ registerRegressionFunctionLeaf package-command-stdin runRegressionPlatformLegacy
 registerRegressionFunctionLeaf reality-scanner-unsafe-dir runRegressionPlatformLegacyLeafWithCompat runRealityScannerRejectsUnsafeDirRegression
 registerRegressionFunctionLeaf reality-scanner-binary runRegressionPlatformLegacyLeafWithCompat runRealityScannerBinaryRegression
 registerRegressionFunctionLeaf reality-scanner-download-failure runRegressionPlatformLegacyLeafWithCompat runRealityScannerDownloadFailureKeepsExistingDirRegression
-registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runRegressionPlatformHotParallelCompositionRegression
+registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runFrameworkParallelCompositionContract platform-hot platform-update platform-refresh
 registerRegressionFunctionLeaf regression-platform-fast-helper-isolation runRegressionPlatformFastHelperIsolationRegression
 
 registerRegressionAggregateRunnerWithArgs sequential \

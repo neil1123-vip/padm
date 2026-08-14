@@ -266,6 +266,43 @@ runFrameworkParallelRegressionSelectorList() {
         "${selectorPairs[@]}"
 }
 
+runFrameworkParallelCompositionContract() (
+    set -euo pipefail
+    local suiteSelector=$1
+    local waitingSelector=$2
+    local signalingSelector=$3
+    local callLog="${TMP_DIR}/regression-${suiteSelector}-parallel-composition.log"
+    local startMarker="${TMP_DIR}/regression-${suiteSelector}-parallel-started"
+
+    : >"${callLog}"
+    rm -f "${startMarker}"
+
+    runRegressionParallelCompositionProbe() {
+        local selector=$1
+
+        printf '%s-start\n' "${selector}" >>"${callLog}"
+        if [[ "${selector}" == "${waitingSelector}" ]]; then
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                [[ -f "${startMarker}" ]] && break
+                sleep 0.05
+            done
+        elif [[ "${selector}" == "${signalingSelector}" ]]; then
+            : >"${startMarker}"
+        fi
+        printf '%s-finish\n' "${selector}" >>"${callLog}"
+    }
+
+    PADM_REGRESSION_SUPPRESS_DONE=1 \
+        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionParallelCompositionProbe \
+        runRegisteredRegressionMain "${suiteSelector}"
+    awk -v waiting="${waitingSelector}" -v signaling="${signalingSelector}" '
+        $0 == waiting "-start" { waitingStart = NR }
+        $0 == signaling "-start" { signalingStart = NR }
+        $0 == waiting "-finish" { waitingFinish = NR }
+        END { exit !(waitingStart && signalingStart && waitingFinish && signalingStart < waitingFinish) }
+    ' "${callLog}"
+)
+
 runFrameworkParallelRegressionSelectorListWithJobs() {
     local orchestrationRoot=$1
     local selectorListFn=$2
