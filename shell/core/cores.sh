@@ -890,23 +890,27 @@ summarizeSingBoxCompatibilityAudit() {
     printf 'FAIL=%s WARN=%s PASS=%s' "${failCount}" "${warnCount}" "${passCount}"
 }
 
-showSingBoxCompatibilityAudit() {
-    local logFile=${1:-$(singBoxCompatibilityAuditLog)}
-    local statusFile=${2:-$(singBoxCompatibilityAuditStatusFile)}
-    local warnFile=${3:-$(singBoxCompatibilityAuditWarnFile)}
+showCoreCompatibilityAudit() {
+    local collectFn=$1 cardFn=$2 missingMessage=$3 failureHint=$4 successMessage=$5
+    local logFile=$6 statusFile=$7 warnFile=$8 rc=0
 
-    local rc=0
-    collectSingBoxCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
+    "${collectFn}" "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
     if [[ "${rc}" -eq 2 ]]; then
-        singBoxCompatibilityAuditCard "无法检查" "未检测到 sing-box 配置" "排查日志: ${logFile}"
+        "${cardFn}" "无法检查" "${missingMessage}" "排查日志: ${logFile}"
     elif [[ "${rc}" -ne 0 ]]; then
-        singBoxCompatibilityAuditCard "失败" "排查日志: ${logFile}" "重点检查 JSON / legacy DNS / WireGuard / special outbounds / domain_strategy"
+        "${cardFn}" "失败" "排查日志: ${logFile}" "${failureHint}"
     elif [[ -s "${warnFile}" ]]; then
-        singBoxCompatibilityAuditCard "需关注" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
+        "${cardFn}" "需关注" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
     else
-        singBoxCompatibilityAuditCard "通过" "未发现 1.13/1.14 已知兼容风险"
+        "${cardFn}" "通过" "${successMessage}"
     fi
     return "${rc}"
+}
+
+showSingBoxCompatibilityAudit() {
+    showCoreCompatibilityAudit collectSingBoxCompatibilityFindings singBoxCompatibilityAuditCard \
+        "未检测到 sing-box 配置" "重点检查 JSON / legacy DNS / WireGuard / special outbounds / domain_strategy" "未发现 1.13/1.14 已知兼容风险" \
+        "${1:-$(singBoxCompatibilityAuditLog)}" "${2:-$(singBoxCompatibilityAuditStatusFile)}" "${3:-$(singBoxCompatibilityAuditWarnFile)}"
 }
 
 showSingBoxConfigValidation() {
@@ -1181,22 +1185,9 @@ summarizeXrayCompatibilityAudit() {
 }
 
 showXrayCompatibilityAudit() {
-    local logFile=${1:-$(xrayCompatibilityAuditLog)}
-    local statusFile=${2:-$(xrayCompatibilityAuditStatusFile)}
-    local warnFile=${3:-$(xrayCompatibilityAuditWarnFile)}
-
-    local rc=0
-    collectXrayCompatibilityFindings "${statusFile}" "${logFile}" "${warnFile}" || rc=$?
-    if [[ "${rc}" -eq 2 ]]; then
-        xrayCompatibilityAuditCard "无法检查" "未检测到 Xray 配置" "排查日志: ${logFile}"
-    elif [[ "${rc}" -ne 0 ]]; then
-        xrayCompatibilityAuditCard "失败" "排查日志: ${logFile}" "重点检查 JSON 解析 / legacy reverse"
-    elif [[ -s "${warnFile}" ]]; then
-        xrayCompatibilityAuditCard "需关注" "提示: $(head -n 1 "${warnFile}")" "完整日志: ${logFile}"
-    else
-        xrayCompatibilityAuditCard "通过" "未检测到当前预发布已知兼容风险"
-    fi
-    return "${rc}"
+    showCoreCompatibilityAudit collectXrayCompatibilityFindings xrayCompatibilityAuditCard \
+        "未检测到 Xray 配置" "重点检查 JSON 解析 / legacy reverse" "未检测到当前预发布已知兼容风险" \
+        "${1:-$(xrayCompatibilityAuditLog)}" "${2:-$(xrayCompatibilityAuditStatusFile)}" "${3:-$(xrayCompatibilityAuditWarnFile)}"
 }
 
 downloadXrayReleaseBinaryToTemp() {
