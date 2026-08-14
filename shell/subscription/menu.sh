@@ -1220,42 +1220,33 @@ refreshSubscriptionGroupSyncCron() {
     fi
 }
 
-setSubscriptionGroupSyncEnabledWithCron() {
-    local enabled=$1
-    local previousEnabled
-    previousEnabled=$(subscriptionActiveGroupRead -r '.sync.enabled == true') || return 1
-    setSubscriptionGroupSyncEnabled "${enabled}" || return 1
+setSubscriptionGroupSyncValueWithCron() {
+    local value=$1 query=$2 setterFn=$3 valueRestoreError=$4 cronRestoreError=$5
+    local previousValue
+    previousValue=$(subscriptionActiveGroupRead -r "${query}") || return 1
+    "${setterFn}" "${value}" || return 1
     if refreshSubscriptionGroupSyncCron; then
         return 0
     fi
-    setSubscriptionGroupSyncEnabled "${previousEnabled}" || {
-        errorCard "自动同步定时任务更新失败，且原状态恢复失败"
+    "${setterFn}" "${previousValue}" || {
+        errorCard "${valueRestoreError}"
         return 1
     }
     refreshSubscriptionGroupSyncCron || {
-        errorCard "自动同步状态已恢复，但原定时任务恢复失败"
+        errorCard "${cronRestoreError}"
         return 1
     }
     return 1
 }
 
+setSubscriptionGroupSyncEnabledWithCron() {
+    setSubscriptionGroupSyncValueWithCron "$1" '.sync.enabled == true' setSubscriptionGroupSyncEnabled \
+        "自动同步定时任务更新失败，且原状态恢复失败" "自动同步状态已恢复，但原定时任务恢复失败"
+}
+
 setSubscriptionGroupSyncIntervalWithCron() {
-    local interval=$1
-    local previousInterval
-    previousInterval=$(subscriptionActiveGroupRead -r '.sync.interval_minutes') || return 1
-    setSubscriptionGroupSyncInterval "${interval}" || return 1
-    if refreshSubscriptionGroupSyncCron; then
-        return 0
-    fi
-    setSubscriptionGroupSyncInterval "${previousInterval}" || {
-        errorCard "自动同步定时任务更新失败，且原间隔恢复失败"
-        return 1
-    }
-    refreshSubscriptionGroupSyncCron || {
-        errorCard "自动同步间隔已恢复，但原定时任务恢复失败"
-        return 1
-    }
-    return 1
+    setSubscriptionGroupSyncValueWithCron "$1" '.sync.interval_minutes' setSubscriptionGroupSyncInterval \
+        "自动同步定时任务更新失败，且原间隔恢复失败" "自动同步间隔已恢复，但原定时任务恢复失败"
 }
 
 manageSubscriptionSyncDiagnostics() {
