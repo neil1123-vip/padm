@@ -1941,10 +1941,6 @@ runRegressionSubscriptionStateQuotaSerial() {
     runRegressionStep subscription-state-quota-serial runSubscriptionGroupStateQuotaSerialRegression
 }
 
-runRegressionSubscriptionStateRemoteRestoreSelfReference() {
-    runRegressionStep subscription-state-remote-restore-self-reference runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression
-}
-
 runRegressionSubscriptionStateRemoteRestoreSelfReferencePlan() {
     runRegressionStep subscription-state-remote-restore-self-reference-plan runSubscriptionGroupStateRemoteRestoreSelfReferencePlanRegression
 }
