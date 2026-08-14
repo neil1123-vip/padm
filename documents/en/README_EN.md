@@ -489,7 +489,7 @@ bash shell/subscription_groups_regression.sh nginx-service-failure
 bash shell/subscription_groups_regression.sh nginx-service-refresh
 ```
 
-Recommended harness structure checks:
+Recommended harness behavior checks:
 
 ```bash
 bash shell/subscription_groups_regression.sh regression-dispatcher-contract
@@ -505,7 +505,7 @@ Regression dispatch rules:
 | Name | Actual command | Coverage |
 | --- | --- | --- |
 | Suite / aggregate selector | `bash shell/subscription_groups_regression.sh fast` | Unified dispatch for `fast`, `all`, `platform-hot`, `platform-io`, `subscription-output`, `transaction-core`, `remote-control` plus its `smoke` / `contract` / `deep` layered selectors, `subscription-state*`, and other suite / aggregate selectors. |
-| Contract / composition selector | `bash shell/subscription_groups_regression.sh regression-dispatcher-contract` | Unified dispatch for the dispatcher contract plus the `all` composition, child-budget, and resource-layer structure regressions. |
+| Contract / composition selector | `bash shell/subscription_groups_regression.sh regression-dispatcher-contract` | Verifies registry argument passing, selector composition, concurrency limits and slot refill, interrupt cleanup, exited-child collection, and exactly-once aggregate dispatch. |
 | All public selectors | `bash shell/subscription_groups_regression.sh <selector>` | Every public regression entrypoint goes through the same dispatcher. |
 
 Historical grouped scripts are now internal runner / source-only layers and are no longer public command surfaces.

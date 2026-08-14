@@ -489,7 +489,7 @@ bash shell/subscription_groups_regression.sh nginx-service-failure
 bash shell/subscription_groups_regression.sh nginx-service-refresh
 ```
 
-推荐的 harness 结构验证集：
+推荐的 harness 行为回归集：
 
 ```bash
 bash shell/subscription_groups_regression.sh regression-dispatcher-contract
@@ -505,7 +505,7 @@ bash shell/subscription_groups_regression.sh regression-all-resource-layer-compo
 | 名称 | 实际命令 | 覆盖范围 |
 | --- | --- | --- |
 | suite / aggregate selector | `bash shell/subscription_groups_regression.sh fast` | 统一分发 `fast`、`all`、`platform-hot`、`platform-io`、`subscription-output`、`transaction-core`、`remote-control` 及其 `smoke` / `contract` / `deep` 分层 selector、`subscription-state*` 等 suite / aggregate selector。 |
-| contract / composition selector | `bash shell/subscription_groups_regression.sh regression-dispatcher-contract` | 统一分发 dispatcher contract、`all` composition、child budget、resource-layer 等结构回归。 |
+| contract / composition selector | `bash shell/subscription_groups_regression.sh regression-dispatcher-contract` | 验证 registry 参数传递、selector 组合、并发限流与补位、中断清理、异常子进程回收及 aggregate exactly-once。 |
 | 所有公开 selector | `bash shell/subscription_groups_regression.sh <selector>` | 所有公开回归入口都走同一个 dispatcher。 |
 
 历史分组脚本现在只作为内部 runner / source-only 复用层，不再作为公开命令面。
