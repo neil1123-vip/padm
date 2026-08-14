@@ -395,7 +395,7 @@ runRoutingRegression() {
     local PADM_ACCESS_CONTROL_BACKUP_DIR="${routingRoot}/access_control_backup"
     export TMPDIR
     cat >"${singBoxConfigPath}dlc.dat_plain.yml" <<'YAML'
-- name: openai
+- name: "openai"
 YAML
     rulesJson=$(initSingBoxRules "openai,example.com,full:api.example.com" "regression")
     jq -e '.ruleSet[0].tag == "geosite_openai_regression" and .suffixRules == ["example.com"] and .domainRules == ["api.example.com"]' <<<"${rulesJson}" >/dev/null

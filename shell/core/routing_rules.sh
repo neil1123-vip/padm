@@ -68,7 +68,7 @@ getDLCGeositeName() {
     escapedInput=$(echo "${normalizedInput}" | sed -e 's/[.[\*^$()+?{|]/\\&/g')
 
     local matchedLine=
-    matchedLine=$(grep -n -m1 -E "^[[:space:]]*-[[:space:]]*name:[[:space:]]*${escapedInput}[[:space:]]*$" "${dlcFilePath}")
+    matchedLine=$(grep -n -m1 -E "^[[:space:]]*-[[:space:]]*name:[[:space:]]*\"?${escapedInput}\"?[[:space:]]*$" "${dlcFilePath}")
     if [[ -n "${matchedLine}" ]]; then
         echo "${normalizedInput}"
     fi
