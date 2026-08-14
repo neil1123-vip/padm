@@ -1706,52 +1706,42 @@ confirmCoreUpgrade() {
     [[ "${confirmVar}" == "y" ]]
 }
 
-upgradeXrayCore() {
+upgradeCore() {
+    local core=$1
+    local repo=$2
+    local auditName=$3
+    local compatibilityFn=$4
+    local installFn=$5
+    shift 5
     local prerelease=${1:-false}
     local version=${2:-}
     local channel="稳定版"
     local preparedDir=
     [[ "${prerelease}" == "true" ]] && channel="预发布版"
-    [[ -n "${version}" ]] || version=$(coreLatestReleaseTag XTLS/Xray-core "${prerelease}" || true)
+    [[ -n "${version}" ]] || version=$(coreLatestReleaseTag "${repo}" "${prerelease}" || true)
     if [[ -z "${version}" || "${version}" == "null" ]]; then
-        errorCard "无法获取 Xray-core 目标版本"
+        errorCard "无法获取 ${core} 目标版本"
         return 1
     fi
     if [[ "${prerelease}" == "true" ]]; then
-        if ! checkXrayPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-xray-prerelease-audit.log)" preparedDir; then
+        if ! "${compatibilityFn}" "${version}" "$(coreTmpFilePath "padm-core-${auditName}-prerelease-audit.log")" preparedDir; then
             return 1
         fi
     fi
-    if ! confirmCoreUpgrade "Xray-core" "${version}" "${channel}"; then
+    if ! confirmCoreUpgrade "${core}" "${version}" "${channel}"; then
         [[ -n "${preparedDir}" ]] && padmRemoveCleanupPath "${preparedDir}"
-        coreCancelledStatusCard "未更新 Xray-core"
+        coreCancelledStatusCard "未更新 ${core}"
         return 0
     fi
-    installDownloadedXrayBinary "${version}" "${preparedDir}"
+    "${installFn}" "${version}" "${preparedDir}"
+}
+
+upgradeXrayCore() {
+    upgradeCore "Xray-core" XTLS/Xray-core xray checkXrayPrereleaseCompatibility installDownloadedXrayBinary "$@"
 }
 
 upgradeSingBoxCore() {
-    local prerelease=${1:-false}
-    local version=${2:-}
-    local channel="稳定版"
-    local preparedDir=
-    [[ "${prerelease}" == "true" ]] && channel="预发布版"
-    [[ -n "${version}" ]] || version=$(coreLatestReleaseTag SagerNet/sing-box "${prerelease}" || true)
-    if [[ -z "${version}" || "${version}" == "null" ]]; then
-        errorCard "无法获取 sing-box 目标版本"
-        return 1
-    fi
-    if [[ "${prerelease}" == "true" ]]; then
-        if ! checkSingBoxPrereleaseCompatibility "${version}" "$(coreTmpFilePath padm-core-sing-box-prerelease-audit.log)" preparedDir; then
-            return 1
-        fi
-    fi
-    if ! confirmCoreUpgrade "sing-box" "${version}" "${channel}"; then
-        [[ -n "${preparedDir}" ]] && padmRemoveCleanupPath "${preparedDir}"
-        coreCancelledStatusCard "未更新 sing-box"
-        return 0
-    fi
-    installDownloadedSingBoxBinary "${version}" "${preparedDir}"
+    upgradeCore "sing-box" SagerNet/sing-box sing-box checkSingBoxPrereleaseCompatibility installDownloadedSingBoxBinary "$@"
 }
 
 selectRollbackVersion() {
