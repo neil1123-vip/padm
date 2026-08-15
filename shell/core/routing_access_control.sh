@@ -370,8 +370,7 @@ accessControlBackupDir() {
 accessControlSafeBackupDir() {
     local backupDir
     backupDir=$(accessControlBackupDir)
-    padmIsSafeAbsolutePath "${backupDir%/}" || return 1
-    printf '%s\n' "${backupDir%/}"
+    padmRequireSafeAbsolutePath "${backupDir%/}"
 }
 
 accessControlSafeXrayConfigDir() {

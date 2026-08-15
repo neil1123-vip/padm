@@ -181,8 +181,7 @@ dnsRoutingSafeBackupDir() {
     else
         return 1
     fi
-    padmIsSafeAbsolutePath "${backupDir%/}" || return 1
-    printf '%s\n' "${backupDir%/}"
+    padmRequireSafeAbsolutePath "${backupDir%/}"
 }
 
 dnsRoutingSafeXrayConfigDir() {

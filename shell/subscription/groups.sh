@@ -7,10 +7,8 @@ subscriptionGroupsDir() {
 subscriptionGroupsSafeDir() {
     local groupsDir
     groupsDir=$(subscriptionGroupsDir)
-    [[ -n "${groupsDir}" ]] || return 1
-    [[ "${groupsDir}" == /* ]] || return 1
-    padmIsSafeAbsolutePath "${groupsDir%/}" || return 1
-    printf '%s\n' "${groupsDir%/}"
+    groupsDir=$(padmRequireSafeAbsolutePath "${groupsDir%/}") || return 1
+    printf '%s\n' "${groupsDir}"
 }
 
 subscriptionGroupsFile() {

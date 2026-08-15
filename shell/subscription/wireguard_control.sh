@@ -7,10 +7,8 @@ subscriptionWireGuardDir() {
 subscriptionWireGuardSafeDir() {
     local wireGuardDir
     wireGuardDir=$(subscriptionWireGuardDir)
-    [[ -n "${wireGuardDir}" ]] || return 1
-    [[ "${wireGuardDir}" == /* ]] || return 1
-    padmIsSafeAbsolutePath "${wireGuardDir%/}" || return 1
-    printf '%s\n' "${wireGuardDir%/}"
+    wireGuardDir=$(padmRequireSafeAbsolutePath "${wireGuardDir%/}") || return 1
+    printf '%s\n' "${wireGuardDir}"
 }
 
 subscriptionWireGuardStateFile() {
@@ -901,8 +899,7 @@ applySubscriptionWireGuardService() {
 
 subscriptionWireGuardNginxConfigFile() {
     local targetPath="${nginxConfigPath:-/etc/nginx/conf.d/}padm-control-wg.conf"
-    padmIsSafeAbsolutePath "${targetPath}" || return 1
-    printf '%s\n' "${targetPath}"
+    padmRequireSafeAbsolutePath "${targetPath}"
 }
 
 removeSubscriptionWireGuardNginxConfig() {

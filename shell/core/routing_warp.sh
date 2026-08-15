@@ -3,8 +3,7 @@
 warpConfigSafeDir() {
     local warpDir
     warpDir="${PADM_WARP_DIR:-/etc/padm/warp}"
-    padmIsSafeAbsolutePath "${warpDir%/}" || return 1
-    printf '%s\n' "${warpDir%/}"
+    padmRequireSafeAbsolutePath "${warpDir%/}"
 }
 
 warpRegConfigLooksValid() {
