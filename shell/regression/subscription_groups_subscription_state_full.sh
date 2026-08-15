@@ -1495,10 +1495,6 @@ JSON
     fi
 )
 
-runSubscriptionGroupSyncControlDisabledRegression() {
-    runSubscriptionGroupSyncRemoteFailureRegression control-disabled
-}
-
 runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression() (
     local syncRoot="${TMP_DIR}/subscription-group-sync-remote-before-publish-refresh"
     local syncConfigFile="${syncRoot}/xray/02_VLESS_TCP_inbounds.json"
@@ -1740,15 +1736,11 @@ JSON
     grep -qx 'success' "${resultStatus}"
 )
 
-runSubscriptionGroupSyncRollbackRegression() {
-    runSubscriptionGroupSyncRollbackSerialRegression
-}
-
 runSubscriptionGroupSyncRollbackSerialRegression() {
     runRegressionStep subscription-group-sync-apply-failure runSubscriptionGroupSyncApplyFailureRegression
     runRegressionStep subscription-group-sync-reconcile-rollback runSubscriptionGroupSyncReconcileRollbackRegression
     runRegressionStep subscription-group-sync-remote-failure runSubscriptionGroupSyncRemoteFailureRegression
-    runRegressionStep subscription-group-sync-control-disabled runSubscriptionGroupSyncControlDisabledRegression
+    runRegressionStep subscription-group-sync-control-disabled runSubscriptionGroupSyncRemoteFailureRegression control-disabled
     runRegressionStep subscription-group-sync-remote-before-publish-refresh runSubscriptionGroupSyncRemoteBeforePublishRefreshRegression
 }
 

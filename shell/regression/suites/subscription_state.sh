@@ -129,13 +129,6 @@ listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors() {
         subscription-state-remote-restore-self-reference-sync
 }
 
-listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors() {
-    printf '%s\n' \
-        subscription-state-remote-restore-self-reference \
-        subscription-state-remote-restore-state-write \
-        subscription-state-remote-restore-legacy-menu
-}
-
 listRegressionSubscriptionStateRemoteRestoreChildSelectors() {
     printf '%s\n' \
         subscription-state-remote-restore-self-reference \
@@ -307,9 +300,9 @@ registerRegressionAggregateRunnerWithArgs sequential \
 registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-remote-restore-serial \
     runFrameworkSequentialRegressionSelectorList \
-    listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors \
+    listRegressionSubscriptionStateRemoteRestoreChildSelectors \
     -- \
-    $(listRegressionSubscriptionStateRemoteRestoreSerialChildSelectors)
+    $(listRegressionSubscriptionStateRemoteRestoreChildSelectors)
 registerRegressionAggregateRunnerWithArgs sequential \
     subscription-state-support \
     runFrameworkSequentialRegressionSelectorList \
@@ -338,7 +331,7 @@ registerRegressionFunctionLeaf subscription-sync-rollback-failure runRegressionS
 registerRegressionFunctionLeaf subscription-sync-rollback-config-restore-failure runRegressionStep subscription-sync-rollback-config-restore-failure runSubscriptionSyncRollbackConfigRestoreFailureRegression
 registerRegressionFunctionLeaf subscription-sync-restore-dir-failure runRegressionStep subscription-sync-restore-dir-failure runSubscriptionSyncRollbackRestoreDirFailureRegression
 registerRegressionFunctionLeaf subscription-sync-reload-rollback runRegressionStep subscription-sync-reload-rollback runSubscriptionSyncRollbackReloadRollbackRegression
-registerRegressionFunctionLeaf subscription-group-sync-rollback runRegressionStep subscription-group-sync-rollback runSubscriptionGroupSyncRollbackRegression
+registerRegressionFunctionLeaf subscription-group-sync-rollback runRegressionStep subscription-group-sync-rollback runSubscriptionGroupSyncRollbackSerialRegression
 registerRegressionFunctionLeaf subscription-group-sync-rollback-serial runRegressionStep subscription-group-sync-rollback-serial runSubscriptionGroupSyncRollbackSerialRegression
 registerRegressionFunctionLeaf subscription-group-sync-publish-refresh-inline runSubscriptionGroupSyncPublishRefreshInlineRegression
 registerRegressionFunctionLeaf subscription-group-sync-single-config-backup runSubscriptionGroupSyncSingleConfigBackupRegression
