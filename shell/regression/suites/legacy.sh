@@ -34,9 +34,8 @@ runRegressionTargetedBatchHelpers() {
     runParallelRegressionRunners "${TMP_DIR}/targeted-batch-helpers-parallel-${BASHPID:-$$}" \
         core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression \
         core-selection-retry-action runCoreSelectionRetryActionRegression \
-        sync-configured-managed-users-helper runSyncConfiguredManagedUsersHelperRegression \
+        configured-account-helpers runConfiguredAccountHelpersRegression \
         sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression \
-        traffic-configured-accounts-helper runTrafficConfiguredAccountsHelperRegression \
         traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression \
         subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression \
         core-rollback-result-message runCoreRollbackResultMessageRegression \

@@ -16187,48 +16187,17 @@ runCoreSelectionRetryActionRegression() (
     done
 )
 
-runSyncConfiguredManagedUsersHelperRegression() (
-    local syncConfigRoot="${TMP_DIR}/sync-configured-managed-users-helper"
-    local helperLog="${syncConfigRoot}/helper.log"
-    local currentManaged
-
-    mkdir -p "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box"
-    configPath="${syncConfigRoot}/xray/"
-    singBoxConfigPath="${syncConfigRoot}/sing-box/"
-    cat >"${configPath}02_VLESS_TCP_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-main"},{"email":"admin-root"}]}}]}
-JSON
-    cat >"${singBoxConfigPath}06_hysteria2_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"name":"sub_team_b-main"},{"username":"ops"}]}]}
-JSON
-
+runConfiguredAccountHelpersRegression() (
+    local helperLog="${TMP_DIR}/configured-account-helpers.log"
+    local currentManaged accounts
     subscriptionSyncConfiguredManagedUsers() {
         printf '%s\n' "$#" >"${helperLog}"
         printf '["sub_team_a-main","sub_team_b-main"]\n'
     }
 
-    currentManaged=$(subscriptionSyncCurrentManagedUsers \
-        "${configPath}02_VLESS_TCP_inbounds.json" \
-        "${singBoxConfigPath}06_hysteria2_inbounds.json")
+    currentManaged=$(subscriptionSyncCurrentManagedUsers xray.json sing-box.json)
     jq -e '. == ["sub_team_a-main","sub_team_b-main"]' <<<"${currentManaged}" >/dev/null
-    [[ -f "${helperLog}" ]] || return 1
     grep -qx '2' "${helperLog}" || return 1
-)
-
-runTrafficConfiguredAccountsHelperRegression() (
-    local trafficRoot="${TMP_DIR}/traffic-configured-accounts-helper"
-    local helperLog="${trafficRoot}/helper.log"
-    local accounts
-
-    mkdir -p "${trafficRoot}/xray" "${trafficRoot}/sing-box"
-    configPath="${trafficRoot}/xray/"
-    singBoxConfigPath="${trafficRoot}/sing-box/"
-    cat >"${configPath}01_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{"clients":[{"email":"sub_team_a-vless"},{"email":"admin-root"}]}}]}
-JSON
-    cat >"${singBoxConfigPath}02_inbounds.json" <<'JSON'
-{"inbounds":[{"users":[{"name":"sub_team_b-hysteria2"},{"username":"ops"}]}]}
-JSON
 
     subscriptionSyncConfiguredAccountNamesJson() {
         printf '%s\n' "$#" >"${helperLog}"
@@ -16237,7 +16206,6 @@ JSON
 
     accounts=$(collectLocalTrafficAccounts)
     jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
-    [[ -f "${helperLog}" ]] || return 1
     grep -qx '0' "${helperLog}" || return 1
 )
 
