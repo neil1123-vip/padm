@@ -343,22 +343,19 @@ fail2banServiceStateText() {
     fi
 }
 
-fail2banEnsurePadmControlLogPath() {
+fail2banEnsureLogPath() {
     local logFile logDir
-    logFile=$(fail2banPadmControlLogFile)
+    logFile=$("$1")
     logDir=$(dirname -- "${logFile}")
     mkdir -p "${logDir}" || return 1
     touch "${logFile}" || return 1
     chmod 644 "${logFile}" 2>/dev/null || true
 }
 
+fail2banEnsurePadmControlLogPath() { fail2banEnsureLogPath fail2banPadmControlLogFile; }
+
 fail2banEnsureNginxAccessLogPath() {
-    local logFile logDir
-    logFile=$(fail2banNginxAccessLogFile)
-    logDir=$(dirname -- "${logFile}")
-    mkdir -p "${logDir}" || return 1
-    touch "${logFile}" || return 1
-    chmod 644 "${logFile}" 2>/dev/null || true
+    fail2banEnsureLogPath fail2banNginxAccessLogFile
 }
 
 fail2banWriteManagedFilter() {

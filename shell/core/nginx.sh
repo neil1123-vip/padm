@@ -347,19 +347,13 @@ realityStreamInternalPortForProtocol() {
 }
 
 realityStreamPatchXrayConfig() {
-    local protocol=$1
     local internalPort=$2
     local configFile=$3
     local tmpFile
     [[ -f "${configFile}" ]] || return 0
     padmCreateTempFileForTarget tmpFile "${configFile}" reality || return 1
 
-    local filter
-    if [[ "${protocol}" == "vision" ]]; then
-        filter='.inbounds[0].listen = "127.0.0.1" | .inbounds[0].port = ($port | tonumber)'
-    else
-        filter='.inbounds[0].listen = "127.0.0.1" | .inbounds[0].port = ($port | tonumber)'
-    fi
+    local filter='.inbounds[0].listen = "127.0.0.1" | .inbounds[0].port = ($port | tonumber)'
     if ! jq --arg port "${internalPort}" "${filter}" "${configFile}" >"${tmpFile}"; then
         padmRemoveCleanupPath "${tmpFile}"
         return 1
