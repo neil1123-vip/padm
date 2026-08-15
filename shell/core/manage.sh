@@ -68,17 +68,22 @@ vlessEncryptionStateSummary() {
     fi
 }
 
-refreshVlessEncryptionSubscriptions() {
+refreshProtocolSubscriptions() {
+    local label=$1 publicSuccess=$2 localSuccess=$3
     readNginxSubscribe
     if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
         if ! refreshPublishedSubscriptions >/dev/null; then
-            errorCard "刷新 VLESS Encryption 公网订阅失败"
+            errorCard "刷新 ${label} 公网订阅失败"
             return 1
         fi
-        successCard "已刷新公网订阅；default/Mihomo 已写入 encryption，sing-box 因上游不支持仍省略"
+        successCard "${publicSuccess}"
     else
-        refreshLocalSubscriptions "VLESS Encryption" "已刷新本地订阅；default/Mihomo 已写入 encryption，sing-box 因上游不支持仍省略" || return 1
+        refreshLocalSubscriptions "${label}" "${localSuccess}"
     fi
+}
+
+refreshVlessEncryptionSubscriptions() {
+    refreshProtocolSubscriptions "VLESS Encryption" "已刷新公网订阅；default/Mihomo 已写入 encryption，sing-box 因上游不支持仍省略" "已刷新本地订阅；default/Mihomo 已写入 encryption，sing-box 因上游不支持仍省略"
 }
 
 restoreLocalSubscribeOutputs() {
@@ -3038,16 +3043,7 @@ xhttpSettingsSummary() {
 }
 
 refreshXHTTPSubscriptions() {
-    readNginxSubscribe
-    if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        if ! refreshPublishedSubscriptions >/dev/null; then
-            errorCard "刷新 XHTTP 公网订阅失败"
-            return 1
-        fi
-        successCard "已刷新公网订阅"
-    else
-        refreshLocalSubscriptions "XHTTP" "已刷新本地订阅" || return 1
-    fi
+    refreshProtocolSubscriptions XHTTP "已刷新公网订阅" "已刷新本地订阅"
 }
 
 configTransactionCommit() {
@@ -3143,18 +3139,22 @@ commitXHTTPConfigUpdate() {
     configTransactionCommit "${configFile}" "${stagedFile}" "${backupFile}" validateXHTTPConfigUpdate "XHTTP 配置校验失败" "已回滚本次 XHTTP 修改；排查日志：$(xhttpConfigTestLog)" "${successMessage}" refreshXHTTPSubscriptions
 }
 
-applyXHTTPConfigUpdate() {
-    local jqFilter=$1
-    local successMessage=$2
-    local configFile stagedFile
-    configFile=$(manageXHTTPConfigFile)
-    padmCreateTempFileForTarget stagedFile "${configFile}" xhttp || { errorCard "写入 XHTTP 配置失败，已取消"; return 1; }
+applyManagedJsonConfigUpdate() {
+    local configFile=$1 stageTag=$2 errorMessage=$3 commitFn=$4 jqFilter=$5 successMessage=$6
+    local stagedFile
+    padmCreateTempFileForTarget stagedFile "${configFile}" "${stageTag}" || { errorCard "${errorMessage}"; return 1; }
     if ! jq "${jqFilter}" "${configFile}" >"${stagedFile}"; then
-        errorCard "写入 XHTTP 配置失败，已取消"
+        errorCard "${errorMessage}"
         padmRemoveCleanupPath "${stagedFile}"
         return 1
     fi
-    commitXHTTPConfigUpdate "${stagedFile}" "${successMessage}"
+    "${commitFn}" "${stagedFile}" "${successMessage}"
+}
+
+applyXHTTPConfigUpdate() {
+    local configFile
+    configFile=$(manageXHTTPConfigFile) || return 1
+    applyManagedJsonConfigUpdate "${configFile}" xhttp "写入 XHTTP 配置失败，已取消" commitXHTTPConfigUpdate "$@"
 }
 
 setXHTTPMode() {
@@ -3600,16 +3600,7 @@ tuicSettingsSummary() {
 }
 
 refreshTuicSubscriptions() {
-    readNginxSubscribe
-    if [[ -n "${subscribePort}" || -f "${nginxConfigPath}subscribe.conf" ]]; then
-        if ! refreshPublishedSubscriptions >/dev/null; then
-            errorCard "刷新 Tuic 公网订阅失败"
-            return 1
-        fi
-        successCard "已刷新公网订阅"
-    else
-        refreshLocalSubscriptions "Tuic" "已刷新本地订阅" || return 1
-    fi
+    refreshProtocolSubscriptions Tuic "已刷新公网订阅" "已刷新本地订阅"
 }
 
 validateTuicConfigUpdate() {
@@ -3637,17 +3628,9 @@ commitTuicConfigUpdate() {
 }
 
 applyTuicConfigUpdate() {
-    local jqFilter=$1
-    local successMessage=$2
-    local configFile stagedFile
-    configFile=$(tuicConfigFile)
-    padmCreateTempFileForTarget stagedFile "${configFile}" tuic || { errorCard "写入 Tuic 配置失败，已取消"; return 1; }
-    if ! jq "${jqFilter}" "${configFile}" >"${stagedFile}"; then
-        errorCard "写入 Tuic 配置失败，已取消"
-        padmRemoveCleanupPath "${stagedFile}"
-        return 1
-    fi
-    commitTuicConfigUpdate "${stagedFile}" "${successMessage}"
+    local configFile
+    configFile=$(tuicConfigFile) || return 1
+    applyManagedJsonConfigUpdate "${configFile}" tuic "写入 Tuic 配置失败，已取消" commitTuicConfigUpdate "$@"
 }
 
 setTuicCongestionControl() {
