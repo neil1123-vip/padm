@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 
-REGRESSION_TRANSACTION_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_TRANSACTION_SUITE_DIR}/../framework/runtime.sh"
-PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_TRANSACTION_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
-
-runRegressionTransactionLegacyLeafWithCompat() (
-    source "${REGRESSION_TRANSACTION_SUITE_DIR}/../legacy_context.sh"
-    "$@"
-)
-
 listRegressionTransactionChildSelectors() {
     printf '%s\n' \
         transaction-core \
@@ -165,17 +155,6 @@ runRegressionTransactionSystemSuiteRoot() {
         runFrameworkParallelRegressionSelectorList "${TMP_DIR}/transaction-system-parallel-${BASHPID:-$$}" \
         listRegressionTransactionSystemChildSelectors
 }
-
-runRegressionTransactionLegacyTmpDirIsolationRegression() (
-    set -euo pipefail
-    local originalTmpDir="${TMP_DIR}"
-
-    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
-    source "${REGRESSION_TRANSACTION_SUITE_DIR}/../bootstrap.sh"
-    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscribe-user-output-transaction
-)
 
 runRegressionTransactionCoreParallelCompositionRegression() (
     set -euo pipefail
@@ -349,16 +328,15 @@ registerRegressionFunctionLeaf reload-core-propagation runReloadCorePropagationR
 
 registerRegressionFunctionLeaf regression-transaction-core-parallel-composition runRegressionTransactionCoreParallelCompositionRegression
 registerRegressionFunctionLeaf regression-transaction-system-parallel-composition runRegressionTransactionSystemParallelCompositionRegression
-registerRegressionFunctionLeaf regression-transaction-legacy-tmpdir-isolation runRegressionTransactionLegacyTmpDirIsolationRegression
-registerRegressionFunctionLeaf cdn-address-write-transaction runRegressionTransactionLegacyLeafWithCompat runCdnAddressTransactionRegression
-registerRegressionFunctionLeaf subscribe-server-name runRegressionTransactionLegacyLeafWithCompat runSubscribeServerNameRegression
-registerRegressionFunctionLeaf subscribe-nginx-config-write runRegressionTransactionLegacyLeafWithCompat runSubscribeNginxConfigWriteRegression
-registerRegressionFunctionLeaf subscribe-nginx-service-failure runRegressionTransactionLegacyLeafWithCompat runSubscribeNginxServiceFailureRegression
-registerRegressionFunctionLeaf subscribe-salt-write-transaction runRegressionTransactionLegacyLeafWithCompat runSubscribeSaltWriteTransactionRegression
-registerRegressionFunctionLeaf subscribe-user-output-transaction runRegressionTransactionLegacyLeafWithCompat runSubscribeUserOutputTransactionRegression
-registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRegressionTransactionLegacyLeafWithCompat runRemoveUserSubscriptionMenuFailureRegression
-registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runRegressionTransactionLegacyLeafWithCompat runUserSubscriptionMenuMutationFailureRegression
-registerRegressionFunctionLeaf remote-subscribe-snapshots runRegressionTransactionLegacyLeafWithCompat runRemoteSubscribeSnapshotRegression
+registerRegressionFunctionLeaf cdn-address-write-transaction runCdnAddressTransactionRegression
+registerRegressionFunctionLeaf subscribe-server-name runSubscribeServerNameRegression
+registerRegressionFunctionLeaf subscribe-nginx-config-write runSubscribeNginxConfigWriteRegression
+registerRegressionFunctionLeaf subscribe-nginx-service-failure runSubscribeNginxServiceFailureRegression
+registerRegressionFunctionLeaf subscribe-salt-write-transaction runSubscribeSaltWriteTransactionRegression
+registerRegressionFunctionLeaf subscribe-user-output-transaction runSubscribeUserOutputTransactionRegression
+registerRegressionFunctionLeaf remove-user-subscription-menu-failure runRemoveUserSubscriptionMenuFailureRegression
+registerRegressionFunctionLeaf user-subscription-menu-mutation-failure runUserSubscriptionMenuMutationFailureRegression
+registerRegressionFunctionLeaf remote-subscribe-snapshots runRemoteSubscribeSnapshotRegression
 registerRegressionFunctionLeaf nginx-service-failure runNginxServiceFailureRegression
 registerRegressionFunctionLeaf nginx-service-refresh runNginxServiceRefreshRegression
 registerRegressionFunctionLeaf uninstall-nginx-cleanup runUninstallNginxCleanupRegression

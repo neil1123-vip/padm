@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
 
-REGRESSION_REMOTE_CONTROL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../framework/runtime.sh"
-PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
-
-runRegressionRemoteControlLegacyLeafWithCompat() (
-    # Re-source legacy remote-control fixtures in an isolated subshell so later
-    # suite loads cannot leave source-time TMP_DIR-derived paths stale.
-    PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../subscription_groups_remote_control.sh"
-    "$@"
-)
-
 listRegressionRemoteControlSmokeRefreshApplyChildSelectors() {
     printf '%s\n' \
         remote-control-smoke-refresh-apply-basic \
@@ -79,17 +67,6 @@ JSON
     cmp -s "${beforeFile}" "${afterFile}"
 )
 
-runRegressionRemoteControlLegacyTmpDirIsolationRegression() (
-    set -euo pipefail
-    local originalTmpDir="${TMP_DIR}"
-
-    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
-    source "${REGRESSION_REMOTE_CONTROL_SUITE_DIR}/../bootstrap.sh"
-    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain remote-control-contract-server-response
-)
-
 registerRegressionFunctionLeaf remote-control-concurrency runRemoteControlConcurrencyRegression
 registerRegressionFunctionLeaf remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
 registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
@@ -111,10 +88,9 @@ registerRegressionFunctionLeaf remote-control-contract-service-install-systemctl
 registerRegressionFunctionLeaf remote-control-contract-service-install-health-fail runRegressionStep remote-control-service-install-health-fail runSubscriptionControlServiceInstallHealthFailRegression
 registerRegressionFunctionLeaf remote-control-contract-service-install-health-rollback runRegressionStep remote-control-service-install-health-rollback runSubscriptionControlServiceInstallHealthRollbackRegression
 registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionStep remote-control-service-install-token-transaction runSubscriptionControlTokenTransactionRegression
-registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionRemoteControlLegacyLeafWithCompat runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
-registerRegressionFunctionLeaf remote-control-deep runRegressionRemoteControlLegacyLeafWithCompat runRegressionStep remote-control-server-refresh-deep runRemoteControlServerRefreshDeepRegression
+registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
+registerRegressionFunctionLeaf remote-control-deep runRegressionStep remote-control-server-refresh-deep runRemoteControlServerRefreshDeepRegression
 registerRegressionFunctionLeaf regression-remote-control-deep-state-rollback-stability runRegressionRemoteControlDeepStateRollbackStabilityRegression
-registerRegressionFunctionLeaf regression-remote-control-legacy-tmpdir-isolation runRegressionRemoteControlLegacyTmpDirIsolationRegression
 
 listRegressionRemoteControlChildSelectors() {
     printf '%s\n' \

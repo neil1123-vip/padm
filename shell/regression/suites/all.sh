@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-REGRESSION_ALL_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_ALL_SUITE_DIR}/../framework/runtime.sh"
-
 listRegressionAllParallelChildSelectors() {
     printf '%s\n' \
         subscription \

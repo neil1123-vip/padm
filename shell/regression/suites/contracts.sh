@@ -311,6 +311,66 @@ runFrameworkParallelSelectorListWithJobsContract() (
     [[ "$(wc -l <"${callLog}")" -eq 3 ]]
 )
 
+runRegressionTargetedBatchHelpers() {
+    runParallelRegressionRunners "${TMP_DIR}/targeted-batch-helpers-parallel-${BASHPID:-$$}" \
+        core-invalid-input-retry-menu runCoreInvalidInputRetryMenuRegression \
+        core-selection-retry-action runCoreSelectionRetryActionRegression \
+        configured-account-helpers runConfiguredAccountHelpersRegression \
+        sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression \
+        traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression \
+        subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression \
+        core-rollback-result-message runCoreRollbackResultMessageRegression \
+        config-transaction runConfigTransactionRegression \
+        padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression \
+        alone-nginx-backup-manual-check runNginxBackupManualCheckRegression
+}
+
+runRegressionCaseLoaderContract() (
+    set -euo pipefail
+    local entry="${PROJECT_ROOT}/shell/subscription_groups_regression.sh"
+    local casesDir="${PROJECT_ROOT}/shell/regression/cases"
+    local load="${casesDir}/load.sh"
+    local sourceLog="${TMP_DIR}/regression-case-loader-top-level-source.log"
+    local compatibilityPattern='LegacyLeafWith''Compat|FastLeafWith''Compat|PADM_REGRESSION_LEGACY_FIXTURES_''LOADED|--re''use([[:space:]]|$)'
+    local suiteFile caseFile selector runner runnerArgs
+    local -a expectedCases=(
+        shared fast protocol_capabilities platform routing runtime reality tls ui subscription
+        transaction_core transaction_subscription transaction_system remote_control subscription_state
+    )
+    local -a casePaths=()
+    local -a runnerArgv=()
+
+    [[ "$(grep -Fxc 'source "${SCRIPT_DIR}/regression/cases/load.sh"' "${entry}")" -eq 1 ]] || return 1
+    ! grep -Eq 'source .*regression/cases/(shared|fast|protocol_capabilities|platform|routing|runtime|reality|tls|ui|subscription|transaction_core|transaction_subscription|transaction_system|remote_control|subscription_state)[.]sh' "${entry}" || return 1
+    [[ "$(grep -Ec '^source "\$\{REGRESSION_CASES_DIR\}/[^/]+[.]sh"$' "${load}")" -eq "${#expectedCases[@]}" ]] || return 1
+    for caseFile in "${expectedCases[@]}"; do
+        [[ "$(grep -Fxc "source \"\${REGRESSION_CASES_DIR}/${caseFile}.sh\"" "${load}")" -eq 1 ]] || return 1
+        casePaths+=("${casesDir}/${caseFile}.sh")
+    done
+    : >"${sourceLog}"
+    runRegressionCaseLoadBoundaryProbe \
+        "${PROJECT_ROOT}" "${sourceLog}" "${casePaths[@]}" || return 1
+    [[ ! -s "${sourceLog}" ]] || return 1
+    for suiteFile in "${PROJECT_ROOT}"/shell/regression/suites/*.sh; do
+        ! grep -Eq '^[[:space:]]*(PADM_REGRESSION_SOURCE_ONLY=1[[:space:]]+)?source[[:space:]]' "${suiteFile}" || return 1
+    done
+    ! grep -R -E -- "${compatibilityPattern}" \
+        "${PROJECT_ROOT}/shell/regression" "${entry}" || return 1
+
+    validateRegressionRegistry || return 1
+    for selector in "${PADM_REGRESSION_REGISTERED_SELECTORS[@]}"; do
+        [[ "${PADM_REGRESSION_SELECTOR_KIND[${selector}]}" == function ]] || continue
+        runner=${PADM_REGRESSION_SELECTOR_RUNNER[${selector}]}
+        declare -F "${runner}" >/dev/null || return 1
+        [[ "${runner}" == runRegressionStep ]] || continue
+        runnerArgs=${PADM_REGRESSION_SELECTOR_RUNNER_ARGS[${selector}]:-}
+        runnerArgv=()
+        mapfile -t runnerArgv <<<"${runnerArgs}"
+        [[ "${#runnerArgv[@]}" -ge 2 ]] || return 1
+        declare -F "${runnerArgv[1]}" >/dev/null || return 1
+    done
+)
+
 runRegressionDispatcherContracts() {
     runRegressionStep registry-runner-args runRegressionRegistryRunnerArgsContract
     runRegressionStep selector-dispatch-composition runRegressionSelectorDispatchCompositionRegression
@@ -327,3 +387,5 @@ registerRegressionFunctionLeaf regression-selector-dispatch-composition runRegre
 registerRegressionFunctionLeaf regression-parallel-selector-limit-composition runRegressionParallelSelectorLimitCompositionRegression
 registerRegressionFunctionLeaf regression-parallel-selector-slot-refill-composition runRegressionParallelSelectorSlotRefillCompositionRegression
 registerRegressionFunctionLeaf framework-parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract
+registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers
+registerRegressionFunctionLeaf regression-case-loader-contract runRegressionCaseLoaderContract

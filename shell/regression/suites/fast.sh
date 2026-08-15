@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-REGRESSION_FAST_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_FAST_SUITE_DIR}/../subscription_groups_fast.sh"
-
 listRegressionFastOnlyOutputChildSelectors() {
     printf '%s\n' \
         fast-only-output-auto-install \

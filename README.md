@@ -161,7 +161,7 @@ padm 不是单个超长 Bash 文件，而是“自刷新入口 + 分模块运行
 | `install.sh` | 🚪 仓库入口；负责自刷新、参数解析、正式子命令分发和首次模块补齐。 |
 | `shell/core/` | ⚙️ 平台检测、运行时 helper、协议模板、Reality/TLS/路由/服务/菜单等核心逻辑。 |
 | `shell/subscription/` | 🔗 订阅发布、订阅组状态、用户账号、WireGuard 控制面、远程同步和流量统计。 |
-| `shell/regression/` | 🧪 selector-based suites、framework helper、contract / composition 回归。 |
+| `shell/regression/` | 🧪 `framework/` 提供环境、runner 和 registry，`cases/` 单次加载 fixture、stub 与测试函数，`suites/` 只注册 selector、分组和组合。 |
 | `shell/subscription_groups_regression.sh` | 🧪 唯一公开回归分发入口；统一分发 suite、aggregate、contract 和 composition selector。 |
 | `shell/validate_install.sh` | ✅ 安装后的只读验收脚本。 |
 | `documents/` | 📚 示例配置和英文 README。 |
@@ -462,6 +462,7 @@ bash shell/validate_install.sh --online example.com
 
 ```bash
 bash shell/subscription_groups_regression.sh fast
+bash shell/subscription_groups_regression.sh protocol-capabilities
 bash shell/subscription_groups_regression.sh platform-hot
 bash shell/subscription_groups_regression.sh subscription-output
 bash shell/subscription_groups_regression.sh transaction-core
@@ -493,6 +494,7 @@ bash shell/subscription_groups_regression.sh nginx-service-refresh
 
 ```bash
 bash shell/subscription_groups_regression.sh regression-dispatcher-contract
+bash shell/subscription_groups_regression.sh regression-case-loader-contract
 bash shell/subscription_groups_regression.sh regression-all-composition
 bash shell/subscription_groups_regression.sh regression-all-child-parallel-budget-composition
 bash shell/subscription_groups_regression.sh regression-all-resource-layer-composition
@@ -506,9 +508,10 @@ bash shell/subscription_groups_regression.sh regression-all-resource-layer-compo
 | --- | --- | --- |
 | suite / aggregate selector | `bash shell/subscription_groups_regression.sh fast` | 统一分发 `fast`、`all`、`platform-hot`、`platform-io`、`subscription-output`、`transaction-core`、`remote-control` 及其 `smoke` / `contract` / `deep` 分层 selector、`subscription-state*` 等 suite / aggregate selector。 |
 | contract / composition selector | `bash shell/subscription_groups_regression.sh regression-dispatcher-contract` | 验证 registry 参数传递、selector 组合、并发限流与补位、中断清理、异常子进程回收及 aggregate exactly-once。 |
+| 协议能力 selector | `bash shell/subscription_groups_regression.sh protocol-capabilities` | 通过统一 dispatcher 运行协议能力回归；`shell/regression/protocol_capabilities.sh` 仅作为保留原成功标记的兼容转发入口。 |
 | 所有公开 selector | `bash shell/subscription_groups_regression.sh <selector>` | 所有公开回归入口都走同一个 dispatcher。 |
 
-历史分组脚本现在只作为内部 runner / source-only 复用层，不再作为公开命令面。
+主入口按 `framework/`、`cases/load.sh`、`suites/` 的固定顺序装配回归；case 只加载一次，不再保留历史 source-only 分组层。
 
 ## 许可证
 

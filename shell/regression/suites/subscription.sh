@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 
-REGRESSION_SUBSCRIPTION_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../framework/runtime.sh"
-PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
-
-runRegressionSubscriptionLegacyLeafWithCompat() (
-    source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../legacy_context.sh"
-    "$@"
-)
-
 listRegressionSubscriptionOutputChildSelectors() {
     printf '%s\n' \
         subscription-output-profile-and-reality \
@@ -103,9 +93,6 @@ runRegressionSubscriptionOutputParallelCompositionRegression() (
         printf '%s-finish\n' "${selector}" >>"${callLog}"
     }
 
-    runRegressionSubscriptionLegacyLeafWithCompat() {
-        "$@"
-    }
     runRemoteSubscribeSourcesAvoidReverseDecodeRegression() {
         printf 'subscription-remote-sources-no-reverse-decode-finish\n' >>"${callLog}"
     }
@@ -157,17 +144,6 @@ runRegressionSubscriptionTxParallelCompositionRegression() {
         subscribe-user-output-transaction listRegressionSubscriptionTxChildSelectors
 }
 
-runRegressionSubscriptionLegacyTmpDirIsolationRegression() (
-    set -euo pipefail
-    local originalTmpDir="${TMP_DIR}"
-
-    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
-    source "${REGRESSION_SUBSCRIPTION_SUITE_DIR}/../bootstrap.sh"
-    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain sing-box-subscribe-write
-)
-
 runRegressionSubscriptionParallelCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-subscription-parallel-composition.log"
@@ -214,12 +190,12 @@ runRegressionSubscriptionParallelCompositionRegression() (
     ' "${callLog}"
 )
 
-registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionLegacyLeafWithCompat runRegressionSubscriptionOutput
-registerRegressionFunctionLeaf subscription-output-profile-and-reality runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputProfileAndRealityRegression
-registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputPublishAccountsAndRemoteHintRegression
-registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsVlessVmessTrojanRegression
-registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runRegressionSubscriptionLegacyLeafWithCompat runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
-registerRegressionFunctionLeaf sing-box-subscribe-write runRegressionSubscriptionLegacyLeafWithCompat runSingBoxSubscribeWriteRegression
+registerRegressionFunctionLeaf subscription-output runRegressionSubscriptionOutput
+registerRegressionFunctionLeaf subscription-output-profile-and-reality runSubscriptionOutputProfileAndRealityRegression
+registerRegressionFunctionLeaf subscription-output-publish-accounts-and-remote-hint runSubscriptionOutputPublishAccountsAndRemoteHintRegression
+registerRegressionFunctionLeaf subscription-output-tls-vless-vmess-trojan runSubscriptionOutputTlsVlessVmessTrojanRegression
+registerRegressionFunctionLeaf subscription-output-tls-any-hysteria-tuic-naive runSubscriptionOutputTlsAnyHysteriaTuicNaiveRegression
+registerRegressionFunctionLeaf sing-box-subscribe-write runSingBoxSubscribeWriteRegression
 registerRegressionFunctionLeaf subscribe-local-output-transaction runSubscribeLocalOutputTransactionRegression
 registerRegressionFunctionLeaf sing-box-port-failure runSingBoxPortFailureRegression
 registerRegressionFunctionLeaf subscribe-local-rollback runSubscribeLocalRollbackRegression
@@ -229,7 +205,6 @@ registerRegressionFunctionLeaf subscribe-return-failure runSubscribeReturnFailur
 registerRegressionFunctionLeaf regression-subscription-parallel-composition runRegressionSubscriptionParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-output-parallel-composition runRegressionSubscriptionOutputParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
-registerRegressionFunctionLeaf regression-subscription-legacy-tmpdir-isolation runRegressionSubscriptionLegacyTmpDirIsolationRegression
 
 registerRegressionParallelSelectorList subscription-tx runSubscriptionSelectorListRegression \
     subscription-tx-parallel listRegressionSubscriptionTxChildSelectors

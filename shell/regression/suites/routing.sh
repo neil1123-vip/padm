@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-REGRESSION_ROUTING_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_ROUTING_SUITE_DIR}/../framework/runtime.sh"
-PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_ROUTING_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
-
 listRegressionRoutingCoreChildSelectors() {
     printf '%s\n' \
         routing-core
@@ -37,37 +32,6 @@ listRegressionRoutingChildSelectors() {
     listRegressionRoutingCoreChildSelectors
     listRegressionRoutingHeavyChildSelectors
     listRegressionRoutingLightChildSelectors
-}
-
-runRegressionRoutingLegacyLeafWithCompat() (
-    source "${REGRESSION_ROUTING_SUITE_DIR}/../legacy_context.sh"
-    "$@"
-)
-
-runRegressionRoutingLegacyReadInstallTypeIsolationRegression() (
-    set -euo pipefail
-
-    readInstallType() {
-        coreInstallType=
-        configPath=
-        singBoxConfigPath=
-    }
-
-    runRegressionRoutingLegacyLeafWithCompat runRegressionRoutingLegacyReadInstallTypeIsolationProbe
-)
-
-runRegressionRoutingLegacyReadInstallTypeIsolationProbe() {
-    local configPath="${TMP_DIR}/routing-legacy-read-install-type/"
-    mkdir -p "${configPath}"
-    coreInstallType=1
-    cat >"${configPath}02_sniffing_inbounds.json" <<'JSON'
-{"inbounds":[{"settings":{}}]}
-JSON
-    installSniffing
-    jq -e '
-      .inbounds[0].sniffing.enabled == true and
-      (.inbounds[0].sniffing.destOverride | sort) == ["http", "quic", "tls"]
-    ' "${configPath}02_sniffing_inbounds.json" >/dev/null
 }
 
 runRegressionRoutingSuiteRoot() {
@@ -165,24 +129,23 @@ runRegressionRoutingParallelCompositionRegression() (
     ' "${callLog}"
 )
 
-registerRegressionFunctionLeaf routing-socks5-udp-associate runRegressionRoutingLegacyLeafWithCompat runSocks5UdpAssociateRegression
-registerRegressionFunctionLeaf routing-core runRegressionRoutingLegacyLeafWithCompat runRoutingRegression
-registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runRoutingCoreRejectsUnsafeConfigDirRegression
-registerRegressionFunctionLeaf routing-access-control-config-transaction runRegressionRoutingLegacyLeafWithCompat runAccessControlConfigTransactionRegression
-registerRegressionFunctionLeaf routing-access-control-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeBackupDirRegression
-registerRegressionFunctionLeaf routing-access-control-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runAccessControlRejectsUnsafeConfigDirRegression
-registerRegressionFunctionLeaf routing-access-control-failure-return runRegressionRoutingLegacyLeafWithCompat runAccessControlFailureReturnRegression
-registerRegressionFunctionLeaf routing-bt-failure-return runRegressionRoutingLegacyLeafWithCompat runBTRoutingFailureReturnRegression
-registerRegressionFunctionLeaf routing-ipv6-failure-return runRegressionRoutingLegacyLeafWithCompat runIPv6RoutingFailureReturnRegression
-registerRegressionFunctionLeaf routing-warp-failure-return runRegressionRoutingLegacyLeafWithCompat runWARPRoutingFailureReturnRegression
-registerRegressionFunctionLeaf routing-socks5-failure-return runRegressionRoutingLegacyLeafWithCompat runSocks5RoutingFailureReturnRegression
-registerRegressionFunctionLeaf routing-dns-failure-return runRegressionRoutingLegacyLeafWithCompat runDNSRoutingFailureReturnRegression
-registerRegressionFunctionLeaf routing-dns-unsafe-backup-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeBackupDirRegression
-registerRegressionFunctionLeaf routing-dns-unsafe-config-dir runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRejectsUnsafeConfigDirRegression
-registerRegressionFunctionLeaf routing-dns-restore-scope runRegressionRoutingLegacyLeafWithCompat runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
-registerRegressionFunctionLeaf routing-port-panel runRegressionRoutingLegacyLeafWithCompat runPortAndPanelHelperRegression
+registerRegressionFunctionLeaf routing-socks5-udp-associate runSocks5UdpAssociateRegression
+registerRegressionFunctionLeaf routing-core runRoutingRegression
+registerRegressionFunctionLeaf routing-core-unsafe-config-dir runRoutingCoreRejectsUnsafeConfigDirRegression
+registerRegressionFunctionLeaf routing-access-control-config-transaction runAccessControlConfigTransactionRegression
+registerRegressionFunctionLeaf routing-access-control-unsafe-backup-dir runAccessControlRejectsUnsafeBackupDirRegression
+registerRegressionFunctionLeaf routing-access-control-unsafe-config-dir runAccessControlRejectsUnsafeConfigDirRegression
+registerRegressionFunctionLeaf routing-access-control-failure-return runAccessControlFailureReturnRegression
+registerRegressionFunctionLeaf routing-bt-failure-return runBTRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-ipv6-failure-return runIPv6RoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-warp-failure-return runWARPRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-socks5-failure-return runSocks5RoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-dns-failure-return runDNSRoutingFailureReturnRegression
+registerRegressionFunctionLeaf routing-dns-unsafe-backup-dir runDNSRoutingRejectsUnsafeBackupDirRegression
+registerRegressionFunctionLeaf routing-dns-unsafe-config-dir runDNSRoutingRejectsUnsafeConfigDirRegression
+registerRegressionFunctionLeaf routing-dns-restore-scope runDNSRoutingRestoreKeepsUnmanagedSingBoxFilesRegression
+registerRegressionFunctionLeaf routing-port-panel runPortAndPanelHelperRegression
 registerRegressionFunctionLeaf regression-routing-parallel-composition runRegressionRoutingParallelCompositionRegression
-registerRegressionFunctionLeaf regression-routing-legacy-read-install-type-isolation runRegressionRoutingLegacyReadInstallTypeIsolationRegression
 
 registerRegressionAggregateRunner parallel routing runRegressionRoutingSuiteRoot \
     $(listRegressionRoutingChildSelectors)

@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 
-REGRESSION_UI_SUITE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_UI_SUITE_DIR}/../framework/runtime.sh"
-PADM_REGRESSION_SOURCE_ONLY=1 source "${REGRESSION_UI_SUITE_DIR}/../subscription_groups_legacy.sh" --reuse
-
-runRegressionUiLegacyLeafWithCompat() (
-    source "${REGRESSION_UI_SUITE_DIR}/../legacy_context.sh"
-    "$@"
-)
-
 runRegressionUiSmokeSuiteRoot() {
     local actions=
     local output=
@@ -360,42 +350,30 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ' "${callLog}"
 )
 
-runRegressionUiLegacyTmpDirIsolationRegression() (
-    set -euo pipefail
-    local originalTmpDir="${TMP_DIR}"
-
-    # Simulate later suite loads re-sourcing bootstrap and drifting TMP_DIR.
-    source "${REGRESSION_UI_SUITE_DIR}/../bootstrap.sh"
-    [[ "${TMP_DIR}" != "${originalTmpDir}" ]]
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain ui-full-subscription-main-entry
-)
-
 registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
-registerRegressionFunctionLeaf ui-full-core runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression core
-registerRegressionFunctionLeaf ui-full-subscription-main-entry runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-entry
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-service runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-publish-service
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-empty runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-publish-user-empty
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-create runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-publish-user-create
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-inspect runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-publish-user-inspect
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-skip runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-publish-sync-skip
-registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-enable runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-publish-sync-enable
-registerRegressionFunctionLeaf ui-full-subscription-main-maintenance runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-main-maintenance
-registerRegressionFunctionLeaf ui-full-subscription-controlled runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression subscription-controlled
-registerRegressionFunctionLeaf ui-full-core-maintenance runRegressionUiLegacyLeafWithCompat runMenuSmokeRegression core-maintenance
-registerRegressionFunctionLeaf wireguard-menu-flow-bootstrap runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowBootstrapRegression
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-add-update runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-add-update
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-service runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-service
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-restore runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-restore
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-source runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-rollback-source
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-write runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-write
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-groups-restore runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-groups-restore
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-toggle runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-source-control-toggle
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-clear-error runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-source-control-clear-error
-registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-status runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression peer-source-control-status
-registerRegressionFunctionLeaf wireguard-menu-flow-control-restore runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression control-restore
-registerRegressionFunctionLeaf wireguard-restore-runner runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardRestoreRunnerRegression
-registerRegressionFunctionLeaf regression-ui-legacy-tmpdir-isolation runRegressionUiLegacyTmpDirIsolationRegression
+registerRegressionFunctionLeaf ui-full-core runMenuSmokeRegression core
+registerRegressionFunctionLeaf ui-full-subscription-main-entry runMenuSmokeRegression subscription-main-entry
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-service runMenuSmokeRegression subscription-main-publish-service
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-empty runMenuSmokeRegression subscription-main-publish-user-empty
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-create runMenuSmokeRegression subscription-main-publish-user-create
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-user-inspect runMenuSmokeRegression subscription-main-publish-user-inspect
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-skip runMenuSmokeRegression subscription-main-publish-sync-skip
+registerRegressionFunctionLeaf ui-full-subscription-main-publish-sync-enable runMenuSmokeRegression subscription-main-publish-sync-enable
+registerRegressionFunctionLeaf ui-full-subscription-main-maintenance runMenuSmokeRegression subscription-main-maintenance
+registerRegressionFunctionLeaf ui-full-subscription-controlled runMenuSmokeRegression subscription-controlled
+registerRegressionFunctionLeaf ui-full-core-maintenance runMenuSmokeRegression core-maintenance
+registerRegressionFunctionLeaf wireguard-menu-flow-bootstrap runSubscriptionWireGuardMenuFlowBootstrapRegression
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-add-update runSubscriptionWireGuardMenuFlowRegression peer-add-update
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-service runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-service
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-apply-restore runSubscriptionWireGuardMenuFlowRegression peer-rollback-apply-restore
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-source runSubscriptionWireGuardMenuFlowRegression peer-rollback-source
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-write runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-write
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-rollback-credential-groups-restore runSubscriptionWireGuardMenuFlowRegression peer-rollback-credential-groups-restore
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-toggle runSubscriptionWireGuardMenuFlowRegression peer-source-control-toggle
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-clear-error runSubscriptionWireGuardMenuFlowRegression peer-source-control-clear-error
+registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowRegression peer-source-control-status
+registerRegressionFunctionLeaf wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowRegression control-restore
+registerRegressionFunctionLeaf wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
 registerRegressionFunctionLeaf regression-ui-long-tail-split-composition runRegressionUiLongTailSplitCompositionRegression
 registerRegressionFunctionLeaf regression-ui-parallel-composition runRegressionUiLongTailSplitCompositionRegression
 

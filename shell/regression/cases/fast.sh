@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 
 regressionModuleManifestReady() {
     [[ "${PADM_FAKE_MODULE_MANIFEST_READY:-0}" == "1" ]]
@@ -69,6 +64,30 @@ runRegressionBootstrapLocalEnvFallbackRegression() {
 
     grep -q "^TMPDIR=${PROJECT_ROOT}/.tmp-msys/tmp$" "${outputFile}"
     grep -q "^HOME=${PROJECT_ROOT}/.tmp-msys/home$" "${outputFile}"
+}
+
+runRegressionCaseLoadBoundaryProbe() {
+    local projectRoot=$1
+    local sourceLog=$2
+    shift 2
+
+    bash -c '
+        set -euo pipefail
+        projectRoot=$1
+        sourceLog=$2
+        shift 2
+        source "${projectRoot}/shell/regression/framework/env.sh"
+        source "${projectRoot}/shell/regression/framework/runtime.sh"
+        source "${projectRoot}/shell/regression/framework/registry.sh"
+        source() { printf "source:%s\n" "$1" >>"${sourceLog}"; }
+        recordCaseRegistration() { printf "%s\n" "${FUNCNAME[1]}" >>"${sourceLog}"; }
+        for registerFn in $(compgen -A function registerRegression); do
+            eval "${registerFn}() { recordCaseRegistration; }"
+        done
+        for caseFile in "$@"; do
+            builtin source "${caseFile}"
+        done
+    ' _ "${projectRoot}" "${sourceLog}" "$@"
 }
 
 runCleanupTrapRegression() {
@@ -3317,7 +3336,7 @@ runRemoteControlSystemctlStubDefaultStopDisableRegression() {
         in_stub && /^disable\)$/ { count++ }
         in_stub && /^SH$/ { in_stub = 0; capture = 0 }
         END { print count + 0 }
-    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_legacy.sh")
+    ' "${PROJECT_ROOT}/shell/regression/cases/remote_control.sh")
     [[ "${explicitStopDisableCount}" == "0" ]]
 }
 
@@ -3328,7 +3347,7 @@ runRemoteControlFunctionStubDefaultStopDisableRegression() {
         capture && /stop \| disable\)/ { count++ }
         capture && /^    }$/ { capture = 0 }
         END { print count + 0 }
-    ' "${PROJECT_ROOT}/shell/regression/subscription_groups_remote_control.sh")
+    ' "${PROJECT_ROOT}/shell/regression/cases/remote_control.sh")
     [[ "${explicitStopDisableCount}" == "0" ]]
 }
 
@@ -6369,10 +6388,3 @@ runRegressionFastOnlyOutputRest() {
     runRegressionStep allow-port-optional-protocol runAllowPortOptionalProtocolRegression
     runRegressionStep core-client-optional-args runCoreClientOptionalArgsRegression
 }
-
-if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
-    return 0 2>/dev/null || exit 0
-fi
-
-printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
-exit 2

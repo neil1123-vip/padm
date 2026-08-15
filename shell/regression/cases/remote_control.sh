@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
-
-REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
-
-SUBSCRIBE_CAPTURE_DIR="${TMP_DIR}/subscribe_local"
-configPath="${TMP_DIR}/xray-conf/"
-singBoxConfigPath="${TMP_DIR}/sing-box-conf/"
 
 remoteControlRegressionSourceId() {
     local source=$1
@@ -2335,10 +2326,3 @@ PY
     jq -e '.sync_while_busy.status == 503 and .sync_while_busy.body.error == "busy" and .sync_while_busy.body.error_detail.type == "busy" and .sync_while_busy.elapsed < 0.5' "${responseFile}" >/dev/null
     jq -e '.sync_invalid_response.status == 503 and .sync_invalid_response.body.error == "invalid_response" and .sync_invalid_response.body.error_detail.type == "invalid_response"' "${responseFile}" >/dev/null
 )
-
-if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
-    return 0 2>/dev/null || exit 0
-fi
-
-printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
-exit 2

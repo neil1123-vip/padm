@@ -34,6 +34,7 @@ export PADM_SUPPRESS_PROGRESS=1
 
 echoContent() {
     if [[ -n "${REGRESSION_ECHO_LOG:-}" ]]; then
+        mkdir -p "$(dirname -- "${REGRESSION_ECHO_LOG}")"
         printf '%s\n' "$*" >>"${REGRESSION_ECHO_LOG}"
     fi
     return 0

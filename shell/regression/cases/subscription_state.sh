@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-REGRESSION_ENTRY_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-# shellcheck source=/dev/null
-source "${REGRESSION_ENTRY_DIR}/regression/bootstrap.sh"
 writeSubscriptionStateDefaultFixture() {
     cat >"$(subscriptionGroupsFile)" <<'JSON'
 {"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"},{"id":"remote-edge","name":"remote-edge","role":"secondary","scheme":"wireguard","transport":"wireguard","host":"10.77.0.3","port":48779,"enabled":true,"sync_status":"pending","control_token":"token-def"}],"user_groups":[{"id":"team-a","name":"Team A","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":"","uuid":"11111111-1111-1111-1111-111111111111"}],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
@@ -1782,10 +1778,3 @@ runSubscriptionGroupSyncUsesStateLockRegression() (
     grep -qx 'lock:runSubscriptionGroupSyncUnlocked' "${callLog}"
     grep -qx 'sync:' "${callLog}"
 )
-
-if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
-    return 0 2>/dev/null || exit 0
-fi
-
-printf 'use shell/subscription_groups_regression.sh <selector>\n' >&2
-exit 2
