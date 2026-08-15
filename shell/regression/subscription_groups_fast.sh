@@ -1368,6 +1368,7 @@ runPortHoppingWithoutPersistentRegression() (
     lastInstallationConfig=
     source "${PROJECT_ROOT}/shell/core/network.sh"
     source "${PROJECT_ROOT}/shell/core/protocol_runtime.sh"
+    padmFirewallStateWithLock() { "$@"; }
 
     local natStateFile="${TMP_DIR}/port-hopping-nat.state"
     local allowCalls=0
@@ -1410,9 +1411,9 @@ runPortHoppingWithoutPersistentRegression() (
             if [[ "${rangeMode}" == "single" && "${inputCount}" == "1" ]]; then
                 printf -v "$3" '%s' '33001'
             elif [[ "${inputCount}" == "1" ]]; then
-                printf -v "$3" '%s' '33000-33005x'
+                printf -v "$3" '%s' '33000-33002x'
             else
-                printf -v "$3" '%s' '33000-33005'
+                printf -v "$3" '%s' '33000-33002'
             fi
             ;;
         hysteria_download_speed)
@@ -1462,12 +1463,12 @@ runPortHoppingWithoutPersistentRegression() (
             if [[ "$*" == *"neil1123-vip_tuic_portHopping"* ]]; then
                 cat >"${natStateFile}" <<'EOF'
 -A PREROUTING -p udp -m udp --dport 12000:12005 -m comment --comment keep-other-rule -j DNAT --to-destination :12095
--A PREROUTING -p udp -m udp --dport 33000:33005 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26451
+-A PREROUTING -p udp -m udp --dport 33000:33002 -m comment --comment neil1123-vip_tuic_portHopping -j DNAT --to-destination :26451
 EOF
             else
                 cat >"${natStateFile}" <<'EOF'
 -A PREROUTING -p udp -m udp --dport 12000:12005 -m comment --comment keep-other-rule -j DNAT --to-destination :12095
--A PREROUTING -p udp -m udp --dport 33000:33005 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+-A PREROUTING -p udp -m udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
 EOF
             fi
             return 0
@@ -1496,10 +1497,10 @@ EOF
             if [[ -s "${natStateFile}" ]]; then
                 printf '1   DNAT       udp  --  anywhere anywhere udp dpts:12000:12005 /* keep-other-rule */ to::12095\n'
                 if grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"; then
-                    printf '2   DNAT       udp  --  anywhere anywhere udp dpts:33000:33005 /* neil1123-vip_hysteria2_portHopping */ to::16295\n'
+                    printf '2   DNAT       udp  --  anywhere anywhere udp dpts:33000:33002 /* neil1123-vip_hysteria2_portHopping */ to::16295\n'
                 fi
                 if grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"; then
-                    printf '2   DNAT       udp  --  anywhere anywhere udp dpts:33000:33005 /* neil1123-vip_tuic_portHopping */ to::26451\n'
+                    printf '2   DNAT       udp  --  anywhere anywhere udp dpts:33000:33002 /* neil1123-vip_tuic_portHopping */ to::26451\n'
                 fi
             fi
             return 0
@@ -1542,7 +1543,7 @@ EOF
     portHoppingEnd=
     addPortHopping hysteria2 16295
     [[ -s "${natStateFile}" ]]
-    padmFirewallStateHas 'forward:iptables:hysteria2:33000:33005:16295'
+    padmFirewallStateHas 'forward:iptables:hysteria2:33000:33002:16295'
     grep -q '范围不合法' "${warnLog}"
     [[ "${allowCalls}" == "5" ]]
     grep -Eq '端口跳跃持久化|未检测到 netfilter-persistent' "${warnLog}"
@@ -1559,25 +1560,25 @@ EOF
 
     readPortHopping hysteria2 16295
     [[ "${hysteria2PortHoppingStart}" == "33000" ]]
-    [[ "${hysteria2PortHoppingEnd}" == "33005" ]]
+    [[ "${hysteria2PortHoppingEnd}" == "33002" ]]
 
-    deletePortHoppingRules hysteria2 33000 33005 16295
+    deletePortHoppingRules hysteria2 33000 33002 16295
     grep -q 'keep-other-rule' "${natStateFile}"
     ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
-    grep -qx 'deny:33000:33005:udp' "${warnLog}"
-    ! padmFirewallStateHas 'forward:iptables:hysteria2:33000:33005:16295'
+    grep -qx 'deny:33000:33002:udp' "${warnLog}"
+    ! padmFirewallStateHas 'forward:iptables:hysteria2:33000:33002:16295'
 
     : >"${natStateFile}"
     hysteria2PortHoppingStart=33000
-    hysteria2PortHoppingEnd=33005
+    hysteria2PortHoppingEnd=33002
     tuicPortHoppingStart=
     tuicPortHoppingEnd=
     addPortHopping tuic 26451
     grep -q 'neil1123-vip_tuic_portHopping' "${natStateFile}"
-    padmFirewallStateHas 'forward:iptables:tuic:33000:33005:26451'
+    padmFirewallStateHas 'forward:iptables:tuic:33000:33002:26451'
     readPortHopping tuic 26451
     [[ "${tuicPortHoppingStart}" == "33000" ]]
-    [[ "${tuicPortHoppingEnd}" == "33005" ]]
+    [[ "${tuicPortHoppingEnd}" == "33002" ]]
 
     : >"${natStateFile}"
     inputCount=1
@@ -1603,11 +1604,11 @@ EOF
     ! grep -q 'neil1123-vip_hysteria2_portHopping' "${natStateFile}"
 
     cat >"${natStateFile}" <<'EOF'
--A PREROUTING -p udp -m udp --dport 33000:33005 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
+-A PREROUTING -p udp -m udp --dport 33000:33002 -m comment --comment neil1123-vip_hysteria2_portHopping -j DNAT --to-destination :16295
 EOF
     iptablesDeleteShouldFail=true
     set +e
-    deletePortHoppingRules hysteria2 33000 33005 16295 >/dev/null 2>&1
+    deletePortHoppingRules hysteria2 33000 33002 16295 >/dev/null 2>&1
     rc=$?
     set -e
     iptablesDeleteShouldFail=false
@@ -1690,19 +1691,19 @@ EOF
             printf 'offline:%s\n' "$*" >>"${firewalldLog}"
             firewall-cmd "$@"
         }
-        allowPort() { padmFirewallStateAdd 'port:firewalld:udp:33000:33005'; }
+        allowPort() { padmFirewallStateAdd 'port:firewalld:udp:33000:33002'; }
         denyPort() {
             printf 'deny:%s:%s\n' "$1" "${2:-tcp}" >>"${firewalldLog}"
-            padmFirewallStateRemove 'port:firewalld:udp:33000:33005'
+            padmFirewallStateRemove 'port:firewalld:udp:33000:33002'
         }
 
         addPortHopping hysteria2 16295
         padmFirewallStateHas masquerade:firewalld
-        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295:owned=33000,33001,33002,33003,33004,33005'
-        deletePortHoppingRules hysteria2 33000 33005 16295
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
+        deletePortHoppingRules hysteria2 33000 33002 16295
         grep -qx 'masquerade:add' "${firewalldLog}"
         grep -qx 'masquerade:remove' "${firewalldLog}"
-        grep -qx 'deny:33000:33005:udp' "${firewalldLog}"
+        grep -qx 'deny:33000:33002:udp' "${firewalldLog}"
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
@@ -1710,8 +1711,8 @@ EOF
         masquerade=true
         inputCount=1
         addPortHopping hysteria2 16295
-        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295:owned=33000,33001,33003,33004,33005'
-        deletePortHoppingRules hysteria2 33000 33005 16295
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001'
+        deletePortHoppingRules hysteria2 33000 33002 16295
         [[ -n "${forwardPorts[33002]:-}" ]]
         [[ "${#forwardPorts[@]}" == "1" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
@@ -1721,7 +1722,7 @@ EOF
         inputCount=1
         addPortHopping hysteria2 16295
         firewalldActive=false
-        deletePortHoppingRules hysteria2 33000 33005 16295
+        deletePortHoppingRules hysteria2 33000 33002 16295
         [[ "${#forwardPorts[@]}" == "0" ]]
         grep -q '^offline:' "${firewalldLog}"
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
@@ -1729,16 +1730,16 @@ EOF
 
         inputCount=1
         addPortHopping hysteria2 16295
-        removeFailurePort=33003
+        removeFailurePort=33001
         set +e
-        deletePortHoppingRules hysteria2 33000 33005 16295 >/dev/null 2>&1
+        deletePortHoppingRules hysteria2 33000 33002 16295 >/dev/null 2>&1
         rc=$?
         set -e
         [[ "${rc}" == "1" ]]
-        padmFirewallStateHas 'forward:firewalld:udp:33000:33005:16295:owned=33000,33001,33002,33003,33004,33005'
-        deletePortHoppingRules hysteria2 33003 33003 16295
+        padmFirewallStateHas 'forward:firewalld:udp:33000:33002:16295:owned=33000,33001,33002'
+        deletePortHoppingRules hysteria2 33001 33001 16295
         [[ "${#forwardPorts[@]}" == "0" ]]
-        grep -qx 'deny:33000:33005:udp' "${firewalldLog}"
+        grep -qx 'deny:33000:33002:udp' "${firewalldLog}"
         [[ "${masquerade}" == "false" ]]
         [[ ! -e "${PADM_FIREWALL_STATE_FILE}" ]]
 
