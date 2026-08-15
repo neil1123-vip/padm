@@ -99,7 +99,7 @@ runRegressionParallelSelectorLimitCompositionRegression() (
     PADM_REGRESSION_PARALLEL_JOBS=1 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
         first \
         second \
         third
@@ -144,7 +144,7 @@ runRegressionParallelSelectorSlotRefillCompositionRegression() (
     PADM_REGRESSION_PARALLEL_JOBS=2 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        runParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
+        runFrameworkParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
         first \
         second \
         third
@@ -241,7 +241,7 @@ runParallelSelectorCollectsExitedChildWithoutRcContract() (
     PADM_REGRESSION_PARALLEL_JOBS=2 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        runParallelRegressionSelectors "${root}/orchestration" exit-fast finish >"${runnerLog}" 2>&1
+        runFrameworkParallelRegressionSelectors "${root}/orchestration" exit-fast finish >"${runnerLog}" 2>&1
     status=$?
     set -e
 

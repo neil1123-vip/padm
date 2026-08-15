@@ -93,7 +93,6 @@ runParallelRegressionRunners() (
 runFrameworkParallelRegressionSelectors() (
     local orchestrationRoot=$1
     shift
-    local -a rawArgs=("$@")
     local -a labels=()
     local -a selectors=()
     local -a logs=()
@@ -102,7 +101,7 @@ runFrameworkParallelRegressionSelectors() (
     local -a rcFiles=()
     local -a completed=()
     local selectorRunner="${PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER:-runRegisteredRegressionMain}"
-    local selectorMode="${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-auto}"
+    local selectorMode="${PADM_REGRESSION_PARALLEL_SELECTOR_MODE:-selectors}"
     local status=0
     local maxJobs="${PADM_REGRESSION_PARALLEL_JOBS:-0}"
     local nextIndex=0
@@ -112,15 +111,15 @@ runFrameworkParallelRegressionSelectors() (
     local madeProgress
 
     if [[ $# -eq 0 ]]; then
-        printf 'runParallelRegressionSelectors expects at least one selector\n' >&2
+        printf 'runFrameworkParallelRegressionSelectors expects at least one selector\n' >&2
         return 2
     fi
 
     mkdir -p "${orchestrationRoot}"
     case "${selectorMode}" in
     pairs)
-        if (( ${#rawArgs[@]} % 2 != 0 )); then
-            printf 'runParallelRegressionSelectors expects label/selector pairs\n' >&2
+        if (( $# % 2 != 0 )); then
+            printf 'runFrameworkParallelRegressionSelectors expects label/selector pairs\n' >&2
             return 2
         fi
         while [[ $# -gt 0 ]]; do
@@ -131,27 +130,6 @@ runFrameworkParallelRegressionSelectors() (
             shift 2
         done
         ;;
-    auto)
-        if declare -p PADM_REGRESSION_SELECTOR_KIND >/dev/null 2>&1 && (( ${#rawArgs[@]} % 2 == 0 )); then
-            local maybePaired=true
-            local selectorIndex
-            for ((selectorIndex = 1; selectorIndex < ${#rawArgs[@]}; selectorIndex += 2)); do
-                if [[ -z "${PADM_REGRESSION_SELECTOR_KIND[${rawArgs[$selectorIndex]}]:-}" ]]; then
-                    maybePaired=false
-                    break
-                fi
-            done
-            if [[ "${maybePaired}" == "true" ]]; then
-                while [[ $# -gt 0 ]]; do
-                    labels+=("$1")
-                    selectors+=("$2")
-                    logs+=("${orchestrationRoot}/$1.log")
-                    rcFiles+=("${orchestrationRoot}/$1.rc")
-                    shift 2
-                done
-            fi
-        fi
-        ;;
     selectors)
         ;;
     *)
@@ -161,10 +139,6 @@ runFrameworkParallelRegressionSelectors() (
     esac
 
     if [[ "${#selectors[@]}" -eq 0 ]]; then
-        if [[ "${selectorMode}" == "pairs" ]]; then
-            printf 'runParallelRegressionSelectors expects label/selector pairs\n' >&2
-            return 2
-        fi
         while [[ $# -gt 0 ]]; do
             labels+=("$1")
             selectors+=("$1")
@@ -349,8 +323,4 @@ runFrameworkSequentialRegressionSelectorList() {
         set -e
     fi
     return "${status}"
-}
-
-runParallelRegressionSelectors() {
-    runFrameworkParallelRegressionSelectors "$@"
 }
