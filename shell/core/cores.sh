@@ -2003,6 +2003,14 @@ appendJsonObject() {
     jq -c "$@" ". + [${objectFilter}]" <<<"${json}"
 }
 
+appendSelectedCoreClient() {
+    local -n usersRef=$1
+    local selection=$2 protocol=$3 objectFilter=$4
+    shift 4
+    protocolSelectionIncludes "${selection}" "${protocol}" || return 0
+    usersRef=$(appendJsonObject "${usersRef}" "${objectFilter}" "$@")
+}
+
 shadowsocks2022KeyFromSeed() {
     local seed=$1
     local hex escaped
@@ -2030,54 +2038,32 @@ initXrayClients() {
         email=$(jq -r '.email // .name // .username // empty' <<<"${user}") || return 1
         [[ -n "${uuid}" && -n "${email}" ]] || return 1
         email=$(stripClientNameSuffix "${email}") || return 1
-        if protocolSelectionIncludes "${type}" 27; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,flow:"xtls-rprx-vision",email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_TCP/TLS_Vision") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 27 '{id:$uuid,flow:"xtls-rprx-vision",email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_TCP/TLS_Vision" || return 1
 
         # VLESS WS
-        if protocolSelectionIncludes "${type}" 21; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_WS") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 21 '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_WS" || return 1
         # VLESS XHTTP
-        if protocolSelectionIncludes "${type}" 2; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_Reality_XHTTP") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 2 '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-VLESS_Reality_XHTTP" || return 1
         # Trojan gRPC
-        if protocolSelectionIncludes "${type}" 25; then
-            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_gRPC") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 25 '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_gRPC" || return 1
         # VMess WS
-        if protocolSelectionIncludes "${type}" 22; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_WS") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 22 '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_WS" || return 1
         # VMess HTTPUpgrade
-        if protocolSelectionIncludes "${type}" 23; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_HTTPUpgrade") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 23 '{id:$uuid,email:$email,alterId:0}' --arg uuid "${uuid}" --arg email "${email}-VMess_HTTPUpgrade" || return 1
 
         # Trojan TCP
-        if protocolSelectionIncludes "${type}" 28; then
-            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_TCP_direct") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 28 '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-Trojan_TCP_direct" || return 1
 
-        if protocolSelectionIncludes "${type}" 29; then
-            users=$(appendJsonObject "${users}" '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-trojan_tcp") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 29 '{password:$password,email:$email}' --arg password "${uuid}" --arg email "${email}-trojan_tcp" || return 1
 
         # VLESS gRPC
-        if protocolSelectionIncludes "${type}" 24; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_grpc") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 24 '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_grpc" || return 1
 
         # VLESS Reality Vision
-        if protocolSelectionIncludes "${type}" 1; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email,flow:"xtls-rprx-vision"}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_vision") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 1 '{id:$uuid,email:$email,flow:"xtls-rprx-vision"}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_vision" || return 1
 
         # VLESS Reality gRPC
-        if protocolSelectionIncludes "${type}" 26; then
-            users=$(appendJsonObject "${users}" '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_grpc") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 26 '{id:$uuid,email:$email}' --arg uuid "${uuid}" --arg email "${email}-vless_reality_grpc" || return 1
     done <<<"${clientRows}"
     printf '%s\n' "${users}"
 }
@@ -2103,22 +2089,14 @@ initSingBoxClients() {
         [[ -n "${uuid}" && -n "${name}" ]] || return 1
         name=$(stripClientNameSuffix "${name}") || return 1
         # VLESS Vision
-        if protocolSelectionIncludes "${type}" 27; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_TCP/TLS_Vision") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 27 '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_TCP/TLS_Vision" || return 1
         # VLESS WS
-        if protocolSelectionIncludes "${type}" 21; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_WS") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 21 '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_WS" || return 1
         # VMess WS
-        if protocolSelectionIncludes "${type}" 22; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_WS") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 22 '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_WS" || return 1
 
         # Trojan TCP
-        if protocolSelectionIncludes "${type}" 28; then
-            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-Trojan_TCP") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 28 '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-Trojan_TCP" || return 1
 
         # Shadowsocks
         if protocolSelectionIncludes "${type}" 30; then
@@ -2128,40 +2106,24 @@ initSingBoxClients() {
         fi
 
         # VLESS Reality Vision
-        if protocolSelectionIncludes "${type}" 1; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_Vision") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 1 '{uuid:$uuid,flow:"xtls-rprx-vision",name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_Vision" || return 1
         # VLESS Reality gRPC
-        if protocolSelectionIncludes "${type}" 26; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_gPRC") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 26 '{uuid:$uuid,name:$name}' --arg uuid "${uuid}" --arg name "${name}-VLESS_Reality_gPRC" || return 1
 
         # Hysteria2
-        if protocolSelectionIncludes "${type}" 3; then
-            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-singbox_hysteria2") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 3 '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-singbox_hysteria2" || return 1
 
         # TUIC
-        if protocolSelectionIncludes "${type}" 31; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,password:$password,name:$name}' --arg uuid "${uuid}" --arg password "${uuid}" --arg name "${name}-singbox_tuic") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 31 '{uuid:$uuid,password:$password,name:$name}' --arg uuid "${uuid}" --arg password "${uuid}" --arg name "${name}-singbox_tuic" || return 1
 
         # Naive
-        if protocolSelectionIncludes "${type}" 5; then
-            users=$(appendJsonObject "${users}" '{password:$password,username:$username}' --arg password "${uuid}" --arg username "${name}-singbox_naive") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 5 '{password:$password,username:$username}' --arg password "${uuid}" --arg username "${name}-singbox_naive" || return 1
         # VMess HTTPUpgrade
-        if protocolSelectionIncludes "${type}" 23; then
-            users=$(appendJsonObject "${users}" '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_HTTPUpgrade") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 23 '{uuid:$uuid,name:$name,alterId:0}' --arg uuid "${uuid}" --arg name "${name}-VMess_HTTPUpgrade" || return 1
         # AnyTLS
-        if protocolSelectionIncludes "${type}" 4; then
-            users=$(appendJsonObject "${users}" '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-anytls") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 4 '{password:$password,name:$name}' --arg password "${uuid}" --arg name "${name}-anytls" || return 1
 
-        if protocolSelectionIncludes "${type}" 201; then
-            users=$(appendJsonObject "${users}" '{username:$username,password:$password}' --arg username "${uuid}" --arg password "${uuid}") || return 1
-        fi
+        appendSelectedCoreClient users "${type}" 201 '{username:$username,password:$password}' --arg username "${uuid}" --arg password "${uuid}" || return 1
 
     done <<<"${clientRows}"
     printf '%s\n' "${users}"
