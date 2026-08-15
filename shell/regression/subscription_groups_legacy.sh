@@ -4254,15 +4254,28 @@ runSingBoxDownloadArtifactsCleanupRegression() (
     [[ "${rc}" == "1" ]]
 )
 
-runCoreReleaseArchiveRejectsUnsafePathRegression() (
-    local root="${TMP_DIR}/core-release-archive-unsafe-path"
+runCoreReleaseArchiveRejectsRegression() (
+    local mode=$1
+    local root="${TMP_DIR}/core-release-archive-${mode}"
     local tmpDir="${root}/tmp"
     local xrayRc singBoxRc
+    local xrayListing singBoxListing singBoxLongListing singBoxExtract
 
     rm -rf "${root}"
     mkdir -p "${tmpDir}"
     xrayCoreCPUVendor=Xray-linux-64
     singBoxCoreCPUVendor=-linux-amd64
+    if [[ "${mode}" == "symlink-payload" ]]; then
+        xrayListing=xray
+        singBoxListing=$'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so'
+        singBoxLongListing=$'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/\n-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box\nlrwxrwxrwx root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so -> /tmp/libcronet.so'
+        singBoxExtract=$'sing-box\ncronet'
+    else
+        xrayListing=../xray
+        singBoxListing=../sing-box
+        singBoxLongListing='-rw-r--r-- root/root 0 2026-01-01 00:00 ../sing-box'
+        singBoxExtract=sing-box
+    fi
     downloadGitHubReleaseAsset() {
         local outputDir= assetName=
         while [[ $# -gt 0 ]]; do
@@ -4276,79 +4289,10 @@ runCoreReleaseArchiveRejectsUnsafePathRegression() (
     }
     unzip() {
         if [[ "${1:-}" == "-Z1" ]]; then
-            printf '../xray\n'
+            printf '%s\n' "${xrayListing}"
             return 0
         fi
-        if [[ "${1:-}" == "-p" ]]; then
-            printf 'xray\n'
-            return 0
-        fi
-        local dest=
-        while [[ $# -gt 0 ]]; do
-            case "$1" in
-            -d) dest=$2; shift 2 ;;
-            *) shift ;;
-            esac
-        done
-        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
-        chmod 755 "${dest}/xray"
-    }
-    tar() {
-        case "$1" in
-        -tzf) printf '../sing-box\n'; return 0 ;;
-        -tvzf) printf '%s\n' '-rw-r--r-- root/root 0 2026-01-01 00:00 ../sing-box'; return 0 ;;
-        -xOzf) printf 'sing-box\n'; return 0 ;;
-        esac
-        local dest=
-        while [[ $# -gt 0 ]]; do
-            case "$1" in
-            -C) dest=$2; shift 2 ;;
-            *) shift ;;
-            esac
-        done
-        mkdir -p "${dest}/sing-box-1.2.3-linux-amd64"
-        printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/sing-box-1.2.3-linux-amd64/sing-box"
-        printf 'cronet\n' >"${dest}/sing-box-1.2.3-linux-amd64/libcronet.so"
-        chmod 755 "${dest}/sing-box-1.2.3-linux-amd64/sing-box"
-    }
-
-    set +e
-    downloadXrayReleaseBinaryToTempDir v1.2.3 "${tmpDir}/xray"
-    xrayRc=$?
-    downloadSingBoxReleaseBinaryToTempDir v1.2.3 "${tmpDir}/sing"
-    singBoxRc=$?
-    set -e
-
-    [[ "${xrayRc}" -ne 0 ]]
-    [[ "${singBoxRc}" -ne 0 ]]
-)
-
-runCoreReleaseArchiveRejectsSymlinkPayloadRegression() (
-    local root="${TMP_DIR}/core-release-archive-symlink-payload"
-    local tmpDir="${root}/tmp"
-    local xrayRc singBoxRc
-
-    rm -rf "${root}"
-    mkdir -p "${tmpDir}"
-    xrayCoreCPUVendor=Xray-linux-64
-    singBoxCoreCPUVendor=-linux-amd64
-    downloadGitHubReleaseAsset() {
-        local outputDir= assetName=
-        while [[ $# -gt 0 ]]; do
-            case "$1" in
-            -P) outputDir=$2; shift 2 ;;
-            *) assetName=$1; shift ;;
-            esac
-        done
-        mkdir -p "${outputDir}"
-        : >"${outputDir}/${assetName}"
-    }
-    unzip() {
-        if [[ "${1:-}" == "-Z1" ]]; then
-            printf 'xray\n'
-            return 0
-        fi
-        if [[ "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
+        if [[ "${mode}" == "symlink-payload" && "${1:-}" == "-Z" && "${2:-}" == "-l" ]]; then
             printf '%s\n' 'lrwxrwxrwx  3.0 unx 0 b- 0% 2026-01-01 00:00 xray'
             return 0
         fi
@@ -4363,24 +4307,18 @@ runCoreReleaseArchiveRejectsSymlinkPayloadRegression() (
             *) shift ;;
             esac
         done
-        mkdir -p "${dest}/xray"
+        if [[ "${mode}" == "symlink-payload" ]]; then
+            mkdir -p "${dest}/xray"
+        else
+            printf '#!/usr/bin/env bash\nexit 0\n' >"${dest}/xray"
+            chmod 755 "${dest}/xray"
+        fi
     }
     tar() {
         case "$1" in
-        -tzf)
-            printf 'sing-box-1.2.3-linux-amd64/\nsing-box-1.2.3-linux-amd64/sing-box\nsing-box-1.2.3-linux-amd64/libcronet.so\n'
-            return 0
-            ;;
-        -tvzf)
-            printf '%s\n' 'drwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/'
-            printf '%s\n' '-rwxr-xr-x root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/sing-box'
-            printf '%s\n' 'lrwxrwxrwx root/root 0 2026-01-01 00:00 sing-box-1.2.3-linux-amd64/libcronet.so -> /tmp/libcronet.so'
-            return 0
-            ;;
-        -xOzf)
-            printf 'sing-box\ncronet\n'
-            return 0
-            ;;
+        -tzf) printf '%s\n' "${singBoxListing}"; return 0 ;;
+        -tvzf) printf '%s\n' "${singBoxLongListing}"; return 0 ;;
+        -xOzf) printf '%s\n' "${singBoxExtract}"; return 0 ;;
         esac
         local dest=
         while [[ $# -gt 0 ]]; do
@@ -4405,6 +4343,9 @@ runCoreReleaseArchiveRejectsSymlinkPayloadRegression() (
     [[ "${xrayRc}" -ne 0 ]]
     [[ "${singBoxRc}" -ne 0 ]]
 )
+
+runCoreReleaseArchiveRejectsUnsafePathRegression() { runCoreReleaseArchiveRejectsRegression unsafe-path; }
+runCoreReleaseArchiveRejectsSymlinkPayloadRegression() { runCoreReleaseArchiveRejectsRegression symlink-payload; }
 
 runCoreFirstInstallLeavesNoLiveArtifactsOnFailureRegression() (
     local rootRel="${TMP_DIR}/core-first-install-failure"
