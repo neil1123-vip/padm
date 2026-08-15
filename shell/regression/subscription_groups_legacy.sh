@@ -17392,15 +17392,9 @@ writeInstallToolsAcmeArchiveFixture() {
     tar -czf "${archiveFile}" -C "${archiveRoot}" "acme.sh-${commitRef}"
 }
 
-runInstallToolsCertificateDependencyRegression() {
-    local oldHome="${HOME}"
-    local oldSelect="${selectCustomInstallType:-}"
-    local oldRealityDomain="${realityOnlyWithDomain:-}"
+runInstallToolsCertificateDependencyRegression() (
     local statusLog="${TMP_DIR}/install-tools-cert-status.log"
     local fakeHome="${TMP_DIR}/install-tools-cert-home"
-    local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
-    local oldSuccessLog="${REGRESSION_SUCCESS_CARD_LOG:-}"
-    local oldInstallLog="${PADM_INSTALL_LOG:-}"
     local nginxCommandLog="${TMP_DIR}/install-tools-nginx-command.log"
     writeInstallToolsAcmeFixture "${fakeHome}/.acme.sh"
     HOME="${fakeHome}"
@@ -17460,34 +17454,10 @@ runInstallToolsCertificateDependencyRegression() {
     [[ -s "${nginxCommandLog}" ]]
     ! grep -vx -- '-v' "${nginxCommandLog}"
     ! grep -q 'unexpected-nginx' "${statusLog}"
-
-    if [[ -n "${oldStatusLog}" ]]; then
-        REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
-    else
-        unset REGRESSION_STATUS_CARD_LOG
-    fi
-    if [[ -n "${oldSuccessLog}" ]]; then
-        REGRESSION_SUCCESS_CARD_LOG="${oldSuccessLog}"
-    else
-        unset REGRESSION_SUCCESS_CARD_LOG
-    fi
-    if [[ -n "${oldInstallLog}" ]]; then
-        PADM_INSTALL_LOG="${oldInstallLog}"
-    else
-        unset PADM_INSTALL_LOG
-    fi
-    HOME="${oldHome}"
-    selectCustomInstallType="${oldSelect}"
-    realityOnlyWithDomain="${oldRealityDomain}"
-}
+)
 
 runInstallToolsAcmeResultFailureRegression() {
     (
-        local oldHome="${HOME}"
-        local oldSelect="${selectCustomInstallType:-}"
-        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
-        local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
-        local oldTmpDir="${TMPDIR:-}"
         local fakeHome="${TMP_DIR}/install-tools-acme-result-home"
         local tmpRoot="${TMP_DIR}/install-tools-acme-result-tmp"
         local errorLog="${TMP_DIR}/install-tools-acme-result-error.log"
@@ -17574,31 +17544,11 @@ runInstallToolsAcmeResultFailureRegression() {
         if regressionFindHasMatches "${tmpRoot}" -maxdepth 1 -type d -name 'padm-package-managed-backup.*'; then
             return 1
         fi
-
-        if [[ -n "${oldErrorLog}" ]]; then
-            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
-        else
-            unset REGRESSION_ERROR_CARD_LOG
-        fi
-        if [[ -n "${oldStatusLog}" ]]; then
-            REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
-        else
-            unset REGRESSION_STATUS_CARD_LOG
-        fi
-        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-        HOME="${oldHome}"
-        selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate resolveGitHubCommitRef curl tail
     )
 }
 
 runInstallToolsAcmeCommitFailureRegression() {
     (
-        local oldHome="${HOME}"
-        local oldSelect="${selectCustomInstallType:-}"
-        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
-        local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
-        local oldTmpDir="${TMPDIR:-}"
         local fakeHome="${TMP_DIR}/install-tools-acme-commit-home"
         local tmpRoot="${TMP_DIR}/install-tools-acme-commit-tmp"
         local errorLog="${TMP_DIR}/install-tools-acme-commit-error.log"
@@ -17674,30 +17624,11 @@ runInstallToolsAcmeCommitFailureRegression() {
         if regressionFindHasMatches "${tmpRoot}" -type f -name 'acme.tar.gz.download.*'; then
             return 1
         fi
-
-        if [[ -n "${oldErrorLog}" ]]; then
-            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
-        else
-            unset REGRESSION_ERROR_CARD_LOG
-        fi
-        if [[ -n "${oldStatusLog}" ]]; then
-            REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
-        else
-            unset REGRESSION_STATUS_CARD_LOG
-        fi
-        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-        HOME="${oldHome}"
-        selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate resolveGitHubCommitRef curl mv
     )
 }
 
 runInstallToolsAcmeDownloadBoundsRegression() {
     (
-        local oldHome="${HOME}"
-        local oldSelect="${selectCustomInstallType:-}"
-        local oldTmpDir="${TMPDIR:-}"
-        local oldInstallLog="${PADM_INSTALL_LOG:-}"
         local fakeHome="${TMP_DIR}/install-tools-acme-download-bounds-home"
         local tmpRoot="${TMP_DIR}/install-tools-acme-download-bounds-tmp"
         local curlLog="${TMP_DIR}/install-tools-acme-download-bounds-curl.log"
@@ -17757,23 +17688,11 @@ runInstallToolsAcmeDownloadBoundsRegression() {
         grep -q 'github.com/acmesh-official/acme.sh/archive/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.tar.gz' "${curlLog}"
         [[ -f "${fakeHome}/.acme.sh/dnsapi/dns_cf.sh" ]]
         [[ -f "${fakeHome}/.acme.sh/dnsapi/dns_ali.sh" ]]
-
-        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-        if [[ -n "${oldInstallLog}" ]]; then PADM_INSTALL_LOG="${oldInstallLog}"; else unset PADM_INSTALL_LOG; fi
-        HOME="${oldHome}"
-        selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout runPackageCommandWithProgress waitAptProcess installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate resolveGitHubCommitRef curl
     )
 }
 
 runInstallToolsUpdateFailureRegression() {
     (
-        local oldHome="${HOME}"
-        local oldSelect="${selectCustomInstallType:-}"
-        local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
-        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
-        local oldInstallLog="${PADM_INSTALL_LOG:-}"
-        local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
         local statusLog="${TMP_DIR}/install-tools-update-status.log"
         local errorLog="${TMP_DIR}/install-tools-update-error.log"
         local fakeHome="${TMP_DIR}/install-tools-update-home"
@@ -17814,40 +17733,11 @@ runInstallToolsUpdateFailureRegression() {
         [[ "${installStatus}" -ne 0 ]]
         [[ ! -e "${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}" ]]
         grep -q "系统软件源刷新失败" "${errorLog}"
-
-        if [[ -n "${oldStatusLog}" ]]; then
-            REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
-        else
-            unset REGRESSION_STATUS_CARD_LOG
-        fi
-        if [[ -n "${oldErrorLog}" ]]; then
-            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
-        else
-            unset REGRESSION_ERROR_CARD_LOG
-        fi
-        if [[ -n "${oldInstallLog}" ]]; then
-            PADM_INSTALL_LOG="${oldInstallLog}"
-        else
-            unset PADM_INSTALL_LOG
-        fi
-        HOME="${oldHome}"
-        selectCustomInstallType="${oldSelect}"
-        if [[ -n "${oldBasePackageCalledFile}" ]]; then
-            PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
-        else
-            unset PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE
-        fi
     )
 }
 
 runInstallToolsUsesConfiguredInstallLogRegression() {
     (
-        local oldHome="${HOME}"
-        local oldSelect="${selectCustomInstallType:-}"
-        local oldInstallLog="${PADM_INSTALL_LOG:-}"
-        local oldStatusLog="${REGRESSION_STATUS_CARD_LOG:-}"
-        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
-        local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
         local fakeHome="${TMP_DIR}/install-tools-log-home"
         local logRoot="${TMP_DIR}/custom-log"
         local callLog="${TMP_DIR}/install-tools-log-calls.log"
@@ -17905,40 +17795,11 @@ runInstallToolsUsesConfiguredInstallLogRegression() {
         [[ "$(grep -cF "|${resolvedInstallLog}" "${callLog}")" == "2" ]]
         grep -q "^检查、安装更新|${resolvedInstallLog}\$" "${callLog}"
         grep -q "^安装基础工具|${resolvedInstallLog}\$" "${callLog}"
-
-        if [[ -n "${oldStatusLog}" ]]; then
-            REGRESSION_STATUS_CARD_LOG="${oldStatusLog}"
-        else
-            unset REGRESSION_STATUS_CARD_LOG
-        fi
-        if [[ -n "${oldErrorLog}" ]]; then
-            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
-        else
-            unset REGRESSION_ERROR_CARD_LOG
-        fi
-        if [[ -n "${oldInstallLog}" ]]; then
-            PADM_INSTALL_LOG="${oldInstallLog}"
-        else
-            unset PADM_INSTALL_LOG
-        fi
-        if [[ -n "${oldBasePackageCalledFile}" ]]; then
-            PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
-        else
-            unset PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE
-        fi
-        HOME="${oldHome}"
-        selectCustomInstallType="${oldSelect}"
-        unset -f command runWithTimeout waitAptProcess packageInstalled installBasePackages installNginxTools nginx protocolSelectionSkipsNginx protocolSelectionNeedsLocalCertificate runPackageCommandWithProgress
     )
 }
 
 runInstallToolsReleaseInfoFailureRegression() {
     (
-        local oldHome="${HOME}"
-        local oldSelect="${selectCustomInstallType:-}"
-        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
-        local oldInstallLog="${PADM_INSTALL_LOG:-}"
-        local oldBasePackageCalledFile="${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE:-}"
         local errorLog="${TMP_DIR}/install-tools-release-info-error.log"
         local fakeHome="${TMP_DIR}/install-tools-release-info-home"
         PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-release-info-base-called"
@@ -17980,33 +17841,11 @@ runInstallToolsReleaseInfoFailureRegression() {
         [[ "${installStatus}" -ne 0 ]]
         [[ ! -e "${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}" ]]
         grep -q "系统软件源 release 信息刷新失败" "${errorLog}"
-
-        if [[ -n "${oldErrorLog}" ]]; then
-            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
-        else
-            unset REGRESSION_ERROR_CARD_LOG
-        fi
-        if [[ -n "${oldInstallLog}" ]]; then
-            PADM_INSTALL_LOG="${oldInstallLog}"
-        else
-            unset PADM_INSTALL_LOG
-        fi
-        HOME="${oldHome}"
-        selectCustomInstallType="${oldSelect}"
-        if [[ -n "${oldBasePackageCalledFile}" ]]; then
-            PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${oldBasePackageCalledFile}"
-        else
-            unset PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE
-        fi
     )
 }
 
 runInstallToolsNginxReinstallFailureRegression() {
     (
-        local oldHome="${HOME}"
-        local oldSelect="${selectCustomInstallType:-}"
-        local oldErrorLog="${REGRESSION_ERROR_CARD_LOG:-}"
-        local oldInstallLog="${PADM_INSTALL_LOG:-}"
         local errorLog="${TMP_DIR}/install-tools-nginx-reinstall-error.log"
         local fakeHome="${TMP_DIR}/install-tools-nginx-reinstall-home"
 
@@ -18056,19 +17895,6 @@ runInstallToolsNginxReinstallFailureRegression() {
         set -e
         [[ "${installStatus}" -ne 0 ]]
         grep -q "Nginx重装失败" "${errorLog}"
-
-        if [[ -n "${oldErrorLog}" ]]; then
-            REGRESSION_ERROR_CARD_LOG="${oldErrorLog}"
-        else
-            unset REGRESSION_ERROR_CARD_LOG
-        fi
-        if [[ -n "${oldInstallLog}" ]]; then
-            PADM_INSTALL_LOG="${oldInstallLog}"
-        else
-            unset PADM_INSTALL_LOG
-        fi
-        HOME="${oldHome}"
-        selectCustomInstallType="${oldSelect}"
     )
 }
 
