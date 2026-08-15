@@ -265,10 +265,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "ui-full-subscription-main-publish-sync-enable" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
         elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply-service" ]]; then
             : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
         fi
@@ -277,34 +274,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
 
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
 
-    for selector in \
-        ui-full-subscription-main-publish-sync-enable \
-        wireguard-menu-flow-peer-rollback-apply-service \
-        wireguard-menu-flow-peer-rollback-credential-write \
-        wireguard-menu-flow-peer-rollback-source \
-        ui-full-subscription-main-publish-sync-skip \
-        wireguard-menu-flow-peer-rollback-apply-restore \
-        wireguard-menu-flow-peer-rollback-credential-groups-restore \
-        ui-full-subscription-main-publish-user-inspect \
-        wireguard-menu-flow-peer-source-control-toggle \
-        ui-full-subscription-main-publish-user-create \
-        wireguard-menu-flow-peer-add-update \
-        wireguard-menu-flow-peer-source-control-clear-error \
-        ui-full-subscription-main-publish-service \
-        wireguard-menu-flow-peer-source-control-status \
-        ui-full-subscription-main-publish-user-empty \
-        ui-full-subscription-main-maintenance \
-        wireguard-menu-flow-control-restore \
-        wireguard-menu-flow-bootstrap \
-        ui-full-subscription-main-entry \
-        ui-full-subscription-controlled \
-        ui-full-core \
-        ui-full-core-maintenance \
-        ui-smoke \
-        wireguard-restore-runner; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiChildSelectors
     awk '
         $0 == "ui-full-subscription-main-publish-sync-enable-start" { syncStart = NR }
         $0 == "wireguard-menu-flow-peer-rollback-apply-service-start" { applyStart = NR }
@@ -324,27 +294,7 @@ runRegressionUiLongTailSplitCompositionRegression() (
 
     : >"${callLog}"
     PADM_REGRESSION_UI_RESOURCE_PROFILE=all PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
-    for selector in \
-        ui-full-subscription-main-publish-sync \
-        wireguard-menu-flow-peer-rollback-apply \
-        wireguard-menu-flow-peer-rollback-credential \
-        wireguard-menu-flow-peer-rollback-source \
-        ui-full-subscription-main-publish-user \
-        ui-full-subscription-main-publish-service \
-        wireguard-menu-flow-peer-add-update \
-        wireguard-menu-flow-peer-source-control \
-        ui-full-subscription-main-maintenance \
-        wireguard-menu-flow-control-restore \
-        wireguard-menu-flow-bootstrap \
-        ui-full-subscription-main-entry \
-        ui-full-subscription-controlled \
-        ui-full-core \
-        ui-full-core-maintenance \
-        ui-smoke \
-        wireguard-restore-runner; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiAllProfileChildSelectors
     ! grep -qx 'ui-full-subscription-main-publish-sync-enable-start' "${callLog}"
     ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-service-start' "${callLog}"
     ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-write-start' "${callLog}"
@@ -371,59 +321,32 @@ runRegressionUiLongTailSplitCompositionRegression() (
     PADM_REGRESSION_SUPPRESS_DONE=1 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         runRegisteredRegressionMain ui-full-subscription-main-publish-user
-    for selector in \
-        ui-full-subscription-main-publish-user-empty \
-        ui-full-subscription-main-publish-user-create \
-        ui-full-subscription-main-publish-user-inspect; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiFullSubscriptionMainPublishUserChildSelectors
     ! grep -q '^ui-full:subscription-main-publish-user-start$' "${callLog}"
 
     : >"${callLog}"
     PADM_REGRESSION_SUPPRESS_DONE=1 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         runRegisteredRegressionMain ui-full-subscription-main-publish-sync
-    for selector in \
-        ui-full-subscription-main-publish-sync-skip \
-        ui-full-subscription-main-publish-sync-enable; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiFullSubscriptionMainPublishSyncChildSelectors
 
     : >"${callLog}"
     PADM_REGRESSION_SUPPRESS_DONE=1 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         runRegisteredRegressionMain wireguard-menu-flow-peer-rollback-apply
-    for selector in \
-        wireguard-menu-flow-peer-rollback-apply-service \
-        wireguard-menu-flow-peer-rollback-apply-restore; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors
 
     : >"${callLog}"
     PADM_REGRESSION_SUPPRESS_DONE=1 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         runRegisteredRegressionMain wireguard-menu-flow-peer-rollback-credential
-    for selector in \
-        wireguard-menu-flow-peer-rollback-credential-write \
-        wireguard-menu-flow-peer-rollback-credential-groups-restore; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors
 
     : >"${callLog}"
     PADM_REGRESSION_SUPPRESS_DONE=1 \
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         runRegisteredRegressionMain wireguard-menu-flow-peer-source-control
-    for selector in \
-        wireguard-menu-flow-peer-source-control-toggle \
-        wireguard-menu-flow-peer-source-control-clear-error \
-        wireguard-menu-flow-peer-source-control-status; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors
 
     : >"${callLog}"
     PADM_REGRESSION_SUPPRESS_DONE=1 \

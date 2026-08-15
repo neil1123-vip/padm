@@ -83,10 +83,7 @@ runRegressionAllCompositionRegression() (
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "routing" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/subscription-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/subscription-started"
         elif [[ "${selector}" == "subscription" ]]; then
             : >"${TMP_DIR}/subscription-started"
         fi

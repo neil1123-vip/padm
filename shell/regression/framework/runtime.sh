@@ -240,6 +240,29 @@ runFrameworkParallelRegressionSelectorList() {
         "${selectorPairs[@]}"
 }
 
+runFrameworkWaitForFile() {
+    local file=$1
+    local attempts=${2:-50}
+
+    while (( attempts-- > 0 )); do
+        [[ -e "${file}" ]] && return 0
+        sleep 0.01
+    done
+    return 0
+}
+
+runFrameworkAssertSelectorListLogged() {
+    local callLog=$1
+    local selectorListFn=$2
+    local selector
+
+    while IFS= read -r selector; do
+        [[ -n "${selector}" ]] || continue
+        grep -Fqx "${selector}-start" "${callLog}"
+        grep -Fqx "${selector}-finish" "${callLog}"
+    done < <("${selectorListFn}")
+}
+
 runFrameworkParallelCompositionContract() (
     set -euo pipefail
     local suiteSelector=$1
@@ -257,10 +280,7 @@ runFrameworkParallelCompositionContract() (
 
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "${waitingSelector}" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${startMarker}" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${startMarker}"
         elif [[ "${selector}" == "${signalingSelector}" ]]; then
             : >"${startMarker}"
         fi
@@ -271,11 +291,7 @@ runFrameworkParallelCompositionContract() (
         PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionParallelCompositionProbe \
         runRegisteredRegressionMain "${suiteSelector}"
     if [[ -n "${selectorListFn}" ]]; then
-        while IFS= read -r selector; do
-            [[ -n "${selector}" ]] || continue
-            grep -qx "${selector}-start" "${callLog}"
-            grep -qx "${selector}-finish" "${callLog}"
-        done < <("${selectorListFn}")
+        runFrameworkAssertSelectorListLogged "${callLog}" "${selectorListFn}"
     fi
     awk -v waiting="${waitingSelector}" -v signaling="${signalingSelector}" '
         $0 == waiting "-start" { waitingStart = NR }

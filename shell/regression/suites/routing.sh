@@ -102,20 +102,9 @@ runRegressionRoutingParallelCompositionRegression() (
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "routing-core" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/routing-core-unsafe-config-dir-started" ]] && break
-                sleep 0.05
-            done
-        elif [[ "${selector}" == "routing-access-control-config-transaction" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/routing-socks5-udp-associate-started" ]] && break
-                sleep 0.05
-            done
-        elif [[ "${selector}" == "routing-dns-failure-return" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/routing-socks5-udp-associate-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/routing-core-unsafe-config-dir-started"
+        elif [[ "${selector}" == "routing-access-control-config-transaction" || "${selector}" == "routing-dns-failure-return" ]]; then
+            runFrameworkWaitForFile "${TMP_DIR}/routing-socks5-udp-associate-started"
         elif [[ "${selector}" == "routing-core-unsafe-config-dir" ]]; then
             : >"${TMP_DIR}/routing-core-unsafe-config-dir-started"
         elif [[ "${selector}" == "routing-socks5-udp-associate" ]]; then
@@ -125,26 +114,7 @@ runRegressionRoutingParallelCompositionRegression() (
     }
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionRoutingSuiteRoot
 
-    for selector in \
-        routing-core \
-        routing-core-unsafe-config-dir \
-        routing-socks5-udp-associate \
-        routing-access-control-failure-return \
-        routing-access-control-config-transaction \
-        routing-access-control-unsafe-backup-dir \
-        routing-access-control-unsafe-config-dir \
-        routing-bt-failure-return \
-        routing-ipv6-failure-return \
-        routing-warp-failure-return \
-        routing-socks5-failure-return \
-        routing-dns-failure-return \
-        routing-dns-unsafe-backup-dir \
-        routing-dns-unsafe-config-dir \
-        routing-dns-restore-scope \
-        routing-port-panel; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionRoutingChildSelectors
     awk '
         $0 == "routing-core-start" { coreStart = NR }
         $0 == "routing-core-unsafe-config-dir-start" { unsafeStart = NR }
@@ -178,26 +148,7 @@ runRegressionRoutingParallelCompositionRegression() (
     rm -f "${TMP_DIR}/routing-core-unsafe-config-dir-started"
     rm -f "${TMP_DIR}/routing-socks5-udp-associate-started"
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_ROUTING_RESOURCE_PROFILE=all runRegressionRoutingSuiteRoot
-    for selector in \
-        routing-core \
-        routing-core-unsafe-config-dir \
-        routing-socks5-udp-associate \
-        routing-access-control-failure-return \
-        routing-access-control-config-transaction \
-        routing-access-control-unsafe-backup-dir \
-        routing-access-control-unsafe-config-dir \
-        routing-bt-failure-return \
-        routing-ipv6-failure-return \
-        routing-warp-failure-return \
-        routing-socks5-failure-return \
-        routing-dns-failure-return \
-        routing-dns-unsafe-backup-dir \
-        routing-dns-unsafe-config-dir \
-        routing-dns-restore-scope \
-        routing-port-panel; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionRoutingChildSelectors
     awk '
         $0 == "routing-core-finish" { coreFinish = NR }
         $0 == "routing-access-control-config-transaction-start" { accessConfigStart = NR }

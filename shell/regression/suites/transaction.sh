@@ -223,18 +223,12 @@ runRegressionTransactionCoreParallelCompositionRegression() (
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "core-rollback-result-message" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/config-transaction-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/config-transaction-started"
         elif [[ "${selector}" == "config-transaction" ]]; then
             : >"${TMP_DIR}/config-transaction-started"
         elif [[ "${selector}" == "core-install-service-action-failure" ]]; then
             if [[ -f "${TMP_DIR}/transaction-core-expect-heavy-concurrency" ]]; then
-                for _ in 1 2 3 4 5 6 7 8 9 10; do
-                    [[ -f "${TMP_DIR}/core-port-file-transaction-started" ]] && break
-                    sleep 0.05
-                done
+                runFrameworkWaitForFile "${TMP_DIR}/core-port-file-transaction-started"
                 [[ -f "${TMP_DIR}/core-port-file-transaction-started" ]] || : >"${TMP_DIR}/transaction-core-heavy-concurrency-violation"
             fi
         elif [[ "${selector}" == "core-port-file-transaction" ]]; then
@@ -256,11 +250,7 @@ runRegressionTransactionCoreParallelCompositionRegression() (
     }
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionTransactionCoreSuiteRoot
 
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done < <(listRegressionTransactionCoreChildSelectors)
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionTransactionCoreChildSelectors
     awk '
         $0 == "core-rollback-result-message-start" { firstStart = NR }
         $0 == "config-transaction-start" { configStart = NR }
@@ -322,10 +312,7 @@ runRegressionTransactionSystemParallelCompositionRegression() (
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "nginx-service-failure" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/fail2ban-apply-transaction-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/fail2ban-apply-transaction-started"
         elif [[ "${selector}" == "fail2ban-apply-transaction" ]]; then
             : >"${TMP_DIR}/fail2ban-apply-transaction-started"
         fi

@@ -187,10 +187,7 @@ runRegressionSubscriptionStateParallelIsolationCompositionContract() (
         printf '%s|start|tmp=%s|groups=%s\n' \
             "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
         if [[ "${selector}" == "${waitingSelector}" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${startMarker}" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${startMarker}"
         elif [[ "${selector}" == "${signalingSelector}" ]]; then
             : >"${startMarker}"
         fi

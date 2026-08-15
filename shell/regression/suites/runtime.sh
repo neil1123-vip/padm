@@ -57,10 +57,7 @@ runRegressionRuntimeParallelCompositionRegression() (
         printf '%s-start\n' "${selector}" >>"${callLog}"
         case "${selector}" in
         runtime-core)
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/runtime-tempdir-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/runtime-tempdir-started"
             ;;
         runtime-tempdir)
             : >"${TMP_DIR}/runtime-tempdir-started"
@@ -70,16 +67,7 @@ runRegressionRuntimeParallelCompositionRegression() (
     }
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector PADM_REGRESSION_RUNTIME_RESOURCE_PROFILE=all runRegressionRuntimeSuiteRoot
 
-    for selector in \
-        runtime-core \
-        runtime-autoread-unset-auto-install \
-        runtime-auto-install-reality-route \
-        runtime-tempdir \
-        reality-candidates \
-        reality-config; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionRuntimeChildSelectors
     awk '
         $0 == "runtime-core-start" { coreStart = NR }
         $0 == "runtime-tempdir-start" { tempdirStart = NR }

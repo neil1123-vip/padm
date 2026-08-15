@@ -98,10 +98,7 @@ runRegressionSubscriptionOutputParallelCompositionRegression() (
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "subscription-output-profile-and-reality" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/subscription-output-publish-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/subscription-output-publish-started"
         elif [[ "${selector}" == "subscription-output-publish-accounts-and-remote-hint" ]]; then
             : >"${TMP_DIR}/subscription-output-publish-started"
         fi
@@ -118,11 +115,7 @@ runRegressionSubscriptionOutputParallelCompositionRegression() (
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
         PADM_REGRESSION_SUPPRESS_DONE=1 runRegisteredRegressionMain subscription-output
 
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done < <(listRegressionSubscriptionOutputChildSelectors)
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionSubscriptionOutputChildSelectors
     awk '
         $0 == "subscription-output-profile-and-reality-start" { firstStart = NR }
         $0 == "subscription-output-publish-accounts-and-remote-hint-start" { secondStart = NR }
@@ -187,10 +180,7 @@ runRegressionSubscriptionParallelCompositionRegression() (
         local selector=$1
         printf '%s-start\n' "${selector}" >>"${callLog}"
         if [[ "${selector}" == "subscription-output" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/subscription-state-started" ]] && break
-                sleep 0.05
-            done
+            runFrameworkWaitForFile "${TMP_DIR}/subscription-state-started"
         elif [[ "${selector}" == "subscription-state" ]]; then
             : >"${TMP_DIR}/subscription-state-started"
         fi
@@ -199,11 +189,7 @@ runRegressionSubscriptionParallelCompositionRegression() (
 
     PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionSuiteRoot
 
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done < <(listRegressionSubscriptionChildSelectors)
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionSubscriptionChildSelectors
     awk '
         $0 == "subscription-output-start" { outputStart = NR }
         $0 == "subscription-state-start" { stateStart = NR }
@@ -215,11 +201,7 @@ runRegressionSubscriptionParallelCompositionRegression() (
     rm -f "${TMP_DIR}/subscription-state-started"
     PADM_REGRESSION_SUBSCRIPTION_RESOURCE_PROFILE=all PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionSubscriptionSuiteRoot
 
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done < <(listRegressionSubscriptionChildSelectors)
+    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionSubscriptionChildSelectors
     awk '
         $0 == "subscription-output-start" { outputStart = NR }
         $0 == "subscription-state-start" { stateStart = NR }
