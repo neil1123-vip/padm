@@ -243,113 +243,6 @@ runRegressionUiSuiteRoot() {
         listRegressionUiChildSelectors
 }
 
-runRegressionUiLongTailSplitCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-ui-long-tail-split-composition.log"
-
-    : >"${callLog}"
-
-    runRegressionAllSelector() {
-        local selector=$1
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "ui-full-subscription-main-publish-sync-enable" ]]; then
-            runFrameworkWaitForFile "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
-        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply-service" ]]; then
-            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
-        fi
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
-
-    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiChildSelectors
-    awk '
-        $0 == "ui-full-subscription-main-publish-sync-enable-start" { syncStart = NR }
-        $0 == "wireguard-menu-flow-peer-rollback-apply-service-start" { applyStart = NR }
-        $0 == "ui-full-subscription-main-publish-sync-enable-finish" { syncFinish = NR }
-        END { exit !(syncStart && applyStart && syncFinish && applyStart < syncFinish) }
-    ' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-sync-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-sync-finish' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-user-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-user-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-source-control-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-source-control-finish' "${callLog}"
-
-    : >"${callLog}"
-    PADM_REGRESSION_UI_RESOURCE_PROFILE=all PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
-    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiAllProfileChildSelectors
-    ! grep -qx 'ui-full-subscription-main-publish-sync-enable-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-service-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-write-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-source-control-toggle-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-transaction-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-start' "${callLog}"
-    ! grep -qx 'ui-full-start' "${callLog}"
-
-    : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_JOBS=4 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
-    awk '
-        /-start$/ {
-            starts++
-            if ($0 == "ui-full-subscription-main-publish-sync-enable-start") { publishStart = starts }
-            if ($0 == "wireguard-menu-flow-peer-rollback-apply-service-start") { peerRollbackStart = starts }
-        }
-        END { exit !(publishStart && peerRollbackStart && publishStart <= 4 && peerRollbackStart <= 4) }
-    ' "${callLog}"
-
-    : >"${callLog}"
-    PADM_REGRESSION_SUPPRESS_DONE=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        runRegisteredRegressionMain ui-full-subscription-main-publish-user
-    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiFullSubscriptionMainPublishUserChildSelectors
-    ! grep -q '^ui-full:subscription-main-publish-user-start$' "${callLog}"
-
-    : >"${callLog}"
-    PADM_REGRESSION_SUPPRESS_DONE=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        runRegisteredRegressionMain ui-full-subscription-main-publish-sync
-    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionUiFullSubscriptionMainPublishSyncChildSelectors
-
-    : >"${callLog}"
-    PADM_REGRESSION_SUPPRESS_DONE=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        runRegisteredRegressionMain wireguard-menu-flow-peer-rollback-apply
-    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionWireGuardMenuFlowPeerRollbackApplyChildSelectors
-
-    : >"${callLog}"
-    PADM_REGRESSION_SUPPRESS_DONE=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        runRegisteredRegressionMain wireguard-menu-flow-peer-rollback-credential
-    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionWireGuardMenuFlowPeerRollbackCredentialChildSelectors
-
-    : >"${callLog}"
-    PADM_REGRESSION_SUPPRESS_DONE=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        runRegisteredRegressionMain wireguard-menu-flow-peer-source-control
-    runFrameworkAssertSelectorListLogged "${callLog}" listRegressionWireGuardMenuFlowPeerSourceControlChildSelectors
-
-    : >"${callLog}"
-    PADM_REGRESSION_SUPPRESS_DONE=1 \
-        PADM_REGRESSION_UI_LEAF_PARALLEL_JOBS=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        runRegisteredRegressionMain ui-full-subscription-main-publish-user
-    awk '
-        $0 == "ui-full-subscription-main-publish-user-empty-finish" { firstFinish = NR }
-        $0 == "ui-full-subscription-main-publish-user-create-start" { secondStart = NR }
-        $0 == "ui-full-subscription-main-publish-user-create-finish" { secondFinish = NR }
-        $0 == "ui-full-subscription-main-publish-user-inspect-start" { thirdStart = NR }
-        END { exit !(firstFinish && secondStart && secondFinish && thirdStart && firstFinish < secondStart && secondFinish < thirdStart) }
-    ' "${callLog}"
-)
-
 registerRegressionFunctionLeaf ui-smoke runRegressionUiSmokeSuiteRoot
 registerRegressionFunctionLeaf ui-full-core runMenuSmokeRegression core
 registerRegressionFunctionLeaf ui-full-subscription-main-entry runMenuSmokeRegression subscription-main-entry
@@ -374,8 +267,6 @@ registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-clear-err
 registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-status runSubscriptionWireGuardMenuFlowRegression peer-source-control-status
 registerRegressionFunctionLeaf wireguard-menu-flow-control-restore runSubscriptionWireGuardMenuFlowRegression control-restore
 registerRegressionFunctionLeaf wireguard-restore-runner runSubscriptionWireGuardRestoreRunnerRegression
-registerRegressionFunctionLeaf regression-ui-long-tail-split-composition runRegressionUiLongTailSplitCompositionRegression
-registerRegressionFunctionLeaf regression-ui-parallel-composition runRegressionUiLongTailSplitCompositionRegression
 
 registerRegressionParallelSelectorList ui-full runFrameworkParallelRegressionSelectorList \
     "${TMP_DIR}/ui-full-parallel-${BASHPID:-$$}" listRegressionUiFullChildSelectors

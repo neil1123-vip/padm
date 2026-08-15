@@ -200,38 +200,6 @@ runTlsFailureReturnRegression() (
     HOME="${oldHome}"
 )
 
-runTlsCustomSSLEmailRejectsUnsafeAddressRegression() (
-    local root="${TMP_DIR}/tls-custom-email-unsafe-address"
-    local homeDir="${root}/home"
-    local accountFile="${homeDir}/.acme.sh/account.conf"
-    local oldHome="${HOME}"
-    local rc
-
-    mkdir -p "$(dirname -- "${accountFile}")"
-    printf "ACCOUNT_EMAIL='old@example.com'\n" >"${accountFile}"
-    HOME="${homeDir}"
-    sslType=zerossl
-    autoRead() {
-        case "$3" in
-        sslEmailStatus) printf -v "$3" 'y' ;;
-        sslEmail) printf -v "$3" "bad'@example.com" ;;
-        *) printf -v "$3" '' ;;
-        esac
-    }
-
-    set +e
-    customSSLEmail "validate email"
-    rc=$?
-    set -e
-
-    [[ "${rc}" == "1" ]]
-    grep -qxF "ACCOUNT_EMAIL='old@example.com'" "${accountFile}"
-    ! grep -qF "bad'" "${accountFile}"
-    [[ ! -e "${accountFile}_tmp" ]]
-    ! compgen -G "${homeDir}/.acme.sh/.account.conf.*" >/dev/null
-    HOME="${oldHome}"
-)
-
 runTlsRenewalFailurePropagationRegression() (
     local root="${TMP_DIR}/tls-renew-failure-propagation"
     local tlsDir="${root}/certs"

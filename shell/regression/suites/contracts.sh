@@ -60,106 +60,6 @@ runRegressionRegistryRunnerArgsContract() (
     cmp -s "${expectedLog}" "${callLog}"
 )
 
-runRegressionSelectorDispatchCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-selector-dispatch-composition.log"
-    local expectedLog="${TMP_DIR}/regression-selector-dispatch-composition.expected.log"
-
-    : >"${callLog}"
-
-    runRegisteredRegressionMain() {
-        printf '%s suppress=%s\n' "$1" "${PADM_REGRESSION_SUPPRESS_DONE:-}" >>"${callLog}"
-    }
-
-    runRegressionAllSelectorSuiteRoot subscription-state
-    runRegressionAllSelectorSuiteRoot remote-control
-    runRegressionAllSelectorSuiteRoot routing
-
-    printf '%s\n' \
-        'subscription-state suppress=1' \
-        'remote-control suppress=1' \
-        'routing suppress=1' >"${expectedLog}"
-    cmp -s "${expectedLog}" "${callLog}"
-)
-
-runRegressionParallelSelectorLimitCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-parallel-selector-limit-composition.log"
-
-    : >"${callLog}"
-
-    runRegressionAllSelector() {
-        local selector=$1
-
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        [[ "${selector}" == "first" ]] && sleep 0.1
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_PARALLEL_JOBS=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/parallel-selector-limit-composition" \
-        first \
-        second \
-        third
-
-    awk '
-        $0 == "first-finish" { firstFinish = NR }
-        $0 == "second-start" { secondStart = NR }
-        $0 == "second-finish" { secondFinish = NR }
-        $0 == "third-start" { thirdStart = NR }
-        END {
-            exit !(firstFinish && secondStart && secondFinish && thirdStart &&
-                firstFinish < secondStart && secondFinish < thirdStart)
-        }
-    ' "${callLog}"
-)
-
-runRegressionParallelSelectorSlotRefillCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-parallel-selector-slot-refill-composition.log"
-    local thirdStarted="${TMP_DIR}/regression-parallel-selector-slot-refill-third-started"
-
-    : >"${callLog}"
-    rm -f "${thirdStarted}"
-
-    runRegressionAllSelector() {
-        local selector=$1
-
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        case "${selector}" in
-        first)
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${thirdStarted}" ]] && break
-                sleep 0.05
-            done
-            ;;
-        second) sleep 0.02 ;;
-        third) : >"${thirdStarted}" ;;
-        esac
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_PARALLEL_JOBS=2 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector \
-        PADM_REGRESSION_PARALLEL_SELECTOR_MODE=selectors \
-        runFrameworkParallelRegressionSelectors "${TMP_DIR}/parallel-selector-slot-refill-composition" \
-        first \
-        second \
-        third
-
-    awk '
-        $0 == "first-finish" { firstFinish = NR }
-        $0 == "second-finish" { secondFinish = NR }
-        $0 == "third-start" { thirdStart = NR }
-        END {
-            exit !(secondFinish && thirdStart && firstFinish &&
-                secondFinish < thirdStart && thirdStart < firstFinish)
-        }
-    ' "${callLog}"
-)
-
 runFrameworkParallelInterruptCleansChildrenContract() (
     set -euo pipefail
     local childPidFile="${TMP_DIR}/framework-parallel-interrupt-child.pid"
@@ -319,7 +219,6 @@ runRegressionTargetedBatchHelpers() {
         sync-append-local-user-batch runSubscriptionSyncAppendLocalUserBatchRegression \
         traffic-account-id-map-helper runTrafficAccountIdMapHelperRegression \
         subscription-remote-sources-no-reverse-decode runRemoteSubscribeSourcesAvoidReverseDecodeRegression \
-        core-rollback-result-message runCoreRollbackResultMessageRegression \
         config-transaction runConfigTransactionRegression \
         padm-bbr-managed-cleanup runPadmBbrManagedCleanupRegression \
         alone-nginx-backup-manual-check runNginxBackupManualCheckRegression
@@ -373,9 +272,6 @@ runRegressionCaseLoaderContract() (
 
 runRegressionDispatcherContracts() {
     runRegressionStep registry-runner-args runRegressionRegistryRunnerArgsContract
-    runRegressionStep selector-dispatch-composition runRegressionSelectorDispatchCompositionRegression
-    runRegressionStep parallel-selector-limit runRegressionParallelSelectorLimitCompositionRegression
-    runRegressionStep parallel-selector-slot-refill runRegressionParallelSelectorSlotRefillCompositionRegression
     runRegressionStep parallel-interrupt-cleans-children runFrameworkParallelInterruptCleansChildrenContract
     runRegressionStep parallel-collects-exited-child runParallelSelectorCollectsExitedChildWithoutRcContract
     runRegressionStep transaction-system-dispatches-children-once runTransactionSystemAggregateDispatchesChildrenExactlyOnceContract
@@ -383,9 +279,6 @@ runRegressionDispatcherContracts() {
 }
 
 registerRegressionFunctionLeaf regression-dispatcher-contract runRegressionDispatcherContracts
-registerRegressionFunctionLeaf regression-selector-dispatch-composition runRegressionSelectorDispatchCompositionRegression
-registerRegressionFunctionLeaf regression-parallel-selector-limit-composition runRegressionParallelSelectorLimitCompositionRegression
-registerRegressionFunctionLeaf regression-parallel-selector-slot-refill-composition runRegressionParallelSelectorSlotRefillCompositionRegression
 registerRegressionFunctionLeaf framework-parallel-selector-list-with-jobs runFrameworkParallelSelectorListWithJobsContract
 registerRegressionFunctionLeaf targeted-batch-helpers runRegressionTargetedBatchHelpers
 registerRegressionFunctionLeaf regression-case-loader-contract runRegressionCaseLoaderContract

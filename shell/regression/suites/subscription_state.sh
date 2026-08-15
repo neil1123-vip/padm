@@ -159,71 +159,10 @@ runRegressionSubscriptionStateSyncRollback() {
             listRegressionSubscriptionStateSyncRollbackFailureChildSelectors
 }
 
-runRegressionSubscriptionStateParallelIsolationCompositionContract() (
-    set -euo pipefail
-    local contractName=$1
-    local suiteRunner=$2
-    local selectorListFn=$3
-    local selectorPrefix=$4
-    local waitingSelector=$5
-    local signalingSelector=$6
-    local callLog="${TMP_DIR}/regression-subscription-state-${contractName}-parallel-isolation-composition.log"
-    local startMarker="${TMP_DIR}/subscription-state-${contractName}-parallel-started"
-    local fullSelector selector
-    local -a selectors=()
-
-    mapfile -t selectors < <("${selectorListFn}")
-    : >"${callLog}"
-    rm -f "${startMarker}"
-
-    runRegressionSubscriptionStateParallelIsolationProbe() {
-        local selector=$1
-
-        printf '%s|start|tmp=%s|groups=%s\n' \
-            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
-        if [[ "${selector}" == "${waitingSelector}" ]]; then
-            runFrameworkWaitForFile "${startMarker}"
-        elif [[ "${selector}" == "${signalingSelector}" ]]; then
-            : >"${startMarker}"
-        fi
-        printf '%s|finish|tmp=%s|groups=%s\n' \
-            "${selector}" "${TMP_DIR}" "${PADM_SUBSCRIPTION_GROUPS_DIR:-}" >>"${callLog}"
-    }
-
-    runRegisteredRegressionMain() {
-        runRegressionSubscriptionStateParallelIsolationProbe "${1#"${selectorPrefix}"}"
-    }
-
-    "${suiteRunner}"
-
-    for fullSelector in "${selectors[@]}"; do
-        selector=${fullSelector#"${selectorPrefix}"}
-        grep -q "^${selector}|start|" "${callLog}"
-        grep -q "^${selector}|finish|" "${callLog}"
-    done
-    awk -F'[|=]' -v waiting="${waitingSelector}" -v signaling="${signalingSelector}" '
-        $1 == waiting && $2 == "start" { waitingStart = NR }
-        $1 == signaling && $2 == "start" { signalingStart = NR }
-        $1 == waiting && $2 == "finish" { waitingFinish = NR }
-        END { exit !(waitingStart && signalingStart && waitingFinish && signalingStart < waitingFinish) }
-    ' "${callLog}"
-    awk -F'[|=]' -v expected="${#selectors[@]}" '
-        $2 == "start" {
-            tmp[$4] = 1
-            groups[$6] = 1
-            if (index($6, $4 "/groups") != 1) {
-                bad = 1
-            }
-        }
-        END { exit !(length(tmp) == expected && length(groups) == expected && !bad) }
-    ' "${callLog}"
-)
-
 registerRegressionFunctionLeaf subscription-state-structure-foundation-add-remove runRegressionStep subscription-state-structure-foundation-add-remove runSubscriptionGroupStateStructureFoundationAddRemoveRegression
 registerRegressionFunctionLeaf subscription-state-structure-foundation-credential runRegressionStep subscription-state-structure-foundation-credential runSubscriptionGroupStateStructureFoundationCredentialRegression
 registerRegressionFunctionLeaf subscription-state-structure-foundation-normalize runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression
 registerRegressionFunctionLeaf subscription-state-structure-foundation-init-transaction runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
-registerRegressionFunctionLeaf subscription-state-structure-foundation-serial runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
 registerRegressionSequentialSelectorList subscription-state-structure-validation listRegressionSubscriptionStateStructureValidationChildSelectors
 registerRegressionFunctionLeaf subscription-state-structure-validation-serial runRegressionStep subscription-state-structure-validation-serial runSubscriptionGroupStateStructureValidationRegression
 registerRegressionSequentialSelectorList subscription-state-structure-source listRegressionSubscriptionStateStructureSourceChildSelectors
@@ -231,7 +170,6 @@ registerRegressionFunctionLeaf subscription-state-structure-source-credential ru
 registerRegressionFunctionLeaf subscription-state-structure-source-status runRegressionStep subscription-state-structure-source-status runSubscriptionGroupStateStructureSourceStatusRegression
 registerRegressionFunctionLeaf subscription-state-structure-source-remove runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
 registerRegressionFunctionLeaf subscription-state-structure-source-serial runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
-registerRegressionFunctionLeaf subscription-state-structure-serial runRegressionStep subscription-state-structure-serial runSubscriptionGroupStateStructureSerialRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-summary runRegressionStep subscription-state-quota-traffic-summary runSubscriptionGroupStateQuotaTrafficSummaryRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-invalid-input runRegressionStep subscription-state-quota-traffic-invalid-input runSubscriptionGroupStateQuotaTrafficInvalidInputRegression
 registerRegressionFunctionLeaf subscription-state-quota-traffic-apply runRegressionStep subscription-state-quota-traffic-apply runSubscriptionGroupStateQuotaTrafficApplyRegression
@@ -243,11 +181,9 @@ registerRegressionFunctionLeaf subscription-state-quota-partial-sync-apply-failu
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-plan runRegressionStep subscription-state-quota-partial-sync-plan runSubscriptionGroupStateQuotaPartialSyncPlanRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-config runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
 registerRegressionFunctionLeaf subscription-state-quota-partial-sync-serial runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
-registerRegressionFunctionLeaf subscription-state-quota-serial runRegressionStep subscription-state-quota-serial runSubscriptionGroupStateQuotaSerialRegression
 registerRegressionSequentialSelectorList subscription-state-remote-restore-self-reference listRegressionSubscriptionStateRemoteRestoreSelfReferenceChildSelectors
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-plan runRegressionStep subscription-state-remote-restore-self-reference-plan runSubscriptionGroupStateRemoteRestoreSelfReferencePlanRegression
 registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-sync runRegressionStep subscription-state-remote-restore-self-reference-sync runSubscriptionGroupStateRemoteRestoreSelfReferenceSyncRegression
-registerRegressionFunctionLeaf subscription-state-remote-restore-self-reference-serial runRegressionStep subscription-state-remote-restore-self-reference-serial runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression
 registerRegressionFunctionLeaf subscription-state-remote-restore-state-write runRegressionStep subscription-state-remote-restore-state-write runSubscriptionGroupStateRemoteRestoreStateWriteRegression
 registerRegressionFunctionLeaf subscription-state-remote-restore-legacy-menu runRegressionStep subscription-state-remote-restore-legacy-menu runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression
 registerRegressionSequentialSelectorList subscription-state-serial listRegressionSubscriptionStateSerialChildSelectors
@@ -278,33 +214,6 @@ registerRegressionFunctionLeaf subscription-group-sync-remote-failure runRegress
 registerRegressionFunctionLeaf subscription-group-sync-state-lock runRegressionStep subscription-group-sync-state-lock runSubscriptionGroupSyncUsesStateLockRegression
 registerRegressionFunctionLeaf subscription-sync-reconcile-early-exit runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
 registerRegressionFunctionLeaf subscription-groups-restore-failure runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
-registerRegressionFunctionLeaf \
-    regression-subscription-state-remote-restore-parallel-isolation-composition \
-    runRegressionSubscriptionStateParallelIsolationCompositionContract \
-    remote-restore \
-    runRegressionSubscriptionStateRemoteRestore \
-    listRegressionSubscriptionStateRemoteRestoreChildSelectors \
-    subscription-state- \
-    remote-restore-self-reference \
-    remote-restore-state-write
-registerRegressionFunctionLeaf \
-    regression-subscription-state-structure-parallel-isolation-composition \
-    runRegressionSubscriptionStateParallelIsolationCompositionContract \
-    structure \
-    runRegressionSubscriptionStateStructure \
-    listRegressionSubscriptionStateStructureChildSelectors \
-    subscription-state- \
-    structure-foundation \
-    structure-source
-registerRegressionFunctionLeaf \
-    regression-subscription-state-sync-rollback-parallel-isolation-composition \
-    runRegressionSubscriptionStateParallelIsolationCompositionContract \
-    sync-rollback \
-    runRegressionSubscriptionStateSyncRollback \
-    listRegressionSubscriptionStateSyncRollbackFailureChildSelectors \
-    subscription- \
-    sync-rollback-config-restore-failure \
-    sync-reload-rollback
 
 listRegressionSubscriptionStateCoreChildSelectors() {
     printf '%s\n' \

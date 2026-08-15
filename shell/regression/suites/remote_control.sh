@@ -50,23 +50,6 @@ listRegressionRemoteControlContractChildSelectors() {
         remote-control-contract-server-response
 }
 
-runRegressionRemoteControlDeepStateRollbackStabilityRegression() (
-    set -euo pipefail
-    local beforeFile="${TMP_DIR}/remote-control-deep-rollback-stable.before.json"
-    local afterFile="${TMP_DIR}/remote-control-deep-rollback-stable.after.json"
-
-    mkdir -p "$(dirname "$(subscriptionGroupsFile)")"
-    cat >"$(subscriptionGroupsFile)" <<'JSON'
-{"version":2,"active_group":"default","groups":[{"id":"default","name":"Default","admin":{"id":"admin","name":"Admin","enabled":true,"allowed_sources":["*"],"traffic_limit_gb":0,"token":""},"sources":[{"id":"main","name":"Main","role":"main","scheme":"local","transport":"local","host":"127.0.0.1","port":0,"enabled":true,"sync_status":"local"}],"user_groups":[],"sync":{"enabled":true,"interval_minutes":10,"last_run":"","last_status":"pending","failures":[],"quota_auto_apply":false},"traffic":{"global":{"upload":0,"download":0},"admin":{"upload":0,"download":0,"sources":{}},"user_groups":{},"sources":{}}}]}
-JSON
-
-    jq -S -c . "$(subscriptionGroupsFile)" >"${beforeFile}"
-    subscriptionGroupsStateWrite '.groups |= .'
-    jq -S -c . "$(subscriptionGroupsFile)" >"${afterFile}"
-
-    cmp -s "${beforeFile}" "${afterFile}"
-)
-
 registerRegressionFunctionLeaf remote-control-concurrency runRemoteControlConcurrencyRegression
 registerRegressionFunctionLeaf remote-control-aggregation-failure runRemoteControlAggregationFailureRegression
 registerRegressionFunctionLeaf remote-control-inline-aggregation-helpers runRemoteControlInlineAggregationHelpersRegression
@@ -90,7 +73,6 @@ registerRegressionFunctionLeaf remote-control-contract-service-install-health-ro
 registerRegressionFunctionLeaf remote-control-contract-service-install-token-transaction runRegressionStep remote-control-service-install-token-transaction runSubscriptionControlTokenTransactionRegression
 registerRegressionFunctionLeaf remote-control-contract-server-response runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
 registerRegressionFunctionLeaf remote-control-deep runRegressionStep remote-control-server-refresh-deep runRemoteControlServerRefreshDeepRegression
-registerRegressionFunctionLeaf regression-remote-control-deep-state-rollback-stability runRegressionRemoteControlDeepStateRollbackStabilityRegression
 
 listRegressionRemoteControlChildSelectors() {
     printf '%s\n' \

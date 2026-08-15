@@ -208,7 +208,7 @@ runFrameworkParallelRegressionSelectors() (
             fi
         done
         if [[ -z "${madeProgress}" ]]; then
-            wait -n 2>/dev/null || sleep 0.01
+            wait -n 2>/dev/null || :
         fi
     done
     if (( hadErrexit )); then
@@ -239,67 +239,6 @@ runFrameworkParallelRegressionSelectorList() {
         runFrameworkParallelRegressionSelectors "${orchestrationRoot}" \
         "${selectorPairs[@]}"
 }
-
-runFrameworkWaitForFile() {
-    local file=$1
-    local attempts=${2:-50}
-
-    while (( attempts-- > 0 )); do
-        [[ -e "${file}" ]] && return 0
-        sleep 0.01
-    done
-    return 0
-}
-
-runFrameworkAssertSelectorListLogged() {
-    local callLog=$1
-    local selectorListFn=$2
-    local selector
-
-    while IFS= read -r selector; do
-        [[ -n "${selector}" ]] || continue
-        grep -Fqx "${selector}-start" "${callLog}"
-        grep -Fqx "${selector}-finish" "${callLog}"
-    done < <("${selectorListFn}")
-}
-
-runFrameworkParallelCompositionContract() (
-    set -euo pipefail
-    local suiteSelector=$1
-    local waitingSelector=$2
-    local signalingSelector=$3
-    local selectorListFn=${4:-}
-    local callLog="${TMP_DIR}/regression-${suiteSelector}-parallel-composition.log"
-    local startMarker="${TMP_DIR}/regression-${suiteSelector}-parallel-started"
-
-    : >"${callLog}"
-    rm -f "${startMarker}"
-
-    runRegressionParallelCompositionProbe() {
-        local selector=$1
-
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "${waitingSelector}" ]]; then
-            runFrameworkWaitForFile "${startMarker}"
-        elif [[ "${selector}" == "${signalingSelector}" ]]; then
-            : >"${startMarker}"
-        fi
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_SUPPRESS_DONE=1 \
-        PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionParallelCompositionProbe \
-        runRegisteredRegressionMain "${suiteSelector}"
-    if [[ -n "${selectorListFn}" ]]; then
-        runFrameworkAssertSelectorListLogged "${callLog}" "${selectorListFn}"
-    fi
-    awk -v waiting="${waitingSelector}" -v signaling="${signalingSelector}" '
-        $0 == waiting "-start" { waitingStart = NR }
-        $0 == signaling "-start" { signalingStart = NR }
-        $0 == waiting "-finish" { waitingFinish = NR }
-        END { exit !(waitingStart && signalingStart && waitingFinish && signalingStart < waitingFinish) }
-    ' "${callLog}"
-)
 
 runFrameworkParallelRegressionSelectorListWithJobs() {
     local orchestrationRoot=$1

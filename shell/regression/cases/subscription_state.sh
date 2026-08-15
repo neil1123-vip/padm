@@ -248,13 +248,6 @@ runSubscriptionGroupStateStructureFoundationInitTransactionRegression() (
 
 )
 
-runSubscriptionGroupStateStructureFoundationSerialRegression() {
-    runRegressionStep subscription-state-structure-foundation-add-remove runSubscriptionGroupStateStructureFoundationAddRemoveRegression
-    runRegressionStep subscription-state-structure-foundation-credential runSubscriptionGroupStateStructureFoundationCredentialRegression
-    runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression
-    runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
-}
-
 runSubscriptionGroupStateStructureValidationRegression() {
     local beforeSnapshot
     local invalidFilter
@@ -432,12 +425,6 @@ runSubscriptionGroupStateStructureSourceSerialRegression() {
     runRegressionStep subscription-state-structure-source-status runSubscriptionGroupStateStructureSourceStatusRegression
     runRegressionStep subscription-state-structure-sync-cron runSubscriptionGroupStateStructureSyncCronRegression
     runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
-}
-
-runSubscriptionGroupStateStructureSerialRegression() {
-    runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
-    runRegressionStep subscription-state-structure-validation runSubscriptionGroupStateStructureValidationRegression
-    runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
 }
 
 runSubscriptionGroupStateQuotaTrafficSummaryRegression() {
@@ -694,12 +681,6 @@ runSubscriptionGroupStateQuotaPartialSyncSerialRegression() {
     runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
 }
 
-runSubscriptionGroupStateQuotaSerialRegression() {
-    runRegressionStep subscription-state-quota-traffic-serial runSubscriptionGroupStateQuotaTrafficSerialRegression
-    runRegressionStep subscription-state-quota-menu-tx-serial runSubscriptionGroupStateQuotaMenuTransactionSerialRegression
-    runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
-}
-
 prepareSubscriptionRemoteRestoreSelfReferenceFixture() {
     currentHost="self.example.com"
     subscribeDomain="self.example.com"
@@ -730,11 +711,6 @@ runSubscriptionGroupStateRemoteRestoreSelfReferenceSyncRegression() {
     }
     runSubscriptionRemoteSync | jq -e '.failures[] | contains("self-ref")' >/dev/null
     subscriptionGroupsStateRead -e '.groups[0].sources[] | select(.id == "self-ref" and .sync_status == "failed" and .last_sync_error.type == "self_reference")' >/dev/null
-}
-
-runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression() {
-    runRegressionStep subscription-state-remote-restore-self-reference-plan runSubscriptionGroupStateRemoteRestoreSelfReferencePlanRegression
-    runRegressionStep subscription-state-remote-restore-self-reference-sync runSubscriptionGroupStateRemoteRestoreSelfReferenceSyncRegression
 }
 
 runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
