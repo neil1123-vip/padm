@@ -16250,8 +16250,6 @@ runSyncConfiguredManagedUsersHelperRegression() (
     local syncConfigRoot="${TMP_DIR}/sync-configured-managed-users-helper"
     local helperLog="${syncConfigRoot}/helper.log"
     local currentManaged
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
 
     mkdir -p "${syncConfigRoot}/xray" "${syncConfigRoot}/sing-box"
     configPath="${syncConfigRoot}/xray/"
@@ -16274,26 +16272,12 @@ JSON
     jq -e '. == ["sub_team_a-main","sub_team_b-main"]' <<<"${currentManaged}" >/dev/null
     [[ -f "${helperLog}" ]] || return 1
     grep -qx '2' "${helperLog}" || return 1
-
-    unset -f subscriptionSyncConfiguredManagedUsers
-    if [[ -n "${oldConfigPath}" ]]; then
-        configPath="${oldConfigPath}"
-    else
-        unset configPath
-    fi
-    if [[ -n "${oldSingBoxConfigPath}" ]]; then
-        singBoxConfigPath="${oldSingBoxConfigPath}"
-    else
-        unset singBoxConfigPath
-    fi
 )
 
 runTrafficConfiguredAccountsHelperRegression() (
     local trafficRoot="${TMP_DIR}/traffic-configured-accounts-helper"
     local helperLog="${trafficRoot}/helper.log"
     local accounts
-    local oldConfigPath="${configPath:-}"
-    local oldSingBoxConfigPath="${singBoxConfigPath:-}"
 
     mkdir -p "${trafficRoot}/xray" "${trafficRoot}/sing-box"
     configPath="${trafficRoot}/xray/"
@@ -16314,18 +16298,6 @@ JSON
     jq -e '. == ["admin","ops","sub_team_a","sub_team_b"]' <<<"${accounts}" >/dev/null
     [[ -f "${helperLog}" ]] || return 1
     grep -qx '0' "${helperLog}" || return 1
-
-    unset -f subscriptionSyncConfiguredAccountNamesJson
-    if [[ -n "${oldConfigPath}" ]]; then
-        configPath="${oldConfigPath}"
-    else
-        unset configPath
-    fi
-    if [[ -n "${oldSingBoxConfigPath}" ]]; then
-        singBoxConfigPath="${oldSingBoxConfigPath}"
-    else
-        unset singBoxConfigPath
-    fi
 )
 
 runTrafficAccountIdMapHelperRegression() (
