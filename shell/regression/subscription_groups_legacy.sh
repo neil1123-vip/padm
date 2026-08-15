@@ -17604,50 +17604,58 @@ runInstallToolsAcmeDownloadBoundsRegression() {
     )
 }
 
-runInstallToolsUpdateFailureRegression() {
-    (
-        local statusLog="${TMP_DIR}/install-tools-update-status.log"
-        local errorLog="${TMP_DIR}/install-tools-update-error.log"
-        local fakeHome="${TMP_DIR}/install-tools-update-home"
-        PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-update-base-called"
+runInstallToolsRefreshFailureRegression() (
+    local failure=$1
+    local errorLog="${TMP_DIR}/install-tools-${failure}-error.log"
+    local fakeHome="${TMP_DIR}/install-tools-${failure}-home"
+    local expectedError installStatus
+    PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-${failure}-base-called"
 
-        mkdir -p "${fakeHome}/.acme.sh"
-        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
-        HOME="${fakeHome}"
-        export REGRESSION_STATUS_CARD_LOG="${statusLog}"
-        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
-        PADM_INSTALL_LOG="${TMP_DIR}/install-tools-update-install.log"
-        : >"${statusLog}"
-        : >"${errorLog}"
-        release=debian
-        rhelLike=false
+    mkdir -p "${fakeHome}/.acme.sh"
+    printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
+    HOME="${fakeHome}"
+    export REGRESSION_ERROR_CARD_LOG="${errorLog}"
+    PADM_INSTALL_LOG="${TMP_DIR}/install-tools-${failure}-install.log"
+    : >"${errorLog}"
+    release=debian
+    rhelLike=false
+    packageManager=apt
+    installType=true
+    removeType=true
+    selectCustomInstallType=",7,"
+    case "${failure}" in
+    update)
         upgrade=false
         updateReleaseInfoChange=true
-        packageManager=apt
-        installType=true
-        removeType=true
-        selectCustomInstallType=",7,"
-        protocolSelectionSkipsNginx() { return 0; }
-        protocolSelectionNeedsLocalCertificate() { return 0; }
-        runWithTimeout() { return 0; }
-        waitAptProcess() { return 0; }
-        installBasePackages() { : >"${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}"; }
-        runPackageCommandWithProgress() {
-            [[ "$1" == "检查、安装更新" ]] && return 1
-            return 0
-        }
+        expectedError="系统软件源刷新失败"
+        ;;
+    release-info)
+        upgrade=true
+        updateReleaseInfoChange=false
+        expectedError="系统软件源 release 信息刷新失败"
+        printf 'Repository changed its value\n' >"${PADM_INSTALL_LOG}"
+        ;;
+    esac
+    protocolSelectionSkipsNginx() { return 0; }
+    protocolSelectionNeedsLocalCertificate() { return 0; }
+    waitAptProcess() { return 0; }
+    installBasePackages() { : >"${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}"; }
+    runPackageCommandWithProgress() {
+        [[ "${failure}" == "release-info" ]] && { printf 'changed\n' >"$4"; return; }
+        [[ "$1" != "检查、安装更新" ]]
+    }
+    runWithTimeout() {
+        [[ "${failure}" != "release-info" || "$1" != "300" ]]
+    }
 
-        set +e
-        (
-            installTools 1
-        ) >/dev/null 2>&1
-        local installStatus=$?
-        set -e
-        [[ "${installStatus}" -ne 0 ]]
-        [[ ! -e "${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}" ]]
-        grep -q "系统软件源刷新失败" "${errorLog}"
-    )
-}
+    set +e
+    (installTools 1) >/dev/null 2>&1
+    installStatus=$?
+    set -e
+    [[ "${installStatus}" -ne 0 ]]
+    [[ ! -e "${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}" ]]
+    grep -q "${expectedError}" "${errorLog}"
+)
 
 runInstallToolsUsesConfiguredInstallLogRegression() {
     (
@@ -17708,52 +17716,6 @@ runInstallToolsUsesConfiguredInstallLogRegression() {
         [[ "$(grep -cF "|${resolvedInstallLog}" "${callLog}")" == "2" ]]
         grep -q "^检查、安装更新|${resolvedInstallLog}\$" "${callLog}"
         grep -q "^安装基础工具|${resolvedInstallLog}\$" "${callLog}"
-    )
-}
-
-runInstallToolsReleaseInfoFailureRegression() {
-    (
-        local errorLog="${TMP_DIR}/install-tools-release-info-error.log"
-        local fakeHome="${TMP_DIR}/install-tools-release-info-home"
-        PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE="${TMP_DIR}/install-tools-release-info-base-called"
-
-        mkdir -p "${fakeHome}/.acme.sh"
-        printf '#!/usr/bin/env sh\n' >"${fakeHome}/.acme.sh/acme.sh"
-        HOME="${fakeHome}"
-        export REGRESSION_ERROR_CARD_LOG="${errorLog}"
-        PADM_INSTALL_LOG="${TMP_DIR}/install-tools-release-info-install.log"
-        : >"${errorLog}"
-        printf 'Repository changed its value\n' >"${PADM_INSTALL_LOG}"
-        release=debian
-        rhelLike=false
-        upgrade=true
-        updateReleaseInfoChange=false
-        packageManager=apt
-        installType=true
-        removeType=true
-        selectCustomInstallType=",7,"
-        protocolSelectionSkipsNginx() { return 0; }
-        protocolSelectionNeedsLocalCertificate() { return 0; }
-        waitAptProcess() { return 0; }
-        installBasePackages() { : >"${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}"; }
-        runPackageCommandWithProgress() {
-            printf 'changed\n' >"$4"
-            return 0
-        }
-        runWithTimeout() {
-            [[ "$1" == "300" ]] && return 1
-            return 0
-        }
-
-        set +e
-        (
-            installTools 1
-        ) >/dev/null 2>&1
-        local installStatus=$?
-        set -e
-        [[ "${installStatus}" -ne 0 ]]
-        [[ ! -e "${PADM_REGRESSION_BASE_PACKAGE_CALLED_FILE}" ]]
-        grep -q "系统软件源 release 信息刷新失败" "${errorLog}"
     )
 }
 
