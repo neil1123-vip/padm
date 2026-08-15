@@ -706,10 +706,6 @@ runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression() {
     runRegressionStep subscription-state-remote-restore-self-reference-sync runSubscriptionGroupStateRemoteRestoreSelfReferenceSyncRegression
 }
 
-runSubscriptionGroupStateRemoteRestoreSelfReferenceRegression() {
-    runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression
-}
-
 runSubscriptionGroupStateRemoteRestoreStateWriteRegression() {
     mkdir -p "$(subscriptionGroupsDir)"
     writeSubscriptionStateDefaultFixture
@@ -1849,154 +1845,6 @@ JSON
     if [[ -n "${oldTmpDir}" ]]; then TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
-runRegressionSubscriptionStateStructureFoundationAddRemove() {
-    runRegressionStep subscription-state-structure-foundation-add-remove runSubscriptionGroupStateStructureFoundationAddRemoveRegression
-}
-
-runRegressionSubscriptionStateStructureFoundationCredential() {
-    runRegressionStep subscription-state-structure-foundation-credential runSubscriptionGroupStateStructureFoundationCredentialRegression
-}
-
-runRegressionSubscriptionStateStructureFoundationNormalize() {
-    runRegressionStep subscription-state-structure-foundation-normalize runSubscriptionGroupStateStructureFoundationNormalizeRegression
-}
-
-runRegressionSubscriptionStateStructureFoundationInitTransaction() {
-    runRegressionStep subscription-state-structure-foundation-init-transaction runSubscriptionGroupStateStructureFoundationInitTransactionRegression
-}
-
-runRegressionSubscriptionStateStructureFoundationSerial() {
-    runRegressionStep subscription-state-structure-foundation-serial runSubscriptionGroupStateStructureFoundationSerialRegression
-}
-
-runRegressionSubscriptionStateStructureValidationSerial() {
-    runRegressionStep subscription-state-structure-validation-serial runSubscriptionGroupStateStructureValidationRegression
-}
-
-runRegressionSubscriptionStateStructureSourceCredential() {
-    runRegressionStep subscription-state-structure-source-credential runSubscriptionGroupStateStructureSourceCredentialRegression
-}
-
-runRegressionSubscriptionStateStructureSourceStatus() {
-    runRegressionStep subscription-state-structure-source-status runSubscriptionGroupStateStructureSourceStatusRegression
-}
-
-runRegressionSubscriptionStateStructureSourceRemove() {
-    runRegressionStep subscription-state-structure-source-remove runSubscriptionGroupStateStructureSourceRemoveRegression
-}
-
-runRegressionSubscriptionStateStructureSourceSerial() {
-    runRegressionStep subscription-state-structure-source-serial runSubscriptionGroupStateStructureSourceSerialRegression
-}
-
-runRegressionSubscriptionStateStructureSerial() {
-    runRegressionStep subscription-state-structure-serial runSubscriptionGroupStateStructureSerialRegression
-}
-
-runRegressionSubscriptionStateQuotaTrafficSummary() {
-    runRegressionStep subscription-state-quota-traffic-summary runSubscriptionGroupStateQuotaTrafficSummaryRegression
-}
-
-runRegressionSubscriptionStateQuotaTrafficInvalidInput() {
-    runRegressionStep subscription-state-quota-traffic-invalid-input runSubscriptionGroupStateQuotaTrafficInvalidInputRegression
-}
-
-runRegressionSubscriptionStateQuotaTrafficApply() {
-    runRegressionStep subscription-state-quota-traffic-apply runSubscriptionGroupStateQuotaTrafficApplyRegression
-}
-
-runRegressionSubscriptionStateQuotaTrafficSerial() {
-    runRegressionStep subscription-state-quota-traffic-serial runSubscriptionGroupStateQuotaTrafficSerialRegression
-}
-
-runRegressionSubscriptionStateQuotaMenuPreviewFailure() {
-    runRegressionStep subscription-state-quota-menu-preview-fail runSubscriptionGroupStateQuotaMenuPreviewFailureRegression
-}
-
-runRegressionSubscriptionStateQuotaTransactionRollback() {
-    runRegressionStep subscription-state-quota-menu-tx-rollback runSubscriptionGroupStateQuotaTransactionRollbackRegression
-}
-
-runRegressionSubscriptionStateQuotaMenuTransactionSerial() {
-    runRegressionStep subscription-state-quota-menu-tx-serial runSubscriptionGroupStateQuotaMenuTransactionSerialRegression
-}
-
-runRegressionSubscriptionStateQuotaPartialSyncApplyFailure() {
-    runRegressionStep subscription-state-quota-partial-sync-apply-failure runSubscriptionGroupStateQuotaPartialSyncApplyFailureRegression
-}
-
-runRegressionSubscriptionStateQuotaPartialSyncPlan() {
-    runRegressionStep subscription-state-quota-partial-sync-plan runSubscriptionGroupStateQuotaPartialSyncPlanRegression
-}
-
-runRegressionSubscriptionStateQuotaPartialSyncConfig() {
-    runRegressionStep subscription-state-quota-partial-sync-config runSubscriptionGroupStateQuotaPartialSyncConfigRegression
-}
-
-runRegressionSubscriptionStateQuotaPartialSyncSerial() {
-    runRegressionStep subscription-state-quota-partial-sync-serial runSubscriptionGroupStateQuotaPartialSyncSerialRegression
-}
-
-runRegressionSubscriptionStateQuotaSerial() {
-    runRegressionStep subscription-state-quota-serial runSubscriptionGroupStateQuotaSerialRegression
-}
-
-runRegressionSubscriptionStateRemoteRestoreSelfReferencePlan() {
-    runRegressionStep subscription-state-remote-restore-self-reference-plan runSubscriptionGroupStateRemoteRestoreSelfReferencePlanRegression
-}
-
-runRegressionSubscriptionStateRemoteRestoreSelfReferenceSync() {
-    runRegressionStep subscription-state-remote-restore-self-reference-sync runSubscriptionGroupStateRemoteRestoreSelfReferenceSyncRegression
-}
-
-runRegressionSubscriptionStateRemoteRestoreSelfReferenceSerial() {
-    runRegressionStep subscription-state-remote-restore-self-reference-serial runSubscriptionGroupStateRemoteRestoreSelfReferenceSerialRegression
-}
-
-runRegressionSubscriptionStateRemoteRestoreStateWrite() {
-    runRegressionStep subscription-state-remote-restore-state-write runSubscriptionGroupStateRemoteRestoreStateWriteRegression
-}
-
-runRegressionSubscriptionStateRemoteRestoreLegacyMenu() {
-    runRegressionStep subscription-state-remote-restore-legacy-menu runSubscriptionGroupStateRemoteRestoreLegacyMenuRegression
-}
-
-runRegressionSubscriptionSyncTempDir() {
-    runRegressionStep subscription-sync-tempdir runSubscriptionSyncTempDirRegression
-}
-
-runRegressionSubscriptionSyncRollbackConfigRestoreFailure() {
-    runRegressionStep subscription-sync-rollback-config-restore-failure runSubscriptionSyncRollbackConfigRestoreFailureRegression
-}
-
-runRegressionSubscriptionSyncRollbackRestoreDirFailure() {
-    runRegressionStep subscription-sync-restore-dir-failure runSubscriptionSyncRollbackRestoreDirFailureRegression
-}
-
-runRegressionSubscriptionSyncRollbackReloadRollback() {
-    runRegressionStep subscription-sync-reload-rollback runSubscriptionSyncRollbackReloadRollbackRegression
-}
-
-runRegressionSubscriptionGroupSyncRollback() {
-    runRegressionStep subscription-group-sync-rollback runSubscriptionGroupSyncRollbackRegression
-}
-
-runRegressionSubscriptionGroupSyncRollbackSerial() {
-    runRegressionStep subscription-group-sync-rollback-serial runSubscriptionGroupSyncRollbackSerialRegression
-}
-
-runRegressionSubscriptionGroupSyncApplyFailure() {
-    runRegressionStep subscription-group-sync-apply-failure runSubscriptionGroupSyncApplyFailureRegression
-}
-
-runRegressionSubscriptionGroupSyncReconcileRollback() {
-    runRegressionStep subscription-group-sync-reconcile-rollback runSubscriptionGroupSyncReconcileRollbackRegression
-}
-
-runRegressionSubscriptionGroupSyncRemoteFailure() {
-    runRegressionStep subscription-group-sync-remote-failure runSubscriptionGroupSyncRemoteFailureRegression
-}
-
 runSubscriptionGroupSyncUsesStateLockRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/subscription-group-sync-state-lock.log"
@@ -2019,18 +1867,6 @@ runSubscriptionGroupSyncUsesStateLockRegression() (
     grep -qx 'lock:runSubscriptionGroupSyncUnlocked' "${callLog}"
     grep -qx 'sync:' "${callLog}"
 )
-
-runRegressionSubscriptionGroupSyncUsesStateLock() {
-    runRegressionStep subscription-group-sync-state-lock runSubscriptionGroupSyncUsesStateLockRegression
-}
-
-runRegressionSubscriptionSyncReconcileEarlyExit() {
-    runRegressionStep subscription-sync-reconcile-early-exit runSubscriptionSyncReconcileEarlyExitRegression
-}
-
-runRegressionSubscriptionGroupsRestoreFailure() {
-    runRegressionStep subscription-groups-restore-failure runSubscriptionGroupsRestoreFailureRegression
-}
 
 if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0

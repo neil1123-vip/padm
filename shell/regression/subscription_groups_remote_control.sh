@@ -2336,58 +2336,6 @@ PY
     jq -e '.sync_invalid_response.status == 503 and .sync_invalid_response.body.error == "invalid_response" and .sync_invalid_response.body.error_detail.type == "invalid_response"' "${responseFile}" >/dev/null
 )
 
-runRegressionRemoteControlContractServiceInstallSuccessSteps() {
-    runRegressionStep remote-control-service-install-success runSubscriptionControlServiceInstallSuccessRegression
-}
-
-runRegressionRemoteControlContractServiceInstallSystemctlFailSteps() {
-    runRegressionStep remote-control-service-install-systemctl-fail runSubscriptionControlServiceInstallSystemctlFailRegression
-}
-
-runRegressionRemoteControlContractServiceInstallHealthFailSteps() {
-    runRegressionStep remote-control-service-install-health-fail runSubscriptionControlServiceInstallHealthFailRegression
-}
-
-runRegressionRemoteControlContractServiceInstallHealthRollbackSteps() {
-    runRegressionStep remote-control-service-install-health-rollback runSubscriptionControlServiceInstallHealthRollbackRegression
-}
-
-runRegressionRemoteControlContractServiceInstallTokenTransactionSteps() {
-    runRegressionStep remote-control-service-install-token-transaction runSubscriptionControlTokenTransactionRegression
-}
-
-runRegressionRemoteControlContractServerResponseSteps() {
-    runRegressionStep remote-control-server-response runSubscriptionControlServerResponseRegression
-}
-
-runRegressionRemoteControlContractServiceInstallSuccess() {
-    runRegressionRemoteControlContractServiceInstallSuccessSteps
-}
-
-runRegressionRemoteControlContractServiceInstallSystemctlFail() {
-    runRegressionRemoteControlContractServiceInstallSystemctlFailSteps
-}
-
-runRegressionRemoteControlContractServiceInstallHealthFail() {
-    runRegressionRemoteControlContractServiceInstallHealthFailSteps
-}
-
-runRegressionRemoteControlContractServiceInstallHealthRollback() {
-    runRegressionRemoteControlContractServiceInstallHealthRollbackSteps
-}
-
-runRegressionRemoteControlContractServiceInstallTokenTransaction() {
-    runRegressionRemoteControlContractServiceInstallTokenTransactionSteps
-}
-
-runRegressionRemoteControlContractServerResponse() {
-    runRegressionRemoteControlContractServerResponseSteps
-}
-
-runRegressionRemoteControlDeep() {
-    runRegressionStep remote-control-server-refresh-deep runRemoteControlServerRefreshDeepRegression
-}
-
 if [[ "${PADM_REGRESSION_SOURCE_ONLY:-}" == "1" ]]; then
     return 0 2>/dev/null || exit 0
 fi
