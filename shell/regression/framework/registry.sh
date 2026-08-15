@@ -81,6 +81,23 @@ registerRegressionAggregateRunnerWithArgs() {
     PADM_REGRESSION_SELECTOR_RUNNER_ARGS["${selector}"]=$(printf '%s\n' "${runnerArgs[@]}")
 }
 
+registerRegressionSequentialSelectorList() {
+    local selector=$1
+    local selectorListFn=$2
+    registerRegressionAggregateRunnerWithArgs sequential "${selector}" \
+        runFrameworkSequentialRegressionSelectorList "${selectorListFn}" -- $("${selectorListFn}")
+}
+
+registerRegressionParallelSelectorList() {
+    local selector=$1
+    local runner=$2
+    local orchestrationRoot=$3
+    local selectorListFn=$4
+    shift 4
+    registerRegressionAggregateRunnerWithArgs parallel "${selector}" "${runner}" \
+        "${orchestrationRoot}" "${selectorListFn}" "$@" -- $("${selectorListFn}")
+}
+
 validateRegressionRegistry() {
     local selector
     local kind

@@ -83,36 +83,15 @@ registerRegressionFunctionLeaf regression-fast-parallel-composition runFramework
 registerRegressionFunctionLeaf regression-fast-only-parallel-composition runFrameworkParallelCompositionContract fast-only fast-only-safety fast-only-output
 registerRegressionFunctionLeaf regression-fast-only-output-parallel-composition runFrameworkParallelCompositionContract fast-only-output fast-only-output-auto-install fast-only-output-rest
 
-registerRegressionAggregateRunnerWithArgs parallel \
-    fast-only-output \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" \
-    listRegressionFastOnlyOutputChildSelectors \
-    -- \
-    $(listRegressionFastOnlyOutputChildSelectors)
+registerRegressionParallelSelectorList fast-only-output runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/fast-only-output-parallel-${BASHPID:-$$}" listRegressionFastOnlyOutputChildSelectors
+registerRegressionParallelSelectorList fast-only runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" listRegressionFastOnlyChildSelectors
 
-registerRegressionAggregateRunnerWithArgs parallel \
-    fast-only \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/fast-only-parallel-${BASHPID:-$$}" \
-    listRegressionFastOnlyChildSelectors \
-    -- \
-    $(listRegressionFastOnlyChildSelectors)
+registerRegressionSequentialSelectorList fast-only-core listRegressionFastOnlyCoreChildSelectors
 
-registerRegressionAggregateRunnerWithArgs sequential \
-    fast-only-core \
-    runFrameworkSequentialRegressionSelectorList \
-    listRegressionFastOnlyCoreChildSelectors \
-    -- \
-    $(listRegressionFastOnlyCoreChildSelectors)
-
-registerRegressionAggregateRunnerWithArgs parallel \
-    fast \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" \
-    listRegressionFastChildSelectors \
-    -- \
-    $(listRegressionFastChildSelectors)
+registerRegressionParallelSelectorList fast runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/fast-parallel-${BASHPID:-$$}" listRegressionFastChildSelectors
 
 listRegressionFastRealityChildSelectors() {
     printf '%s\n' \
@@ -120,9 +99,4 @@ listRegressionFastRealityChildSelectors() {
         reality-candidates-fast
 }
 
-registerRegressionAggregateRunnerWithArgs sequential \
-    fast-reality \
-    runFrameworkSequentialRegressionSelectorList \
-    listRegressionFastRealityChildSelectors \
-    -- \
-    $(listRegressionFastRealityChildSelectors)
+registerRegressionSequentialSelectorList fast-reality listRegressionFastRealityChildSelectors

@@ -123,51 +123,16 @@ listRegressionRemoteControlChildSelectors() {
         remote-control-deep
 }
 
-registerRegressionAggregateRunnerWithArgs parallel \
-    remote-control-smoke-refresh-apply \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/remote-control-smoke-refresh-apply" \
-    listRegressionRemoteControlSmokeRefreshApplyChildSelectors \
-    -- \
-    $(listRegressionRemoteControlSmokeRefreshApplyChildSelectors)
-registerRegressionAggregateRunnerWithArgs parallel \
-    remote-control-smoke-refresh \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/remote-control-smoke-refresh" \
-    listRegressionRemoteControlSmokeRefreshChildSelectors \
-    -- \
-    $(listRegressionRemoteControlSmokeRefreshChildSelectors)
-registerRegressionAggregateRunnerWithArgs parallel \
-    remote-control-smoke \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/remote-control-smoke" \
-    listRegressionRemoteControlSmokeChildSelectors \
-    -- \
-    $(listRegressionRemoteControlSmokeChildSelectors)
-registerRegressionAggregateRunnerWithArgs sequential \
-    remote-control-smoke-core \
-    runFrameworkSequentialRegressionSelectorList \
-    listRegressionRemoteControlSmokeCoreChildSelectors \
-    -- \
-    $(listRegressionRemoteControlSmokeCoreChildSelectors)
-registerRegressionAggregateRunnerWithArgs parallel \
-    remote-control-contract-service-install \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/remote-control-contract-service-install" \
-    listRegressionRemoteControlContractServiceInstallChildSelectors \
-    -- \
-    $(listRegressionRemoteControlContractServiceInstallChildSelectors)
-registerRegressionAggregateRunnerWithArgs parallel \
-    remote-control-contract \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/remote-control-contract" \
-    listRegressionRemoteControlContractChildSelectors \
-    -- \
-    $(listRegressionRemoteControlContractChildSelectors)
-registerRegressionAggregateRunnerWithArgs parallel \
-    remote-control \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/remote-control-default-${BASHPID:-$$}" \
-    listRegressionRemoteControlChildSelectors \
-    -- \
-    $(listRegressionRemoteControlChildSelectors)
+registerRegressionParallelSelectorList remote-control-smoke-refresh-apply runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/remote-control-smoke-refresh-apply" listRegressionRemoteControlSmokeRefreshApplyChildSelectors
+registerRegressionParallelSelectorList remote-control-smoke-refresh runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/remote-control-smoke-refresh" listRegressionRemoteControlSmokeRefreshChildSelectors
+registerRegressionParallelSelectorList remote-control-smoke runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/remote-control-smoke" listRegressionRemoteControlSmokeChildSelectors
+registerRegressionSequentialSelectorList remote-control-smoke-core listRegressionRemoteControlSmokeCoreChildSelectors
+registerRegressionParallelSelectorList remote-control-contract-service-install runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/remote-control-contract-service-install" listRegressionRemoteControlContractServiceInstallChildSelectors
+registerRegressionParallelSelectorList remote-control-contract runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/remote-control-contract" listRegressionRemoteControlContractChildSelectors
+registerRegressionParallelSelectorList remote-control runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/remote-control-default-${BASHPID:-$$}" listRegressionRemoteControlChildSelectors

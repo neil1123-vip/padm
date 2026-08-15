@@ -233,13 +233,8 @@ registerRegressionFunctionLeaf regression-subscription-output-parallel-compositi
 registerRegressionFunctionLeaf regression-subscription-tx-parallel-composition runRegressionSubscriptionTxParallelCompositionRegression
 registerRegressionFunctionLeaf regression-subscription-legacy-tmpdir-isolation runRegressionSubscriptionLegacyTmpDirIsolationRegression
 
-registerRegressionAggregateRunnerWithArgs parallel \
-    subscription-tx \
-    runSubscriptionSelectorListRegression \
-    subscription-tx-parallel \
-    listRegressionSubscriptionTxChildSelectors \
-    -- \
-    $(listRegressionSubscriptionTxChildSelectors)
+registerRegressionParallelSelectorList subscription-tx runSubscriptionSelectorListRegression \
+    subscription-tx-parallel listRegressionSubscriptionTxChildSelectors
 
 registerRegressionAggregateRunner parallel subscription runRegressionSubscriptionSuiteRoot \
     $(listRegressionSubscriptionChildSelectors)

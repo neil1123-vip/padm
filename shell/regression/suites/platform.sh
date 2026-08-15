@@ -90,17 +90,7 @@ registerRegressionFunctionLeaf reality-scanner-download-failure runRegressionPla
 registerRegressionFunctionLeaf regression-platform-hot-parallel-composition runFrameworkParallelCompositionContract platform-hot platform-update platform-refresh
 registerRegressionFunctionLeaf regression-platform-fast-helper-isolation runRegressionPlatformFastHelperIsolationRegression
 
-registerRegressionAggregateRunnerWithArgs sequential \
-    platform-io \
-    runFrameworkSequentialRegressionSelectorList \
-    listRegressionPlatformIoChildSelectors \
-    -- \
-    $(listRegressionPlatformIoChildSelectors)
+registerRegressionSequentialSelectorList platform-io listRegressionPlatformIoChildSelectors
 
-registerRegressionAggregateRunnerWithArgs parallel \
-    platform-hot \
-    runFrameworkParallelRegressionSelectorList \
-    "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" \
-    listRegressionPlatformHotChildSelectors \
-    -- \
-    $(listRegressionPlatformHotChildSelectors)
+registerRegressionParallelSelectorList platform-hot runFrameworkParallelRegressionSelectorList \
+    "${TMP_DIR}/platform-hot-parallel-${BASHPID:-$$}" listRegressionPlatformHotChildSelectors

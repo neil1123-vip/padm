@@ -35,9 +35,4 @@ registerRegressionFunctionLeaf tls-reinstall-rollback runRegressionTlsLegacyLeaf
 registerRegressionFunctionLeaf tls-renew-failure-propagation runRegressionTlsLegacyLeafWithCompat runTlsRenewalFailurePropagationRegression
 registerRegressionFunctionLeaf regression-tls-legacy-tmpdir-isolation runRegressionTlsLegacyTmpDirIsolationRegression
 
-registerRegressionAggregateRunnerWithArgs sequential \
-    tls \
-    runFrameworkSequentialRegressionSelectorList \
-    listRegressionTlsChildSelectors \
-    -- \
-    $(listRegressionTlsChildSelectors)
+registerRegressionSequentialSelectorList tls listRegressionTlsChildSelectors
