@@ -79,18 +79,20 @@ subscriptionSyncEnsureEnabledUserUUIDs() {
     fi
 }
 
-subscriptionSyncConfiguredAccountNamesJson() {
+subscriptionSyncValidConfigFiles() {
     local file
-    local validFiles=()
     if (($# > 0)); then
-        for file in "$@"; do
-            [[ -f "${file}" ]] && validFiles+=("${file}")
-        done
+        for file; do [[ -f "${file}" ]] && printf '%s\n' "${file}"; done
     else
         while IFS= read -r file; do
-            [[ -f "${file}" ]] && validFiles+=("${file}")
+            [[ -f "${file}" ]] && printf '%s\n' "${file}"
         done < <(subscriptionSyncConfigFiles)
     fi
+}
+
+subscriptionSyncConfiguredAccountNamesJson() {
+    local -a validFiles=()
+    mapfile -t validFiles < <(subscriptionSyncValidConfigFiles "$@")
     [[ "${#validFiles[@]}" -gt 0 ]] || {
         printf '[]\n'
         return 0
@@ -109,17 +111,8 @@ subscriptionSyncConfiguredManagedUsers() {
 }
 
 subscriptionSyncConfiguredManagedCredentials() {
-    local file
-    local validFiles=()
-    if (($# > 0)); then
-        for file in "$@"; do
-            [[ -f "${file}" ]] && validFiles+=("${file}")
-        done
-    else
-        while IFS= read -r file; do
-            [[ -f "${file}" ]] && validFiles+=("${file}")
-        done < <(subscriptionSyncConfigFiles)
-    fi
+    local -a validFiles=()
+    mapfile -t validFiles < <(subscriptionSyncValidConfigFiles "$@")
     [[ "${#validFiles[@]}" -gt 0 ]] || {
         printf '[]\n'
         return 0
