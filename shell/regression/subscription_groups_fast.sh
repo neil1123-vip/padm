@@ -2488,18 +2488,17 @@ EOF
     if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 }
 
-runInstallRefreshRefFailClosedRegression() {
+runInstallRefreshRefFailClosedRegression() (
     (
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
 
-        local fixtureDir outputLog downloadLog oldTmpDir
+        local fixtureDir outputLog downloadLog
         fixtureDir="${TMP_DIR}/install-refresh-ref-fail-closed"
         mkdir -p "${fixtureDir}"
         outputLog="${fixtureDir}/refresh.log"
         downloadLog="${fixtureDir}/downloads.log"
-        oldTmpDir="${TMPDIR:-}"
         mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/tmp"
         printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
         printf 'old-shell\n' >"${fixtureDir}/shell/marker"
@@ -2552,22 +2551,20 @@ runInstallRefreshRefFailClosedRegression() {
         [[ "$(<"${fixtureDir}/documents/marker")" == "old-doc" ]]
         [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
 
-        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     )
-}
+)
 
-runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
+runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() (
     (
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
 
-        local fixtureDir archiveRoot outputLog oldTmpDir
+        local fixtureDir archiveRoot outputLog
         fixtureDir="${TMP_DIR}/install-refresh-keep-ref-on-lookup-fail"
         mkdir -p "${fixtureDir}"
         archiveRoot="${fixtureDir}/archive"
         outputLog="${fixtureDir}/refresh.log"
-        oldTmpDir="${TMPDIR:-}"
         mkdir -p "${archiveRoot}/padm-main/shell/core" "${archiveRoot}/padm-main/documents" "${archiveRoot}/padm-main/assets" "${fixtureDir}/shell" "${fixtureDir}/tmp"
         printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
         printf 'old-shell\n' >"${fixtureDir}/shell/marker"
@@ -2612,16 +2609,14 @@ runInstallRefreshKeepsRefWhenRemoteLookupFailsRegression() {
         [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
         [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
 
-        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     )
-}
+)
 
-runInstallRefreshRejectsUnsafeScriptDirRegression() {
-    local root archiveRoot outputLog oldTmpDir
+runInstallRefreshRejectsUnsafeScriptDirRegression() (
+    local root archiveRoot outputLog
     root="${TMP_DIR}/install-refresh-unsafe-script-dir"
     archiveRoot="${root}/archive/padm-main"
     outputLog="${root}/refresh.log"
-    oldTmpDir="${TMPDIR:-}"
     mkdir -p "${archiveRoot}/shell" "${root}/relative-script/shell" "${root}/tmp"
     printf '#!/usr/bin/env bash\n' >"${archiveRoot}/install.sh"
     printf 'new-shell\n' >"${archiveRoot}/shell/marker"
@@ -2654,21 +2649,19 @@ runInstallRefreshRejectsUnsafeScriptDirRegression() {
 
     grep -q '脚本目录异常' "${outputLog}"
     [[ -f "${root}/relative-script/shell/sentinel" ]]
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-}
+)
 
-runInstallRefreshRejectsUnsafeArchiveRegression() {
+runInstallRefreshRejectsUnsafeArchiveRegression() (
     (
         set -euo pipefail
         # shellcheck source=/dev/null
         source "${PROJECT_ROOT}/shell/regression/bootstrap.sh"
 
-        local fixtureDir archiveRoot outputLog oldTmpDir
+        local fixtureDir archiveRoot outputLog
         fixtureDir="${TMP_DIR}/install-refresh-unsafe-archive"
         mkdir -p "${fixtureDir}"
         archiveRoot="${fixtureDir}/archive"
         outputLog="${fixtureDir}/refresh.log"
-        oldTmpDir="${TMPDIR:-}"
         mkdir -p "${archiveRoot}/padm-main/shell/core" "${fixtureDir}/shell" "${fixtureDir}/tmp"
         printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
         printf 'old-shell\n' >"${fixtureDir}/shell/marker"
@@ -2707,9 +2700,8 @@ runInstallRefreshRejectsUnsafeArchiveRegression() {
         [[ "$(<"${fixtureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
         [[ "$(<"${fixtureDir}/shell/marker")" == "old-shell" ]]
         [[ ! -e "${fixtureDir}/escape.txt" ]]
-        if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
     )
-}
+)
 
 runInstallRefreshRejectsUnsupportedArchiveEntriesRegression() {
     (
@@ -2964,8 +2956,8 @@ runRemoveInstallPathSafetyRegression() {
     )
 }
 
-runInstallRefreshRestoresBackupRegression() {
-    local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot oldTmpDir restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
+runInstallRefreshRestoresBackupRegression() (
+    local fixtureDir archiveRoot outputLog archiveDirName refreshTmpRoot restoreFailureDir restoreFailureArchiveRoot restoreFailureOutputLog restoreFailureTmpRoot
     fixtureDir="${TMP_DIR}/install-refresh-restore"
     archiveDirName="padm-main"
     mkdir -p "${fixtureDir}"
@@ -2977,7 +2969,6 @@ runInstallRefreshRestoresBackupRegression() {
     restoreFailureArchiveRoot="${restoreFailureDir}/archive/${archiveDirName}"
     restoreFailureOutputLog="${restoreFailureDir}/refresh.log"
     restoreFailureTmpRoot="${restoreFailureDir}/tmp"
-    oldTmpDir="${TMPDIR:-}"
     mkdir -p "${fixtureDir}/shell" "${fixtureDir}/documents" "${fixtureDir}/assets" "${archiveRoot}/shell" "${archiveRoot}/documents" "${archiveRoot}/assets" "${refreshTmpRoot}"
     printf '#!/usr/bin/env bash\nprintf "old-entry\\n"\n' >"${fixtureDir}/install.sh"
     printf 'old-shell\n' >"${fixtureDir}/shell/marker"
@@ -3075,15 +3066,13 @@ runInstallRefreshRestoresBackupRegression() {
     grep -q '完整安装包替换失败，旧模块恢复失败，请手动检查备份目录' "${restoreFailureOutputLog}"
     [[ "$(<"${restoreFailureDir}/install.sh")" == $'#!/usr/bin/env bash\nprintf "old-entry\\n"' ]]
     [[ -d "${restoreFailureDir}/.padm-update-backup" ]]
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-}
+)
 
 runInstallRefreshSignalRestoresAndExitsRegression() (
     set -euo pipefail
     local root="${TMP_DIR}/install-refresh-signal"
     local fixtureDir="${root}/target"
     local archiveRoot="${root}/archive/padm-main"
-    local oldTmpDir="${TMPDIR:-}"
     local status
 
     mkdir -p \
@@ -3138,7 +3127,6 @@ runInstallRefreshSignalRestoresAndExitsRegression() (
     [[ "$(<"${fixtureDir}/assets/marker")" == "old-assets" ]]
     [[ "$(<"${fixtureDir}/README.md")" == "old-readme" ]]
     [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
 runInstallModuleLockSerializesLoadRegression() (
@@ -3231,7 +3219,6 @@ runInstallRefreshRefCommitRollbackRegression() (
     local root="${TMP_DIR}/install-refresh-ref-rollback"
     local fixtureDir="${root}/target"
     local archiveRoot="${root}/archive/padm-main"
-    local oldTmpDir="${TMPDIR:-}"
     local newRef=9999999999999999999999999999999999999999
 
     mkdir -p \
@@ -3284,7 +3271,6 @@ runInstallRefreshRefCommitRollbackRegression() (
     [[ "$(<"${fixtureDir}/.padm-ref")" == "1111111111111111111111111111111111111111" ]]
     [[ "$(<"${fixtureDir}/.padm-entry-ref")" == "1111111111111111111111111111111111111111" ]]
     [[ ! -e "${fixtureDir}/.padm-update-backup" ]]
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
 runInstallRefreshSingleArchiveGuardRegression() {
@@ -3314,7 +3300,6 @@ runInstallRefreshDownloadBoundsRegression() (
     local archiveRoot="${root}/archive"
     local curlLog="${root}/curl.log"
     local wgetLog="${root}/wget.log"
-    local oldTmpDir="${TMPDIR:-}"
 
     mkdir -p "${archiveRoot}/padm-main/shell/core" "${root}/tmp"
     printf '#!/usr/bin/env bash\n' >"${archiveRoot}/padm-main/install.sh"
@@ -3376,7 +3361,6 @@ runInstallRefreshDownloadBoundsRegression() (
     fi
     [[ "$(wc -c <"${root}/oversized" | tr -d ' ')" == "17" ]]
 
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
 )
 
 runRemoteControlSystemctlStubDefaultStopDisableRegression() {
@@ -3705,12 +3689,11 @@ EOF
     )
 )
 
-runInstallModulePathsRegression() {
-    local outputList moduleTmpRoot fixtureDir oldTmpDir moduleListBefore moduleListAfter
+runInstallModulePathsRegression() (
+    local outputList moduleTmpRoot fixtureDir moduleListBefore moduleListAfter
     outputList="${TMP_DIR}/install-module-paths.txt"
     moduleTmpRoot="${TMP_DIR}/install-module-paths-tmp"
     fixtureDir="${TMP_DIR}/install-entry-manifest"
-    oldTmpDir="${TMPDIR:-}"
     mkdir -p "${moduleTmpRoot}" "${fixtureDir}/shell/core" "${fixtureDir}/documents" "${fixtureDir}/assets"
     printf '#!/usr/bin/env bash\n' >"${fixtureDir}/install.sh"
     printf 'fixture\n' >"${fixtureDir}/README.md"
@@ -3766,8 +3749,7 @@ EOF
         printf '# changed\n' >>"${fixtureDir}/install.sh"
         ! scriptModulesReady >/dev/null
     )
-    if [[ -n "${oldTmpDir}" ]]; then export TMPDIR="${oldTmpDir}"; else unset TMPDIR; fi
-}
+)
 
 runInstallModuleManifestCompleteRegression() {
     local fixtureDir moduleTmpRoot oldTmpDir
