@@ -988,6 +988,7 @@ protocolCapabilityStatusLabel() {
 showInstallStatus() {
     if [[ -n "${coreInstallType}" ]]; then
         local protocolId statusLabel
+        local vlessEncryptionStateFile="${PADM_VLESS_ENCRYPTION_STATE_FILE:-/etc/padm/xray/vless_encryption.json}"
         if [[ "${coreInstallType}" == 1 ]]; then
             if xrayRunning; then
                 echoContent yellow "\n核心: Xray-core[运行中]"
@@ -1014,6 +1015,11 @@ showInstallStatus() {
             [[ -n "${statusLabel}" ]] || continue
             echoContent yellow "${statusLabel} \c"
         done < <(protocolCapabilityRegistry | awk -F'|' '$3 == "node" { print }')
+        if [[ "${coreInstallType}" == "1" && -f "${vlessEncryptionStateFile}" ]] &&
+            currentProtocolHasAny 1 2 &&
+            jq -e '.enabled == true' "${vlessEncryptionStateFile}" >/dev/null 2>&1; then
+            echoContent yellow "VLESS Encryption [experimental] \c"
+        fi
         if [[ -n ${currentInstallProtocolType} ]]; then
             echo
         fi

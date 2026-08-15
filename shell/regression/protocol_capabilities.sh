@@ -374,6 +374,24 @@ runSubscriptionCapabilityDispatchRegression() {
     fi
 }
 
+runInstallStatusVlessEncryptionRegression() (
+    local outputFile="${TMP_DIR}/install-status-vless-encryption.log"
+
+    coreInstallType=1
+    readInstallProtocolType() { currentInstallProtocolType=",1,"; }
+    xrayRunning() { return 0; }
+    echoContent() { printf '%s\n' "$*" >>"${outputFile}"; }
+
+    printf '%s\n' '{"enabled":true,"encryption":"active-encryption","decryption":"active-decryption"}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+    showInstallStatus
+    grep -Fq 'VLESS Encryption [experimental]' "${outputFile}"
+
+    : >"${outputFile}"
+    printf '%s\n' '{"enabled":false}' >"${PADM_VLESS_ENCRYPTION_STATE_FILE}"
+    showInstallStatus
+    ! grep -Fq 'VLESS Encryption [experimental]' "${outputFile}"
+)
+
 runSingBoxPlainInboundHostFallbackRegression() {
     local oldCoreInstallType="${coreInstallType:-}"
     local oldConfigPath="${configPath:-}"
@@ -454,6 +472,7 @@ runRegressionStep protocol-capability-nginx-topology runProtocolCapabilityNginxT
 runRegressionStep protocol-capability-templates runProtocolCapabilityTemplateRegression
 runRegressionStep hysteria2-capability runHysteria2CapabilityRegression
 runRegressionStep subscription-capability-dispatch runSubscriptionCapabilityDispatchRegression
+runRegressionStep install-status-vless-encryption runInstallStatusVlessEncryptionRegression
 runRegressionStep singbox-plain-inbound-host-fallback runSingBoxPlainInboundHostFallbackRegression
 runRegressionStep xray-direct-tls-inbound-without-fallback runXrayDirectTlsInboundWithoutFallbackRegression
 echo "protocol-capabilities-regression-ok"
