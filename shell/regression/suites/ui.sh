@@ -255,97 +255,6 @@ runRegressionUiSuiteRoot() {
         listRegressionUiChildSelectors
 }
 
-runRegressionUiParallelCompositionRegression() (
-    set -euo pipefail
-    local callLog="${TMP_DIR}/regression-ui-parallel-composition.log"
-
-    : >"${callLog}"
-
-    runRegressionAllSelector() {
-        local selector=$1
-        printf '%s-start\n' "${selector}" >>"${callLog}"
-        if [[ "${selector}" == "ui-full-subscription-main-publish-sync-enable" ]]; then
-            for _ in 1 2 3 4 5 6 7 8 9 10; do
-                [[ -f "${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started" ]] && break
-                sleep 0.05
-            done
-        elif [[ "${selector}" == "wireguard-menu-flow-peer-rollback-apply-service" ]]; then
-            : >"${TMP_DIR}/wireguard-menu-flow-peer-rollback-apply-service-started"
-        fi
-        printf '%s-finish\n' "${selector}" >>"${callLog}"
-    }
-
-    PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
-
-    for selector in \
-        ui-full-subscription-main-entry \
-        ui-full-subscription-main-publish-service \
-        ui-full-subscription-main-publish-user-empty \
-        ui-full-subscription-main-publish-user-create \
-        ui-full-subscription-main-publish-user-inspect \
-        ui-full-subscription-main-publish-sync-skip \
-        ui-full-subscription-main-publish-sync-enable \
-        ui-full-subscription-main-maintenance \
-        wireguard-menu-flow-bootstrap \
-        wireguard-menu-flow-peer-add-update \
-        wireguard-menu-flow-peer-rollback-apply-service \
-        wireguard-menu-flow-peer-rollback-apply-restore \
-        wireguard-menu-flow-peer-rollback-source \
-        wireguard-menu-flow-peer-rollback-credential-write \
-        wireguard-menu-flow-peer-rollback-credential-groups-restore \
-        wireguard-menu-flow-peer-source-control-toggle \
-        wireguard-menu-flow-peer-source-control-clear-error \
-        wireguard-menu-flow-peer-source-control-status \
-        wireguard-menu-flow-control-restore \
-        ui-full-subscription-controlled \
-        ui-full-core \
-        ui-full-core-maintenance \
-        ui-smoke \
-        wireguard-restore-runner; do
-        grep -qx "${selector}-start" "${callLog}"
-        grep -qx "${selector}-finish" "${callLog}"
-    done
-    awk '
-        $0 == "ui-full-subscription-main-publish-sync-enable-start" { smokeStart = NR }
-        $0 == "wireguard-menu-flow-peer-rollback-apply-service-start" { wireguardStart = NR }
-        $0 == "ui-full-subscription-main-publish-sync-enable-finish" { smokeFinish = NR }
-        END { exit !(smokeStart && wireguardStart && smokeFinish && wireguardStart < smokeFinish) }
-    ' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-transaction-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-transaction-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-finish' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-finish' "${callLog}"
-    ! grep -qx 'ui-full-start' "${callLog}"
-    ! grep -qx 'ui-full-finish' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-user-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-user-finish' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-sync-start' "${callLog}"
-    ! grep -qx 'ui-full-subscription-main-publish-sync-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-finish' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-source-control-start' "${callLog}"
-    ! grep -qx 'wireguard-menu-flow-peer-source-control-finish' "${callLog}"
-
-    : >"${callLog}"
-    PADM_REGRESSION_PARALLEL_JOBS=4 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
-    awk '
-        /-start$/ {
-            starts++
-            if ($0 == "ui-full-subscription-main-publish-sync-enable-start") { publishStart = starts }
-            if ($0 == "wireguard-menu-flow-peer-rollback-apply-service-start") { peerRollbackStart = starts }
-        }
-        END { exit !(publishStart && peerRollbackStart && publishStart <= 4 && peerRollbackStart <= 4) }
-    ' "${callLog}"
-)
-
 runRegressionUiLongTailSplitCompositionRegression() (
     set -euo pipefail
     local callLog="${TMP_DIR}/regression-ui-long-tail-split-composition.log"
@@ -440,6 +349,23 @@ runRegressionUiLongTailSplitCompositionRegression() (
     ! grep -qx 'wireguard-menu-flow-peer-rollback-apply-service-start' "${callLog}"
     ! grep -qx 'wireguard-menu-flow-peer-rollback-credential-write-start' "${callLog}"
     ! grep -qx 'wireguard-menu-flow-peer-source-control-toggle-start' "${callLog}"
+    ! grep -qx 'ui-full-subscription-main-publish-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-transaction-start' "${callLog}"
+    ! grep -qx 'wireguard-menu-flow-peer-rollback-start' "${callLog}"
+    ! grep -qx 'ui-full-subscription-main-start' "${callLog}"
+    ! grep -qx 'ui-full-start' "${callLog}"
+
+    : >"${callLog}"
+    PADM_REGRESSION_PARALLEL_JOBS=4 PADM_REGRESSION_PARALLEL_SELECTOR_RUNNER=runRegressionAllSelector runRegressionUiSuiteRoot
+    awk '
+        /-start$/ {
+            starts++
+            if ($0 == "ui-full-subscription-main-publish-sync-enable-start") { publishStart = starts }
+            if ($0 == "wireguard-menu-flow-peer-rollback-apply-service-start") { peerRollbackStart = starts }
+        }
+        END { exit !(publishStart && peerRollbackStart && publishStart <= 4 && peerRollbackStart <= 4) }
+    ' "${callLog}"
 
     : >"${callLog}"
     PADM_REGRESSION_SUPPRESS_DONE=1 \
@@ -549,8 +475,8 @@ registerRegressionFunctionLeaf wireguard-menu-flow-peer-source-control-status ru
 registerRegressionFunctionLeaf wireguard-menu-flow-control-restore runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardMenuFlowRegression control-restore
 registerRegressionFunctionLeaf wireguard-restore-runner runRegressionUiLegacyLeafWithCompat runSubscriptionWireGuardRestoreRunnerRegression
 registerRegressionFunctionLeaf regression-ui-legacy-tmpdir-isolation runRegressionUiLegacyTmpDirIsolationRegression
-registerRegressionFunctionLeaf regression-ui-parallel-composition runRegressionUiParallelCompositionRegression
 registerRegressionFunctionLeaf regression-ui-long-tail-split-composition runRegressionUiLongTailSplitCompositionRegression
+registerRegressionFunctionLeaf regression-ui-parallel-composition runRegressionUiLongTailSplitCompositionRegression
 
 registerRegressionAggregateRunnerWithArgs parallel \
     ui-full \
